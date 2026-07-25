@@ -2590,3 +2590,18 @@ msgstr "查看连接详情"
 
 msgid "View radio and cell details"
 msgstr "查看无线与小区详情"
+
+msgid "Lock"
+msgstr "锁定"
+
+msgid "Confirm lock"
+msgstr "确认锁定"
+
+msgid "Lock to %s cell? PCI %s · ARFCN %s. Mobile service will reconnect."
+msgstr "锁定到 %s 小区？PCI %s · ARFCN %s。移动服务将重新连接。"
+
+msgid "Frequency lock applied."
+msgstr "频段锁已应用。"
+
+msgid "Lock failed."
+msgstr "锁定失败。"

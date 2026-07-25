@@ -236,49 +236,38 @@ function parseMonnc(text) {
 	});
 }
 
-// Render cell scan results as structured panels instead of raw <pre> text.
+// Render cell scan results as structured panels with graphical signal bars
+// and one-click lock buttons (reference: mt5700webui screenshot 4)
 function renderCellScan(raw) {
+	var self_ref = this; // capture for closure in cellLockCard calls
 	var sections = [];
-	// Serving cell from MONSC
+	// Serving cell from MONSC — with colored signal bars
 	var monsc = parseMonsc(controls.section(raw, 'Serving cell: AT^MONSC') || raw);
 	if (monsc && monsc.rat) {
 		var scsKhz = monsc.scs ? ({ '0':'15', '1':'30', '2':'60', '3':'120', '4':'240' }[monsc.scs] || '?') : '';
+		var scRatLabel = monsc.rat === '101' ? 'NR' : monsc.rat === '1' ? 'LTE' : monsc.rat || '';
 		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
 			E('h4', {}, _('Serving cell')),
-			E('table', { 'class':'mt-scan-table' }, [
-				E('tbody', {}, [
-					tr(_('RAT'), monsc.rat),
-					tr('ARFCN', monsc.arfcn),
-					tr('PCI', monsc.pci),
-					tr('RSRP', monsc.rsrp ? monsc.rsrp + ' dBm' : '--'),
-					tr('RSRQ', monsc.rsrq ? monsc.rsrq + ' dB' : '--'),
-					tr('SINR', monsc.sinr ? monsc.sinr + ' dB' : '--'),
-					scsKhz ? tr(_('SCS'), scsKhz + ' kHz') : null,
-					tr('Cell ID', monsc.cellId || '--'),
-					tr('TAC', monsc.tac || '--')
-				].filter(Boolean))
+			E('div', { 'class':'mt-ssb-serving' }, [
+				E('div', { 'class':'mt-ssb-serving-head' }, [
+					E('span', { 'class':'mt-ssb-serving-title' }, scRatLabel + (monsc.pci ? ' · PCI:' + monsc.pci : '') + (monsc.arfcn ? ' · ARFCN:' + monsc.arfcn : '')),
+					E('span', { 'class':'mt-ssb-serving-meta' }, (monsc.cellId || '') + (scsKhz ? ' · SCS:' + scsKhz + 'kHz' : ''))
+				]),
+				signalBar(monsc.rsrp, 'rsrp', 'RSRP'),
+				signalBar(monsc.rsrq, 'rsrq', 'RSRQ'),
+				signalBar(monsc.sinr, 'sinr', 'SINR')
 			])
 		]));
 	}
-	// Neighbour cells from MONNC
+	// Neighbour cells from MONNC — with signal bars and one-click lock buttons
 	var monnc = parseMonnc(controls.section(raw, 'Neighbour cells: AT^MONNC') || raw);
 	if (monnc.length) {
-		var nbRows = monnc.map(function(nb, i) {
-			return E('tr', {}, [
-				E('td', {}, String(i + 1)),
-				E('td', {}, nb.rat || '--'),
-				E('td', {}, nb.arfcn || '--'),
-				E('td', {}, nb.rsrp ? nb.rsrp + ' dBm' : '--'),
-				E('td', {}, nb.rsrq ? nb.rsrq + ' dB' : '--'),
-				E('td', {}, nb.sinr ? nb.sinr + ' dB' : '--')
-			]);
+		var nbCards = monnc.map(function(nb, i) {
+			return cellLockCard(nb, i, nb.rat === '101' ? 'nr' : nb.rat === '1' ? 'lte' : '');
 		});
 		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
 			E('h4', {}, _('Neighbour cells (%d)').format(monnc.length)),
-			E('table', { 'class':'mt-scan-table' }, [
-				E('thead', {}, E('tr', {}, [E('th', {}, '#'), E('th', {}, _('RAT')), E('th', {}, 'ARFCN'), E('th', {}, 'RSRP'), E('th', {}, 'RSRQ'), E('th', {}, 'SINR')])),
-				E('tbody', {}, nbRows)
-			])
+			E('div', { 'class':'mt-lock-cell-grid' }, nbCards)
 		]));
 	}
 	// CELLSCAN frequency scan (raw — may be empty or ERROR)
@@ -345,6 +334,96 @@ function bandPanel(title, description, checklist) {
 			}, _('Select all'))
 		]),
 		checklist
+	]);
+}
+
+// ---------- Graphical signal helpers (mt5700webui reference) ----------
+
+// Map a numeric signal value to a quality class for coloring.
+// RSRP: excellent(>=-80), good(-90), fair(-100), weak(<-110)
+// RSRQ: excellent(>=-10), good(-15), fair(-20), weak(<-25)
+// SINR: excellent(>=20), good(13), fair(0), weak(<0)
+function signalColorClass(value, kind) {
+	var v = parseFloat(value);
+	if (isNaN(v)) return 'unknown';
+	if (kind === 'rsrp') { if (v >= -80) return 'excellent'; if (v >= -90) return 'good'; if (v >= -100) return 'fair'; return 'weak'; }
+	if (kind === 'rsrq') { if (v >= -10) return 'excellent'; if (v >= -15) return 'good'; if (v >= -20) return 'fair'; return 'weak'; }
+	// SINR or default
+	if (v >= 20) return 'excellent'; if (v >= 13) return 'good'; if (v >= 0) return 'fair'; return 'weak';
+}
+
+// Return a percentage (0-100) for bar width based on value range.
+function signalPercent(value, kind) {
+	var v = parseFloat(value);
+	if (isNaN(v)) return 0;
+	if (kind === 'rsrp') return Math.max(0, Math.min(100, (v + 140) * 1.67));   // -140..-80 → 0..100
+	if (kind === 'rsrq') return Math.max(0, Math.min(100, (v + 35) * 2.86));     // -35..0 → 0..100
+	return Math.max(0, Math.min(100, (v + 10) * 3.33));                         // SINR -10..20 → 0..100
+}
+
+// Build a horizontal colored signal bar with optional label.
+// Returns DOM: [label span] [track div > fill div] [value text]
+function signalBar(value, kind, label) {
+	var v = String(value || '--');
+	var cls = signalColorClass(value, kind);
+	var pct = signalPercent(value, kind);
+	var labelText = label ? E('span', { 'class':'mt-sbar-label' }, label) : null;
+	return E('div', { 'class':'mt-sbar ' + cls }, [
+		labelText,
+		E('div', { 'class':'mt-sbar-track', 'role':'progressbar', 'aria-valuenow':String(pct), 'aria-valuemin':'0', 'aria-valuemax':'100' },
+			E('div', { 'class':'mt-sbar-fill', 'style':'width:' + pct.toFixed(1) + '%' })),
+		E('span', { 'class':'mt-sbar-value' }, v + (kind === 'rsrp' ? 'dBm' : kind === 'rsrq' ? 'dB' : 'dB'))
+	]);
+}
+
+// Build a single SSB beam card (reference: mt5700webui beam grid)
+function beamCard(beam) {
+	var rsrp = parseFloat(beam.rsrp);
+	var cls = isNaN(rsrp) ? 'unknown' : signalColorClass(beam.rsrp, 'rsrp');
+	return E('div', { 'class':'mt-beam-card ' + cls }, [
+		E('div', { 'class':'mt-beam-id' }, _('SSB-%s').format(beam.id)),
+		E('div', { 'class':'mt-beam-rsrp' }, beam.rsrp ? beam.rsrp + ' dBm' : '--')
+	]);
+}
+
+// Build a neighbour cell card with one-click lock button (reference: mt5700webui lock grid)
+function cellLockCard(nb, index, rat) {
+	var rsrpCls = signalColorClass(nb.rsrp, 'rsrp');
+	var sinrCls = signalColorClass(nb.sinr, 'sinr');
+	var ratLabel = nb.rat === '101' ? 'NR' : nb.rat === '1' ? 'LTE' : nb.rat || '?';
+	var self = this;
+	var lockBtn = E('button', { 'type':'button', 'class':'btn mt-lock-btn' }, _('Lock'));
+	lockBtn.addEventListener('click', function() {
+		var isNr = (ratLabel === 'NR' || nb.rat === '101');
+		var lockType = nb.pci && nb.pci !== '?' ? '2' : '1'; // cell lock if PCI known, else ARFCN lock
+		var args = isNr
+			? ['lock', 'nr', lockType, '', nb.arfcn || '', isNr && lockType === '2' ? '0' : '', nb.pci || '']
+			: ['lock', 'lte', lockType, '', nb.arfcn || '', '', nb.pci || ''];
+		ui.showModal(_('Confirm lock'), [
+			E('p', {}, _('Lock to %s cell? PCI %s · ARFCN %s. Mobile service will reconnect.').format(ratLabel, nb.pci || '?', nb.arfcn || '?')),
+			E('div', { 'class':'right' }, [
+				E('button', { 'type':'button', 'class':'btn', 'click': ui.hideModal }, _('Cancel')),
+				E('button', { 'type':'button', 'class':'btn cbi-button-negative', 'click': function() {
+					ui.hideModal();
+					fs.exec('/usr/sbin/mt5700m-at', args).then(function() {
+						ui.addNotification(null, E('p', {}, _('Frequency lock applied.')));
+						window.setTimeout(function() { window.location.reload(); }, 2500);
+					}, function(err) {
+						ui.addNotification(null, E('p', {}, err.message || _('Lock failed.')), 'danger');
+					});
+				} }, _('Lock'))
+			])
+		]);
+	});
+	return E('div', { 'class':'mt-lock-cell-card' }, [
+		E('div', { 'class':'mt-lock-cell-head' }, [
+			E('span', { 'class':'mt-lock-cell-band' }, ratLabel + (nb.arfcn ? ' · ' + nb.arfcn : '')),
+			lockBtn
+		]),
+		signalBar(nb.rsrp, 'rsrp', 'RSRP'),
+		signalBar(nb.rsrq, 'rsrq', 'RSRQ'),
+		signalBar(nb.sinr, 'sinr', 'SINR'),
+		nb.pci ? E('div', { 'class':'mt-lock-cell-pci' }, _('PCI') + ': ' + nb.pci) : null
 	]);
 }
 
@@ -434,6 +513,22 @@ return view.extend({
 			'.mt-freq-head{margin-top:20px;padding:19px 20px;border-radius:13px;background:linear-gradient(135deg,#f4f7fb,#f1f8f6);border:1px solid #dce7ee}.mt-freq-head h3{font-size:18px;margin:0 0 6px}.mt-freq-head p{margin:0;color:var(--text-color-medium,#68717d);font-size:12px}',
 			'.mt-freq-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.mt-freq-card{padding:17px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:13px;background:var(--background-color-high,#fff)}.mt-freq-card h4{margin:0 0 12px;font-size:14px}.mt-freq-field{margin:11px 0}.mt-freq-field label{display:block;font-size:12px;color:var(--text-color-medium,#6d7680);margin-bottom:5px}.mt-freq-field input,.mt-freq-field select{width:100%;box-sizing:border-box}.mt-freq-help{font-size:11px;color:var(--text-color-medium,#7b838c);margin-top:5px}.mt-freq-actions{display:flex;justify-content:flex-end;margin-top:14px}',
 			'.mt-band-card{padding:18px}.mt-band-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.mt-band-head h3{margin:0 0 4px;font-size:15px}.mt-band-head p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.45}.mt-band-head .btn{flex:0 0 auto}.mt-band-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.mt-band-option{display:flex;align-items:center;gap:9px;min-height:40px;padding:7px 10px;border:1px solid var(--border-color-low,#e8ecf0);border-radius:9px;background:var(--background-color-low,#f8fafb);cursor:pointer;font-size:12px;transition:border-color .15s ease,background-color .15s ease}.mt-band-option:hover{border-color:#9cc5ee;background:#f1f7fd}.mt-band-option input{flex:0 0 auto;width:16px!important;height:16px;margin:0}.mt-band-apply{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:18px;padding:15px 18px}.mt-band-apply p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.5}.mt-band-apply .btn{flex:0 0 auto}',
+			// Graphical signal bars (mt5700webui reference)
+			'.mt-sbar{display:flex;align-items:center;gap:8px;margin:4px 0}.mt-sbar-label{flex:0 0 44px;font-size:11px;font-weight:600;color:var(--text-color-medium,#707985)}.mt-sbar-track{flex:1;height:16px;border-radius:8px;background:#eef1f5;overflow:hidden;min-width:60px}.mt-sbar-fill{height:100%;border-radius:8px;transition:width .35s ease}.mt-sbar-value{flex:0 0 auto;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;min-width:72px;text-align:right}',
+			'.mt-sbar.excellent .mt-sbar-fill{background:linear-gradient(90deg,#22c55e,#16a34a)}.mt-sbar.good .mt-sbar-fill{background:linear-gradient(90deg,#3b82f6,#2563eb)}.mt-sbar.fair .mt-sbar-fill{background:linear-gradient(90deg,#f59e0b,#d97706)}.mt-sbar.weak .mt-sbar-fill{background:linear-gradient(90deg,#ef4444,#dc2626)}',
+			'.mt-sbar.excellent .mt-sbar-value{color:#15803d}.mt-sbar.good .mt-sbar-value{color:#1d4ed8}.mt-sbar.fair .mt-sbar-value{color:#b45309}.mt-sbar.weak .mt-sbar-value{color:#b91c1c}',
+			// SSB beam cards grid
+			'.mt-beam-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-top:10px}.mt-beam-card{padding:12px 8px;border-radius:10px;border:1px solid var(--border-color-low,#e8ecf0);text-align:center;transition:border-color .2s ease,box-shadow .2s ease}.mt-beam-card:hover{border-color:#9cc5ee;box-shadow:0 2px 8px rgba(18,100,216,.08)}.mt-beam-id{font-size:11px;color:var(--text-color-medium,#707985);margin-bottom:4px}.mt-beam-rsrp{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}',
+			'.mt-beam-card.excellent{background:#f0fdf4;border-color:#bbf7d0}.mt-beam-card.excellent .mt-beam-rsrp{color:#15803d}',
+			'.mt-beam-card.good{background:#eff6ff;border-color:#bfdbfe}.mt-beam-card.good .mt-beam-rsrp{color:#1d4ed8}',
+			'.mt-beam-card.fair{background:#fffbeb;border-color:#fde68a}.mt-beam-card.fair .mt-beam-rsrp{color:#b45309}',
+			'.mt-beam-card.weak{background:#fef2f2;border-color:#fecaca}.mt-beam-card.weak .mt-beam-rsrp{color:#b91c1c}',
+			// Lock cell cards grid
+			'.mt-lock-cell-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:10px}.mt-lock-cell-card{padding:14px;border-radius:12px;border:1px solid var(--border-color-medium,#d9dde4);background:var(--background-color-high,#fff);transition:border-color .2s ease,box-shadow .2s ease}.mt-lock-cell-card:hover{border-color:#9cc5ee;box-shadow:0 3px 12px rgba(20,32,50,.06)}',
+			'.mt-lock-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.mt-lock-cell-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-lock-btn{flex:0 0 auto;padding:4px 12px;font-size:11px;border-radius:8px;background:#eef2f6;color:#176bc1;font-weight:700;border:1px solid #c9daf0;cursor:pointer;white-space:nowrap}.mt-lock-btn:hover{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}',
+			'.mt-lock-cell-pci{margin-top:6px;font-size:10px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
+			// SSB serving cell enhanced
+			'.mt-ssb-serving{padding:16px;border-radius:12px;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border-color-low,#e8ecf0);margin-bottom:12px}.mt-ssb-serving-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.mt-ssb-serving-title{font-size:13px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-ssb-serving-meta{font-size:11px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
 			'@media(max-width:720px){.mt-net-hero{display:block}.mt-net-badge{margin-top:13px}.mt-net-metrics{grid-template-columns:1fr}.mt-net-grid,.mt-freq-grid{grid-template-columns:1fr}.mt-band-options{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-band-apply{display:block}.mt-band-apply .btn{width:100%;margin-top:12px}}',
 			'@media(max-width:430px){.mt-band-head{display:block}.mt-band-head .btn{margin-top:10px}.mt-band-options{grid-template-columns:1fr}}'
 		].join(''));
@@ -520,49 +615,44 @@ return view.extend({
 				E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('NR SSB measurement')), E('strong', {}, _('Not available')) ])
 			]);
 		}
-		var serving = E('div', {}, [
-			this.row(_('SSB ARFCN'), ssbValue(info.arfcn, [ '4294967295' ])),
-			this.row(_('Serving beam PCI'), ssbValue(info.pci, [ '65535' ])),
-			this.row(_('Beam RSRP'), ssbValue(info.rsrp, [ '32767' ]) ? info.rsrp + ' dBm' : ''),
-			this.row(_('Beam SINR'), ssbValue(info.sinr, [ '32767' ]) ? info.sinr + ' dB' : ''),
-			this.row(_('Timing advance'), ssbValue(info.ta, [ '-1' ]) ? info.ta + ' us' : '')
+		var self = this;
+		// Serving cell with colored signal bars (reference: mt5700webui screenshot 4)
+		var serving = E('div', { 'class':'mt-ssb-serving' }, [
+			E('div', { 'class':'mt-ssb-serving-head' }, [
+				E('span', { 'class':'mt-ssb-serving-title' }, _('Serving cell')),
+				E('span', { 'class':'mt-ssb-serving-meta' },
+					(info.pci && info.pci !== '65535' ? 'PCI:' + info.pci : '') +
+					(info.arfcn && info.arfcn !== '4294967295' ? ' · ARFCN:' + info.arfcn : '')
+				)
+			]),
+			signalBar(ssbValue(info.rsrp, [ '32767' ]), 'rsrp', 'RSRP'),
+			signalBar(ssbValue(info.sinr, [ '32767' ]), 'sinr', 'SINR')
 		]);
-		var beamChildren = [];
+		// Beam cards grid
+		var beamGrid;
 		if (info.beams.length) {
-			info.beams.forEach(function(b) {
-				beamChildren.push(E('div', { 'class':'mt-net-row' }, [
-					E('span', {}, _('SSB ID %s').format(b.id)),
-					E('strong', {}, ssbValue(b.rsrp, [ '32767' ]) ? b.rsrp + ' dBm' : '--')
-				]));
-			});
+			beamGrid = E('div', { 'class':'mt-beam-grid' }, info.beams.map(function(b) { return beamCard(b); }));
 		} else {
-			beamChildren.push(E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('Serving beams')), E('strong', {}, _('No measurement')) ]));
+			beamGrid = E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('Serving beams')), E('strong', {}, _('No measurement')) ]);
 		}
-		var nbChildren = [];
+		// Neighbour cells as lockable card grid
+		var nbSection;
 		if (info.neighbours.length) {
-			info.neighbours.forEach(function(nb, i) {
-				nbChildren.push(E('div', { 'class':'mt-net-row' }, [
-					E('span', {}, _('Neighbour %d').format(i + 1)),
-					E('strong', {}, [
-						ssbValue(nb.pci, [ '65535' ]) ? _('PCI %s').format(nb.pci) : _('PCI ?'),
-						'  ·  ',
-						ssbValue(nb.arfcn, [ '4294967295' ]) ? 'ARFCN ' + nb.arfcn : _('ARFCN ?'),
-						'  ·  ',
-						ssbValue(nb.rsrp, [ '32767' ]) ? nb.rsrp + ' dBm' : '--',
-						ssbValue(nb.sinr, [ '32767' ]) ? '  ·  ' + nb.sinr + ' dB' : ''
-					])
-				]));
-			});
+			nbSection = E('div', {}, [
+				E('h4', { 'style':'margin:14px 0 8px;font-size:13px' }, _('NR neighbour cells (%d)').format(info.neighbours.length)),
+				E('div', { 'class':'mt-lock-cell-grid' }, info.neighbours.map(function(nb, i) {
+					return self.cellLockCard(nb, i, 'nr');
+				}))
+			]);
 		} else {
-			nbChildren.push(E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('NR neighbour cells')), E('strong', {}, _('None reported')) ]));
+			nbSection = E('div', { 'style':'margin-top:10px' }, [ E('h4', { 'style':'font-size:13px;margin:0 0 6px' }, _('NR neighbour cells')), E('div', { 'class':'mt-net-row' }, [ E('span', {}, ''), E('strong', {}, _('None reported')) ]) ]);
 		}
 		return E('section', { 'class':'mt-net-panel mt-ui-card', 'style':'margin-top:12px' }, [
 			E('h3', {}, _('SSB information')),
-			E('div', { 'class':'mt-net-grid', 'style':'margin-top:8px' }, [
-				E('div', {}, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('Serving cell')), serving ]),
-				E('div', {}, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('Serving SSB beams (%d)').format(info.beams.length)) ].concat(beamChildren)),
-				E('div', { 'style':'grid-column:1 / -1' }, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('NR neighbour cells (%d)').format(info.neighbours.length)) ].concat(nbChildren))
-			])
+			serving,
+			E('h4', { 'style':'margin:12px 0 8px;font-size:13px' }, _('Serving SSB beams (%d)').format(info.beams.length)),
+			beamGrid,
+			nbSection
 		]);
 	},
 
