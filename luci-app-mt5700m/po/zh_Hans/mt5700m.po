@@ -1872,8 +1872,53 @@ msgstr "波束 RSRP"
 msgid "Beam SINR"
 msgstr "波束 SINR"
 
-msgid "Detected SSB beams"
-msgstr "检测到的 SSB 波束"
+msgid "NR neighbour cells"
+msgstr "NR 邻区数"
+
+msgid "Timing advance"
+msgstr "定时提前量"
+
+msgid "SSB information"
+msgstr "SSB 信息"
+
+msgid "NR SSB measurement"
+msgstr "NR SSB 测量"
+
+msgid "Not available"
+msgstr "不可用"
+
+msgid "Serving cell"
+msgstr "服务小区"
+
+msgid "Serving SSB beams (%d)"
+msgstr "服务 SSB 波束 (%d)"
+
+msgid "Serving beams"
+msgstr "服务波束"
+
+msgid "No measurement"
+msgstr "无测量"
+
+msgid "Neighbour %d"
+msgstr "邻区 %d"
+
+msgid "PCI %s"
+msgstr "PCI %s"
+
+msgid "PCI ?"
+msgstr "PCI ?"
+
+msgid "ARFCN ?"
+msgstr "ARFCN ?"
+
+msgid "NR neighbour cells (%d)"
+msgstr "NR 邻区 (%d)"
+
+msgid "None reported"
+msgstr "未上报"
+
+msgid "SSB ID %s"
+msgstr "SSB ID %s"
 
 msgid "IMS registration"
 msgstr "IMS 注册"

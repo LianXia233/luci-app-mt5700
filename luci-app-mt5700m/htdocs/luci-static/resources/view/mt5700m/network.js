@@ -25,10 +25,73 @@ function sectionValue(raw, label) {
 
 function matchValues(text, prefix) {
 	var line = (text || '').split(/\n/).filter(function(item) { return item.indexOf(prefix) === 0; })[0] || '';
-	return line.substring(prefix.length).replace(/^[ :]+/, '').replace(/"/g, '').split(',').map(function(value) { return value.trim(); });
+	// MT5700M private commands are inconsistent: most reply "^CMD: value" but
+	// a few (notably ^NRSSBID) reply "^NRSSBID=value". Strip a leading colon
+	// or equals sign so the first field is not corrupted by the delimiter.
+	return line.substring(prefix.length).replace(/^[ :=]+/, '').replace(/"/g, '').split(',').map(function(value) { return value.trim(); });
 }
 
-function cleanCsv(value) {
+function ssbValue(value, invalid) {
+	// The manual defines dedicated "invalid" sentinels for the SSB fields:
+	// ARFCN 0xFFFFFFFF (4294967295), PCI 0xFFFF (65535) and the signed
+	// RSRP/SINR/TA fields 0x7FFF (32767) / -1. Hide those instead of showing
+	// the raw sentinel so the panel only renders meaningful measurements.
+	if (value === undefined || value === null || value === '')
+		return '';
+	if ((invalid || []).some(function(item) { return String(value) === String(item); }))
+		return '';
+		return value;
+	}
+
+	// Parse a full AT^NRSSBID? response (manual 13.28) into a structured object.
+	// Field layout: [0]ARFCN [1]CID [2]PCI [3]RSRP [4]SINR [5]TA
+	// [6..21] 8 serving beams (SSBID, RSRP pairs)
+	// [22] N_NB_CELL, then per neighbour (up to 4): NB_PCI, NB_ARFCN, NB_RSRP,
+	// NB_SINR and 4 neighbour SSB beams. The module strips the leading '=' so the
+	// first field is no longer corrupted.
+	function parseNrsSbid(text) {
+		var raw = matchValues(text, '^NRSSBID');
+		if (!raw.length)
+			return null;
+		var info = {
+			arfcn: raw[0], cid: raw[1], pci: raw[2], rsrp: raw[3], sinr: raw[4], ta: raw[5],
+			beams: [], neighbours: []
+		};
+		for (var i = 0; i < 8; i++) {
+			var id = raw[6 + i * 2];
+			var rsrp = raw[7 + i * 2];
+			var idNum = parseInt(id, 10);
+			// A valid serving SSB ID is 0..7; the module reports the 0xFF/0x7FFF
+			// sentinels (255 / 32767) for beams with no measurement.
+			if (!(idNum >= 0 && idNum <= 7))
+				continue;
+			info.beams.push({ id: id, rsrp: rsrp === '32767' ? '' : rsrp });
+		}
+		// N_NB_CELL (0..4) follows the serving beams. The AT manual's documented
+		// layout places it at index 22, but some firmware/example outputs insert a
+		// stray field, shifting it to index 23. Probe both so the neighbour block
+		// is located correctly either way.
+		var nbIdx = 22;
+		var n = parseInt(raw[nbIdx], 10);
+		if (!(n >= 0 && n <= 4)) {
+			nbIdx = 23;
+			n = parseInt(raw[nbIdx], 10);
+			if (!(n >= 0 && n <= 4))
+				n = 0;
+		}
+		if (n > 4)
+			n = 4;
+		var base = nbIdx + 1;
+		for (var j = 0; j < n; j++) {
+			var o = base + j * 12;
+			info.neighbours.push({
+				pci: raw[o], arfcn: raw[o + 1], rsrp: raw[o + 2], sinr: raw[o + 3]
+			});
+		}
+		return info;
+	}
+
+	function cleanCsv(value) {
 	return (value || '').replace(/\s+/g, '').replace(/^,+|,+$/g, '').replace(/,+/g, ',');
 }
 
@@ -231,25 +294,73 @@ return view.extend({
 		var uplinkMcs = matchValues(controls.section(raw, 'Uplink MCS'), '^MCS');
 		var downlinkMcs = matchValues(controls.section(raw, 'Downlink MCS'), '^MCS');
 		var txPower = matchValues(controls.section(raw, 'NR transmit power'), '^NTXPOWER');
-		var ssb = matchValues(controls.section(raw, 'NR SSB beam'), '^NRSSBID');
+		var ssbRaw = controls.section(raw, 'NR SSB beam');
+		var ssb = matchValues(ssbRaw, '^NRSSBID');
 		var qos = matchValues(controls.section(raw, 'QoS'), '+CGEQOSRDP');
 		var dataRegistration = matchValues(controls.section(raw, 'Data registration'), '+C5GREG');
 		var ims = matchValues(controls.section(raw, 'IMS registration'), '+CIREG');
 		var endc = matchValues(controls.section(raw, 'Dual connectivity'), '^LENDC');
 		var lteSecondary = countLines(controls.section(raw, 'LTE secondary cells'), '^CASCELLINFO');
 		var nsaSecondary = countLines(controls.section(raw, 'NSA secondary cells'), '^MONSSC: NR');
-		return E('div', { 'class':'mt-net-grid', 'style':'margin-top:12px' }, [
-			E('section', { 'class':'mt-net-panel mt-ui-card' }, [
-				E('h3', {}, _('Radio link details')),
-				this.row(_('Uplink modulation'), formatMcs(uplinkMcs)), this.row(_('Downlink modulation'), formatMcs(downlinkMcs)),
-				this.row(_('QoS class'), qos[1] ? 'QCI ' + qos[1] : ''), this.row(_('NR PUSCH power'), txPower[0] && txPower[0] !== '999' ? txPower[0] + ' dBm' : ''),
-				this.row(_('NR PUCCH power'), txPower[1] && txPower[1] !== '999' ? txPower[1] + ' dBm' : ''), this.row(_('NR transmit frequency'), txPower[4] && txPower[4] !== '0' ? (Number(txPower[4]) / 1000).toFixed(1) + ' MHz' : '')
+		var ssbInfo = parseNrsSbid(ssbRaw);
+		return E('div', { 'class':'mt-net-ssb-wrap' }, [
+			E('div', { 'class':'mt-net-grid', 'style':'margin-top:12px' }, [
+				E('section', { 'class':'mt-net-panel mt-ui-card' }, [
+					E('h3', {}, _('Radio link details')),
+					this.row(_('Uplink modulation'), formatMcs(uplinkMcs)), this.row(_('Downlink modulation'), formatMcs(downlinkMcs)),
+					this.row(_('QoS class'), qos[1] ? 'QCI ' + qos[1] : ''), this.row(_('NR PUSCH power'), txPower[0] && txPower[0] !== '999' ? txPower[0] + ' dBm' : ''),
+					this.row(_('NR PUCCH power'), txPower[1] && txPower[1] !== '999' ? txPower[1] + ' dBm' : ''), this.row(_('NR transmit frequency'), txPower[4] && txPower[4] !== '0' ? (Number(txPower[4]) / 1000).toFixed(1) + ' MHz' : '')
+				]),
+				E('section', { 'class':'mt-net-panel mt-ui-card' }, [
+					E('h3', {}, _('5G beam and service')), this.row(_('LTE secondary carriers'), String(lteSecondary)), this.row(_('NSA secondary connections'), String(nsaSecondary)),
+					this.row(_('NR neighbour cells'), ssbInfo ? String(ssbInfo.neighbours.length) : (ssb.length > 6 ? '0' : '')),
+					this.row(_('Data registration'), dataRegistration[1] === '1' || dataRegistration[1] === '5' ? _('Registered') : dataRegistration.length ? _('Not registered') : ''),
+					this.row(_('IMS registration'), ims[1] === '1' ? _('Registered') : ims.length ? _('Not registered') : ''), this.row(_('LTE-NR dual connectivity'), endc[0] === '1' ? _('Enabled') : endc.length ? _('Disabled') : '')
+				])
 			]),
-			E('section', { 'class':'mt-net-panel mt-ui-card' }, [
-				E('h3', {}, _('5G beam and service')), this.row(_('LTE secondary carriers'), String(lteSecondary)), this.row(_('NSA secondary connections'), String(nsaSecondary)),
-				this.row(_('SSB ARFCN'), ssb[0]), this.row(_('Serving beam PCI'), ssb[2]), this.row(_('Beam RSRP'), ssb[3] ? ssb[3] + ' dBm' : ''), this.row(_('Beam SINR'), ssb[4] ? ssb[4] + ' dB' : ''),
-				this.row(_('Detected SSB beams'), ssb[6]), this.row(_('Data registration'), dataRegistration[1] === '1' || dataRegistration[1] === '5' ? _('Registered') : dataRegistration.length ? _('Not registered') : ''),
-				this.row(_('IMS registration'), ims[1] === '1' ? _('Registered') : ims.length ? _('Not registered') : ''), this.row(_('LTE-NR dual connectivity'), endc[0] === '1' ? _('Enabled') : endc.length ? _('Disabled') : '')
+			this.ssbPanel(ssbInfo)
+		]);
+	},
+
+	ssbPanel: function(info) {
+		if (!info) {
+			return E('section', { 'class':'mt-net-panel mt-ui-card', 'style':'margin-top:12px' }, [
+				E('h3', {}, _('SSB information')),
+				E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('NR SSB measurement')), E('strong', {}, _('Not available')) ])
+			]);
+		}
+		var serving = E('div', {}, [
+			this.row(_('SSB ARFCN'), ssbValue(info.arfcn, [ '4294967295' ])),
+			this.row(_('Serving beam PCI'), ssbValue(info.pci, [ '65535' ])),
+			this.row(_('Beam RSRP'), ssbValue(info.rsrp, [ '32767' ]) ? info.rsrp + ' dBm' : ''),
+			this.row(_('Beam SINR'), ssbValue(info.sinr, [ '32767' ]) ? info.sinr + ' dB' : ''),
+			this.row(_('Timing advance'), ssbValue(info.ta, [ '-1' ]) ? info.ta + ' us' : '')
+		]);
+		var beamRows = info.beams.length ? info.beams.map(function(b) {
+			return E('div', { 'class':'mt-net-row' }, [
+				E('span', {}, _('SSB ID %s').format(b.id)),
+				E('strong', {}, ssbValue(b.rsrp, [ '32767' ]) ? b.rsrp + ' dBm' : '--')
+			]);
+		}) : [ E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('Serving beams')), E('strong', {}, _('No measurement')) ]) ];
+		var nbRows = info.neighbours.length ? info.neighbours.map(function(nb, i) {
+			return E('div', { 'class':'mt-net-row' }, [
+				E('span', {}, _('Neighbour %d').format(i + 1)),
+				E('strong', {}, [
+					ssbValue(nb.pci, [ '65535' ]) ? _('PCI %s').format(nb.pci) : _('PCI ?'),
+					'  ·  ',
+					ssbValue(nb.arfcn, [ '4294967295' ]) ? 'ARFCN ' + nb.arfcn : _('ARFCN ?'),
+					'  ·  ',
+					ssbValue(nb.rsrp, [ '32767' ]) ? nb.rsrp + ' dBm' : '--',
+					ssbValue(nb.sinr, [ '32767' ]) ? '  ·  ' + nb.sinr + ' dB' : ''
+				])
+			]);
+		}) : [ E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('NR neighbour cells')), E('strong', {}, _('None reported')) ]) ];
+		return E('section', { 'class':'mt-net-panel mt-ui-card', 'style':'margin-top:12px' }, [
+			E('h3', {}, _('SSB information')),
+			E('div', { 'class':'mt-net-grid', 'style':'margin-top:8px' }, [
+				E('div', {}, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('Serving cell')), serving ]),
+				E('div', {}, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('Serving SSB beams (%d)').format(info.beams.length)), beamRows ]),
+				E('div', { 'style':'grid-column:1 / -1' }, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('NR neighbour cells (%d)').format(info.neighbours.length)), nbRows ])
 			])
 		]);
 	},

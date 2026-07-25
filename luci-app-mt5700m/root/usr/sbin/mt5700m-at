@@ -1187,7 +1187,32 @@ case "${1:-status}" in
 		print_network_info
 		;;
 	cellscan)
-		at_cmd 'AT^CELLSCAN=3'
+		# Neighbour-cell survey.
+		#
+		# The previous implementation sent AT^CELLSCAN=3 (NR-only frequency
+		# scan). MT5700M firmware refuses a RAT-restricted full-band scan while
+		# the module is camped and answers with "+CME ERROR: 3" (operation not
+		# allowed). Per the AT manual (13.9/13.10 and 5.35) the reliable way to
+		# read neighbours is the network-monitor query AT^MONNC, which works in
+		# the connected state, followed by the documented parameter-less
+		# AT^CELLSCAN frequency survey for a broader list.
+		#
+		# A frequency scan releases the radio and can take a while. Raise the
+		# per-command timeout above the 8 s default so a slow AT^CELLSCAN is not
+		# truncated, but keep it bounded so the LuCI request itself does not time
+		# out. AT^MONSC/AT^MONNC return almost immediately regardless of this.
+		case "${timeout_s}" in
+			''|*[!0-9]*) timeout_s=30 ;;
+			*) [ "${timeout_s}" -ge 30 ] || timeout_s=30 ;;
+		esac
+		echo "===== Serving cell: AT^MONSC ====="
+		at_cmd 'AT^MONSC' || true
+		echo
+		echo "===== Neighbour cells: AT^MONNC ====="
+		at_cmd 'AT^MONNC' || true
+		echo
+		echo "===== Frequency scan: AT^CELLSCAN ====="
+		at_cmd 'AT^CELLSCAN' || true
 		;;
 	sms-list)
 		print_sms_list
