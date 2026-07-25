@@ -110,12 +110,90 @@ function countLines(text, prefix) {
 	return (text || '').split(/\n/).filter(function(line) { return line.indexOf(prefix) === 0; }).length;
 }
 
-function formatMcs(values) {
-	if (!values.length)
+// Map an MCS index to its modulation scheme, accounting for the 3GPP table
+// the module reports (NR TABLE 1/2/3 and uplink TABLE 4/5; LTE uses its own
+// tables). Invalid sentinels (255) yield an empty string.
+function mcsModulation(mcs, table, rat) {
+	if (mcs === undefined || mcs === null || mcs === '' || mcs === '255')
 		return '';
-	var rat = values[2] === '1' ? 'NR' : values[2] === '0' ? 'LTE' : '';
-	var codewords = values.slice(3).filter(function(value) { return /^\d+$/.test(value) && value !== '255'; });
-	return [ rat, codewords.length ? 'MCS ' + codewords.join(' / ') : '' ].filter(Boolean).join(' · ');
+	var m = parseInt(mcs, 10);
+	if (!(m >= 0 && m <= 31))
+		return '';
+	var t = parseInt(table, 10);
+	if (rat === '0') { // LTE (TS36.213 Table 7.1.7.1-1)
+		if (m <= 6) return 'QPSK';
+		if (m <= 15) return '16QAM';
+		if (m <= 27) return '64QAM';
+		return '256QAM';
+	}
+	if (t === 4) { // NR uplink 64QAM (TS38.214 Table 6.1.4.2)
+		if (m <= 10) return 'QPSK';
+		if (m <= 20) return '16QAM';
+		return '64QAM';
+	}
+	if (t === 5) { // NR uplink 256QAM
+		if (m <= 10) return 'QPSK';
+		if (m <= 20) return '16QAM';
+		if (m <= 26) return '64QAM';
+		return '256QAM';
+	}
+	if (t === 3) { // NR low-SE table
+		if (m <= 9) return 'QPSK';
+		if (m <= 16) return '16QAM';
+		return '64QAM';
+	}
+	if (m <= 9) return 'QPSK'; // NR TABLE 1/2 default
+	if (m <= 16) return '16QAM';
+	if (m <= 28) return '64QAM';
+	return '256QAM';
+}
+
+// Parse a full MCS section. The module can return several ^MCS: lines for
+// multi-carrier / EN-DC, each describing one RAT with one group of three
+// fields (table index, codeword0, codeword1) per carrier.
+function parseMcsSection(text) {
+	var lines = (text || '').split(/\n/).map(function(l) { return l.trim(); })
+		.filter(function(l) { return l.indexOf('^MCS') === 0; });
+	return lines.map(function(line) {
+		var body = line.replace(/^\^MCS/, '').replace(/^[ :=]+/, '').replace(/"/g, '');
+		var v = body.split(',').map(function(x) { return x.trim(); });
+		var rat = v[1];
+		var carriers = [];
+		for (var i = 2; i + 2 < v.length; i += 3) {
+			carriers.push({ table: v[i], code0: v[i + 1], code1: v[i + 2] });
+		}
+		return { rat: rat, carriers: carriers };
+	});
+}
+
+// Build a readable per-carrier modulation summary node for an MCS section.
+function mcsDetailNode(text) {
+	var groups = parseMcsSection(text);
+	if (!groups.length)
+		return E('span', {}, _('Not available'));
+	var rows = [];
+	groups.forEach(function(group) {
+		var ratName = group.rat === '1' ? 'NR' : group.rat === '0' ? 'LTE' : '';
+		group.carriers.forEach(function(c, idx) {
+			var c0 = mcsModulation(c.code0, c.table, group.rat);
+			var c1 = mcsModulation(c.code1, c.table, group.rat);
+			var parts = [];
+			if (c0) parts.push(_('Codeword 0') + ': MCS ' + c.code0 + ' · ' + c0);
+			if (c1) parts.push(_('Codeword 1') + ': MCS ' + c.code1 + ' · ' + c1);
+			if (!parts.length)
+				return;
+			var label = _('Carrier %d').format(idx + 1);
+			if (ratName && groups.length > 1)
+				label = ratName + ' ' + label;
+			rows.push(E('div', { 'class': 'mt-mcs-row' }, [
+				E('span', {}, label),
+				E('strong', {}, parts.join('   ·   '))
+			]));
+		});
+	});
+	if (!rows.length)
+		return E('span', {}, _('Not available'));
+	return E('div', { 'class': 'mt-mcs-list' }, rows);
 }
 
 function bandChecklist(options, mask, anyMask) {
@@ -237,6 +315,7 @@ return view.extend({
 			'.mt-net-panel{padding:16px}.mt-net-panel h3{font-size:14px;margin:0 0 12px}',
 			'.mt-net-row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--border-color-low,#edf0f4);font-size:13px}',
 			'.mt-net-row:last-child{border-bottom:0}.mt-net-row span:first-child{color:var(--text-color-medium,#707985)}.mt-net-row strong{text-align:right;word-break:break-word}',
+			'.mt-mcs-list{display:flex;flex-direction:column;gap:7px;padding:3px 0}.mt-mcs-row{display:flex;justify-content:space-between;gap:14px;font-size:12.5px;line-height:1.5}.mt-mcs-row span:first-child{color:var(--text-color-medium,#707985);flex:0 0 auto}.mt-mcs-row strong{text-align:right;word-break:break-word;font-weight:600}',
 			'.mt-net-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}.mt-net-actions .btn{border-radius:9px;padding:7px 14px}',
 			'.mt-net-details{margin-top:14px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:12px;overflow:hidden}',
 			'.mt-net-details summary{cursor:pointer;padding:13px 15px;font-size:13px;font-weight:650}.mt-net-raw{margin:0;padding:14px;background:#17202a;color:#dce6ef;white-space:pre-wrap;word-break:break-word;font:12px/1.55 monospace;max-height:420px;overflow:auto}',
@@ -291,8 +370,8 @@ return view.extend({
 	},
 
 	radioDiagnostics: function(raw) {
-		var uplinkMcs = matchValues(controls.section(raw, 'Uplink MCS'), '^MCS');
-		var downlinkMcs = matchValues(controls.section(raw, 'Downlink MCS'), '^MCS');
+		var uplinkMcsText = controls.section(raw, 'Uplink MCS');
+		var downlinkMcsText = controls.section(raw, 'Downlink MCS');
 		var txPower = matchValues(controls.section(raw, 'NR transmit power'), '^NTXPOWER');
 		var ssbRaw = controls.section(raw, 'NR SSB beam');
 		var ssb = matchValues(ssbRaw, '^NRSSBID');
@@ -307,7 +386,7 @@ return view.extend({
 			E('div', { 'class':'mt-net-grid', 'style':'margin-top:12px' }, [
 				E('section', { 'class':'mt-net-panel mt-ui-card' }, [
 					E('h3', {}, _('Radio link details')),
-					this.row(_('Uplink modulation'), formatMcs(uplinkMcs)), this.row(_('Downlink modulation'), formatMcs(downlinkMcs)),
+					this.row(_('Uplink modulation'), mcsDetailNode(uplinkMcsText)), this.row(_('Downlink modulation'), mcsDetailNode(downlinkMcsText)),
 					this.row(_('QoS class'), qos[1] ? 'QCI ' + qos[1] : ''), this.row(_('NR PUSCH power'), txPower[0] && txPower[0] !== '999' ? txPower[0] + ' dBm' : ''),
 					this.row(_('NR PUCCH power'), txPower[1] && txPower[1] !== '999' ? txPower[1] + ' dBm' : ''), this.row(_('NR transmit frequency'), txPower[4] && txPower[4] !== '0' ? (Number(txPower[4]) / 1000).toFixed(1) + ' MHz' : '')
 				]),

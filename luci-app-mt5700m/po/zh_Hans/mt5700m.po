@@ -1845,6 +1845,15 @@ msgstr "上行调制"
 msgid "Downlink modulation"
 msgstr "下行调制"
 
+msgid "Codeword 0"
+msgstr "码字 0"
+
+msgid "Codeword 1"
+msgstr "码字 1"
+
+msgid "Carrier %d"
+msgstr "载波 %d"
+
 msgid "QoS class"
 msgstr "QoS 等级"
 
