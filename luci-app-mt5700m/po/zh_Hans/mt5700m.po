@@ -1905,6 +1905,21 @@ msgstr "服务 SSB 波束 (%d)"
 msgid "Serving beams"
 msgstr "服务波束"
 
+msgid "Neighbour cells (%d)"
+msgstr "NR 邻区 (%d)"
+
+msgid "Frequency scan"
+msgstr "频点扫描"
+
+msgid "Frequency scan is not available while the module is camped on a cell (%s)."
+msgstr "模块驻留小区时频点扫描不可用（%s）。"
+
+msgid "RAT"
+msgstr "制式"
+
+msgid "SCS"
+msgstr "SCS"
+
 msgid "No measurement"
 msgstr "无测量"
 

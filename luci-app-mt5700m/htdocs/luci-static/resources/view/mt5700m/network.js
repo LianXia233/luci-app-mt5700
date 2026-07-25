@@ -166,11 +166,28 @@ function parseMcsSection(text) {
 	});
 }
 
-// Build a readable per-carrier modulation summary node for an MCS section.
+// Build a readable modulation summary node for an MCS section.
+// Single-carrier single-codeword cases use a compact one-liner
+// (e.g. "NR · MCS 20 · 64QAM"); multi-carrier / EN-DC cases expand into
+// a per-carrier detail list.
 function mcsDetailNode(text) {
 	var groups = parseMcsSection(text);
 	if (!groups.length)
 		return E('span', {}, _('Not available'));
+	// Fast path: single RAT, single carrier → compact one-liner
+	if (groups.length === 1 && groups[0].carriers.length === 1) {
+		var g = groups[0], c = g.carriers[0];
+		var c0 = mcsModulation(c.code0, c.table, g.rat);
+		var c1 = mcsModulation(c.code1, c.table, g.rat);
+		var ratName = g.rat === '1' ? 'NR' : g.rat === '0' ? 'LTE' : '';
+		var parts = [];
+		if (c0) parts.push('MCS ' + c.code0 + ' · ' + c0);
+		if (c1) parts.push('MCS ' + c.code1 + ' · ' + c1);
+		if (!parts.length)
+			return E('span', {}, _('Not available'));
+		return E('strong', {}, (ratName ? ratName + ' · ' : '') + parts.join(' / '));
+	}
+	// Multi-carrier / EN-DC: expanded detail list
 	var rows = [];
 	groups.forEach(function(group) {
 		var ratName = group.rat === '1' ? 'NR' : group.rat === '0' ? 'LTE' : '';
@@ -178,8 +195,8 @@ function mcsDetailNode(text) {
 			var c0 = mcsModulation(c.code0, c.table, group.rat);
 			var c1 = mcsModulation(c.code1, c.table, group.rat);
 			var parts = [];
-			if (c0) parts.push(_('Codeword 0') + ': MCS ' + c.code0 + ' · ' + c0);
-			if (c1) parts.push(_('Codeword 1') + ': MCS ' + c.code1 + ' · ' + c1);
+			if (c0) parts.push('MCS ' + c.code0 + ' · ' + c0);
+			if (c1) parts.push('MCS ' + c.code1 + ' · ' + c1);
 			if (!parts.length)
 				return;
 			var label = _('Carrier %d').format(idx + 1);
@@ -194,6 +211,100 @@ function mcsDetailNode(text) {
 	if (!rows.length)
 		return E('span', {}, _('Not available'));
 	return E('div', { 'class': 'mt-mcs-list' }, rows);
+}
+
+// ---------- Cell scan parsers & renderer ----------
+
+// Parse AT^MONSC serving cell response.
+// Format: ^MONSC: <RAT>,<MCC>,<MNC>,<ARFCN>,<SCS>,<CellID>,<PCI>,<TAC>,
+//         <RSRP>,<RSRQ>,<SINR>[,<...>]
+function parseMonsc(text) {
+	var lines = (text || '').split(/\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l.indexOf('^MONSC:') === 0; });
+	if (!lines.length) return null;
+	var v = lines[0].replace(/^\^MONSC:/, '').replace(/^[ :=]+/, '').replace(/"/g, '').split(',').map(function(x) { return x.trim(); });
+	if (!v[0]) return null;
+	return { rat: v[0], mcc: v[1], mnc: v[2], arfcn: v[3], scs: v[4], cellId: v[5], pci: v[6], tac: v[7], rsrp: v[8], rsrq: v[9], sinr: v[10] };
+}
+
+// Parse AT^MONNC neighbour cell responses (one ^MONNC: per neighbour).
+// Format: ^MONSC: <RAT>,<ARFCN>,<RSRP>,<RSRQ>,<SINR>
+function parseMonnc(text) {
+	var lines = (text || '').split(/\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l.indexOf('^MONNC:') === 0; });
+	return lines.map(function(line) {
+		var v = line.replace(/^\^MONNC:/, '').replace(/^[ :=]+/, '').replace(/"/g, '').split(',').map(function(x) { return x.trim(); });
+		return { rat: v[0], arfcn: v[1], rsrp: v[2], rsrq: v[3], sinr: v[4] };
+	});
+}
+
+// Render cell scan results as structured panels instead of raw <pre> text.
+function renderCellScan(raw) {
+	var sections = [];
+	// Serving cell from MONSC
+	var monsc = parseMonsc(controls.section(raw, 'Serving cell: AT^MONSC') || raw);
+	if (monsc && monsc.rat) {
+		var scsKhz = monsc.scs ? ({ '0':'15', '1':'30', '2':'60', '3':'120', '4':'240' }[monsc.scs] || '?') : '';
+		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
+			E('h4', {}, _('Serving cell')),
+			E('table', { 'class':'mt-scan-table' }, [
+				E('tbody', {}, [
+					tr(_('RAT'), monsc.rat),
+					tr('ARFCN', monsc.arfcn),
+					tr('PCI', monsc.pci),
+					tr('RSRP', monsc.rsrp ? monsc.rsrp + ' dBm' : '--'),
+					tr('RSRQ', monsc.rsrq ? monsc.rsrq + ' dB' : '--'),
+					tr('SINR', monsc.sinr ? monsc.sinr + ' dB' : '--'),
+					scsKhz ? tr(_('SCS'), scsKhz + ' kHz') : null,
+					tr('Cell ID', monsc.cellId || '--'),
+					tr('TAC', monsc.tac || '--')
+				].filter(Boolean))
+			])
+		]));
+	}
+	// Neighbour cells from MONNC
+	var monnc = parseMonnc(controls.section(raw, 'Neighbour cells: AT^MONNC') || raw);
+	if (monnc.length) {
+		var nbRows = monnc.map(function(nb, i) {
+			return E('tr', {}, [
+				E('td', {}, String(i + 1)),
+				E('td', {}, nb.rat || '--'),
+				E('td', {}, nb.arfcn || '--'),
+				E('td', {}, nb.rsrp ? nb.rsrp + ' dBm' : '--'),
+				E('td', {}, nb.rsrq ? nb.rsrq + ' dB' : '--'),
+				E('td', {}, nb.sinr ? nb.sinr + ' dB' : '--')
+			]);
+		});
+		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
+			E('h4', {}, _('Neighbour cells (%d)').format(monnc.length)),
+			E('table', { 'class':'mt-scan-table' }, [
+				E('thead', {}, E('tr', {}, [E('th', {}, '#'), E('th', {}, _('RAT')), E('th', {}, 'ARFCN'), E('th', {}, 'RSRP'), E('th', {}, 'RSRQ'), E('th', {}, 'SINR')])),
+				E('tbody', {}, nbRows)
+			])
+		]));
+	}
+	// CELLSCAN frequency scan (raw — may be empty or ERROR)
+	var cellscanSection = controls.section(raw, 'Frequency scan: AT^CELLSCAN');
+	var cellscanLines = (cellscanSection || '').split(/\n/).filter(function(l) { return l.trim() && l.trim() !== 'OK'; });
+	var hasCellScanData = cellscanLines.some(function(l) { return l.indexOf('^CELLSCAN:') === 0; });
+	var hasCellScanError = cellscanLines.some(function(l) { return l.indexOf('ERROR') !== -1; });
+	if (hasCellScanData) {
+		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
+			E('h4', {}, _('Frequency scan')),
+			E('pre', { 'class':'mt-net-raw mt-scan-raw' }, cellscanSection)
+		]));
+	} else if (hasCellScanError) {
+		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
+			E('h4', {}, _('Frequency scan')),
+			E('div', { 'class':'mt-scan-note' }, _('Frequency scan is not available while the module is camped on a cell (%s).').format('+CME ERROR: 3'))
+		]));
+	}
+	if (!sections.length)
+		return E('div', {}, E('div', { 'class':'alert-message warning' }, _('No scan data received.')));
+	return E('div', { 'class':'mt-scan-results' }, sections);
+}
+
+// Helper: table row for key-value pairs
+function tr(label, value) {
+	return E('tr', {}, [ E('td', {}, label), E('td', {}, value || '--') ]);
 }
 
 function bandChecklist(options, mask, anyMask) {
@@ -317,6 +428,7 @@ return view.extend({
 			'.mt-net-row:last-child{border-bottom:0}.mt-net-row span:first-child{color:var(--text-color-medium,#707985)}.mt-net-row strong{text-align:right;word-break:break-word}',
 			'.mt-mcs-list{display:flex;flex-direction:column;gap:7px;padding:3px 0}.mt-mcs-row{display:flex;justify-content:space-between;gap:14px;font-size:12.5px;line-height:1.5}.mt-mcs-row span:first-child{color:var(--text-color-medium,#707985);flex:0 0 auto}.mt-mcs-row strong{text-align:right;word-break:break-word;font-weight:600}',
 			'.mt-net-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}.mt-net-actions .btn{border-radius:9px;padding:7px 14px}',
+			'.mt-scan-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:12px}.mt-scan-panel{padding:16px}.mt-scan-panel h4{font-size:14px;margin:0 0 12px;color:var(--text-color-high,#20242a)}.mt-scan-table{width:100%;border-collapse:collapse;font-size:12.5px}.mt-scan-table th,.mt-scan-table td{padding:6px 10px;border-bottom:1px solid var(--border-color-low,#edf0f4);text-align:left}.mt-scan-table th{color:var(--text-color-medium,#707985);font-weight:600;background:var(--background-color-low,#f8fafb)}.mt-scan-table td{text-align:right;font-weight:600}.mt-scan-table td:first-child{text-align:left;font-weight:400}.mt-scan-note{color:var(--text-color-medium,#707985);font-size:12px;padding:8px 0}.mt-scan-raw{margin-top:8px}',
 			'.mt-net-details{margin-top:14px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:12px;overflow:hidden}',
 			'.mt-net-details summary{cursor:pointer;padding:13px 15px;font-size:13px;font-weight:650}.mt-net-raw{margin:0;padding:14px;background:#17202a;color:#dce6ef;white-space:pre-wrap;word-break:break-word;font:12px/1.55 monospace;max-height:420px;overflow:auto}',
 			'.mt-freq-head{margin-top:20px;padding:19px 20px;border-radius:13px;background:linear-gradient(135deg,#f4f7fb,#f1f8f6);border:1px solid #dce7ee}.mt-freq-head h3{font-size:18px;margin:0 0 6px}.mt-freq-head p{margin:0;color:var(--text-color-medium,#68717d);font-size:12px}',
@@ -415,31 +527,41 @@ return view.extend({
 			this.row(_('Beam SINR'), ssbValue(info.sinr, [ '32767' ]) ? info.sinr + ' dB' : ''),
 			this.row(_('Timing advance'), ssbValue(info.ta, [ '-1' ]) ? info.ta + ' us' : '')
 		]);
-		var beamRows = info.beams.length ? info.beams.map(function(b) {
-			return E('div', { 'class':'mt-net-row' }, [
-				E('span', {}, _('SSB ID %s').format(b.id)),
-				E('strong', {}, ssbValue(b.rsrp, [ '32767' ]) ? b.rsrp + ' dBm' : '--')
-			]);
-		}) : [ E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('Serving beams')), E('strong', {}, _('No measurement')) ]) ];
-		var nbRows = info.neighbours.length ? info.neighbours.map(function(nb, i) {
-			return E('div', { 'class':'mt-net-row' }, [
-				E('span', {}, _('Neighbour %d').format(i + 1)),
-				E('strong', {}, [
-					ssbValue(nb.pci, [ '65535' ]) ? _('PCI %s').format(nb.pci) : _('PCI ?'),
-					'  ·  ',
-					ssbValue(nb.arfcn, [ '4294967295' ]) ? 'ARFCN ' + nb.arfcn : _('ARFCN ?'),
-					'  ·  ',
-					ssbValue(nb.rsrp, [ '32767' ]) ? nb.rsrp + ' dBm' : '--',
-					ssbValue(nb.sinr, [ '32767' ]) ? '  ·  ' + nb.sinr + ' dB' : ''
-				])
-			]);
-		}) : [ E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('NR neighbour cells')), E('strong', {}, _('None reported')) ]) ];
+		var beamChildren = [];
+		if (info.beams.length) {
+			info.beams.forEach(function(b) {
+				beamChildren.push(E('div', { 'class':'mt-net-row' }, [
+					E('span', {}, _('SSB ID %s').format(b.id)),
+					E('strong', {}, ssbValue(b.rsrp, [ '32767' ]) ? b.rsrp + ' dBm' : '--')
+				]));
+			});
+		} else {
+			beamChildren.push(E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('Serving beams')), E('strong', {}, _('No measurement')) ]));
+		}
+		var nbChildren = [];
+		if (info.neighbours.length) {
+			info.neighbours.forEach(function(nb, i) {
+				nbChildren.push(E('div', { 'class':'mt-net-row' }, [
+					E('span', {}, _('Neighbour %d').format(i + 1)),
+					E('strong', {}, [
+						ssbValue(nb.pci, [ '65535' ]) ? _('PCI %s').format(nb.pci) : _('PCI ?'),
+						'  ·  ',
+						ssbValue(nb.arfcn, [ '4294967295' ]) ? 'ARFCN ' + nb.arfcn : _('ARFCN ?'),
+						'  ·  ',
+						ssbValue(nb.rsrp, [ '32767' ]) ? nb.rsrp + ' dBm' : '--',
+						ssbValue(nb.sinr, [ '32767' ]) ? '  ·  ' + nb.sinr + ' dB' : ''
+					])
+				]));
+			});
+		} else {
+			nbChildren.push(E('div', { 'class':'mt-net-row' }, [ E('span', {}, _('NR neighbour cells')), E('strong', {}, _('None reported')) ]));
+		}
 		return E('section', { 'class':'mt-net-panel mt-ui-card', 'style':'margin-top:12px' }, [
 			E('h3', {}, _('SSB information')),
 			E('div', { 'class':'mt-net-grid', 'style':'margin-top:8px' }, [
 				E('div', {}, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('Serving cell')), serving ]),
-				E('div', {}, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('Serving SSB beams (%d)').format(info.beams.length)), beamRows ]),
-				E('div', { 'style':'grid-column:1 / -1' }, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('NR neighbour cells (%d)').format(info.neighbours.length)), nbRows ])
+				E('div', {}, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('Serving SSB beams (%d)').format(info.beams.length)) ].concat(beamChildren)),
+				E('div', { 'style':'grid-column:1 / -1' }, [ E('h4', { 'style':'margin:0 0 8px;font-size:13px' }, _('NR neighbour cells (%d)').format(info.neighbours.length)) ].concat(nbChildren))
 			])
 		]);
 	},
@@ -604,7 +726,10 @@ return view.extend({
 						E('p', {}, _('Cell scan may take some time and can briefly increase modem load.')),
 						E('div', { 'class': 'right' }, [ E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')), ' ', E('button', { 'class': 'btn cbi-button-apply', 'click': function() {
 							ui.hideModal();
-							fs.exec('/usr/sbin/mt5700m-at', [ 'cellscan' ]).then(function(scan) { ui.showModal(_('Cell Scan'), [ E('pre', { 'class': 'mt-net-raw' }, scan.stdout || _('No response.')), E('div', { 'class': 'right' }, E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Close'))) ]); });
+							fs.exec('/usr/sbin/mt5700m-at', [ 'cellscan' ]).then(function(scan) {
+								var body = scan.stdout ? renderCellScan(scan.stdout) : E('div', { 'class':'alert-message warning' }, _('No response.'));
+								ui.showModal(_('Cell Scan'), [ body, E('div', { 'class': 'right', 'style':'margin-top:14px' }, E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Close'))) ]);
+							});
 						} }, _('Continue')) ])
 					]);
 				} }, _('Cell Scan'))
