@@ -1896,9 +1896,6 @@ msgstr "NR SSB 测量"
 msgid "Not available"
 msgstr "不可用"
 
-msgid "Serving cell"
-msgstr "服务小区"
-
 msgid "Serving SSB beams (%d)"
 msgstr "服务 SSB 波束 (%d)"
 
