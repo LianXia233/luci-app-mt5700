@@ -224,9 +224,17 @@ return view.extend({
 		]);
 	},
 
+	// Robust node detector: some LuCI runtimes (older L.dom) build nodes that
+	// are NOT `instanceof HTMLElement` but still have nodeType === 1.  Using
+	// only `instanceof HTMLElement` (as v2.3.9 did) mis-classifies those nodes
+	// as scalars and toString()s them into "[object HTMLElement]".  nodeType===1
+	// is the reliable cross-runtime test.
+	isNode: function(v) {
+		return v && typeof v === 'object' && (v instanceof HTMLElement || v.nodeType === 1);
+	},
+
 	infoRow: function(label, value) {
-		var isScalar = value == null || value === '' || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
-		var valueNode = isScalar ? E('strong', {}, (value == null || value === '') ? '--' : String(value)) : value;
+		var valueNode = this.isNode(value) ? value : E('strong', {}, (value == null || value === '') ? '--' : String(value));
 		return E('div', { 'class':'mt5700m-info-row' }, [ E('span', {}, label), valueNode ]);
 	},
 

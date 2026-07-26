@@ -728,13 +728,14 @@ return view.extend({
 
 	row: function(label, value) {
 		// Support both plain-text values and rich DOM nodes (e.g. mcsDetailNode,
-		// signalBar).  When value is already a DOM node, render it directly
+		// signalBar).  When value is already a DOM/LuCI node, render it directly
 		// instead of wrapping it inside <strong> – otherwise LuCI's E() helper
-		// Pass any DOM node straight through so LuCI renders it; only wrap
-		// scalar values (string/number/boolean) in <strong>.  Wrapping a node
-		// in E('strong', {}, String(node)) is what produced "[object HTMLElement]".
-		var isScalar = value == null || value === '' || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
-		var valueNode = isScalar ? E('strong', {}, (value == null || value === '') ? '--' : String(value)) : value;
+		// would toString() the node and emit "[object HTMLElement]".  Some
+		// runtimes (older LuCI L.dom) produce nodes that are NOT
+		// `instanceof HTMLElement` but DO have nodeType === 1, so we detect a
+		// node via isNode() (nodeType check) rather than `instanceof HTMLElement`,
+		// which is what broke v2.3.9.  Only scalar values get wrapped in <strong>.
+		var valueNode = isNode(value) ? value : E('strong', {}, (value == null || value === '') ? '--' : String(value));
 		return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, label), valueNode ]);
 	},
 
