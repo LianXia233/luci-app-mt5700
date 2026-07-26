@@ -86,7 +86,7 @@ return view.extend({
 			'.mt5700m-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;background:#eef2f6;color:#6b7480;font-size:10px;font-weight:750;white-space:nowrap}.mt5700m-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.mt5700m-badge.good,.mt5700m-badge.active{background:#e8f8f1;color:#087c60}.mt5700m-badge.fair{background:#fff5df;color:#9b6500}.mt5700m-badge.weak{background:#fff0ee;color:#b84035}',
 			'.mt5700m-signal-value{display:flex;align-items:baseline;gap:6px}.mt5700m-signal-value strong{font-size:31px;letter-spacing:-.04em}.mt5700m-signal-value span{font-size:11px;color:var(--mt-ui-muted)}.mt5700m-signal-bars{display:flex;align-items:flex-end;gap:3px;height:52px;margin:5px 0 13px}.mt5700m-signal-bar{flex:1;min-width:2px;border-radius:2px 2px 1px 1px;background:var(--mt-ui-border);opacity:.55}.mt5700m-signal-bar.on{background:#4b94df;opacity:1}.mt5700m-signal-bars.excellent .on{background:#13a979}.mt5700m-signal-bars.fair .on{background:#e4a23a}.mt5700m-signal-bars.weak .on{background:#db5b52}',
 			'.mt5700m-signal-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:auto}.mt5700m-mini{padding:8px;border-radius:9px;background:var(--background-color-low,#f5f7f9)}.mt5700m-mini span{display:block;margin-bottom:3px;color:var(--mt-ui-muted);font-size:9px}.mt5700m-mini strong{font-size:12px}',
-			'.mt5700m-carrier-main{margin:2px 0 12px}.mt5700m-carrier-main strong{display:block;font-size:29px;line-height:1.15;letter-spacing:-.03em}.mt5700m-carrier-main span{display:block;margin-top:4px;color:var(--mt-ui-muted);font-size:11px}.mt5700m-band-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.mt5700m-band{padding:5px 8px;border-radius:8px;background:#edf5ff;color:#176bc1;font-size:10px;font-weight:700}.mt5700m-carrier-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}',
+			'.mt5700m-carrier-main{margin:2px 0 12px}.mt5700m-carrier-main strong{display:block;font-size:29px;line-height:1.15;letter-spacing:-.03em}.mt5700m-carrier-main span{display:block;margin-top:4px;color:var(--mt-ui-muted);font-size:11px}.mt5700m-band-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.mt5700m-band{padding:5px 8px;border-radius:8px;background:#edf5ff;color:#176bc1;font-size:10px;font-weight:700}.mt5700m-carrier-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}.mt5700m-cc-list{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}.mt5700m-cc-row{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9);border:1px solid var(--mt-ui-border,#e8ecf0)}.mt5700m-cc-role{display:flex;align-items:center;gap:8px}.mt5700m-cc-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:750;white-space:nowrap}.mt5700m-cc-badge.primary{background:#e8f1ff;color:#176bc1}.mt5700m-cc-badge.secondary{background:#eef2f6;color:#6b7480}.mt5700m-cc-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.mt5700m-cc-detail{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:10px;color:var(--mt-ui-muted)}.mt5700m-cc-detail span{font-variant-numeric:tabular-nums}',
 			'.mt5700m-ip-list{display:grid;gap:9px}.mt5700m-ip-row{padding:10px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9)}.mt5700m-ip-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;font-size:10px;color:var(--mt-ui-muted)}.mt5700m-ip-state{font-weight:700;color:#9a6200}.mt5700m-ip-state.on{color:#087c60}.mt5700m-ip-value{font:600 12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}.mt5700m-ip-meta{display:flex;justify-content:space-between;gap:10px;margin-top:9px;color:var(--mt-ui-muted);font-size:10px}',
 			'.mt5700m-card-link{display:inline-flex;align-items:center;gap:5px;margin-top:auto;padding-top:12px;color:#176bc1;font-size:10px;font-weight:700;text-decoration:none}.mt5700m-card-link:after{content:"›";font-size:16px;line-height:10px}',
 			'.mt5700m-traffic{padding:18px;margin-bottom:12px}.mt5700m-traffic-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}.mt5700m-traffic-head h3{margin:0 0 4px;font-size:16px}.mt5700m-traffic-head p{margin:0;color:var(--mt-ui-muted);font-size:10px}.mt5700m-traffic-side{text-align:right}.mt5700m-updated{color:var(--mt-ui-muted);font-size:10px;white-space:nowrap}.mt5700m-legend{display:flex;justify-content:flex-end;gap:10px;margin-top:5px;color:var(--mt-ui-muted);font-size:9px}.mt5700m-legend span:before{content:"";display:inline-block;width:7px;height:3px;margin-right:4px;border-radius:9px;background:#337de8;vertical-align:middle}.mt5700m-legend span:last-child:before{background:#16a085}',
@@ -119,7 +119,7 @@ return view.extend({
 		for (i = 1; i <= count; i++) {
 			parts = String(data['carrier_' + i] || '').split('|');
 			if (parts.length < 8) continue;
-			carriers.push({ radio:parts[0], band:parts[1], dlBandwidth:parts[4], ulBandwidth:parts[7] });
+			carriers.push({ radio:parts[0], band:parts[1], arfcn:parts[2], dlFreq:parts[3], dlBandwidth:parts[4], ulFreq:parts[6], ulBandwidth:parts[7] });
 		}
 		return {
 			available:carriers.length > 0,
@@ -154,6 +154,25 @@ return view.extend({
 		var active = info.active || info.dual;
 		var badge = !info.available ? _('Unavailable') : info.active ? _('Aggregating') : info.dual ? _('Dual connectivity') : _('Single carrier');
 		var headline = !info.available ? '--' : info.active ? info.count + 'CA' : info.dual ? (info.mode || 'EN-DC') : (info.carriers[0] ? info.carriers[0].band : _('Single carrier'));
+		// Expand every component carrier when more than one is active so the
+		// serving cell (PCell + SCells) is fully listed (not just a summary).
+		var ccList = null;
+		if (info.carriers.length > 1) {
+			ccList = E('div', { 'class':'mt5700m-cc-list' }, info.carriers.map(function(item, idx) {
+				var role = idx === 0 ? _('PCell') : _('SCell %d').format(idx);
+				return E('div', { 'class':'mt5700m-cc-row' }, [
+					E('div', { 'class':'mt5700m-cc-role' }, [
+						E('span', { 'class':'mt5700m-cc-badge ' + (idx === 0 ? 'primary' : 'secondary') }, role),
+						E('span', { 'class':'mt5700m-cc-band' }, item.radio + ' · ' + item.band)
+					]),
+					E('div', { 'class':'mt5700m-cc-detail' }, [
+						item.arfcn ? E('span', {}, _('ARFCN') + ' ' + item.arfcn) : null,
+						E('span', {}, _('DL') + ' ' + (item.dlFreq ? item.dlFreq + ' MHz' : '--') + ' / ' + (item.dlBandwidth ? item.dlBandwidth + ' MHz' : '--')),
+						E('span', {}, _('UL') + ' ' + (item.ulFreq ? item.ulFreq + ' MHz' : '--') + ' / ' + (item.ulBandwidth ? item.ulBandwidth + ' MHz' : '--'))
+					].filter(Boolean))
+				]);
+			}));
+		}
 		return E('section', { 'class':'mt5700m-focus mt-ui-card' }, [
 			E('div', { 'class':'mt5700m-focus-head' }, [
 				E('div', {}, [ E('div', { 'class':'mt5700m-focus-title' }, _('Carrier status')), E('div', { 'class':'mt5700m-focus-desc' }, _('Carrier aggregation and bandwidth')) ]),
@@ -161,6 +180,7 @@ return view.extend({
 			]),
 			E('div', { 'class':'mt5700m-carrier-main' }, [ E('strong', {}, headline), E('span', {}, info.mode || _('Mobile network')) ]),
 			E('div', { 'class':'mt5700m-band-list' }, info.carriers.length ? info.carriers.map(function(item) { return E('span', { 'class':'mt5700m-band' }, item.radio + ' · ' + item.band); }) : E('span', { 'class':'mt5700m-focus-desc' }, _('Current carrier information is unavailable.'))),
+			ccList,
 			E('div', { 'class':'mt5700m-carrier-stats' }, [
 				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Downlink bandwidth')), E('strong', {}, info.dlBandwidth ? info.dlBandwidth + ' MHz' : '--') ]),
 				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Uplink bandwidth')), E('strong', {}, info.ulBandwidth ? info.ulBandwidth + ' MHz' : '--') ])
