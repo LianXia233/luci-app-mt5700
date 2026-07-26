@@ -2617,3 +2617,69 @@ msgstr "未找到锁定面板，请向下滚动到「频段与小区选择」。
 
 msgid "%s cell data filled into %s lock panel. Review and click \"Review and apply\"."
 msgstr "%s 小区数据已填入 %s 锁定面板。请检查后点击「检查并应用」。"
+
+msgid "Access technology"
+msgstr "接入技术"
+
+msgid "Subscription rate"
+msgstr "签约速率"
+
+msgid "Phone number"
+msgstr "电话号码"
+
+msgid "Not stored"
+msgstr "未存储"
+
+msgid "Down %s / Up %s"
+msgstr "下行 %s / 上行 %s"
+
+msgid "ARFCN"
+msgstr "ARFCN"
+
+msgid "AT port"
+msgstr "AT 端口"
+
+msgid "Firmware"
+msgstr "固件"
+
+msgid "Identity and firmware"
+msgstr "标识与固件"
+
+msgid "Manufacturer"
+msgstr "制造商"
+
+msgid "QCI"
+msgstr "QCI"
+
+msgid "Ready"
+msgstr "就绪"
+
+msgid "SIM & Subscription"
+msgstr "SIM 与签约"
+
+msgid "DL"
+msgstr "下行"
+
+msgid "UL"
+msgstr "上行"
+
+msgid "PCell"
+msgstr "主小区"
+
+msgid "SCell %d"
+msgstr "辅小区 %d"
+
+msgid "SSB-%s"
+msgstr "SSB-%s"
+
+msgid "Subscriber identity and service plan"
+msgstr "用户标识与签约套餐"
+
+msgid "No scan data received."
+msgstr "未收到扫描数据。"
+
+msgid "MCC / MNC"
+msgstr "MCC / MNC"
+
+msgid "TAC / LAC"
+msgstr "TAC / LAC"

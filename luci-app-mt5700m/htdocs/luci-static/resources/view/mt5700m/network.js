@@ -23,6 +23,15 @@ function sectionValue(raw, label) {
 	return result.join('\n');
 }
 
+// Robust DOM-node detector usable in any LuCI runtime.  Some environments
+// report `instanceof HTMLElement` as false for nodes created by E(), so we
+// also accept any object exposing nodeType === 1 (a real Element).  This is
+// what prevents rich nodes (mcsDetailNode, signalBar, …) from being
+// stringified to "[object HTMLElement]" when rendered as a row value.
+function isNode(v) {
+	return v && typeof v === 'object' && (v instanceof HTMLElement || v.nodeType === 1);
+}
+
 function matchValues(text, prefix) {
 	var line = (text || '').split(/\n/).filter(function(item) { return item.indexOf(prefix) === 0; })[0] || '';
 	// MT5700M private commands are inconsistent: most reply "^CMD: value" but
@@ -710,10 +719,10 @@ return view.extend({
 
 	row: function(label, value) {
 		// Support both plain-text values and rich DOM nodes (e.g. mcsDetailNode,
-		// signalBar).  When value is already an HTMLElement, render it directly
+		// signalBar).  When value is already a DOM node, render it directly
 		// instead of wrapping it inside <strong> – otherwise LuCI's E() helper
 		// may toString() the node and emit "[object HTMLElement]".
-		var valueNode = (value instanceof HTMLElement) ? value : E('strong', {}, String(value || '--'));
+		var valueNode = isNode(value) ? value : E('strong', {}, String(value || '--'));
 		return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, label), valueNode ]);
 	},
 
@@ -767,6 +776,12 @@ return view.extend({
 	// Map English operator name (from AT+COPS) to Chinese name + inline SVG logo.
 	operatorInfo: function(name) {
 		var n = (name || '').toUpperCase();
+		// Some modules reply with the numeric MCC-MNC instead of the operator
+		// name (e.g. "+COPS: 0,0,"46000",7").  Normalise those to the alphabetic
+		// key so the logo/name branches below still match.
+		if (/^4600[02478]$/.test(n)) n = 'CHINA MOBILE';        // CMCC
+		else if (/^4600[169]$/.test(n)) n = 'CHINA UNICOM';    // CUCC
+		else if (/^460(03|05|11)$/.test(n)) n = 'CHINA TELECOM'; // CTCC
 		// China Mobile — blue-green swirl logo
 		if (n.indexOf('CHINA MOBILE') !== -1 || n.indexOf('CMCC') !== -1)
 			return { name: '中国移动', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0066B3"/><stop offset="100%" stop-color="#00A0E9"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#g)"/><path d="M8 28c0 0 4-12 14-12s12 8 12 8-4 6-12 6S8 28 8 28z" fill="#fff" opacity=".9"/><circle cx="22" cy="23" r="4" fill="#fff"/><path d="M10 14c2-4 7-7 13-6s9 5 10 9c-2-2-5-4-10-4s-11 3-13 1z" fill="#FFE600" opacity=".85"/></svg>') };
@@ -1098,12 +1113,12 @@ return view.extend({
 			E('div', { 'class': 'mt-net-grid' }, [
 				E('section', { 'class': 'mt-net-panel' }, [
 					E('h3', {}, _('Serving cell')),
-					this.row(_('Radio access'), cell.rat || signal[0]),
-					this.row('MCC / MNC', cell.mcc && cell.mnc ? '%s / %s'.format(cell.mcc, cell.mnc) : ''),
-					this.row('ARFCN', cell.arfcn),
-					this.row('PCI', cell.pci),
-					this.row(_('Cell ID'), cell.cellId),
-					this.row('TAC / LAC', cell.tac),
+				this.row(_('Radio access'), cell.rat || signal[0]),
+				this.row(_('MCC / MNC'), cell.mcc && cell.mnc ? '%s / %s'.format(cell.mcc, cell.mnc) : ''),
+				this.row(_('ARFCN'), cell.arfcn),
+				this.row(_('PCI'), cell.pci),
+				this.row(_('Cell ID'), cell.cellId),
+				this.row(_('TAC / LAC'), cell.tac),
 					cell.scs ? this.row(_('SCS type'), cell.scs + ' · ' + ([ '15', '30', '60', '120', '240' ][Number(cell.scs)] || '?') + ' kHz') : null,
 					this.row(_('Registration'), registered ? (registration[1] === '5' ? _('Roaming') : _('Home network')) : _('Not registered'))
 				]),
