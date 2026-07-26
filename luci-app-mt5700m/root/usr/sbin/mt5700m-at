@@ -356,6 +356,15 @@ extract_cops_operator() {
 		return 0
 	fi
 
+	# Numeric MCC-MNC: on some firmwares the long-name field is empty and the
+	# numeric code lands in a different comma field (e.g. "0,2,,46000,7").
+	# Pick the first 5–6 digit token as the operator code.
+	name="$(printf '%s' "${line}" | awk -F, '{ for (i=1;i<=NF;i++) if ($i ~ /^[0-9]{5,6}$/) { print $i; exit } }')"
+	if [ -n "${name}" ]; then
+		printf '%s\n' "${name}"
+		return 0
+	fi
+
 	name="$(printf '%s' "${line}" | awk -F, '{ print $3 }')"
 	name="$(clean_line_value "${name}")"
 	[ -n "${name}" ] && {

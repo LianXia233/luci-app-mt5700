@@ -730,8 +730,11 @@ return view.extend({
 		// Support both plain-text values and rich DOM nodes (e.g. mcsDetailNode,
 		// signalBar).  When value is already a DOM node, render it directly
 		// instead of wrapping it inside <strong> – otherwise LuCI's E() helper
-		// may toString() the node and emit "[object HTMLElement]".
-		var valueNode = isNode(value) ? value : E('strong', {}, String(value || '--'));
+		// Pass any DOM node straight through so LuCI renders it; only wrap
+		// scalar values (string/number/boolean) in <strong>.  Wrapping a node
+		// in E('strong', {}, String(node)) is what produced "[object HTMLElement]".
+		var isScalar = value == null || value === '' || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+		var valueNode = isScalar ? E('strong', {}, (value == null || value === '') ? '--' : String(value)) : value;
 		return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, label), valueNode ]);
 	},
 
@@ -785,6 +788,11 @@ return view.extend({
 	// Map English operator name (from AT+COPS) to Chinese name + inline SVG logo.
 	operatorInfo: function(name) {
 		var n = (name || '').toUpperCase();
+		// Some firmwares emit the full +COPS tuple (e.g. "0,2,,46000,7") or a
+		// numeric MCC-MNC instead of the operator name.  Strip to the 5–6 digit
+		// MCC-MNC token so the normalisation below still matches.
+		var mccMnc = n.match(/(\d{5,6})/);
+		if (mccMnc && n.indexOf(',') !== -1) n = mccMnc[1];
 		// Some modules reply with the numeric MCC-MNC instead of the operator
 		// name (e.g. "+COPS: 0,0,"46000",7").  Normalise those to the alphabetic
 		// key so the logo/name branches below still match.

@@ -225,7 +225,8 @@ return view.extend({
 	},
 
 	infoRow: function(label, value) {
-		var valueNode = (value && typeof value === 'object' && (value instanceof HTMLElement || value.nodeType === 1)) ? value : E('strong', {}, String(value || '--'));
+		var isScalar = value == null || value === '' || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+		var valueNode = isScalar ? E('strong', {}, (value == null || value === '') ? '--' : String(value)) : value;
 		return E('div', { 'class':'mt5700m-info-row' }, [ E('span', {}, label), valueNode ]);
 	},
 
@@ -304,6 +305,11 @@ return view.extend({
 	// Map English operator name (from AT+COPS) to Chinese name + inline SVG logo.
 	operatorInfo: function(name) {
 		var n = (name || '').toUpperCase();
+		// Some firmwares emit the full +COPS tuple (e.g. "0,2,,46000,7") or a
+		// numeric MCC-MNC instead of the operator name.  Strip to the 5–6 digit
+		// MCC-MNC token so the normalisation below still matches.
+		var mccMnc = n.match(/(\d{5,6})/);
+		if (mccMnc && n.indexOf(',') !== -1) n = mccMnc[1];
 		// Some modules reply with the numeric MCC-MNC instead of the operator
 		// name.  Normalise those to the alphabetic key for logo/name matching.
 		if (/^4600[02478]$/.test(n)) n = 'CHINA MOBILE';        // CMCC
