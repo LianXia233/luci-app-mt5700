@@ -321,9 +321,21 @@ function renderCellScan(raw) {
 		var scRat = (monsc && monsc.rat) || '';
 		var nrNbs = monnc.filter(function(nb) { return nb.rat === 'NR'; });
 		var lteNbs = monnc.filter(function(nb) { return nb.rat === 'LTE'; });
-		// Show only neighbours matching the serving cell RAT
-		var activeNbs = scRat === 'NR' ? nrNbs : scRat === 'LTE' ? lteNbs : monnc;
-		var activeLabel = scRat === 'NR' ? _('NR neighbour cells (%d)') : scRat === 'LTE' ? _('LTE neighbour cells (%d)') : _('Neighbour cells (%d)');
+		// Default the primary neighbour block to 5G (NR). The other RAT (LTE)
+		// is shown only as a secondary block when NR neighbours are present or
+		// as the primary fallback when no NR neighbours are reported at all.
+		var activeNbs, activeLabel, otherNbs = [], otherLabel = '';
+		if (nrNbs.length) {
+			activeNbs = nrNbs;
+			activeLabel = _('NR neighbour cells (%d)');
+			if (lteNbs.length) { otherNbs = lteNbs; otherLabel = _('LTE neighbour cells (%d)'); }
+		} else if (lteNbs.length) {
+			activeNbs = lteNbs;
+			activeLabel = _('LTE neighbour cells (%d)');
+		} else {
+			activeNbs = monnc;
+			activeLabel = _('Neighbour cells (%d)');
+		}
 		if (activeNbs.length) {
 			var nbCards = activeNbs.map(function(nb, i) {
 				var ratType = nb.rat === 'NR' ? 'nr' : nb.rat === 'LTE' ? 'lte' : '';
@@ -335,9 +347,6 @@ function renderCellScan(raw) {
 				E('div', { 'class':'mt-lock-cell-grid' }, nbCards)
 			]));
 		}
-		// If the other RAT has neighbours too, show them in a collapsible secondary section
-		var otherNbs = scRat === 'NR' ? lteNbs : scRat === 'LTE' ? nrNbs : [];
-		var otherLabel = scRat === 'NR' ? _('LTE neighbour cells (%d)') : scRat === 'LTE' ? _('NR neighbour cells (%d)') : '';
 		if (otherNbs.length && otherLabel) {
 			var otherCards = otherNbs.map(function(nb, i) {
 				var ratType = nb.rat === 'NR' ? 'nr' : nb.rat === 'LTE' ? 'lte' : '';
@@ -883,10 +892,16 @@ return view.extend({
 		// LTE (and any NR) neighbour cells from AT^MONNC — surface them as
 		// lockable cards so LTE neighbours are visible on the main page too.
 		var monnc = parseMonnc(controls.section(raw, 'Neighbour cells') || '');
+		var nrMonnc = monnc.filter(function(nb) { return nb.rat === 'NR'; });
 		var lteMonnc = monnc.filter(function(nb) { return nb.rat === 'LTE'; });
+		// Default the diagnostics neighbour block to 5G (NR). Fall back to LTE
+		// only when no NR neighbours are reported, so the panel is never empty.
+		var diagNb = nrMonnc.length ? nrMonnc : lteMonnc;
 		var extra = [ this.ssbPanel(ssbInfo) ];
-		if (lteMonnc.length)
-			extra.push(this.lockNeighbourSection(_('LTE neighbour cells (%d)').format(lteMonnc.length), lteMonnc, 'lte'));
+		if (diagNb.length)
+			extra.push(this.lockNeighbourSection(
+				(nrMonnc.length ? _('NR neighbour cells (%d)') : _('LTE neighbour cells (%d)')).format(diagNb.length),
+				diagNb, nrMonnc.length ? 'nr' : 'lte'));
 		return E('div', { 'class':'mt-net-ssb-wrap' }, [
 			E('div', { 'class':'mt-net-grid', 'style':'margin-top:12px' }, [
 				E('section', { 'class':'mt-net-panel mt-ui-card' }, [
