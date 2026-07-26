@@ -125,6 +125,20 @@ jobs:
             - 主载波（PCell）与每个辅载波（SCell 1/2…）分别标注
             - 每张载波卡显示：制式 · 频段、ARFCN、下行频率/带宽、上行频率/带宽
             - 单载波时仍只显示频段标签，保持简洁
+          - **LTE 邻区也在主页显示**
+            - 射频诊断区新增「LTE neighbour cells」面板，与主页面 NR 邻区一样支持一键「填入 / 锁定」
+            - 后端 radio-diagnostics 增加 AT^MONNC 邻区查询
+          - **锁频面板实时读取当前锁定信息**
+            - 修复根因：原 matchValues 只取首行（仅锁定类型），丢弃了已锁 band/ARFCN/PCI
+            - 新增 collectFreqLock() 收集 AT^LTEFREQLOCK? / AT^NRFREQLOCK? 的全部行
+            - 打开「频段与小区选择」时，面板自动填入选中的锁频类型与已锁频段、ARFCN、PCI
+          - **锁频时自动填入相应选项并应用**
+            - 邻区卡片「锁定」按钮在确认前会先把该小区的频段、ARFCN、PCI 自动填入锁频面板
+            - 「填入」按钮逻辑复用，面板即时反映所选小区
+          - **首页新增「模块与 SIM」信息卡**
+            - 新增模块卡：厂商、型号、固件版本、IMEI、AT 端口
+            - 新增 SIM 卡：运营商、接入技术、ICCID、IMSI、号码
+            - 后端 status 增加 AT^ICCID? / AT+CIMI 查询，首页无需额外往返即可显示
 
           ### 📦 支持模组
           - 鼎桥 MT5700M-CN（海思巴龙平台，5G NR / LTE-FDD / LTE-TDD / WCDMA）

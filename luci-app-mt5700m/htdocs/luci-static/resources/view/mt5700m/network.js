@@ -31,6 +31,18 @@ function matchValues(text, prefix) {
 	return line.substring(prefix.length).replace(/^[ :=]+/, '').replace(/"/g, '').split(',').map(function(value) { return value.trim(); });
 }
 
+// Collect EVERY line beginning with `prefix` and flatten all comma-split
+// fields into one array. Required because AT^LTEFREQLOCK? / AT^NRFREQLOCK?
+// reply with several prefixed lines: <operatetype>, then <forbidFlag>,<num>,
+// then one line per locked cell (<band>,<freq/arfcn>,<scs>,<pci>). A single
+// matchValues() call only returns the type digit, discarding the lock details.
+function collectFreqLock(text, prefix) {
+	return (text || '').split(/\n/).filter(function(item) { return item.indexOf(prefix) === 0; }).reduce(function(out, line) {
+		var fields = line.substring(prefix.length).replace(/^[ :=]+/, '').replace(/"/g, '').split(',').map(function(v) { return v.trim(); });
+		return out.concat(fields);
+	}, []);
+}
+
 function ssbValue(value, invalid) {
 	// The manual defines dedicated "invalid" sentinels for the SSB fields:
 	// ARFCN 0xFFFFFFFF (4294967295), PCI 0xFFFF (65535) and the signed
@@ -507,7 +519,23 @@ function cellLockCard(nb, index, rat, bandName, hideRsqr) {
 		: rat === 'nr' ? 'NR' : rat === 'lte' ? 'LTE' : nb.rat || '?';
 	var bandDisplay = bandName || ratLabel;
 	var bandNum = bandNameToNumber(bandName);    // e.g. 'n41' → '41' for backend
-	var self = this;
+	// Copy this neighbour cell's data into the matching lock-panel form.
+	// Returns true if the panel was found and filled. Used by both the
+	// "Fill" button and the "Lock" button (auto-fill before apply).
+	function applyFill() {
+		var panelRat = (ratLabel === 'NR') ? 'nr' : 'lte';
+		var fields = lockPanelFields[panelRat];
+		if (!fields || !fields.type || !fields.bands || !fields.arfcns)
+			return false;
+		// Cell Lock (2) if PCI known, else ARFCN Lock (1)
+		fields.type.value = (nb.pci && nb.pci !== '?') ? '2' : '1';
+		fields.type.dispatchEvent(new Event('change')); // reveal/hide the right fields
+		fields.bands.value = bandNum || '';
+		fields.arfcns.value = nb.arfcn || '';
+		if (fields.scs) fields.scs.value = '0';
+		if (fields.pcis) fields.pcis.value = nb.pci || '';
+		return true;
+	}
 	var lockBtn = E('button', { 'type':'button', 'class':'btn mt-lock-btn' }, _('Lock'));
 	lockBtn.addEventListener('click', function() {
 		var isNr = (ratLabel === 'NR');
@@ -525,6 +553,8 @@ function cellLockCard(nb, index, rat, bandName, hideRsqr) {
 				E('button', { 'type':'button', 'class':'btn', 'click': ui.hideModal }, _('Cancel')),
 				E('button', { 'type':'button', 'class':'btn cbi-button-negative', 'click': function() {
 					ui.hideModal();
+					// Auto-fill the lock panel so it reflects the chosen cell
+					applyFill();
 					fs.exec('/usr/sbin/mt5700m-at', args).then(function() {
 						ui.addNotification(null, E('p', {}, _('Frequency lock applied.')));
 						window.setTimeout(function() { window.location.reload(); }, 2500);
@@ -538,25 +568,16 @@ function cellLockCard(nb, index, rat, bandName, hideRsqr) {
 	// "Fill panel" button — copies this cell's data into the lock panel form
 	var fillBtn = E('button', { 'type':'button', 'class':'btn mt-lock-btn mt-fill-btn' }, _('Fill'));
 	fillBtn.addEventListener('click', function() {
-		var panelRat = (ratLabel === 'NR') ? 'nr' : 'lte';
-		var fields = lockPanelFields[panelRat];
-		if (!fields || !fields.type || !fields.bands || !fields.arfcns) {
+		if (!applyFill()) {
 			ui.addNotification(null, E('p', {}, _('Lock panel not found. Scroll down to "Frequency and cell selection".')), 'warning');
 			return;
 		}
-		// Set lock type: Cell Lock (2) if PCI known, else ARFCN Lock (1)
-		fields.type.value = (nb.pci && nb.pci !== '?') ? '2' : '1';
-		// Dispatch change event so the panel shows/hides correct fields
-		fields.type.dispatchEvent(new Event('change'));
-		// Fill in the values
-		fields.bands.value = bandNum || '';
-		fields.arfcns.value = nb.arfcn || '';
-		if (fields.scs) fields.scs.value = '0';
-		if (fields.pcis) fields.pcis.value = nb.pci || '';
+		var panelRat = (ratLabel === 'NR') ? 'nr' : 'lte';
 		ui.addNotification(null, E('p', {}, _('%s cell data filled into %s lock panel. Review and click "Review and apply".')
 			.format(bandDisplay, panelRat === 'nr' ? '5G NR' : 'LTE')));
 		// Scroll to the lock panel
-		var card = fields.type.closest('.mt-freq-card');
+		var fields = lockPanelFields[panelRat];
+		var card = fields && fields.type && fields.type.closest ? fields.type.closest('.mt-freq-card') : null;
 		if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	});
 	var thirdBar = (ratLabel === 'LTE' && nb.sinr === '' && nb.rxlev !== undefined)
@@ -696,14 +717,52 @@ return view.extend({
 		]);
 	},
 
-	lockPanel: function(title, rat, currentType) {
+	// Parse ^LTEFREQLOCK? / ^NRFREQLOCK? raw array into structured lock info.
+	// Raw format (from AT manual 13.12/13.13):
+	//   LTE: [type, forbidFlag, num, band1, freq1, pci1, band2, freq2, pci2, ...]
+	//   NR:  [type, forbidFlag, num, band1, arfcn1, scs1, pci1, band2, arfcn2, scs2, pci2, ...]
+	parseLockData: function(rawArr, rat) {
+		if (!rawArr || !rawArr.length || rawArr[0] === '' || rawArr[0] === undefined)
+			return { type:'0', bands:'', arfcns:'', scs:'', pcis:'' };
+		var type = String(rawArr[0] || '0');
+		if (type === '0') return { type:'0', bands:'', arfcns:'', scs:'', pcis:'' };
+		var num = Math.min(parseInt(rawArr[2] || '0', 10) || 0, 20);
+		if (num < 1) return { type:type, bands:'', arfcns:'', scs:'', pcis:'' };
+		var bands=[], arfcns=[], scs=[], pcis=[];
+		if (rat === 'nr') {
+			for (var i = 0; i < num; i++) {
+				var base = 3 + i * 4;
+				bands.push(rawArr[base] || '');
+				arfcns.push(rawArr[base + 1] || '');
+				scs.push(rawArr[base + 2] || '');
+				pcis.push(rawArr[base + 3] || '');
+			}
+		} else {
+			for (var j = 0; j < num; j++) {
+				var b2 = 3 + j * 3;
+				bands.push(rawArr[b2] || '');
+				arfcns.push(rawArr[b2 + 1] || '');
+				pcis.push(rawArr[b2 + 2] || '');
+			}
+		}
+		return {
+			type: type,
+			bands: bands.filter(Boolean).join(','),
+			arfcns: arfcns.filter(Boolean).join(','),
+			scs: scs.filter(Boolean).join(','),
+			pcis: pcis.filter(Boolean).join(',')
+		};
+	},
+
+	lockPanel: function(title, rat, lockData) {
 		var self = this;
+		var parsed = this.parseLockData(Array.isArray(lockData) ? lockData : [], rat);
 		var type = E('select', { 'class':'cbi-input-select' }, [E('option',{'value':'3'},_('Band Lock')),E('option',{'value':'1'},_('ARFCN Lock')),E('option',{'value':'2'},_('Cell Lock')),E('option',{'value':'0'},_('Remove Lock'))]);
-		type.value = /^(0|1|2|3)$/.test(currentType || '') ? currentType : '0';
-		var bands = E('input', { 'class':'cbi-input-text','placeholder':rat==='nr'?'78,41':'3,8','inputmode':'numeric' });
-		var arfcns = E('input', { 'class':'cbi-input-text','placeholder':rat==='nr'?'630000,520000':'1850,3450','inputmode':'numeric' });
-		var scs = E('input', { 'class':'cbi-input-text','placeholder':'1,1','inputmode':'numeric' });
-		var pcis = E('input', { 'class':'cbi-input-text','placeholder':'100,200','inputmode':'numeric' });
+		type.value = /^(0|1|2|3)$/.test(parsed.type || '') ? parsed.type : '0';
+		var bands = E('input', { 'class':'cbi-input-text','placeholder':rat==='nr'?'78,41':'3,8','inputmode':'numeric', 'value':parsed.bands });
+		var arfcns = E('input', { 'class':'cbi-input-text','placeholder':rat==='nr'?'630000,520000':'1850,3450','inputmode':'numeric', 'value':parsed.arfcns });
+		var scs = E('input', { 'class':'cbi-input-text','placeholder':'1,1','inputmode':'numeric', 'value':parsed.scs });
+		var pcis = E('input', { 'class':'cbi-input-text','placeholder':'100,200','inputmode':'numeric', 'value':parsed.pcis });
 		// Register fields for "Fill panel" button from cellLockCard
 		lockPanelFields[rat] = { type: type, bands: bands, arfcns: arfcns, scs: scs, pcis: pcis };
 		var wraps = {};
@@ -741,6 +800,13 @@ return view.extend({
 		var lteSecondary = countLines(controls.section(raw, 'LTE secondary cells'), '^CASCELLINFO');
 		var nsaSecondary = countLines(controls.section(raw, 'NSA secondary cells'), '^MONSSC: NR');
 		var ssbInfo = parseNrsSbid(ssbRaw);
+		// LTE (and any NR) neighbour cells from AT^MONNC — surface them as
+		// lockable cards so LTE neighbours are visible on the main page too.
+		var monnc = parseMonnc(controls.section(raw, 'Neighbour cells') || '');
+		var lteMonnc = monnc.filter(function(nb) { return nb.rat === 'LTE'; });
+		var extra = [ this.ssbPanel(ssbInfo) ];
+		if (lteMonnc.length)
+			extra.push(this.lockNeighbourSection(_('LTE neighbour cells (%d)').format(lteMonnc.length), lteMonnc, 'lte'));
 		return E('div', { 'class':'mt-net-ssb-wrap' }, [
 			E('div', { 'class':'mt-net-grid', 'style':'margin-top:12px' }, [
 				E('section', { 'class':'mt-net-panel mt-ui-card' }, [
@@ -756,7 +822,22 @@ return view.extend({
 					this.row(_('IMS registration'), ims[1] === '1' ? _('Registered') : ims.length ? _('Not registered') : ''), this.row(_('LTE-NR dual connectivity'), endc[0] === '1' ? _('Enabled') : endc.length ? _('Disabled') : '')
 				])
 			]),
-			this.ssbPanel(ssbInfo)
+			extra
+		]);
+	},
+
+	// Render a panel of lockable neighbour cells from AT^MONNC data.
+	// ratType: 'lte' or 'nr'. Used by the main-page diagnostics so LTE
+	// neighbours also get the one-click Fill / Lock controls.
+	lockNeighbourSection: function(title, list, ratType) {
+		var cards = list.map(function(nb, i) {
+			var band = arfcnToBand(nb.arfcn, ratType === 'nr' ? 'NR' : 'LTE');
+			return cellLockCard(nb, i, ratType, band, ratType === 'nr');
+		});
+		return E('section', { 'class':'mt-net-panel mt-ui-card', 'style':'margin-top:12px' }, [
+			E('h3', {}, title),
+			cards.length ? E('div', { 'class':'mt-lock-cell-grid' }, cards)
+				: E('div', { 'class':'mt-net-row' }, [ E('span', {}, ''), E('strong', {}, _('None reported')) ])
 		]);
 	},
 
@@ -817,8 +898,8 @@ return view.extend({
 		var cell = parseServingCell(matchValues(sectionValue(raw, 'Serving cell'), '^MONSC'));
 		var registration = matchValues(sectionValue(raw, 'Network registration'), '+CEREG');
 		var operator = matchValues(sectionValue(raw, 'Operator'), '+COPS');
-		var lteLock = matchValues(sectionValue(raw, 'LTE lock'), '^LTEFREQLOCK');
-		var nrLock = matchValues(sectionValue(raw, 'NR lock'), '^NRFREQLOCK');
+		var lteLock = collectFreqLock(sectionValue(raw, 'LTE lock'), '^LTEFREQLOCK');
+		var nrLock = collectFreqLock(sectionValue(raw, 'NR lock'), '^NRFREQLOCK');
 		var rrc = matchValues(sectionValue(raw, 'RRC state'), '^RRCSTAT');
 		var rrcLabels = [ _('Idle'), _('Connected'), _('Inactive'), _('Invalid') ];
 		var rrcState = rrc.length > 1 ? (rrcLabels[Number(rrc[1])] || rrc[1]) : '';
@@ -987,7 +1068,7 @@ return view.extend({
 			]),
 			radioControls,
 			E('section', { 'class':'mt-freq-head mt-ui-card' }, [E('h3',{},_('Frequency and cell selection')),E('p',{},_('Advanced controls for limiting LTE or 5G NR bands, frequencies and cells. Leave these unlocked for normal automatic network selection.'))]),
-			E('div', { 'class':'mt-freq-grid' }, [this.lockPanel(_('LTE network'),'lte',lteLock[0]),this.lockPanel(_('5G NR network'),'nr',nrLock[0])])
+			E('div', { 'class':'mt-freq-grid' }, [this.lockPanel(_('LTE network'),'lte',lteLock),this.lockPanel(_('5G NR network'),'nr',nrLock)])
 		]);
 	},
 

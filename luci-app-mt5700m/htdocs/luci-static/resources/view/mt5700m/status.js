@@ -89,12 +89,13 @@ return view.extend({
 			'.mt5700m-carrier-main{margin:2px 0 12px}.mt5700m-carrier-main strong{display:block;font-size:29px;line-height:1.15;letter-spacing:-.03em}.mt5700m-carrier-main span{display:block;margin-top:4px;color:var(--mt-ui-muted);font-size:11px}.mt5700m-band-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.mt5700m-band{padding:5px 8px;border-radius:8px;background:#edf5ff;color:#176bc1;font-size:10px;font-weight:700}.mt5700m-carrier-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}.mt5700m-cc-list{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}.mt5700m-cc-row{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9);border:1px solid var(--mt-ui-border,#e8ecf0)}.mt5700m-cc-role{display:flex;align-items:center;gap:8px}.mt5700m-cc-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:750;white-space:nowrap}.mt5700m-cc-badge.primary{background:#e8f1ff;color:#176bc1}.mt5700m-cc-badge.secondary{background:#eef2f6;color:#6b7480}.mt5700m-cc-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.mt5700m-cc-detail{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:10px;color:var(--mt-ui-muted)}.mt5700m-cc-detail span{font-variant-numeric:tabular-nums}',
 			'.mt5700m-ip-list{display:grid;gap:9px}.mt5700m-ip-row{padding:10px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9)}.mt5700m-ip-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;font-size:10px;color:var(--mt-ui-muted)}.mt5700m-ip-state{font-weight:700;color:#9a6200}.mt5700m-ip-state.on{color:#087c60}.mt5700m-ip-value{font:600 12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}.mt5700m-ip-meta{display:flex;justify-content:space-between;gap:10px;margin-top:9px;color:var(--mt-ui-muted);font-size:10px}',
 			'.mt5700m-card-link{display:inline-flex;align-items:center;gap:5px;margin-top:auto;padding-top:12px;color:#176bc1;font-size:10px;font-weight:700;text-decoration:none}.mt5700m-card-link:after{content:"›";font-size:16px;line-height:10px}',
+			'.mt5700m-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.mt5700m-info{display:flex;flex-direction:column;padding:17px 18px}.mt5700m-info-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:13px}.mt5700m-info-title{font-size:14px;font-weight:750}.mt5700m-info-desc{margin-top:3px;color:var(--mt-ui-muted);font-size:10px;line-height:1.4}.mt5700m-info-list{display:flex;flex-direction:column}.mt5700m-info-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px solid var(--mt-ui-border-soft,#edf0f4);font-size:12px}.mt5700m-info-row:last-child{border-bottom:0}.mt5700m-info-row span{color:var(--mt-ui-muted)}.mt5700m-info-row strong{text-align:right;word-break:break-all;font-weight:600;font-variant-numeric:tabular-nums}',
 			'.mt5700m-traffic{padding:18px;margin-bottom:12px}.mt5700m-traffic-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}.mt5700m-traffic-head h3{margin:0 0 4px;font-size:16px}.mt5700m-traffic-head p{margin:0;color:var(--mt-ui-muted);font-size:10px}.mt5700m-traffic-side{text-align:right}.mt5700m-updated{color:var(--mt-ui-muted);font-size:10px;white-space:nowrap}.mt5700m-legend{display:flex;justify-content:flex-end;gap:10px;margin-top:5px;color:var(--mt-ui-muted);font-size:9px}.mt5700m-legend span:before{content:"";display:inline-block;width:7px;height:3px;margin-right:4px;border-radius:9px;background:#337de8;vertical-align:middle}.mt5700m-legend span:last-child:before{background:#16a085}',
 			'.mt5700m-traffic-layout{display:grid;grid-template-columns:repeat(3,minmax(0,.62fr)) minmax(300px,1.8fr);gap:10px}.mt5700m-traffic-stat{padding:13px;border-radius:11px;background:var(--background-color-low,#f5f7f9)}.mt5700m-traffic-label{font-size:10px;color:var(--mt-ui-muted);margin-bottom:6px}.mt5700m-traffic-value{font-size:18px;font-weight:750;letter-spacing:-.02em}.mt5700m-traffic-split{margin-top:5px;color:var(--mt-ui-muted);font-size:9px;line-height:1.45}',
 			'.mt5700m-days{display:flex;flex-direction:column;justify-content:center;gap:6px;padding:2px 0 2px 8px}.mt5700m-day{display:grid;grid-template-columns:42px minmax(80px,1fr) 112px;align-items:center;gap:8px;font-size:9px}.mt5700m-date{color:var(--mt-ui-muted);font-weight:650}.mt5700m-bars{display:flex;flex-direction:column;gap:2px}.mt5700m-bar{height:4px;border-radius:999px;background:var(--background-color-low,#eef1f5);overflow:hidden}.mt5700m-bar i{display:block;height:100%;min-width:2px;border-radius:inherit;background:#337de8}.mt5700m-bar.tx i{background:#16a085}.mt5700m-values{text-align:right;font-variant-numeric:tabular-nums;color:var(--mt-ui-muted)}',
 			'.mt5700m-shortcuts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.mt5700m-shortcut{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;color:inherit;text-decoration:none}.mt5700m-shortcut strong{display:block;font-size:12px}.mt5700m-shortcut span{display:block;margin-top:3px;color:var(--mt-ui-muted);font-size:9px;line-height:1.4}.mt5700m-shortcut b{color:#176bc1;font-size:20px}.mt5700m-alert{margin-bottom:12px}',
 			'@media(max-width:900px){.mt5700m-focus-grid{grid-template-columns:1fr 1fr}.mt5700m-address-card{grid-column:1/-1;min-height:auto}.mt5700m-traffic-layout{grid-template-columns:repeat(3,1fr)}.mt5700m-days{grid-column:1/-1;padding:8px 0 0}}',
-			'@media(max-width:650px){.mt5700m-hero{display:block}.mt5700m-hero-side{align-items:flex-start;margin-top:14px}.mt5700m-focus-grid,.mt5700m-shortcuts{grid-template-columns:1fr}.mt5700m-address-card{grid-column:auto}.mt5700m-focus{min-height:auto}.mt5700m-traffic-layout{grid-template-columns:1fr}.mt5700m-days{grid-column:auto}.mt5700m-day{grid-template-columns:38px 1fr}.mt5700m-values{grid-column:2;text-align:left}.mt5700m-traffic-head{display:block}.mt5700m-updated{margin-top:7px}}'
+			'@media(max-width:650px){.mt5700m-hero{display:block}.mt5700m-hero-side{align-items:flex-start;margin-top:14px}.mt5700m-focus-grid,.mt5700m-shortcuts,.mt5700m-info-grid{grid-template-columns:1fr}.mt5700m-address-card{grid-column:auto}.mt5700m-focus{min-height:auto}.mt5700m-traffic-layout{grid-template-columns:1fr}.mt5700m-days{grid-column:auto}.mt5700m-day{grid-template-columns:38px 1fr}.mt5700m-values{grid-column:2;text-align:left}.mt5700m-traffic-head{display:block}.mt5700m-updated{margin-top:7px}}'
 		].join(''));
 	},
 
@@ -205,6 +206,44 @@ return view.extend({
 		]);
 	},
 
+	infoRow: function(label, value) {
+		return E('div', { 'class':'mt5700m-info-row' }, [ E('span', {}, label), E('strong', {}, value || '--') ]);
+	},
+
+	moduleCard: function(data) {
+		return E('section', { 'class':'mt5700m-info mt-ui-card' }, [
+			E('div', { 'class':'mt5700m-info-head' }, [
+				E('div', {}, [ E('div', { 'class':'mt5700m-info-title' }, _('Module')), E('div', { 'class':'mt5700m-info-desc' }, _('Identity and firmware')) ]),
+				E('span', { 'class':'mt5700m-badge active' }, data.product_name || 'MT5700M')
+			]),
+			E('div', { 'class':'mt5700m-info-list' }, [
+				this.infoRow(_('Manufacturer'), data.manufacturer),
+				this.infoRow(_('Model'), data.model),
+				this.infoRow(_('Firmware'), data.revision),
+				this.infoRow('IMEI', data.imei),
+				this.infoRow(_('AT port'), data.at_port || data.network_interface)
+			])
+		]);
+	},
+
+	simCard: function(data) {
+		var simState = data.sim || '';
+		var simOk = /READY/i.test(simState);
+		return E('section', { 'class':'mt5700m-info mt-ui-card' }, [
+			E('div', { 'class':'mt5700m-info-head' }, [
+				E('div', {}, [ E('div', { 'class':'mt5700m-info-title' }, _('SIM card')), E('div', { 'class':'mt5700m-info-desc' }, _('Subscriber identity')) ]),
+				E('span', { 'class':'mt5700m-badge' + (simOk ? ' active' : '') }, simOk ? _('Ready') : (simState || _('Unknown')))
+			]),
+			E('div', { 'class':'mt5700m-info-list' }, [
+				this.infoRow(_('Operator'), data.operator),
+				this.infoRow(_('Access technology'), data.sysmode_detail || data.sysmode),
+				this.infoRow('ICCID', data.iccid),
+				this.infoRow('IMSI', data.imsi),
+				this.infoRow(_('Phone number'), data.phone_number_state === 'not_stored' ? _('Not stored') : data.phone_number)
+			])
+		]);
+	},
+
 	trafficPanel: function(report, interfaceName) {
 		var iface = (report.interfaces || []).filter(function(item) { return item.name === interfaceName; })[0] ||
 			(report.interfaces || []).filter(function(item) { return item.name === 'eth2'; })[0] || { traffic:{} };
@@ -253,6 +292,7 @@ return view.extend({
 				E('div', { 'class':'mt5700m-hero-side' }, [ E('div', { 'class':'mt5700m-status' + (connected ? ' online' : '') }, [ E('span', { 'class':'mt5700m-dot' }), connected ? _('Connected') : reachable ? _('Module online') : _('Unavailable') ]), E('button', { 'class':'btn mt5700m-refresh', 'click':function() { window.location.reload(); } }, _('Refresh')) ])
 			]),
 			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo), this.addressCard(session) ]),
+			E('div', { 'class':'mt5700m-info-grid' }, [ this.moduleCard(data), this.simCard(data) ]),
 			this.trafficPanel(res.traffic || {}, data.network_interface || 'eth2'),
 			E('div', { 'class':'mt5700m-shortcuts' }, [
 				this.shortcut(_('Mobile data'), _('APN, dialing, IP details and session counters'), 'admin/modem/mt5700m/connection'),

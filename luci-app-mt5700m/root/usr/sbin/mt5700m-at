@@ -661,6 +661,16 @@ print_sim_operator() {
 	[ -n "${sysmode}" ] && echo "sysmode_detail=${sysmode}"
 }
 
+# Emit SIM card identifiers (ICCID / IMSI) as key=value lines so the homepage
+# overview can surface them without a separate modem query.
+print_sim_details() {
+	local iccid imsi
+	iccid="$(at_cmd 'AT^ICCID?' 2>/dev/null | first_match 's/^\^ICCID:[[:space:]]*//p' | clean_value)"
+	[ -n "${iccid}" ] && echo "iccid=${iccid}"
+	imsi="$(at_cmd 'AT+CIMI' 2>/dev/null | grep -E '^[0-9]+$' | head -n 1 | tr -d '\r')"
+	[ -n "${imsi}" ] && echo "imsi=${imsi}"
+}
+
 print_subscriber_number() {
 	local raw number
 
@@ -983,6 +993,7 @@ Uplink MCS|AT^MCS=0
 Downlink MCS|AT^MCS=1
 NR transmit power|AT^NTXPOWER?
 NR SSB beam|AT^NRSSBID?
+Neighbour cells|AT^MONNC
 QoS|AT+CGEQOSRDP=1
 Data registration|AT+C5GREG?
 IMS registration|AT+CIREG?
@@ -1169,6 +1180,7 @@ case "${1:-status}" in
 		fi
 		print_identity
 		print_sim_operator
+		print_sim_details
 		print_subscriber_number
 		print_signal
 		print_subscription_rate
