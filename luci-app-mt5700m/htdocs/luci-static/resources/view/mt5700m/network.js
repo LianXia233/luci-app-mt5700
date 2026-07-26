@@ -925,9 +925,8 @@ return view.extend({
 					this.row(_('Data registration'), dataRegistration[1] === '1' || dataRegistration[1] === '5' ? _('Registered') : dataRegistration.length ? _('Not registered') : ''),
 					this.row(_('IMS registration'), ims[1] === '1' ? _('Registered') : ims.length ? _('Not registered') : ''), this.row(_('LTE-NR dual connectivity'), endc[0] === '1' ? _('Enabled') : endc.length ? _('Disabled') : '')
 				])
-			]),
-			extra
-		]);
+			])
+		].concat(extra));
 	},
 
 	// Render a panel of lockable neighbour cells from AT^MONNC data.

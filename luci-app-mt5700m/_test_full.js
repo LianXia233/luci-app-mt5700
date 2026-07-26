@@ -27,10 +27,22 @@ function ctrlNode(tag) {
   return n;
 }
 function isElement(o) { return o && typeof o === 'object' && (typeof o.nodeName === 'string'); }
-function addChild(node, c) {
+/* Faithful to real LuCI dom.append(): ONLY the top-level children argument
+ * may be an array. A nested array inside that array is NOT flattened by
+ * LuCI — it falls through to String(child) producing
+ * "[object HTMLElement],[object HTMLElement]" (comma-joined). */
+function addChild(node, c, topLevel) {
   if (c == null || c === false || c === true) return;
-  if (Array.isArray(c)) { c.forEach(x => addChild(node, x)); return; }
-  if (typeof c === 'function') { addChild(node, c()); return; }
+  if (Array.isArray(c)) {
+    if (topLevel) { c.forEach(x => addChild(node, x, false)); return; }
+    // nested array -> LuCI stringifies the whole array
+    const s = String(c);
+    if (s.indexOf('[object') !== -1)
+      issues.push('NESTED-ARRAY @ [' + buildStack.join(' > ') + '] -> ' + s);
+    node.children.push({ text: s });
+    return;
+  }
+  if (typeof c === 'function') { addChild(node, c(), false); return; }
   if (typeof c === 'string' || typeof c === 'number') { node.children.push({ text: String(c) }); return; }
   if (isElement(c)) { node.children.push(c); return; }
   // non-element object -> LuCI stringifies it
@@ -43,7 +55,7 @@ function E(tag, attrs) {
   const node = makeNode(tag);
   node.attrs = attrs || {};
   buildStack.push(tag);
-  for (let i = 2; i < arguments.length; i++) addChild(node, arguments[i]);
+  for (let i = 2; i < arguments.length; i++) addChild(node, arguments[i], true);
   buildStack.pop();
   return node;
 }
