@@ -312,7 +312,10 @@ return view.extend({
 
 	// Map English operator name (from AT+COPS) to Chinese name + inline SVG logo.
 	operatorInfo: function(name) {
-		var n = (name || '').toUpperCase();
+		// Collapse runs of whitespace: MT5700M firmware reports the long name
+		// with a double space (e.g. "CHINA  MOBILE"), which would defeat the
+		// single-space indexOf matches below.
+		var n = (name || '').toUpperCase().replace(/\s+/g, ' ').trim();
 		// Some firmwares emit the full +COPS tuple (e.g. "0,2,,46000,7") or a
 		// numeric MCC-MNC instead of the operator name.  Strip to the 5–6 digit
 		// MCC-MNC token so the normalisation below still matches.
@@ -323,13 +326,14 @@ return view.extend({
 		if (/^4600[02478]$/.test(n)) n = 'CHINA MOBILE';        // CMCC
 		else if (/^4600[169]$/.test(n)) n = 'CHINA UNICOM';    // CUCC
 		else if (/^460(03|05|11)$/.test(n)) n = 'CHINA TELECOM'; // CTCC
+		else if (/^46015$/.test(n)) n = 'CHINA BROADNET';      // CBN
 		if (n.indexOf('CHINA MOBILE') !== -1 || n.indexOf('CMCC') !== -1)
 			return { name: '中国移动', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0066B3"/><stop offset="100%" stop-color="#00A0E9"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#g)"/><path d="M8 28c0 0 4-12 14-12s12 8 12 8-4 6-12 6S8 28 8 28z" fill="#fff" opacity=".9"/><circle cx="22" cy="23" r="4" fill="#fff"/><path d="M10 14c2-4 7-7 13-6s9 5 10 9c-2-2-5-4-10-4s-11 3-13 1z" fill="#FFE600" opacity=".85"/></svg>') };
 		if (n.indexOf('CHINA UNICOM') !== -1 || n.indexOf('UNICOM') !== -1)
 			return { name: '中国联通', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="#ED1C24"/><path d="M20 7c-7.2 0-13 5.8-13 13 0 3.6 1.5 6.9 3.9 9.3L20 33l9.1-3.7C31.5 26.9 33 23.6 33 20c0-7.2-5.8-13-13-13zm0 4c5 0 9 4 9 9s-4 9-9 9-9-4-9-9 4-9 9-9z" fill="#fff" opacity=".95"/><path d="M20 14c-3.3 0-6 2.7-6 6s2.7 6 6 6 6-2.7 6-6-2.7-6-6-6z" fill="#fff"/></svg>') };
 		if (n.indexOf('CHINA TELECOM') !== -1 || n.indexOf('TELECOM') !== -1)
 			return { name: '中国电信', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="t" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0066B3"/><stop offset="100%" stop-color="#0091DA"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#t)"/><path d="M7 24 Q15 14 25 20 T36 16" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/><path d="M7 29 Q15 19 27 24 T36 22" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" opacity=".7"/><path d="M7 18 Q15 10 23 14 T34 11" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".5"/></svg>') };
-		if (n.indexOf('BROADNET') !== -1 || n.indexOf('GBA') !== -1 || n.indexOf('CHINA BROADCASTING') !== -1)
+		if (n.indexOf('BROADNET') !== -1 || n.indexOf('GBA') !== -1 || n.indexOf('CHINA BROADCASTING') !== -1 || n.indexOf('CBN') !== -1)
 			return { name: '中国广电', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6B21A8"/><stop offset="100%" stop-color="#F97316"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#b)"/><text x="20" y="26" text-anchor="middle" fill="#fff" font-size="16" font-weight="bold" font-family="Arial">广</text></svg>') };
 		return { name: name || _('Mobile Network'), logo: null };
 	},
