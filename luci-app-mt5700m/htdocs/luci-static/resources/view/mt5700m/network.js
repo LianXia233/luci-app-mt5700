@@ -85,7 +85,8 @@ function ssbValue(value, invalid) {
 		for (var j = 0; j < n; j++) {
 			var o = base + j * 12;
 			info.neighbours.push({
-				pci: raw[o], arfcn: raw[o + 1], rsrp: raw[o + 2], sinr: raw[o + 3]
+				pci: raw[o], arfcn: raw[o + 1],
+				rsrp: cleanSignal(raw[o + 2]), sinr: cleanSignal(raw[o + 3])
 			});
 		}
 		return info;
@@ -215,25 +216,56 @@ function mcsDetailNode(text) {
 
 // ---------- Cell scan parsers & renderer ----------
 
-// Parse AT^MONSC serving cell response.
-// Format: ^MONSC: <RAT>,<MCC>,<MNC>,<ARFCN>,<SCS>,<CellID>,<PCI>,<TAC>,
-//         <RSRP>,<RSRQ>,<SINR>[,<...>]
+// Drop the "invalid measurement" sentinels defined by the AT manual so the
+// UI shows '--' instead of absurd numbers. NR invalid values are the real
+// range multiplied by 8: RSRP -1256, RSRQ -348, SINR -188.
+function cleanSignal(value) {
+	if (value === undefined || value === null || value === '')
+		return '';
+	var v = parseFloat(value);
+	if (isNaN(v)) return '';
+	if (v === -1256 || v === -348 || v === -188 || v === 32767 || v === 255)
+		return '';
+	return String(value).trim();
+}
+
+// Parse AT^MONSC serving cell response (manual 13.9).
+// RAT is a string ("NR"/"LTE"/"WCDMA"). Field layout differs per RAT:
+//   NR:  NR,MCC,MNC,ARFCN,SCS,CellID,PCI,TAC,RSRP,RSRQ,SINR
+//   LTE: LTE,MCC,MNC,ARFCN,CellID,PCI,TAC,RSRP,RSRQ,RSSI   (no SCS!)
 function parseMonsc(text) {
 	var lines = (text || '').split(/\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l.indexOf('^MONSC:') === 0; });
 	if (!lines.length) return null;
 	var v = lines[0].replace(/^\^MONSC:/, '').replace(/^[ :=]+/, '').replace(/"/g, '').split(',').map(function(x) { return x.trim(); });
-	if (!v[0]) return null;
-	return { rat: v[0], mcc: v[1], mnc: v[2], arfcn: v[3], scs: v[4], cellId: v[5], pci: v[6], tac: v[7], rsrp: v[8], rsrq: v[9], sinr: v[10] };
+	var rat = String(v[0] || '').toUpperCase();
+	if (!rat || rat === 'NONE') return null;
+	if (rat.indexOf('NR') === 0)
+		return { rat: 'NR', mcc: v[1], mnc: v[2], arfcn: v[3], scs: v[4], cellId: v[5], pci: v[6], tac: v[7],
+			rsrp: cleanSignal(v[8]), rsrq: cleanSignal(v[9]), sinr: cleanSignal(v[10]) };
+	if (rat.indexOf('LTE') === 0)
+		return { rat: 'LTE', mcc: v[1], mnc: v[2], arfcn: v[3], scs: '', cellId: v[4], pci: v[5], tac: v[6],
+			rsrp: cleanSignal(v[7]), rsrq: cleanSignal(v[8]), rssi: cleanSignal(v[9]), sinr: '' };
+	// WCDMA / other: show what we can (RSCP as primary level)
+	return { rat: rat, mcc: v[1], mnc: v[2], arfcn: v[3], scs: '', cellId: v[5], pci: v[4], tac: v[6],
+		rsrp: cleanSignal(v[7]), rsrq: '', sinr: '' };
 }
 
-// Parse AT^MONNC neighbour cell responses (one ^MONNC: per neighbour).
-// Format: ^MONSC: <RAT>,<ARFCN>,<RSRP>,<RSRQ>,<SINR>
+// Parse AT^MONNC neighbour cell responses (manual 13.10), one ^MONNC: per cell.
+// Field layout per RAT (PCI comes BEFORE the signal values!):
+//   NR:  NR,ARFCN,PCI,RSRP,RSRQ,SINR
+//   LTE: LTE,ARFCN,PCI,RSRP,RSRQ,RXLEV
+//   GSM/WCDMA/NONE: skipped (not lockable targets on this module)
 function parseMonnc(text) {
 	var lines = (text || '').split(/\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l.indexOf('^MONNC:') === 0; });
 	return lines.map(function(line) {
 		var v = line.replace(/^\^MONNC:/, '').replace(/^[ :=]+/, '').replace(/"/g, '').split(',').map(function(x) { return x.trim(); });
-		return { rat: v[0], arfcn: v[1], rsrp: v[2], rsrq: v[3], sinr: v[4] };
-	});
+		var rat = String(v[0] || '').toUpperCase();
+		if (rat.indexOf('NR') === 0)
+			return { rat: 'NR', arfcn: v[1], pci: v[2], rsrp: cleanSignal(v[3]), rsrq: cleanSignal(v[4]), sinr: cleanSignal(v[5]) };
+		if (rat.indexOf('LTE') === 0)
+			return { rat: 'LTE', arfcn: v[1], pci: v[2], rsrp: cleanSignal(v[3]), rsrq: cleanSignal(v[4]), rxlev: cleanSignal(v[5]), sinr: '' };
+		return null;
+	}).filter(function(item) { return item !== null; });
 }
 
 // Render cell scan results as structured panels with graphical signal bars
@@ -245,26 +277,28 @@ function renderCellScan(raw) {
 	var monsc = parseMonsc(controls.section(raw, 'Serving cell: AT^MONSC') || raw);
 	if (monsc && monsc.rat) {
 		var scsKhz = monsc.scs ? ({ '0':'15', '1':'30', '2':'60', '3':'120', '4':'240' }[monsc.scs] || '?') : '';
-		var scRatLabel = monsc.rat === '101' ? 'NR' : monsc.rat === '1' ? 'LTE' : monsc.rat || '';
+		var scRatLabel = monsc.rat;
 		var scBand = arfcnToBand(monsc.arfcn, scRatLabel);
+		var scBars = [ signalBar(monsc.rsrp, 'rsrp', 'RSRP'), signalBar(monsc.rsrq, 'rsrq', 'RSRQ') ];
+		if (monsc.rat === 'LTE')
+			scBars.push(signalBar(monsc.rssi, 'rsrp', 'RSSI'));
+		else
+			scBars.push(signalBar(monsc.sinr, 'sinr', 'SINR'));
 		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
 			E('h4', {}, _('Serving cell')),
 			E('div', { 'class':'mt-ssb-serving' }, [
 				E('div', { 'class':'mt-ssb-serving-head' }, [
 					E('span', { 'class':'mt-ssb-serving-title' }, scRatLabel + (scBand ? ' · ' + scBand : '') + (monsc.pci ? ' · PCI:' + monsc.pci : '') + (monsc.arfcn ? ' · ARFCN:' + monsc.arfcn : '')),
 					E('span', { 'class':'mt-ssb-serving-meta' }, (monsc.cellId || '') + (scsKhz ? ' · SCS:' + scsKhz + 'kHz' : ''))
-				]),
-				signalBar(monsc.rsrp, 'rsrp', 'RSRP'),
-				signalBar(monsc.rsrq, 'rsrq', 'RSRQ'),
-				signalBar(monsc.sinr, 'sinr', 'SINR')
-			])
+				])
+			].concat(scBars))
 		]));
 	}
 	// Neighbour cells from MONNC — with signal bars, band names and one-click lock buttons
 	var monnc = parseMonnc(controls.section(raw, 'Neighbour cells: AT^MONNC') || raw);
 	if (monnc.length) {
 		var nbCards = monnc.map(function(nb, i) {
-			var ratType = nb.rat === '101' ? 'nr' : nb.rat === '1' ? 'lte' : '';
+			var ratType = nb.rat === 'NR' ? 'nr' : nb.rat === 'LTE' ? 'lte' : '';
 			var band = arfcnToBand(nb.arfcn, nb.rat);
 			return cellLockCard(nb, i, ratType, band);
 		});
@@ -429,12 +463,14 @@ function beamCard(beam) {
 function cellLockCard(nb, index, rat, bandName) {
 	var rsrpCls = signalColorClass(nb.rsrp, 'rsrp');
 	var sinrCls = signalColorClass(nb.sinr, 'sinr');
-	var ratLabel = nb.rat === '101' ? 'NR' : nb.rat === '1' ? 'LTE' : nb.rat || '?';
+	var ratLabel = nb.rat === '101' || nb.rat === 'NR' ? 'NR'
+		: nb.rat === '1' || nb.rat === 'LTE' ? 'LTE'
+		: rat === 'nr' ? 'NR' : rat === 'lte' ? 'LTE' : nb.rat || '?';
 	var bandDisplay = bandName || ratLabel;
 	var self = this;
 	var lockBtn = E('button', { 'type':'button', 'class':'btn mt-lock-btn' }, _('Lock'));
 	lockBtn.addEventListener('click', function() {
-		var isNr = (ratLabel === 'NR' || nb.rat === '101');
+		var isNr = (ratLabel === 'NR');
 		var lockType = nb.pci && nb.pci !== '?' ? '2' : '1'; // cell lock if PCI known, else ARFCN lock
 		var args = isNr
 			? ['lock', 'nr', lockType, '', nb.arfcn || '', isNr && lockType === '2' ? '0' : '', nb.pci || '']
@@ -455,6 +491,9 @@ function cellLockCard(nb, index, rat, bandName) {
 			])
 		]);
 	});
+	var thirdBar = (ratLabel === 'LTE' && nb.sinr === '' && nb.rxlev !== undefined)
+		? signalBar(nb.rxlev, 'rsrp', 'RXLEV')
+		: signalBar(nb.sinr, 'sinr', 'SINR');
 	return E('div', { 'class':'mt-lock-cell-card' }, [
 		E('div', { 'class':'mt-lock-cell-head' }, [
 			E('span', { 'class':'mt-lock-cell-band' }, bandDisplay + (nb.arfcn ? ' · ' + nb.arfcn : '')),
@@ -462,7 +501,7 @@ function cellLockCard(nb, index, rat, bandName) {
 		]),
 		signalBar(nb.rsrp, 'rsrp', 'RSRP'),
 		signalBar(nb.rsrq, 'rsrq', 'RSRQ'),
-		signalBar(nb.sinr, 'sinr', 'SINR'),
+		thirdBar,
 		nb.pci ? E('div', { 'class':'mt-lock-cell-pci' }, _('PCI') + ': ' + nb.pci) : null
 	]);
 }

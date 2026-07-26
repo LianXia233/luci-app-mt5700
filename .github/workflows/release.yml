@@ -106,15 +106,17 @@ jobs:
 
           ### 📋 更新内容
 
+          - **修复扫描结果中 RSRQ / SINR 显示异常**
+            - `^MONNC` 邻区解析漏掉 PCI 字段，导致 RSRP/RSRQ/SINR 全部错位一格
+            - `^MONSC` 服务小区此前统一按 NR 布局解析，LTE 实际没有 SCS 字段，字段全部错位
+            - 现严格按 AT 手册 13.9/13.10 分 RAT 解析：NR 与 LTE 各用正确布局
+            - LTE 小区第三项按手册显示 RSSI/RXLEV（LTE 的 ^MONSC/^MONNC 不上报 SINR）
+            - 过滤手册定义的无效哨兵值（RSRP -1256 / RSRQ -348 / SINR -188），显示 "--" 而非荒谬数值
+          - **修复频段名显示错误（n7 → n41）**
+            - 按 MT5700M-CN 硬件设计指南 Table 5-1 重写 ARFCN→频段映射
+            - 移除模组不支持的频段（n7/n77/n38），2524.95 MHz 正确显示为 n41
           - **修复 SSB 信息面板一直显示"加载中"的问题**
-            - 根因：`cellLockCard` 是独立函数而非视图方法，`self.cellLockCard` 为 undefined
-            - 在 Promise 链中同步抛出 TypeError 且无 `.catch()`，导致 DOM 永远停留在加载状态
-          - **新增频段名称显示（ARFCN → 频段映射）**
-            - 新增 `arfcnToBand()` 函数，基于 MT5700M-CN 官方硬件设计指南 Table 5-1
-            - 支持频段：NR n1/n3/n5/n8/n28/n41/n78/n79、LTE B1/B3/B5/B8/B34/B38/B39/B40/B41
-            - 服务小区、邻区扫描结果、SSB 面板均显示具体频段名（如 n41、B3）
-          - **首页样式对齐上游 FAN789**
-            - 蓝色渐变 Hero 卡片、14 格信号柱状图、载波聚合卡片、流量统计图表
+          - **邻区卡片显示 PCI，一键锁定使用正确的 PCI 值**
 
           ### 📦 支持模组
           - 鼎桥 MT5700M-CN（海思巴龙平台，5G NR / LTE-FDD / LTE-TDD / WCDMA）
