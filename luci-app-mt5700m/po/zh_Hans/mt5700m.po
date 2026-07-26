@@ -1935,6 +1935,9 @@ msgstr "ARFCN ?"
 msgid "NR neighbour cells (%d)"
 msgstr "NR 邻区 (%d)"
 
+msgid "LTE neighbour cells (%d)"
+msgstr "LTE 邻区 (%d)"
+
 msgid "None reported"
 msgstr "未上报"
 

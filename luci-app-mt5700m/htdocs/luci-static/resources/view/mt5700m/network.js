@@ -294,18 +294,40 @@ function renderCellScan(raw) {
 			].concat(scBars))
 		]));
 	}
-	// Neighbour cells from MONNC — with signal bars, band names and one-click lock buttons
+	// Neighbour cells from MONNC — split by RAT, show only group matching serving cell
 	var monnc = parseMonnc(controls.section(raw, 'Neighbour cells: AT^MONNC') || raw);
 	if (monnc.length) {
-		var nbCards = monnc.map(function(nb, i) {
-			var ratType = nb.rat === 'NR' ? 'nr' : nb.rat === 'LTE' ? 'lte' : '';
-			var band = arfcnToBand(nb.arfcn, nb.rat);
-			return cellLockCard(nb, i, ratType, band);
-		});
-		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
-			E('h4', {}, _('Neighbour cells (%d)').format(monnc.length)),
-			E('div', { 'class':'mt-lock-cell-grid' }, nbCards)
-		]));
+		var scRat = (monsc && monsc.rat) || '';
+		var nrNbs = monnc.filter(function(nb) { return nb.rat === 'NR'; });
+		var lteNbs = monnc.filter(function(nb) { return nb.rat === 'LTE'; });
+		// Show only neighbours matching the serving cell RAT
+		var activeNbs = scRat === 'NR' ? nrNbs : scRat === 'LTE' ? lteNbs : monnc;
+		var activeLabel = scRat === 'NR' ? _('NR neighbour cells (%d)') : scRat === 'LTE' ? _('LTE neighbour cells (%d)') : _('Neighbour cells (%d)');
+		if (activeNbs.length) {
+			var nbCards = activeNbs.map(function(nb, i) {
+				var ratType = nb.rat === 'NR' ? 'nr' : nb.rat === 'LTE' ? 'lte' : '';
+				var band = arfcnToBand(nb.arfcn, nb.rat);
+				return cellLockCard(nb, i, ratType, band);
+			});
+			sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
+				E('h4', {}, activeLabel.format(activeNbs.length)),
+				E('div', { 'class':'mt-lock-cell-grid' }, nbCards)
+			]));
+		}
+		// If the other RAT has neighbours too, show them in a collapsible secondary section
+		var otherNbs = scRat === 'NR' ? lteNbs : scRat === 'LTE' ? nrNbs : [];
+		var otherLabel = scRat === 'NR' ? _('LTE neighbour cells (%d)') : scRat === 'LTE' ? _('NR neighbour cells (%d)') : '';
+		if (otherNbs.length && otherLabel) {
+			var otherCards = otherNbs.map(function(nb, i) {
+				var ratType = nb.rat === 'NR' ? 'nr' : nb.rat === 'LTE' ? 'lte' : '';
+				var band = arfcnToBand(nb.arfcn, nb.rat);
+				return cellLockCard(nb, i, ratType, band);
+			});
+			sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
+				E('h4', {}, otherLabel.format(otherNbs.length)),
+				E('div', { 'class':'mt-lock-cell-grid' }, otherCards)
+			]));
+		}
 	}
 	// CELLSCAN frequency scan (raw — may be empty or ERROR)
 	var cellscanSection = controls.section(raw, 'Frequency scan: AT^CELLSCAN');
@@ -459,8 +481,10 @@ function beamCard(beam) {
 	]);
 }
 
-// Build a neighbour cell card with one-click lock button (reference: mt5700webui lock grid)
-function cellLockCard(nb, index, rat, bandName) {
+// Build a neighbour cell card with one-click lock button (reference: mt5700webui lock grid).
+// hideRsqr: set true for SSB neighbours — ^NRSSBID? does not report RSRQ for
+//           neighbour cells (manual 13.28: only NB_PCI,NB_ARFCN,NB_RSRP,NB_SINR).
+function cellLockCard(nb, index, rat, bandName, hideRsqr) {
 	var rsrpCls = signalColorClass(nb.rsrp, 'rsrp');
 	var sinrCls = signalColorClass(nb.sinr, 'sinr');
 	var ratLabel = nb.rat === '101' || nb.rat === 'NR' ? 'NR'
@@ -494,16 +518,19 @@ function cellLockCard(nb, index, rat, bandName) {
 	var thirdBar = (ratLabel === 'LTE' && nb.sinr === '' && nb.rxlev !== undefined)
 		? signalBar(nb.rxlev, 'rsrp', 'RXLEV')
 		: signalBar(nb.sinr, 'sinr', 'SINR');
-	return E('div', { 'class':'mt-lock-cell-card' }, [
+	var cardChildren = [
 		E('div', { 'class':'mt-lock-cell-head' }, [
 			E('span', { 'class':'mt-lock-cell-band' }, bandDisplay + (nb.arfcn ? ' · ' + nb.arfcn : '')),
 			lockBtn
 		]),
-		signalBar(nb.rsrp, 'rsrp', 'RSRP'),
-		signalBar(nb.rsrq, 'rsrq', 'RSRQ'),
-		thirdBar,
-		nb.pci ? E('div', { 'class':'mt-lock-cell-pci' }, _('PCI') + ': ' + nb.pci) : null
-	]);
+		signalBar(nb.rsrp, 'rsrp', 'RSRP')
+	];
+	if (!hideRsqr)
+		cardChildren.push(signalBar(nb.rsrq, 'rsrq', 'RSRQ'));
+	cardChildren.push(thirdBar);
+	if (nb.pci)
+		cardChildren.push(E('div', { 'class':'mt-lock-cell-pci' }, _('PCI') + ': ' + nb.pci));
+	return E('div', { 'class':'mt-lock-cell-card' }, cardChildren);
 }
 
 function parseServingCell(values) {
@@ -722,7 +749,7 @@ return view.extend({
 				E('h4', { 'style':'margin:14px 0 8px;font-size:13px' }, _('NR neighbour cells (%d)').format(info.neighbours.length)),
 				E('div', { 'class':'mt-lock-cell-grid' }, info.neighbours.map(function(nb, i) {
 					var nbBand = arfcnToBand(nb.arfcn, 'NR');
-					return cellLockCard(nb, i, 'nr', nbBand);
+					return cellLockCard(nb, i, 'nr', nbBand, true);
 				}))
 			]);
 		} else {
