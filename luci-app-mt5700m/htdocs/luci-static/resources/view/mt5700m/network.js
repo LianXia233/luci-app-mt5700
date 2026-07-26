@@ -241,16 +241,17 @@ function parseMonnc(text) {
 function renderCellScan(raw) {
 	var self_ref = this; // capture for closure in cellLockCard calls
 	var sections = [];
-	// Serving cell from MONSC — with colored signal bars
+	// Serving cell from MONSC — with colored signal bars and band name
 	var monsc = parseMonsc(controls.section(raw, 'Serving cell: AT^MONSC') || raw);
 	if (monsc && monsc.rat) {
 		var scsKhz = monsc.scs ? ({ '0':'15', '1':'30', '2':'60', '3':'120', '4':'240' }[monsc.scs] || '?') : '';
 		var scRatLabel = monsc.rat === '101' ? 'NR' : monsc.rat === '1' ? 'LTE' : monsc.rat || '';
+		var scBand = arfcnToBand(monsc.arfcn, scRatLabel);
 		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
 			E('h4', {}, _('Serving cell')),
 			E('div', { 'class':'mt-ssb-serving' }, [
 				E('div', { 'class':'mt-ssb-serving-head' }, [
-					E('span', { 'class':'mt-ssb-serving-title' }, scRatLabel + (monsc.pci ? ' · PCI:' + monsc.pci : '') + (monsc.arfcn ? ' · ARFCN:' + monsc.arfcn : '')),
+					E('span', { 'class':'mt-ssb-serving-title' }, scRatLabel + (scBand ? ' · ' + scBand : '') + (monsc.pci ? ' · PCI:' + monsc.pci : '') + (monsc.arfcn ? ' · ARFCN:' + monsc.arfcn : '')),
 					E('span', { 'class':'mt-ssb-serving-meta' }, (monsc.cellId || '') + (scsKhz ? ' · SCS:' + scsKhz + 'kHz' : ''))
 				]),
 				signalBar(monsc.rsrp, 'rsrp', 'RSRP'),
@@ -259,11 +260,13 @@ function renderCellScan(raw) {
 			])
 		]));
 	}
-	// Neighbour cells from MONNC — with signal bars and one-click lock buttons
+	// Neighbour cells from MONNC — with signal bars, band names and one-click lock buttons
 	var monnc = parseMonnc(controls.section(raw, 'Neighbour cells: AT^MONNC') || raw);
 	if (monnc.length) {
 		var nbCards = monnc.map(function(nb, i) {
-			return cellLockCard(nb, i, nb.rat === '101' ? 'nr' : nb.rat === '1' ? 'lte' : '');
+			var ratType = nb.rat === '101' ? 'nr' : nb.rat === '1' ? 'lte' : '';
+			var band = arfcnToBand(nb.arfcn, nb.rat);
+			return cellLockCard(nb, i, ratType, band);
 		});
 		sections.push(E('section', { 'class':'mt-scan-panel mt-ui-card' }, [
 			E('h4', {}, _('Neighbour cells (%d)').format(monnc.length)),
@@ -376,6 +379,43 @@ function signalBar(value, kind, label) {
 	]);
 }
 
+// Map NR/LTE ARFCN to human-readable band name (common China bands).
+// Returns band string like 'n41' or 'B3' or null if unknown.
+function arfcnToBand(arfcn, rat) {
+	var n = parseInt(arfcn, 10);
+	if (isNaN(n) || n < 0) return null;
+	if (rat === '101' || rat === 'NR' || rat === 'nr') {
+		// NR-ARFCN → band (step = 5 kHz, reference = 0 MHz = 0)
+		var freqMHz = n * 0.005;
+		if (freqMHz >= 1920   && freqMHz <= 1980)   return 'n1';
+		if (freqMHz >= 1805   && freqMHz <= 1880)   return 'n3';
+		if (freqMHz >= 1710   && freqMHz <= 1780)   return 'n5';
+		if (freqMHz >= 2500   && freqMHz <= 2570)   return 'n7';
+		if (freqMHz >= 880    && freqMHz <= 960)    return 'n8';
+		if (freqMHz >= 791    && freqMHz <= 821)    return 'n28';
+		if (freqMHz >= 2570   && freqMHz <= 2620)   return 'n38';
+		if (freqMHz >= 2496   && freqMHz <= 2690)   return 'n41';  // most common China 5G
+		if (freqMHz >= 3300   && freqMHz <= 3800)   return 'n78';
+		if (freqMHz >= 3300   && freqMHz <= 4200)   return 'n77';
+		if (freqMHz >= 4470   && freqMHz <= 4990)   return 'n79';
+		return 'NR';
+	}
+	// LTE EARFCN → band
+	if (rat === '1' || rat === 'LTE' || rat === 'lte') {
+		if (n >= 0     && n <= 599)    return 'B1';
+		if (n >= 1200  && n <= 1950)   return 'B3';
+		if (n >= 2400  && n <= 2649)   return 'B5';
+		if (n >= 3450  && n <= 3799)   return 'B8';
+		if (n >= 10000 && n <= 10200)  return 'B34';
+		if (n >= 37750 && n <= 38249)  return 'B38';
+		if (n >= 38250 && n <= 38649)  return 'B39';
+		if (n >= 38650 && n <= 39649)  return 'B40';
+		if (n >= 39650 && n <= 41589)  return 'B41';
+		return 'LTE';
+	}
+	return null;
+}
+
 // Build a single SSB beam card (reference: mt5700webui beam grid)
 function beamCard(beam) {
 	var rsrp = parseFloat(beam.rsrp);
@@ -387,10 +427,11 @@ function beamCard(beam) {
 }
 
 // Build a neighbour cell card with one-click lock button (reference: mt5700webui lock grid)
-function cellLockCard(nb, index, rat) {
+function cellLockCard(nb, index, rat, bandName) {
 	var rsrpCls = signalColorClass(nb.rsrp, 'rsrp');
 	var sinrCls = signalColorClass(nb.sinr, 'sinr');
 	var ratLabel = nb.rat === '101' ? 'NR' : nb.rat === '1' ? 'LTE' : nb.rat || '?';
+	var bandDisplay = bandName || ratLabel;
 	var self = this;
 	var lockBtn = E('button', { 'type':'button', 'class':'btn mt-lock-btn' }, _('Lock'));
 	lockBtn.addEventListener('click', function() {
@@ -417,7 +458,7 @@ function cellLockCard(nb, index, rat) {
 	});
 	return E('div', { 'class':'mt-lock-cell-card' }, [
 		E('div', { 'class':'mt-lock-cell-head' }, [
-			E('span', { 'class':'mt-lock-cell-band' }, ratLabel + (nb.arfcn ? ' · ' + nb.arfcn : '')),
+			E('span', { 'class':'mt-lock-cell-band' }, bandDisplay + (nb.arfcn ? ' · ' + nb.arfcn : '')),
 			lockBtn
 		]),
 		signalBar(nb.rsrp, 'rsrp', 'RSRP'),
@@ -617,9 +658,10 @@ return view.extend({
 		}
 		var self = this;
 		// Serving cell with colored signal bars (reference: mt5700webui screenshot 4)
+		var scBand = arfcnToBand(info.arfcn, 'NR');
 		var serving = E('div', { 'class':'mt-ssb-serving' }, [
 			E('div', { 'class':'mt-ssb-serving-head' }, [
-				E('span', { 'class':'mt-ssb-serving-title' }, _('Serving cell')),
+				E('span', { 'class':'mt-ssb-serving-title' }, _('Serving cell') + (scBand ? ' · ' + scBand : '')),
 				E('span', { 'class':'mt-ssb-serving-meta' },
 					(info.pci && info.pci !== '65535' ? 'PCI:' + info.pci : '') +
 					(info.arfcn && info.arfcn !== '4294967295' ? ' · ARFCN:' + info.arfcn : '')
@@ -641,7 +683,8 @@ return view.extend({
 			nbSection = E('div', {}, [
 				E('h4', { 'style':'margin:14px 0 8px;font-size:13px' }, _('NR neighbour cells (%d)').format(info.neighbours.length)),
 				E('div', { 'class':'mt-lock-cell-grid' }, info.neighbours.map(function(nb, i) {
-					return self.cellLockCard(nb, i, 'nr');
+					var nbBand = arfcnToBand(nb.arfcn, 'NR');
+					return cellLockCard(nb, i, 'nr', nbBand);
 				}))
 			]);
 		} else {
