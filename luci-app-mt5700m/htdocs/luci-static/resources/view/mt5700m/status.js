@@ -85,7 +85,8 @@ return view.extend({
 			'.mt5700m-focus-grid{display:grid;grid-template-columns:1.12fr .88fr 1.18fr;gap:12px;margin-bottom:12px}.mt5700m-focus{display:flex;flex-direction:column;min-height:230px;padding:17px 18px}.mt5700m-focus-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:13px}.mt5700m-focus-title{font-size:14px;font-weight:750}.mt5700m-focus-desc{margin-top:3px;color:var(--mt-ui-muted);font-size:10px;line-height:1.4}',
 			'.mt5700m-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;background:#eef2f6;color:#6b7480;font-size:10px;font-weight:750;white-space:nowrap}.mt5700m-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.mt5700m-badge.good,.mt5700m-badge.active{background:#e8f8f1;color:#087c60}.mt5700m-badge.fair{background:#fff5df;color:#9b6500}.mt5700m-badge.weak{background:#fff0ee;color:#b84035}',
 			'.mt5700m-signal-value{display:flex;align-items:baseline;gap:6px}.mt5700m-signal-value strong{font-size:31px;letter-spacing:-.04em}.mt5700m-signal-value span{font-size:11px;color:var(--mt-ui-muted)}.mt5700m-signal-bars{display:flex;align-items:flex-end;gap:3px;height:52px;margin:5px 0 13px}.mt5700m-signal-bar{flex:1;min-width:2px;border-radius:2px 2px 1px 1px;background:var(--mt-ui-border);opacity:.55}.mt5700m-signal-bar.on{background:#4b94df;opacity:1}.mt5700m-signal-bars.excellent .on{background:#13a979}.mt5700m-signal-bars.fair .on{background:#e4a23a}.mt5700m-signal-bars.weak .on{background:#db5b52}',
-			'.mt5700m-signal-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:auto}.mt5700m-mini{padding:8px;border-radius:9px;background:var(--background-color-low,#f5f7f9)}.mt5700m-mini span{display:block;margin-bottom:3px;color:var(--mt-ui-muted);font-size:9px}.mt5700m-mini strong{font-size:12px}',
+			'.mt5700m-signal-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:auto}.mt5700m-mini{padding:8px 9px;border-radius:9px;background:var(--background-color-low,#f5f7f9)}.mt5700m-mini-top{display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:6px}.mt5700m-mini span{color:var(--mt-ui-muted);font-size:9px}.mt5700m-mini strong{font-size:12px;font-variant-numeric:tabular-nums}',
+			'.mt5700m-gauge-track{position:relative;height:6px;border-radius:999px;background:var(--mt-ui-border,#e3e8ee);overflow:hidden}.mt5700m-gauge-track i{display:block;height:100%;min-width:3px;border-radius:inherit;background:#4b94df;transition:width .35s ease}.mt5700m-gauge-track i.excellent{background:linear-gradient(90deg,#0fb783,#13a979)}.mt5700m-gauge-track i.good{background:linear-gradient(90deg,#4bb985,#3fa66f)}.mt5700m-gauge-track i.fair{background:linear-gradient(90deg,#f0b44f,#e4a23a)}.mt5700m-gauge-track i.weak{background:linear-gradient(90deg,#e8756c,#db5b52)}.mt5700m-gauge-track i.unknown{background:var(--mt-ui-border,#cfd6de)}.mt5700m-mini-scale{display:flex;justify-content:space-between;margin-top:3px;color:var(--mt-ui-muted);font-size:8px;opacity:.75}',
 			'.mt5700m-carrier-main{margin:2px 0 12px}.mt5700m-carrier-main strong{display:block;font-size:29px;line-height:1.15;letter-spacing:-.03em}.mt5700m-carrier-main span{display:block;margin-top:4px;color:var(--mt-ui-muted);font-size:11px}.mt5700m-band-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.mt5700m-band{padding:5px 8px;border-radius:8px;background:#edf5ff;color:#176bc1;font-size:10px;font-weight:700}.mt5700m-carrier-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}.mt5700m-cc-list{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}.mt5700m-cc-row{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9);border:1px solid var(--mt-ui-border,#e8ecf0)}.mt5700m-cc-role{display:flex;align-items:center;gap:8px}.mt5700m-cc-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:750;white-space:nowrap}.mt5700m-cc-badge.primary{background:#e8f1ff;color:#176bc1}.mt5700m-cc-badge.secondary{background:#eef2f6;color:#6b7480}.mt5700m-cc-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.mt5700m-cc-detail{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:10px;color:var(--mt-ui-muted)}.mt5700m-cc-detail span{font-variant-numeric:tabular-nums}',
 			'.mt5700m-ip-list{display:grid;gap:9px}.mt5700m-ip-row{padding:10px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9)}.mt5700m-ip-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;font-size:10px;color:var(--mt-ui-muted)}.mt5700m-ip-state{font-weight:700;color:#9a6200}.mt5700m-ip-state.on{color:#087c60}.mt5700m-ip-value{font:600 12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}.mt5700m-ip-meta{display:flex;justify-content:space-between;gap:10px;margin-top:9px;color:var(--mt-ui-muted);font-size:10px}',
 			'.mt5700m-card-link{display:inline-flex;align-items:center;gap:5px;margin-top:auto;padding-top:12px;color:#176bc1;font-size:10px;font-weight:700;text-decoration:none}.mt5700m-card-link:after{content:"›";font-size:16px;line-height:10px}',
@@ -130,6 +131,23 @@ return view.extend({
 		};
 	},
 
+	// Small colour-coded horizontal gauge for a single scalar metric.
+	// kind: 'rsrq' | 'sinr' | 'temp' — decides the good/fair/weak thresholds.
+	metricGauge: function(label, kind, rawValue, unit, scaleLow, scaleHigh) {
+		var num = parseFloat(rawValue), has = !isNaN(num), pct = 0, cls = 'unknown';
+		if (has) {
+			if (kind === 'rsrq') { pct = (num + 25) * 4; cls = num >= -10 ? 'excellent' : num >= -15 ? 'good' : num >= -20 ? 'fair' : 'weak'; }
+			else if (kind === 'sinr') { pct = (num + 10) * 2.5; cls = num >= 20 ? 'excellent' : num >= 13 ? 'good' : num >= 0 ? 'fair' : 'weak'; }
+			else { pct = (num - 20) / 60 * 100; cls = num < 45 ? 'excellent' : num < 55 ? 'good' : num < 65 ? 'fair' : 'weak'; }
+			pct = Math.max(4, Math.min(100, pct));
+		}
+		return E('div', { 'class':'mt5700m-mini' }, [
+			E('div', { 'class':'mt5700m-mini-top' }, [ E('span', {}, label), E('strong', {}, has ? (String(rawValue) + (unit || '')) : '--') ]),
+			E('div', { 'class':'mt5700m-gauge-track' }, [ E('i', { 'class':cls, 'style':'width:' + (has ? pct : 0) + '%' }) ]),
+			E('div', { 'class':'mt5700m-mini-scale' }, [ E('span', {}, scaleLow || ''), E('span', {}, scaleHigh || '') ])
+		]);
+	},
+
 	signalCard: function(data) {
 		var rsrp = parseFloat(data.rsrp), rsrq = parseFloat(data.rsrq), sinr = parseFloat(data.sinr);
 		var quality = this.signalQuality('rsrp', rsrp), active = isNaN(rsrp) ? 0 : Math.max(1, Math.round(quality.percentage / 100 * 14));
@@ -144,9 +162,9 @@ return view.extend({
 			E('div', { 'class':'mt5700m-signal-value' }, [ E('strong', {}, isNaN(rsrp) ? '--' : String(data.rsrp)), E('span', {}, 'RSRP · dBm') ]),
 			E('div', { 'class':'mt5700m-signal-bars ' + quality.cls, 'aria-hidden':'true' }, bars),
 			E('div', { 'class':'mt5700m-signal-meta' }, [
-				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, 'RSRQ'), E('strong', {}, isNaN(rsrq) ? '--' : data.rsrq + ' dB') ]),
-				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, 'SINR'), E('strong', {}, isNaN(sinr) ? '--' : data.sinr + ' dB') ]),
-				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Temperature')), E('strong', {}, data.temperature ? data.temperature + '°C' : '--') ])
+				this.metricGauge('RSRQ', 'rsrq', data.rsrq, ' dB', '-25', '-3'),
+				this.metricGauge('SINR', 'sinr', data.sinr, ' dB', '-10', '30'),
+				this.metricGauge(_('Temperature'), 'temp', data.temperature, '°C', '20', '80')
 			])
 		]);
 	},

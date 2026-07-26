@@ -919,6 +919,10 @@ print_network_info() {
 		raw="$(at_cmd "${command}" || true)"
 		printf '%s\n\n' "${raw}"
 	done
+
+	# Module temperature (emitted as key=value) so the network page hero can
+	# show a temperature gauge without a second AT round-trip.
+	print_temperature
 }
 
 print_sms_list() {

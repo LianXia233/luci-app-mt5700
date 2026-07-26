@@ -669,10 +669,12 @@ return view.extend({
 			'.mt-net-badge{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border-radius:999px;background:#dcf6eb;color:#08775d;font-size:12px;font-weight:700;white-space:nowrap}',
 			'.mt-net-badge:before{content:"";width:7px;height:7px;border-radius:50%;background:#17b883}',
 			'.mt-net-badge.off{background:#fff0e2;color:#99530a}.mt-net-badge.off:before{background:#e99737}',
-			'.mt-net-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}',
+			'.mt-net-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 16px}',
 			'.mt-net-metric,.mt-net-panel{border:1px solid var(--border-color-medium,#d9dde4);border-radius:13px;background:var(--background-color-high,#fff);box-shadow:0 3px 12px rgba(20,32,50,.04)}',
 			'.mt-net-metric{padding:16px}.mt-net-label{font-size:12px;color:var(--text-color-medium,#707985);margin-bottom:6px}',
 			'.mt-net-value{font-size:23px;font-weight:720}.mt-net-unit{font-size:12px;color:#747c86;margin-left:5px}',
+			'.mt-net-metric-top{display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:9px}.mt-net-qual{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}.mt-net-qual.excellent{background:#dcf6eb;color:#08775d}.mt-net-qual.good{background:#e2f3e4;color:#2f7a3f}.mt-net-qual.fair{background:#fdf0d8;color:#9a6a12}.mt-net-qual.weak{background:#fce4e0;color:#b23b30}.mt-net-qual.unknown{background:var(--background-color-low,#eef1f4);color:#8a939d}',
+			'.mt-net-gauge{position:relative;height:7px;border-radius:999px;background:var(--border-color-low,#e3e8ee);overflow:hidden;margin-top:2px}.mt-net-gauge i{display:block;height:100%;min-width:3px;border-radius:inherit;background:#4b94df;transition:width .35s ease}.mt-net-gauge i.excellent{background:linear-gradient(90deg,#0fb783,#13a979)}.mt-net-gauge i.good{background:linear-gradient(90deg,#4bb985,#3fa66f)}.mt-net-gauge i.fair{background:linear-gradient(90deg,#f0b44f,#e4a23a)}.mt-net-gauge i.weak{background:linear-gradient(90deg,#e8756c,#db5b52)}.mt-net-gauge i.unknown{background:var(--border-color-low,#cfd6de)}.mt-net-gauge-scale{display:flex;justify-content:space-between;margin-top:4px;color:var(--text-color-medium,#9099a3);font-size:9px;opacity:.8}',
 			'.mt-net-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}',
 			'.mt-net-panel{padding:16px}.mt-net-panel h3{font-size:14px;margin:0 0 12px}',
 			'.mt-net-row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--border-color-low,#edf0f4);font-size:13px}',
@@ -701,7 +703,7 @@ return view.extend({
 			'.mt-lock-cell-pci{margin-top:6px;font-size:10px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
 			// SSB serving cell enhanced
 			'.mt-ssb-serving{padding:16px;border-radius:12px;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border-color-low,#e8ecf0);margin-bottom:12px}.mt-ssb-serving-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.mt-ssb-serving-title{font-size:13px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-ssb-serving-meta{font-size:11px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
-			'@media(max-width:720px){.mt-net-hero{display:block}.mt-net-badge{margin-top:13px}.mt-net-metrics{grid-template-columns:1fr}.mt-net-grid,.mt-freq-grid{grid-template-columns:1fr}.mt-band-options{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-band-apply{display:block}.mt-band-apply .btn{width:100%;margin-top:12px}}',
+			'@media(max-width:720px){.mt-net-hero{display:block}.mt-net-badge{margin-top:13px}.mt-net-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-net-grid,.mt-freq-grid{grid-template-columns:1fr}.mt-band-options{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-band-apply{display:block}.mt-band-apply .btn{width:100%;margin-top:12px}}',
 			'@media(max-width:430px){.mt-band-head{display:block}.mt-band-head .btn{margin-top:10px}.mt-band-options{grid-template-columns:1fr}}'
 		].join(''));
 	},
@@ -721,6 +723,45 @@ return view.extend({
 			E('span', { 'class': 'mt-net-value' }, value || '--'),
 			value ? E('span', { 'class': 'mt-net-unit' }, unit) : null
 		]);
+	},
+
+	// Colour-coded metric with a horizontal quality gauge (RSRP/RSRQ/SINR/temp).
+	// kind decides thresholds & bar fill percentage; simple and easy to read.
+	metricGauge: function(label, kind, rawValue, unit, scaleLow, scaleHigh) {
+		var num = parseFloat(rawValue), has = !isNaN(num), pct = 0, cls = 'unknown', ql = '';
+		var tags = { excellent:_('Excellent'), good:_('Good'), fair:_('Fair'), weak:_('Weak') };
+		if (has) {
+			if (kind === 'rsrp') { pct = (num + 120) * 2.5; cls = num >= -80 ? 'excellent' : num >= -90 ? 'good' : num >= -100 ? 'fair' : 'weak'; }
+			else if (kind === 'rsrq') { pct = (num + 25) * 4; cls = num >= -10 ? 'excellent' : num >= -15 ? 'good' : num >= -20 ? 'fair' : 'weak'; }
+			else if (kind === 'sinr') { pct = (num + 10) * 2.5; cls = num >= 20 ? 'excellent' : num >= 13 ? 'good' : num >= 0 ? 'fair' : 'weak'; }
+			else { pct = (num - 20) / 60 * 100; cls = num < 45 ? 'excellent' : num < 55 ? 'good' : num < 65 ? 'fair' : 'weak'; }
+			pct = Math.max(4, Math.min(100, pct));
+			ql = tags[cls] || '';
+		}
+		return E('div', { 'class': 'mt-net-metric mt-ui-card' }, [
+			E('div', { 'class': 'mt-net-metric-top' }, [
+				E('span', { 'class': 'mt-net-label', 'style':'margin:0' }, label),
+				E('span', { 'class': 'mt-net-qual ' + cls }, ql || _('No data'))
+			]),
+			E('div', {}, [
+				E('span', { 'class': 'mt-net-value' }, has ? String(rawValue) : '--'),
+				has ? E('span', { 'class': 'mt-net-unit' }, unit) : null
+			]),
+			E('div', { 'class': 'mt-net-gauge' }, [ E('i', { 'class': cls, 'style':'width:' + (has ? pct : 0) + '%' }) ]),
+			E('div', { 'class': 'mt-net-gauge-scale' }, [ E('span', {}, scaleLow || ''), E('span', {}, scaleHigh || '') ])
+		]);
+	},
+
+	// Turn a serving-cell metric {label,value,unit} into a coloured gauge.
+	heroGauge: function(m) {
+		m = m || { label:'', value:'', unit:'' };
+		var scales = {
+			RSRP:{ kind:'rsrp', lo:'-120', hi:'-70' }, RSRQ:{ kind:'rsrq', lo:'-25', hi:'-3' },
+			SINR:{ kind:'sinr', lo:'-10', hi:'30' }, RSSI:{ kind:'rsrp', lo:'-110', hi:'-50' },
+			RXLEV:{ kind:'rsrp', lo:'-110', hi:'-50' }
+		};
+		var s = scales[m.label] || { kind:'rsrp', lo:'', hi:'' };
+		return this.metricGauge(m.label, s.kind, m.value, m.unit ? (' ' + m.unit) : '', s.lo, s.hi);
 	},
 
 	// Map English operator name (from AT+COPS) to Chinese name + inline SVG logo.
@@ -932,6 +973,8 @@ return view.extend({
 		var registered = registration[1] === '1' || registration[1] === '5';
 		var opInfo = this.operatorInfo(operator[2]);
 		var operatorName = opInfo.name;
+		var tempMatch = raw.match(/^temperature=([\d.]+)/m);
+		var temperature = tempMatch ? tempMatch[1] : '';
 		var lteLockState = !lteLock[0] ? '--' : lteLock[0] === '0' ? _('Not locked') : _('Locked');
 		var nrLockState = !nrLock[0] ? '--' : nrLock[0] === '0' ? _('Not locked') : _('Locked');
 		var systemValues = matchValues(controls.section(radioRaw, 'Radio mode'), '^SYSCFGEX');
@@ -1047,9 +1090,10 @@ return view.extend({
 				E('span', { 'class': 'mt-net-badge' + (registered ? '' : ' off') }, registered ? _('Registered') : _('Not registered'))
 			]),
 			E('div', { 'class': 'mt-net-metrics' }, [
-				this.metric(cell.metrics[0].label, cell.metrics[0].value, cell.metrics[0].unit),
-				this.metric(cell.metrics[1].label, cell.metrics[1].value, cell.metrics[1].unit),
-				this.metric(cell.metrics[2].label, cell.metrics[2].value, cell.metrics[2].unit)
+				this.heroGauge(cell.metrics[0]),
+				this.heroGauge(cell.metrics[1]),
+				this.heroGauge(cell.metrics[2]),
+				this.metricGauge(_('Temperature'), 'temp', temperature, '°C', '20', '80')
 			]),
 			E('div', { 'class': 'mt-net-grid' }, [
 				E('section', { 'class': 'mt-net-panel' }, [
