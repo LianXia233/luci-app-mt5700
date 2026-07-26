@@ -603,7 +603,7 @@ function cellLockCard(nb, index, rat, bandName, hideRsqr) {
 		cardChildren.push(signalBar(nb.rsrq, 'rsrq', 'RSRQ'));
 	cardChildren.push(thirdBar);
 	if (nb.pci)
-		cardChildren.push(E('div', { 'class':'mt-lock-cell-pci' }, _('PCI') + ': ' + nb.pci));
+		cardChildren.push(E('div', { 'class':'mt-lock-cell-pci' }, 'PCI: ' + nb.pci));
 	return E('div', { 'class':'mt-lock-cell-card' }, cardChildren);
 }
 
@@ -1114,11 +1114,11 @@ return view.extend({
 				E('section', { 'class': 'mt-net-panel' }, [
 					E('h3', {}, _('Serving cell')),
 				this.row(_('Radio access'), cell.rat || signal[0]),
-				this.row(_('MCC / MNC'), cell.mcc && cell.mnc ? '%s / %s'.format(cell.mcc, cell.mnc) : ''),
-				this.row(_('ARFCN'), cell.arfcn),
-				this.row(_('PCI'), cell.pci),
+				this.row('MCC / MNC', cell.mcc && cell.mnc ? '%s / %s'.format(cell.mcc, cell.mnc) : ''),
+				this.row('ARFCN', cell.arfcn),
+				this.row('PCI', cell.pci),
 				this.row(_('Cell ID'), cell.cellId),
-				this.row(_('TAC / LAC'), cell.tac),
+				this.row('TAC / LAC', cell.tac),
 					cell.scs ? this.row(_('SCS type'), cell.scs + ' · ' + ([ '15', '30', '60', '120', '240' ][Number(cell.scs)] || '?') + ' kHz') : null,
 					this.row(_('Registration'), registered ? (registration[1] === '5' ? _('Roaming') : _('Home network')) : _('Not registered'))
 				]),

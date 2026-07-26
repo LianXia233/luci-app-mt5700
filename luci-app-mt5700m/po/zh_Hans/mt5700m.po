@@ -2633,9 +2633,6 @@ msgstr "未存储"
 msgid "Down %s / Up %s"
 msgstr "下行 %s / 上行 %s"
 
-msgid "ARFCN"
-msgstr "ARFCN"
-
 msgid "AT port"
 msgstr "AT 端口"
 
@@ -2677,9 +2674,3 @@ msgstr "用户标识与签约套餐"
 
 msgid "No scan data received."
 msgstr "未收到扫描数据。"
-
-msgid "MCC / MNC"
-msgstr "MCC / MNC"
-
-msgid "TAC / LAC"
-msgstr "TAC / LAC"

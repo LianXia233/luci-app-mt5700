@@ -185,7 +185,7 @@ return view.extend({
 						E('span', { 'class':'mt5700m-cc-band' }, item.radio + ' · ' + item.band)
 					]),
 					E('div', { 'class':'mt5700m-cc-detail' }, [
-						item.arfcn ? E('span', {}, _('ARFCN') + ' ' + item.arfcn) : null,
+						item.arfcn ? E('span', {}, 'ARFCN ' + item.arfcn) : null,
 						E('span', {}, _('DL') + ' ' + (item.dlFreq ? item.dlFreq + ' MHz' : '--') + ' / ' + (item.dlBandwidth ? item.dlBandwidth + ' MHz' : '--')),
 						E('span', {}, _('UL') + ' ' + (item.ulFreq ? item.ulFreq + ' MHz' : '--') + ' / ' + (item.ulBandwidth ? item.ulBandwidth + ' MHz' : '--'))
 					].filter(Boolean))
