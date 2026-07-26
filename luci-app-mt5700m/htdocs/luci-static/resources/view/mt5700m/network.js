@@ -481,6 +481,21 @@ function beamCard(beam) {
 	]);
 }
 
+// Convert band name (n41, B3, etc.) to numeric band number for AT lock commands.
+// The mt5700m-at backend expects plain numbers: n41→41, B3→3, n78→78, etc.
+function bandNameToNumber(bandName) {
+	if (!bandName) return '';
+	var m = String(bandName).match(/^n(\d+)$/i);
+	if (m) return m[1];                    // n41 → 41
+	m = String(bandName).match(/^B(\d+)$/i);
+	if (m) return m[1];                    // B3  → 3
+	return '';
+}
+
+// Shared registry for lock panel input fields — allows cellLockCard's
+// "fill panel" button to populate the frequency/cell selection form.
+var lockPanelFields = { lte: null, nr: null };
+
 // Build a neighbour cell card with one-click lock button (reference: mt5700webui lock grid).
 // hideRsqr: set true for SSB neighbours — ^NRSSBID? does not report RSRQ for
 //           neighbour cells (manual 13.28: only NB_PCI,NB_ARFCN,NB_RSRP,NB_SINR).
@@ -491,16 +506,21 @@ function cellLockCard(nb, index, rat, bandName, hideRsqr) {
 		: nb.rat === '1' || nb.rat === 'LTE' ? 'LTE'
 		: rat === 'nr' ? 'NR' : rat === 'lte' ? 'LTE' : nb.rat || '?';
 	var bandDisplay = bandName || ratLabel;
+	var bandNum = bandNameToNumber(bandName);    // e.g. 'n41' → '41' for backend
 	var self = this;
 	var lockBtn = E('button', { 'type':'button', 'class':'btn mt-lock-btn' }, _('Lock'));
 	lockBtn.addEventListener('click', function() {
 		var isNr = (ratLabel === 'NR');
 		var lockType = nb.pci && nb.pci !== '?' ? '2' : '1'; // cell lock if PCI known, else ARFCN lock
+		// Backend mt5700m-at expects: lock {lte|nr} <type> <bands> [arfcns] [scs] [pcis]
+		// bands MUST be a valid numeric CSV — empty string causes exit 64
 		var args = isNr
-			? ['lock', 'nr', lockType, '', nb.arfcn || '', isNr && lockType === '2' ? '0' : '', nb.pci || '']
-			: ['lock', 'lte', lockType, '', nb.arfcn || '', '', nb.pci || ''];
+			? ['lock', 'nr', lockType, bandNum || '41', nb.arfcn || '',
+			   isNr && lockType === '2' ? '0' : '', nb.pci || '']
+			: ['lock', 'lte', lockType, bandNum || '3', nb.arfcn || '', '', nb.pci || ''];
 		ui.showModal(_('Confirm lock'), [
-			E('p', {}, _('Lock to %s cell? PCI %s · ARFCN %s. Mobile service will reconnect.').format(ratLabel, nb.pci || '?', nb.arfcn || '?')),
+			E('p', {}, _('Lock to %s cell? %s · ARFCN %s · PCI %s. Mobile service will reconnect.')
+				.format(ratLabel, bandDisplay, nb.arfcn || '?', nb.pci || '?')),
 			E('div', { 'class':'right' }, [
 				E('button', { 'type':'button', 'class':'btn', 'click': ui.hideModal }, _('Cancel')),
 				E('button', { 'type':'button', 'class':'btn cbi-button-negative', 'click': function() {
@@ -515,13 +535,37 @@ function cellLockCard(nb, index, rat, bandName, hideRsqr) {
 			])
 		]);
 	});
+	// "Fill panel" button — copies this cell's data into the lock panel form
+	var fillBtn = E('button', { 'type':'button', 'class':'btn mt-lock-btn mt-fill-btn' }, _('Fill'));
+	fillBtn.addEventListener('click', function() {
+		var panelRat = (ratLabel === 'NR') ? 'nr' : 'lte';
+		var fields = lockPanelFields[panelRat];
+		if (!fields || !fields.type || !fields.bands || !fields.arfcns) {
+			ui.addNotification(null, E('p', {}, _('Lock panel not found. Scroll down to "Frequency and cell selection".')), 'warning');
+			return;
+		}
+		// Set lock type: Cell Lock (2) if PCI known, else ARFCN Lock (1)
+		fields.type.value = (nb.pci && nb.pci !== '?') ? '2' : '1';
+		// Dispatch change event so the panel shows/hides correct fields
+		fields.type.dispatchEvent(new Event('change'));
+		// Fill in the values
+		fields.bands.value = bandNum || '';
+		fields.arfcns.value = nb.arfcn || '';
+		if (fields.scs) fields.scs.value = '0';
+		if (fields.pcis) fields.pcis.value = nb.pci || '';
+		ui.addNotification(null, E('p', {}, _('%s cell data filled into %s lock panel. Review and click "Review and apply".')
+			.format(bandDisplay, panelRat === 'nr' ? '5G NR' : 'LTE')));
+		// Scroll to the lock panel
+		var card = fields.type.closest('.mt-freq-card');
+		if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	});
 	var thirdBar = (ratLabel === 'LTE' && nb.sinr === '' && nb.rxlev !== undefined)
 		? signalBar(nb.rxlev, 'rsrp', 'RXLEV')
 		: signalBar(nb.sinr, 'sinr', 'SINR');
 	var cardChildren = [
 		E('div', { 'class':'mt-lock-cell-head' }, [
 			E('span', { 'class':'mt-lock-cell-band' }, bandDisplay + (nb.arfcn ? ' · ' + nb.arfcn : '')),
-			lockBtn
+			E('div', { 'class':'mt-lock-cell-btns' }, [ fillBtn, lockBtn ])
 		]),
 		signalBar(nb.rsrp, 'rsrp', 'RSRP')
 	];
@@ -631,7 +675,7 @@ return view.extend({
 			'.mt-beam-card.weak{background:#fef2f2;border-color:#fecaca}.mt-beam-card.weak .mt-beam-rsrp{color:#b91c1c}',
 			// Lock cell cards grid
 			'.mt-lock-cell-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:10px}.mt-lock-cell-card{padding:14px;border-radius:12px;border:1px solid var(--border-color-medium,#d9dde4);background:var(--background-color-high,#fff);transition:border-color .2s ease,box-shadow .2s ease}.mt-lock-cell-card:hover{border-color:#9cc5ee;box-shadow:0 3px 12px rgba(20,32,50,.06)}',
-			'.mt-lock-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.mt-lock-cell-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-lock-btn{flex:0 0 auto;padding:4px 12px;font-size:11px;border-radius:8px;background:#eef2f6;color:#176bc1;font-weight:700;border:1px solid #c9daf0;cursor:pointer;white-space:nowrap}.mt-lock-btn:hover{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}',
+			'.mt-lock-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.mt-lock-cell-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-lock-cell-btns{display:flex;gap:6px}.mt-lock-btn{flex:0 0 auto;padding:4px 12px;font-size:11px;border-radius:8px;background:#eef2f6;color:#176bc1;font-weight:700;border:1px solid #c9daf0;cursor:pointer;white-space:nowrap}.mt-lock-btn:hover{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}.mt-fill-btn{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}.mt-fill-btn:hover{background:#dcfce7;border-color:#86efac;color:#166534}',
 			'.mt-lock-cell-pci{margin-top:6px;font-size:10px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
 			// SSB serving cell enhanced
 			'.mt-ssb-serving{padding:16px;border-radius:12px;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border-color-low,#e8ecf0);margin-bottom:12px}.mt-ssb-serving-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.mt-ssb-serving-title{font-size:13px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-ssb-serving-meta{font-size:11px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
@@ -660,6 +704,8 @@ return view.extend({
 		var arfcns = E('input', { 'class':'cbi-input-text','placeholder':rat==='nr'?'630000,520000':'1850,3450','inputmode':'numeric' });
 		var scs = E('input', { 'class':'cbi-input-text','placeholder':'1,1','inputmode':'numeric' });
 		var pcis = E('input', { 'class':'cbi-input-text','placeholder':'100,200','inputmode':'numeric' });
+		// Register fields for "Fill panel" button from cellLockCard
+		lockPanelFields[rat] = { type: type, bands: bands, arfcns: arfcns, scs: scs, pcis: pcis };
 		var wraps = {};
 		function field(key,label,input,help){wraps[key]=E('div',{'class':'mt-freq-field'},[E('label',{},label),input,E('div',{'class':'mt-freq-help'},help)]);return wraps[key];}
 		function update(){var t=type.value;wraps.bands.style.display=t==='0'?'none':'';wraps.arfcns.style.display=t==='1'||t==='2'?'':'none';if(wraps.scs)wraps.scs.style.display=t==='1'||t==='2'?'':'none';wraps.pcis.style.display=t==='2'?'':'none';}
