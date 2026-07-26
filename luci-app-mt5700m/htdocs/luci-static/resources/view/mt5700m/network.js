@@ -379,38 +379,37 @@ function signalBar(value, kind, label) {
 	]);
 }
 
-// Map NR/LTE ARFCN to human-readable band name (common China bands).
+// Map NR/LTE ARFCN to human-readable band name.
+// Frequency ranges sourced from MT5700M-CN Hardware Design Guide Table 5-1.
+// NR-ARFCN step = 5 kHz → freq(MHz) = arfcn * 0.005.
 // Returns band string like 'n41' or 'B3' or null if unknown.
 function arfcnToBand(arfcn, rat) {
 	var n = parseInt(arfcn, 10);
 	if (isNaN(n) || n < 0) return null;
 	if (rat === '101' || rat === 'NR' || rat === 'nr') {
-		// NR-ARFCN → band (step = 5 kHz, reference = 0 MHz = 0)
 		var freqMHz = n * 0.005;
-		if (freqMHz >= 1920   && freqMHz <= 1980)   return 'n1';
-		if (freqMHz >= 1805   && freqMHz <= 1880)   return 'n3';
-		if (freqMHz >= 1710   && freqMHz <= 1780)   return 'n5';
-		if (freqMHz >= 2500   && freqMHz <= 2570)   return 'n7';
-		if (freqMHz >= 880    && freqMHz <= 960)    return 'n8';
-		if (freqMHz >= 791    && freqMHz <= 821)    return 'n28';
-		if (freqMHz >= 2570   && freqMHz <= 2620)   return 'n38';
-		if (freqMHz >= 2496   && freqMHz <= 2690)   return 'n41';  // most common China 5G
-		if (freqMHz >= 3300   && freqMHz <= 3800)   return 'n78';
-		if (freqMHz >= 3300   && freqMHz <= 4200)   return 'n77';
-		if (freqMHz >= 4470   && freqMHz <= 4990)   return 'n79';
+		// MT5700M-CN supported NR bands — ordered narrow → wide to avoid overlap
+		if (freqMHz >= 703    && freqMHz <= 803)    return 'n28';   // 703-748 / 758-803
+		if (freqMHz >= 824    && freqMHz <= 894)    return 'n5';    // 824-849 / 869-894
+		if (freqMHz >= 880    && freqMHz <= 960)    return 'n8';    // 880-915 / 925-960
+		if (freqMHz >= 1710   && freqMHz <= 1880)   return 'n3';    // 1710-1785 / 1805-1880
+		if (freqMHz >= 1920   && freqMHz <= 2170)   return 'n1';    // 1920-1980 / 2110-2170
+		if (freqMHz >= 2496   && freqMHz <= 2690)   return 'n41';   // 2496-2690 (most common China 5G)
+		if (freqMHz >= 3300   && freqMHz <= 3800)   return 'n78';   // 3300-3800
+		if (freqMHz >= 4400   && freqMHz <= 5000)   return 'n79';   // 4400-5000
 		return 'NR';
 	}
-	// LTE EARFCN → band
+	// LTE EARFCN → band (MT5700M-CN supported LTE bands)
 	if (rat === '1' || rat === 'LTE' || rat === 'lte') {
-		if (n >= 0     && n <= 599)    return 'B1';
-		if (n >= 1200  && n <= 1950)   return 'B3';
-		if (n >= 2400  && n <= 2649)   return 'B5';
-		if (n >= 3450  && n <= 3799)   return 'B8';
-		if (n >= 10000 && n <= 10200)  return 'B34';
-		if (n >= 37750 && n <= 38249)  return 'B38';
-		if (n >= 38250 && n <= 38649)  return 'B39';
-		if (n >= 38650 && n <= 39649)  return 'B40';
-		if (n >= 39650 && n <= 41589)  return 'B41';
+		if (n >= 0     && n <= 359)     return 'B1';    // FDD 1920-1980
+		if (n >= 1200  && n <= 1949)    return 'B3';    // FDD 1710-1785
+		if (n >= 2400  && n <= 2649)    return 'B5';    // FDD 824-849
+		if (n >= 3450  && n <= 3799)    return 'B8';    // FDD 880-915
+		if (n >= 10000 && n <= 10200)   return 'B34';   // TDD 2010-2025
+		if (n >= 37750 && n <= 38249)   return 'B38';   // TDD 2570-2620
+		if (n >= 38250 && n <= 38649)   return 'B39';   // TDD 1880-1920
+		if (n >= 38650 && n <= 39649)   return 'B40';   // TDD 2300-2400
+		if (n >= 39650 && n <= 41589)   return 'B41';   // TDD 2496-2690
 		return 'LTE';
 	}
 	return null;
