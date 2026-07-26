@@ -671,6 +671,30 @@ print_sim_details() {
 	[ -n "${imsi}" ] && echo "imsi=${imsi}"
 }
 
+# QCI (Quality of Service Class Identifier) from the active bearer.
+# AT+CGEQOSRDP=1 returns the negotiated QoS for CID 1.
+print_qos() {
+	local raw qci
+	raw="$(at_cmd 'AT+CGEQOSRDP=1' || true)"
+	qci="$(printf '%s\n' "${raw}" | awk -F, '/^\+CGEQOSRDP:/ { gsub(/[[:space:]\r"]/,"",$2); print $2; exit }')"
+	[ -n "${qci}" ] && echo "qci=${qci}"
+}
+
+# Active APN from PDP context.  AT+CGDCONT? lists all contexts; the first
+# non-empty APN on CID 1 is usually the active Internet data context.
+print_active_apn() {
+	local raw apn
+	raw="$(at_cmd 'AT+CGDCONT?' || true)"
+	# Format: +CGDCONT: <cid>,"<type>","<apn>",...
+	apn="$(printf '%s\n' "${raw}" | awk -F, '
+		/^\+CGDCONT:[[:space:]]*1,/ {
+			apn = $3
+			gsub(/^[[:space:]]*"|"[[:space:]]*$/, "", apn)
+			if (length(apn) > 0) { print apn; exit }
+		}')"
+	[ -n "${apn}" ] && echo "active_apn=${apn}"
+}
+
 print_subscriber_number() {
 	local raw number
 
@@ -1181,6 +1205,8 @@ case "${1:-status}" in
 		print_identity
 		print_sim_operator
 		print_sim_details
+		print_qos
+		print_active_apn
 		print_subscriber_number
 		print_signal
 		print_subscription_rate

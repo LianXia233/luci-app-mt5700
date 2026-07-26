@@ -207,7 +207,8 @@ return view.extend({
 	},
 
 	infoRow: function(label, value) {
-		return E('div', { 'class':'mt5700m-info-row' }, [ E('span', {}, label), E('strong', {}, value || '--') ]);
+		var valueNode = (value instanceof HTMLElement) ? value : E('strong', {}, String(value || '--'));
+		return E('div', { 'class':'mt5700m-info-row' }, [ E('span', {}, label), valueNode ]);
 	},
 
 	moduleCard: function(data) {
@@ -229,18 +230,29 @@ return view.extend({
 	simCard: function(data) {
 		var simState = data.sim || '';
 		var simOk = /READY/i.test(simState);
+		// Format AMBR rate as "Down XXX Mbps / Up XXX Mbps"
+		var downRate = data.ambr_down_mbps ? parseFloat(data.ambr_down_mbps) : NaN;
+		var upRate = data.ambr_up_mbps ? parseFloat(data.ambr_up_mbps) : NaN;
+		var rateText = (!isNaN(downRate) && !isNaN(upRate))
+			? _('Down %s / Up %s').format(
+				downRate >= 1 ? downRate.toFixed(0) + ' Mbps' : (downRate * 1000).toFixed(0) + ' Kbps',
+				upRate >= 1 ? upRate.toFixed(0) + ' Mbps' : (upRate * 1000).toFixed(0) + ' Kbps')
+			: '';
 		return E('section', { 'class':'mt5700m-info mt-ui-card' }, [
 			E('div', { 'class':'mt5700m-info-head' }, [
-				E('div', {}, [ E('div', { 'class':'mt5700m-info-title' }, _('SIM card')), E('div', { 'class':'mt5700m-info-desc' }, _('Subscriber identity')) ]),
+				E('div', {}, [ E('div', { 'class':'mt5700m-info-title' }, _('SIM & Subscription')), E('div', { 'class':'mt5700m-info-desc' }, _('Subscriber identity and service plan')) ]),
 				E('span', { 'class':'mt5700m-badge' + (simOk ? ' active' : '') }, simOk ? _('Ready') : (simState || _('Unknown')))
 			]),
 			E('div', { 'class':'mt5700m-info-list' }, [
 				this.infoRow(_('Operator'), data.operator),
 				this.infoRow(_('Access technology'), data.sysmode_detail || data.sysmode),
+				this.infoRow(_('APN'), data.active_apn),
+				this.infoRow(_('QCI'), data.qci ? 'QCI ' + data.qci : ''),
 				this.infoRow('ICCID', data.iccid),
 				this.infoRow('IMSI', data.imsi),
-				this.infoRow(_('Phone number'), data.phone_number_state === 'not_stored' ? _('Not stored') : data.phone_number)
-			])
+				this.infoRow(_('Phone number'), data.phone_number_state === 'not_stored' ? _('Not stored') : data.phone_number),
+				rateText ? this.infoRow(_('Subscription rate'), rateText) : null
+			].filter(Boolean))
 		]);
 	},
 
@@ -271,13 +283,30 @@ return view.extend({
 		return E('a', { 'class':'mt5700m-shortcut mt-ui-card', 'href':L.url(path) }, [ E('div', {}, [ E('strong', {}, title), E('span', {}, description) ]), E('b', {}, '›') ]);
 	},
 
+	// Map English operator name (from AT+COPS) to Chinese name + inline SVG logo.
+	operatorInfo: function(name) {
+		var n = (name || '').toUpperCase();
+		if (n.indexOf('CHINA MOBILE') !== -1 || n.indexOf('CMCC') !== -1)
+			return { name: '中国移动', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0066B3"/><stop offset="100%" stop-color="#00A0E9"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#g)"/><path d="M8 28c0 0 4-12 14-12s12 8 12 8-4 6-12 6S8 28 8 28z" fill="#fff" opacity=".9"/><circle cx="22" cy="23" r="4" fill="#fff"/><path d="M10 14c2-4 7-7 13-6s9 5 10 9c-2-2-5-4-10-4s-11 3-13 1z" fill="#FFE600" opacity=".85"/></svg>') };
+		if (n.indexOf('CHINA UNICOM') !== -1 || n.indexOf('UNICOM') !== -1)
+			return { name: '中国联通', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="#ED1C24"/><path d="M20 7c-7.2 0-13 5.8-13 13 0 3.6 1.5 6.9 3.9 9.3L20 33l9.1-3.7C31.5 26.9 33 23.6 33 20c0-7.2-5.8-13-13-13zm0 4c5 0 9 4 9 9s-4 9-9 9-9-4-9-9 4-9 9-9z" fill="#fff" opacity=".95"/><path d="M20 14c-3.3 0-6 2.7-6 6s2.7 6 6 6 6-2.7 6-6-2.7-6-6-6z" fill="#fff"/></svg>') };
+		if (n.indexOf('CHINA TELECOM') !== -1 || n.indexOf('TELECOM') !== -1)
+			return { name: '中国电信', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="t" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0066B3"/><stop offset="100%" stop-color="#0091DA"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#t)"/><path d="M7 24 Q15 14 25 20 T36 16" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/><path d="M7 29 Q15 19 27 24 T36 22" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" opacity=".7"/><path d="M7 18 Q15 10 23 14 T34 11" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".5"/></svg>') };
+		if (n.indexOf('BROADNET') !== -1 || n.indexOf('GBA') !== -1 || n.indexOf('CHINA BROADCASTING') !== -1)
+			return { name: '中国广电', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6B21A8"/><stop offset="100%" stop-color="#F97316"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#b)"/><text x="20" y="26" text-anchor="middle" fill="#fff" font-size="16" font-weight="bold" font-family="Arial">广</text></svg>') };
+		return { name: name || _('Mobile Network'), logo: null };
+	},
+
 	render: function(res) {
 		var data = this.parseStatus(res), session = controls.parseSession(res.session && res.session.stdout || '');
 		var reachable = data.reachable === '1', connected = data.connected === '1', carrierInfo = this.carrierInfo(data);
-		var operator = data.operator || '';
+		var opInfo = this.operatorInfo(data.operator);
+		var operator = opInfo.name;
 		if (!/[A-Za-z0-9\u4e00-\u9fff]/.test(operator)) operator = '';
 		var usbNames = { upgrade:_('Upgrade mode'), dump:_('Dump mode'), unknown:_('Unknown USB mode') };
 		var abnormalUsb = data.usb_state === 'upgrade' || data.usb_state === 'dump' || data.usb_state === 'unknown';
+		// Override raw AT+COPS operator name with Chinese-mapped version for SIM card
+		data.operator = operator;
 		return E('div', { 'class':'mt5700m-page mt-ui-page' }, [
 			this.styleNode(), controls.styleNode(),
 			data.error ? E('div', { 'class':'alert-message warning mt5700m-alert' }, data.error) : null,
@@ -285,7 +314,10 @@ return view.extend({
 			abnormalUsb ? E('div', { 'class':'alert-message warning mt5700m-alert' }, _('The MT5700M is in %s. Mobile data and AT management are unavailable until normal mode returns.').format(usbNames[data.usb_state])) : null,
 			E('section', { 'class':'mt5700m-hero' }, [
 				E('div', { 'class':'mt5700m-hero-copy' }, [
-					E('h2', { 'class':'mt5700m-title' }, _('MT5700M Module')),
+					E('h2', { 'class':'mt5700m-title' }, [
+						opInfo.logo ? E('img', { 'class':'mt5700m-op-logo', 'style':'width:28px;height:28px;border-radius:6px;flex-shrink:0;object-fit:contain;vertical-align:middle;margin-right:8px', 'src': opInfo.logo, 'alt': operator }) : null,
+						_('MT5700M Module')
+					]),
 					E('div', { 'class':'mt5700m-summary' }, !reachable ? _('The modem did not respond. Check the module connection.') : connected ? _('Mobile network is connected and ready.') : _('The module is online, but mobile data is not connected.')),
 					E('div', { 'class':'mt5700m-hero-meta' }, [ E('span', {}, [ _('Operator'), E('strong', {}, operator || '--') ]), E('span', {}, [ _('Network Mode'), E('strong', {}, data.sysmode_detail || data.sysmode || '--') ]), E('span', {}, [ _('Network interface'), E('strong', {}, data.network_interface || '--') ]) ])
 				]),

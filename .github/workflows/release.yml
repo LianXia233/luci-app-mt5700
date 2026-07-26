@@ -139,6 +139,21 @@ jobs:
             - 新增模块卡：厂商、型号、固件版本、IMEI、AT 端口
             - 新增 SIM 卡：运营商、接入技术、ICCID、IMSI、号码
             - 后端 status 增加 AT^ICCID? / AT+CIMI 查询，首页无需额外往返即可显示
+          - **运营商中文名 + Logo 显示**
+            - 首页（status.js）和射频页（network.js）统一使用中文运营商名
+            - 支持四大运营商：中国移动 / 中国联通 / 中国电信 / 中国广电
+            - 每个运营商配有内联 SVG Logo（首页标题栏、射频页 Hero 区域）
+          - **SIM 卡增强信息**
+            - 新增当前 APN 显示（从 AT+CGDCONT? CID 1 解析）
+            - 新增 QCI（QoS 类标识符）显示（从 AT+CGEQOSRDP=1 解析）
+            - 新增签约速率显示（下行/上行 Mbps，从 AT^DSAMBR=1 解析）
+            - SIM 卡标题改为「SIM & Subscription」，更准确反映内容
+          - **修复 [object HTMLElement] 渲染 Bug**
+            - 根因：row() / infoRow() 函数将 mcsDetailNode() 返回的 DOM 元素
+              强制包裹在 E('strong') 中，LuCI E() 某些路径下会 toString()
+            - 修复：row() 和 infoRow() 增加 HTMLElement 类型检测，
+              DOM 子节点直接插入而非文本化
+            - 影响：射频诊断区 SSB/MCS 信息、信号条等不再显示 [object HTMLElement]
 
           ### 📦 支持模组
           - 鼎桥 MT5700M-CN（海思巴龙平台，5G NR / LTE-FDD / LTE-TDD / WCDMA）

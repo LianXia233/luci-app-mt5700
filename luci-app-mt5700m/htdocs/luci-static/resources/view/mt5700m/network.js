@@ -663,8 +663,9 @@ return view.extend({
 			'.mt-net{max-width:1120px;margin:0 auto;color:var(--text-color-high,#20242a)}',
 			'.mt-net-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:21px 23px;border:1px solid #cfe4fb;border-radius:15px;background:linear-gradient(135deg,#f4f9ff,#eefaf8);margin-bottom:16px}',
 			'.mt-net-kicker{font-size:12px;color:#2470a9;font-weight:700;margin-bottom:5px}',
-			'.mt-net-title{font-size:25px;font-weight:720;line-height:1.2;margin:0 0 6px}',
+			'.mt-net-title{font-size:25px;font-weight:720;line-height:1.2;margin:0 0 6px;display:flex;align-items:center;gap:10px}',
 			'.mt-net-sub{font-size:13px;color:var(--text-color-medium,#68717d)}',
+			'.mt-op-logo{width:28px;height:28px;border-radius:6px;flex-shrink:0;object-fit:contain}',
 			'.mt-net-badge{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border-radius:999px;background:#dcf6eb;color:#08775d;font-size:12px;font-weight:700;white-space:nowrap}',
 			'.mt-net-badge:before{content:"";width:7px;height:7px;border-radius:50%;background:#17b883}',
 			'.mt-net-badge.off{background:#fff0e2;color:#99530a}.mt-net-badge.off:before{background:#e99737}',
@@ -706,7 +707,12 @@ return view.extend({
 	},
 
 	row: function(label, value) {
-		return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, label), E('strong', {}, value || '--') ]);
+		// Support both plain-text values and rich DOM nodes (e.g. mcsDetailNode,
+		// signalBar).  When value is already an HTMLElement, render it directly
+		// instead of wrapping it inside <strong> – otherwise LuCI's E() helper
+		// may toString() the node and emit "[object HTMLElement]".
+		var valueNode = (value instanceof HTMLElement) ? value : E('strong', {}, String(value || '--'));
+		return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, label), valueNode ]);
 	},
 
 	metric: function(label, value, unit) {
@@ -715,6 +721,24 @@ return view.extend({
 			E('span', { 'class': 'mt-net-value' }, value || '--'),
 			value ? E('span', { 'class': 'mt-net-unit' }, unit) : null
 		]);
+	},
+
+	// Map English operator name (from AT+COPS) to Chinese name + inline SVG logo.
+	operatorInfo: function(name) {
+		var n = (name || '').toUpperCase();
+		// China Mobile — blue-green swirl logo
+		if (n.indexOf('CHINA MOBILE') !== -1 || n.indexOf('CMCC') !== -1)
+			return { name: '中国移动', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0066B3"/><stop offset="100%" stop-color="#00A0E9"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#g)"/><path d="M8 28c0 0 4-12 14-12s12 8 12 8-4 6-12 6S8 28 8 28z" fill="#fff" opacity=".9"/><circle cx="22" cy="23" r="4" fill="#fff"/><path d="M10 14c2-4 7-7 13-6s9 5 10 9c-2-2-5-4-10-4s-11 3-13 1z" fill="#FFE600" opacity=".85"/></svg>') };
+		// China Unicom — red "unicom" knot logo
+		if (n.indexOf('CHINA UNICOM') !== -1 || n.indexOf('UNICOM') !== -1)
+			return { name: '中国联通', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="#ED1C24"/><path d="M20 7c-7.2 0-13 5.8-13 13 0 3.6 1.5 6.9 3.9 9.3L20 33l9.1-3.7C31.5 26.9 33 23.6 33 20c0-7.2-5.8-13-13-13zm0 4c5 0 9 4 9 9s-4 9-9 9-9-4-9-9 4-9 9-9z" fill="#fff" opacity=".95"/><path d="M20 14c-3.3 0-6 2.7-6 6s2.7 6 6 6 6-2.7 6-6-2.7-6-6-6z" fill="#fff"/></svg>') };
+		// China Telecom — blue wave logo
+		if (n.indexOf('CHINA TELECOM') !== -1 || n.indexOf('TELECOM') !== -1)
+			return { name: '中国电信', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="t" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0066B3"/><stop offset="100%" stop-color="#0091DA"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#t)"/><path d="M7 24 Q15 14 25 20 T36 16" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/><path d="M7 29 Q15 19 27 24 T36 22" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" opacity=".7"/><path d="M7 18 Q15 10 23 14 T34 11" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".5"/></svg>') };
+		// China Broadnet / 广电 — purple-orange logo
+		if (n.indexOf('BROADNET') !== -1 || n.indexOf('GBA') !== -1 || n.indexOf('CHINA BROADCASTING') !== -1)
+			return { name: '中国广电', logo: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6B21A8"/><stop offset="100%" stop-color="#F97316"/></linearGradient></defs><rect width="40" height="40" rx="8" fill="url(#b)"/><text x="20" y="26" text-anchor="middle" fill="#fff" font-size="16" font-weight="bold" font-family="Arial">广</text></svg>') };
+		return { name: name || _('Mobile Network'), logo: null };
 	},
 
 	// Parse ^LTEFREQLOCK? / ^NRFREQLOCK? raw array into structured lock info.
@@ -906,7 +930,8 @@ return view.extend({
 		if (rrc.length > 2)
 			rrcState += rrc[2] === '98' ? ' · ' + _('Camped') : rrc[2] === '99' ? ' · ' + _('Not camped') : '';
 		var registered = registration[1] === '1' || registration[1] === '5';
-		var operatorName = operator[2] || _('Mobile Network');
+		var opInfo = this.operatorInfo(operator[2]);
+		var operatorName = opInfo.name;
 		var lteLockState = !lteLock[0] ? '--' : lteLock[0] === '0' ? _('Not locked') : _('Locked');
 		var nrLockState = !nrLock[0] ? '--' : nrLock[0] === '0' ? _('Not locked') : _('Locked');
 		var systemValues = matchValues(controls.section(radioRaw, 'Radio mode'), '^SYSCFGEX');
@@ -1013,7 +1038,10 @@ return view.extend({
 			E('section', { 'class': 'mt-net-hero mt-ui-hero' }, [
 				E('div', {}, [
 					E('div', { 'class': 'mt-net-kicker' }, _('NETWORK AND CELL')),
-					E('h2', { 'class': 'mt-net-title' }, operatorName),
+					E('h2', { 'class': 'mt-net-title' }, [
+					opInfo.logo ? E('img', { 'class': 'mt-op-logo', 'src': opInfo.logo, 'alt': operatorName }) : null,
+					operatorName
+				]),
 					E('div', { 'class': 'mt-net-sub' }, _('Serving-cell and registration information reported by the modem.'))
 				]),
 				E('span', { 'class': 'mt-net-badge' + (registered ? '' : ' off') }, registered ? _('Registered') : _('Not registered'))
