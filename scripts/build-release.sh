@@ -49,7 +49,20 @@ CONFIG_PACKAGE_sms-tool_q=m
 EOF
 make defconfig
 make package/feeds/qmodem/ubus_at_daemon/compile package/feeds/qmodem/sms-tool_q/compile -j"$(nproc)" V=s
+# Force a clean rebuild so the SDK re-copies the updated htdocs (network.js/status.js)
+# instead of reusing a cached build_dir / staging copy from the previous version.
+make package/h5000m-custom/luci-app-mt5700m/clean >/dev/null 2>&1 || true
+rm -rf build_dir/target-*/luci-app-mt5700m \
+       staging_dir/target-*/root-*/www/luci-static/resources/view/mt5700m \
+       bin/packages/*/custom/luci-app-mt5700m*.apk 2>/dev/null || true
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
+
+# Sanity check: the freshly staged www tree must contain the latest operator fix.
+# If this fails, the SDK reused a cached htdocs copy and the package would be broken.
+if ! grep -rq "Collapse runs" staging_dir/target-*/root-*/www/luci-static/resources/view/mt5700m/ 2>/dev/null; then
+  echo "ERROR: built www tree is missing the operator whitespace fix (SDK caching?)" >&2
+  exit 1
+fi
 
 find bin -type f \( -name 'luci-app-mt5700m-*.apk' -o -name 'luci-app-mt5700m_*.ipk' -o -name 'luci-i18n-mt5700m-zh-cn-*.apk' -o -name 'luci-i18n-mt5700m-zh-cn_*.ipk' -o -name 'ubus-at-daemon-*.apk' -o -name 'ubus-at-daemon_*.ipk' -o -name 'sms-tool_q-*.apk' -o -name 'sms-tool_q_*.ipk' \) -exec cp -f {} "${output_dir}/" \;
 test "$(find "${output_dir}" -type f \( -name '*.apk' -o -name '*.ipk' \) | wc -l)" -ge 4
