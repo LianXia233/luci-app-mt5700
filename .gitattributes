@@ -1,0 +1,11 @@
+# 强制 shell/python/配置脚本使用 LF，避免 CRLF 导致 BusyBox ash / procd 启动失败
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+luci-app-mt5700m/root/** text eol=lf
+luci-app-mt5700m/htdocs/cgi-bin/** text eol=lf
+*.png binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ico binary

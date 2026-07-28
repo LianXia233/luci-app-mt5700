@@ -1,0 +1,6 @@
+#!/bin/sh
+# mt5700m WebUI: ensure backend + CGI helpers are executable and config committed.
+chmod 0755 /usr/bin/at-server.py 2>/dev/null
+chmod 0755 /www/cgi-bin/at-ws-info /www/cgi-bin/at-log-clear 2>/dev/null
+uci -q commit at-webserver 2>/dev/null
+exit 0
