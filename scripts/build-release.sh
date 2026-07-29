@@ -57,10 +57,16 @@ rm -rf build_dir/target-*/luci-app-mt5700m \
        bin/packages/*/custom/luci-app-mt5700m*.apk 2>/dev/null || true
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
 
-# Sanity check: the freshly staged www tree must contain the latest operator fix.
+# Sanity check: the freshly staged www tree must contain the WebUI integration.
 # If this fails, the SDK reused a cached htdocs copy and the package would be broken.
-if ! grep -rq "Collapse runs" staging_dir/target-*/root-*/www/luci-static/resources/view/mt5700m/ 2>/dev/null; then
-  echo "ERROR: built www tree is missing the operator whitespace fix (SDK caching?)" >&2
+# We check for the homepage entry-button class (a JS string literal that survives
+# any minification, unlike a // comment) and for the bundled WebUI SPA entry.
+if ! grep -rq "mt5700m-webui-cta" staging_dir/target-*/root-*/www/luci-static/resources/view/mt5700m/ 2>/dev/null; then
+  echo "ERROR: built www tree is missing the WebUI entry button (SDK caching?)" >&2
+  exit 1
+fi
+if ! ls staging_dir/target-*/root-*/www/5700/index.html >/dev/null 2>&1; then
+  echo "ERROR: built www tree is missing the WebUI SPA at /www/5700/index.html" >&2
   exit 1
 fi
 
