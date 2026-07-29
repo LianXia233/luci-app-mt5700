@@ -106,64 +106,37 @@ jobs:
 
           ### 📋 更新内容
 
-          - **RSRQ / SINR / 温度图形化显示**
-            - 首页信号卡：RSRQ、SINR、温度改为彩色迷你量表（gauge），按质量自动变色（优秀/良好/一般/较弱），并标注刻度区间
-            - 射频页 Hero：RSRP / RSRQ / SINR 由纯文本改为彩色量表条，并新增温度量表（共 4 项）
-            - 后端 network 命令新增温度输出（AT^CHIPTEMP?），射频页首屏无需额外往返即可显示温度
-          - **修复邻区锁频/锁小区功能无法使用的问题**
-            - 根因：cellLockCard 传给后端的 bands 参数为空字符串 ''，后端验证失败（exit 64）
-            - 新增 bandNameToNumber() 函数，将频段名转为数字（n41→41, B3→3）
-            - 锁定命令现在正确传递频段号、ARFCN、PCI 等全部参数
-            - 支持三种锁定模式：Band Lock / ARFCN Lock / Cell Lock
-          - **新增「填入面板」按钮**
-            - 每个邻区卡片现在有两个按钮：「填入」和「锁定」
-            - 点击「填入」自动将该小区的频段、ARFCN、PCI 填入页面下方的「频段与小区选择」面板
-            - 填入后可检查修改，再点击「检查并应用」生效
-            - 面板自动滚动到可视区域
-          - **SSB 邻区不再显示 RSRQ**（硬件限制，AT^NRSSBID? 不提供邻区 RSRQ）
-          - **邻区按 RAT 分组显示**（5G 显示 NR 邻区，4G 显示 LTE 邻区）
-          - **频段名显示修正**（ARFCN 504990 正确显示为 n41 而非 n7）
-          - **RSRQ/SINR 解析修正**（MONNC 补 PCI 字段、MONSC LTE 无 SCS 字段）
-          - **多载波服务小区完整显示**
-            - 载波聚合（CA）激活时，首页「载波状态」卡片展开列出所有分量载波
-            - 主载波（PCell）与每个辅载波（SCell 1/2…）分别标注
-            - 每张载波卡显示：制式 · 频段、ARFCN、下行频率/带宽、上行频率/带宽
-            - 单载波时仍只显示频段标签，保持简洁
-          - **LTE 邻区也在主页显示**
-            - 射频诊断区新增「LTE neighbour cells」面板，与主页面 NR 邻区一样支持一键「填入 / 锁定」
-            - 后端 radio-diagnostics 增加 AT^MONNC 邻区查询
-          - **锁频面板实时读取当前锁定信息**
-            - 修复根因：原 matchValues 只取首行（仅锁定类型），丢弃了已锁 band/ARFCN/PCI
-            - 新增 collectFreqLock() 收集 AT^LTEFREQLOCK? / AT^NRFREQLOCK? 的全部行
-            - 打开「频段与小区选择」时，面板自动填入选中的锁频类型与已锁频段、ARFCN、PCI
-          - **锁频时自动填入相应选项并应用**
-            - 邻区卡片「锁定」按钮在确认前会先把该小区的频段、ARFCN、PCI 自动填入锁频面板
-            - 「填入」按钮逻辑复用，面板即时反映所选小区
-          - **首页新增「模块与 SIM」信息卡**
-            - 新增模块卡：厂商、型号、固件版本、IMEI、AT 端口
-            - 新增 SIM 卡：运营商、接入技术、ICCID、IMSI、号码
-            - 后端 status 增加 AT^ICCID? / AT+CIMI 查询，首页无需额外往返即可显示
-          - **运营商中文名 + Logo 显示**
-            - 首页（status.js）和射频页（network.js）统一使用中文运营商名
-            - 支持四大运营商：中国移动 / 中国联通 / 中国电信 / 中国广电
-            - 每个运营商配有内联 SVG Logo（首页标题栏、射频页 Hero 区域）
-          - **SIM 卡增强信息**
-            - 新增当前 APN 显示（从 AT+CGDCONT? CID 1 解析）
-            - 新增 QCI（QoS 类标识符）显示（从 AT+CGEQOSRDP=1 解析）
-            - 新增签约速率显示（下行/上行 Mbps，从 AT^DSAMBR=1 解析）
-            - SIM 卡标题改为「SIM & Subscription」，更准确反映内容
-          - **修复 [object HTMLElement] 渲染 Bug**
-            - 根因：row() / infoRow() 函数将 mcsDetailNode() 返回的 DOM 元素
-              强制包裹在 E('strong') 中，LuCI E() 某些路径下会 toString()
-            - 修复：row() 和 infoRow() 增加 HTMLElement 类型检测，
-              DOM 子节点直接插入而非文本化
-            - 影响：射频诊断区 SSB/MCS 信息、信号条等不再显示 [object HTMLElement]
+          - **WebUI 回退到 v2.3.18 原版（UMI.js / React SPA）**
+            - 移除 1:1 复刻的手写 SPA（index.html + app.js + bg1.jpg），恢复官方 UMI 构建产物
+            - 多路由：概览 / 网络 / 短信 / 系统 / AT 终端，加载动画与响应式布局完整
+            - 首页集成「WebUI 入口」按钮（mt5700m-webui-cta），一键跳转 /5700/
+          - **后端 AT 服务（at-server.py，UBUS + WebSocket 双模式）**
+            - 纯标准库 + `websockets` + `pyserial`，**无 aiohttp 依赖**，轻量稳定
+            - UBUS 模式直连本地模块串口；网络 AT 模式可连远程 WS（方便外部 WebUI 接入）
+            - 端口 8765，自动重连，支持并发 AT 命令队列
+          - **依赖内置（打包即包含，GitHub 自动编译产出）**
+            - `luci-app-mt5700m` 主包：`LUCI_DEPENDS` 声明 `python3` + `python3-websockets` + `python3-pyserial` + `ubus-at-daemon` + `sms-tool_q`
+            - `ubus-at-daemon`、`sms-tool_q` 由 QModem feed 在 CI 内编译并随包发布
+            - 内核模块：`kmod-usb2/3`、`kmod-usb-serial(-option)`、`kmod-usb-net(-cdc-ether/-cdc-ncm)` 已在 `LUCI_EXTRA_DEPENDS` 声明
+          - **信号与射频展示**
+            - RSRP / RSRQ / SINR / 温度图形化量表，按质量自动变色
+            - 载波聚合（CA）完整展示：主载波 + 各辅载波的频段 / ARFCN / 带宽
+            - 邻区扫描按 RAT 分组（NR / LTE），支持一键填入面板 + 锁定
+            - SSB 波束信号图形化，锁频支持 Band / ARFCN / Cell 三种模式
+          - **运营商中文名 + Logo**
+            - 中国移动 / 联通 / 电信 / 广电，内联 SVG Logo
+          - **SIM 增强**：APN、QCI、签约速率显示
+
+          ### 📦 发布产物（dist-release）
+          - `luci-app-mt5700m-*.apk`（主包，含 /www/5700/ WebUI）
+          - `ubus-at-daemon-*.apk`、`sms-tool_q-*.apk`（随包编译）
+          - `SHA256SUMS`、`openwrt-sdk-build.pem`
 
           ### 📦 支持模组
           - 鼎桥 MT5700M-CN（海思巴龙平台，5G NR / LTE-FDD / LTE-TDD / WCDMA）
 
           ### 📱 适用固件
-          - OpenWrt 21.02+ / ImmortalWrt / Lean 的 LuCI 界面
+          - OpenWrt 21.02+ / ImmortalWrt / Lean 的 LuCI 界面（mediatek/filogic）
           RELEASEEOF
           )
 
