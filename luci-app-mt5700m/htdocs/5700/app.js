@@ -688,8 +688,8 @@
         '<div class="speed-toggle"><label class="toggle-switch"><input type="checkbox" id="speedToggle" />' +
         '<span class="slider"></span></label><span>\u5b9e\u65f6\u7f51\u901f\u5f00\u5173</span></div>' +
         '<div class="speed-values">' +
-          kv('\u4e0a\u884c\u901f\u7387', '<span class="spd-up">\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7</span>') +
-          kv('\u4e0b\u884c\u901f\u7387', '<span class="spd-down">\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7</span>') +
+          kvHtml('\u4e0a\u884c\u901f\u7387', '<span class="spd-up">\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7</span>') +
+          kvHtml('\u4e0b\u884c\u901f\u7387', '<span class="spd-down">\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7</span>') +
           '<div class="speed-bps"><span class="spd-bps-val">0</span> bps &nbsp;&nbsp; <span class="spd-bps-val">0</span> bps</div>' +
         '</div></div>';
 
