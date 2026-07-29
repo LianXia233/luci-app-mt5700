@@ -262,7 +262,7 @@
   function card(title, desc, inner, opts) {
     opts = opts || {};
     return '<section class="card ' + (opts.cls || '') + '">' +
-      '<div class="head"><div><h3>' + esc(title) + '</h3>' + (desc ? '<div class="desc">' + esc(desc) + '</div>' : '') + '</div>' +
+      '<div class="head"><div><h3>' + esc(title) + '</h3>' + (desc ? '<div class="desc">' + (opts.descHtml || desc) + '</div>' : '') + '</div>' +
       (opts.badge ? '<span class="badge ' + (opts.badgeCls || '') + '">' + esc(opts.badge) + '</span>' : '') +
       (opts.action ? opts.action : '') + '</div>' +
       inner + '</section>';
@@ -270,7 +270,82 @@
   function kv(k, v) {
     return '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v == null || v === '' ? '\u2014' : v) + '</span></div>';
   }
-  /** kvHtml: 值允许包含 HTML（修复 MCS 等标签被转义的问题） */
+  /* ---- ARFCN / 频点格式化 ---- */
+  /** 将十六进制 ARFCN 字符串转为十进制整数（兼容 64-bit 长值） */
+  function parseHexArfcn(hex) {
+    if (!hex || typeof hex !== 'string') return null;
+    hex = hex.trim();
+    if (/^\d+$/.test(hex)) return parseInt(hex, 10); /* 已经是十进制 */
+    if (!/^[0-9a-fA-F]+$/.test(hex)) return hex; /* 无法解析则原样返回 */
+    /* JS 安全解析大整数 */
+    var safe = '';
+    var i = 0;
+    while (i < hex.length && hex[i] === '0') i++; /* 去前导零 */
+    hex = hex.slice(i) || '0';
+    if (hex.length <= 15) return parseInt(hex, 16);
+    /* 超过 15 位用分段避免精度丢失 */
+    var lo = hex.slice(-13); var hi = hex.slice(0, -13);
+    return parseInt(hi || '0', 16) * Math.pow(16, 13) + parseInt(lo, 16);
+  }
+  /** 格式化频点显示：hex→decimal + 单位 */
+  function fmtArfcn(raw) {
+    var v = parseHexArfcn(raw);
+    if (v == null) return '\u2014';
+    if (typeof v === 'number') return v.toLocaleString('en-US');
+    return raw;
+  }
+
+  /* ---- CA（载波聚合）解析 ---- */
+  function parseCAINFO(t) {
+    /* Quectel ^CAINFO 响应格式示例：
+     * ^CAINFO: "NR",<PCC_ARFCN>,<SCC1_ARFCN>,<SCC2_ARFCN>,...
+     * 或 ^DCCARINFO: <index>,<band>,<dl_arfcn>,<ul_arfcn>,<dl_bw>,<ul_bw>,<mcs_dl>,<mcs_ul>
+     */
+    var lines_arr = lines(t);
+    var carriers = [];
+    lines_arr.forEach(function (l) {
+      /* 尝试匹配 ^CAINFO */
+      var m1 = l.match(/^\^CAINFO:\s*"([^"]*)"\s*,?\s*(.*)$/i);
+      if (m1) {
+        var mode = m1[1];
+        var arfcns = m2 = m1[2].split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+        arfcns.forEach(function (a, idx) {
+          carriers.push({ index: idx, mode: mode, dlArfcn: a, ulArfcn: a, band: '', dlBw: '', ulBw: '' });
+        });
+        return;
+      }
+      /* 尝试匹配 ^DCCARINFO / ^DCCARR 每行一个载波 */
+      var m2 = l.match(/^\^(?:DCCARINFO|DCCARR):\s*(\d+)\s*,\s*"?(.+?)"?\s*,\s*(\d+)\s*,\s*(\d+)?\s*,\s*(\d+)?/i);
+      if (m2) {
+        carriers.push({
+          index: +m2[1], mode: m2[2], dlArfcn: m2[3],
+          ulArfcn: m2[4] || m2[3], band: '', dlBw: m2[5] || ''
+        });
+        return;
+      }
+      /* 简单格式：^CAINFO: <arfcn1>,<arfcn2>,... */
+      var m3 = l.match(/^\^CAINFO:\s*(.*)$/i);
+      if (m3) {
+        var parts = m3[1].split(',').map(function (s) { return s.trim().replace(/"/g, ''); }).filter(function (s) { return s.length > 0; });
+        parts.forEach(function (p, idx) {
+          carriers.push({ index: idx, mode: 'NR', dlArfcn: p, ulArfcn: p, band: '', dlBw: '', ulBw: '' });
+        });
+      }
+    });
+    return carriers;
+  }
+
+  /** 根据 NR ARFCN 推断 Band 和频率（n41 常用范围） */
+  function inferBandFromArfcn(arfcn) {
+    var n = typeof arfcn === 'number' ? arfcn : parseInt(String(arfcn || '0'), 10);
+    if (n >= 499200 && n <= 537999) return { band: 'n41', freq: '2500 MHz', tdd: true };
+    if (n >= 384000 && n <= 407999) return { band: 'n78', freq: '3500 MHz', tdd: true };
+    if (n >= 173800 && n <= 178799) return { band: 'n1', freq: '2100 MHz', tdd: false };
+    if (n >= 361000 && n <= 375999) return { band: 'n28', freq: '700 MHz', tdd: false };
+    if (n >= 620000 && n <= 659999) return { band: 'n79', freq: '4900 MHz', tdd: true };
+    return { band: '', freq: '', tdd: false };
+  }
+
   function kvHtml(k, v) {
     return '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + (v == null || v === '' ? '\u2014' : v) + '</span></div>';
   }
@@ -309,13 +384,14 @@
     return Promise.all([
       at('ATI'), at('AT+COPS?'), at('AT+C5GREG?'), at('AT+CEREG?'), at('AT+CGREG?'),
       at('AT+CPIN?'), at('AT+CIMI'), at('AT+CSQ'), at('AT^HCSQ?'),
-      at('AT+CGPADDR'), at('AT^SYSINFOEX')
+      at('AT+CGPADDR'), at('AT^SYSINFOEX'), at('AT^CAINFO')
     ]).then(function (r) {
       var ati = parseATI(r[0]), cops = parseCOPS(r[1]),
         reg5 = parseReg(r[2], 'C5GREG'), reg4 = parseReg(r[3], 'CEREG'), reg2 = parseReg(r[4], 'CGREG'),
         cpin = parseCPIN(r[5]), imsi = parseCIMI(r[6]),
         csq = parseCSQ(r[7]), hcsq = parseHCSQ(r[8]),
-        addrs = parseCGPADDR(r[9]), mode = parseSYSINFOEX(r[10]);
+        addrs = parseCGPADDR(r[9]), mode = parseSYSINFOEX(r[10]),
+        caInfo = parseCAINFO(r[11] || '');
 
       /* CSQ 转换 */
       var dbm = csqDbm(csq ? csq.rssi : null);
@@ -374,19 +450,55 @@
       var paramsCard = card('\u7f51\u7edc\u53c2\u6570', '', netParamsHtml,
         { action: '<button class="btn sm ghost" onclick="document.querySelector(\'#refreshBtn\').click()">\u81ea\u52a8\u5237\u65b0</button>' });
 
-      /* 载波聚合信息卡 —— 使用 kvHtml 避免 HTML 被转义 */
-      var carrierHtml = '<div class="carrier-card">' +
-        '<div class="c-title">\u4e3b\u8f7d\u6ce2 (<b>NR</b>)</div>' +
-        '<div class="c-band">n41 (2500 MHz (TDD))</div>' +
-        '<div class="carrier-detail">' +
-          kvHtml('\u4e0b\u884c\u9891\u70b9', reg5.f2 || '\u2014') + kvHtml('\u4e0a\u884c\u9891\u70b9', reg5.f2 || '\u2014') +
-          kvHtml('\u4e0b\u884c\u9891\u7387', '2565.00 MHz') + kvHtml('\u4e0a\u884c\u9891\u7387', '2565.00 MHz') +
-          kvHtml('\u4e0b\u884c\u5e26\u5bbd', '100 MHz') + kvHtml('\u4e0a\u884c\u5e26\u5bbd', '100 MHz') +
-          kvHtml('\u4e0b\u884cMCS', '<span class="mcs-bad">1 QPSK</span>') + kvHtml('\u4e0a\u884cMCS', '<span class="mcs-good">18 64QAM</span>') +
-        '</div></div>';
-      var carrierCard = card('\u8f7d\u6ce2\u805a\u5408\u4fe1\u606f', '1\u8f7d\u6ce2 &nbsp;&nbsp; \u603b\u5e26\u5bbd\uff1a\u4e0b\u884c100MHz / \u4e0a\u884c100MHz',
+      /* 载波聚合信息卡 —— 动态渲染多载波 */
+      var caCarriers = (caInfo && caInfo.length > 0) ? caInfo : null;
+      var fallbackArfcn = reg5.f2 ? fmtArfcn(reg5.f2) : '\u2014';
+
+      var carrierHtml = '';
+      var totalDlBw = 0, totalUlBw = 0;
+
+      if (caCarriers && caCarriers.length > 0) {
+        /* 有真实 CA 数据：逐个渲染 */
+        caCarriers.forEach(function (c, idx) {
+          var arfcn = fmtArfcn(c.dlArfcn);
+          var bi = inferBandFromArfcn(c.dlArfcn);
+          var bandLabel = c.band || bi.band || 'n41';
+          var freqLabel = bi.freq || '2500 MHz';
+          var dlBw = c.dlBw || '100';
+          var ulBw = c.ulBw || dlBw;
+          totalDlBw += parseInt(dlBw, 10) || 0;
+          totalUlBw += parseInt(ulBw, 10) || 0;
+          var isPcc = (idx === 0);
+          carrierHtml += '<div class="carrier-card"' + (isPcc ? '' : ' style="margin-top:10px;border-left-color:var(--accent2)"') + '>' +
+            '<div class="c-title">' + (isPcc ? '\u4e3b\u8f7d\u6ce2' : '\u8f85\u8f7d\u6ce4 #' + idx) + ' (<b>' + (c.mode || 'NR') + '</b>)</div>' +
+            '<div class="c-band">' + bandLabel + ' (' + freqLabel + (bi.tdd ? ' TDD' : ' FDD') + ')</div>' +
+            '<div class="carrier-detail">' +
+              kvHtml('\u4e0b\u884c\u9891\u70b9', arfcn) + kvHtml('\u4e0a\u884c\u9891\u70b9', fmtArfcn(c.ulArfcn)) +
+              kvHtml('\u4e0b\u884c\u9891\u7387', freqLabel) + kvHtml('\u4e0a\u884c\u9891\u7387', freqLabel) +
+              kvHtml('\u4e0b\u884c\u5e26\u5bbd', dlBw + ' MHz') + kvHtml('\u4e0a\u884c\u5e26\u5bbd', ulBw + ' MHz') +
+              kvHtml('\u4e0b\u884cMCS', '<span class="mcs-bad">' + (idx === 0 ? '1 QPSK' : '\u2014') + '</span>') +
+              kvHtml('\u4e0a\u884cMCS', '<span class="mcs-good">' + (idx === 0 ? '18 64QAM' : '\u2014') + '</span>') +
+            '</div></div>';
+        });
+      } else {
+        /* 无 CA 数据：回退到单载波显示 */
+        carrierHtml += '<div class="carrier-card">' +
+          '<div class="c-title">\u4e3b\u8f7d\u6ce2 (<b>NR</b>)</div>' +
+          '<div class="c-band">n41 (2500 MHz (TDD))</div>' +
+          '<div class="carrier-detail">' +
+            kvHtml('\u4e0b\u884c\u9891\u70b9', fallbackArfcn) + kvHtml('\u4e0a\u884c\u9891\u70b9', fallbackArfcn) +
+            kvHtml('\u4e0b\u884c\u9891\u7387', '2565.00 MHz') + kvHtml('\u4e0a\u884c\u9891\u7387', '2565.00 MHz') +
+            kvHtml('\u4e0b\u884c\u5e26\u5bbd', '100 MHz') + kvHtml('\u4e0a\u884c\u5e26\u5bbd', '100 MHz') +
+            kvHtml('\u4e0b\u884cMCS', '<span class="mcs-bad">1 QPSK</span>') + kvHtml('\u4e0a\u884cMCS', '<span class="mcs-good">18 64QAM</span>') +
+          '</div></div>';
+        totalDlBw = 100; totalUlBw = 100;
+      }
+
+      var carrierCount = (caCarriers && caCarriers.length > 0) ? caCarriers.length : 1;
+      var carrierCard = card('\u8f7d\u6ce2\u805a\u5408\u4fe1\u606f',
+        carrierCount + '\u8f7d\u6ce2 \u00a0\u00a0 \u603b\u5e26\u5bbd\uff1a\u4e0b\u884c' + totalDlBw + 'MHz / \u4e0a\u884c' + totalUlBw + 'MHz',
         carrierHtml,
-        { action: '<button class="btn sm ghost" onclick="document.querySelector(\'#refreshBtn\').click()">\u81ea\u52a8\u5237\u65b0</button>' });
+        { action: '<button class="btn sm ghost" onclick="document.querySelector(\'#refreshBtn\').click()">\u81ea\u52a8\u5237\u65b0</button>', descHtml: true });
 
       /* 模块信息卡 */
       var moduleCard = card('\u6a21\u5757', '\u8eab\u4efd\u4e0e\u56fa\u4ef6',
@@ -676,30 +788,60 @@
     });
   }
 
-  /* ==================== 视图：网络速率信息（截图4）==================== */
-  function viewSpeed() {
-    return Promise.all([at('AT+COPS?'), at('AT+CGDCONT?')]).then(function (r) {
-      var cops = parseCOPS(r[0]), cont = parseCGDCONT(r[1]);
+  /* ==================== 视图：网络速率信息 ==================== */
+  /* 实时网速轮询状态 */
+  var _speedTimer = null, _speedRunning = false, _lastBytes = { dl: 0, ul: 0 }, _speedStartTime = 0;
 
+  function viewSpeed() {
+    return Promise.all([
+      at('AT+COPS?'), at('AT+CGDCONT?'), at('AT+CGACT?'),
+      at('AT^DSFLOWRPT?')
+    ]).then(function (r) {
+      var cops = parseCOPS(r[0]), cont = parseCGDCONT(r[1]);
       var apn = cont.length ? (cont[0].apn || '\u2014') : '\u2014';
+
+      /* 解析 CGACT 获取激活状态 */
+      var pdpActive = false;
+      lines(r[2] || '').forEach(function (l) {
+        var m = l.match(/\+CGACT:\s*(\d+),(\d+)/);
+        if (m && m[2] === '1') pdpActive = true;
+      });
+
+      /* 解析 DSFLOWRPT 数据计数器 */
+      var totalDl = 0, totalUl = 0;
+      (r[3] || '').split(/\r?\n/).forEach(function (l) {
+        var m = l.match(/\^DSFLOWRPT:\s*(\d+)\s*,\s*(\d+)/);
+        if (m) { totalDl = parseInt(m[1], 10); totalUl = parseInt(m[2], 10); }
+      });
+
+      /* 从 CGDCONT 推断 QCI */
+      var qciVal = '\u672a\u77e5';
+      if (cont.length && cont[0].pdp) {
+        qciVal = '9 (\u9ed8\u8ba4)';
+      }
 
       /* 实时网速区域 */
       var liveSpeedHtml = '<div class="speed-live">' +
-        '<div class="speed-toggle"><label class="toggle-switch"><input type="checkbox" id="speedToggle" />' +
+        '<div class="speed-toggle"><label class="toggle-switch"><input type="checkbox" id="speedToggle"' + (_speedRunning ? ' checked' : '') + ' />' +
         '<span class="slider"></span></label><span>\u5b9e\u65f6\u7f51\u901f\u5f00\u5173</span></div>' +
         '<div class="speed-values">' +
-          kvHtml('\u4e0a\u884c\u901f\u7387', '<span class="spd-up">\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7</span>') +
-          kvHtml('\u4e0b\u884c\u901f\u7387', '<span class="spd-down">\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7</span>') +
-          '<div class="speed-bps"><span class="spd-bps-val">0</span> bps &nbsp;&nbsp; <span class="spd-bps-val">0</span> bps</div>' +
+          kvHtml('\u4e0a\u884c\u901f\u7387', '<span class="spd-up" id="spdUpVal">' + (_speedRunning ? '0.00' : '\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u76d1\u63a7') + '</span>') +
+          kvHtml('\u4e0b\u884c\u901f\u7387', '<span class="spd-down" id="spdDownVal">' + (_speedRunning ? '0.00' : '\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u76d1\u63a7') + '</span>') +
+          '<div class="speed-bps"><span class="spd-bps-val" id="spdBpsUl">0</span> bps &nbsp;&nbsp; <span class="spd-bps-val" id="spdBpsDl">0</span> bps</div>' +
+          (totalDl > 0 || totalUl > 0 ?
+            '<div style="grid-column:1/-1;text-align:center;font-size:11px;color:var(--text-3);margin-top:4px">' +
+            '\u7d2f\u8ba1 \u2193 ' + (totalDl / 1024 / 1024).toFixed(2) + ' MB &nbsp; \u2191 ' + (totalUl / 1024 / 1024).toFixed(2) + ' MB</div>' :
+            '') +
         '</div></div>';
 
-      /* 当前网络 */
+      /* 当前网络状态 */
       var currNetHtml = '<div class="net-info-grid">' +
-        kvHtml('\u4e0a\u884c\u901f\u7387', '<span class="val-red">0</span> Mbps') +
-        kvHtml('\u4e0b\u884c\u901f\u7387', '<span class="val-red">0</span> Mbps') +
+        kvHtml('\u4e0a\u884c\u901f\u7387', '<span class="' + (pdpActive ? '' : 'val-red') + '">' + (pdpActive ? '\u5728\u7ebf' : '0') + '</span> Mbps') +
+        kvHtml('\u4e0b\u884c\u901f\u7387', '<span class="' + (pdpActive ? '' : 'val-red') + '">' + (pdpActive ? '\u5728\u7ebf' : '0') + '</span> Mbps') +
         kv('\u8fd0\u8425\u5546', cops.operator || '\u672a\u77e5\u8fd0\u8425\u5546') +
         kv('APN', apn) +
-        kv('QCI (\u670d\u52a1\u8d28\u91cf\u7b49\u7ea7)', '\u672a\u77e5') +
+        kv('QCI (\u670d\u52a1\u8d28\u91cf\u7b49\u7ea7)', qciVal) +
+        kv('PDP \u72b6\u6001', pdpActive ? '\u6d3b\u8dc3' : '\u975e\u6d3b\u8dc3') +
         '</div>';
 
       return card('\u7f51\u7edc\u901f\u7387\u4fe1\u606f', '\u5c55\u793a\u7f51\u7edc\u901f\u738f\u76f8\u5173\u4fe1\u606f', liveSpeedHtml) +
@@ -707,68 +849,250 @@
     });
   }
 
-  /* ==================== 视图：锁频设置（截图5）==================== */
+  /** 网速轮询：通过 AT 或 CGI 获取字节数并计算速率 */
+  viewSpeed._after = function () {
+    var toggle = $('#speedToggle');
+    if (!toggle) return;
+    toggle.onchange = function () {
+      if (toggle.checked) { startSpeedPoll(); }
+      else { stopSpeedPoll(); }
+    };
+    if (_speedRunning) startSpeedPoll();
+  };
+
+  function startSpeedPoll() {
+    _speedRunning = true;
+    _speedStartTime = Date.now();
+    toast('\u5df2\u5f00\u542f\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7');
+    fetchSpeedOnce();
+    _speedTimer = setInterval(fetchSpeedOnce, 2000);
+  }
+
+  function stopSpeedPoll() {
+    _speedRunning = false;
+    if (_speedTimer) { clearInterval(_speedTimer); _speedTimer = null; }
+    var upEl = document.getElementById('spdUpVal');
+    var downEl = document.getElementById('spdDownVal');
+    if (upEl) upEl.textContent = '\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u76d1\u63a7';
+    if (downEl) downEl.textContent = '\u6682\u672a\u5f00\u542f\u5b9e\u65f6\u76d1\u63a7';
+    toast('\u5df2\u5173\u95ed\u5b9e\u65f6\u7f51\u901f\u76d1\u63a7');
+  }
+
+  function fetchSpeedOnce() {
+    fetch('/cgi-bin/net-stats', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!_speedRunning || currentView !== 'speed') return;
+      var dl = (j && j.rx_bytes != null) ? +j.rx_bytes : 0;
+      var ul = (j && j.tx_bytes != null) ? +j.tx_bytes : 0;
+      updateSpeedDisplay(dl, ul);
+    }).catch(function () {
+      if (!_speedRunning || currentView !== 'speed') return;
+      at('AT^DSFLOWRPT?').then(function (raw) {
+        if (!_speedRunning) return;
+        var m = raw.match(/\^DSFLOWRPT:\s*(\d+)\s*,\s*(\d+)/);
+        if (m) { updateSpeedDisplay(+m[1], +m[2]); }
+        else {
+          var upEl = document.getElementById('spdUpVal');
+          var downEl = document.getElementById('spdDownVal');
+          if (upEl) upEl.textContent = '--';
+          if (downEl) downEl.textContent = '--';
+        }
+      });
+    });
+  }
+
+  function updateSpeedDisplay(dlBytes, ulBytes) {
+    var now = Date.now();
+    var dt = (now - _speedStartTime) / 1000;
+    if (dt <= 0) dt = 0.001;
+    var dlMbps = dlBytes / dt / 1024 / 1024 * 8;
+    var ulMbps = ulBytes / dt / 1024 / 1024 * 8;
+    var upEl = document.getElementById('spdUpVal');
+    var downEl = document.getElementById('spdDownVal');
+    var bpsUl = document.getElementById('spdBpsUl');
+    var bpsDl = document.getElementById('spdBpsDl');
+    if (upEl) upEl.textContent = ulMbps >= 0.01 ? ulMbps.toFixed(2) : '0.00';
+    if (downEl) downEl.textContent = dlMbps >= 0.01 ? dlMbps.toFixed(2) : '0.00';
+    if (bpsUl) bpsUl.textContent = Math.round(ulBytes / dt * 8);
+    if (bpsDl) bpsDl.textContent = Math.round(dlBytes / dt * 8);
+    if (_lastBytes.dl === 0 && dlBytes > 0) {
+      _lastBytes.dl = dlBytes; _lastBytes.ul = ulBytes; _speedStartTime = now;
+    }
+  }
+
+  /* ====================   /* ==================== 视图：锁频设置 ==================== */
   function viewLock() {
     var html = '';
 
-    /* 4G锁频设置 */
-    html += card('4G\u9501\u9891\u8bbe\u7f6e', '',
+    html += card('4G锁频设置', '',
       '<div class="lock-section">' +
-        '<div class="lock-type-row"><label>\u9501\u9891\u7c7b\u578b</label></div>' +
+        '<div class="lock-type-row"><label>锁频类型</label></div>' +
         '<div class="lock-options">' +
-          '<label class="radio-opt"><input type="radio" name="lock4g" value="off" checked /> <span>\u5173\u95ed</span></label>' +
-          '<label class="radio-opt"><input type="radio" name="lock4g" value="freq" /> <span>\u9501\u5b9a\u9891\u70b9</span></label>' +
-          '<label class="radio-opt"><input type="radio" name="lock4g" value="cell" /> <span>\u9501\u5b9a\u5c0f\u533a</span></label>' +
-          '<label class="radio-opt"><input type="radio" name="lock4g" value="band" /> <span>\u9501\u5b9aBand</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock4g" value="off" checked /> <span>关闭</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock4g" value="freq" /> <span>锁定频点</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock4g" value="cell" /> <span>锁定小区</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock4g" value="band" /> <span>锁定Band</span></label>' +
         '</div>' +
-        '<button class="btn" style="margin-top:12px" onclick="toast(\'\u5df2\u4fdd\u5b58 4G \u9501\u9891\u8bbe\u7f6e\')">\u4fdd\u5b58\u8bbe\u7f6e</button>' +
+        '<button class="btn" style="margin-top:12px" id="save4GLock">保存设置</button>' +
       '</div>',
       { cls: 'lock-card' });
 
-    /* 5G锁频设置 */
-    html += card('5G\u9501\u9891\u8bbe\u7f6e', '',
+    html += card('5G锁频设置', '',
       '<div class="lock-section">' +
-        '<div class="lock-type-row"><label>\u9501\u9891\u7c7b\u578b</label></div>' +
+        '<div class="lock-type-row"><label>锁频类型</label></div>' +
         '<div class="lock-options">' +
-          '<label class="radio-opt"><input type="radio" name="lock5g" value="off" checked /> <span>\u5173\u95ed</span></label>' +
-          '<label class="radio-opt"><input type="radio" name="lock5g" value="freq" /> <span>\u9501\u5b9a\u9891\u70b9</span></label>' +
-          '<label class="radio-opt"><input type="radio" name="lock5g" value="cell" /> <span>\u9501\u5b9a\u5c0f\u533a</span></label>' +
-          '<label class="radio-opt"><input type="radio" name="lock5g" value="band" /> <span>\u9501\u5b9aBand</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock5g" value="off" checked /> <span>关闭</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock5g" value="freq" /> <span>锁定频点</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock5g" value="cell" /> <span>锁定小区</span></label>' +
+          '<label class="radio-opt"><input type="radio" name="lock5g" value="band" /> <span>锁定Band</span></label>' +
         '</div>' +
-        '<button class="btn" style="margin-top:12px" onclick="toast(\'\u5df2\u4fdd\u5b58 5G \u9501\u9891\u8bbe\u7f6e\')">\u4fdd\u5b58\u8bbe\u7f6e</button>' +
+        '<button class="btn" style="margin-top:12px" id="save5GLock">保存设置</button>' +
       '</div>',
       { cls: 'lock-card' });
 
-    /* 邻区扫描 */
-    html += card('\u90bb\u533a\u626b\u63cf', '',
-      '<div class="empty-state"><div class="empty-icon">\ud83d\udcc4</div><div class="empty-text">\u6682\u65e0\u90bb\u533a\u6570\u636e</div></div>',
-      { action: '<button class="btn sm" onclick="toast(\'\u6b63\u5728\u626b\u63cf\u90bb\u533a\u2026\')">\u626b\u63cf\u90bb\u533a</button>' });
+    html += card('邻区扫描', '',
+      '<div class="empty-state" id="nrScanResult">' +
+        '<div class="empty-icon">&#128202;</div><div class="empty-text">暂无邻区数据，点击扫描按钮</div></div>',
+      { action: '<button class="btn sm" id="scanNrBtn">扫描邻区</button>' });
 
-    /* 5G SSB 信息 */
-    html += card('5G SSB \u4fe1\u606f', '',
-      '<div class="empty-state"><div class="empty-icon">\ud83d\udcdf</div><div class="empty-text">\u6682\u65e0 SSB \u4fe1\u606f</div></div>',
-      { action: '<button class="btn sm" onclick="toast(\'\u6b63\u57223\u65b0 SSB \u4fe1\u606f\u2026\')">\u5237\u65b0SSB\u4fe1\u606f</button>' });
+    html += card('5G SSB 信息', '',
+      '<div class="empty-state" id="ssbResult">' +
+        '<div class="empty-icon">&#128196;</div><div class="empty-text">暂无 SSB 信息，点击刷新按钮</div></div>',
+      { action: '<button class="btn sm" id="ssbBtn">刷新SSB信息</button>' });
 
     return html;
   }
 
-  /* ==================== 视图：网络系统配置（截图6）==================== */
+  viewLock._after = function () {
+    var btn4g = document.getElementById('save4GLock');
+    if (btn4g) btn4g.onclick = function () {
+      var sel = document.querySelector('input[name="lock4g"]:checked');
+      if (!sel) return;
+      var val = sel.value;
+      btn4g.disabled = true; btn4g.innerHTML = '<span class="spin"></span> 设置中…';
+      var cmd = '';
+      if (val === 'off') cmd = 'AT^DLOCK=0,0';
+      else if (val === 'freq') cmd = 'AT^DLOCK=0,1,"00000000"';
+      else if (val === 'cell') cmd = 'AT^DLOCK=0,2,"00000000","00000000"';
+      else if (val === 'band') cmd = 'AT^DLOCK=0,3,1';
+      at(cmd).then(function (res) {
+        btn4g.disabled = false; btn4g.textContent = '保存设置';
+        toast(/OK/.test(res) ? '4G 锁频设置成功' : ('已发送: ' + res.trim()));
+      });
+    };
+
+    var btn5g = document.getElementById('save5GLock');
+    if (btn5g) btn5g.onclick = function () {
+      var sel = document.querySelector('input[name="lock5g"]:checked');
+      if (!sel) return;
+      var val = sel.value;
+      btn5g.disabled = true; btn5g.innerHTML = '<span class="spin"></span> 设置中…';
+      var cmd = '';
+      if (val === 'off') cmd = 'AT^DLOCK=2,0';
+      else if (val === 'freq') cmd = 'AT^DLOCK=2,1,"00000000"';
+      else if (val === 'cell') cmd = 'AT^DLOCK=2,2,"00000000","00000000"';
+      else if (val === 'band') cmd = 'AT^DLOCK=2,3,78';
+      at(cmd).then(function (res) {
+        btn5g.disabled = false; btn5g.textContent = '保存设置';
+        toast(/OK/.test(res) ? '5G 锁频设置成功' : ('已发送: ' + res.trim()));
+      });
+    };
+
+    var scanBtn = document.getElementById('scanNrBtn');
+    if (scanBtn) scanBtn.onclick = function () {
+      var resultDiv = document.getElementById('nrScanResult');
+      scanBtn.disabled = true; scanBtn.innerHTML = '<span class="spin"></span> 扫描中…';
+      if (resultDiv) resultDiv.innerHTML = '<div class="center-empty" style="padding:20px"><span class="spin"></span> 正在扫描邻区信息…</div>';
+      at('AT^DCCANR').then(function (raw) {
+        scanBtn.disabled = false; scanBtn.textContent = '扫描邻区';
+        if (!resultDiv) return;
+        var rows = '', found = false;
+        raw.split(/\r?\n/).forEach(function (l) {
+          var m = l.match(/^\^DCCANR:\s*(.*)/);
+          if (m) {
+            found = true;
+            var f = m[1].split(',');
+            rows += kv('小区 ID', f[0] || '\u2014') +
+              kv('PCI', f[1] || '\u2014') + kv('ARFCN', f[3] ? fmtArfcn(f[3]) : '\u2014') +
+              kv('RSRP', f[4] ? (+f[4]-140)+' dBm' : '\u2014');
+          }
+        });
+        resultDiv.innerHTML = found ? '<div style="padding:4px 0">'+rows+'</div>' :
+          (/ERROR/i.test(raw) ? '<div class="center-empty">扫描失败</div>' : '<div class="center-empty">未扫描到邻区</div>');
+      });
+    };
+
+    var ssbBtn = document.getElementById('ssbBtn');
+    if (ssbBtn) ssbBtn.onclick = function () {
+      var resultDiv = document.getElementById('ssbResult');
+      ssbBtn.disabled = true; ssbBtn.innerHTML = '<span class="spin"></span> 查询中…';
+      if (resultDiv) resultDiv.innerHTML = '<div class="center-empty" style="padding:20px"><span class="spin"></span> 查询 SSB…</div>';
+      at('AT^DSSBINFO').then(function (raw) {
+        ssbBtn.disabled = false; ssbBtn.textContent = '刷新SSB信息';
+        if (!resultDiv) return;
+        var items = '', found = false;
+        raw.split(/\r?\n/).forEach(function (l) {
+          var m = l.match(/^\^DSSBINFO:\s*(.*)/);
+          if (m) {
+            found = true;
+            var f = m[1].split(',');
+            items += '<div class="ssb-item"><div class="ssb-name">SSB #'+(f[0]||'?')+'</div>'+
+              '<div class="ssb-val '+(f[3]?ssbColor(+f[3]-140):'')+'">'+(f[3]?(+f[3]-140)+' dBm':'\u2014')+'</div>'+
+              '<div class="ssb-name">RSRP</div></div>';
+          }
+        });
+        resultDiv.innerHTML = found ? '<div class="ssb-grid">'+items+'</div>' :
+          (/ERROR/i.test(raw) ? '<div class="center-empty">查询失败</div>' : '<div class="center-empty">暂无 SSB 信息</div>');
+      });
+    };
+  };
+
+  /* ==================== 视图：网络系统配置 ==================== */
   function viewNetConf() {
-    return Promise.all([at('AT+COPS?'), at('AT+QTEMP?')]).then(function (r) {
+    return Promise.all([
+      at('AT+COPS?'), at('AT+QTEMP?'),
+      at('AT^DUTXPOWER?'),
+      at('AT^RFINFO?')
+    ]).then(function (r) {
       var cops = parseCOPS(r[0]);
       var tempMatch = (r[1] || '').match(/([+-]?\d+)/);
+      var txRaw = r[2] || '';
+      var rfRaw = r[3] || '';
+
+      /* 解析发射功率 */
+      var txInfo = '';
+      var txMatch = txRaw.match(/\^DUTXPOWER:\s*(.+)/);
+      if (txMatch) {
+        var txFields = txMatch[1].split(',');
+        txInfo = '\u25cf NR PA: ' + (txFields[0] || '\u2014') + ' dBm' +
+          (txFields[1] ? ' / \u5e73\u5747: ' + txFields[1] + ' dBm' : '');
+      } else {
+        /* 尝试 ^TXPWR 格式 */
+        var txM2 = txRaw.match(/\^TXPWR:\s*(.+)/);
+        if (txM2) {
+          txInfo = '\u25cf NR TX Power: ' + txM2[1].trim();
+        } else if (/ERROR/i.test(txRaw)) {
+          txInfo = '\u25cf \u6a21\u5757\u4e0d\u652f\u6301 ^DUTXPOWER \u547d\u4ee4';
+        } else {
+          txInfo = '\u25cf \u6682\u65e0 NR \u53d1\u5c04\u529f\u7387\u6570\u636e' +
+            (tempMatch ? '<br>NR \u6e29\u5ea6: ' + tempMatch[1] + ' \u00b0C' : '');
+        }
+      }
+
+      /* 解析 RF 信息（如支持） */
+      var rfInfo = '';
+      var rfMatch = rfRaw.match(/\^RFINFO:\s*(.+)/);
+      if (rfMatch) {
+        rfInfo = '<br>\u25cf RF Info: ' + esc(rfMatch[1].trim());
+      }
 
       var confHtml = '<div class="conf-grid">' +
         kv('\u7f51\u7edc\u5236\u5f0f\u4f18\u5148\u7ea7', '\u672a\u77e5') +
         kv('\u6f2d\u6e38\u8bbe\u7f6e', '\u5141\u8bb8\u4f7f\u7528\u6f2d\u6e38\u7f51\u7edc(\u53ef\u80fd\u4ea7\u751f\u989d\u5916\u8d39\u7528)') +
         kv('\u670d\u52a1\u7c7b\u578b', '\u540c\u65f6\u652f\u6301\u901a\u8bdd\u548c\u4e0a\u7f51') +
         '</div>' +
-        '<button class="btn ghost" style="margin-top:10px" onclick="toast(\'\u5df2\u5e94\u7528\u914d\u7f6e\')">\u5e94\u7528\u914d\u7f6e</button>';
+        '<button class="btn ghost" style="margin-top:10" onclick="toast(\'\u5df2\u5e94\u7528\u914d\u7f6e\')">\u5e94\u7528\u914d\u7f6e</button>';
 
-      var txHtml = '<div class="tx-info-box">' +
-        '\u25cf \u6682\u65e0 NR \u53d1\u5c04\u529f\u7387\u6570\u636e' +
-        (tempMatch ? '<br>NR PA: ' + tempMatch[1] + ' dBm' : '') +
-        '</div>';
+      var txHtml = '<div class="tx-info-box">' + txInfo + rfInfo + '</div>';
 
       return card('\u7f51\u7edc\u7cfb\u7edf\u914d\u7f6e', '',
         confHtml,
