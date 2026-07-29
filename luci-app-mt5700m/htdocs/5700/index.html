@@ -17,6 +17,7 @@
     --glass-border:rgba(255,255,255,.6);
     --hair:rgba(0,0,0,.05);
     --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    --sig-good:#22c55e; --sig-warn:#f59e0b; --sig-bad:#ef4444;
     --shadow:0 8px 32px rgba(15,23,42,.1);
     --shadow-lg:0 20px 60px rgba(15,23,42,.15);
     --radius:20px;
@@ -41,7 +42,6 @@
     background:#dbeafe url('bg1.jpg') center top / cover no-repeat fixed;
     overflow:hidden;
   }
-  /* overlay for readability over bg image */
   body::before{
     content:'';position:fixed;inset:0;background:rgba(220,232,254,.35);z-index:0;pointer-events:none;
   }
@@ -94,7 +94,7 @@
   .topbar .sub{font-size:12.5px;color:var(--text-2);margin-top:1px}
   .topbar-right{display:flex;align-items:center;gap:10px}
 
-  /* Refresh button — circular, next to title */
+  /* Refresh button */
   .refresh-btn{
     width:34px;height:34px;border-radius:50%;border:0;cursor:pointer;
     display:grid;place-items:center;background:var(--glass);backdrop-filter:blur(16px);
@@ -125,6 +125,7 @@
   .grid{display:grid;gap:14px}
   .grid.cols-2{grid-template-columns:repeat(2,1fr)}
   .grid.cols-3{grid-template-columns:repeat(3,1fr)}
+  .grid.cols-4{grid-template-columns:repeat(4,1fr)}
 
   /* ===== Cards ===== */
   .card{
@@ -146,6 +147,7 @@
   .badge.warn{background:rgba(245,158,11,.14);color:#d97706}
   .badge.bad{background:rgba(239,68,68,.14);color:#dc2626}
   .badge.white{background:rgba(255,255,255,.22);color:#fff}
+  .badge.blue{background:rgba(79,110,247,.14);color:#4F6EF7}
 
   /* Hero card (signal overview) */
   .hero{
@@ -163,19 +165,98 @@
   .hero .meta{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:14px;font-size:11.5px;position:relative;z-index:1}
   .hero .meta span b{color:#fff;font-weight:700;margin-left:4px}
 
+  /* ===== Signal bars — FIX: bright green, visible on any background ===== */
+  .bars{display:flex;align-items:flex-end;gap:4px;height:64px;margin:8px 0 6px}
+  .bars i{
+    flex:1;border-radius:4px 4px 2px 2px;background:rgba(127,127,127,.22);
+    transition:height .5s cubic-bezier(.2,.8,.2,1),background .3s;
+  }
+  .bars i.on{background:#22c55e}/* bright green — always visible */
+  .hero .bars i.on{background:#fff}/* white on blue hero bg */
+
+  /* Large signal bars for dashboard (screenshot 5 style) */
+  .bars-lg{display:flex;align-items:flex-end;gap:5px;height:80px;margin:10px 0 8px}
+  .bars-lg i{
+    width:18px;border-radius:5px 5px 3px 3px;background:rgba(127,127,127,.18);
+    transition:height .5s cubic-bezier(.2,.8,.2,1),background .3s;
+  }
+  .bars-lg i.on{background:linear-gradient(180deg,#22c55e 0%,#16a34a 100%);box-shadow:0 2px 8px rgba(34,197,94,.3)}
+
+  /* ===== Signal Dashboard (screenshot 5 style) ===== */
+  .sig-row{display:flex;gap:16px;align-items:stretch}
+  .sig-left{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:80px}
+  .sig-badges{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+  .sig-quality{text-align:center;font-size:11px;color:var(--text-3)}
+  .sig-quality b{font-size:18px;font-weight:800;color:var(--good)}
+
+  /* Three big metrics (RSRP / SINR / RSRQ) */
+  .sig-metrics{display:flex;gap:12px;flex:1}
+  .sig-metric{
+    flex:1;text-align:center;padding:14px 10px;border-radius:var(--radius-sm);
+    background:rgba(127,127,127,.04);border:1px solid var(--hair);
+  }
+  .sig-metric .m-val{font-size:32px;font-weight:800;line-height:1.1;letter-spacing:-1px}
+  .sig-metric .m-label{font-size:11px;color:var(--text-3);margin-top:2px}
+  .sig-metric .m-unit{font-size:12px;color:var(--text-2);font-weight:600;margin-top:1px}
+  .sig-metric .m-desc{font-size:10px;color:var(--text-3);margin-top:2px}
+  .sig-metric.m-rsrp .m-val{color:var(--sig-good)}
+  .sig-metric.m-sinr .m-val{color:var(--sig-warn)}
+  .sig-metric.m-rsrq .m-val{color:var(--sig-bad)}
+
+  /* Network params grid (screenshot 5 right column) */
+  .net-params{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+  .net-params .kv{padding:5px 0;border-bottom:1px solid var(--hair);font-size:12.5px}
+  .net-params .kv:last-child{border-bottom:0}
+
+  /* Carrier aggregation card */
+  .carrier-card{border-left:4px solid var(--accent);padding-left:14px}
+  .carrier-card .c-title{font-weight:700;font-size:13.5px;color:var(--accent);margin-bottom:8px}
+  .carrier-card .c-band{font-weight:700;font-size:13px;margin-bottom:6px}
+  .carrier-detail{display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:12px}
+  .carrier-detail .kv{padding:4px 0;border-bottom:1px solid var(--hair)}
+  .carrier-detail .kv:last-child{border-bottom:0}
+  .carrier-detail .v.mcs-good{color:var(--sig-good);font-weight:700}
+  .carrier-detail .v.mcs-bad{color:var(--sig-bad);font-weight:700}
+
+  /* HCSQ Cell cards (screenshot 3 style) */
+  .cell-card{
+    background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:14px;
+  }
+  .cell-card .cell-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .cell-card .cell-name{font-weight:700;font-size:14px}
+  .cell-card .cell-pci{font-size:11px;color:var(--text-3)}
+
+  /* Colored value bars (like screenshot 3) */
+  .val-bar{
+    display:flex;align-items:center;gap:8px;margin:4px 0;
+  }
+  .val-bar .bar-wrap{flex:1;height:26px;border-radius:6px;overflow:hidden;background:rgba(127,127,127,.1)}
+  .val-bar .bar-fill{height:100%;display:flex;align-items:center;justify-content:center;
+    font-size:11.5px;font-weight:700;color:#fff;border-radius:inherit;transition:width .5s;
+  }
+  .val-bar .bar-fill.bg-good{background:linear-gradient(135deg,#22c55e,#16a34a)}
+  .val-bar .bar-fill.bg-warn{background:linear-gradient(135deg,#f59e0b,#d97706)}
+  .val-bar .bar-fill.bg-bad{background:linear-gradient(135deg,#ef4444,#dc2626)}
+  .val-bar .bar-label{font-size:11.5px;font-weight:600;color:var(--text-2);min-width:48px;text-align:right}
+
+  /* SSB beam info (screenshot 3 bottom) */
+  .ssb-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .ssb-item{
+    flex:1;min-width:70px;text-align:center;padding:10px 6px;border-radius:12px;
+    background:rgba(127,127,127,.04);border:1px solid var(--hair);
+  }
+  .ssb-item .ssb-name{font-size:11px;color:var(--text-3);margin-bottom:4px}
+  .ssb-item .ssb-val{font-size:13px;font-weight:700}
+  .ssb-item .ssb-val.c-good{color:var(--sig-good)}
+  .ssb-item .ssb-val.c-warn{color:var(--sig-warn)}
+  .ssb-item .ssb-val.c-bad{color:var(--sig-bad)}
+
   /* KV rows */
   .kv{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px solid var(--hair);font-size:13px}
   .kv:last-child{border-bottom:0}
   .kv .k{color:var(--text-2);flex:none;min-width:72px}
   .kv .v{font-weight:600;text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}
-
-  /* Signal bars */
-  .bars{display:flex;align-items:flex-end;gap:4px;height:64px;margin:8px 0 6px}
-  .bars i{
-    flex:1;border-radius:4px 4px 2px 2px;background:rgba(127,127,127,.18);
-    transition:height .5s cubic-bezier(.2,.8,.2,1),background .3s;
-  }
-  .bars i.on{background:var(--accent-grad)}
 
   /* Metric with progress bar */
   .metric{margin-bottom:10px}
@@ -196,7 +277,8 @@
   .btn:active{transform:scale(.96)}
   .btn.ghost{background:var(--glass-strong);color:var(--text);box-shadow:none;border:1px solid var(--glass-border)}
   .btn.ghost:hover{background:var(--glass);transform:none}
-  .btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important}
+  .btn.sm{padding:6px 14px;font-size:11.5px}
+  .btn.disabled{opacity:.45;cursor:not-allowed;transform:none!important}
 
   /* Form fields */
   .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
@@ -249,23 +331,48 @@
   .sms-item .date{font-size:11px;color:var(--text-3)}
   .sms-item .body{font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--text-2)}
 
+  /* Temp monitoring cards (screenshot 1 style) */
+  .temp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .temp-item{
+    text-align:center;padding:14px 10px;border-radius:var(--radius-sm);
+    background:rgba(127,127,127,.03);border:1px solid var(--hair);
+  }
+  .temp-item .t-name{font-size:11px;color:var(--text-3);margin-bottom:6px}
+  .temp-item .t-val{font-size:24px;font-weight:800;color:var(--sig-good)}
+
   /* ===== Responsive ===== */
+  @media (max-width:1200px){
+    .temp-grid{grid-template-columns:repeat(3,1fr)}
+    .sig-metrics{flex-wrap:wrap}
+    .sig-metric{min-width:100px}
+  }
   @media (max-width:1024px){
     .grid.cols-3{grid-template-columns:repeat(2,1fr)}
+    .grid.cols-4{grid-template-columns:repeat(2,1fr)}
+    .temp-grid{grid-template-columns:repeat(2,1fr)}
   }
   @media (max-width:768px){
     .shell{padding:12px;gap:12px}
-    .sidebar{display:none}/* mobile: no sidebar, use full width */
+    .sidebar{display:none}
     .main{width:100%}
-    .grid.cols-2,.grid.cols-3{grid-template-columns:1fr}
+    .grid.cols-2,.grid.cols-3,.grid.cols-4{grid-template-columns:1fr}
     .hero .big{font-size:30px}
     .topbar h1{font-size:20px}
+    .sig-row{flex-direction:column;align-items:center}
+    .sig-metrics{width:100%;flex-direction:row;flex-wrap:wrap;justify-content:center}
+    .sig-metric{flex:1;min-width:90px}
+    .net-params{grid-template-columns:1fr}
+    .carrier-detail{grid-template-columns:1fr}
+    .temp-grid{grid-template-columns:repeat(2,1fr)}
   }
   @media (max-width:480px){
     .shell{padding:8px;gap:8px}
     .card{padding:14px 16px}
     .kv{font-size:12.5px;padding:7px 0}
     .topbar h1{font-size:18px}
+    .sig-metric .m-val{font-size:24px}
+    .bars-lg i{width:14px}
+    .temp-grid{grid-template-columns:1fr 1fr}
   }
 </style>
 </head>

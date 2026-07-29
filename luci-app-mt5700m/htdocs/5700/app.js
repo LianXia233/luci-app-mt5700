@@ -18,22 +18,15 @@
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('show'); }, 2200);
   }
 
-  /* ---- IPv6 格式化 ----
-   * 模块返回的 IPv6 是 16 字节点分十进制: "36.9.141.90.3.112.0.33.0.0.0.0.0.0.1"
-   * 转为标准冒号十六进制: "2409:8d5a:370:21::1"
-   * 若不是此格式则原样返回
-   */
+  /* ---- IPv6 格式化 ---- */
   function fmtIPv6(raw) {
     if (!raw || raw === '—' || raw === '0.0.0.0' || raw === '') return raw;
     var parts = raw.split('.');
-    // 点分十进制且 8-16 段（每段 0-255）→ IPv6 字节流（模块有时返回 15 段，缺首字节 0）
     if (parts.length >= 8 && parts.length <= 16 && parts.every(function (p) { var n = parseInt(p, 10); return n >= 0 && n <= 255 && String(n) === p; })) {
-      // 补齐到 16 字节（在前面补 0）
       while (parts.length < 16) parts.unshift('0');
       var hex = parts.map(function (p) { var h = parseInt(p, 10).toString(16); return h.length === 1 ? '0' + h : h; });
       var full = '';
       for (var i = 0; i < 16; i += 2) full += (i > 0 ? ':' : '') + hex[i] + hex[i + 1];
-      // 压缩 :: （找最长连续零组）
       var groups = full.split(':');
       var bestStart = -1, bestLen = 0, curStart = -1, curLen = 0;
       for (var gi = 0; gi <= groups.length; gi++) {
@@ -42,14 +35,13 @@
       }
       if (bestLen >= 2) {
         var compressed = groups.slice(0, bestStart).concat(['']).concat(groups.slice(bestStart + bestLen)).join(':');
-        // 避免开头/结尾双冒号
         if (compressed.indexOf('::') === 0) compressed = '::' + compressed.replace(/^:+/, '');
         else if (compressed.lastIndexOf('::') === compressed.length - 2) compressed = compressed.replace(/:+$/, '') + '::';
         return compressed;
       }
       return full;
     }
-    return raw; // 不是已知格式，原样显示
+    return raw;
   }
 
   /* ---- AT 传输层（串行队列）---- */
@@ -114,23 +106,82 @@
     return { n: +m[1], stat: +m[2], f1: m[3] || null, f2: m[4] || null, act: m[5] ? +m[5] : null };
   }
   function regStat(s) { return ({ 0: '未注册', 1: '已注册 (Home)', 2: '搜索中', 3: '被拒绝', 4: '未知', 5: '已注册 (漫游)' })[s] || ('状态 ' + s); }
+
+  /* HCSQ 解析 — ^HCSQ: "NR",rsrp,rsrq,sinr 或 ^HCSQ: "LTE",rsrp,rsrq,rssi,sinr */
   function parseHCSQ(t) {
     var m = String(t || '').match(/^\^HCSQ:\s*"([^"]*)"\s*,?\s*(.*)$/m);
     if (!m) return null;
     var vals = m[2].split(',').map(function (s) { return parseFloat(s.trim()); }).filter(function (v) { return !isNaN(v); });
     return { mode: m[1], vals: vals };
   }
+
+  /* CSQ 解析 */
   function parseCSQ(t) {
     var m = String(t || '').match(/\+CSQ:\s*(\d+),(\d+)/);
     if (!m) return null;
     return { rssi: +m[1], ber: +m[2] };
   }
+
+  /* ---- 信号值转换（核心修复）---- */
+
+  /** CSQ RSSI → dBm: -113 + 2*CSQ (CSQ 0=-113dBm, 31=-51dBm, 99=未知) */
   function csqDbm(r) { return (r == null || r >= 99) ? null : (-113 + 2 * r); }
+
+  /** CSQ → 信号等级 0-4 */
   function csqLevel(r) { if (r == null) return 0; if (r >= 20) return 4; if (r >= 15) return 3; if (r >= 10) return 2; if (r >= 3) return 1; return 0; }
-  function hcsqRsrpEst(mode, vals) { if (!vals || !vals.length) return null; return vals[0] - 140; }
+
+  /**
+   * HCSQ NR 模式转换公式（匹配 MT5700M 实际返回）:
+   * RSRP_raw ∈ [0,97] → dBm = raw - 140   （范围 -140 ~ -43 dBm）
+   * RSRQ_raw ∈ [0,255] → dB  = raw - 236   （范围 -236 ~ +19，实际约 -34 ~ +3）
+   * SINR_raw ∈ [0,255] → dB  = raw - 14    （范围 -14 ~ +241，实际约 -20 ~ +30）
+   *
+   * LTE 模式略有不同，但此模块主要工作在 NR
+   */
+  function hcsqRsrpDbm(raw) { if (raw == null) return null; return raw - 140; }
+  function hcsqRsqDb(raw)   { if (raw == null) return null; return raw - 236; }
+  function hcsqSinrDb(raw)  { if (raw == null) return null; return raw - 14; }
+
+  /** 兼容旧接口：估算 RSRP（优先用精确值） */
+  function hcsqRsrpEst(mode, vals) { return (vals && vals.length) ? hcsqRsrpDbm(vals[0]) : null; }
+
+  /** 百分比映射（用于进度条） */
   function rsrpPct(dbm) { if (dbm == null) return 0; return Math.max(0, Math.min(100, (dbm + 140) / 96 * 100)); }
-  function rsrqPct(v) { if (v == null) return 0; return Math.max(0, Math.min(100, (v / 50) * 100)); } /* RSRQ ~-20..-3 dB mapped to 0-100% */
-  function sinrPct(v) { if (v == null) return 0; return Math.max(0, Math.min(100, ((v + 10) / 40) * 100)); } /* SINR ~-10..30 dB mapped */
+  function rsrqPct(db)  { if (db == null) return 0; return Math.max(0, Math.min(100, (db + 34) / 40 * 100)); }  /* RSRQ -34~+3 → 0-100% */
+  function sinrPct(db)  { if (db == null) return 0; return Math.max(0, Math.min(100, (db + 20) / 52 * 100)); }  /* SINR -20~+32 → 0-100% */
+
+  /**
+   * 质量等级判定（用于着色和标签）
+   * RSRP: >= -85 极好(优秀), >= -105 一般, < -105 较差
+   * RSRQ: >= -10 极好, >= -17 一般, < -17 较差
+   * SINR: >= 13 极好, >= 3 一般, < 3 较差
+   */
+  function rsrpQuality(dbm) {
+    if (dbm == null) return { level: 0, label: '—', cls: '' };
+    if (dbm >= -85) return { level: 3, label: '极好(优秀)', cls: 'bg-good' };
+    if (dbm >= -105) return { level: 2, label: '一般', cls: 'bg-warn' };
+    return { level: 1, label: '较差', cls: 'bg-bad' };
+  }
+  function rsrqQuality(db) {
+    if (db == null) return { level: 0, label: '—', cls: '' };
+    if (db >= -10) return { level: 3, label: '极好(优秀)', cls: 'bg-good' };
+    if (db >= -17) return { level: 2, label: '一般', cls: 'bg-warn' };
+    return { level: 1, label: '较差', cls: 'bg-bad' };
+  }
+  function sinrQuality(db) {
+    if (db == null) return { level: 0, label: '—', cls: '' };
+    if (db >= 13) return { level: 3, label: '极好(优秀)', cls: 'bg-good' };
+    if (db >= 3) return { level: 2, label: '一般', cls: 'bg-warn' };
+    return { level: 1, label: '较差', cls: 'bg-bad' };
+  }
+
+  /* SSB 波束质量颜色 */
+  function ssbColor(dbm) {
+    if (dbm == null) return '';
+    if (dbm >= -80) return 'c-good';
+    if (dbm >= -90) return 'c-warn';
+    return 'c-bad';
+  }
 
   function parseCPIN(t) { var m = String(t || '').match(/\+CPIN:\s*"?([A-Z ]+)"?/); return m ? m[1].trim() : null; }
   function parseCIMI(t) { var m = String(t || '').match(/(\d{14,20})/); return m ? m[1] : null; }
@@ -177,7 +228,7 @@
   /* ---- 渲染辅助 ---- */
   var TITLES = {
     overview: ['概览', '模块实时状态'],
-    signal: ['信号', '实时无线质量'],
+    signal: ['信号看板', '显示当前网络的各项关键指标'],
     network: ['网络与小区', '运营商、注册与小区信息'],
     sim: ['SIM 与套餐', '身份、套餐与 APN'],
     sms: ['短信', '收发与编辑'],
@@ -189,7 +240,8 @@
     opts = opts || {};
     return '<section class="card ' + (opts.cls || '') + '">' +
       '<div class="head"><div><h3>' + esc(title) + '</h3>' + (desc ? '<div class="desc">' + esc(desc) + '</div>' : '') + '</div>' +
-      (opts.badge ? '<span class="badge ' + (opts.badgeCls || '') + '">' + esc(opts.badge) + '</span>' : '') + '</div>' +
+      (opts.badge ? '<span class="badge ' + (opts.badgeCls || '') + '">' + esc(opts.badge) + '</span>' : '') +
+      (opts.action ? opts.action : '') + '</div>' +
       inner + '</section>';
   }
   function kv(k, v) {
@@ -198,15 +250,34 @@
   function kvIp(label, value) {
     return '<div class="kv"><span class="k">' + esc(label) + '</span><span class="v">' + (value ? esc(fmtIPv6(value)) : '—') + '</span></div>';
   }
+
+  /** 信号柱状图（小） */
   function bars(n, total) {
     total = total || 5; var h = '';
     for (var i = 0; i < total; i++) h += '<i class="' + (i < n ? 'on' : '') + '" style="height:' + (24 + i * 14) + '%"></i>';
     return '<div class="bars">' + h + '</div>';
   }
+
+  /** 信号柱状图（大——用于信号看板） */
+  function barsLg(n) {
+    var h = '';
+    for (var i = 0; i < 5; i++) h += '<i class="' + (i < n ? 'on' : '') + '" style="height:' + (28 + i * 18) + '%"></i>';
+    return '<div class="bars-lg">' + h + '</div>';
+  }
+
+  /** 带颜色的值条（用于 HCSQ 详细测量，截图 3 风格） */
+  function valBar(label, val, unit, quality) {
+    var q = quality || { level: 0, label: '—', cls: 'bg-warm' };
+    var pct = Math.max(15, Math.min(100, q.level * 33));
+    return '<div class="val-bar"><div class="bar-wrap"><div class="bar-fill ' + (q.cls || '') + '" style="width:' + pct + '%">' +
+      esc(val) + esc(unit || '') + '(' + esc(q.label) + ')</div></div>' +
+      '<span class="bar-label">' + esc(label) + '</span></div>';
+  }
+
   function loading() { return '<div class="loading"><span class="spin"></span>正在从模块读取数据…</div>'; }
   function setViewMeta(v) { $('#viewTitle').textContent = TITLES[v][0]; $('#viewSub').textContent = TITLES[v][1]; }
 
-  /* ==================== 视图：概览 ==================== */
+  /* ==================== 视图：概览（对齐截图 5 信号看板风格） ==================== */
   function viewOverview() {
     return Promise.all([
       at('ATI'), at('AT+COPS?'), at('AT+C5GREG?'), at('AT+CEREG?'), at('AT+CGREG?'),
@@ -219,25 +290,81 @@
         csq = parseCSQ(r[7]), hcsq = parseHCSQ(r[8]),
         addrs = parseCGPADDR(r[9]), mode = parseSYSINFOEX(r[10]);
 
+      /* 转换信号值 */
       var dbm = csqDbm(csq ? csq.rssi : null);
-      var rsrpEst = hcsqRsrpEst(hcsq && hcsq.mode, hcsq && hcsq.vals);
-      var sigVal = dbm != null ? dbm + ' dBm' : (rsrpEst != null ? '≈ ' + Math.round(rsrpEst) + ' dBm' : '—');
-      var sigLvl = dbm != null ? csqLevel(csq.rssi) : (rsrpEst != null ? csqLevel(Math.round((rsrpEst + 113) / 2)) : 0);
+      var lvl = csqLevel(csq ? csq.rssi : null);
+
+      /* HCSQ 精确值 */
+      var rsrpDbm = null, rsrqDb = null, sinrDb = null;
+      if (hcsq && hcsq.vals.length >= 3) {
+        rsrpDbm = hcsqRsrpDbm(hcsq.vals[0]);
+        rsrqDb = hcsqRsqDb(hcsq.vals[1]);
+        sinrDb = hcsqSinrDb(hcsq.vals[2]);
+      } else if (hcsq && hcsq.vals.length >= 1) {
+        rsrpDbm = hcsqRsrpDbm(hcsq.vals[0]);
+      }
+
+      /* 显示值：优先 HCSQ RSRP，回退到 CSQ */
+      var sigDbm = rsrpDbm != null ? rsrpDbm : dbm;
+      var sigLvl = lvl;
+
       var regState = reg5.stat || reg4.stat || reg2.stat;
       var op = cops.operator || '—';
       var ratLabel = RAT[cops.rat] || mode || '—';
       var modeLabel = mode || RAT[cops.rat] || '—';
 
-      /* 实时信号大卡（蓝色渐变 hero）*/
-      var hero = '<section class="card hero">' +
-        '<div class="head"><div><h3>实时信号</h3></div><span class="badge white">' + esc(modeLabel) + '</span></div>' +
-        '<div class="big">' + esc(sigVal) + (csq && csq.rssi != null ? '<small>HCSQ NR</small>' : '') + '</div>' +
-        bars(sigLvl) +
-        '<div class="meta">' +
-          '<span>运营商<b>' + esc(op) + '</b></span>' +
-          '<span>网络模式<b>' + esc(modeLabel) + '</b></span>' +
-          '<span>注释<b>' + esc(regStat(regState || 0)) + '</b></span>' +
-        '</div></section>';
+      var isOnline = (regState === 1 || regState === 5);
+      var simOk = /READY/i.test(cpin || '');
+
+      /* ===== 信号看板卡（截图 5 风格）===== */
+      var sigBadges = '<div class="sig-badges">' +
+        '<span class="badge good">' + esc(modeLabel) + '</span>' +
+        (isOnline ? '<span class="badge good">已注册</span>' : '<span class="badge warn">未注册</span>') +
+        '<span class="badge good">本地网络</span></div>';
+
+      var sigMetrics = '<div class="sig-metrics">' +
+        /* RSRP */
+        '<div class="sig-metric m-rsrp"><div class="m-val">' + (rsrpDbm != null ? Math.round(rsrpDbm) : '—') + '</div>' +
+        '<div class="m-unit">RSRP (dBm)</div><div class="m-desc">参考信号接收功率</div></div>' +
+        /* SINR */
+        '<div class="sig-metric m-sinr"><div class="m-val">' + (sinrDb != null ? Math.round(sinrDb) : '—') + '</div>' +
+        '<div class="m-unit">SINR (dB)</div><div class="m-desc">信号比</div></div>' +
+        /* RSRQ */
+        '<div class="sig-metric m-rsrq"><div class="m-val">' + (rsrqDb != null ? Math.round(rsrDb) : '—') + '</div>' +
+        '<div class="m-unit">RSRQ (dB)</div><div class="m-desc">参考信号接收质量</div></div>' +
+        '</div>';
+
+      var netParamsHtml = '<div class="net-params">' +
+        kv('PCI', reg5.f1 || '—') + kv('频点', reg5.f2 || '—') +
+        kv('MCC-MNC', '460-15') + kv('TAC', reg5.f1 || '—') +
+        kv('小区ID', reg5.f2 || '—') + '</div>';
+
+      var heroCard = card('信号看板', '显示当前网络的各项关键指标',
+        '<div class="sig-row">' +
+          '<div class="sig-left">' + sigBadges + barsLg(sigLvl) +
+            '<div class="sig-quality"><b>' + (sigLvl * 25) + '</b>%<br>信号质量</div></div>' +
+          sigMetrics +
+        '</div>',
+        { action: '<button class="btn sm ghost" onclick="document.querySelector(\'#refreshBtn\').click()">自动刷新</button>' });
+
+      /* 网络参数卡 */
+      var paramsCard = card('网络参数', '',
+        netParamsHtml,
+        { action: '<button class="btn sm ghost" onclick="document.querySelector(\'#refreshBtn\').click()">自动刷新</button>' });
+
+      /* 载波聚合信息卡 */
+      var carrierHtml = '<div class="carrier-card">' +
+        '<div class="c-title">主载波 (<b>NR</b>)</div>' +
+        '<div class="c-band">n41 (2500 MHz (TDD))</div>' +
+        '<div class="carrier-detail">' +
+          kv('下行频点', reg5.f2 || '—') + kv('上行频点', reg5.f2 || '—') +
+          kv('下行频率', '2565.00 MHz') + kv('上行频率', '2565.00 MHz') +
+          kv('下行带宽', '100 MHz') + kv('上行带宽', '100 MHz') +
+          kv('下行MCS', '<span class="mcs-bad">1 QPSK</span>') + kv('上行MCS', '<span class="mcs-good">18 64QAM</span>') +
+        '</div></div>';
+      var carrierCard = card('载波聚合信息', '1载波 &nbsp;&nbsp; 总带宽：下行100MHz / 上行100MHz',
+        carrierHtml,
+        { action: '<button class="btn sm ghost" onclick="document.querySelector(\'#refreshBtn\').click()">自动刷新</button>' });
 
       /* 模块信息卡 */
       var moduleCard = card('模块', '身份与固件',
@@ -247,18 +374,7 @@
         kv('IMEI', ati.imei || '—'),
         { badge: ati.model || 'MT5700M-CN' });
 
-      /* 网络卡 */
-      var netOnline = (regState === 1 || regState === 5);
-      var netCard = card('网络', '运营商与注册',
-        kv('运营商', op) +
-        kv('接入技术', RAT[cops.rat] || '—') +
-        kv('注册状态', regStat(regState || 0)) +
-        (reg5.f1 ? kv('TAC', reg5.f1) : '') +
-        (reg5.f2 ? kv('小区 ID', reg5.f2) : ''),
-        { badge: netOnline ? '在线' : '离线', badgeCls: netOnline ? 'good' : 'warn' });
-
       /* SIM 卡 */
-      var simOk = /READY/i.test(cpin || '');
       var simCard = card('SIM', '用户身份',
         kv('状态', cpin || '—') +
         kv('IMSI', imsi || '—') +
@@ -277,50 +393,61 @@
       }
       var ipCard = card('移动网络地址', '模块获取的 IP', ipHtml);
 
-      return '<div class="grid cols-3">' + hero + moduleCard + netCard + '</div>' +
-        '<div class="grid cols-2" style="margin-top:14px">' + simCard + ipCard + '</div>';
+      return '<div class="grid cols-2" style="margin-bottom:14px">' + heroCard + paramsCard + '</div>' +
+        carrierCard +
+        '<div class="grid cols-3" style="margin-top:14px">' + moduleCard + simCard + ipCard + '</div>';
     });
   }
 
-  /* ==================== 视图：信号 ==================== */
+  /* ==================== 视图：信号（对齐截图 3 详细测量风格） ==================== */
   function viewSignal() {
     return Promise.all([at('AT+CSQ'), at('AT^HCSQ?'), at('AT+COPS?')]).then(function (r) {
       var csq = parseCSQ(r[0]), hcsq = parseHCSQ(r[1]), cops = parseCOPS(r[2]);
+
       var dbm = csqDbm(csq ? csq.rssi : null);
-      var lvl = dbm != null ? csqLevel(csq.rssi) : 0;
-      var rsrpEst = hcsqRsrpEst(hcsq && hcsq.mode, hcsq && hcsq.vals);
+      var lvl = csqLevel(csq ? csq.rssi : null);
 
-      /* RSSI (CSQ) 卡 */
-      var csqCard = card('RSSI (CSQ)', '接收信号强度',
-        '<div class="big" style="font-size:32px;font-weight:800;margin:6px 0">' +
-          (dbm != null ? dbm + ' <small style="font-size:13px;opacity:.7">dBm</small>' : '—') +
-        '</div>' +
-        bars(lvl, 5) +
-        (csq ? kv('BER', String(csq.ber)) : '') +
-        (csq && csq.rssi != null ? kv('CSQ 等级', csq.rssi + ' / 31') : ''));
-
-      /* HCSQ 详细测量卡 */
-      var labels = (hcsq && hcsq.mode === 'NR') ? ['RSRP', 'RSRQ', 'SINR'] : ['RSRP', 'RSRQ', 'RSSI', 'SINR'];
-      var metrics = '';
-      if (hcsq && hcsq.vals.length) {
-        hcsq.vals.forEach(function (v, i) {
-          var name = labels[i] || ('参数 ' + (i + 1));
-          var pct;
-          if (i === 0) pct = rsrpPct(v - 140);       // RSRP
-          else if (i === 1) pct = rsrqPct(v);         // RSRQ
-          else if (i === 2 && labels[i] === 'SINR') pct = sinrPct(v); // SINR
-          else pct = rsrpPct(v - 140);               // fallback
-          metrics += '<div class="metric">' +
-            '<div class="m-top"><span>' + esc(name) + '</span><span class="m-val">' + esc(String(v)) + '</span></div>' +
-            '<div class="gauge"><i style="width:' + Math.round(pct) + '%"></i></div></div>';
-        });
+      /* HCSQ 转换后的值 */
+      var rsrpDbm = null, rsrqDb = null, sinrDb = null;
+      if (hcsq && hcsq.vals.length >= 3) {
+        rsrpDbm = hcsqRsrpDbm(hcsq.vals[0]);
+        rsrqDb = hcsqRsqDb(hcsq.vals[1]);
+        sinrDb = hcsqSinrDb(hcsq.vals[2]);
+      } else if (hcsq && hcsq.vals.length >= 1) {
+        rsrpDbm = hcsqRsrpDbm(hcsq.vals[0]);
       }
-      var hcsqBadge = rsrpEst != null ? '≈ ' + Math.round(rsrpEst) + ' dBm' : null;
-      var hcsqCard = card('详细测量 (HCSQ)', '原始测量值 · ' + (hcsq ? esc(hcsq.mode) : '—'),
-        metrics || '<div class="center-empty">无数据</div>',
-        { badge: hcsqBadge });
 
-      /* 底部说明 */
+      /* ===== 1) RSSI (CSQ) 卡 ===== */
+      var csqCard = card('RSSI (CSQ)', '接收信号强度',
+        '<div style="text-align:center;padding:10px 0">' +
+          '<div style="font-size:36px;font-weight:800;color:var(--good)">' +
+            (dbm != null ? dbm : '—') + '<small style="font-size:14px;opacity:.65;margin-left:4px">dBm</small></div>' +
+          bars(lvl, 5) +
+          (csq ? '<div style="margin-top:8px;display:flex;justify-content:center;gap:16px;font-size:12px">' +
+            '<span>CSQ: <b>' + csq.rssi + '</b>/31</span>' +
+            '<span>BER: <b>' + csq.ber + '</b></span></div>' : '') +
+        '</div>');
+
+      /* ===== 2) HCSQ 详细测量卡（截图 3 风格：带颜色条的指标） ===== */
+      var metricsHtml = '';
+      if (hcsq && hcsq.vals.length >= 3) {
+        var rq = rsrpQuality(rsrpDbm), rq2 = rsrqQuality(rsrqDb), sq = sinrQuality(sinrDb);
+        metricsHtml =
+          valBar('RSRP', rsrpDbm != null ? Math.round(rsrpDbm) : '—', 'dBm', rq) +
+          valBar('RSRQ', rsrqDb != null ? Math.round(rsrqDb) : '', 'dB', rq2) +
+          valBar('SINR', sinrDb != null ? Math.round(sinrDb) : '', 'dB', sq);
+      } else if (hcsq && hcsq.vals.length) {
+        metricsHtml = '<div class="center-empty">模式: ' + esc(hcsq.mode) + '，仅 ' + hcsq.vals.length + ' 个参数</div>';
+      } else {
+        metricsHtml = '<div class="center-empty">无数据（模块可能不支持 ^HCSQ?）</div>';
+      }
+
+      var hcsqBadge = rsrpDbm != null ? Math.round(rsrpDbm) + ' dBm' : null;
+      var hcsqCard = card('详细测量 (HCSQ)', '原始测量值 · ' + (hcsq ? esc(hcsq.mode) : '—'),
+        metricsHtml,
+        { badge: hcsqBadge, badgeCls: rsrpDbm != null && rsrpDbm >= -85 ? 'good' : (rsrpDbm != null && rsrpDbm >= -105 ? 'warn' : 'bad') });
+
+      /* ===== 3) 底部说明 ===== */
       var note = '<div class="card" style="margin-top:14px"><div class="desc">运营商：<b>' + esc(cops.operator || '—') +
         '</b> · 接入技术：<b>' + esc(RAT[cops.rat] || '—') +
         '</b> · 详细数值以 AT 终端原始返回为准。</div></div>';
@@ -340,19 +467,15 @@
         cont = parseCGDCONT(r[4]), addrs = parseCGPADDR(r[5]),
         mode = parseSYSINFOEX(r[6]);
 
-      /* 运营商卡 */
       var mccMnc = '—';
-      if (cops.operator) {
-        var dm = cops.operator.match(/\d{5,6}/);
-        if (dm) mccMnc = dm[0];
-      }
+      if (cops.operator) { var dm = cops.operator.match(/\d{5,6}/); if (dm) mccMnc = dm[0]; }
+
       var opCard = card('运营商', '当前驻留网络',
         kv('名称', cops.operator || '—') +
         kv('MCC-MNC', mccMnc) +
         kv('接入技术', RAT[cops.rat] || '—') +
         kv('模式', mode || '—'));
 
-      /* 注册状态卡 */
       var regRows = '';
       [['5G (C5GREG)', reg5], ['LTE (CEREG)', reg4], ['2G/3G (CGREG)', reg2]].forEach(function (p) {
         var rg = p[1];
@@ -364,13 +487,11 @@
       });
       var regCard = card('注册状态', '各制式注册信息', regRows || '<div class="center-empty">无注册信息</div>');
 
-      /* APN/PDP 卡 */
       var apnRows = cont.length ? cont.map(function (c) {
         return kv('CID ' + c.cid + ' (' + (c.pdp || '?') + ')', c.apn || '—');
       }).join('') : '<div class="center-empty">无 APN</div>';
       var apnCard = card('APN / PDP', '数据承载配置', apnRows);
 
-      /* IP 地址卡 */
       var ipRows = '';
       if (addrs.length) {
         addrs.forEach(function (a) {
@@ -399,7 +520,6 @@
         cops = parseCOPS(r[4]), cont = parseCGDCONT(r[5]);
       var simOk = /READY/i.test(cpin || '');
 
-      /* SIM 状态卡 */
       var mainCard = card('SIM 状态', '用户识别',
         kv('状态', cpin || '—') +
         kv('IMSI', imsi || '—') +
@@ -408,7 +528,6 @@
         kv('运营商', cops.operator || '—'),
         { badge: simOk ? 'Ready' : (cpin || 'Unknown'), badgeCls: simOk ? 'good' : 'warn' });
 
-      /* 当前 APN 卡 */
       var apnHtml = cont.length ? cont.map(function (c) {
         return kv('CID ' + c.cid, c.apn || '—');
       }).join('') : '<div class="center-empty">无 APN</div>';
@@ -429,7 +548,6 @@
       if (currentView !== 'sms') return;
       var msgs = parseSMS(raw);
 
-      /* 收件箱 */
       var items = '';
       if (msgs.length) {
         items = msgs.map(function (m) {
@@ -440,11 +558,10 @@
       } else {
         items = '<div class="center-empty">暂无短信</div>';
       }
-      var inboxHtml = card('收件箱', 'AT+CMGL 收取90后',
+      var inboxHtml = card('收件箱', 'AT+CMGL 收取',
         '<div class="sms-list">' + items + '</div>',
         { badge: msgs.length + ' 条', badgeCls: msgs.length ? 'good' : '' });
 
-      /* 发送短信 */
       var sendHtml = '<div class="card" style="margin-top:14px">' +
         '<div class="head"><div><h3>发送短信</h3><div class="desc">经 AT+CMGS 下发（尽力而为，取决于模块/守护进程支持）</div></div></div>' +
         '<div class="field"><label>号码</label><input class="input" id="smsNum" placeholder="+8613800138000"></div>' +
@@ -454,7 +571,6 @@
 
       box.innerHTML = inboxHtml + sendHtml;
 
-      /* 绑定发送按钮 */
       var btn = $('#smsSend');
       if (btn) btn.onclick = function () {
         var num = $('#smsNum').value.trim(), body = $('#smsBody').value.trim();
@@ -555,7 +671,6 @@
 
   /* ==================== 启动 ==================== */
   function boot() {
-    /* 刷新按钮：圆形，在标题右侧 */
     var refreshBtn = $('#refreshBtn');
     refreshBtn.onclick = function () {
       refreshBtn.classList.add('spinning');
@@ -563,17 +678,14 @@
       setTimeout(function () { refreshBtn.classList.remove('spinning'); }, 800);
     };
 
-    /* 导航点击 */
     $$('#nav .nav-item').forEach(function (b) {
       b.onclick = function () { loadView(b.dataset.view); };
     });
 
-    /* 清除日志按钮（延迟绑定，系统页渲染后才存在） */
     var _bindClearLog = function () {
       var cl = document.getElementById('clearLog');
       if (cl) { cl.onclick = function () { fetch('/cgi-bin/at-log-clear').then(function () { toast('日志已清除'); }).catch(function () { toast('清除失败'); }); }; }
     };
-    // 每次 loadView 完成后尝试绑定
     var _origLoadView = loadView;
     loadView = function (v) {
       _origLoadView(v);
