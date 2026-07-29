@@ -330,7 +330,7 @@
         '<div class="sig-metric m-sinr"><div class="m-val">' + (sinrDb != null ? Math.round(sinrDb) : '—') + '</div>' +
         '<div class="m-unit">SINR (dB)</div><div class="m-desc">信号比</div></div>' +
         /* RSRQ */
-        '<div class="sig-metric m-rsrq"><div class="m-val">' + (rsrqDb != null ? Math.round(rsrDb) : '—') + '</div>' +
+        '<div class="sig-metric m-rsrq"><div class="m-val">' + (rsrqDb != null ? Math.round(rsrqDb) : '—') + '</div>' +
         '<div class="m-unit">RSRQ (dB)</div><div class="m-desc">参考信号接收质量</div></div>' +
         '</div>';
 
