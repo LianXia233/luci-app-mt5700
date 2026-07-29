@@ -57,8 +57,10 @@
     width:216px;flex:none;display:flex;flex-direction:column;gap:8px;
     background:var(--glass);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);
     border:1px solid var(--glass-border);border-radius:var(--radius);box-shadow:var(--shadow);
-    padding:16px 12px;
+    padding:16px 12px;overflow-y:auto;
   }
+  .sidebar::-webkit-scrollbar{width:4px}
+  .sidebar::-webkit-scrollbar-thumb{background:rgba(127,127,127,.2);border-radius:4px}
   .brand{display:flex;align-items:center;gap:10px;padding:4px 6px 14px;font-weight:800;font-size:16px;letter-spacing:.3px}
   .brand .logo{
     width:34px;height:34px;border-radius:11px;background:var(--accent-grad);
@@ -76,6 +78,11 @@
   .nav-item:active{transform:scale(.96)}
   .nav-item.active{color:#fff;background:var(--accent-grad);box-shadow:0 4px 16px rgba(79,110,247,.32)}
   .nav-item.active .ico{color:#fff;opacity:1}
+
+  /* Nav section divider */
+  .nav-sep{height:1px;background:var(--hair);margin:6px 8px}
+  .nav-section-label{font-size:10px;color:var(--text-3);font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:8px 12px 4px}
+
   .conn{
     display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:var(--radius-sm);
     background:rgba(127,127,127,.08);font-size:12px;color:var(--text-2);margin-top:4px;
@@ -174,7 +181,7 @@
   .bars i.on{background:#22c55e}/* bright green — always visible */
   .hero .bars i.on{background:#fff}/* white on blue hero bg */
 
-  /* Large signal bars for dashboard (screenshot 5 style) */
+  /* Large signal bars for dashboard */
   .bars-lg{display:flex;align-items:flex-end;gap:5px;height:80px;margin:10px 0 8px}
   .bars-lg i{
     width:18px;border-radius:5px 5px 3px 3px;background:rgba(127,127,127,.18);
@@ -182,7 +189,7 @@
   }
   .bars-lg i.on{background:linear-gradient(180deg,#22c55e 0%,#16a34a 100%);box-shadow:0 2px 8px rgba(34,197,94,.3)}
 
-  /* ===== Signal Dashboard (screenshot 5 style) ===== */
+  /* ===== Signal Dashboard ===== */
   .sig-row{display:flex;gap:16px;align-items:stretch}
   .sig-left{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:80px}
   .sig-badges{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
@@ -196,14 +203,13 @@
     background:rgba(127,127,127,.04);border:1px solid var(--hair);
   }
   .sig-metric .m-val{font-size:32px;font-weight:800;line-height:1.1;letter-spacing:-1px}
-  .sig-metric .m-label{font-size:11px;color:var(--text-3);margin-top:2px}
   .sig-metric .m-unit{font-size:12px;color:var(--text-2);font-weight:600;margin-top:1px}
   .sig-metric .m-desc{font-size:10px;color:var(--text-3);margin-top:2px}
   .sig-metric.m-rsrp .m-val{color:var(--sig-good)}
   .sig-metric.m-sinr .m-val{color:var(--sig-warn)}
   .sig-metric.m-rsrq .m-val{color:var(--sig-bad)}
 
-  /* Network params grid (screenshot 5 right column) */
+  /* Network params grid */
   .net-params{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
   .net-params .kv{padding:5px 0;border-bottom:1px solid var(--hair);font-size:12.5px}
   .net-params .kv:last-child{border-bottom:0}
@@ -218,16 +224,7 @@
   .carrier-detail .v.mcs-good{color:var(--sig-good);font-weight:700}
   .carrier-detail .v.mcs-bad{color:var(--sig-bad);font-weight:700}
 
-  /* HCSQ Cell cards (screenshot 3 style) */
-  .cell-card{
-    background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
-    border:1px solid var(--glass-border);border-radius:var(--radius-sm);padding:14px;
-  }
-  .cell-card .cell-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-  .cell-card .cell-name{font-weight:700;font-size:14px}
-  .cell-card .cell-pci{font-size:11px;color:var(--text-3)}
-
-  /* Colored value bars (like screenshot 3) */
+  /* Colored value bars */
   .val-bar{
     display:flex;align-items:center;gap:8px;margin:4px 0;
   }
@@ -240,7 +237,7 @@
   .val-bar .bar-fill.bg-bad{background:linear-gradient(135deg,#ef4444,#dc2626)}
   .val-bar .bar-label{font-size:11.5px;font-weight:600;color:var(--text-2);min-width:48px;text-align:right}
 
-  /* SSB beam info (screenshot 3 bottom) */
+  /* SSB beam info */
   .ssb-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
   .ssb-item{
     flex:1;min-width:70px;text-align:center;padding:10px 6px;border-radius:12px;
@@ -279,6 +276,8 @@
   .btn.ghost:hover{background:var(--glass);transform:none}
   .btn.sm{padding:6px 14px;font-size:11.5px}
   .btn.disabled{opacity:.45;cursor:not-allowed;transform:none!important}
+  .btn-link{background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:600;padding:4px 8px;border-radius:6px}
+  .btn-link:hover{background:rgba(79,110,247,.08)}
 
   /* Form fields */
   .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
@@ -331,7 +330,7 @@
   .sms-item .date{font-size:11px;color:var(--text-3)}
   .sms-item .body{font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--text-2)}
 
-  /* Temp monitoring cards (screenshot 1 style) */
+  /* Temp monitoring cards */
   .temp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   .temp-item{
     text-align:center;padding:14px 10px;border-radius:var(--radius-sm);
@@ -340,16 +339,87 @@
   .temp-item .t-name{font-size:11px;color:var(--text-3);margin-bottom:6px}
   .temp-item .t-val{font-size:24px;font-weight:800;color:var(--sig-good)}
 
+  /* ========== NEW: Network Speed page (screenshot 4) ========== */
+  .speed-live{padding:6px 0}
+  .speed-toggle{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .toggle-switch{position:relative;display:inline-block;width:44px;height:24px;flex:none}
+  .toggle-switch input{opacity:0;width:0;height:0}
+  .toggle-switch .slider{
+    position:absolute;inset:0;background:rgba(127,127,127,.25);border-radius:99px;
+    cursor:pointer;transition:background .25s;
+  }
+  .toggle-switch .slider::before{
+    content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;
+    background:#fff;border-radius:50%;transition:transform .25s cubic-bezier(.34,1.56,.64,1);
+    box-shadow:0 1px 4px rgba(0,0,0,.2);
+  }
+  .toggle-switch input:checked + .slider{background:var(--accent)}
+  .toggle-switch input:checked + .slider::before{transform:translateX(20px)}
+  .speed-values{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px}
+  .spd-up,.spd-down{color:var(--text-3);font-size:12px}
+  .speed-bps{grid-column:1/-1;display:flex;gap:20px;justify-content:center;font-size:11px;color:var(--text-3);margin-top:4px}
+  .spd-bps-val{font-weight:700;font-variant-numeric:tabular-nums}
+  .net-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+  .val-red{color:var(--bad);font-weight:700;font-variant-numeric:tabular-nums}
+
+  /* ========== NEW: Lock frequency settings (screenshot 5) ========== */
+  .lock-card .lock-section{padding:4px 0}
+  .lock-type-row{margin-bottom:10px;font-size:13px;font-weight:600;color:var(--text)}
+  .lock-options{display:flex;flex-wrap:wrap;gap:10px}
+  .radio-opt{
+    display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:var(--radius-sm);
+    background:rgba(127,127,127,.04);border:1px solid var(--hair);cursor:pointer;
+    font-size:12.5px;color:var(--text-2);transition:all .15s;user-select:none;
+  }
+  .radio-opt:hover{background:rgba(79,110,247,.06);border-color:rgba(79,110,247,.2)}
+  .radio-opt input[type=radio]{accent-color:var(--accent)}
+  .empty-state{text-align:center;padding:28px 16px;color:var(--text-3)}
+  .empty-icon{font-size:36px;margin-bottom:8px;opacity:.4}
+  .empty-text{font-size:13px}
+
+  /* ========== NEW: Network config (screenshot 6) ========== */
+  .conf-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+  .tx-info-box{
+    padding:12px 16px;border-radius:var(--radius-sm);
+    background:rgba(79,110,247,.07);border:1px solid rgba(79,110,247,.15);
+    font-size:13px;color:var(--text-2);line-height:1.6;
+  }
+
+  /* ========== NEW: PDP management (screenshot 7) ========== */
+  .pdp-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--hair);font-size:13px}
+  .pdp-row:last-child{border-bottom:0}
+  .pdp-cid{color:var(--text-2);font-weight:600}
+  .pdp-state{font-weight:700;font-size:12px;padding:2px 10px;border-radius:999px}
+  .pdp-state.active{background:rgba(34,197,94,.12);color:#16a34a}
+  .pdp-state:not(.active){background:rgba(127,127,127,.1);color:var(--text-3)}
+  .skeleton-list{padding:4px 0}
+  .skeleton-row{height:28px;border-radius:6px;background:rgba(127,127,127,.07);margin-bottom:6px;animation:skeleton-pulse 1.4s ease-in-out infinite}
+  @keyframes skeleton-pulse{0%,100%{opacity:.5}50%{opacity:1}}
+
+  /* ========== NEW: AT Server Config / Settings (screenshot 8) ========== */
+  .at-config{padding:2px 0}
+  .at-mode-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:14px;font-weight:700}
+  .at-mode-label{color:var(--text)}
+  .at-mode-val{font-size:15px}
+  .mode-net{color:var(--accent);font-weight:800}
+  .mode-local{color:var(--good);font-weight:800}
+  .at-mode-desc{font-size:12.5px;color:var(--text-2);margin-bottom:14px;line-height:1.5}
+  .at-fields{}
+  .at-local-info{padding:8px 0}
+  .at-local-info .kv{font-size:12.5px}
+
   /* ===== Responsive ===== */
   @media (max-width:1200px){
     .temp-grid{grid-template-columns:repeat(3,1fr)}
     .sig-metrics{flex-wrap:wrap}
     .sig-metric{min-width:100px}
+    .conf-grid,.net-info-grid{grid-template-columns:1fr}
   }
   @media (max-width:1024px){
     .grid.cols-3{grid-template-columns:repeat(2,1fr)}
     .grid.cols-4{grid-template-columns:repeat(2,1fr)}
     .temp-grid{grid-template-columns:repeat(2,1fr)}
+    .speed-values,.lock-options{flex-direction:column}
   }
   @media (max-width:768px){
     .shell{padding:12px;gap:12px}
@@ -364,6 +434,10 @@
     .net-params{grid-template-columns:1fr}
     .carrier-detail{grid-template-columns:1fr}
     .temp-grid{grid-template-columns:repeat(2,1fr)}
+    .speed-values{grid-template-columns:1fr}
+    .net-info-grid{grid-template-columns:1fr}
+    .conf-grid{grid-template-columns:1fr}
+    .lock-options{flex-direction:column}
   }
   @media (max-width:480px){
     .shell{padding:8px;gap:8px}
@@ -373,6 +447,7 @@
     .sig-metric .m-val{font-size:24px}
     .bars-lg i{width:14px}
     .temp-grid{grid-template-columns:1fr 1fr}
+    .at-mode-row{flex-direction:column;align-items:flex-start;gap:6px}
   }
 </style>
 </head>
@@ -388,34 +463,49 @@
   <symbol id="i-system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9 19 19M19 5l-2.1 2.1M7.1 16.9 5 19"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><polyline points="21 3 21 8 16 8"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="3" x2="10.5" y2="14"/><path d="M21 3 14 21l-4-8-8-4 18-7z"/></symbol>
+  <!-- New icons -->
+  <symbol id="i-speed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
 </defs></svg>
 
 <div class="shell">
   <aside class="sidebar">
     <div class="brand"><span class="logo">🌐</span><span>MT5700M</span></div>
     <nav class="nav" id="nav">
-      <button class="nav-item active" data-view="overview"><svg class="ico"><use href="#i-overview"/></svg>概览</button>
-      <button class="nav-item" data-view="signal"><svg class="ico"><use href="#i-signal"/></svg>信号</button>
-      <button class="nav-item" data-view="network"><svg class="ico"><use href="#i-network"/></svg>网络与小区</button>
-      <button class="nav-item" data-view="sim"><svg class="ico"><use href="#i-sim"/></svg>SIM 与套餐</button>
-      <button class="nav-item" data-view="sms"><svg class="ico"><use href="#i-sms"/></svg>短信</button>
-      <button class="nav-item" data-view="terminal"><svg class="ico"><use href="#i-terminal"/></svg>AT 终端</button>
-      <button class="nav-item" data-view="system"><svg class="ico"><use href="#i-system"/></svg>系统</button>
+      <!-- 主功能 -->
+      <button class="nav-item active" data-view="overview"><svg class="ico"><use href="#i-overview"/></svg>\u6982\u89c8</button>
+      <button class="nav-item" data-view="signal"><svg class="ico"><use href="#i-signal"/></svg>\u4fe1\u53f7</button>
+      <button class="nav-item" data-view="network"><svg class="ico"><use href="#i-network"/></svg>\u7f51\u7edc\u4e0e\u5c0f\u533a</button>
+      <button class="nav-item" data-view="sim"><svg class="ico"><use href="#i-sim"/></svg>SIM \u4e0e\u5957\u9910</button>
+      <button class="nav-item" data-view="sms"><svg class="ico"><use href="#i-sms"/></svg>\u77ed\u4fe1</button>
+      <button class="nav-item" data-view="terminal"><svg class="ico"><use href="#i-terminal"/></svg>AT \u7ec8\u7aef</button>
+      <div class="nav-sep"></div>
+      <!-- 扩展功能 -->
+      <button class="nav-item" data-view="speed"><svg class="ico"><use href="#i-speed"/></svg>\u7f51\u901f</button>
+      <button class="nav-item" data-view="lock"><svg class="ico"><use href="#i-lock"/></svg>\u9501\u9891</button>
+      <button class="nav-item" data-view="netconf"><svg class="ico"><use href="#i-network"/></svg>\u7f51\u7edc\u914d\u7f6e</button>
+      <button class="nav-item" data-view="pdp"><svg class="ico"><use href="#i-network"/></svg>PDP</button>
+      <div class="nav-sep"></div>
+      <!-- 设置 -->
+      <button class="nav-item" data-view="settings"><svg class="ico"><use href="#i-settings"/></svg>\u8bbe\u7f6e</button>
+      <div class="nav-sep"></div>
+      <button class="nav-item" data-view="system"><svg class="ico"><use href="#i-system"/></svg>\u7cfb\u7edf</button>
     </nav>
-    <div class="conn" id="conn"><span class="dot"></span><span id="connText">连接中…</span></div>
+    <div class="conn" id="conn"><span class="dot"></span><span id="connText">\u8fde\u63a5\u4e2d…</span></div>
   </aside>
 
   <main class="main">
     <div class="topbar">
       <div class="topbar-left">
         <div>
-          <h1 id="viewTitle">概览</h1>
-          <div class="sub" id="viewSub">模块实时状态</div>
+          <h1 id="viewTitle">\u6982\u89c8</h1>
+          <div class="sub" id="viewSub">\u6a21\u5757\u5b9e\u65f6\u72b6\u6001</div>
         </div>
-        <button class="refresh-btn" id="refreshBtn" title="刷新数据"><svg class="ico"><use href="#i-refresh"/></svg></button>
+        <button class="refresh-btn" id="refreshBtn" title="\u5237\u65b0\u6570\u636e"><svg class="ico"><use href="#i-refresh"/></svg></button>
       </div>
       <div class="topbar-right">
-        <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">连接中…</span></div>
+        <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">\u8fde\u63a5\u4e2d…</span></div>
       </div>
     </div>
     <div class="scroller"><div id="content"></div></div>
