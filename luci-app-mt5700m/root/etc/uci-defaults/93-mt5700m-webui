@@ -1,6 +1,13 @@
 #!/bin/sh
-# mt5700m WebUI: ensure backend + CGI helpers are executable and config committed.
+# mt5700m WebUI: ensure backend + CGI helpers are executable, commit config,
+# and auto-enable/start the AT WebSocket backend so the WebUI has live data.
 chmod 0755 /usr/bin/at-server.py 2>/dev/null
 chmod 0755 /www/cgi-bin/at-ws-info /www/cgi-bin/at-log-clear 2>/dev/null
 uci -q commit at-webserver 2>/dev/null
+
+if [ -z "${IPKG_INSTROOT:-}" ]; then
+	# Enable + start the AT WebSocket backend (at-server.py) on the real device.
+	[ -x /etc/init.d/at-webserver ] && /etc/init.d/at-webserver enable >/dev/null 2>&1
+	[ -x /etc/init.d/at-webserver ] && /etc/init.d/at-webserver start >/dev/null 2>&1
+fi
 exit 0
