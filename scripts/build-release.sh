@@ -56,6 +56,17 @@ rm -rf build_dir/target-*/luci-app-mt5700m \
        staging_dir/target-*/root-*/www/luci-static/resources/view/mt5700m \
        staging_dir/target-*/root-*/www/5700 \
        bin/packages/*/custom/luci-app-mt5700m*.apk 2>/dev/null || true
+# Force LF line endings on ALL files under htdocs/5700 BEFORE the SDK touches them.
+# .gitattributes eol=lf is the root-cause fix, but CI runners may check out with
+# CRLF anyway (e.g. git config core.autocrlf=true on the runner).  This explicit
+# conversion is the belt-and-suspenders guarantee that no CRLF large file ever
+# reaches the OpenWrt staging/copy/tar pipeline — which is what truncates them.
+if [ -d "package/h5000m-custom/luci-app-mt5700m/htdocs/5700" ]; then
+  find "package/h5000m-custom/luci-app-mt5700m/htdocs/5700" -type f \
+    -exec sed -i 's/\r$//' {} +
+  echo "INFO: forced LF on htdocs/5700 ($(find 'package/h5000m-custom/luci-app-mt5700m/htdocs/5700' -type f | wc -l) files)"
+fi
+
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
 
 # NOTE: We deliberately do NOT re-copy htdocs/5700 into staging_dir AFTER `make compile`.

@@ -106,6 +106,9 @@ jobs:
 
           ### 📋 更新内容
 
+          - **v2.3.27 修复：运营商图标替换 + 编译截断根除**
+            - **四大运营商图标替换为官方 PNG Logo**：中国移动/联通/电信/广电的内联 SVG 图标全部替换为用户提供的真实 PNG logo（base64 data URI 内嵌），图标尺寸从 24px 调整到 26px、圆角从 6px 改为 4px，更贴合实际 logo 比例，PC 和移动端显示效果更佳
+            - **编译截断问题根治**：`build-release.sh` 在 `make compile` **之前**新增显式 `sed -i 's/\r$//'` 步骤，强制将 `htdocs/5700/` 下所有文件转为 LF 换行。此前 `.gitattributes eol=lf` 在 CI runner 上可能不生效（runner 的 `core.autocrlf=true` 会覆盖），导致 2MB 的 `umi.ec9b4b52.js` 被 OpenWrt SDK staging/copy/tar 流程截断；现在无论 git 配置如何，LF 转换在 SDK 处理前完成，彻底杜绝截断
           - **v2.3.26 修复：构建脚本三处问题（基于源码分析）**
             - **问题一（重拷贝时机错误）**：原 `scripts/build-release.sh` 在 `make compile` **之后**才 `cp -a` 覆盖 `/www/5700/`，但 OpenWrt 中 `make package/X/compile` 含 install+打包步骤，返回时 `.apk` 已定型，覆盖对已打好的包**无效**（死代码、给人错觉）。修正：删除该无效块——干净产物由根因修复（`.gitattributes` 强制 `eol=lf`，SDK 不再因 CRLF 损坏大文件）+ v2.3.25 的 `node --check` 全量护栏（任何损坏块直接 `exit 1`）共同保证。
             - **问题二（node --check 硬编码文件名）**：已在 v2.3.25 修复——由硬编码 `umi.ec9b4b52.js` 改为 `find .../www/5700 -name '*.js'` 遍历全部 JS 校验，content hash 变更后不再静默失效。
@@ -146,7 +149,7 @@ jobs:
             - 邻区扫描按 RAT 分组（NR / LTE），支持一键填入面板 + 锁定
             - SSB 波束信号图形化，锁频支持 Band / ARFCN / Cell 三种模式
           - **运营商中文名 + Logo**
-            - 中国移动 / 联通 / 电信 / 广电，内联 SVG Logo
+            - 中国移动 / 联通 / 电信 / 广电，内嵌官方 PNG Logo（base64 data URI）
           - **SIM 增强**：APN、QCI、签约速率显示
 
           ### 📦 发布产物（dist-release）
