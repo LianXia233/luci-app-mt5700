@@ -106,6 +106,10 @@ jobs:
 
           ### 📋 更新内容
 
+          - **v2.3.26 修复：构建脚本三处问题（基于源码分析）**
+            - **问题一（重拷贝时机错误）**：原 `scripts/build-release.sh` 在 `make compile` **之后**才 `cp -a` 覆盖 `/www/5700/`，但 OpenWrt 中 `make package/X/compile` 含 install+打包步骤，返回时 `.apk` 已定型，覆盖对已打好的包**无效**（死代码、给人错觉）。修正：删除该无效块——干净产物由根因修复（`.gitattributes` 强制 `eol=lf`，SDK 不再因 CRLF 损坏大文件）+ v2.3.25 的 `node --check` 全量护栏（任何损坏块直接 `exit 1`）共同保证。
+            - **问题二（node --check 硬编码文件名）**：已在 v2.3.25 修复——由硬编码 `umi.ec9b4b52.js` 改为 `find .../www/5700 -name '*.js'` 遍历全部 JS 校验，content hash 变更后不再静默失效。
+            - **问题三（缺静态 config.json）**：新增 `htdocs/5700/config.json` 静态兜底（`{"at":{"host":"192.168.1.1","port":8765},"status":"true","require_auth":false}`），init 脚本 `at-webserver` 运行时用 LAN IP 覆盖此文件；init 未运行时 SPA 仍能拿到兜底配置，避免无配置白屏。
           - **v2.3.25 修复：构建护栏加固 — 杜绝单个路由块被截断导致该路由白屏**
             - **根因**：`scripts/build-release.sh` 的 `node --check` 语法护栏此前只校验主包 `umi.ec9b4b52.js`，漏掉了各路由的 `.async.js` 异步块。若某个路由块（如 `p__CPE__Network__Info__index.*.async.js`）被 OpenWrt SDK 构建过程截断，整包会通过校验、装到设备后**仅该路由白屏**（其余页面正常），正是 `/network/info` 白屏的典型症状
             - **修复**：护栏改为 `find .../www/5700 -name '*.js'` 遍历**全部** JS 做 `node --check`，任一文件语法错误直接 `exit 1`，从构建期拦截任何被截断的路由块

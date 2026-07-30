@@ -58,16 +58,17 @@ rm -rf build_dir/target-*/luci-app-mt5700m \
        bin/packages/*/custom/luci-app-mt5700m*.apk 2>/dev/null || true
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
 
-# CRITICAL: Re-copy pristine /www/5700/ SPA files from source into the SDK staging dir.
-# The OpenWrt SDK build process (staging/copy/tar) can corrupt large JS bundles
-# (e.g. truncate umi.ec9b4b52.js mid-regex due to CRLF→LF conversion or buffer
-# limits). Overwriting with the original source guarantees byte-identical output.
-STAGING_5700=$(ls -d staging_dir/target-*/root-*/www/5700 2>/dev/null | head -n1)
-if [ -n "${STAGING_5700}" ]; then
-  rm -rf "${STAGING_5700}"
-  cp -a "${repo_dir}/luci-app-mt5700m/htdocs/5700" "${STAGING_5700}"
-  echo "Re-copied pristine /www/5700/ from source ($(ls "${STAGING_5700}" | wc -l) files)"
-fi
+# NOTE: We deliberately do NOT re-copy htdocs/5700 into staging_dir AFTER `make compile`.
+# In OpenWrt, `make package/X/compile` includes the install+packaging step, so by the
+# time it returns the .apk is already assembled from staging_dir — a post-compile
+# overwrite would be too late and silently ineffective.
+# The clean-package guarantee comes from TWO correct mechanisms instead:
+#   1. Root cause fixed at source: .gitattributes forces eol=lf on htdocs/**, so the
+#      SDK's staging/copy never mangles CRLF large JS bundles in the first place.
+#   2. The node --check guard below validates EVERY .js under /www/5700/ and aborts
+#      the build if any file is truncated/corrupted — so a bad package can never ship.
+# (An earlier post-compile re-copy block was removed because it looked protective but
+#  did nothing; see issue analysis for v2.3.26.)
 
 # Sanity check: the freshly staged www tree must contain the WebUI integration.
 # If this fails, the SDK reused a cached htdocs copy and the package would be broken.
