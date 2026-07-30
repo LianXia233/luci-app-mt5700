@@ -106,6 +106,10 @@ jobs:
 
           ### 📋 更新内容
 
+          - **v2.3.23 优化：首页 UI 布局与运营商显示**
+            - **「打开模块 WebUI」按钮缩小**：从全宽大卡片改为紧凑行内按钮（padding 7px→14px, icon 38px→26px），不再占据整行空间
+            - **运营商名称和图标排版优化**：hero 区域运营商名放大（11px→14px bold）、图标增大（16px→20px）并独立样式类 `.mt5700m-hero-op`，视觉层次更清晰
+            - **四大运营商 SVG logo 美化**：中国移动/联通/电信/广电的 inline SVG 图标优化（圆角 8→9、更精准的品牌色、广电字体改用系统中文字体栈）
           - **v2.3.22 修复：WebUI 白屏 + 后端无法自启**
             - **CI 构建脚本导致 APK 内 `umi.ec9b4b52.js` 被截断（白屏）**：`scripts/build-release.sh` 的 `rm -rf` 清理遗漏 `staging_dir/target-*/root-*/www/5700`，SDK 复用上游残留的损坏文件被打包；新增清理该目录，并在 sanity check 阶段用 `node --check` 对 `umi.ec9b4b52.js` 做语法校验作为兜底护栏
             - 修复 `at-webserver` init 在 `USE_PROCD=1` 下同步调用 `/etc/init.d/firewall reload` 造成的 procd 死锁，导致后端进程永不启动、WebUI 全部功能失效
