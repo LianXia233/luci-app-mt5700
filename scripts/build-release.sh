@@ -54,6 +54,7 @@ make package/feeds/qmodem/ubus_at_daemon/compile package/feeds/qmodem/sms-tool_q
 make package/h5000m-custom/luci-app-mt5700m/clean >/dev/null 2>&1 || true
 rm -rf build_dir/target-*/luci-app-mt5700m \
        staging_dir/target-*/root-*/www/luci-static/resources/view/mt5700m \
+       staging_dir/target-*/root-*/www/5700 \
        bin/packages/*/custom/luci-app-mt5700m*.apk 2>/dev/null || true
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
 
@@ -67,6 +68,11 @@ if ! grep -rq "mt5700m-webui-cta" staging_dir/target-*/root-*/www/luci-static/re
 fi
 if ! ls staging_dir/target-*/root-*/www/5700/index.html >/dev/null 2>&1; then
   echo "ERROR: built www tree is missing the WebUI SPA at /www/5700/index.html" >&2
+  exit 1
+fi
+# Guard rail: catch truncated/garbled UMI bundles (e.g. broken regex) before packaging.
+if ! node --check staging_dir/target-*/root-*/www/5700/umi.ec9b4b52.js 2>/dev/null; then
+  echo "ERROR: umi.ec9b4b52.js has syntax errors (likely truncated regex)" >&2
   exit 1
 fi
 

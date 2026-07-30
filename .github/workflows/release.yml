@@ -106,7 +106,8 @@ jobs:
 
           ### 📋 更新内容
 
-          - **v2.3.21 修复：WebUI 后端无法自启 / WebSocket 连接失败**
+          - **v2.3.22 修复：WebUI 白屏 + 后端无法自启**
+            - **CI 构建脚本导致 APK 内 `umi.ec9b4b52.js` 被截断（白屏）**：`scripts/build-release.sh` 的 `rm -rf` 清理遗漏 `staging_dir/target-*/root-*/www/5700`，SDK 复用上游残留的损坏文件被打包；新增清理该目录，并在 sanity check 阶段用 `node --check` 对 `umi.ec9b4b52.js` 做语法校验作为兜底护栏
             - 修复 `at-webserver` init 在 `USE_PROCD=1` 下同步调用 `/etc/init.d/firewall reload` 造成的 procd 死锁，导致后端进程永不启动、WebUI 全部功能失效
             - 修复 SPA 兜底配置 `/www/5700/config.json` 的 `host` 误带 CIDR 掩码（如 `192.168.10.1/24`）导致 WebSocket 地址非法的缺陷
             - 安装后自动 `enable`+`start`，重启路由器后端自动拉起，WebUI 正常加载并使用
