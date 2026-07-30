@@ -81,12 +81,19 @@ if ! ls staging_dir/target-*/root-*/www/5700/index.html >/dev/null 2>&1; then
   echo "ERROR: built www tree is missing the WebUI SPA at /www/5700/index.html" >&2
   exit 1
 fi
-# Guard rail: catch truncated/garbled UMI bundles (e.g. broken regex) before packaging.
-UMI_JS=$(ls staging_dir/target-*/root-*/www/5700/umi.ec9b4b52.js 2>/dev/null | head -n1)
-if [ -n "${UMI_JS}" ] && ! node --check "${UMI_JS}" 2>/dev/null; then
-  echo "ERROR: umi.ec9b4b52.js has syntax errors (likely truncated regex)" >&2
-  exit 1
-fi
+# Guard rail: catch truncated/garbled JS bundles (e.g. broken regex) before packaging.
+# IMPORTANT: validate EVERY .js under /www/5700/, not just the main umi bundle.
+# A truncated per-route async chunk (e.g. p__CPE__Network__Info__index.*.async.js)
+# parses with a SyntaxError and white-screens ONLY that route while the rest of the
+# app loads fine — exactly the symptom reported for /network/info. The earlier guard
+# only checked umi.ec9b4b52.js and let broken route chunks through.
+while IFS= read -r js; do
+  [ -f "$js" ] || continue
+  if ! node --check "$js" 2>/dev/null; then
+    echo "ERROR: $js has syntax errors (likely truncated by SDK build)" >&2
+    exit 1
+  fi
+done < <(find staging_dir/target-*/root-*/www/5700 -name '*.js' -type f 2>/dev/null)
 
 find bin -type f \( -name 'luci-app-mt5700m-*.apk' -o -name 'luci-app-mt5700m_*.ipk' -o -name 'luci-i18n-mt5700m-zh-cn-*.apk' -o -name 'luci-i18n-mt5700m-zh-cn_*.ipk' -o -name 'ubus-at-daemon-*.apk' -o -name 'ubus-at-daemon_*.ipk' -o -name 'sms-tool_q-*.apk' -o -name 'sms-tool_q_*.ipk' \) -exec cp -f {} "${output_dir}/" \;
 test "$(find "${output_dir}" -type f \( -name '*.apk' -o -name '*.ipk' \) | wc -l)" -ge 4
