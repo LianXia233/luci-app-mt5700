@@ -106,6 +106,10 @@ jobs:
 
           ### 📋 更新内容
 
+          - **v2.3.29 修复：清除运营商图标替换残留的 SVG 片段（SyntaxError: Unexpected identifier 'xmlns'）**
+            - **根因**：v2.3.27 将四大运营商图标从 SVG 替换为 PNG base64 data URI 时，**中国电信和中国广电两处替换不完整**——PNG base64 已正确写入，但原 `<svg xmlns="...">...</svg>` 标签未删除，残留在 `return` 语句的 `}` 之后。浏览器解析时将 SVG 标签当作 JavaScript 执行 → `SyntaxError: Unexpected identifier 'xmlns'`，整个 LuCI 状态页崩溃（含 WebUI 入口按钮），WebUI `/5700/#/network/info` 也受影响
+            - **修复**：从 `status.js` 的中国电信（L337）和中国广电（L339）两行中精确删除尾部 SVG 残留（分别 529 字符和 476 字符）。验证：文件中 `xmlns=0`、`<svg=0`、PNG data URI=`4`（四个运营商全部干净）
+            - **影响版本**：v2.3.27、v2.3.28 均包含此 bug（v2.3.28 的 status.js 源码与 v2.3.27 相同未修正）；v2.3.26 及之前不受影响（使用原始 SVG 图标）
           - **v2.3.28 修复：重新加回「事后 cp -a 覆盖 staging」——这才是根治 umi.js 被 SDK 截断的真正修复**
             - **实证根因**：v2.3.22 曾在 `make compile` 之后用 `cp -a` 从仓库干净源码覆盖 `staging_dir/.../www/5700`，构建**成功**；v2.3.26 误删此步、v2.3.27 仅补 `make compile` 之前的 `sed` 预处理，二者构建**均失败**（node --check 拦截到被截断的 umi.js）。三步对比证明：该事后覆盖才是实际生效的修复，此前「覆盖太晚、对已打好的包无效」的判断错误
             - **修复**：`scripts/build-release.sh` 在 `make compile` **之后、node --check 护栏之前**重新加回 `cp -a "${repo_dir}/luci-app-mt5700m/htdocs/5700/." staging_dir/target-*/root-*/www/5700/.`，用仓库完好源码覆盖被 SDK 截断了大 JS 的 staging 树。OpenWrt 的 `.apk` 由 `staging_dir` 组装，覆盖 staging 会进入最终产物
