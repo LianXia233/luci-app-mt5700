@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-mt5700m
-PKG_VERSION:=2.3.31
+PKG_VERSION:=2.3.32
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
