@@ -1,7 +1,15 @@
 include $(TOPDIR)/rules.mk
 
+# The WebUI (htdocs/5700) is a pre-built UMI/Webpack SPA whose bundle already
+# ships minified.  LuCI's build-time `jsmin` (Crockford JSMin) cannot parse
+# regex literals that follow `=>`/`)`/`]` and rewrites them as division, which
+# corrupts umi.*.js / the shared async chunks and makes the whole SPA white-
+# screen at /5700/#/network/info (and every other route).  Disable JS
+# minification for this package so the already-minified bundle ships untouched.
+LUCI_MINIFY_JS:=0
+
 PKG_NAME:=luci-app-mt5700m
-PKG_VERSION:=2.3.30
+PKG_VERSION:=2.3.31
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
