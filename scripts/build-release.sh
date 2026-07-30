@@ -58,6 +58,17 @@ rm -rf build_dir/target-*/luci-app-mt5700m \
        bin/packages/*/custom/luci-app-mt5700m*.apk 2>/dev/null || true
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
 
+# CRITICAL: Re-copy pristine /www/5700/ SPA files from source into the SDK staging dir.
+# The OpenWrt SDK build process (staging/copy/tar) can corrupt large JS bundles
+# (e.g. truncate umi.ec9b4b52.js mid-regex due to CRLF→LF conversion or buffer
+# limits). Overwriting with the original source guarantees byte-identical output.
+STAGING_5700=$(ls -d staging_dir/target-*/root-*/www/5700 2>/dev/null | head -n1)
+if [ -n "${STAGING_5700}" ]; then
+  rm -rf "${STAGING_5700}"
+  cp -a "${repo_dir}/luci-app-mt5700m/htdocs/5700" "${STAGING_5700}"
+  echo "Re-copied pristine /www/5700/ from source ($(ls "${STAGING_5700}" | wc -l) files)"
+fi
+
 # Sanity check: the freshly staged www tree must contain the WebUI integration.
 # If this fails, the SDK reused a cached htdocs copy and the package would be broken.
 # We check for the homepage entry-button class (a JS string literal that survives

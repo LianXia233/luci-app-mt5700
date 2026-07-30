@@ -4,6 +4,11 @@
 *.py text eol=lf
 luci-app-mt5700m/root/** text eol=lf
 luci-app-mt5700m/htdocs/cgi-bin/** text eol=lf
+luci-app-mt5700m/htdocs/5700/** text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
 *.png binary
 *.gz binary
 *.woff binary
