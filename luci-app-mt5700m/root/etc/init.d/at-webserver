@@ -24,7 +24,7 @@ start_service() {
 	# 该文件正常启动并连接 WebSocket 后端。
 	generate_config_json() {
 		local lan_ip ws_port
-		lan_ip=$(uci get network.lan.ipaddr 2>/dev/null)
+		lan_ip=$(uci get network.lan.ipaddr 2>/dev/null | cut -d'/' -f1)
 		[ -z "$lan_ip" ] && lan_ip=$(uci get network.lan.ip6addr 2>/dev/null | cut -d/ -f1)
 		[ -z "$lan_ip" ] && lan_ip="192.168.1.1"
 		ws_port=$(uci get at-webserver.config.websocket_port 2>/dev/null || echo "8765")
@@ -221,8 +221,8 @@ JSON
 		fi
 		
 		uci commit firewall
-		# 重新加载防火墙
-		/etc/init.d/firewall reload >/dev/null 2>&1
+		# 重新加载防火墙（后台执行，避免阻塞 procd 启动锁导致死锁）
+		/etc/init.d/firewall reload >/dev/null 2>&1 &
 	}
 	
 	setup_firewall
@@ -294,7 +294,7 @@ stop_service() {
 	fi
 	
 	uci commit firewall
-	/etc/init.d/firewall reload >/dev/null 2>&1
+	/etc/init.d/firewall reload >/dev/null 2>&1 &
 	logger -t at-webserver "已清理所有防火墙规则"
 	
 	sleep 1

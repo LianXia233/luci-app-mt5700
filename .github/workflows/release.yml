@@ -106,6 +106,10 @@ jobs:
 
           ### 📋 更新内容
 
+          - **v2.3.20 修复：WebUI 后端无法自启 / WebSocket 连接失败**
+            - 修复 `at-webserver` init 在 `USE_PROCD=1` 下同步调用 `/etc/init.d/firewall reload` 造成的 procd 死锁，导致后端进程永不启动、WebUI 全部功能失效
+            - 修复 SPA 兜底配置 `/www/5700/config.json` 的 `host` 误带 CIDR 掩码（如 `192.168.10.1/24`）导致 WebSocket 地址非法的缺陷
+            - 安装后自动 `enable`+`start`，重启路由器后端自动拉起，WebUI 正常加载并使用
           - **WebUI 回退到 v2.3.18 原版（UMI.js / React SPA）**
             - 移除 1:1 复刻的手写 SPA（index.html + app.js + bg1.jpg），恢复官方 UMI 构建产物
             - 多路由：概览 / 网络 / 短信 / 系统 / AT 终端，加载动画与响应式布局完整
