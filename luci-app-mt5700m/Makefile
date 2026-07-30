@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-mt5700m
-PKG_VERSION:=2.3.29
+PKG_VERSION:=2.3.30
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 

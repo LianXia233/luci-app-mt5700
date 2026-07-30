@@ -56,20 +56,13 @@ rm -rf build_dir/target-*/luci-app-mt5700m \
        staging_dir/target-*/root-*/www/luci-static/resources/view/mt5700m \
        staging_dir/target-*/root-*/www/5700 \
        bin/packages/*/custom/luci-app-mt5700m*.apk 2>/dev/null || true
-# Force LF line endings on ALL files under htdocs/5700 BEFORE the SDK touches them.
-# .gitattributes eol=lf is the root-cause fix, but CI runners may check out with
-# CRLF anyway (e.g. git config core.autocrlf=true on the runner).  This explicit
-# conversion is the belt-and-suspenders guarantee that no CRLF large file ever
-# reaches the OpenWrt staging/copy/tar pipeline — which is what truncates them.
-if [ -d "package/h5000m-custom/luci-app-mt5700m/htdocs/5700" ]; then
-  # Strip CR from TEXT files only — never touch binary assets (png/ico/woff).
-  # .png/.ico may contain 0x0D bytes that are NOT line endings; running a blanket
-  # sed on them would corrupt the binaries.  Restrict to the same globs as .gitattributes.
-  find "package/h5000m-custom/luci-app-mt5700m/htdocs/5700" \( \
-      -name '*.js' -o -name '*.html' -o -name '*.css' -o -name '*.json' -o -name '*.svg' \) \
-    -type f -exec sed -i 's/\r$//' {} +
-  echo "INFO: forced LF on htdocs/5700 text files"
-fi
+# CRLF prevention: .gitattributes mandates eol=lf for htdocs/5700 text files.
+# Removing the pre-compile `sed -i 's/\r$//'` step — it was empirically proven to
+# corrupt large single-line JS bundles (umi bundle) on CI runners, causing both
+# build failures (node --check) and runtime SyntaxErrors (exposed `xmlns` from
+# truncated JS strings in network.js / status.js).
+# The post-compile `cp -a` of pristine repo htdocs into staging_dir is the safety
+# net for any SDK copy/tar artifacts, and `node --check` validates the result.
 
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
 
