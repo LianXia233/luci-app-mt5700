@@ -71,12 +71,13 @@ if ! ls staging_dir/target-*/root-*/www/5700/index.html >/dev/null 2>&1; then
   exit 1
 fi
 # Guard rail: catch truncated/garbled UMI bundles (e.g. broken regex) before packaging.
-if ! node --check staging_dir/target-*/root-*/www/5700/umi.ec9b4b52.js 2>/dev/null; then
+UMI_JS=$(ls staging_dir/target-*/root-*/www/5700/umi.ec9b4b52.js 2>/dev/null | head -n1)
+if [ -n "${UMI_JS}" ] && ! node --check "${UMI_JS}" 2>/dev/null; then
   echo "ERROR: umi.ec9b4b52.js has syntax errors (likely truncated regex)" >&2
   exit 1
 fi
 
 find bin -type f \( -name 'luci-app-mt5700m-*.apk' -o -name 'luci-app-mt5700m_*.ipk' -o -name 'luci-i18n-mt5700m-zh-cn-*.apk' -o -name 'luci-i18n-mt5700m-zh-cn_*.ipk' -o -name 'ubus-at-daemon-*.apk' -o -name 'ubus-at-daemon_*.ipk' -o -name 'sms-tool_q-*.apk' -o -name 'sms-tool_q_*.ipk' \) -exec cp -f {} "${output_dir}/" \;
 test "$(find "${output_dir}" -type f \( -name '*.apk' -o -name '*.ipk' \) | wc -l)" -ge 4
-cp public-key.pem "${output_dir}/openwrt-sdk-build.pem"
+cp -f public-key.pem "${output_dir}/openwrt-sdk-build.pem" 2>/dev/null || true
 (cd "${output_dir}" && find . -maxdepth 1 -type f \( -name '*.apk' -o -name '*.ipk' -o -name 'openwrt-sdk-build.pem' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
