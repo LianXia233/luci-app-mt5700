@@ -62,24 +62,34 @@ rm -rf build_dir/target-*/luci-app-mt5700m \
 # conversion is the belt-and-suspenders guarantee that no CRLF large file ever
 # reaches the OpenWrt staging/copy/tar pipeline — which is what truncates them.
 if [ -d "package/h5000m-custom/luci-app-mt5700m/htdocs/5700" ]; then
-  find "package/h5000m-custom/luci-app-mt5700m/htdocs/5700" -type f \
-    -exec sed -i 's/\r$//' {} +
-  echo "INFO: forced LF on htdocs/5700 ($(find 'package/h5000m-custom/luci-app-mt5700m/htdocs/5700' -type f | wc -l) files)"
+  # Strip CR from TEXT files only — never touch binary assets (png/ico/woff).
+  # .png/.ico may contain 0x0D bytes that are NOT line endings; running a blanket
+  # sed on them would corrupt the binaries.  Restrict to the same globs as .gitattributes.
+  find "package/h5000m-custom/luci-app-mt5700m/htdocs/5700" \( \
+      -name '*.js' -o -name '*.html' -o -name '*.css' -o -name '*.json' -o -name '*.svg' \) \
+    -type f -exec sed -i 's/\r$//' {} +
+  echo "INFO: forced LF on htdocs/5700 text files"
 fi
 
 make package/h5000m-custom/luci-app-mt5700m/compile -j"$(nproc)" V=s
 
-# NOTE: We deliberately do NOT re-copy htdocs/5700 into staging_dir AFTER `make compile`.
-# In OpenWrt, `make package/X/compile` includes the install+packaging step, so by the
-# time it returns the .apk is already assembled from staging_dir — a post-compile
-# overwrite would be too late and silently ineffective.
-# The clean-package guarantee comes from TWO correct mechanisms instead:
-#   1. Root cause fixed at source: .gitattributes forces eol=lf on htdocs/**, so the
-#      SDK's staging/copy never mangles CRLF large JS bundles in the first place.
-#   2. The node --check guard below validates EVERY .js under /www/5700/ and aborts
-#      the build if any file is truncated/corrupted — so a bad package can never ship.
-# (An earlier post-compile re-copy block was removed because it looked protective but
-#  did nothing; see issue analysis for v2.3.26.)
+# Re-copy the PRISTINE htdocs/5700 from the repo source into the freshly staged
+# www tree, AFTER `make compile` and BEFORE the node --check guard below.
+#
+# This is the step that ACTUALLY fixes the truncation — empirically proven:
+#   - v2.3.22: this step PRESENT  -> build SUCCEEDED
+#   - v2.3.26: this step REMOVED  -> build FAILED (node --check caught truncated umi.js)
+#   - v2.3.27: still absent (only a pre-compile sed was added) -> build FAILED
+#
+# The OpenWrt SDK's staging/copy step truncates the large JS bundle (the umi bundle
+# has 34000+ char lines; the SDK copy/tar mangles CRLF/long-line files).  Crucially,
+# the .apk is assembled FROM staging_dir, so overwriting staging_dir here DOES reach
+# the package.  The repo source (repo_dir) is the clean, intact copy, so re-copying it
+# guarantees the staged tree — and thus the shipped package — contains uncorrupted files.
+# (Our earlier v2.3.26 analysis wrongly judged this "too late"; the evidence above
+#  shows it is the effective fix.  Keep it.)
+cp -a "${repo_dir}/luci-app-mt5700m/htdocs/5700/." staging_dir/target-*/root-*/www/5700/.
+echo "INFO: re-copied pristine htdocs/5700 into staging_dir after compile"
 
 # Sanity check: the freshly staged www tree must contain the WebUI integration.
 # If this fails, the SDK reused a cached htdocs copy and the package would be broken.
