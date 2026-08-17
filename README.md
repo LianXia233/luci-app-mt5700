@@ -57,9 +57,10 @@ MT5700M 蜂窝模块管理 LuCI 应用（OpenWrt / ImmortalWrt）。提供 AT �
 | MIPS (big-endian) | `mips-unknown-linux-musl` | 老 MIPS | 本地（Makefile 映射支持） |
 | i686 | `i686-unknown-linux-musl` | 32 位 x86 | 本地（Makefile 映射支持） |
 
-> CI 当前仅构建 **amd64 + arm64**（ipk@24.10.8 与 apk@25.12.5）。mips / mipsel / i686 的
-> `rust-std` 已从 Rust *stable* 渠道下架，无法再用自带 `rust-lld` 交叉编译；本地若需构建这些
-> 目标须自行提供对应工具链。Makefile 的 `RUST_TARGET` 映射仍保留，便于本地或自定义 CI 使用。
+> CI 当前仅构建 **amd64 (x86_64) + arm64**（ipk@24.10.8 与 apk@25.12.5）；arm64 覆盖
+> `aarch64_generic` 与 `mediatek-filogic`（MT798x / Filogic，Cortex-A53，即 MT5700M 平台）。
+> mips / mipsel / i686 的 `rust-std` 已从 Rust *stable* 渠道下架，无法再用自带 `rust-lld` 交叉编译；
+> 本地若需构建这些目标须自行提供对应工具链。Makefile 的 `RUST_TARGET` 映射仍保留，便于本地或自定义 CI 使用。
 
 OpenWrt 版本：**24.10.x（opkg/.ipk）** 与 **25.x（apk/.apk）**；更早版本（23.05）可按需扩展矩阵。
 

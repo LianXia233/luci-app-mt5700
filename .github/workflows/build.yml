@@ -91,8 +91,10 @@ jobs:
         include:
           - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
           - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "24.10.8", format: ipk }
+          - { arch: mediatek-filogic, rust_target: aarch64-unknown-linux-musl, sdk: "24.10.8", format: ipk }
           - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "25.12.5", format: apk }
           - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "25.12.5", format: apk }
+          - { arch: mediatek-filogic, rust_target: aarch64-unknown-linux-musl, sdk: "25.12.5", format: apk }
     steps:
       - uses: actions/checkout@v4
 

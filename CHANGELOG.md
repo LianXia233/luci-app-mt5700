@@ -45,6 +45,8 @@
   现通过 `openwrt/gh-action-sdk` 的 `EXTRA_FEEDS` 注入 `src-git qmodem https://github.com/FUjr/QModem.git;main`。
 - **核验 SDK 容器标签**：`gh-action-sdk` 的 `ARCH` 须匹配 `ghcr.io/openwrt/sdk` 真实标签
   （如 `x86_64-24.10.8`）；已确认 24.10.8 / 25.12.5 下 `x86_64` 与 `aarch64_generic` 标签存在。
+- **CI 矩阵新增 Cortex-A53（arm64）目标**：加入 `mediatek-filogic`（MT798x / Filogic，MT5700M 平台）
+  的 ipk@24.10.8 与 apk@25.12.5 构建，与 `aarch64_generic` 共用同一 `aarch64-unknown-linux-musl` 预编译二进制。
 
 ### Known Issues / 边界
 - `mt5700m-at` / `-manager` / `-traffic` 仍为 Shell 实现，待命令级等价验证后迁移为 Rust 符号链接。
