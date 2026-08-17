@@ -3,10 +3,20 @@ name: Build & Release
 # Build the LuCI package for multiple OpenWrt targets and publish both
 # opkg (.ipk) and apk (.apk) artifacts to GitHub Releases.
 #
-# Triggers:
-#   - push of a tag  "v*"        -> build + publish release
-#   - workflow_dispatch          -> build; publish release only if release_tag given
+# Triggers / publish semantics:
+#   - push of a tag  "v*"        -> build + publish STABLE release (tag = pushed tag, marked Latest)
+#   - workflow_dispatch          -> build + publish release:
+#                                    * release_tag given  -> STABLE release (tag = release_tag, Latest)
+#                                    * release_tag empty  -> ROLLING "latest" PRERELEASE (updated in place, not Latest)
 #   - pull_request              -> build only (no release), as a CI gate
+#
+# Upload path: each `openwrt` job uploads `bin/packages` (+ logs) as a
+#   `packages-<arch>-<sdk>` artifact -> the `release` job downloads & merges them
+#   into `dist/packages/` -> uploaded to the Release.
+# Artifact naming (set by the OpenWrt SDK):
+#   luci-app-mt5700m_<pkgver>_<target>.ipk   (24.10.x, opkg)
+#   luci-app-mt5700m_<pkgver>_<target>.apk   (25.x, apk)
+#   plus a top-level SHA256SUMS.txt.
 on:
   push:
     tags:
@@ -139,13 +149,23 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Stage 3 — collect every .ipk / .apk, compute checksums, publish a Release.
+  #
+  # Trigger / publish semantics (mirrors the notes in the file header):
+  #   - push of a "v*" tag               -> STABLE release, tag = pushed tag (Latest)
+  #   - workflow_dispatch + release_tag  -> STABLE release, tag = release_tag (Latest)
+  #   - workflow_dispatch (no release_tag) -> ROLLING prerelease, tag = "latest"
+  #                                          (updated in place each run; NOT Latest)
+  #   - pull_request                     -> skipped (build-only CI gate)
+  # Upload path: openwrt jobs upload `bin/packages` as `packages-*` artifacts ->
+  #   this job merges them into `dist/packages/` and uploads to the Release.
+  # Artifact naming: luci-app-mt5700m_<pkgver>_<target>.{ipk,apk} + SHA256SUMS.txt.
   # ---------------------------------------------------------------------------
   release:
     name: Release
     needs: openwrt
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.release_tag != '' ||
-      startsWith(github.ref, 'refs/tags/v')
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -170,11 +190,29 @@ jobs:
       - name: Resolve release tag
         id: tag
         run: |
+          set -e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            if [ -n "${{ inputs.release_tag }}" ]; then
+              # Explicit version requested via the workflow_dispatch input.
+              TAG="${{ inputs.release_tag }}"
+              MAKE_LATEST=true
+              PRERELEASE=false
+            else
+              # No version given: publish to a rolling "latest" prerelease that
+              # is updated in place on every manual run (never steals "Latest").
+              TAG="latest"
+              MAKE_LATEST=false
+              PRERELEASE=true
+            fi
           else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            # "v*" tag push: stable release named after the tag.
+            TAG="${GITHUB_REF_NAME}"
+            MAKE_LATEST=true
+            PRERELEASE=false
           fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "make_latest=$MAKE_LATEST" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -186,5 +224,7 @@ jobs:
             dist/packages/**/*.apk
             dist/SHA256SUMS.txt
           generate_release_notes: true
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          make_latest: ${{ steps.tag.outputs.make_latest }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
