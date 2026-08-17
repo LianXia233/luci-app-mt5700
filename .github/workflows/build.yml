@@ -1,22 +1,20 @@
 name: Build & Release
 
-# Build the LuCI package for multiple OpenWrt targets and publish both
-# opkg (.ipk) and apk (.apk) artifacts to GitHub Releases.
+# 为多个 OpenWrt 目标构建 LuCI 软件包，并将 opkg (.ipk) 与 apk (.apk) 产物发布到 GitHub Releases。
 #
-# Triggers / publish semantics:
-#   - push of a tag  "v*"        -> build + publish STABLE release (tag = pushed tag, marked Latest)
-#   - workflow_dispatch          -> build + publish release:
-#                                    * release_tag given  -> STABLE release (tag = release_tag, Latest)
-#                                    * release_tag empty  -> ROLLING "latest" PRERELEASE (updated in place, not Latest)
-#   - pull_request              -> build only (no release), as a CI gate
+# 触发与发布逻辑：
+#   - 推送 "v*" 标签        → 构建 + 发布正式版（STABLE，标记为 Latest）
+#   - workflow_dispatch      → 构建 + 发布：
+#                               * 填写了 release_tag → 正式版（tag = release_tag，标记为 Latest）
+#                               * 未填写 release_tag → 滚动更新的 "latest" 预发布版（就地更新，不标记为 Latest）
+#   - pull_request           → 仅构建（不发布），作为 CI 门禁
 #
-# Upload path: each `openwrt` job uploads `bin/packages` (+ logs) as a
-#   `packages-<arch>-<sdk>` artifact -> the `release` job downloads & merges them
-#   into `dist/packages/` -> uploaded to the Release.
-# Artifact naming (set by the OpenWrt SDK):
+# 上传路径：每个 openwrt 作业上传 bin/packages（+ logs）为 packages-<arch>-<sdk> 产物
+#           → release 作业下载并合并到 dist/packages/ → 扁平化后上传到 Release
+# 产物命名（由 OpenWrt SDK 决定）：
 #   luci-app-mt5700m_<pkgver>_<target>.ipk   (24.10.x, opkg)
 #   luci-app-mt5700m_<pkgver>_<target>.apk   (25.x, apk)
-#   plus a top-level SHA256SUMS.txt.
+#   以及顶层 SHA256SUMS.txt
 on:
   push:
     tags:
@@ -27,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to publish (e.g. v1.0.0). Leave empty to build only."
+        description: "要发布的版本标签（例如 v1.0.0）。留空则发布滚动更新的 'latest' 预发布版"
         required: false
         default: ""
 
@@ -36,16 +34,15 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write # needed by softprops/action-gh-release
+  contents: write # softprops/action-gh-release 需要
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Stage 1 — cross-compile the Rust backend (single `mt5700m` binary) for every
-  # musl target we ship.  Uses the bundled rust-lld (self-contained) so no
-  # external cross linker is required.  Binaries are uploaded as artifacts.
+  # 阶段 1 — 为所有目标交叉编译 Rust 后端（单个 mt5700m 二进制）
+  # 使用自带的 rust-lld，无需外部交叉链接器。二进制作为产物上传。
   # ---------------------------------------------------------------------------
   rust:
     name: rust ${{ matrix.rust_target }}
@@ -53,11 +50,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # NOTE: only amd64 + arm64. The musl `rust-std` for mips/mipsel/i686 was
-        # removed from the Rust *stable* channel, so those targets can no longer
-        # be cross-built with the bundled rust-lld here. Local builds can still
-        # target them via the Makefile's RUST_TARGET mapping if a suitable
-        # toolchain is provided.
+        # 仅支持 amd64 + arm64。musl 的 mips/mipsel/i686 rust-std 已从 stable 通道移除，
+        # 因此这里无法再用自带 rust-lld 交叉编译这些目标。本地仍可通过 Makefile 的
+        # RUST_TARGET 映射在提供合适工具链时构建。
         rust_target:
           - x86_64-unknown-linux-musl
           - aarch64-unknown-linux-musl
@@ -83,10 +78,10 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Stage 2 — package the binary with the official OpenWrt SDK.  The SDK
-  # container has no Rust toolchain, so we drop the prebuilt binary next to the
-  # package Makefile (the Makefile's Build/Compile copies it when present).
-  # Matrix = (arch x SDK version).  24.10.x ships opkg (.ipk); 25.x ships apk.
+  # 阶段 2 — 使用官方 OpenWrt SDK 打包二进制。
+  # SDK 容器没有 Rust 工具链，因此我们把预编译好的二进制放到包 Makefile 旁边
+  # （Makefile 的 Build/Compile 会在存在时直接复制）。
+  # 矩阵 = (架构 × SDK 版本)。24.10.x 产出 opkg (.ipk)；25.x 产出 apk。
   # ---------------------------------------------------------------------------
   openwrt:
     name: ${{ matrix.arch }} / ${{ matrix.sdk }} (${{ matrix.format }})
@@ -95,9 +90,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # amd64 (x86_64) + arm64 (aarch64_generic) only — see note in the rust job.
-        # 24.10.x ships opkg (.ipk); 25.x ships apk. SDK tags verified against
-        # ghcr.io/openwrt/sdk (e.g. x86_64-24.10.8, aarch64_generic-25.12.5).
+        # 仅 amd64 (x86_64) + arm64 (aarch64_generic) —— 详见 rust 作业说明。
+        # 24.10.x 产出 opkg (.ipk)；25.x 产出 apk。
+        # SDK 标签已对照 ghcr.io/openwrt/sdk 验证（例如 x86_64-24.10.8、aarch64_generic-25.12.5）。
         include:
           - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
           - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "24.10.8", format: ipk }
@@ -132,33 +127,31 @@ jobs:
           PACKAGES: luci-app-mt5700m
           INDEX: "1"
           BUILD_LOG: "1"
-          # QModem feed supplies ubus-at-daemon + sms-tool_q, which
-          # luci-app-mt5700m declares as runtime dependencies. Without it the
-          # SDK fails to resolve those deps at `feeds install` time.
-          # Format: fields joined by '|' -> ' ' in the container's feeds.conf.
+          # QModem feed 提供 ubus-at-daemon + sms-tool_q，
+          # luci-app-mt5700m 声明为运行时依赖。没有它会在 feeds install 时解析失败。
+          # 格式：字段用 '|' 连接 → 容器内 feeds.conf 用空格。
           EXTRA_FEEDS: "src-git|qmodem|https://github.com/FUjr/QModem.git;main"
 
       - name: Upload ${{ matrix.format }} packages
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.arch }}-${{ matrix.sdk }}
-          path: |
-            bin/packages
-            logs
+          # 只上传 packages，不再上传 logs（减少干扰）
+          path: bin/packages
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Stage 3 — collect every .ipk / .apk, compute checksums, publish a Release.
+  # 阶段 3 — 收集所有 .ipk / .apk，计算校验和，发布 Release。
   #
-  # Trigger / publish semantics (mirrors the notes in the file header):
-  #   - push of a "v*" tag               -> STABLE release, tag = pushed tag (Latest)
-  #   - workflow_dispatch + release_tag  -> STABLE release, tag = release_tag (Latest)
-  #   - workflow_dispatch (no release_tag) -> ROLLING prerelease, tag = "latest"
-  #                                          (updated in place each run; NOT Latest)
-  #   - pull_request                     -> skipped (build-only CI gate)
-  # Upload path: openwrt jobs upload `bin/packages` as `packages-*` artifacts ->
-  #   this job merges them into `dist/packages/` and uploads to the Release.
-  # Artifact naming: luci-app-mt5700m_<pkgver>_<target>.{ipk,apk} + SHA256SUMS.txt.
+  # 触发 / 发布逻辑（与文件头部注释一致）：
+  #   - 推送 "v*" 标签               → 正式版，tag = 推送的标签（Latest）
+  #   - workflow_dispatch + release_tag  → 正式版，tag = release_tag（Latest）
+  #   - workflow_dispatch（无 release_tag） → 滚动预发布版，tag = "latest"
+  #                                          （每次手动运行就地更新；不标记为 Latest）
+  #   - pull_request                     → 跳过（仅构建的 CI 门禁）
+  # 上传路径：openwrt 作业上传 bin/packages 为 packages-* 产物 →
+  #   本作业合并到 dist/packages/ 后扁平化，再上传到 Release。
+  # 产物命名：luci-app-mt5700m_<pkgver>_<target>.{ipk,apk} + SHA256SUMS.txt。
   # ---------------------------------------------------------------------------
   release:
     name: Release
@@ -179,33 +172,57 @@ jobs:
 
       - name: Stage dist + checksums
         run: |
-          set -e
-          rm -rf dist && mkdir -p dist
-          cp -r /tmp/release/bin/packages dist/packages
-          ( cd dist/packages && find . -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 ) \
-            | xargs -0 -I{} sha256sum {} > dist/SHA256SUMS.txt
-          echo "Artifacts:" && find dist -type f | sort
-          echo "--- SHA256SUMS ---" && cat dist/SHA256SUMS.txt
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist/packages
+
+          # 复制所有 bin/packages 目录（不同架构会落到不同子目录）
+          if [ -d /tmp/release/bin/packages ]; then
+            cp -a /tmp/release/bin/packages/. dist/packages/
+          else
+            # 兼容更扁平的产物布局
+            find /tmp/release -type d -name packages -exec cp -a {}/. dist/packages/ \; || true
+          fi
+
+          # 把真正的 .ipk / .apk 扁平化到 dist/upload，方便可靠上传
+          mkdir -p dist/upload
+          find dist/packages -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 \
+            | xargs -0 -I{} cp -a {} dist/upload/
+
+          # 正确生成校验和（路径相对 dist/）
+          (cd dist && find upload -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 \
+            | xargs -0 sha256sum) > dist/SHA256SUMS.txt
+
+          echo "=== 即将发布的文件 ==="
+          find dist/upload -type f | sort
+          echo "=== SHA256SUMS ==="
+          cat dist/SHA256SUMS.txt
+
+          # 提前检查：如果一个包都没有就直接失败
+          count=$(find dist/upload -type f \( -name '*.ipk' -o -name '*.apk' \) | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::没有找到任何 .ipk/.apk 包，终止发布"
+            exit 1
+          fi
 
       - name: Resolve release tag
         id: tag
         run: |
-          set -e
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ -n "${{ inputs.release_tag }}" ]; then
-              # Explicit version requested via the workflow_dispatch input.
+              # 手动触发并指定了版本号 → 正式版
               TAG="${{ inputs.release_tag }}"
               MAKE_LATEST=true
               PRERELEASE=false
             else
-              # No version given: publish to a rolling "latest" prerelease that
-              # is updated in place on every manual run (never steals "Latest").
+              # 未指定版本号 → 滚动更新的 "latest" 预发布版（不抢 Latest）
               TAG="latest"
               MAKE_LATEST=false
               PRERELEASE=true
             fi
           else
-            # "v*" tag push: stable release named after the tag.
+            # 推送了 v* 标签 → 正式版
             TAG="${GITHUB_REF_NAME}"
             MAKE_LATEST=true
             PRERELEASE=false
@@ -213,6 +230,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "make_latest=$MAKE_LATEST" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "解析结果 → tag=$TAG  make_latest=$MAKE_LATEST  prerelease=$PRERELEASE"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -220,11 +238,12 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
           files: |
-            dist/packages/**/*.ipk
-            dist/packages/**/*.apk
+            dist/upload/*
             dist/SHA256SUMS.txt
           generate_release_notes: true
           prerelease: ${{ steps.tag.outputs.prerelease }}
           make_latest: ${{ steps.tag.outputs.make_latest }}
+          fail_on_unmatched_files: true   # 匹配不到文件就直接失败，避免空发布
+          overwrite_files: true           # 对滚动 latest 预发布版安全
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
