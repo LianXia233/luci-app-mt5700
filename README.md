@@ -48,14 +48,18 @@ MT5700M 蜂窝模块管理 LuCI 应用（OpenWrt / ImmortalWrt）。提供 AT �
 
 ## 3. 支持的目标
 
-| 架构 | musl 三元组 | 典型设备 |
-|---|---|---|
-| x86_64 | `x86_64-unknown-linux-musl` | x86 软路由 |
-| aarch64 (ARM64) | `aarch64-unknown-linux-musl` | MT5700M、ARM 盒子 |
-| ARMv7 | `armv7-unknown-linux-musleabihf` | Cortex-A9 等 |
-| MIPS (little-endian) | `mipsel-unknown-linux-musl` | ramips 等 |
-| MIPS (big-endian) | `mips-unknown-linux-musl` | 老 MIPS |
-| i686 | `i686-unknown-linux-musl` | 32 位 x86 |
+| 架构 | musl 三元组 | 典型设备 | CI 构建 |
+|---|---|---|---|
+| x86_64 (amd64) | `x86_64-unknown-linux-musl` | x86 软路由 | ✅ ipk + apk |
+| aarch64 (ARM64) | `aarch64-unknown-linux-musl` | MT5700M、ARM 盒子 | ✅ ipk + apk |
+| ARMv7 | `armv7-unknown-linux-musleabihf` | Cortex-A9 等 | 本地（Makefile 映射支持） |
+| MIPS (little-endian) | `mipsel-unknown-linux-musl` | ramips 等 | 本地（Makefile 映射支持） |
+| MIPS (big-endian) | `mips-unknown-linux-musl` | 老 MIPS | 本地（Makefile 映射支持） |
+| i686 | `i686-unknown-linux-musl` | 32 位 x86 | 本地（Makefile 映射支持） |
+
+> CI 当前仅构建 **amd64 + arm64**（ipk@24.10.8 与 apk@25.12.5）。mips / mipsel / i686 的
+> `rust-std` 已从 Rust *stable* 渠道下架，无法再用自带 `rust-lld` 交叉编译；本地若需构建这些
+> 目标须自行提供对应工具链。Makefile 的 `RUST_TARGET` 映射仍保留，便于本地或自定义 CI 使用。
 
 OpenWrt 版本：**24.10.x（opkg/.ipk）** 与 **25.x（apk/.apk）**；更早版本（23.05）可按需扩展矩阵。
 
@@ -112,8 +116,8 @@ uci commit at-webserver
 
 `.github/workflows/build.yml` 实现：
 
-1. **rust 作业**：在 GitHub  runner 上用自带 `rust-lld`（自包含链接，无需交叉 gcc）为 6 个 musl 目标
-   编译 `mt5700m`，产物作为 artifact 上传。
+1. **rust 作业**：在 GitHub runner 上用自带 `rust-lld`（自包含链接，无需交叉 gcc）为 2 个 musl 目标
+   （amd64 + arm64）编译 `mt5700m`，产物作为 artifact 上传。
 2. **openwrt 作业**（矩阵 = 架构 × SDK 版本）：下载预编译二进制，置入包目录，调用
    [`openwrt/gh-action-sdk`](https://github.com/openwrt/gh-action-sdk) 用官方 SDK 容器打包。
    - `24.10.8` → 产出 `.ipk`（opkg）
@@ -126,8 +130,9 @@ uci commit at-webserver
 - `workflow_dispatch`（填写 `release_tag`）：手动构建并发布。
 - 发起 PR：仅构建验证，不发布。
 
-> 提示：若你的自定义依赖（`ubus-at-daemon`、`sms-tool_q`）不在默认 feed，可在工作流中为
-> `openwrt/gh-action-sdk` 设置 `EXTRA_FEEDS`；这些仅为运行时依赖，不影响包本身的编译。
+> 提示：CI 已通过 `openwrt/gh-action-sdk` 的 `EXTRA_FEEDS` 注入 QModem feed
+>（`src-git qmodem https://github.com/FUjr/QModem.git;main`），用于解析 `ubus-at-daemon`、
+> `sms-tool_q` 这两个运行时依赖；如需其它自定义 feed 可继续追加（字段以 `|` 分隔）。
 
 ---
 

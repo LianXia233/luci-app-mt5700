@@ -43,13 +43,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # NOTE: only amd64 + arm64. The musl `rust-std` for mips/mipsel/i686 was
+        # removed from the Rust *stable* channel, so those targets can no longer
+        # be cross-built with the bundled rust-lld here. Local builds can still
+        # target them via the Makefile's RUST_TARGET mapping if a suitable
+        # toolchain is provided.
         rust_target:
           - x86_64-unknown-linux-musl
           - aarch64-unknown-linux-musl
-          - armv7-unknown-linux-musleabihf
-          - mipsel-unknown-linux-musl
-          - mips-unknown-linux-musl
-          - i686-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
 
@@ -84,15 +85,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # amd64 (x86_64) + arm64 (aarch64_generic) only — see note in the rust job.
+        # 24.10.x ships opkg (.ipk); 25.x ships apk. SDK tags verified against
+        # ghcr.io/openwrt/sdk (e.g. x86_64-24.10.8, aarch64_generic-25.12.5).
         include:
-          - { arch: x86_64,        rust_target: x86_64-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
-          - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl, sdk: "24.10.8", format: ipk }
-          - { arch: arm_cortex-a9, rust_target: armv7-unknown-linux-musleabihf, sdk: "24.10.8", format: ipk }
-          - { arch: mips_24kc,     rust_target: mipsel-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
-          - { arch: x86_64,        rust_target: x86_64-unknown-linux-musl,    sdk: "25.12.5", format: apk }
-          - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl, sdk: "25.12.5", format: apk }
-          - { arch: arm_cortex-a9, rust_target: armv7-unknown-linux-musleabihf, sdk: "25.12.5", format: apk }
-          - { arch: mips_24kc,     rust_target: mipsel-unknown-linux-musl,    sdk: "25.12.5", format: apk }
+          - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
+          - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "24.10.8", format: ipk }
+          - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "25.12.5", format: apk }
+          - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "25.12.5", format: apk }
     steps:
       - uses: actions/checkout@v4
 
@@ -120,6 +120,11 @@ jobs:
           PACKAGES: luci-app-mt5700m
           INDEX: "1"
           BUILD_LOG: "1"
+          # QModem feed supplies ubus-at-daemon + sms-tool_q, which
+          # luci-app-mt5700m declares as runtime dependencies. Without it the
+          # SDK fails to resolve those deps at `feeds install` time.
+          # Format: fields joined by '|' -> ' ' in the container's feeds.conf.
+          EXTRA_FEEDS: "src-git|qmodem|https://github.com/FUjr/QModem.git;main"
 
       - name: Upload ${{ matrix.format }} packages
         uses: actions/upload-artifact@v4

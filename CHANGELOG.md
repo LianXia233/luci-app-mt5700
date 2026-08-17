@@ -36,6 +36,16 @@
   现仅保留 `build.yml` 作为唯一 CI：打 `pull_request` 构建门禁、打 `v*` 标签 / `workflow_dispatch` 产出 ipk+apk 并发布到 Releases。
 - 停止跟踪本地 `.workbuddy/` 工作记忆（纳入 `.gitignore`，不进入代码仓库）。
 
+### Fixed
+- **CI 架构矩阵收敛为 arm64 + amd64**：Rust *stable* 渠道已下架 `mips` / `mipsel` / `i686` 的
+  `rust-std`，导致这两个 Rust 交叉编译作业失败、进而 `openwrt` 打包作业被依赖链整体跳过；
+  现仅构建 `x86_64` 与 `aarch64_generic`（各 ipk@24.10.8、apk@25.12.5），与需求一致。
+- **补充 QModem feed（`EXTRA_FEEDS`）**：`luci-app-mt5700m` 声明依赖 `ubus-at-daemon` 与
+  `sms-tool_q`，二者仅存在于 QModem feed；未注入会导致 SDK `feeds install` 解析依赖失败。
+  现通过 `openwrt/gh-action-sdk` 的 `EXTRA_FEEDS` 注入 `src-git qmodem https://github.com/FUjr/QModem.git;main`。
+- **核验 SDK 容器标签**：`gh-action-sdk` 的 `ARCH` 须匹配 `ghcr.io/openwrt/sdk` 真实标签
+  （如 `x86_64-24.10.8`）；已确认 24.10.8 / 25.12.5 下 `x86_64` 与 `aarch64_generic` 标签存在。
+
 ### Known Issues / 边界
 - `mt5700m-at` / `-manager` / `-traffic` 仍为 Shell 实现，待命令级等价验证后迁移为 Rust 符号链接。
 
