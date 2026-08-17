@@ -47,8 +47,21 @@
   （如 `x86_64-24.10.8`）；已确认 24.10.8 / 25.12.5 下 `x86_64` 与 `aarch64_generic` 标签存在。
 - **CI 矩阵新增 Cortex-A53（arm64）目标**：加入 `mediatek-filogic`（MT798x / Filogic，MT5700M 平台）
   的 ipk@24.10.8 与 apk@25.12.5 构建，与 `aarch64_generic` 共用同一 `aarch64-unknown-linux-musl` 预编译二进制。
+- **修复 CI `release` 作业"空壳发布"缺陷**：`download-artifact@v4` 的 `merge-multiple: true`
+  在合并 6 个架构产物时，同名 `_all` 包互相覆盖，导致绝大多数包在收集阶段丢失——
+  实锤：上轮 `latest` 预发布仅含 `cgi-io` / `curl` / `libcurl4` / `libnghttp2-14` 四类依赖，
+  而 app 本体 `luci-app-mt5700m`、i18n 语言包、以及 `ubus-at-daemon` / `sms-tool_q` 全部缺失
+  （编译阶段实际已产出 `luci-app-mt5700m_2.3.32-r1_all.ipk`，仅发布环节漏收）。
+  修复：① 去掉 `merge-multiple`，改用 `find` 递归收集所有 `.ipk`/`.apk` 到 `dist/upload`；
+  ② 增加 app 本体完整性闸门，本体缺失则直接 `exit 1`，杜绝再次发布空壳。
+- **`Makefile` `Build/Compile` 加固**：当构建环境缺少 `cargo` 且未注入 CI 预编译 musl 二进制时，
+  给出清晰可执行的报错（二选一：放入预编译二进制 / 安装 `cargo` + 对应 `rust-std`），
+  替代原先晦涩的 `cargo: command not found` 失败。
 
 ### Known Issues / 边界
+- 重新触发的 CI 运行（id=32081793088，`workflow_dispatch`）截至 2026-08-18 仍处于
+  `in_progress`（已持续约 8 小时，远超常规 20–40 分钟），疑似 runner 卡顿；待其完成以验证
+  修复后的 `latest` 是否重新包含完整 app 本体（`luci-app-mt5700m` 等）。
 - `mt5700m-at` / `-manager` / `-traffic` 仍为 Shell 实现，待命令级等价验证后迁移为 Rust 符号链接。
 
 ---
