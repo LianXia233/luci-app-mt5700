@@ -31,6 +31,10 @@
 
 ### Removed
 - 删除 `root/usr/bin/at-server.py`（原 2803 行 Python 实现，已由 Rust 取代）。
+- 移除遗留 CI：`ci.yml`（静态检查，仍断言已删除的 `at-server.py` 可执行位，会在 PR 门禁失败）、
+  `release.yml`（仅产出 `.apk`、`scripts/build-release.sh` 旧构建路径，会与 `build.yml` 在 `v*` 标签推送时竞争发布）。
+  现仅保留 `build.yml` 作为唯一 CI：打 `pull_request` 构建门禁、打 `v*` 标签 / `workflow_dispatch` 产出 ipk+apk 并发布到 Releases。
+- 停止跟踪本地 `.workbuddy/` 工作记忆（纳入 `.gitignore`，不进入代码仓库）。
 
 ### Known Issues / 边界
 - `mt5700m-at` / `-manager` / `-traffic` 仍为 Shell 实现，待命令级等价验证后迁移为 Rust 符号链接。
