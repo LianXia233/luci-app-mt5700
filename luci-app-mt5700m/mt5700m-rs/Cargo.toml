@@ -1,0 +1,23 @@
+[package]
+name = "mt5700m"
+version = "2.3.32"
+edition = "2021"
+description = "Rust reimplementation of luci-app-mt5700m backend logic (mt5700m-at / mt5700m-manager / mt5700m-traffic / at-server)"
+license = "Apache-2.0"
+
+# Keep the dependency surface to the standard library only.  The original
+# backend was a set of POSIX shell scripts plus one Python daemon that shelled
+# out to uci/ubus/nc/stty/sms_tool_q and talked to the MT5700M over a serial
+# tty, a network AT port or ubus-at-daemon.  Re-implementing those exact
+# external contracts with std alone makes the OpenWrt cross-build trivial
+# (no vendored crates, no cargo index access on the build host) and preserves
+# byte-for-byte stdout compatibility with the LuCI front-end.
+
+[[bin]]
+name = "mt5700m"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

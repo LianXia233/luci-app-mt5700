@@ -1,0 +1,183 @@
+name: Build & Release
+
+# Build the LuCI package for multiple OpenWrt targets and publish both
+# opkg (.ipk) and apk (.apk) artifacts to GitHub Releases.
+#
+# Triggers:
+#   - push of a tag  "v*"        -> build + publish release
+#   - workflow_dispatch          -> build; publish release only if release_tag given
+#   - pull_request              -> build only (no release), as a CI gate
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish (e.g. v1.0.0). Leave empty to build only."
+        required: false
+        default: ""
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # needed by softprops/action-gh-release
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1 — cross-compile the Rust backend (single `mt5700m` binary) for every
+  # musl target we ship.  Uses the bundled rust-lld (self-contained) so no
+  # external cross linker is required.  Binaries are uploaded as artifacts.
+  # ---------------------------------------------------------------------------
+  rust:
+    name: rust ${{ matrix.rust_target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust_target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - armv7-unknown-linux-musleabihf
+          - mipsel-unknown-linux-musl
+          - mips-unknown-linux-musl
+          - i686-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + musl target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Build (self-contained rust-lld, no external linker)
+        working-directory: luci-app-mt5700m/mt5700m-rs
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }} \
+            --config 'target.${{ matrix.rust_target }}.linker="rust-lld"'
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt5700m-${{ matrix.rust_target }}
+          path: luci-app-mt5700m/mt5700m-rs/target/${{ matrix.rust_target }}/release/mt5700m
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — package the binary with the official OpenWrt SDK.  The SDK
+  # container has no Rust toolchain, so we drop the prebuilt binary next to the
+  # package Makefile (the Makefile's Build/Compile copies it when present).
+  # Matrix = (arch x SDK version).  24.10.x ships opkg (.ipk); 25.x ships apk.
+  # ---------------------------------------------------------------------------
+  openwrt:
+    name: ${{ matrix.arch }} / ${{ matrix.sdk }} (${{ matrix.format }})
+    needs: rust
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,        rust_target: x86_64-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
+          - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl, sdk: "24.10.8", format: ipk }
+          - { arch: arm_cortex-a9, rust_target: armv7-unknown-linux-musleabihf, sdk: "24.10.8", format: ipk }
+          - { arch: mips_24kc,     rust_target: mipsel-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
+          - { arch: x86_64,        rust_target: x86_64-unknown-linux-musl,    sdk: "25.12.5", format: apk }
+          - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl, sdk: "25.12.5", format: apk }
+          - { arch: arm_cortex-a9, rust_target: armv7-unknown-linux-musleabihf, sdk: "25.12.5", format: apk }
+          - { arch: mips_24kc,     rust_target: mipsel-unknown-linux-musl,    sdk: "25.12.5", format: apk }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Rust binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mt5700m-*
+          path: /tmp/rustbins
+          merge-multiple: false
+
+      - name: Stage prebuilt binary for this target
+        run: |
+          set -e
+          d="/tmp/rustbins/mt5700m-${{ matrix.rust_target }}"
+          dst="luci-app-mt5700m/prebuilt/${{ matrix.rust_target }}"
+          mkdir -p "$dst"
+          cp "$d/mt5700m" "$dst/mt5700m"
+          chmod +x "$dst/mt5700m"
+          ls -l "$dst"
+
+      - name: Build OpenWrt package
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
+          PACKAGES: luci-app-mt5700m
+          INDEX: "1"
+          BUILD_LOG: "1"
+
+      - name: Upload ${{ matrix.format }} packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.arch }}-${{ matrix.sdk }}
+          path: |
+            bin/packages
+            logs
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Stage 3 — collect every .ipk / .apk, compute checksums, publish a Release.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release
+    needs: openwrt
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.release_tag != '' ||
+      startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: /tmp/release
+          merge-multiple: true
+
+      - name: Stage dist + checksums
+        run: |
+          set -e
+          rm -rf dist && mkdir -p dist
+          cp -r /tmp/release/bin/packages dist/packages
+          ( cd dist/packages && find . -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 ) \
+            | xargs -0 -I{} sha256sum {} > dist/SHA256SUMS.txt
+          echo "Artifacts:" && find dist -type f | sort
+          echo "--- SHA256SUMS ---" && cat dist/SHA256SUMS.txt
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          files: |
+            dist/packages/**/*.ipk
+            dist/packages/**/*.apk
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,57 +1,161 @@
-# MT5700M Manager for OpenWrt
+# luci-app-mt5700m
 
-[![CI](https://github.com/FAN789/luci-app-mt5700m/actions/workflows/ci.yml/badge.svg)](https://github.com/FAN789/luci-app-mt5700m/actions/workflows/ci.yml)
-[![Build Release](https://github.com/FAN789/luci-app-mt5700m/actions/workflows/release.yml/badge.svg)](https://github.com/FAN789/luci-app-mt5700m/actions/workflows/release.yml)
+MT5700M 蜂窝模块管理 LuCI 应用（OpenWrt / ImmortalWrt）。提供 AT 指令终端（WebSocket）、
+短信、流量统计、信号/小区信息（RSSI/SINR/PCI/CA/速率/温度）实时面板，以及企微机器人通知。
 
-专门面向移远 MT5700M-CN 5G 模组的 OpenWrt LuCI 管理器。它把状态、移动
-数据、网络与小区、短信、系统维护和 AT 终端统一到一个应用中，并按照 MT5700M
-手册识别 USB 正常、升级和 Dump 模式。
+> 仓库部署名 `luci-app-mt5700`；包名与设备侧服务名仍为 `luci-app-mt5700m`（WebUI / UCI / procd 均按此名称寻址）。
 
-版本采用标准的 `主版本.次版本.修订版本-r打包修订` 格式。`2.2.0` 按最终用户的
-使用路径重构了信息架构；当前开发版本为 `v2.2.1`，OpenWrt 安装包为
-`2.2.1-r1`。
+[![Build & Release](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/build.yml/badge.svg)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/build.yml)
 
-## 主要功能
+---
 
-- 首页优先展示信号质量、载波聚合、IPv4/IPv6 与移动流量
-- 网关、DNS、PDP 会话和模组原生计数集中到“移动数据”页面
-- 模组身份、手机号、SIM 信息和签约速率集中到“模组与 SIM 卡”页面
-- RSRP/RSRQ/SINR 等信号质量的人性化显示
-- APN、PDP、漫游和移动数据连接管理
-- 网络制式、LTE/WCDMA 频段及小区锁定
-- 短信收发与联系人友好的列表界面
-- IMEI、手机号、签约速率、USB/网口状态及系统维护
-- 高级页面统一收纳 USB/PCIe、通信诊断和 MT5700M 专用 AT 终端入口
-- 定期缓存模组温度，供 H5000M 风扇控制等本机组件低开销共享
-- 简体中文界面；不依赖云服务，不上传模组或 SIM 数据
+## 1. 特性
 
-流量历史由应用直接读取 MT5700M 数据接口的内核计数，不依赖 `vnStat`，并保存在
-`/etc/mt5700m/traffic-history`。升级自早期独立流量插件时会自动迁移已有记录；不再
-安装或显示单独的“流量统计”应用。
+| 模块 | 说明 |
+|---|---|
+| AT WebSocket 终端 (`at-server`) | 浏览器直连模块串口 / 网络 AT 端口的双向终端，心跳保活、命令分发 |
+| 短信 (SMS) | PDU / text 收发，GSM-7 / UCS2 解码 |
+| 流量统计 (`mt5700m-traffic`) | 周期性采样、落盘 `traffic-history`、守护采样 |
+| 信号面板 | RSSI / RSRP / SINR / PCI / 载波聚合(CA) / 上下行速率 / 温度实时展示 |
+| 企微通知 | Rust 后端通过 `curl` 调企微机器人 Webhook 推送事件（HTTPS） |
+| 双包格式 | 同时产出 **opkg (`.ipk`)** 与 **apk (`.apk`)**，覆盖 OpenWrt 24.10 与 25.x |
 
-## 安装和编译
+---
 
-源码包位于 `luci-app-mt5700m/`：
+## 2. 架构
+
+后端是一个 **单一 Rust 二进制 `mt5700m`**，按 `argv[0]` 基名派发，对外表现为多个程序：
+
+```
+/usr/bin/mt5700m          # 本体（Rust, std-only, 零外部 crate）
+/usr/bin/at-server        # -> mt5700m  (argv[0] == "at-server"  => server::run)
+/usr/sbin/mt5700m-at      # -> mt5700m  (at 指令封装, 仍由 Shell 前端调用)
+/usr/sbin/mt5700m-manager # -> mt5700m  (状态/日志/连接/高级设置 JSON-RPC 后端)
+/usr/sbin/mt5700m-traffic # -> mt5700m  (流量统计)
+```
+
+- **零外部依赖**：自研 RFC6455 WebSocket、SHA1+Base64、GSM-7/UCS2 PDU 解码、双栈 `TcpListener`；
+  企微 Webhook 走 `curl` shell-out，避开 TLS 栈。
+- **派发契约**：`at-server` 软链到 `mt5700m`，`/etc/init.d/at-webserver` 启动即拉起 WebSocket 终端，
+  与旧 Python 实现行为一致。
+- **Shell 前端保留**：`mt5700m-at` / `-manager` / `-traffic` 仍是 Shell 脚本（rpcd 与 init 依赖其富子命令），
+  后续将逐步迁移为 Rust 符号链接（见 §7）。
+
+前端（`htdocs/5700`）是预构建的 UMI/Webpack SPA，已随包发布；为避免 LuCI 的 `jsmin` 破坏正则字面量，
+包内已设 `LUCI_MINIFY_JS:=0`。
+
+---
+
+## 3. 支持的目标
+
+| 架构 | musl 三元组 | 典型设备 |
+|---|---|---|
+| x86_64 | `x86_64-unknown-linux-musl` | x86 软路由 |
+| aarch64 (ARM64) | `aarch64-unknown-linux-musl` | MT5700M、ARM 盒子 |
+| ARMv7 | `armv7-unknown-linux-musleabihf` | Cortex-A9 等 |
+| MIPS (little-endian) | `mipsel-unknown-linux-musl` | ramips 等 |
+| MIPS (big-endian) | `mips-unknown-linux-musl` | 老 MIPS |
+| i686 | `i686-unknown-linux-musl` | 32 位 x86 |
+
+OpenWrt 版本：**24.10.x（opkg/.ipk）** 与 **25.x（apk/.apk）**；更早版本（23.05）可按需扩展矩阵。
+
+---
+
+## 4. 安装
+
+### 4.1 从 Releases（推荐）
+
+1. 到 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载对应架构与包格式的产物。
+2. 上传到路由器后安装：
+
+   ```sh
+   # opkg (.ipk, OpenWrt 24.10)
+   opkg install luci-app-mt5700m_*.ipk
+
+   # apk (.apk, OpenWrt 25.x)
+   apk add --allow-untrusted luci-app-mt5700m_*.apk
+   ```
+
+3. 依赖 `luci-base`、`ubus-at-daemon`、`sms-tool_q`、`curl` 需已在设备或自定义 feed 中可用。
+
+### 4.2 从源码（OpenWrt SDK / 本地）
 
 ```sh
-git clone https://github.com/FAN789/luci-app-mt5700m.git
-cp -a luci-app-mt5700m/luci-app-mt5700m /path/to/openwrt/package/
-make menuconfig
-# LuCI -> Applications -> luci-app-mt5700m
+# 1) 准备 Rust 工具链（交叉目标）
+rustup target add aarch64-unknown-linux-musl   # 按目标架构选择三元组
+
+# 2) 用 OpenWrt SDK 编译（在 SDK 环境下）
+./scripts/feeds update -a
+./scripts/feeds install luci-app-mt5700m
 make package/luci-app-mt5700m/compile V=s
 ```
 
-应用依赖 `ubus-at-daemon`、`sms-tool_q` 及 OpenWrt 官方 USB 串口/网卡内核模块。
-每个 GitHub Release 均由 GitHub Actions 使用官方 OpenWrt SNAPSHOT
-`mediatek/filogic` SDK 在线构建，附带应用、中文包、两个底层传输包、SDK 构建公钥
-和 SHA256 校验文件。安装时必须使用与设备固件 ABI/内核版本相匹配的软件源。
+本地编译时 `Build/Compile` 会直接 `cargo build`（需 SDK 环境内有 `cargo` 与目标 `rust-std`）；
+CI 则改为注入预编译二进制（见 §6）。
 
-## 设计边界
+---
 
-本项目不是通用蜂窝模组框架，只实现 MT5700M 所需的能力。低层 AT 与短信传输
-包来自固定版本的 [FUjr/QModem](https://github.com/FUjr/QModem)，应用内的精简
-实现保留了来源说明，详见
-[`QMODEM-NOTICE`](luci-app-mt5700m/root/usr/share/mt5700m/QMODEM-NOTICE)。
-该部分受其上游 MPL-2.0 和非商业限制约束，适用于个人、非商业用途。
+## 5. 配置（UCI）
 
-本仓库自行编写的代码按 [Apache License 2.0](LICENSE) 发布。
+```sh
+uci set at-webserver.config.enabled='1'
+uci set at-webserver.config.websocket_port='8765'
+uci commit at-webserver
+/etc/init.d/at-webserver restart
+```
+
+`mt5700m-traffic` 的持久化文件位于 `/etc/mt5700m/traffic-history`（已在 `conffiles` 中声明）。
+
+---
+
+## 6. CI / 云端自动编译
+
+`.github/workflows/build.yml` 实现：
+
+1. **rust 作业**：在 GitHub  runner 上用自带 `rust-lld`（自包含链接，无需交叉 gcc）为 6 个 musl 目标
+   编译 `mt5700m`，产物作为 artifact 上传。
+2. **openwrt 作业**（矩阵 = 架构 × SDK 版本）：下载预编译二进制，置入包目录，调用
+   [`openwrt/gh-action-sdk`](https://github.com/openwrt/gh-action-sdk) 用官方 SDK 容器打包。
+   - `24.10.8` → 产出 `.ipk`（opkg）
+   - `25.12.5` → 产出 `.apk`（apk 包管理器）
+3. **release 作业**：汇集全部 `.ipk` / `.apk`，计算 SHA256，推送到 GitHub Releases。
+
+触发方式：
+
+- 推送 tag `v*`：自动构建并发布 Release。
+- `workflow_dispatch`（填写 `release_tag`）：手动构建并发布。
+- 发起 PR：仅构建验证，不发布。
+
+> 提示：若你的自定义依赖（`ubus-at-daemon`、`sms-tool_q`）不在默认 feed，可在工作流中为
+> `openwrt/gh-action-sdk` 设置 `EXTRA_FEEDS`；这些仅为运行时依赖，不影响包本身的编译。
+
+---
+
+## 7. 已知边界 / 路线图
+
+- `mt5700m-at` / `-manager` / `-traffic` 仍为 Shell 实现（rpcd / init 依赖其富子命令），
+  迁移为 Rust 符号链接前需先做命令级等价性验证并回归 LuCI 面板。
+- CI 矩阵中的架构 / SDK 版本可按需增删；若某 SDK 容器标签不存在，构建会拉取失败，按
+  [OpenWrt Releases](https://github.com/openwrt/openwrt/releases) 调整版本号即可。
+- 本仓库 `.gitattributes` 强制 LF 行尾——`Makefile` 的 `Build/Compile` 使用 `\` 续行，
+  续行前若出现 CR 会导致 GNU make 漏掉续行、破坏 Rust 构建。
+
+---
+
+## 8. 目录结构
+
+```
+luci-app-mt5700m/
+├── Makefile                 # OpenWrt 包定义 + RUST_TARGET 架构映射 + Build/Compile
+├── mt5700m-rs/              #  vendored Rust 后端（Cargo.toml / src / REFACTOR.md）
+├── root/                    #  设备侧文件（init.d, uci-defaults, bin, config.json 等）
+├── htdocs/5700/             #  预构建前端 SPA
+├── po/                      #  翻译
+└── .github/workflows/       #  CI
+```
+
+---
+
+## 9. 许可
+
+Apache-2.0。

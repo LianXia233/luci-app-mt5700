@@ -1,0 +1,3 @@
+# CI-injected prebuilt Rust binary (built off-tree by GitHub Actions and copied
+# next to this Makefile during the OpenWrt SDK build). Never committed.
+prebuilt/

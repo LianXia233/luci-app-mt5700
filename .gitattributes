@@ -1,16 +1,12 @@
-# 强制 shell/python/配置脚本使用 LF，避免 CRLF 导致 BusyBox ash / procd 启动失败
-* text=auto
+# Force LF line endings on checkout for all text files.
+# The OpenWrt Makefile uses backslash line-continuations in Build/Compile; a
+# trailing CR before '\' makes GNU make miss the continuation and breaks the
+# Rust cross-build.  Shell scripts and the bundled Rust sources must also stay
+# LF.  Without this, git's core.autocrlf=true (common on Windows) re-adds CRLF
+# on every checkout.
+* text=auto eol=lf
+
+# Explicitly mark the build/shell critical files as text even if content
+# sniffing ever disagrees.
+Makefile text eol=lf
 *.sh text eol=lf
-*.py text eol=lf
-luci-app-mt5700m/root/** text eol=lf
-luci-app-mt5700m/htdocs/cgi-bin/** text eol=lf
-luci-app-mt5700m/htdocs/5700/** text eol=lf
-*.js text eol=lf
-*.html text eol=lf
-*.css text eol=lf
-*.json text eol=lf
-*.png binary
-*.gz binary
-*.woff binary
-*.woff2 binary
-*.ico binary

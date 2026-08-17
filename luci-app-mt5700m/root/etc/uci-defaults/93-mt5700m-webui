@@ -4,18 +4,18 @@
 #
 # SELF-HEAL (v2.3.32): the init script itself MUST be chmod'ed here too.
 # Older packages shipped /etc/init.d/at-webserver as 0644 (missing +x in the
-# git index), so procd silently skipped it at boot, at-server.py never
+# git index), so procd silently skipped it at boot, at-server never
 # started, ws://LAN_IP:8765 had no listener, and every realtime panel in the
 # WebUI (RSSI/SINR/PCI/CA/rates/temperature) showed zeros. Worse, the
 # previous `[ -x ... ]` guards below silently no-op'ed in that state, so the
 # service was never enabled/started either. chmod FIRST, then enable+start.
 chmod 0755 /etc/init.d/at-webserver 2>/dev/null
-chmod 0755 /usr/bin/at-server.py 2>/dev/null
+chmod 0755 /usr/bin/at-server 2>/dev/null
 chmod 0755 /www/cgi-bin/at-ws-info /www/cgi-bin/at-log-clear 2>/dev/null
 uci -q commit at-webserver 2>/dev/null
 
 if [ -z "${IPKG_INSTROOT:-}" ]; then
-	# Enable + start the AT WebSocket backend (at-server.py) on the real device.
+	# Enable + start the AT WebSocket backend (at-server, the Rust binary) on the real device.
 	if [ -x /etc/init.d/at-webserver ]; then
 		/etc/init.d/at-webserver enable >/dev/null 2>&1
 		/etc/init.d/at-webserver restart >/dev/null 2>&1
