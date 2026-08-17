@@ -91,6 +91,15 @@ define Build/Compile
 			echo "mt5700m: using prebuilt binary $$PREBUILT"; \
 			$(INSTALL_BIN) "$$PREBUILT" "$(PKG_BUILD_DIR)/root/usr/bin/mt5700m"; \
 		else \
+			if ! command -v cargo >/dev/null 2>&1; then \
+				echo "ERROR: cargo (Rust toolchain) not found in PATH."; \
+				echo "  luci-app-mt5700m requires EITHER:"; \
+				echo "    1) a prebuilt musl binary at $(PREBUILT_DIR)/$(RUST_TARGET)/mt5700m"; \
+				echo "       (the CI rust job builds it off-tree and drops it next to this Makefile)"; \
+				echo "    2) cargo + the $(RUST_TARGET) rust-std installed on the build host"; \
+				echo "  See README.md section 4.2 / 6. Aborting Build/Compile."; \
+				exit 1; \
+			fi; \
 			cd "$(RUST_SRC_DIR)" && \
 			CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" \
 			cargo build --release --target "$(RUST_TARGET)" --offline && \

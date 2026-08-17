@@ -168,25 +168,22 @@ jobs:
         with:
           pattern: packages-*
           path: /tmp/release
-          merge-multiple: true
+          # 故意不启用 merge-multiple：让每个 openwrt 作业产物落到
+          # /tmp/release/<artifact-name>/ 的独立子目录，后续用 find 递归收集。
+          # 之前启用 merge-multiple 时，6 个产物里的同名文件（如 _all 架构的
+          # app/i18n/base 包）互相覆盖，导致发布中绝大多数包丢失，
+          # 只剩少量依赖（曾有 latest 预发布只发布了 cgi-io/curl 等依赖、漏掉 app 本体）。
 
       - name: Stage dist + checksums
         run: |
           set -euo pipefail
           rm -rf dist
-          mkdir -p dist/packages
-
-          # 复制所有 bin/packages 目录（不同架构会落到不同子目录）
-          if [ -d /tmp/release/bin/packages ]; then
-            cp -a /tmp/release/bin/packages/. dist/packages/
-          else
-            # 兼容更扁平的产物布局
-            find /tmp/release -type d -name packages -exec cp -a {}/. dist/packages/ \; || true
-          fi
-
-          # 把真正的 .ipk / .apk 扁平化到 dist/upload，方便可靠上传
           mkdir -p dist/upload
-          find dist/packages -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 \
+
+          # 递归收集所有 openwrt 作业产物里的 .ipk / .apk，不依赖内部目录结构，
+          # 避免 bin/packages 合并时的同名包覆盖问题。每个 artifact 解压到
+          # /tmp/release/<name>/bin/packages/...，find 会一网打尽。
+          find /tmp/release -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 \
             | xargs -0 -I{} cp -a {} dist/upload/
 
           # 正确生成校验和（路径相对 dist/）
@@ -197,6 +194,16 @@ jobs:
           find dist/upload -type f | sort
           echo "=== SHA256SUMS ==="
           cat dist/SHA256SUMS.txt
+
+          # 完整性闸门：app 本体必须存在，否则发布会变成缺 app 的空壳。
+          # （workflow_dispatch 触发的 latest 预发布曾因收集逻辑缺陷只发布了依赖。）
+          shopt -s nullglob
+          app_hits=(dist/upload/luci-app-mt5700m_*.ipk dist/upload/luci-app-mt5700m-*.apk)
+          if [ "${#app_hits[@]}" -eq 0 ]; then
+            echo "::error::luci-app-mt5700m 本体未出现在产物中，终止发布（避免发布缺 app 的空壳）"
+            exit 1
+          fi
+          shopt -u nullglob
 
           # 提前检查：如果一个包都没有就直接失败
           count=$(find dist/upload -type f \( -name '*.ipk' -o -name '*.apk' \) | wc -l)
