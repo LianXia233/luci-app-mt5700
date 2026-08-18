@@ -62,6 +62,11 @@
   `libubox`/`ubus`/`uci`/`lua`/`ucode`、甚至 `zlib-dev`/`lua-examples`）。现改为按包名前缀
   白名单挑选，仅发布 `luci-app-mt5700m`（本体）、`luci-i18n-mt5700m-zh-cn`（简中）、
   直接依赖 `ubus-at-daemon`/`sms-tool_q`/`curl`/`luci-base`，剔除所有无关包。
+- **滚动 `latest` 发布提升为正式「Latest」Release（不再预发布）**：原先 `workflow_dispatch`
+  未填 `release_tag` 时发布的 `latest` 被标记为 **prerelease**，GitHub 仓库首页会把预发布弱化、
+  侧栏「Releases」不显示「Latest」徽标，用户只能看到「1 tag」。
+  现改为 `prerelease: false` + `make_latest: true`，`latest` 在首页作为「最新 Release」直接展示，
+  可下载其中的 ipk/apk 包，不再是被弱化的标签。
 
 ### Known Issues / 边界
 - 精简发布逻辑（白名单）的改动需在重跑 CI（`workflow_dispatch`）后验证 `latest` 是否仅含

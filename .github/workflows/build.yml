@@ -6,7 +6,8 @@ name: Build & Release
 #   - 推送 "v*" 标签        → 构建 + 发布正式版（STABLE，标记为 Latest）
 #   - workflow_dispatch      → 构建 + 发布：
 #                               * 填写了 release_tag → 正式版（tag = release_tag，标记为 Latest）
-#                               * 未填写 release_tag → 滚动更新的 "latest" 预发布版（就地更新，不标记为 Latest）
+#                               * 未填写 release_tag → 滚动更新的 "latest" 正式版（就地更新，标记为
+#                                 Latest，在仓库首页作为「最新 Release」展示，而非被当作预发布/标签弱化）
 #   - pull_request           → 仅构建（不发布），作为 CI 门禁
 #
 # 上传路径：每个 openwrt 作业上传 bin/packages（+ logs）为 packages-<arch>-<sdk> 产物
@@ -146,8 +147,8 @@ jobs:
   # 触发 / 发布逻辑（与文件头部注释一致）：
   #   - 推送 "v*" 标签               → 正式版，tag = 推送的标签（Latest）
   #   - workflow_dispatch + release_tag  → 正式版，tag = release_tag（Latest）
-  #   - workflow_dispatch（无 release_tag） → 滚动预发布版，tag = "latest"
-  #                                          （每次手动运行就地更新；不标记为 Latest）
+  #   - workflow_dispatch（无 release_tag） → 滚动正式版，tag = "latest"
+  #                                          （每次手动运行就地更新；标记为 Latest，在首页展示为最新 Release）
   #   - pull_request                     → 跳过（仅构建的 CI 门禁）
   # 上传路径：openwrt 作业上传 bin/packages 为 packages-* 产物 →
   #   本作业合并到 dist/packages/ 后扁平化，再上传到 Release。
@@ -241,10 +242,11 @@ jobs:
               MAKE_LATEST=true
               PRERELEASE=false
             else
-              # 未指定版本号 → 滚动更新的 "latest" 预发布版（不抢 Latest）
+              # 未指定版本号 → 滚动更新的 "latest" 正式版（就地更新，标记为 Latest，
+              # 在仓库首页作为「最新 Release」展示，而不是被当成预发布/标签弱化显示）
               TAG="latest"
-              MAKE_LATEST=false
-              PRERELEASE=true
+              MAKE_LATEST=true
+              PRERELEASE=false
             fi
           else
             # 推送了 v* 标签 → 正式版
