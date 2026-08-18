@@ -57,11 +57,16 @@
 - **`Makefile` `Build/Compile` 加固**：当构建环境缺少 `cargo` 且未注入 CI 预编译 musl 二进制时，
   给出清晰可执行的报错（二选一：放入预编译二进制 / 安装 `cargo` + 对应 `rust-std`），
   替代原先晦涩的 `cargo: command not found` 失败。
+- **发布产物精简（白名单收集）**：上一轮修复 `merge-multiple` 后改用 `find` 全量收集，
+  导致 `latest` 发布了 300+ 个无关包（40+ 种语言的 `luci-i18n-base-*`、所有 base 运行时库
+  `libubox`/`ubus`/`uci`/`lua`/`ucode`、甚至 `zlib-dev`/`lua-examples`）。现改为按包名前缀
+  白名单挑选，仅发布 `luci-app-mt5700m`（本体）、`luci-i18n-mt5700m-zh-cn`（简中）、
+  直接依赖 `ubus-at-daemon`/`sms-tool_q`/`curl`/`luci-base`，剔除所有无关包。
 
 ### Known Issues / 边界
-- 重新触发的 CI 运行（id=32081793088，`workflow_dispatch`）截至 2026-08-18 仍处于
-  `in_progress`（已持续约 8 小时，远超常规 20–40 分钟），疑似 runner 卡顿；待其完成以验证
-  修复后的 `latest` 是否重新包含完整 app 本体（`luci-app-mt5700m` 等）。
+- 精简发布逻辑（白名单）的改动需在重跑 CI（`workflow_dispatch`）后验证 `latest` 是否仅含
+  白名单内的包；base 运行时依赖（`libubox`/`ubus`/`uci`/`lua` 等）与 `ca-bundle`/
+  `ca-certificates` 不再随发布提供，依赖目标系统已装 Luci 环境，或安装时由包管理器从仓库解析。
 - `mt5700m-at` / `-manager` / `-traffic` 仍为 Shell 实现，待命令级等价验证后迁移为 Rust 符号链接。
 
 ---

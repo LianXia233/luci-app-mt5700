@@ -169,7 +169,8 @@ jobs:
           pattern: packages-*
           path: /tmp/release
           # 故意不启用 merge-multiple：让每个 openwrt 作业产物落到
-          # /tmp/release/<artifact-name>/ 的独立子目录，后续用 find 递归收集。
+          # /tmp/release/<artifact-name>/ 的独立子目录，后续用 find 递归 + 白名单挑选
+          # （见下方 KEEP 列表），避免无关 base 库与多余语言包被一并发布。
           # 之前启用 merge-multiple 时，6 个产物里的同名文件（如 _all 架构的
           # app/i18n/base 包）互相覆盖，导致发布中绝大多数包丢失，
           # 只剩少量依赖（曾有 latest 预发布只发布了 cgi-io/curl 等依赖、漏掉 app 本体）。
@@ -180,11 +181,28 @@ jobs:
           rm -rf dist
           mkdir -p dist/upload
 
-          # 递归收集所有 openwrt 作业产物里的 .ipk / .apk，不依赖内部目录结构，
-          # 避免 bin/packages 合并时的同名包覆盖问题。每个 artifact 解压到
-          # /tmp/release/<name>/bin/packages/...，find 会一网打尽。
+          # 白名单收集：只发布 app 本体 + 简体中文包 + 直接依赖，剔除无关的 base 库
+          # 与 40+ 种语言的 luci-i18n-base-* 等无用包。每个 openwrt 作业产物解压到
+          # /tmp/release/<name>/bin/packages/...，find 遍历后按包名前缀白名单挑选，
+          # 跨架构（aarch64_cortex-a53 / aarch64_generic / x86_64）与格式（ipk/apk）一并纳入。
+          KEEP=(
+            'luci-app-mt5700m'          # app 本体（ipk@24.10 / apk@25.x）
+            'luci-i18n-mt5700m-zh-cn'   # 简体中文语言包
+            'ubus-at-daemon'            # QModem feed 直接依赖（AT 通道守护进程）
+            'sms-tool_q'                # QModem feed 直接依赖（短信工具）
+            'curl'                      # LUCI_DEPENDS 声明的依赖
+            'luci-base'                 # LUCI_DEPENDS 声明的依赖（Luci 框架基础）
+          )
           find /tmp/release -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 \
-            | xargs -0 -I{} cp -a {} dist/upload/
+            | while IFS= read -r -d '' f; do
+                bn=$(basename "$f")
+                for k in "${KEEP[@]}"; do
+                  if [[ "$bn" == "$k"* ]]; then
+                    cp -a "$f" dist/upload/
+                    break
+                  fi
+                done
+              done
 
           # 正确生成校验和（路径相对 dist/）
           (cd dist && find upload -type f \( -name '*.ipk' -o -name '*.apk' \) -print0 \
