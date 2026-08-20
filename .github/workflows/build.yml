@@ -279,7 +279,12 @@ jobs:
           echo "清理 release ${TAG} (id=${REL_ID}) 的全部旧资产"
           ASSETS=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" "${API}/${REL_ID}/assets")
-          echo "${ASSETS}" | grep -o '"id": [0-9]*' | awk '{print $2}' | while read -r aid; do
+          IDS=$(echo "${ASSETS}" | grep -o '"id": [0-9]*' | awk '{print $2}' || true)
+          if [ -z "${IDS}" ]; then
+            echo "无旧资产，跳过清理"
+            exit 0
+          fi
+          echo "${IDS}" | while read -r aid; do
             echo "  删除资产 ${aid}"
             curl -s -X DELETE -H "Authorization: token ${GITHUB_TOKEN}" \
               "${API}/assets/${aid}" || true
