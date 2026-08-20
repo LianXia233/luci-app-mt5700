@@ -6,8 +6,10 @@ name: Build & Release
 #   - 推送 "v*" 标签        → 构建 + 发布正式版（STABLE，标记为 Latest）
 #   - workflow_dispatch      → 构建 + 发布：
 #                               * 填写了 release_tag → 正式版（tag = release_tag，标记为 Latest）
-#                               * 未填写 release_tag → 滚动更新的 "latest" 正式版（就地更新，标记为
-#                                 Latest，在仓库首页作为「最新 Release」展示，而非被当作预发布/标签弱化）
+#                               * 未填写 release_tag → 滚动更新的 "rolling" 开发版（就地更新，
+#                                 标记为 Latest）。注意不能用 "latest" 作 tag 名：它与 GitHub
+#                                 保留 URL /releases/latest 冲突，会导致该 release 详情页资产
+#                                 懒加载失败（只显示 Loading），页面看起来“没有包”。
 #   - pull_request           → 仅构建（不发布），作为 CI 门禁
 #
 # 上传路径：每个 openwrt 作业上传 bin/packages（+ logs）为 packages-<arch>-<sdk> 产物
@@ -26,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "要发布的版本标签（例如 v1.0.0）。留空则发布滚动更新的 'latest' 预发布版"
+        description: "要发布的版本标签（例如 v1.0.0）。留空则发布滚动更新的 'rolling' 开发版（注意不能用 latest，会与 GitHub 保留 URL 冲突导致页面无资产显示）"
         required: false
         default: ""
 
@@ -147,8 +149,10 @@ jobs:
   # 触发 / 发布逻辑（与文件头部注释一致）：
   #   - 推送 "v*" 标签               → 正式版，tag = 推送的标签（Latest）
   #   - workflow_dispatch + release_tag  → 正式版，tag = release_tag（Latest）
-  #   - workflow_dispatch（无 release_tag） → 滚动正式版，tag = "latest"
-  #                                          （每次手动运行就地更新；标记为 Latest，在首页展示为最新 Release）
+  #   - workflow_dispatch（无 release_tag） → 滚动开发版，tag = "rolling"
+  #                                          （每次手动运行就地更新；标记为 Latest）
+  # 注意：不得使用 "latest" 作为 tag 名（与 GitHub 保留 URL /releases/latest 冲突，
+  #       会导致该 release 详情页资产懒加载失败、页面显示不出包）。
   #   - pull_request                     → 跳过（仅构建的 CI 门禁）
   # 上传路径：openwrt 作业上传 bin/packages 为 packages-* 产物 →
   #   本作业合并到 dist/packages/ 后扁平化，再上传到 Release。
@@ -242,9 +246,10 @@ jobs:
               MAKE_LATEST=true
               PRERELEASE=false
             else
-              # 未指定版本号 → 滚动更新的 "latest" 正式版（就地更新，标记为 Latest，
-              # 在仓库首页作为「最新 Release」展示，而不是被当成预发布/标签弱化显示）
-              TAG="latest"
+              # 未指定版本号 → 滚动更新的 "rolling" 开发版（就地更新，标记为 Latest）。
+              # 注意不能用 "latest"：与 GitHub 保留 URL /releases/latest 冲突，
+              # 会导致该 release 详情页资产懒加载失败（只显示 Loading），页面看起来“没有包”。
+              TAG="rolling"
               MAKE_LATEST=true
               PRERELEASE=false
             fi
