@@ -1,3 +1,26 @@
+# Directory containing *this* Makefile.  $(CURDIR) is unreliable because the
+# package may be built straight from its own dir (standalone SDK) or from the
+# feeds tree inside the gh-action-sdk container.  Anchoring on the Makefile's
+# own path keeps the vendored Rust source and any CI-injected prebuilt binary
+# locatable in both cases.
+#
+# CRITICAL: this MUST be evaluated before `include $(TOPDIR)/rules.mk` below.
+# `$(lastword $(MAKEFILE_LIST))` returns the most recently *included* Makefile,
+# not the one currently being parsed.  After rules.mk (and its transitive
+# includes) runs, the lastword points somewhere under include/ — e.g.
+# `/builder/include/verbose.mk` — so `$(dir …)` resolves to the wrong tree and
+# PREBUILT_BIN / RUST_SRC_DIR silently point at non-existent paths, which makes
+# src/Makefile fall through to "no prebuilt binary and cargo not found" and fail
+# the whole package build.  Capturing here (while MAKEFILE_LIST contains only
+# this file) is the only reliable anchor.
+#
+# `$(abspath …)` is required because the result may be a relative path (e.g. `./`
+# when the package is built via `make -C <pkgdir>`).  The src/ sub-make runs in
+# $(PKG_BUILD_DIR)/src — a different CWD — so a relative PREBUILT_BIN would
+# resolve against the wrong directory and the copy would fail.  abspath freezes
+# the path to an absolute location at parse time.  Trailing `/` is re-added
+# because abspath strips it and downstream vars concatenate as $(PKG_SRC_DIR)prebuilt.
+PKG_SRC_DIR:=$(abspath $(dir $(lastword $(MAKEFILE_LIST))))/
 include $(TOPDIR)/rules.mk
 
 # The WebUI (htdocs/5700) is a pre-built UMI/Webpack SPA whose bundle already
@@ -51,12 +74,6 @@ ifeq ($(RUST_TARGET),)
   endif
 endif
 
-# Directory containing *this* Makefile.  $(CURDIR) is unreliable because the
-# package may be built straight from its own dir (standalone SDK) or from the
-# feeds tree inside the gh-action-sdk container.  Anchoring on the Makefile's
-# own path keeps the vendored Rust source and any CI-injected prebuilt binary
-# locatable in both cases.
-PKG_SRC_DIR:=$(dir $(lastword $(MAKEFILE_LIST)))
 PREBUILT_DIR:=$(PKG_SRC_DIR)prebuilt
 
 # --- Binary staging ---------------------------------------------------------
