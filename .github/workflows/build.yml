@@ -299,7 +299,7 @@ jobs:
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases"
           REL_JSON=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" "${API}/tags/${TAG}" || true)
-          REL_ID=$(echo "${REL_JSON}" | grep -o '"id": [0-9]*' | head -1 | awk '{print $2}')
+          REL_ID=$(echo "${REL_JSON}" | grep -o '"id": [0-9]*' | head -1 | awk '{print $2}' || true)
           if [ -z "${REL_ID}" ]; then
             echo "release ${TAG} 尚不存在（首次发布），跳过清理"
             exit 0
