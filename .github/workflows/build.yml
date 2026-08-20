@@ -259,6 +259,33 @@ jobs:
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "解析结果 → tag=$TAG  make_latest=$MAKE_LATEST  prerelease=$PRERELEASE"
 
+      - name: Clean existing release assets
+        # softprops/action-gh-release 的 overwrite_files 只覆盖同名文件，不会删除
+        # 旧 release 中已存在的多余资产（例如早期全量构建遗留的 300+ 无关包）。
+        # 发布前先清空目标 release 的全部旧资产，避免无关文件累积污染 release。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases"
+          REL_JSON=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" "${API}/tags/${TAG}" || true)
+          REL_ID=$(echo "${REL_JSON}" | grep -o '"id": [0-9]*' | head -1 | awk '{print $2}')
+          if [ -z "${REL_ID}" ]; then
+            echo "release ${TAG} 尚不存在（首次发布），跳过清理"
+            exit 0
+          fi
+          echo "清理 release ${TAG} (id=${REL_ID}) 的全部旧资产"
+          ASSETS=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" "${API}/${REL_ID}/assets")
+          echo "${ASSETS}" | grep -o '"id": [0-9]*' | awk '{print $2}' | while read -r aid; do
+            echo "  删除资产 ${aid}"
+            curl -s -X DELETE -H "Authorization: token ${GITHUB_TOKEN}" \
+              "${API}/assets/${aid}" || true
+          done
+          echo "资产清理完成"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
