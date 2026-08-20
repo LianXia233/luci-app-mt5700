@@ -57,11 +57,7 @@ endif
 # own path keeps the vendored Rust source and any CI-injected prebuilt binary
 # locatable in both cases.
 PKG_SRC_DIR:=$(dir $(lastword $(MAKEFILE_LIST)))
-RUST_SRC_DIR:=$(PKG_SRC_DIR)mt5700m-rs
 PREBUILT_DIR:=$(PKG_SRC_DIR)prebuilt
-# Keep all Rust build artifacts inside the OpenWrt build dir so the package
-# source tree stays clean.
-CARGO_TARGET_DIR:=$(PKG_BUILD_DIR)/cargo-target
 
 # --- Binary staging ---------------------------------------------------------
 # IMPORTANT: luci.mk evaluates BuildPackage at include time, so a custom
@@ -73,14 +69,20 @@ CARGO_TARGET_DIR:=$(PKG_BUILD_DIR)/cargo-target
 #   $(MAKE_VARS) $(MAKE) -C $(PKG_BUILD_DIR)/src clean compile
 # and (with PKG_INSTALL:=1)
 #   $(MAKE) -C $(PKG_BUILD_DIR)/src DESTDIR=$(PKG_INSTALL_DIR) install
-# so the Rust staging logic lives in src/Makefile and receives its paths via
-# MAKE_VARS, which must be set BEFORE the include below.
-PKG_INSTALL:=1
-MAKE_VARS += \
-	PREBUILT_BIN="$(PREBUILT_DIR)/$(RUST_TARGET)/mt5700m" \
-	RUST_SRC_DIR="$(RUST_SRC_DIR)" \
-	RUST_TARGET="$(RUST_TARGET)" \
-	CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)"
+# so the Rust staging logic lives in src/Makefile.
+#
+# NOTE on variable passing: `MAKE_VARS +=` does NOT work here — luci.mk
+# includes package.mk (line 139) which loads package-defaults.mk defining
+# `MAKE_VARS = ...`, overwriting anything appended before the include.
+# Environment `export` is immune to that: exported vars reach the src/
+# sub-make through the recipe environment and are picked up as env-origin
+# variables there.  All values below use deferred `=` so PKG_BUILD_DIR
+# (set inside luci.mk) is already defined when they are expanded at
+# recipe-run time.
+PREBUILT_BIN = $(PREBUILT_DIR)/$(RUST_TARGET)/mt5700m
+RUST_SRC_DIR = $(PKG_SRC_DIR)mt5700m-rs
+CARGO_TARGET_DIR = $(PKG_BUILD_DIR)/cargo-target
+export PREBUILT_BIN RUST_SRC_DIR RUST_TARGET CARGO_TARGET_DIR
 
 define Package/luci-app-mt5700m/conffiles
 /etc/mt5700m/traffic-history
