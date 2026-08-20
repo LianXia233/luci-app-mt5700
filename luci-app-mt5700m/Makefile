@@ -9,19 +9,19 @@ include $(TOPDIR)/rules.mk
 LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-mt5700m
-PKG_VERSION:=2.3.32
+PKG_VERSION:=2.3.34
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 
 LUCI_TITLE:=MT5700M module management
-# The AT WebSocket terminal (at-server) is now a Rust binary (`mt5700m`)
+# The AT WebSocket terminal (at-server) is a Rust binary (`mt5700m`)
 # dispatched by argv[0] basename.  Python is no longer required.  `curl` is
 # needed by the Rust at-server for the WeChat-Work notification webhook
 # (HTTPS POST); ubus-at-daemon owns the PCUI serial port for the default UBUS
 # AT channel; sms-tool_q provides the SMS helper used by the WebUI.
 LUCI_DEPENDS:=+luci-base +ubus-at-daemon +sms-tool_q +curl
 LUCI_EXTRA_DEPENDS:=kmod-usb2 (>=0), kmod-usb3 (>=0), kmod-usb-serial (>=0), kmod-usb-serial-option (>=0), kmod-usb-net (>=0), kmod-usb-net-cdc-ether (>=0), kmod-usb-net-cdc-ncm (>=0)
-# NOTE: deliberately do NOT set LUCI_PKGARCH:=all — this package now ships an
+# NOTE: deliberately do NOT set LUCI_PKGARCH:=all — this package ships an
 # architecture-specific Rust binary and must inherit the target PKGARCH.
 
 # --- Rust cross-compilation ------------------------------------------------
@@ -63,52 +63,27 @@ PREBUILT_DIR:=$(PKG_SRC_DIR)prebuilt
 # source tree stays clean.
 CARGO_TARGET_DIR:=$(PKG_BUILD_DIR)/cargo-target
 
+# --- Binary staging ---------------------------------------------------------
+# IMPORTANT: luci.mk evaluates BuildPackage at include time, so a custom
+# `define Build/Compile` placed AFTER the include is silently ignored — this
+# is exactly how v2.3.33 shipped an apk WITHOUT /usr/bin/at-server (the
+# backend binary never entered the package and the WebUI lost its WebSocket
+# data channel, see CHANGELOG 2.3.34).  luci.mk only honours its own build
+# channel: when `src/Makefile` exists it runs
+#   $(MAKE_VARS) $(MAKE) -C $(PKG_BUILD_DIR)/src clean compile
+# and (with PKG_INSTALL:=1)
+#   $(MAKE) -C $(PKG_BUILD_DIR)/src DESTDIR=$(PKG_INSTALL_DIR) install
+# so the Rust staging logic lives in src/Makefile and receives its paths via
+# MAKE_VARS, which must be set BEFORE the include below.
+PKG_INSTALL:=1
+MAKE_VARS += \
+	PREBUILT_BIN="$(PREBUILT_DIR)/$(RUST_TARGET)/mt5700m" \
+	RUST_SRC_DIR="$(RUST_SRC_DIR)" \
+	RUST_TARGET="$(RUST_TARGET)" \
+	CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)"
+
 define Package/luci-app-mt5700m/conffiles
 /etc/mt5700m/traffic-history
 endef
 
 include $(TOPDIR)/feeds/luci/luci.mk
-
-# Build the Rust backend.  Two paths:
-#   1. CI injects a prebuilt, stripped musl binary at
-#      $(PREBUILT_DIR)/$(RUST_TARGET)/mt5700m (built off-tree by the GitHub
-#      Actions rust job, then dropped next to this Makefile).  When present we
-#      just copy it — this lets the OpenWrt SDK container (which has no Rust
-#      toolchain) package the binary without compiling.
-#   2. Otherwise compile in place with cargo (the normal local / SDK build).
-#      Requires `cargo` + the `$(RUST_TARGET)` rust-std on the host
-#      (`rustup target add $(RUST_TARGET)`).  The release profile sets
-#      `strip = true`, so no separate $(STRIP) pass is needed.
-# In both cases the binary is staged into $(PKG_BUILD_DIR)/root/usr/bin so
-# luci.mk's default Package/install (copies root/*) ships it, and the
-# `at-server` symlink lets /etc/init.d/at-webserver launch the WebSocket
-# terminal exactly as before (argv[0] basename dispatch inside the binary).
-define Build/Compile
-	( \
-		PREBUILT="$(PREBUILT_DIR)/$(RUST_TARGET)/mt5700m"; \
-		$(INSTALL_DIR) "$(PKG_BUILD_DIR)/root/usr/bin"; \
-		if [ -x "$$PREBUILT" ]; then \
-			echo "mt5700m: using prebuilt binary $$PREBUILT"; \
-			$(INSTALL_BIN) "$$PREBUILT" "$(PKG_BUILD_DIR)/root/usr/bin/mt5700m"; \
-		else \
-			if ! command -v cargo >/dev/null 2>&1; then \
-				echo "ERROR: cargo (Rust toolchain) not found in PATH."; \
-				echo "  luci-app-mt5700m requires EITHER:"; \
-				echo "    1) a prebuilt musl binary at $(PREBUILT_DIR)/$(RUST_TARGET)/mt5700m"; \
-				echo "       (the CI rust job builds it off-tree and drops it next to this Makefile)"; \
-				echo "    2) cargo + the $(RUST_TARGET) rust-std installed on the build host"; \
-				echo "  See README.md section 4.2 / 6. Aborting Build/Compile."; \
-				exit 1; \
-			fi; \
-			cd "$(RUST_SRC_DIR)" && \
-			CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" \
-			cargo build --release --target "$(RUST_TARGET)" --offline && \
-			$(INSTALL_BIN) "$(CARGO_TARGET_DIR)/$(RUST_TARGET)/release/mt5700m" \
-				"$(PKG_BUILD_DIR)/root/usr/bin/mt5700m"; \
-		fi; \
-		ln -sf mt5700m "$(PKG_BUILD_DIR)/root/usr/bin/at-server"; \
-		rm -f "$(PKG_BUILD_DIR)/root/usr/bin/at-server.py" ; \
-	)
-endef
-
-# call BuildPackage - OpenWrt buildroot signature

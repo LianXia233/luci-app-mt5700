@@ -57,12 +57,12 @@ MT5700M 蜂窝模块管理 LuCI 应用（OpenWrt / ImmortalWrt）。提供 AT �
 | MIPS (big-endian) | `mips-unknown-linux-musl` | 老 MIPS | 本地（Makefile 映射支持） |
 | i686 | `i686-unknown-linux-musl` | 32 位 x86 | 本地（Makefile 映射支持） |
 
-> CI 当前仅构建 **amd64 (x86_64) + arm64**（ipk@24.10.8 与 apk@25.12.5）；arm64 覆盖
+> CI 当前仅构建 **amd64 (x86_64) + arm64**（ipk@24.10.8、apk@25.12.5 与 apk@main 快照）；arm64 覆盖
 > `aarch64_generic` 与 `mediatek-filogic`（MT798x / Filogic，Cortex-A53，即 MT5700M 平台）。
 > mips / mipsel / i686 的 `rust-std` 已从 Rust *stable* 渠道下架，无法再用自带 `rust-lld` 交叉编译；
 > 本地若需构建这些目标须自行提供对应工具链。Makefile 的 `RUST_TARGET` 映射仍保留，便于本地或自定义 CI 使用。
 
-OpenWrt 版本：**24.10.x（opkg/.ipk）** 与 **25.x（apk/.apk）**；更早版本（23.05）可按需扩展矩阵。
+OpenWrt 版本：**24.10.x（opkg/.ipk）**、**25.x 稳定版（apk/.apk）** 与 **main 滚动快照（apk/.apk）**；更早版本（23.05）可按需扩展矩阵。
 
 ---
 
@@ -71,15 +71,31 @@ OpenWrt 版本：**24.10.x（opkg/.ipk）** 与 **25.x（apk/.apk）**；更早�
 ### 4.1 从 Releases（推荐）
 
 1. 到 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载对应架构与包格式的产物。
+
+   **如何选择 apk（OpenWrt/ImmortalWrt 25.x 及更新版本）**：apk 资产命名带 `-<架构>-<SDK>` 后缀，
+   请按固件的库 ABI 选择，否则 `apk add` 会报 `no such package`（如 `libubox20260213`）：
+
+   | 资产后缀 | 适用于固件 | 判别方法 |
+   |---|---|---|
+   | `-<arch>-25.12.5.apk` | OpenWrt 25.12 稳定分支固件 | `apk info libubox` 显示 `libubox20260213` 一类 25.12 时代 soname |
+   | `-<arch>-main.apk` | ImmortalWrt / OpenWrt **main 滚动快照**固件 | `apk info libubox` 显示 `libubox202607xx` 等较新日期 soname |
+   | `_<arch>.ipk` | OpenWrt 24.10.x（opkg） | `opkg` 存在且包管理器为 opkg |
+
+   MT5700M / MT798x（Filogic）设备对应 `mediatek-filogic`；通用 ARM64 对应 `aarch64_generic`。
+
 2. 上传到路由器后安装：
 
    ```sh
    # opkg (.ipk, OpenWrt 24.10)
    opkg install luci-app-mt5700m_*.ipk
 
-   # apk (.apk, OpenWrt 25.x)
-   apk add --allow-untrusted luci-app-mt5700m_*.apk
+   # apk (.apk, OpenWrt 25.x / main 快照)
+   apk add --allow-untrusted luci-app-mt5700m-*-mediatek-filogic-main.apk \
+     ubus-at-daemon-*-mediatek-filogic-main.apk \
+     sms-tool_q-*-mediatek-filogic-main.apk
    ```
+
+   （依赖 `ubus-at-daemon` / `sms-tool_q` 与 app 本体需取**同一 SDK 后缀**的版本，保持 ABI 一致。）
 
 3. 依赖 `luci-base`、`ubus-at-daemon`、`sms-tool_q`、`curl` 需已在设备或自定义 feed 中可用。
 
@@ -95,8 +111,8 @@ rustup target add aarch64-unknown-linux-musl   # 按目标架构选择三元组
 make package/luci-app-mt5700m/compile V=s
 ```
 
-本地编译时 `Build/Compile` 会直接 `cargo build`（需 SDK 环境内有 `cargo` 与目标 `rust-std`）；
-CI 则改为注入预编译二进制（见 §6）。
+本地编译时 `src/Makefile` 会直接 `cargo build`（需 SDK 环境内有 `cargo` 与目标 `rust-std`）；
+CI 则注入预编译二进制到 `prebuilt/<triple>/mt5700m` 供其复制（见 §6）。
 
 ---
 
@@ -122,8 +138,10 @@ uci commit at-webserver
 2. **openwrt 作业**（矩阵 = 架构 × SDK 版本）：下载预编译二进制，置入包目录，调用
    [`openwrt/gh-action-sdk`](https://github.com/openwrt/gh-action-sdk) 用官方 SDK 容器打包。
    - `24.10.8` → 产出 `.ipk`（opkg）
-   - `25.12.5` → 产出 `.apk`（apk 包管理器）
-3. **release 作业**：汇集全部 `.ipk` / `.apk`，计算 SHA256，推送到 GitHub Releases。
+   - `25.12.5` → 产出 `.apk`（apk 包管理器，稳定分支 ABI）
+   - `main` → 产出 `.apk`（OpenWrt main 滚动快照 ABI，匹配 ImmortalWrt master 固件）
+3. **release 作业**：汇集全部 `.ipk` / `.apk`（apk 追加 `-<架构>-<SDK>` 后缀防同名覆盖），
+   计算 SHA256，推送到 GitHub Releases。
 
 触发方式：
 
@@ -152,7 +170,8 @@ uci commit at-webserver
 
 ```
 luci-app-mt5700m/
-├── Makefile                 # OpenWrt 包定义 + RUST_TARGET 架构映射 + Build/Compile
+├── Makefile                 # OpenWrt 包定义 + RUST_TARGET 架构映射 + MAKE_VARS 透传
+├── src/Makefile             #  二进制 staging（预编译优先，cargo 回退；luci.mk 原生通道）
 ├── mt5700m-rs/              #  vendored Rust 后端（Cargo.toml / src / REFACTOR.md）
 ├── root/                    #  设备侧文件（init.d, uci-defaults, bin, config.json 等）
 ├── htdocs/5700/             #  预构建前端 SPA

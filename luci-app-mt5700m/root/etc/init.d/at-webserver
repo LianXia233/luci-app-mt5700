@@ -4,8 +4,11 @@ START=99
 STOP=10
 
 USE_PROCD=1
-PROG=/usr/bin/at-server
+PROG_RUST=/usr/bin/at-server
+PROG_PY=/usr/bin/at-server.py
+PROG="$PROG_RUST"
 PROG_NAME="at-server"
+PROG_CMD=""
 
 # 加载 UCI 函数库（必须在文件顶部）
 . /lib/functions.sh
@@ -56,11 +59,23 @@ JSON
 		return 1
 	fi
 	
-	# 检查 Rust 后端程序是否存在
-	if [ ! -f "$PROG" ]; then
-		logger -t at-webserver "错误：找不到后端程序 $PROG"
-		echo "Error: $PROG not found"
-		return 1
+	# 检查后端程序：优先 Rust 二进制；缺失时回退到老固件 ROM 自带的
+	# Python 版 at-server.py（保持 WebUI 数据通道可用，避免升级包与旧
+	# ROM 组合时 WebSocket 后端直接失效）。
+	PROG="$PROG_RUST"
+	PROG_NAME="at-server"
+	PROG_CMD=""
+	if [ ! -f "$PROG_RUST" ]; then
+		if [ -f "$PROG_PY" ] && command -v python3 >/dev/null 2>&1; then
+			PROG="$PROG_PY"
+			PROG_NAME="at-server.py"
+			PROG_CMD="python3"
+			logger -t at-webserver "未找到 $PROG_RUST，回退到 Python 后端 $PROG_PY"
+		else
+			logger -t at-webserver "错误：找不到后端程序 $PROG_RUST（也无 $PROG_PY 回退）"
+			echo "Error: $PROG_RUST not found"
+			return 1
+		fi
 	fi
 
 	# 自动检测并添加 USB 串口设备 ID（如果需要）
@@ -228,6 +243,7 @@ JSON
 	
 	# 确保没有旧进程在运行
 	killall -q -9 "$PROG_NAME" 2>/dev/null
+	pkill -9 -f "$PROG_PY" 2>/dev/null
 	sleep 1
 	
 	logger -t at-webserver "配置 procd 实例..."
@@ -235,7 +251,11 @@ JSON
 	
 	# 启动 procd 服务（不指定实例名，使用默认 instance1）
 	procd_open_instance
-	procd_set_param command "$PROG"
+	if [ -n "$PROG_CMD" ]; then
+		procd_set_param command "$PROG_CMD" "$PROG"
+	else
+		procd_set_param command "$PROG"
+	fi
 	procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
 	procd_set_param stdout 1
 	procd_set_param stderr 1
@@ -252,6 +272,7 @@ stop_service() {
 	
 	# 强制杀死所有相关进程
 	killall -q -9 "$PROG_NAME" 2>/dev/null
+	pkill -9 -f "$PROG_PY" 2>/dev/null
 	
 	# 清理 pidfile
 	rm -f /var/run/at-webserver.pid
@@ -310,6 +331,7 @@ reload_service() {
 	
 	# 强制停止所有相关进程
 	killall -q -9 "$PROG_NAME" 2>/dev/null
+	pkill -9 -f "$PROG_PY" 2>/dev/null
 	rm -f /var/run/at-webserver.pid
 	
 	# 等待进程完全停止

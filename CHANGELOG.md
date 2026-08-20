@@ -3,6 +3,43 @@
 本文件记录 `luci-app-mt5700m` 的显著变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)，
 版本号与包内 `PKG_VERSION` 对齐。
 
+## [2.3.34] - 2026-08-21
+
+### Fixed
+- **apk 包不含 `/usr/bin/at-server`（导致 WebUI 数据通道完全失效）**：
+  v2.3.32 起重写的 `Build/Compile` 定义放在 `include luci.mk` **之后**，而 luci.mk 在
+  include 时即通过 `$(eval $(call BuildPackage,...))` 展开 `Build/CoreTargets`（对
+  `$(Build/Compile)` 做单 `$` 展开），位于 include 之后的同名 define 被静默忽略——
+  CI 日志中 `make -C package compile` 仅 0.3 秒且无任何 staging 回显即为实证，
+  最终 apk 内没有 `usr/bin` 任何文件。修复：二进制 staging 迁移到 luci.mk 原生支持的
+  `src/Makefile` 通道（存在 `src/Makefile` 时 luci.mk 自动调用
+  `make -C src clean compile` 并配合 `PKG_INSTALL:=1` 执行 `make -C src install`），
+  `Makefile` 通过 `MAKE_VARS` 向其透传 `PREBUILT_BIN` / `RUST_SRC_DIR` /
+  `RUST_TARGET` / `CARGO_TARGET_DIR`，并删除死代码 define。
+- **init 脚本在后端二进制缺失时直接失败**：`root/etc/init.d/at-webserver` 增加回退链——
+  `/usr/bin/at-server`（Rust）不存在时自动降级到 `/usr/bin/at-server.py` + `python3`
+  （若存在），并以 `procd_set_param command python3 /usr/bin/at-server.py` 方式拉起；
+  stop/reload/pre-start 清理同时 `pkill -f at-server.py`，避免双实例。
+
+### Added
+- **OpenWrt main 快照 SDK 构建矩阵**：`build.yml` 的 `openwrt` 作业新增
+  `x86_64 / aarch64_generic / mediatek-filogic` × `sdk: main` 三条 apk 条目
+  （ghcr.io/openwrt/sdk 的 `-main` 滚动标签）。main SDK 的 soname ABI
+  （如 `libubox20260708` / `libubus20260628`）与 ImmortalWrt master 滚动固件同步，
+  解决稳定版 SDK（25.12.5）产出的 apk 依赖 pin 在 `libubox20260213` 等旧 ABI、
+  在 ImmortalWrt master 固件上 `apk add` 报 `no such package` 的问题。
+
+### Changed
+- **Release apk 资产命名追加 `-<arch>-<sdk>` 后缀**：apkv3 包文件名不含架构信息，
+  此前三个架构作业的同名 `.apk` 在发布收集阶段互相覆盖（最终 Release 只剩最后
+  完成架构的包）。现 apk 统一命名为
+  `luci-app-mt5700m-<ver>-r1-<arch>-<sdk>.apk`（如
+  `luci-app-mt5700m-2.3.34-r1-mediatek-filogic-main.apk`）；ipk 文件名自带架构
+  （且仅单一 24.10.8 SDK），保持原名不变。
+- **`/etc/mt5700m/traffic-history` 声明为 conffiles**：升级包时保留流量历史数据。
+
+---
+
 ## [2.3.33] - 2026-08-20
 
 ### Fixed
@@ -77,6 +114,7 @@
 - **CI 架构矩阵收敛为 arm64 + amd64**：Rust *stable* 渠道已下架 `mips` / `mipsel` / `i686` 的
   `rust-std`，导致这两个 Rust 交叉编译作业失败、进而 `openwrt` 打包作业被依赖链整体跳过；
   现仅构建 `x86_64` 与 `aarch64_generic`（各 ipk@24.10.8、apk@25.12.5），与需求一致。
+- **补充 QModem feed（`EXTRA_FEEDS`）**：`luci-app-mt5700m` 声明依赖 `ubus-at-daemon` 与
 - **补充 QModem feed（`EXTRA_FEEDS`）**：`luci-app-mt5700m` 声明依赖 `ubus-at-daemon` 与
   `sms-tool_q`，二者仅存在于 QModem feed；未注入会导致 SDK `feeds install` 解析依赖失败。
   现通过 `openwrt/gh-action-sdk` 的 `EXTRA_FEEDS` 注入 `src-git qmodem https://github.com/FUjr/QModem.git;main`。

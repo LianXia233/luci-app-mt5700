@@ -14,9 +14,9 @@ name: Build & Release
 #
 # 上传路径：每个 openwrt 作业上传 bin/packages（+ logs）为 packages-<arch>-<sdk> 产物
 #           → release 作业下载并合并到 dist/packages/ → 扁平化后上传到 Release
-# 产物命名（由 OpenWrt SDK 决定）：
-#   luci-app-mt5700m_<pkgver>_<target>.ipk   (24.10.x, opkg)
-#   luci-app-mt5700m_<pkgver>_<target>.apk   (25.x, apk)
+# 产物命名：
+#   luci-app-mt5700m_<pkgver>_<target>.ipk                  (24.10.x, opkg)
+#   luci-app-mt5700m-<pkgver>-<arch>-<sdk>.apk              (25.x / main, apk；发布时追加后缀防同名覆盖)
 #   以及顶层 SHA256SUMS.txt
 on:
   push:
@@ -94,8 +94,15 @@ jobs:
       fail-fast: false
       matrix:
         # 仅 amd64 (x86_64) + arm64 (aarch64_generic) —— 详见 rust 作业说明。
-        # 24.10.x 产出 opkg (.ipk)；25.x 产出 apk。
-        # SDK 标签已对照 ghcr.io/openwrt/sdk 验证（例如 x86_64-24.10.8、aarch64_generic-25.12.5）。
+        # 24.10.x 产出 opkg (.ipk)；25.x / main 产出 apk。
+        # SDK 标签已对照 ghcr.io/openwrt/sdk 验证（例如 x86_64-24.10.8、aarch64_generic-25.12.5、
+        # mediatek-filogic-main）。
+        #
+        # "main" = OpenWrt main 分支滚动快照 SDK（ghcr 每小时刷新），其 soname ABI
+        # （libubox2026xxxx / libubus2026xxxx）与 ImmortalWrt master 滚动固件保持同步。
+        # 25.12.5 稳定版 SDK 产出的 apk 依赖 pin 在旧 ABI（libubox20260213 等），
+        # 在 ImmortalWrt master 固件上 apk add 会报 "no such package"。
+        # 三条 main 条目即为 ImmortalWrt master / 最新 snapshot 固件用户准备。
         include:
           - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "24.10.8", format: ipk }
           - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "24.10.8", format: ipk }
@@ -103,6 +110,9 @@ jobs:
           - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "25.12.5", format: apk }
           - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "25.12.5", format: apk }
           - { arch: mediatek-filogic, rust_target: aarch64-unknown-linux-musl, sdk: "25.12.5", format: apk }
+          - { arch: x86_64,          rust_target: x86_64-unknown-linux-musl,    sdk: "main",    format: apk }
+          - { arch: aarch64_generic, rust_target: aarch64-unknown-linux-musl,   sdk: "main",    format: apk }
+          - { arch: mediatek-filogic, rust_target: aarch64-unknown-linux-musl, sdk: "main",    format: apk }
     steps:
       - uses: actions/checkout@v4
 
@@ -203,7 +213,20 @@ jobs:
                 bn=$(basename "$f")
                 for k in "${KEEP[@]}"; do
                   if [[ "$bn" == "$k"* ]]; then
-                    cp -a "$f" dist/upload/
+                    # apk 格式的文件名不含架构（由 apkv3 命名规则决定），不同架构/SDK
+                    # 作业产出的同名 apk 会互相覆盖（例如 mediatek-filogic 的
+                    # luci-app-mt5700m-2.3.34-r1.apk 覆盖 x86_64 的同名文件）。
+                    # 因此 apk 统一追加 “-<arch>-<sdk>” 后缀区分来源。
+                    # ipk 文件名自带架构（luci-app-mt5700m_2.3.34_aarch64_cortex-a53.ipk），
+                    # 且仅有一个 ipk SDK（24.10.8），无需改名。
+                    rel=${f#/tmp/release/}
+                    rel=${rel%%/*}          # 第一层目录 = 产物名 packages-<arch>-<sdk>
+                    suffix=${rel#packages-} # → <arch>-<sdk>
+                    if [[ "$bn" == *.apk ]]; then
+                      cp -a "$f" "dist/upload/${bn%.apk}-${suffix}.apk"
+                    else
+                      cp -a "$f" dist/upload/
+                    fi
                     break
                   fi
                 done
