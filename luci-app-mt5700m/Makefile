@@ -87,3 +87,8 @@ define Package/luci-app-mt5700m/conffiles
 endef
 
 include $(TOPDIR)/feeds/luci/luci.mk
+
+# call BuildPackage - OpenWrt buildroot signature
+# (Do NOT remove: include/scan.mk only indexes package dirs whose Makefile text
+#  matches `call BuildPackage` — luci.mk-based packages lack the real call, so
+#  this comment marker is what keeps this package visible to feeds install.)
