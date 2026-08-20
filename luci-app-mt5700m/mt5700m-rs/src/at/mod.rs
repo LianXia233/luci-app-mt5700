@@ -14,6 +14,7 @@ use crate::shell;
 use crate::usb;
 use config::{AtConfig, AtMode};
 use parse::AdvancedGroup;
+use transport::response_ok;
 
 /// Entry point invoked by `main` when the program is running as `mt5700m-at`.
 /// `args` is everything after the program name (i.e. `mt5700m-at <args>`).
