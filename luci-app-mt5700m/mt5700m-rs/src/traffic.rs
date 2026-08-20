@@ -11,6 +11,39 @@ use crate::json::Json;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Set true by the SIGINT/SIGTERM handler so the daemon loop can flush and
+/// exit gracefully.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "linux")]
+extern "C" fn sigterm_handler(_sig: i32) {
+    SHUTDOWN.store(true, Ordering::SeqCst);
+}
+
+/// Raw POSIX `signal()` FFI — no external crate needed; libc is always linked
+/// on Linux (musl) targets, we just declare the symbol ourselves.
+#[cfg(target_os = "linux")]
+mod ffi {
+    extern "C" {
+        pub fn signal(signum: i32, handler: usize) -> usize;
+    }
+    pub const SIGINT: i32 = 2;
+    pub const SIGTERM: i32 = 15;
+}
+
+/// Install a minimal handler for SIGINT and SIGTERM.
+#[cfg(target_os = "linux")]
+fn install_signal_handlers() {
+    unsafe {
+        let _ = ffi::signal(ffi::SIGTERM, sigterm_handler as usize);
+        let _ = ffi::signal(ffi::SIGINT, sigterm_handler as usize);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn install_signal_handlers() {}
 
 fn interfaces() -> Vec<String> {
     std::env::var("MT5700M_TRAFFIC_INTERFACES")
@@ -344,6 +377,12 @@ fn collect_interface(netdev: &str) -> bool {
         (String::new(), String::new())
     };
 
+    // Always persist the current counter snapshot so the next cycle computes
+    // a correct delta.  MUST be written before returning, regardless of
+    // whether a delta was applied (otherwise the next sample would double-
+    // count the already-accounted traffic).
+    let _ = std::fs::write(&last_file, format!("{} {}\n", rx_now, tx_now));
+
     if valid_number(&last_rx) && valid_number(&last_tx) {
         let last_rx: u64 = last_rx.parse().unwrap_or(0);
         let last_tx: u64 = last_tx.parse().unwrap_or(0);
@@ -355,16 +394,24 @@ fn collect_interface(netdev: &str) -> bool {
             return true;
         }
     }
-    let _ = std::fs::write(&last_file, format!("{} {}\n", rx_now, tx_now));
     false
 }
 
 fn collect_daemon() {
     ensure_history();
+    // Graceful flush on SIGINT/SIGTERM: without this, procd's stop (SIGTERM)
+    // would kill the process mid-cycle and up to flush_cycles()*interval()
+    // (~10 min) of traffic deltas would never reach the history file.
+    install_signal_handlers();
     let mut cycles: u64 = 0;
     let mut dirty = false;
-    // Best-effort graceful flush on SIGINT/SIGTERM.
     loop {
+        if SHUTDOWN.load(Ordering::SeqCst) {
+            if dirty {
+                flush_history();
+            }
+            break;
+        }
         for dev in interfaces() {
             if collect_interface(&dev) {
                 dirty = true;

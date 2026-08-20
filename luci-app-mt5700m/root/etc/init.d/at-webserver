@@ -23,17 +23,23 @@ start_service() {
 	# 即使 /cgi-bin/at-ws-info（CGI）在部分环境下不可用，WebUI 也能凭借
 	# 该文件正常启动并连接 WebSocket 后端。
 	generate_config_json() {
-		local lan_ip ws_port
+		local lan_ip ws_port auth_key require_auth
 		lan_ip=$(uci get network.lan.ipaddr 2>/dev/null | cut -d'/' -f1)
 		[ -z "$lan_ip" ] && lan_ip=$(uci get network.lan.ip6addr 2>/dev/null | cut -d/ -f1)
 		[ -z "$lan_ip" ] && lan_ip="192.168.1.1"
 		ws_port=$(uci get at-webserver.config.websocket_port 2>/dev/null || echo "8765")
+		# 与 Rust 后端 ws.rs 的认证逻辑保持一致：
+		# 配置了 websocket_auth_key 时 require_auth 必须为 true，
+		# 否则前端不会提示输入密钥、WebSocket 会在 10s 认证超时后被服务端断开。
+		auth_key=$(uci get at-webserver.config.websocket_auth_key 2>/dev/null)
+		require_auth="false"
+		[ -n "$auth_key" ] && require_auth="true"
 		if [ -d /www/5700 ]; then
 			cat > /www/5700/config.json <<JSON
 {
   "at": { "host": "$lan_ip", "port": $ws_port },
   "status": "true",
-  "require_auth": false
+  "require_auth": $require_auth
 }
 JSON
 		fi

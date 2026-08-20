@@ -114,11 +114,13 @@ pub fn serial_sendat(device: &str, timeout: u64, command: &str) -> AtResult {
         Some(p) => p.to_string(),
         None => "/tmp/mt5700m-at.tmp".to_string(),
     };
-    // Use mktemp if available for a unique file, else a pid-scoped name.
+    // Use mktemp if available for a unique file, else a pid-scoped name
+    // (with the literal XXXXXX suffix stripped so the fallback is a plain
+    // unique-per-pid filename rather than an mktemp template).
     let tmp = if let Ok(out) = run("mktemp", &["/tmp/mt5700m-at.XXXXXX"]) {
         out.0
     } else {
-        tmp
+        tmp.trim_end_matches("XXXXXX").to_string()
     };
 
     let mut cat = Command::new("cat")
@@ -156,6 +158,9 @@ pub fn serial_sendat(device: &str, timeout: u64, command: &str) -> AtResult {
             if terminal_token_present(&stripped) {
                 let _ = cat.kill();
                 let _ = cat.wait();
+                // Clean up the tmp file on the success path too; previously it
+                // leaked one file per successful serial command in /tmp.
+                let _ = std::fs::remove_file(&tmp);
                 let rc = if response_ok(&stripped) { 0 } else { 1 };
                 return AtResult { response: stripped, rc };
             }

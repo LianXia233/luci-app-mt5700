@@ -3,6 +3,43 @@
 本文件记录 `luci-app-mt5700m` 的显著变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)，
 版本号与包内 `PKG_VERSION` 对齐。
 
+## [2.3.33] - 2026-08-20
+
+### Fixed
+- **流量统计双倍计数（`mt5700m-rs/src/traffic.rs`）**：`collect_interface` 原先在 delta
+  计算之后才写回 `last-<dev>` 快照，当上一周期已成功记账但快照未落盘时（进程中断/接口
+  暂时失效），下一采样会把同一段流量重复计入。修复：快照写入提前到 delta 计算前，保证
+  每轮采样后必然持久化当前计数。
+- **IPv6 残留接口清理失败（`mt5700m-rs/src/manager.rs`）**：`ensure_network` 在
+  `pdp_type == "ip"` 时调用 `delete_if_present(INTERFACE6, ...)` 传入裸 section 名
+  （`MT5700Mv6`），而 `delete_if_present` 期望完整 UCI 路径，导致切换回纯 IPv4 后遗留
+  残留 IPv6 接口配置。修复：改为传入 `network.MT5700Mv6` 完整路径。
+- **WebSocket 认证配置不一致（`root/etc/init.d/at-webserver`）**：`generate_config_json`
+  硬编码 `"require_auth": false`，与 Rust 后端 `ws.rs` 的 `auth_key` 认证逻辑冲突——
+  配置了 `websocket_auth_key` 时前端不会提示输入密钥，连接会在 10s 认证超时后被服务端
+  断开。修复：按 `websocket_auth_key` 是否配置动态输出 `require_auth`。
+- **AT 串口临时文件泄漏（`mt5700m-rs/src/at/transport.rs`）**：`serial_sendat` 仅在超时
+  路径删除 `mktemp` 临时文件，成功收到 `OK`/`ERROR` 返回时遗漏清理，每次成功串口 AT
+  命令都在 `/tmp` 泄漏一个文件。修复：成功路径同样 `remove_file`；并顺手将 mktemp
+  回退文件名去掉字面 `XXXXXX` 模板后缀，避免产生看似模板的 pid 作用域文件。
+- **SMS 发送假成功（`mt5700m-rs/src/at/mod.rs`）**：
+  - `serial_sms_send` 原先无论调制解调器返回 `OK` 还是 `ERROR` / `+CMS ERROR` 一律返回
+    0，WebUI 在发送失败时仍提示"发送成功"；现按最终结果令牌判定：无 `OK` 或含
+    `ERROR` 返回 1。
+  - `network_sms_send` 原先把任意非空响应（含 `+CMS ERROR: ...`）都视为成功；现要求
+    响应非空且 `response_ok`（不含 `ERROR`）才算成功。
+- **流量守护进程退出丢数据（`mt5700m-rs/src/traffic.rs`）**：`collect_daemon` 注释声称
+  有 SIGINT/SIGTERM 优雅落盘，实际未安装任何信号处理；`procd stop` 触发 SIGTERM 时进程
+  被杀，最多丢失 `flush_cycles()*interval()`（约 10 分钟）的流量增量。修复：新增零依赖
+  POSIX `signal()` FFI 处理器（`SHUTDOWN` 原子标志），收到信号后在下一轮循环立即
+  `flush_history()` 再退出。
+
+### Security
+- 上述 `require_auth` 修复同时消除 WebSocket 终端在配置密钥后仍可被无密钥访问的
+  认证绕过风险。
+
+---
+
 ## [2.3.32] - 2026-08-17
 
 ### Added

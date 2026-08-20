@@ -817,7 +817,14 @@ fn serial_sms_send(device: &str, number: &str, text: &str) -> i32 {
     if !final_output.is_empty() {
         println!("{}", final_output);
     }
-    0
+    // The modem's final result token decides success.  Previously the
+    // function returned 0 unconditionally, so the WebUI reported "sent"
+    // even when the modem answered ERROR / +CMS ERROR.
+    if terminal_token_present(&final_output) && !final_output.contains("ERROR") {
+        0
+    } else {
+        1
+    }
 }
 
 fn network_sms_send(host: &str, port: u16, number: &str, text: &str) -> bool {
@@ -849,10 +856,13 @@ fn network_sms_send(host: &str, port: u16, number: &str, text: &str) -> bool {
     if let Some(mut stdout) = child.stdout.take() {
         let _ = stdout.read_to_string(&mut response);
     }
-    if !response.trim().is_empty() {
-        println!("{}", response.trim());
+    let response = response.trim().to_string();
+    if !response.is_empty() {
+        println!("{}", response);
     }
-    !response.trim().is_empty()
+    // Success only when the modem answered OK; a non-empty ERROR response
+    // (e.g. "+CMS ERROR: ...") must not be reported as a successful send.
+    !response.is_empty() && response_ok(&response)
 }
 
 fn terminal_token_present(text: &str) -> bool {

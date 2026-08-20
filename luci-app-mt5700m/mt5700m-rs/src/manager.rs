@@ -265,7 +265,9 @@ fn ensure_network(netdev: &str) {
     }
 
     if pdp_type == "ip" {
-        delete_if_present(INTERFACE6, &mut config_changed);
+        // NOTE: must pass the full UCI path ("network.MT5700Mv6"), not the bare
+        // section name, otherwise the stale IPv6 interface is never removed.
+        delete_if_present(&format!("network.{}", INTERFACE6), &mut config_changed);
     } else {
         sync_set(&format!("network.{}", INTERFACE6), "interface", &mut config_changed);
         sync_set(&format!("network.{}.managed_by", INTERFACE6), "mt5700m", &mut config_changed);
