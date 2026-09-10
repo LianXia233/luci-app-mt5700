@@ -25,6 +25,8 @@ endef
 RUST_TARGET_x86_64  := x86_64-unknown-linux-musl
 RUST_TARGET_aarch64 := aarch64-unknown-linux-musl
 RUST_TARGET_mipsel  := mipsel-unknown-linux-musl
+RUST_TARGET_mips_24kc    := mipsel-unknown-linux-musl
+RUST_TARGET_mipsel_24kc  := mipsel-unknown-linux-musl
 RUST_TARGET_arm     := armv7-unknown-linux-musleabihf
 
 RUST_TARGET := $(RUST_TARGET_$(ARCH))
