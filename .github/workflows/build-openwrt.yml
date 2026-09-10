@@ -64,6 +64,20 @@ jobs:
             openwrt/sdk:${{ matrix.image }} \
             /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}"
 
+      - name: Verify required packages
+        run: |
+          set -e
+          missing=0
+          for pkg in at-webserver-rust luci-app-mt5700; do
+            if [ -z "$(find "out/${{ matrix.arch }}" -type f \( -name "${pkg}*.apk" -o -name "${pkg}*.ipk" \) -print -quit)" ]; then
+              echo "::error::缺少 ${pkg} 产物（arch=${{ matrix.arch }} fmt=${{ matrix.fmt }}）"
+              missing=1
+            fi
+          done
+          echo "==> out/${{ matrix.arch }} 产物："
+          ls -la "out/${{ matrix.arch }}/"
+          [ "$missing" -eq 0 ] || exit 1
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -99,6 +113,20 @@ jobs:
           done < <(find out -type f \( -name '*.apk' -o -name '*.ipk' \) | sort)
           echo "==> 待发布文件："
           find dist -type f | sort
+
+      - name: Verify dist completeness
+        run: |
+          set -e
+          # 每个包必须覆盖全部 4 个构建组合（x86_64/aarch64_cortex-a53 × apk/ipk）
+          for pkg in at-webserver-rust luci-app-mt5700; do
+            count=$(find dist -type f -name "${pkg}*" | wc -l)
+            echo "==> ${pkg}: ${count} 个包"
+            if [ "$count" -lt 4 ]; then
+              echo "::error::${pkg} 仅有 ${count} 个包（期望 4 个：2 架构 × apk/ipk），拒绝发布不完整的 Release"
+              find dist -type f | sort
+              exit 1
+            fi
+          done
 
       - name: Clean up previous draft release (if any)
         env:
