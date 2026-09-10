@@ -21,7 +21,7 @@ SUDO=''
 if [ "$(id -u)" -ne 0 ]; then
   SUDO='sudo'
 fi
-$SUDO apt-get update -qq
+$SUDO apt-get update -qq -o Acquire::Check-Valid-Until=false
 $SUDO apt-get install -y -qq curl xz-utils ca-certificates >/dev/null
 
 # ---------- 2) Rust 工具链（仅容器内 /opt，不落盘到仓库） ----------
