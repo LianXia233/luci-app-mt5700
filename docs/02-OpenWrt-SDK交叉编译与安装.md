@@ -103,7 +103,7 @@ opkg remove at-webserver-rust      # 会保留 /etc/config/at-webserver（opkg �
 
 ## 7. 串口模式说明
 
-- 默认 `connection_type=NETWORK`（连模组 TCP 20249，MT5700M 出厂 IP 192.168.8.1）。
+- 默认 `connection_type=SERIAL`（**PCUI 优先**，AT 走串口 /dev/ttyUSB1；`auto` 探测同样优先 ttyUSB1；网络 TCP 20249 保留为备用）。
 - 改 `SERIAL` 时：`uci set at-webserver.config.serial_port=/dev/ttyUSB1`，
   服务启动时 init.d 会尝试把 VID/PID 3466:3301 绑定到 usbserial/option 驱动（仅缺 ttyUSB 时）。
 - `serial_port=auto` 时 Rust 后端逐个探测 `/dev/ttyUSB*` 找能应答 AT 的端口。

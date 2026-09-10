@@ -1,6 +1,6 @@
 config at-webserver 'config'
 	option enabled '1'
-	option connection_type 'NETWORK'
+	option connection_type 'SERIAL'           # 默认 PCUI 优先：AT 走串口 /dev/ttyUSB1（PCUI）；网络 TCP 作为备用
 	option network_host '192.168.8.1'
 	option network_port '20249'
 	option network_timeout '10'
@@ -9,7 +9,7 @@ config at-webserver 'config'
 	# AT 命令走 PCUI 口，MT5700M-CN 上默认枚举为 ttyUSB1
 	# （ttyUSB0=Application Interface, ttyUSB1=PCUI, ttyUSB2=SerialB, ttyUSB3=SerialC, ttyUSB4=GPS）
 	# 填 'auto' 则逐个探测 /dev/ttyUSB* 自动选出能应答 AT 的端口
-	option serial_port 'auto'
+	option serial_port 'auto'          # 'auto' 逐个探测，优先 ttyUSB1(PCUI)
 	option serial_port_custom '/dev/ttyUSB1'  # 自定义串口路径（当 serial_port='custom' 时使用）
 	option serial_baudrate '115200'
 	option serial_timeout '10'

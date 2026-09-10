@@ -9,6 +9,16 @@
 
 ### 变更
 
+- **菜单收敛为「服务 → 模组管理」，二级菜单全部置于 Plugin Top Navigation**：
+  - 原 `网络 → 5G 模组`（5 页）与 `服务 → 5G 模组`（7 页）合并为
+    `服务 → AT WebServer → 模组管理` 一组 12 页（网络状态/网络设置/拨号设置/全网扫频/定时锁频/
+    模组设置/模组升级/短信中心/短信设置/AT 调试终端/通知日志/服务配置）
+  - 页面作为模组管理下第 3 级节点，LuCI 主题将其渲染在 **Plugin Top Navigation**（页面顶部导航条），
+    侧边栏只保留两级（AT WebServer → 模组管理），页面入口无丢失
+- **连接默认 PCUI 优先**：
+  - `connection_type` 默认值由 `NETWORK` 改为 `SERIAL`（Rust `config.rs` 与 UCI 默认配置同步）
+  - AT 走串口 `/dev/ttyUSB1`（PCUI）；`auto` 探测同样优先 `ttyUSB1`；网络 TCP 20249 保留为备用
+  - LuCI 服务配置页连接类型选项改为：PCUI 串口（默认）/ 自动探测（串口优先 ttyUSB1）/ 网络连接（备用）
 - **通信架构改为 LuCI RPC（移除 WebSocket）**：
   - 前端 `ws.js` → `rpc.js`：`L.rpc.declare` 调用 rpcd 对象 `mt5700`（`at` 执行 AT 命令、
     `events` 拉取事件增量），实时数据由 1.5s 轮询 `events(since)` 保证；`AtWs` API 面与页面交互不变

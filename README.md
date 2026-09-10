@@ -26,7 +26,7 @@ luci-app-mt5700/                        # 仓库根 = LuCI 插件包
 │   ├── etc/config/at-webserver         # UCI 默认配置
 │   ├── etc/init.d/at-webserver         # procd 服务脚本
 │   ├── etc/uci-defaults/at-webserver   # 首次安装初始化
-│   ├── usr/share/luci/menu.d/          # 顶部菜单（网络 / 服务 两个顶级入口）
+│   ├── usr/share/luci/menu.d/          # LuCI 顶部菜单：服务 → 模组管理（12 个页面全在 Plugin Top Navigation）
 │   └── usr/share/rpcd/
 │       ├── acl.d/luci-app-mt5700.json  # 权限控制（含 mt5700 RPC 对象）
 │       └── ucode/mt5700.uc             # rpcd ucode 插件（LuCI RPC ↔ Rust 代理）
@@ -82,8 +82,11 @@ luci-app-mt5700/                        # 仓库根 = LuCI 插件包
 ## 3. 功能等价性
 
 - 既有 8 个页面全部迁移，见 `docs/01-原WebUI功能清单与LuCI映射表.md`（功能 1-75、后端 B1-B16）。
-- 菜单：原有侧边栏 8 项映射为 LuCI **网络 → 5G 模组**（网络状态/网络设置/拨号设置/全网扫频/定时锁频）
-  与 **服务 → 5G 模组**（模组设置/模组升级/短信中心/短信设置/AT调试终端/通知日志/服务配置），无入口丢失。
+- 菜单：原有侧边栏全部入口收敛为 LuCI **服务 → 模组管理** 一组（网络状态/网络设置/拨号设置/全网扫频/定时锁频/
+  模组设置/模组升级/短信中心/短信设置/AT 调试终端/通知日志/服务配置共 12 页），二级菜单全部渲染在
+  LuCI **Plugin Top Navigation**（页面顶部导航条），无入口丢失。
+- 连接：默认 **PCUI 优先**——`connection_type` 默认 `SERIAL`，AT 走串口 `/dev/ttyUSB1`（PCUI）；
+  `auto` 探测同样优先 `ttyUSB1`；网络 TCP（192.168.8.1:20249）保留为备用通道。
 - 全部按钮 → JS → LuCI RPC → Rust → 模组 → 应答 → UI 更新链路真实（见 §6 测试结果）。
 - **未实现项已清零**：全部功能（含载波辅助小区聚合 `^MONSSC`/`^CASCELLINFO`、`^REJINFO` 网络拒绝原因面板、
   `^SIMSQ` 卡状态、连接诊断面板、温度保护阈值等深层功能）均已完整移植，见 `docs/03-最终验收报告.md`。
