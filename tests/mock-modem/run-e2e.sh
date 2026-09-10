@@ -1,7 +1,7 @@
 #!/bin/sh
 # run-e2e.sh — 本地端到端链路验证（无硬件环境）
 #
-# 链路：WS 客户端(等价 LuCI ws.js) → Rust 后端(8765) → mock 模组(TCP 20249)
+# 链路：RPC 客户端(等价 rpcd ucode 插件) → Rust 后端(127.0.0.1:8765) → mock 模组(TCP 20249)
 #
 # 前置：Rust 后端已 release 编译（src/rust/target/release/at-webserver）
 #       mock-modem 目录已 npm install（ws 包）
@@ -35,13 +35,13 @@ MOCK_PID=$!
 trap 'kill $MOCK_PID $RUST_PID 2>/dev/null || true' EXIT
 sleep 0.5
 
-echo "==> 2/4 启动 Rust 后端 (WS 8765)"
+echo "==> 2/4 启动 Rust 后端 (RPC 127.0.0.1:8765)"
 "$RUST_BIN" > /tmp/at-webserver-rust.log 2>&1 &
 RUST_PID=$!
 sleep 1.5
 
-echo "==> 3/4 运行 WS 端到端测试"
-node e2e-test.js ws://127.0.0.1:8765 test-key-123
+echo "==> 3/4 运行 RPC 端到端测试"
+node e2e-test.js 8765 test-key-123
 E2E_RC=$?
 
 echo "==> 4/4 清理"

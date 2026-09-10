@@ -1,8 +1,8 @@
-//! at-webserver —— MT5700M 5G 模组 AT WebSocket 服务（Rust 实现）。
+//! at-webserver —— MT5700M 5G 模组 AT 服务（Rust 实现）。
 //!
-//! 由 Go 版 at-webserver 完整迁移：
+//! 完整业务逻辑迁移：
 //! - AT 客户端（网络/串口/自动探测）
-//! - WebSocket 服务（认证、心跳、命令转发、主动上报推送）
+//! - LuCI RPC 服务（rpcd ucode 代理 → TCP newline-JSON，替代原 WebSocket 传输层）
 //! - 定时锁频调度、小区扫频、短信/来电/信号通知、企业微信推送
 
 mod atclient;
@@ -10,19 +10,19 @@ mod config;
 mod logger;
 mod notify;
 mod pdu;
+mod rpcserver;
 mod schedconfig;
 mod schedule;
 mod serial_linux;
 mod serialdetect;
 mod transport;
 mod urc;
-mod wsserver;
 
 use crate::config::Config;
 use crate::notify::Notifier;
+use crate::rpcserver::RpcServer;
 use crate::schedule::Scheduler;
 use crate::urc::{Broadcaster, Dispatcher};
-use crate::wsserver::WsServer;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -74,15 +74,15 @@ async fn run(verbose: bool) -> Result<(), String> {
     let (notifier, notif_rx) = Notifier::new(cfg.notification.clone());
     let notifier = Arc::new(notifier);
     let scheduler = Scheduler::new(cfg.schedule.clone(), client.clone(), notifier.clone(), ctx_rx.clone());
-    let mut ws = WsServer::new(client.clone(), cfg.websocket.auth_key.clone(), scheduler.clone(), ctx_rx.clone());
-    ws.set_scan_timeout(cfg.websocket.scan_timeout);
-    let ws = Arc::new(ws);
+    let mut rpc = RpcServer::new(client.clone(), cfg.websocket.auth_key.clone(), scheduler.clone(), ctx_rx.clone());
+    rpc.set_scan_timeout(cfg.websocket.scan_timeout);
+    let rpc = Arc::new(rpc);
 
-    // 上报分发：Broadcast 走 hub，推给所有 WebSocket 客户端。
-    let hub = ws.hub();
+    // 上报分发：Broadcast 走事件总线，前端轮询 events(since) 拉取。
+    let hub = rpc.hub();
     let broadcaster: Broadcaster = Arc::new(move |v: serde_json::Value| hub.broadcast(&v));
 
-    log_info!("启动完成，WebSocket ws://<路由器地址>:{}", cfg.websocket.port);
+    log_info!("启动完成，LuCI RPC 127.0.0.1:{}（经 rpcd/ucode 代理，不对外暴露）", cfg.websocket.port);
     if !verbose {
         // 稳态只留警告和错误，避免刷满 procd 日志。
         crate::logger::set_level(crate::logger::Level::Warn);
@@ -108,9 +108,9 @@ async fn run(verbose: bool) -> Result<(), String> {
         async move { scheduler.run().await }
     });
     let serve_task = tokio::spawn({
-        let ws = ws.clone();
+        let rpc = rpc.clone();
         let port = cfg.websocket.port;
-        async move { ws.serve(port).await }
+        async move { rpc.serve(port).await }
     });
 
     // 等待退出信号或服务异常。
@@ -124,7 +124,7 @@ async fn run(verbose: bool) -> Result<(), String> {
     let _ = ctx_tx.send(true);
 
     if let Some(Ok(Err(e))) = serve_result {
-        log_error!("WebSocket 服务异常退出: {}", e);
+        log_error!("LuCI RPC 服务异常退出: {}", e);
     }
 
     // 给后台任务一点时间优雅收尾。
@@ -169,12 +169,12 @@ fn log_config(cfg: &Config) {
     }
 
     log_info!(
-        "WebSocket 端口: {}，连接密钥: {}",
+        "LuCI RPC 端口: {}，连接密钥: {}",
         cfg.websocket.port,
         if cfg.websocket.auth_key.is_empty() { "未设置" } else { "已设置" }
     );
     if cfg.websocket.allow_wan {
-        log_warn!("配置中允许外网访问 WebSocket，请确认防火墙规则已就位");
+        log_warn!("配置中允许外网访问 WebSocket——RPC 仅监听回环地址，该键保留兼容但不生效");
     }
 
     log_info!(

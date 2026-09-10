@@ -111,16 +111,17 @@ opkg remove at-webserver-rust      # 会保留 /etc/config/at-webserver（opkg �
 ## 8. 防火墙
 
 init.d 启动时按 UCI 配置生成防火墙规则（幂等）：
-- `websocket_allow_wan=1/0` → 允许/拒绝外网访问 WS 端口；
+- LuCI RPC（`websocket_port`，UCI 键名保留）仅监听 `127.0.0.1`，经 rpcd ucode 代理本机转发，
+  不对外暴露，**无需也不生成** RPC 端口的外网规则（`websocket_allow_wan` 键保留兼容但不再生效）；
 - `network_allow_wan=1/0` → 允许/拒绝外网访问模组 AT 端口；
 - `network_restrict_access=1` → 仅路由器本身可访问模组端口。
 停止服务时规则自动清理。
 
 ## 9. 常见问题
 
-- **WS 连不上**：确认 `websocket_port`、`websocket_auth_key` 与 LuCI 页面「服务配置」一致；
-  前端默认连 `window.location.hostname:8765`，可用 localStorage `atHost`/`atPort` 覆写。
-- **认证失败**：服务配置页的认证密钥与页面保存的一致；错误密钥会被后端拒绝并关闭连接。
+- **页面提示"RPC 调用失败/未运行"**：确认 Rust 服务已启动（`/etc/init.d/at-webserver status`）
+  且 rpcd ucode 插件已生效（重启 `rpcd` 或安装后重登 LuCI）；`websocket_port` 与 LuCI 页面「服务配置」一致。
+- **认证失败**：服务配置页的认证密钥与 UCI `websocket_auth_key` 一致；错误密钥会被后端拒绝（RPC 错误码 -32001）。
 - **无法枚举 ttyUSB**：确认内核含 usbserial/option；或手动 `echo "3466 3301" > /sys/bus/usb-serial/drivers/option/new_id`。
 - **IPK/APK 体积**：Rust 后端 release + strip 约 1-2MB；LuCI 插件全 JS 极小。
 

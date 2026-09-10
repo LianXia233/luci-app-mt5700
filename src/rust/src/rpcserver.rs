@@ -1,25 +1,33 @@
-//! WebSocket 服务：认证、心跳、{success,data,error} 命令应答、主动上报推送。
-//! 协议与 Go 实现（wsserver.go）严格一致，前端无需改动即可接入。
+//! LuCI RPC 服务：TCP newline-JSON（127.0.0.1:8765），由 rpcd ucode 插件（mt5700.uc）代理转发。
+//! 替代原 WebSocket 传输层；核心业务逻辑（伪命令/扫频/命令分发/事件总线）全部保留。
+//!
+//! 协议（每行一个 JSON 对象）：
+//!   请求: {"id":1,"method":"at","params":{"cmd":"AT+CSQ","auth_key":"..."}}
+//!   请求: {"id":2,"method":"events","params":{"since":12,"auth_key":"..."}}
+//!   应答: {"id":1,"result":{"success":true,"data":"..."}}
+//!   应答: {"id":2,"result":{"seq":18,"events":[{"type":"raw_data","data":"..."}]}}
+//!   错误: {"id":1,"error":{"code":-1,"message":"..."}}
+//!
+//! 事件不主动推送：前端通过 events(since) 拉取增量（LuCI RPC 为请求-响应模型）。
 
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::atclient::AtClient;
 use crate::schedconfig::{SCHED_QUERY_COMMAND, SCHED_RESPONSE_PREFIX, SCHED_SET_PREFIX, SchedConfigDto, dto_to_schedule, schedule_to_dto, write_schedule_uci};
 use crate::schedule::Scheduler;
-use futures_util::{SinkExt, StreamExt};
-use serde::Serialize;
-use std::sync::{Arc, RwLock};
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::TcpStream;
+use tokio::sync::Mutex as AsyncMutex;
 
-const WS_HEARTBEAT: Duration = Duration::from_secs(30);
-const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
-const WS_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-const WS_OUT_BUFFER: usize = 128;
+const RPC_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const CELLSCAN_ABORT_TOKEN: &str = "abcd";
 const DEFAULT_SCAN_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// 发给前端的命令应答。字段名与旧实现严格一致，前端按 FIFO 顺序匹配。
+/// 发给前端的命令应答。字段名与原实现严格一致。
 #[derive(Serialize)]
 pub struct AtCommandResponse {
     pub success: bool,
@@ -29,16 +37,7 @@ pub struct AtCommandResponse {
     pub error: Option<String>,
 }
 
-#[derive(Serialize)]
-struct AuthResult {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    success: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    message: String,
-}
-
-/// 扫频推给前端的消息。state 取值 running/done/aborted/error。
+/// 扫频推给前端的事件 data。state 取值 running/done/aborted/error。
 #[derive(Serialize)]
 #[allow(dead_code)] // 扫频推送结构保留（后续断点续扫扩展）
 pub struct ScanPush {
@@ -58,65 +57,90 @@ pub struct ScanState {
     pub lines: Vec<String>,
 }
 
-/// 推送中枢：给所有已认证客户端 try_send（客户端来不及收就丢弃）。
+/// 事件总线：替代原 WebSocket Hub 的"广播给所有客户端"。
+/// 所有推送（raw_data/new_sms/incoming_call/pdcp_data/memory_full/cellscan/urc_data）
+/// 按序入队并分配单调递增 seq；前端轮询 events(since) 拉取增量。
 #[derive(Clone)]
 pub struct Hub {
-    clients: Arc<RwLock<Vec<mpsc::Sender<Vec<u8>>>>>,
+    bus: Arc<EventBus>,
+}
+
+pub struct EventBus {
+    seq: AtomicU64,
+    events: Mutex<VecDeque<(u64, serde_json::Value)>>,
+    max: usize,
+}
+
+impl EventBus {
+    fn new(max: usize) -> EventBus {
+        EventBus { seq: AtomicU64::new(0), events: Mutex::new(VecDeque::new()), max }
+    }
+
+    fn push(&self, value: serde_json::Value) {
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut q = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        q.push_back((seq, value));
+        while q.len() > self.max {
+            q.pop_front();
+        }
+    }
+
+    /// 返回 (当前最新 seq, 自 since 之后的事件列表)。
+    fn since(&self, since: u64) -> (u64, Vec<serde_json::Value>) {
+        let q = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        let seq = self.seq.load(Ordering::Relaxed);
+        let events = q.iter().filter(|(s, _)| *s > since).map(|(_, v)| v.clone()).collect();
+        (seq, events)
+    }
 }
 
 impl Hub {
     pub fn new() -> Hub {
-        Hub { clients: Arc::new(RwLock::new(Vec::new())) }
+        Hub { bus: Arc::new(EventBus::new(500)) }
     }
 
+    /// 完整推送对象入队（调用方传入 {type,data}）。
     pub fn broadcast(&self, msg: &serde_json::Value) {
-        let payload = match serde_json::to_vec(msg) {
-            Ok(p) => p,
-            Err(e) => {
-                log_error!("序列化推送消息失败: {}", e);
-                return;
-            }
-        };
-        // std::sync::RwLock：广播在异步任务里被调用，tokio 锁的 blocking_* 会 panic；
-        // 锁内只做非阻塞 try_send，持有时间极短。
-        let clients = self.clients.read().unwrap_or_else(|e| e.into_inner());
-        for c in clients.iter() {
-            if c.try_send(payload.clone()).is_err() {
-                log_debug!("客户端发送队列已满，丢弃一条推送");
-            }
-        }
+        self.bus.push(msg.clone());
     }
 
     pub fn broadcast_json(&self, type_: &str, data: serde_json::Value) {
-        self.broadcast(&serde_json::json!({ "type": type_, "data": data }));
+        self.bus.push(serde_json::json!({ "type": type_, "data": data }));
     }
 }
 
-type WsStream = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+/// RPC 请求（每行一个 JSON）。
+#[derive(Deserialize)]
+struct RpcRequest {
+    id: serde_json::Value,
+    method: String,
+    #[serde(default)]
+    params: serde_json::Value,
+}
 
-pub struct WsServer {
+pub struct RpcServer {
     client: Arc<AtClient>,
     auth_key: String,
     sched: Arc<Scheduler>,
     hub: Hub,
-    scan: Arc<Mutex<ScanState>>,
+    scan: Arc<AsyncMutex<ScanState>>,
     scan_timeout: Duration,
     ctx: tokio::sync::watch::Receiver<bool>,
 }
 
-impl WsServer {
+impl RpcServer {
     pub fn new(
         client: Arc<AtClient>,
         auth_key: String,
         sched: Arc<Scheduler>,
         ctx: tokio::sync::watch::Receiver<bool>,
-    ) -> WsServer {
-        WsServer {
+    ) -> RpcServer {
+        RpcServer {
             client,
             auth_key,
             sched,
             hub: Hub::new(),
-            scan: Arc::new(Mutex::new(ScanState { running: false, aborted: false, lines: Vec::new() })),
+            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new() })),
             scan_timeout: DEFAULT_SCAN_TIMEOUT,
             ctx,
         }
@@ -126,9 +150,8 @@ impl WsServer {
         self.hub.clone()
     }
 
-    /// 生成一个只用于单连接的浅拷贝（共享内部状态）。
-    fn shallow_clone(&self) -> WsServer {
-        WsServer {
+    fn shallow_clone(&self) -> RpcServer {
+        RpcServer {
             client: self.client.clone(),
             auth_key: self.auth_key.clone(),
             sched: self.sched.clone(),
@@ -145,15 +168,13 @@ impl WsServer {
         }
     }
 
-    /// 绑定并服务 WebSocket，直到 ctx 结束。
+    /// 绑定并服务 RPC，直到 ctx 结束。仅监听回环地址：LuCI 经 rpcd/ucode 本机转发，
+    /// 不对外暴露端口。
     pub async fn serve(&self, port: u16) -> Result<(), String> {
-        let listener = match tokio::net::TcpListener::bind(("::", port)).await {
-            Ok(l) => l,
-            Err(_) => tokio::net::TcpListener::bind(("0.0.0.0", port))
-                .await
-                .map_err(|e| format!("监听 WebSocket 端口 {port} 失败: {e}"))?,
-        };
-        log_info!("WebSocket 监听 :{} (IPv4 + IPv6)", port);
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .map_err(|e| format!("监听 RPC 端口 127.0.0.1:{port} 失败: {e}"))?;
+        log_info!("LuCI RPC 监听 127.0.0.1:{port}");
 
         let mut ctx_c = self.ctx.clone();
         loop {
@@ -169,8 +190,8 @@ impl WsServer {
                     };
                     let conn_server = self.shallow_clone();
                     tokio::spawn(async move {
-                        if let Err(e) = conn_server.handle_connection(stream, addr).await {
-                            log_debug!("WebSocket 客户端断开: {} ({})", addr, e);
+                        if let Err(e) = conn_server.handle_connection(stream).await {
+                            log_debug!("RPC 连接结束: {} ({})", addr, e);
                         }
                     });
                 }
@@ -178,106 +199,79 @@ impl WsServer {
         }
     }
 
-    async fn handle_connection(&self, stream: tokio::net::TcpStream, addr: std::net::SocketAddr) -> Result<(), String> {
-        let mut ws = tokio_tungstenite::accept_async(stream).await.map_err(|e| e.to_string())?;
-
-        // 认证握手是严格的一问一答；拒绝消息一定在关闭连接之前送达。
-        if !self.auth_key.is_empty() && !self.authenticate(&mut ws).await {
-            return Ok(());
-        }
-
-        let (mut write, mut read) = ws.split();
-        let (out_tx, mut out_rx) = mpsc::channel::<Vec<u8>>(WS_OUT_BUFFER);
-        self.hub.clients.write().unwrap_or_else(|e| e.into_inner()).push(out_tx.clone());
-        log_debug!("WebSocket 客户端已连接: {}", addr);
-
-        // 写循环：这条连接唯一的写入者，同时负责 30 秒一次的心跳。
-        let writer_task = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(WS_HEARTBEAT);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            ticker.tick().await; // 跳过立即触发的一次，与 Go 一致：首包心跳在 30s 后
-            loop {
-                tokio::select! {
-                    msg = out_rx.recv() => {
-                        match msg {
-                            Some(payload) => {
-                                let text = String::from_utf8(payload).unwrap_or_default();
-                                if write.send(Message::Text(text.into())).await.is_err() {
-                                    return;
-                                }
-                            }
-                            None => return,
-                        }
-                    }
-                    _ = ticker.tick() => {
-                        if write.send(Message::Text("ping".into())).await.is_err() {
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-
-        // 读循环：顺序处理客户端消息。串行是刻意的：前端没有请求 ID，
-        // 靠应答顺序匹配命令，并发处理会串号。
+    async fn handle_connection(&self, stream: TcpStream) -> Result<(), String> {
+        let (read_half, mut write_half) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read_half);
         let mut ctx_c = self.ctx.clone();
         loop {
-            let msg = tokio::select! {
-                m = read.next() => m,
+            let mut line = String::new();
+            let n = tokio::select! {
                 _ = ctx_c.changed() => break,
-            };
-            match msg {
-                Some(Ok(Message::Text(text))) => {
-                    let text = text.to_string();
-                    if text == "ping" {
-                        let _ = out_tx.try_send(b"pong".to_vec());
-                        continue;
-                    }
-                    let response = self.run_command(&text).await;
-                    let payload = serde_json::to_vec(&response).unwrap_or_default();
-                    if out_tx.send(payload).await.is_err() {
-                        break;
+                r = tokio::time::timeout(RPC_READ_TIMEOUT, reader.read_line(&mut line)) => {
+                    match r {
+                        Ok(Ok(n)) => n,
+                        _ => break,
                     }
                 }
-                Some(Ok(_)) => {}
-                _ => break,
+            };
+            if n == 0 {
+                break; // EOF
             }
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let resp = self.handle_request(line).await;
+            let payload = match serde_json::to_string(&resp) {
+                Ok(p) => p,
+                Err(e) => {
+                    log_error!("序列化 RPC 应答失败: {}", e);
+                    continue;
+                }
+            };
+            let _ = tokio::time::timeout(Duration::from_secs(5), write_half.write_all(format!("{payload}\n").as_bytes())).await;
+            let _ = write_half.flush().await;
         }
-
-        writer_task.abort();
-        drop(out_tx);
-        self.hub.clients.write().unwrap_or_else(|e| e.into_inner()).retain(|c| !c.is_closed());
         Ok(())
     }
 
-    async fn authenticate(&self, ws: &mut WsStream) -> bool {
-        let msg = tokio::time::timeout(WS_AUTH_TIMEOUT, ws.next()).await;
-        let text = match msg {
-            Ok(Some(Ok(Message::Text(t)))) => t.to_string(),
-            _ => {
-                send_auth(ws, AuthResult { success: None, error: Some("Authentication timeout".into()), message: "认证超时".into() }).await;
-                return false;
+    async fn handle_request(&self, line: &str) -> serde_json::Value {
+        let req: RpcRequest = match serde_json::from_str(line) {
+            Ok(r) => r,
+            Err(e) => {
+                return serde_json::json!({ "id": null, "error": { "code": -32700, "message": format!("无效的 RPC 请求: {e}") } });
             }
         };
+        let id = req.id;
 
-        let body: serde_json::Value = match serde_json::from_str(&text) {
-            Ok(v) => v,
-            Err(_) => {
-                send_auth(ws, AuthResult { success: None, error: Some("Invalid authentication".into()), message: "无效的认证数据".into() }).await;
-                return false;
-            }
-        };
-
-        let key = body.get("auth_key").and_then(|v| v.as_str()).unwrap_or("");
-        if key != self.auth_key {
-            log_warn!("WebSocket 连接被拒绝: 密钥错误");
-            send_auth(ws, AuthResult { success: None, error: Some("Authentication failed".into()), message: "密钥验证失败".into() }).await;
-            return false;
+        // 认证：配置了密钥时，每个请求必须携带匹配的 auth_key（rpcd ucode 代理从 UCI 读取并附加；
+        // 页面登录态由 LuCI/rpcd 会话保证，密钥保持原配置语义兼容）。
+        let key = req.params.get("auth_key").and_then(|v| v.as_str()).unwrap_or("");
+        if !self.auth_key.is_empty() && key != self.auth_key {
+            log_warn!("RPC 请求被拒绝: 密钥错误 (method={})", req.method);
+            return serde_json::json!({ "id": id, "error": { "code": -32001, "message": "认证失败" } });
         }
 
-        send_auth(ws, AuthResult { success: Some(true), error: None, message: "认证成功".into() }).await;
-        log_debug!("WebSocket 客户端认证成功");
-        true
+        match req.method.as_str() {
+            "at" => {
+                let cmd = req.params.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+                if cmd.is_empty() {
+                    return serde_json::json!({ "id": id, "error": { "code": -32602, "message": "缺少参数 cmd" } });
+                }
+                let resp = self.run_command(cmd).await;
+                serde_json::json!({ "id": id, "result": {
+                    "success": resp.success,
+                    "data": resp.data,
+                    "error": resp.error,
+                } })
+            }
+            "events" => {
+                let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
+                let (seq, events) = self.hub.bus.since(since);
+                serde_json::json!({ "id": id, "result": { "seq": seq, "events": events } })
+            }
+            _ => serde_json::json!({ "id": id, "error": { "code": -32601, "message": format!("未知方法: {}", req.method) } }),
+        }
     }
 
     /// 把前端发来的字符串当作 AT 命令执行并整理成应答。
@@ -420,7 +414,7 @@ impl WsServer {
         scan.lines.clear();
         drop(scan);
 
-        // 后台异步执行扫频，让 WebSocket 读循环空出来接收打断命令。
+        // 后台异步执行扫频，让 RPC 读循环空出来接收打断命令。
         let client = self.client.clone();
         let hub = self.hub.clone();
         let scan_state = self.scan.clone();
@@ -457,17 +451,10 @@ impl WsServer {
     }
 }
 
-async fn send_auth(ws: &mut WsStream, result: AuthResult) {
-    if let Ok(payload) = serde_json::to_vec(&result) {
-        let text = String::from_utf8(payload).unwrap_or_default();
-        let _ = tokio::time::timeout(WS_WRITE_TIMEOUT, ws.send(Message::Text(text.into()))).await;
-    }
-}
-
 async fn run_cell_scan(
     client: Arc<AtClient>,
     hub: Hub,
-    scan_state: Arc<Mutex<ScanState>>,
+    scan_state: Arc<AsyncMutex<ScanState>>,
     ctx: tokio::sync::watch::Receiver<bool>,
     command: String,
     timeout: Duration,

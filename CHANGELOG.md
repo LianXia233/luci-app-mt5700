@@ -7,6 +7,22 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **通信架构改为 LuCI RPC（移除 WebSocket）**：
+  - 前端 `ws.js` → `rpc.js`：`L.rpc.declare` 调用 rpcd 对象 `mt5700`（`at` 执行 AT 命令、
+    `events` 拉取事件增量），实时数据由 1.5s 轮询 `events(since)` 保证；`AtWs` API 面与页面交互不变
+  - 新增 rpcd ucode 插件 `root/usr/share/rpcd/ucode/mt5700.uc`：LuCI RPC ↔ Rust 后端代理
+    （TCP newline-JSON，仅回环 127.0.0.1，不对外暴露端口）
+  - Rust 后端 `wsserver.rs` → `rpcserver.rs`：WebSocket 传输层替换为 TCP newline-JSON-RPC，
+    核心业务逻辑（伪命令 CONNECT?/SCHED?/CELLSCAN、扫频状态机、命令分发）全部保留；
+    Hub 广播改为有界事件总线（500 条，单调 seq），urc/schedule/cellscan 推送语义不变
+  - 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI `websocket_auth_key` 由 ucode 代理自动附带（兼容）
+  - init.d 不再生成 RPC 端口外网防火墙规则（仅回环）；`websocket_allow_wan` 键保留兼容
+  - ACL 增加 `mt5700` 对象（`at`/`events`，read + write）
+- 测试同步：e2e 改为 TCP newline-JSON 客户端，**20/20 通过**；解析单测 19/19；Rust 7/7（0 warning）
+- 依赖裁剪：移除 `tokio-tungstenite`、`futures-util`（传输层不再需要）
+
 ## [1.0.0] - 2026-09-10
 
 ### 新增

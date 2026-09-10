@@ -13,9 +13,9 @@ config at-webserver 'config'
 	option serial_port_custom '/dev/ttyUSB1'  # 自定义串口路径（当 serial_port='custom' 时使用）
 	option serial_baudrate '115200'
 	option serial_timeout '10'
-	option websocket_port '8765'
-	option websocket_allow_wan '0'          # 是否允许外网访问 WebSocket (0=禁止, 1=允许)
-	option websocket_auth_key ''            # WebSocket 连接密钥（留空则不验证）
+	option websocket_port '8765'           # LuCI RPC 监听端口（仅 127.0.0.1，经 rpcd/ucode 代理，不对外暴露）
+	option websocket_allow_wan '0'          # 保留兼容：RPC 仅回环监听，该键不再生效
+	option websocket_auth_key ''            # RPC 访问密钥（留空则不验证；LuCI 登录态由 rpcd 会话保证）
 	option cellscan_timeout '180'           # 一次 ^CELLSCAN 全网扫频允许运行的秒数（下限 10）
 
 	# 通知配置

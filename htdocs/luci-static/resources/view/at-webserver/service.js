@@ -1,5 +1,5 @@
 'use strict';
-'require at-webserver/ws';
+'require at-webserver/rpc';
 'require at-webserver/parse';
 'require at-webserver/ui';
 /* global L, AtWs, Ui */
@@ -33,7 +33,7 @@ return L.view.extend({
 
 	render: function (data) {
 		var self = this;
-		var page = Ui.page('服务配置', 'AT WebSocket 服务与通知设置（保存后自动重载）');
+		var page = Ui.page('服务配置', 'AT 服务与通知设置（保存后自动重载）');
 		var body = page._body;
 
 		var state = data || {};
@@ -87,24 +87,24 @@ return L.view.extend({
 		connPanel._body.appendChild(Ui.field('波特率', baudInput));
 		body.appendChild(connPanel);
 
-		/* ---------- WebSocket ---------- */
-		var wsPanel = Ui.panel('WebSocket 服务', 'LuCI 前端连接后端使用的服务端口与密钥');
+		/* ---------- RPC 服务 ---------- */
+		var wsPanel = Ui.panel('RPC 服务', 'LuCI 经 rpcd/ucode 代理连接后端使用的端口与密钥（仅回环监听，不对外暴露）');
 		var wsHostInput = document.createElement('input');
 		wsHostInput.className = 'cbi-input-text';
 		wsHostInput.placeholder = '留空表示本机';
-		wsPanel._body.appendChild(Ui.field('监听地址', wsHostInput, '留空监听所有接口'));
+		wsPanel._body.appendChild(Ui.field('监听地址', wsHostInput, '保留兼容：RPC 固定监听 127.0.0.1，该键不再生效'));
 
 		var wsPortInput = document.createElement('input');
 		wsPortInput.type = 'number';
 		wsPortInput.className = 'cbi-input-text';
 		wsPortInput.min = 1;
 		wsPortInput.max = 65535;
-		wsPanel._body.appendChild(Ui.field('WebSocket 端口', wsPortInput, '默认 8765'));
+		wsPanel._body.appendChild(Ui.field('RPC 端口', wsPortInput, '默认 8765'));
 
 		var authKeyInput = document.createElement('input');
 		authKeyInput.className = 'cbi-input-text';
 		authKeyInput.placeholder = '留空表示无需认证';
-		wsPanel._body.appendChild(Ui.field('认证密钥', authKeyInput, '前端连接时必须携带该密钥，留空放行'));
+		wsPanel._body.appendChild(Ui.field('认证密钥', authKeyInput, 'ucode 代理自动附带该密钥；LuCI 登录态由 rpcd 会话保证'));
 		body.appendChild(wsPanel);
 
 		/* ---------- 定时锁频 ---------- */
@@ -217,7 +217,7 @@ return L.view.extend({
 		}
 
 		function restartService() {
-			Ui.confirm('确定重启 AT 服务？现有 WebSocket 连接将中断。', function () {
+			Ui.confirm('确定重启 AT 服务？现有 RPC 调用将短暂中断。', function () {
 				restartBtn.disabled = true;
 				return L.rpc.declare({
 					object: 'service',

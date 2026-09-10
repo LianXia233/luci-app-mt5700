@@ -40,8 +40,8 @@ msgstr "通知日志"
 msgid "服务配置"
 msgstr "服务配置"
 
-msgid "AT WebSocket 服务与通知设置（保存后自动重载）"
-msgstr "AT WebSocket 服务与通知设置（保存后自动重载）"
+msgid "AT 服务与通知设置（保存后自动重载）"
+msgstr "AT 服务与通知设置（保存后自动重载）"
 
 msgid "服务状态"
 msgstr "服务状态"
@@ -88,8 +88,8 @@ msgstr "串口设备"
 msgid "波特率"
 msgstr "波特率"
 
-msgid "WebSocket 服务"
-msgstr "WebSocket 服务"
+msgid "RPC 服务"
+msgstr "RPC 服务"
 
 msgid "监听地址"
 msgstr "监听地址"
@@ -97,8 +97,8 @@ msgstr "监听地址"
 msgid "留空监听所有接口"
 msgstr "留空监听所有接口"
 
-msgid "WebSocket 端口"
-msgstr "WebSocket 端口"
+msgid "RPC 端口"
+msgstr "RPC 端口"
 
 msgid "认证密钥"
 msgstr "认证密钥"

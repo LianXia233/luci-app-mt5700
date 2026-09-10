@@ -1,6 +1,6 @@
 {
 	"luci-app-mt5700": {
-		"description": "Grant UCI and ubus access for luci-app-at-webserver",
+		"description": "Grant UCI, ubus and MT5700 RPC access for luci-app-mt5700",
 		"read": {
 			"uci": [
 				"at-webserver",
@@ -15,6 +15,10 @@
 				"luci": [
 					"getInitList",
 					"getRealtimeStats"
+				],
+				"mt5700": [
+					"at",
+					"events"
 				],
 				"service": [
 					"list",
@@ -73,6 +77,10 @@
 				],
 				"luci": [
 					"setInitAction"
+				],
+				"mt5700": [
+					"at",
+					"events"
 				],
 				"service": [
 					"set",

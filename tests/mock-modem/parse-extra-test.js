@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 前端解析层单测（node 环境模拟浏览器加载 ws.js / parse.js）：
+ * 前端解析层单测（node 环境模拟浏览器加载 rpc.js / parse.js）：
  * 覆盖"全部移植"新增的解析函数：辅载波聚合（MONSSC/CASCELLINFO）、REJINFO、SIMSQ。
  * 运行：node parse-extra-test.js
  */
@@ -11,7 +11,14 @@ const path = require('path');
 const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
 
 // 用 Function 模拟 LuCI 全局环境加载两个库文件
-const sandbox = { window: {}, AtWs: undefined, Parse: undefined, L: { view: { extend: function (o) { return o; } } } };
+const sandbox = {
+	window: {}, AtWs: undefined, Parse: undefined,
+	L: {
+		view: { extend: function (o) { return o; } },
+		rpc: { declare: function () { return function () { return Promise.resolve({}); }; } },
+		uci: { load: function () { return Promise.resolve(); }, get: function () { return ''; } }
+	}
+};
 sandbox.window = sandbox;
 
 function loadLib(name) {
@@ -32,10 +39,10 @@ function check(name, cond, detail) {
 }
 
 try {
-	// 先加载 parse.js（ws.js 的 parseRawData 运行时引用全局 Parse）
+	// 先加载 parse.js（rpc.js 的 parseRawData 运行时引用全局 Parse）
 	const parse = loadLib('parse.js');
 	sandbox.Parse = parse.Parse;
-	const ws = loadLib('ws.js');
+	const ws = loadLib('rpc.js');
 	sandbox.AtWs = ws.AtWs;
 	const Parse = parse.Parse;
 	const AtWs = ws.AtWs;
@@ -98,7 +105,7 @@ try {
 	// 原版语义：present 只排除 0/99，98（失效）依然 present=true
 	check('parseSimsq 失效', sqDead.dead === true && sqDead.present === true, sqDead ? sqDead.label : 'null');
 
-	/* ---- ws.js raw_data 拆分 REJINFO ---- */
+	/* ---- rpc.js raw_data 拆分 REJINFO ---- */
 	const parsed = AtWs.parseRawData('^REJINFO:46000,1,40,2,3,40,"0026F8","FF","0A444202"\r\n');
 	const rejType = parsed.filter(function (p) { return p.type === 'REJINFO'; });
 	check('parseRawData 拆分 REJINFO 类型', rejType.length === 1 && rejType[0].parsed && rejType[0].parsed.plmn === '46000',
