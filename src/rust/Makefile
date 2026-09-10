@@ -37,7 +37,7 @@ endif
 define Build/Compile
 	cd $(PKG_BUILD_DIR) && \
 		CARGO_TARGET_DIR="$(PKG_BUILD_DIR)/target" \
-		cargo build --release --target $(RUST_TARGET)
+		cargo build $(CARGO_BUILD_STD_FLAGS) --release --target $(RUST_TARGET) 2>&1 || { echo "CARGO BUILD FAILED (target=$(RUST_TARGET))"; exit 1; }
 endef
 
 define Package/at-webserver-rust/install
