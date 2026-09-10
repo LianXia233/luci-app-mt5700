@@ -245,7 +245,7 @@ pub async fn load_config() -> Config {
 
     cfg.enabled = values.bool("enabled", true);
 
-    let t = values.str("connection_type", "NETWORK").to_uppercase();
+    let t = values.str("connection_type", "SERIAL").to_uppercase();   // PCUI 优先
     cfg.at.type_ = if t == "SERIAL" { "SERIAL" } else { "NETWORK" }.to_string();
 
     cfg.at.network.host = values.str("network_host", &cfg.at.network.host);

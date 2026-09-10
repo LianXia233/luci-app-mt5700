@@ -56,7 +56,7 @@ return L.view.extend({
 		var connPanel = Ui.panel('调制解调器连接', '后端连接模组的通道');
 		var connTypeSel = document.createElement('select');
 		connTypeSel.className = 'cbi-input-select';
-		[{ v: 'NETWORK', l: '网络连接（TCP）' }, { v: 'SERIAL', l: '串口连接' }, { v: 'AUTO', l: '自动探测（串口优先 ttyUSB1）' }].forEach(function (o) {
+		[{ v: 'SERIAL', l: 'PCUI 串口（默认，优先 /dev/ttyUSB1）' }, { v: 'AUTO', l: '自动探测（串口优先 ttyUSB1）' }, { v: 'NETWORK', l: '网络连接（TCP，备用）' }].forEach(function (o) {
 			var opt = document.createElement('option');
 			opt.value = o.v; opt.textContent = o.l;
 			connTypeSel.appendChild(opt);
@@ -112,7 +112,7 @@ return L.view.extend({
 		var schedChk = document.createElement('input');
 		schedChk.type = 'checkbox';
 		schedChk.className = 'cbi-input-checkbox';
-		schedPanel._body.appendChild(Ui.field('启用定时锁频', schedChk, '在「网络 → 定时锁频」编排时段'));
+		schedPanel._body.appendChild(Ui.field('启用定时锁频', schedChk, '在「服务 → 模组管理 → 定时锁频」编排时段'));
 		body.appendChild(schedPanel);
 
 		/* ---------- 通知配置 ---------- */
@@ -148,7 +148,7 @@ return L.view.extend({
 			var v = L.uci.get('at-webserver', section, key);
 			return v == null || v === '' ? def : v;
 		};
-		connTypeSel.value = String(get('connection', 'type', 'NETWORK'));
+		connTypeSel.value = String(get('connection', 'type', 'SERIAL'));
 		hostInput.value = String(get('connection', 'host', '192.168.8.1'));
 		netPortInput.value = String(get('connection', 'port', '20249'));
 		serialInput.value = String(get('connection', 'serial_port', 'auto'));

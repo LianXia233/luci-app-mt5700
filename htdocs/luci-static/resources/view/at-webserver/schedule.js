@@ -29,7 +29,7 @@ return L.view.extend({
 		statusPanel._body.appendChild(statusLine);
 		body.appendChild(statusPanel);
 
-		var formPanel = Ui.panel('编排配置', '总开关在「服务 → 服务配置」的 schedule_enabled，启用后此页才可编辑');
+		var formPanel = Ui.panel('编排配置', '总开关在「服务 → 模组管理 → 服务配置」的 schedule_enabled，启用后此页才可编辑');
 		formPanel.style.display = 'none';
 		body.appendChild(formPanel);
 
@@ -339,7 +339,7 @@ return L.view.extend({
 			formPanel.style.display = '';
 			if (!cfg || !cfg.enabled || !draft) {
 				formPanel.style.display = 'none';
-				statusLine.appendChild(E('span', { 'class': 'at-hint' }, ' （定时锁频未启用，请到「服务 → 服务配置」开启 schedule_enabled）'));
+				statusLine.appendChild(E('span', { 'class': 'at-hint' }, ' （定时锁频未启用，请到「服务 → 模组管理 → 服务配置」开启 schedule_enabled）'));
 				return;
 			}
 
