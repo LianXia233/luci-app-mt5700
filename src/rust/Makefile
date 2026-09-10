@@ -34,7 +34,13 @@ ifeq ($(strip $(RUST_TARGET)),)
 $(error 不支持的架构 $(ARCH)，请在 Makefile RUST_TARGET_* 中添加映射)
 endif
 
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)
+	$(CP) $(CURDIR)/* $(PKG_BUILD_DIR)/
+endef
+
 define Build/Compile
+	@echo "==> cargo compile: ARCH=$(ARCH) RUST_TARGET=$(RUST_TARGET) BUILD_DIR=$(PKG_BUILD_DIR)"
 	cd $(PKG_BUILD_DIR) && \
 		CARGO_TARGET_DIR="$(PKG_BUILD_DIR)/target" \
 		cargo build $(CARGO_BUILD_STD_FLAGS) --release --target $(RUST_TARGET) 2>&1 || { echo "CARGO BUILD FAILED (target=$(RUST_TARGET))"; exit 1; }
