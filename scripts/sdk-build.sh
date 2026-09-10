@@ -13,8 +13,19 @@ RUST_TRIPLE="$2"
 
 echo "==> 仓库挂载: /work（构建开始）"
 
-# ---------- 0) 仓库源码布局 ----------
-cd /work
+# ---------- 0) 定位 openwrt/sdk 镜像自带的 SDK 根目录（含 feeds/package/scripts） ----------
+SDK_DIR=""
+for d in /builder /home/build/sdk; do
+  [ -f "$d/feeds.conf.default" ] && [ -d "$d/package" ] && { SDK_DIR="$d"; break; }
+done
+if [ -z "$SDK_DIR" ]; then
+  for d in /builder/*/; do
+    [ -f "$d/feeds.conf.default" ] && [ -d "$d/package" ] && { SDK_DIR="$d"; break; }
+  done
+fi
+[ -n "$SDK_DIR" ] || { echo "ERROR: 未找到 SDK 根目录（/builder 下无 feeds.conf.default）"; ls -la /builder; exit 1; }
+cd "$SDK_DIR"
+echo "==> SDK 根目录: $SDK_DIR"
 
 # ---------- 1) 基础工具（SDK 容器默认 buildbot 非 root，需要时用 sudo） ----------
 SUDO=''
@@ -64,8 +75,8 @@ echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 
 # ---------- 4) 把仓库包放入 buildroot package/ ----------
 mkdir -p package/luci-app-mt5700 package/at-webserver-rust
-cp -r Makefile htdocs po root package/luci-app-mt5700/
-cp -r src/rust/. package/at-webserver-rust/    # 含 Makefile + Cargo.toml（链接器由 cargo 全局 config 提供）
+cp -r /work/Makefile /work/htdocs /work/po /work/root package/luci-app-mt5700/
+cp -r /work/src/rust/. package/at-webserver-rust/    # 含 Makefile + Cargo.toml（链接器由 cargo 全局 config 提供）
 
 # ---------- 5) feeds（确保 luci feed 的 luci.mk 可用） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
