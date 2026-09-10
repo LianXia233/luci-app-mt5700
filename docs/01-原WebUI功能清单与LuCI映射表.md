@@ -217,15 +217,24 @@ LuCI 顶部菜单
 
 ## 4. API / 数据结构兼容性
 
-### 4.1 WebSocket 协议（完全兼容）
+### 4.1 LuCI RPC 协议（传输层替换为 RPC，命令/应答/推送语义完全兼容）
 
-- 地址：`ws://<router>:8765`（UCI `websocket_port`，可配）
-- 认证：连接建立后，若服务端配置了 `websocket_auth_key`，客户端先发 `{"auth_key":"..."}`；服务端回 `{"success":true,"message":"认证成功"}` 或 `{"error":"...","message":"认证失败"}`，随后关闭连接
-- 心跳：服务端每 30s 发 `ping` 文本帧，收到 `ping` 回 `pong`
-- 命令应答（客户端发 AT 命令字符串，服务端回）：
+传输链路：LuCI JS `L.rpc.declare('mt5700.at'/'mt5700.events')` → rpcd ucode 插件
+（`root/usr/share/rpcd/ucode/mt5700.uc`）→ Rust 后端（`127.0.0.1:<websocket_port>`，TCP newline-JSON）。
+
+- 请求（每行一个 JSON）：
   ```json
-  {"success": true,  "data": "+CGREG: 2,1,...\r\nOK"}
-  {"success": false, "error": "..."}
+  {"id":1,"method":"at","params":{"cmd":"AT+CSQ"}}
+  {"id":2,"method":"events","params":{"since":12}}
+  ```
+- 命令应答（`at` 方法）：
+  ```json
+  {"id":1,"result":{"success":true,"data":"+CGREG: 2,1,...\r\nOK"}}
+  {"id":1,"result":{"success":false,"error":"..."}}
+  ```
+- 事件拉取（`events` 方法，RPC 为请求-响应模型，实时性由前端 1.5s 轮询保证）：
+  ```json
+  {"id":2,"result":{"seq":18,"events":[{"type":"incoming_call","data":{...}}]}}
   ```
 - 伪命令（服务端本地处理，不发给模组）：
   - `AT+CONNECT?` → `+CONNECT: 0|1\r\nOK`（0=网络,1=串口）
@@ -234,7 +243,8 @@ LuCI 顶部菜单
   - `AT^CELLSCAN=...` 启动 → `^CELLSCAN: STARTED\r\nOK`
   - `AT^CELLSCAN=ABORT` → `OK`
   - `AT^CELLSCAN=STATE` → `^CELLSCAN: IDLE|RUNNING,n\r\nOK`
-- 推送类型：`raw_data`（主动上报原文）、`new_sms`、`incoming_call`、`pdcp_data`、`cellscan`（running/done/aborted/error）
+- 推送类型（经 events 拉取）：`raw_data`（主动上报原文）、`new_sms`、`incoming_call`、`pdcp_data`、`cellscan`（running/done/aborted/error）、`memory_full`、`urc_data`
+- 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI `websocket_auth_key` 由 ucode 代理自动附带（密钥语义兼容）
 - `AT^SYSCFGEX` 归一化：去掉 `\r\nOK`、给频段参数补引号、补齐末尾两个空参数
 
 ### 4.2 UCI 配置（完全兼容，键名不变）
@@ -279,5 +289,5 @@ LuCI 顶部菜单
 | 原功能条目（上表 #1–#75） | 75 |
 | 后端功能（#B1–#B16） | 16 |
 | 涉及 AT 命令/伪命令 | 60+（见 §2 各表） |
-| WebSocket 消息类型 | 8（command 应答、raw_data、new_sms、incoming_call、pdcp_data、cellscan、memory_full、urc_data） |
+| RPC 事件/应答类型 | 8（at 应答、raw_data、new_sms、incoming_call、pdcp_data、cellscan、memory_full、urc_data） |
 | UCI 配置键 | 50+ |

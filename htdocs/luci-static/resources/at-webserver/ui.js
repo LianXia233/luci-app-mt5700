@@ -1,5 +1,5 @@
 'use strict';
-'require at-webserver/ws';
+'require at-webserver/rpc';
 'require at-webserver/parse';
 /* global L, AtWs, Parse */
 

@@ -1,52 +1,63 @@
 'use strict';
 'require at-webserver/parse';
-/* global L, XHR */
+'require rpc';
+/* global L */
 
 /**
- * AT WebSocket 客户端（等价原 React 前端 services/at.ts 的 WebSocketATAdapter）。
+ * AT LuCI RPC 客户端（保持原 ATClient 的 API 面）。
  *
- * 协议契约（与 Go/Rust 服务端严格一致）：
- * - 地址 ws://<host>:<port>，配置来自 UCI at-webserver（原实现读 localStorage / CGI，LuCI 侧统一读 UCI）
- * - 服务端配置了密钥时：连接后先发 {"auth_key":"..."}，收到 {"success":true,"message":"认证成功"} 才算可用
- * - 心跳：客户端 20 秒发一次 "ping"，服务端 30 秒推一次 "ping"，收到回 "pong"
- * - 命令应答 {success, data, error}，按发送顺序 FIFO 匹配（无请求 ID）
- * - AT+CMGL=4 的应答可能被拆成多条消息，见到 OK/ERROR 才算读完
- * - 推送类型：raw_data / new_sms / incoming_call / pdcp_data / memory_full / cellscan / urc_data
+ * 传输链路（LuCI RPC，无 WebSocket）：
+ *   LuCI JS → L.rpc.declare('mt5700.at'/'mt5700.events') → rpcd → ucode 插件
+ *   （/usr/share/rpcd/ucode/mt5700.uc）→ Rust 后端（127.0.0.1:<port>，TCP newline-JSON）
+ *
+ * 语义兼容：
+ * - sendCommand(cmd) → {success,data,error}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
+ * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型），推送类型与原 WS 一致：
+ *   raw_data / new_sms / incoming_call / pdcp_data / memory_full / cellscan / urc_data
+ * - 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI websocket_auth_key 由 ucode 代理附加，
+ *   页面无需输入密钥（原有密钥配置保持兼容）
  */
 
-var AUTH_REJECTIONS = ['Authentication failed', 'Authentication timeout', 'Invalid authentication'];
+// rpcd 对象 mt5700 的方法声明（与 root/usr/share/rpcd/ucode/mt5700.uc 对应）
+var rpcAt = L.rpc.declare({
+	object: 'mt5700',
+	method: 'at',
+	params: ['cmd'],
+	expect: {}
+});
+
+var rpcEvents = L.rpc.declare({
+	object: 'mt5700',
+	method: 'events',
+	params: ['since'],
+	expect: {}
+});
+
+function withTimeout(p, ms, msg) {
+	return Promise.race([
+		p,
+		new Promise(function (resolve, reject) {
+			setTimeout(function () { reject(new Error(msg || '请求超时')); }, ms);
+		})
+	]);
+}
 
 function ATClient() {
 	this.connected = false;
-	this.ws = null;
-	this.authenticated = false;
+	this.authenticated = true;       // RPC 模式：登录态由 LuCI/rpcd 会话保证
 	this.requireAuth = false;
 	this.authKey = '';
-	this.host = '';
-	this.port = 8765;
-	this.reconnectAttempts = 0;
-	this.maxReconnectAttempts = 3;
-	this.reconnectDelay = 2000;
-	this.commandTimeout = 6000;
-	this.heartbeatTimer = null;
-	this.reconnectTimer = null;
-	this.pendingCommands = [];        // FIFO：{ resolve, timer }
+	this.commandTimeout = 8000;
 	this.subscribers = [];            // 推送订阅者
 	this.stateCallbacks = [];
 	this.state = 'idle';
 	this.error = null;
-	this.connectingPromise = null;
-	this.connectResolve = null;
-	this.connectReject = null;
-	this.connectTimeout = null;
-	this.smsCollecting = false;
-	this.smsBuffer = [];
-	this.smsResolve = null;
-	this.smsTimer = null;
-	this.lastCommand = '';
 	this.commandQueue = Promise.resolve();
+	this.pollTimer = null;
+	this.pollInterval = 1500;         // 事件轮询间隔（毫秒）
+	this.eventSeq = 0;
+	this.firstPoll = true;
 	this.configReady = this.loadConfig();
-	this.rememberDays = 30;
 }
 
 ATClient.prototype.setConnectionState = function (state, err) {
@@ -58,416 +69,151 @@ ATClient.prototype.setConnectionState = function (state, err) {
 };
 
 ATClient.prototype.isReady = function () {
-	return this.connected && (!this.requireAuth || this.authenticated);
+	return this.connected;
 };
 
-/* ---------- 配置加载 ---------- */
+/* ---------- 配置加载（保留 UCI 键语义；host 仅记录不再用于直连） ---------- */
 
 ATClient.prototype.loadConfig = function () {
 	var self = this;
 	return L.uci.load('at-webserver').then(function () {
-		var host = L.uci.get('at-webserver', 'websocket', 'host') || '';
 		var port = parseInt(L.uci.get('at-webserver', 'websocket', 'port') || '8765', 10) || 8765;
 		var authKey = L.uci.get('at-webserver', 'websocket', 'auth_key') || '';
-		// 原前端以 /cgi-bin/at-ws-info 的返回值优先；LuCI 侧同一份 UCI，直接取。
-		// host 为空时退回到当前页面主机（LuCI 与 AT 服务在同一台路由器上）。
-		self.host = host || window.location.hostname || '192.168.8.1';
 		self.port = port;
 		self.requireAuth = !!authKey;
 		self.authKey = authKey;
-		// 兼容：也允许用户在浏览器里用 localStorage 覆盖（与原前端行为一致）。
-		var lsHost = null, lsPort = null;
-		try {
-			lsHost = localStorage.getItem('atHost');
-			lsPort = localStorage.getItem('atPort');
-		} catch (e) { /* 隐私模式下 localStorage 不可用 */ }
-		if (lsHost) self.host = lsHost;
-		if (lsPort) self.port = parseInt(lsPort, 10) || self.port;
-		return self.host;
+		return self.port;
 	}).catch(function (err) {
 		console.warn('加载 UCI 配置失败，使用默认值', err);
-		self.host = window.location.hostname || '192.168.8.1';
 		self.port = 8765;
-		return self.host;
+		return self.port;
 	});
 };
 
-/* ---------- 连接管理 ---------- */
+/* ---------- 连接管理（RPC 模式下为逻辑连接） ---------- */
 
-ATClient.prototype.connect = function (authKey) {
+ATClient.prototype.connect = function () {
 	if (this.isReady()) {
 		this.setConnectionState('connected');
 		return Promise.resolve(true);
 	}
-	if (this.connectingPromise) return this.connectingPromise;
-
 	var self = this;
-	this.setConnectionState(this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
-	var connection = this.configReady.then(function () {
-		return self._doConnect(authKey);
-	});
-	this.connectingPromise = connection;
-	return connection.finally(function () {
-		if (self.connectingPromise === connection) self.connectingPromise = null;
-	});
-};
-
-ATClient.prototype._doConnect = function (authKey) {
-	var self = this;
-	if (self.requireAuth) {
-		if (authKey) {
-			self.authKey = authKey;
-			self.saveAuthKey(authKey);
-		} else if (!self.authKey) {
-			var cached = self.getCachedAuthKey();
-			if (cached) { self.authKey = cached; }
-			else {
-				self.setConnectionState('authenticating');
-				return Promise.reject(new Error('REQUIRE_AUTH_KEY'));
-			}
-		}
-	}
-
-	var isIPv6 = self.host.indexOf(':') >= 0;
-	var url = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://' + (isIPv6 ? '[' + self.host + ']' : self.host) + ':' + self.port;
-	var socket;
-	try {
-		socket = new WebSocket(url);
-	} catch (e) {
-		self.setConnectionState('error', '连接调制解调器失败: ' + (e.message || e));
-		return Promise.reject(e);
-	}
-	self.ws = socket;
-	self.setupWebSocket(socket);
-
-	return new Promise(function (resolve, reject) {
-		self.connectResolve = resolve;
-		self.connectReject = reject;
-		self.connectTimeout = setTimeout(function () {
-			if (self.ws !== socket || self.isReady()) return;
-			var err = new Error('连接超时');
-			self.setConnectionState('error', err.message);
-			self.rejectPendingConnection(err);
-			socket.close();
-		}, 10000);
-	});
-};
-
-ATClient.prototype.setupWebSocket = function (socket) {
-	var self = this;
-	socket.onopen = function () {
-		if (self.ws !== socket) { socket.close(); return; }
+	this.setConnectionState('connecting');
+	return this.configReady.then(function () {
 		self.connected = true;
-		if (self.requireAuth) {
-			self.setConnectionState('authenticating');
-			socket.send(JSON.stringify({ auth_key: self.authKey }));
-			return;
-		}
-		self.onAuthenticated();
-	};
-
-	socket.onclose = function () {
-		if (self.ws !== socket) return;
-		var wasConnected = self.state === 'connected';
-		self.ws = null;
-		self.connected = false;
-		self.authenticated = false;
-		self.stopHeartbeat();
-		self.rejectPendingConnection(new Error('AT WebSocket 连接已断开'));
-		self.handleDisconnect(wasConnected);
-	};
-
-	socket.onerror = function () {
-		if (self.ws !== socket) return;
-		var message = window.location.protocol === 'https:'
-			? '连接AT服务器失败：当前页面是 HTTPS，AT 服务只提供明文 WebSocket，请改用 http:// 访问'
-			: '连接AT服务器失败';
-		self.setConnectionState('error', message);
-		self.rejectPendingConnection(new Error(message));
-		if (socket.readyState !== WebSocket.CLOSING && socket.readyState !== WebSocket.CLOSED) socket.close();
-	};
-
-	socket.onmessage = function (event) {
-		if (self.ws !== socket) return;
-		try {
-			if (typeof event.data === 'string') self.handleWSMessage(event.data);
-		} catch (e) {
-			console.error('处理 WebSocket 消息失败:', e);
-		}
-	};
-};
-
-ATClient.prototype.onAuthenticated = function () {
-	this.authenticated = true;
-	this.reconnectAttempts = 0;
-	this.setConnectionState('connected');
-	this.startHeartbeat();
-	this.resolvePendingConnection();
-};
-
-ATClient.prototype.startHeartbeat = function () {
-	var self = this;
-	this.stopHeartbeat();
-	this.heartbeatTimer = setInterval(function () {
-		if (self.ws && self.ws.readyState === WebSocket.OPEN) self.ws.send('ping');
-	}, 20000);
-};
-
-ATClient.prototype.stopHeartbeat = function () {
-	if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
-};
-
-ATClient.prototype.handleDisconnect = function (wasConnected) {
-	var self = this;
-	this.clearPendingCommands('连接已断开');
-
-	if (this.requireAuth) {
-		if (this.state !== 'error') this.setConnectionState('disconnected');
-		return;
-	}
-
-	if (this.reconnectAttempts < this.maxReconnectAttempts) {
-		this.reconnectAttempts++;
-		this.setConnectionState('reconnecting');
-		if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-		this.reconnectTimer = setTimeout(function () {
-			self.reconnectTimer = null;
-			self.connect().catch(function () {});
-		}, this.reconnectDelay);
-		return;
-	}
-	this.setConnectionState('error', '自动重连失败，请检查设备连接');
+		self.authenticated = true;
+		self.firstPoll = true;
+		self.reconnectAttempts = 0;
+		self.setConnectionState('connected');
+		if (self.subscribers.length) self.startPolling();
+		return true;
+	});
 };
 
 ATClient.prototype.disconnect = function () {
-	var self = this;
-	if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
 	this.clearPendingCommands('连接已手动断开');
-	this.stopHeartbeat();
-	this.rejectPendingConnection(new Error('连接已手动断开'));
-	var socket = this.ws;
-	this.ws = null;
-	if (socket) socket.close();
+	this.stopPolling();
 	this.connected = false;
 	this.authenticated = false;
-	this.reconnectAttempts = 0;
-	this.connectingPromise = null;
 	this.setConnectionState('disconnected');
 	return Promise.resolve();
 };
 
-/* ---------- 认证 ---------- */
-
-ATClient.prototype.getCachedAuthKey = function () {
-	try {
-		var key = localStorage.getItem('at_ws_auth_key');
-		var expiry = localStorage.getItem('at_ws_auth_key_expiry');
-		if (key && expiry && Date.now() < parseInt(expiry, 10)) return key;
-		if (key) this.clearAuthKey();
-	} catch (e) { /* ignore */ }
-	return '';
-};
-
-ATClient.prototype.saveAuthKey = function (key) {
-	try {
-		localStorage.setItem('at_ws_auth_key', key);
-		localStorage.setItem('at_ws_auth_key_expiry', String(Date.now() + this.rememberDays * 86400000));
-	} catch (e) { /* ignore */ }
-};
-
-ATClient.prototype.clearAuthKey = function () {
-	this.authKey = '';
-	this.authenticated = false;
-	try {
-		localStorage.removeItem('at_ws_auth_key');
-		localStorage.removeItem('at_ws_auth_key_expiry');
-	} catch (e) { /* ignore */ }
-};
-
-/* ---------- 消息处理 ---------- */
-
-ATClient.prototype.handleWSMessage = function (data) {
+ATClient.prototype.reconnect = function () {
 	var self = this;
-	if (data === 'ping' || data === 'pong') return;
+	if (this.connected) return Promise.resolve();
+	this.setConnectionState('reconnecting');
+	return this.connect().catch(function () {});
+};
 
-	var parsed;
-	try { parsed = JSON.parse(data); }
-	catch (e) { this.handleTextMessage(data); return; }
+/* ---------- 事件轮询 ---------- */
 
-	// 认证握手
-	if (this.requireAuth && !this.authenticated) {
-		if (parsed.success && parsed.message === '认证成功') {
-			this.onAuthenticated();
+ATClient.prototype.startPolling = function () {
+	var self = this;
+	if (this.pollTimer) return;
+	this.pollTimer = setInterval(function () { self.pollEvents(); }, this.pollInterval);
+};
+
+ATClient.prototype.stopPolling = function () {
+	if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+};
+
+ATClient.prototype.pollEvents = function () {
+	var self = this;
+	if (!this.connected) return;
+	withTimeout(rpcEvents(this.eventSeq), 6000, '事件轮询超时').then(function (resp) {
+		if (!self.connected) return;
+		resp = resp || {};
+		var seq = typeof resp.seq === 'number' ? resp.seq : self.eventSeq;
+		var events = Array.isArray(resp.events) ? resp.events : [];
+		self.eventSeq = seq;
+		if (self.firstPoll) {
+			// 首次连接只对齐序号，不重放服务启动前的事件（与原 WS 连接语义一致）
+			self.firstPoll = false;
 			return;
 		}
-		if (parsed.error || parsed.message === '认证失败') {
-			var msg = parsed.message || '密钥认证失败';
-			this.authenticated = false;
-			this.connected = false;
-			this.setConnectionState('error', msg);
-			this.rejectPendingConnection(new Error(msg));
-			if (this.ws) this.ws.close();
-			return;
+		for (var i = 0; i < events.length; i++) {
+			self.handlePush(events[i]);
 		}
-		return;
-	}
-
-	// 服务端要求密钥但配置没报告（旧版本 CGI 场景）
-	if (typeof parsed.error === 'string' && AUTH_REJECTIONS.indexOf(parsed.error) >= 0) {
-		this.requireAuth = true;
-		this.authenticated = false;
-		this.connected = false;
-		this.setConnectionState('error', '需要连接密钥');
-		this.rejectPendingConnection(new Error('REQUIRE_AUTH_KEY'));
-		if (this.ws) this.ws.close();
-		return;
-	}
-
-	// 结构化推送，直接转发给订阅者
-	if (['incoming_call', 'new_sms', 'pdcp_data', 'memory_full', 'cellscan', 'urc_data'].indexOf(parsed.type) >= 0) {
-		this.emitPush({ success: true, type: parsed.type, data: parsed.data });
-		return;
-	}
-
-	// raw_data 里只有主动上报，不能拿去匹配等待中的命令
-	if (parsed.type === 'raw_data' && typeof parsed.data === 'string') {
-		this.dispatchRawData(parsed.data);
-		return;
-	}
-
-	// AT+CMGL=4 多包收集
-	if (this.smsCollecting) {
-		if (parsed.success === false) {
-			this.finishSMSCollect({ success: false, error: parsed.error || '读取短信失败' });
-		} else {
-			this.collectSMSChunk(typeof parsed.data === 'string' ? parsed.data : data);
+	}).catch(function (err) {
+		if (self.connected && (err && err.message !== '事件轮询超时')) {
+			self.setConnectionState('error', 'RPC 调用失败: ' + (err.message || err));
+			self.connected = false;
+			self.stopPolling();
+			// rpcd/Rust 恢复后自动重连（有订阅者时）
+			setTimeout(function () { self.reconnect(); }, 3000);
 		}
-		return;
-	}
-
-	// 应答和当前命令对不上就丢弃：宁可让这条命令超时，也不能污染下一条。
-	if (typeof parsed.data === 'string' && !this.matchesLastCommand(parsed.data)) return;
-
-	this.handleResponse({
-		success: parsed.success !== false,
-		data: parsed.data,
-		error: parsed.error
 	});
 };
 
-ATClient.prototype.handleTextMessage = function (data) {
-	if (this.smsCollecting) { this.collectSMSChunk(data); return; }
-	if (isUnsolicitedText(data)) return;
-	this.handleResponse({ success: data.indexOf('ERROR') < 0, data: data });
-};
-
-ATClient.prototype.matchesLastCommand = function (data) {
-	var m = this.lastCommand.match(/AT([^\s=?]*)/);
-	if (!m) return true;
-	var prefix = m[1];
-	if (!prefix) return true;
-	if (data.indexOf(prefix) >= 0 || data.indexOf('OK') >= 0 || data.indexOf('ERROR') >= 0) return true;
-	return false;
-};
-
-ATClient.prototype.handleResponse = function (resp) {
-	if (!this.pendingCommands.length) return;
-	var cmd = this.pendingCommands.shift();
-	clearTimeout(cmd.timer);
-	cmd.resolve(resp);
-};
-
-ATClient.prototype.clearPendingCommands = function (err) {
-	while (this.pendingCommands.length) {
-		var cmd = this.pendingCommands.shift();
-		clearTimeout(cmd.timer);
-		cmd.resolve({ success: false, error: err });
+ATClient.prototype.handlePush = function (ev) {
+	if (!ev || typeof ev.type !== 'string') return;
+	if (ev.type === 'raw_data' && typeof ev.data === 'string') {
+		this.dispatchRawData(ev.data);
+		return;
+	}
+	if (['incoming_call', 'new_sms', 'pdcp_data', 'memory_full', 'cellscan', 'urc_data'].indexOf(ev.type) >= 0) {
+		this.emitPush({ success: true, type: ev.type, data: ev.data });
 	}
 };
 
-ATClient.prototype.resolvePendingConnection = function () {
-	if (this.connectTimeout) { clearTimeout(this.connectTimeout); this.connectTimeout = null; }
-	var r = this.connectResolve;
-	this.connectResolve = null;
-	this.connectReject = null;
-	if (r) r(true);
-};
-
-ATClient.prototype.rejectPendingConnection = function (err) {
-	if (this.connectTimeout) { clearTimeout(this.connectTimeout); this.connectTimeout = null; }
-	var r = this.connectReject;
-	this.connectResolve = null;
-	this.connectReject = null;
-	if (r) r(err);
-};
-
-/* ---------- 命令发送 ---------- */
+/* ---------- 命令发送（RPC，逐条独立应答） ---------- */
 
 ATClient.prototype.sendCommand = function (command) {
 	var self = this;
 	this.commandQueue = this.commandQueue.then(function () {
-		if (!self.connected || !self.ws) return { success: false, error: '未连接到调制解调器' };
-
-		// 短信列表可能被拆成多条消息返回，单独收集
-		if (command.trim() === 'AT+CMGL=4') {
-			self.smsCollecting = true;
-			self.smsBuffer = [];
-			return new Promise(function (resolve) {
-				self.smsResolve = resolve;
-				self.smsTimer = setTimeout(function () {
-					self.finishSMSCollect({ success: false, error: '短信数据收集超时' });
-				}, 10000);
-				self.ws.send(command.endsWith('\r') ? command : command + '\r');
-			});
-		}
-
-		self.lastCommand = command;
-		return new Promise(function (resolve) {
-			var timer = setTimeout(function () {
-				// 从 FIFO 里移除自己
-				for (var i = 0; i < self.pendingCommands.length; i++) {
-					if (self.pendingCommands[i].timer === timer) { self.pendingCommands.splice(i, 1); break; }
-				}
-				resolve({ success: false, error: '命令执行超时' });
-			}, self.commandTimeout);
-			self.pendingCommands.push({ resolve: resolve, timer: timer });
-			self.ws.send(command.endsWith('\r') ? command : command + '\r');
+		if (!self.connected) return { success: false, error: '未连接到调制解调器' };
+		return withTimeout(rpcAt(command), self.commandTimeout, '命令执行超时').then(function (resp) {
+			resp = resp || {};
+			if (resp.success === false) {
+				return { success: false, error: resp.error || '命令执行失败' };
+			}
+			return { success: true, data: resp.data };
+		}).catch(function (err) {
+			return { success: false, error: (err && err.message) || '命令执行失败' };
 		});
-	}).catch(function (err) {
-		return { success: false, error: (err && err.message) || '命令执行失败' };
 	});
 	return this.commandQueue;
 };
 
-/* ---------- CMGL=4 收集 ---------- */
-
-ATClient.prototype.collectSMSChunk = function (content) {
-	if (content.indexOf('OK') < 0 && content.indexOf('ERROR') < 0) {
-		this.smsBuffer.push(content);
-		return;
-	}
-	var all = this.smsBuffer.concat([content]).join('\n');
-	this.finishSMSCollect({ success: all.indexOf('ERROR') < 0, data: all });
-};
-
-ATClient.prototype.finishSMSCollect = function (resp) {
-	if (this.smsTimer) { clearTimeout(this.smsTimer); this.smsTimer = null; }
-	this.smsCollecting = false;
-	this.smsBuffer = [];
-	var r = this.smsResolve;
-	this.smsResolve = null;
-	if (r) r(resp);
+ATClient.prototype.clearPendingCommands = function (err) {
+	// RPC 模式下无挂起 FIFO；保留函数以兼容调用点
+	void err;
 };
 
 /* ---------- 订阅 ---------- */
 
 ATClient.prototype.subscribe = function (cb) {
-	if (this.subscribers.indexOf(cb) < 0) this.subscribers.push(cb);
+	if (this.subscribers.indexOf(cb) < 0) {
+		this.subscribers.push(cb);
+		if (this.connected) this.startPolling();
+	}
 };
 
 ATClient.prototype.unsubscribe = function (cb) {
 	var i = this.subscribers.indexOf(cb);
 	if (i >= 0) this.subscribers.splice(i, 1);
+	if (!this.subscribers.length) this.stopPolling();
 };
 
 ATClient.prototype.emitPush = function (resp) {
@@ -490,14 +236,14 @@ ATClient.prototype.dispatchRawData = function (text) {
 };
 
 ATClient.prototype.setConnection = function (host, port) {
-	this.host = host.replace(/^\[|\]$/g, '');
-	this.port = port;
+	// RPC 模式下连接由 LuCI/rpcd 决定，仅记录参数保持兼容
+	this.host = String(host || '').replace(/^\[|\]$/g, '');
+	this.port = parseInt(port, 10) || this.port;
 	try {
 		localStorage.setItem('atHost', this.host);
-		localStorage.setItem('atPort', String(port));
+		localStorage.setItem('atPort', String(this.port));
 	} catch (e) { /* ignore */ }
-	var self = this;
-	return this.disconnect().then(function () { return self.connect(); });
+	return Promise.resolve();
 };
 
 /* ================= 解析工具 ================= */
@@ -677,7 +423,7 @@ function parseRawData(text) {
 		} else if (line.indexOf('^CERSSI:') === 0) {
 			out.push({ type: 'CERSSI', raw: line });
 		} else if (line.indexOf('^REJINFO') === 0) {
-			// 手册 13.14：网络拒绝原因主动上报，解析后进 REJINFO 类型
+			// 网络拒绝原因主动上报，解析后进 REJINFO 类型
 			out.push({ type: 'REJINFO', raw: line, parsed: Parse.parseRejInfo(line) });
 		}
 	}
@@ -793,8 +539,6 @@ var atClient = (function () {
 	};
 })();
 
-// 保持与旧代码一致的“按需重连”语义：连接状态回调驱动页面展示，
-// 页面在需要时主动 connect()（无密钥环境会自动连接）。
 var AtWs = {
 	client: atClient,
 	extractATData: extractATData,

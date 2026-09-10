@@ -124,26 +124,10 @@ start_service() {
 			logger -t at-webserver "已禁止外网访问模块 AT 端口: $module_host:$module_port"
 		fi
 
-		# WebSocket 外网访问控制
-		if [ "$allow_wan" -eq 1 ]; then
-			uci add firewall rule >/dev/null
-			uci set firewall.@rule[-1].name='at_webserver_wan_allow'
-			uci set firewall.@rule[-1].src='wan'
-			uci set firewall.@rule[-1].proto='tcp'
-			uci set firewall.@rule[-1].dest_port="$ws_port"
-			uci set firewall.@rule[-1].target='ACCEPT'
-			uci set firewall.@rule[-1].enabled='1'
-			logger -t at-webserver "已允许外网访问 WebSocket (端口 $ws_port)"
-		else
-			uci add firewall rule >/dev/null
-			uci set firewall.@rule[-1].name='at_webserver_wan_block'
-			uci set firewall.@rule[-1].src='wan'
-			uci set firewall.@rule[-1].proto='tcp'
-			uci set firewall.@rule[-1].dest_port="$ws_port"
-			uci set firewall.@rule[-1].target='REJECT'
-			uci set firewall.@rule[-1].enabled='1'
-			logger -t at-webserver "已禁止外网访问 WebSocket (端口 $ws_port)"
-		fi
+		# LuCI RPC 端口（websocket_port，UCI 键名保留兼容）仅监听 127.0.0.1，
+		# 由 rpcd ucode 代理本机转发，不对外暴露，无需防火墙规则。
+		# 旧版本遗留的 at_webserver_wan_allow/at_webserver_wan_block 规则在上方已统一清理。
+		logger -t at-webserver "LuCI RPC 仅监听回环地址，跳过 WebSocket 外网防火墙规则"
 
 		# 模块访问限制：仅路由器本身可访问模块
 		if [ "$restrict_module" -eq 1 ]; then
