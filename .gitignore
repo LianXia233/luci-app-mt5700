@@ -1,0 +1,15 @@
+# Rust 构建产物
+src/rust/target/
+target/
+
+# 测试依赖
+tests/mock-modem/node_modules/
+
+# 日志与临时文件
+*.log
+*.tmp
+.DS_Store
+
+# IDE
+.idea/
+.vscode/

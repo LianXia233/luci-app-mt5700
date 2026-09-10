@@ -1,0 +1,79 @@
+name: Build OpenWrt packages (apk + ipk)
+
+# 云编译 OpenWrt 软件包：
+#   - 最新主线（main snapshot，OpenWrt 24.10+ 包管理器 apk）→ 产出 .apk
+#   - 老版本 23.05（opkg 包管理器）→ 产出 .ipk
+# 架构矩阵：x86_64 / aarch64_cortex-a53 / mips_24kc(mt7621)
+# 触发：push 到 main、打 v* 标签、或手动 workflow_dispatch
+# 产物：Actions 页面 Artifacts 下载；打标签时自动发布到 GitHub Release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ---- 最新主线 → .apk ----
+          - image: main-x86_64
+            arch: x86_64
+            rust: x86_64-unknown-linux-musl
+            fmt: apk
+          - image: main-aarch64_cortex-a53
+            arch: aarch64_cortex-a53
+            rust: aarch64-unknown-linux-musl
+            fmt: apk
+          - image: main-mips_24kc
+            arch: mips_24kc
+            rust: mipsel-unknown-linux-musl
+            fmt: apk
+          # ---- 老版本 23.05 → .ipk ----
+          - image: 23.05.5-x86_64
+            arch: x86_64
+            rust: x86_64-unknown-linux-musl
+            fmt: ipk
+          - image: 23.05.5-aarch64_cortex-a53
+            arch: aarch64_cortex-a53
+            rust: aarch64-unknown-linux-musl
+            fmt: ipk
+          - image: 23.05.5-mips_24kc
+            arch: mips_24kc
+            rust: mipsel-unknown-linux-musl
+            fmt: ipk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build in OpenWrt SDK container
+        run: |
+          mkdir -p out
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$PWD/out:/out" \
+            openwrt/sdk:${{ matrix.image }} \
+            /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.fmt }}-${{ matrix.arch }}
+          path: out/
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/**
+          generate_release_notes: true
+          token: ${{ secrets.GITHUB_TOKEN }}

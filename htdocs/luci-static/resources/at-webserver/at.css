@@ -1,0 +1,401 @@
+/* ==========================================================================
+   at-webserver LuCI 前端公共样式（原 WebUI Semi Design 视觉的等价迁移）
+   覆盖：面板 / 字段 / 标签 / 弹窗 / 连接条 / 短信会话 / 终端 / 扫频进度等
+   ========================================================================== */
+
+/* ---------- 页面骨架 ---------- */
+.at-page { }
+.at-page-head { margin-bottom: 14px; }
+.at-page-title { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+.at-page-subtitle { color: #888; font-size: 13px; }
+.at-page-body { }
+
+/* ---------- 面板 ---------- */
+.at-panel {
+	background: #fff;
+	border: 1px solid #dfe2e5;
+	border-radius: 8px;
+	margin-bottom: 16px;
+	overflow: hidden;
+}
+.at-panel-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 14px;
+	border-bottom: 1px solid #f0f2f5;
+	background: #fafbfc;
+}
+.at-panel-title { margin: 0; font-size: 15px; font-weight: 600; }
+.at-panel-hint { color: #999; font-size: 12px; }
+.at-panel-extra { font-size: 12px; color: #666; }
+.at-panel-body { padding: 12px 14px; }
+.at-panel-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+/* ---------- 字段 ---------- */
+.at-field { display: flex; align-items: flex-start; margin-bottom: 10px; }
+.at-field-label { flex: 0 0 160px; padding-top: 6px; font-weight: 500; color: #333; }
+.at-field-control { flex: 1 1 auto; }
+.at-field-control .cbi-input-text,
+.at-field-control .cbi-input-select,
+.at-field-control input[type="text"],
+.at-field-control input[type="number"],
+.at-field-control input[type="password"],
+.at-field-control select {
+	width: 100%;
+	max-width: 420px;
+	box-sizing: border-box;
+}
+.at-field-hint { color: #999; font-size: 12px; margin-top: 3px; }
+
+/* ---------- 键值表 ---------- */
+.at-kv { width: 100%; border-collapse: collapse; }
+.at-kv td { padding: 6px 10px; border-bottom: 1px solid #f4f5f7; font-size: 13px; }
+.at-kv-label { color: #666; white-space: nowrap; width: 1%; }
+.at-kv-value { color: #222; word-break: break-all; }
+
+/* ---------- 标签 ---------- */
+.at-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.at-tag {
+	display: inline-block;
+	padding: 2px 10px;
+	border-radius: 12px;
+	font-size: 12px;
+	line-height: 20px;
+	border: 1px solid transparent;
+}
+.at-tag-green { color: #1a7f37; background: #e6f4ea; border-color: #b7dfc2; }
+.at-tag-red { color: #c62828; background: #fdeaea; border-color: #f3c0c0; }
+.at-tag-orange { color: #b26a00; background: #fff3e0; border-color: #ffd591; }
+.at-tag-blue { color: #1565c0; background: #e7f0fd; border-color: #bcd8f5; }
+.at-tag-gray { color: #555; background: #f0f0f0; border-color: #ddd; }
+
+/* ---------- 按钮 ---------- */
+.at-btn {
+	display: inline-block;
+	padding: 5px 14px;
+	border-radius: 6px;
+	border: 1px solid #ccc;
+	background: #f7f8fa;
+	color: #333;
+	font-size: 13px;
+	cursor: pointer;
+	line-height: 20px;
+	transition: background .15s, border-color .15s;
+}
+.at-btn:hover { background: #fff; border-color: #aaa; }
+.at-btn:disabled { opacity: .55; cursor: not-allowed; }
+.at-btn-primary { background: #1668dc; border-color: #1668dc; color: #fff; }
+.at-btn-primary:hover { background: #1f76ee; border-color: #1f76ee; color: #fff; }
+.at-btn-danger { background: #e5484d; border-color: #e5484d; color: #fff; }
+.at-btn-danger:hover { background: #f05a5f; border-color: #f05a5f; color: #fff; }
+.at-btn-action { background: #f2f4f7; border-color: #d0d5dd; }
+.at-btn-neutral { background: #f7f8fa; }
+
+/* ---------- Toast ---------- */
+.at-toast {
+	position: fixed;
+	top: 70px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10000;
+	padding: 10px 22px;
+	border-radius: 8px;
+	color: #fff;
+	font-size: 14px;
+	box-shadow: 0 4px 16px rgba(0,0,0,.18);
+	opacity: 1;
+	transition: opacity .4s;
+	max-width: 80vw;
+}
+.at-toast-success { background: #1a7f37; }
+.at-toast-error { background: #c62828; }
+.at-toast-warning { background: #b26a00; }
+.at-toast-info { background: #1565c0; }
+.at-toast-hide { opacity: 0; }
+
+/* ---------- 弹窗 ---------- */
+.at-modal-mask {
+	position: fixed;
+	inset: 0;
+	background: rgba(0,0,0,.45);
+	z-index: 9999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.at-modal {
+	background: #fff;
+	border-radius: 10px;
+	width: 90%;
+	max-width: 420px;
+	max-height: 85vh;
+	overflow-y: auto;
+	padding: 18px 20px;
+	box-shadow: 0 10px 40px rgba(0,0,0,.25);
+}
+.at-modal-wide { max-width: 640px; }
+.at-modal-title { margin: 0 0 12px; font-size: 16px; }
+.at-modal-text { margin: 0 0 14px; font-size: 14px; color: #333; }
+.at-modal-body { }
+.at-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.at-modal .at-field { margin-bottom: 10px; }
+
+/* ---------- 连接状态条 ---------- */
+.at-conn-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 14px;
+	border-radius: 8px;
+	margin-bottom: 14px;
+	font-size: 13px;
+	border: 1px solid;
+}
+.at-conn-idle { background: #f4f5f7; border-color: #e0e3e8; color: #666; }
+.at-conn-connecting { background: #e7f0fd; border-color: #bcd8f5; color: #1565c0; }
+.at-conn-connected { background: #e6f4ea; border-color: #b7dfc2; color: #1a7f37; }
+.at-conn-error { background: #fdeaea; border-color: #f3c0c0; color: #c62828; }
+.at-conn-dot {
+	width: 8px; height: 8px; border-radius: 50%;
+	background: currentColor;
+	flex: 0 0 auto;
+}
+.at-conn-actions { margin-left: auto; display: flex; gap: 6px; }
+
+/* ---------- 进度条 ---------- */
+.at-progress-bar {
+	height: 8px;
+	background: #eef0f3;
+	border-radius: 4px;
+	overflow: hidden;
+	margin-top: 6px;
+}
+.at-progress-fill {
+	height: 100%;
+	background: #1668dc;
+	border-radius: 4px;
+	transition: width .4s;
+}
+.at-progress-danger { background: #e5484d; }
+
+/* ---------- 空状态 / 提示 ---------- */
+.at-empty { color: #999; font-size: 13px; padding: 18px 8px; text-align: center; }
+.at-hint { color: #888; font-size: 12px; margin-top: 4px; }
+
+/* ---------- 短信中心 ---------- */
+.at-sms-layout { display: flex; gap: 14px; min-height: 480px; }
+.at-sms-left { flex: 0 0 280px; border: 1px solid #e5e8ec; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+.at-sms-right { flex: 1 1 auto; border: 1px solid #e5e8ec; border-radius: 8px; display: flex; flex-direction: column; min-width: 0; }
+.at-sms-storage { padding: 8px 12px; background: #fafbfc; border-bottom: 1px solid #eef0f3; font-size: 12px; color: #666; }
+.at-sms-contacts { flex: 1 1 auto; overflow-y: auto; }
+.at-sms-contact { padding: 10px 12px; border-bottom: 1px solid #f4f5f7; cursor: pointer; }
+.at-sms-contact:hover { background: #f7f9fc; }
+.at-sms-contact-active { background: #e7f0fd; }
+.at-sms-contact-num { font-weight: 600; font-size: 14px; }
+.at-sms-contact-last { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.at-sms-contact-time { color: #aaa; font-size: 11px; }
+.at-sms-left > .at-btn { margin: 8px; }
+.at-sms-conv-head {
+	padding: 10px 14px; background: #fafbfc; border-bottom: 1px solid #eef0f3;
+	font-weight: 600;
+}
+.at-sms-conv-body {
+	flex: 1 1 auto; overflow-y: auto; padding: 12px;
+	display: flex; flex-direction: column; gap: 8px;
+	background: #f8f9fb;
+}
+.at-sms-bubble {
+	max-width: 76%;
+	padding: 8px 12px;
+	border-radius: 10px;
+	font-size: 13px;
+	position: relative;
+	word-break: break-all;
+}
+.at-sms-sent { align-self: flex-end; background: #1668dc; color: #fff; border-bottom-right-radius: 2px; }
+.at-sms-recv { align-self: flex-start; background: #fff; border: 1px solid #e5e8ec; border-bottom-left-radius: 2px; }
+.at-sms-msg-meta { font-size: 11px; opacity: .7; margin-top: 3px; }
+.at-sms-msg-part { font-size: 11px; opacity: .75; }
+.at-sms-del { position: absolute; top: -8px; right: -6px; padding: 0 6px; font-size: 11px; line-height: 18px; display: none; }
+.at-sms-bubble:hover .at-sms-del { display: inline-block; }
+.at-sms-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #eef0f3; align-items: flex-end; flex-wrap: wrap; }
+.at-sms-textarea {
+	flex: 1 1 auto; min-width: 200px; min-height: 44px; resize: vertical;
+	border: 1px solid #d0d5dd; border-radius: 6px; padding: 6px 8px; font-size: 13px;
+}
+.at-sms-hint { flex: 0 0 auto; color: #999; font-size: 11px; max-width: 220px; }
+.at-batch-list { max-height: 300px; overflow-y: auto; border: 1px solid #eef0f3; border-radius: 6px; padding: 6px; }
+.at-batch-item { display: flex; gap: 8px; align-items: flex-start; padding: 5px 6px; font-size: 13px; }
+.at-storage-info { font-size: 13px; color: #333; margin-bottom: 4px; }
+
+/* ---------- USSD ---------- */
+.at-ussd-reply {
+	margin-top: 8px; padding: 10px 12px; background: #f8f9fb;
+	border: 1px solid #e5e8ec; border-radius: 6px;
+	font-size: 14px; color: #222; min-height: 24px; word-break: break-all;
+}
+
+/* ---------- AT 终端 ---------- */
+.at-console {
+	background: #1e1e1e; color: #e6e6e6;
+	border: 1px solid #333; border-radius: 6px;
+	padding: 10px; max-height: 480px; overflow-y: auto;
+	font-family: ui-monospace, Menlo, Consolas, monospace;
+	font-size: 12px; line-height: 1.6;
+	white-space: pre-wrap; word-break: break-all;
+}
+.at-console-entry { margin-bottom: 10px; }
+.at-console-cmd { color: #9cdcfe; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.at-console-prompt { color: #6a9955; }
+.at-console-cmd time { color: #666; font-size: 11px; }
+.at-console-res { margin: 3px 0 0; color: #dcdcaa; white-space: pre-wrap; word-break: break-all; }
+.at-console-res--err { color: #f48771; }
+.at-terminal-input { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.at-terminal-input .cbi-input-text { flex: 1 1 260px; }
+.at-log-console {
+	background: #1e1e1e; color: #e6e6e6;
+	border: 1px solid #333; border-radius: 6px;
+	padding: 12px; max-height: 600px; overflow-y: auto;
+	font-family: ui-monospace, Menlo, Consolas, monospace;
+	font-size: 12px; line-height: 1.6;
+	white-space: pre-wrap; word-break: break-all;
+	margin: 0 0 10px;
+}
+
+/* ---------- 常用命令 / 已保存命令 ---------- */
+.at-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.at-chip { display: inline-flex; align-items: center; gap: 2px; }
+.at-chip-del { color: #c62828; cursor: pointer; padding: 0 4px; font-size: 14px; }
+
+/* ---------- 指标网格（网络状态页） ---------- */
+.at-metrics {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+	gap: 10px;
+	margin-bottom: 10px;
+}
+.at-metric {
+	background: #f8f9fb;
+	border: 1px solid #eef0f3;
+	border-radius: 8px;
+	padding: 8px 10px;
+}
+.at-metric-label { color: #888; font-size: 11px; margin-bottom: 2px; }
+.at-metric-value { font-size: 15px; font-weight: 600; color: #222; word-break: break-all; }
+
+/* ---------- 速率显示（PDCP 实时速率） ---------- */
+.at-speed-row {
+	display: flex;
+	gap: 12px;
+	flex-wrap: wrap;
+	margin-bottom: 8px;
+}
+.at-speed-box {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	background: #f8f9fb;
+	border: 1px solid #eef0f3;
+	border-radius: 8px;
+	padding: 6px 12px;
+}
+.at-speed-num { font-size: 20px; font-weight: 700; color: #1668dc; }
+.at-speed-label { color: #888; font-size: 12px; }
+.at-speed-value { font-size: 13px; color: #444; }
+.at-speed-dir { color: #999; font-size: 12px; }
+
+/* ---------- 曲线图（SVG） ---------- */
+.at-chart {
+	width: 100%;
+	height: 120px;
+	background: #fafbfc;
+	border: 1px solid #eef0f3;
+	border-radius: 6px;
+	margin: 6px 0;
+}
+
+/* ---------- 锁频编辑器 ---------- */
+.at-lock-editor { border: 1px solid #eef0f3; border-radius: 6px; padding: 10px; margin: 8px 0; }
+.at-lock-items { display: flex; flex-direction: column; gap: 6px; }
+.at-lock-item {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	flex-wrap: wrap;
+	padding: 6px 8px;
+	background: #fafbfc;
+	border: 1px solid #f0f2f5;
+	border-radius: 6px;
+}
+.at-lock-item .cbi-input-text { width: 90px; }
+.at-lock-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* ---------- 扫频结果单元格 ---------- */
+.at-op-cell { color: #1565c0; font-weight: 600; cursor: pointer; }
+.at-op-cell:hover { text-decoration: underline; }
+
+/* ---------- 通用提示 / 内联 / 等宽 ---------- */
+.at-note { color: #888; font-size: 12px; margin: 4px 0; }
+.at-inline { display: inline-block; margin-right: 10px; }
+.at-mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+/* ---------- 定时时段 ---------- */
+.at-period {
+	display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+	padding: 10px; border: 1px solid #eef0f3; border-radius: 8px; margin: 8px 0;
+}
+.at-period-kind { font-weight: 600; min-width: 48px; }
+.at-period .at-lock-editor { width: 100%; }
+
+/* ---------- 升级步骤进度 ---------- */
+.at-steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.at-step {
+	padding: 4px 10px; border-radius: 12px; font-size: 12px;
+	background: #f0f0f0; color: #666;
+}
+.at-step.at-step-done { background: #e6f4ea; color: #1a7f37; }
+.at-step.at-step-active { background: #e7f0fd; color: #1565c0; font-weight: 600; }
+.at-progress { margin: 8px 0; }
+
+/* ---------- 短信内容 ---------- */
+.at-sms-msg-content { word-break: break-all; white-space: pre-wrap; }
+
+/* ---------- 免责声明列表 ---------- */
+.at-agree-list { margin: 8px 0 12px; padding-left: 18px; }
+.at-agree-list li { margin-bottom: 4px; font-size: 13px; color: #444; }
+
+/* ---------- 网络拒绝（REJINFO） ---------- */
+.at-reject-title {
+	font-weight: 700;
+	font-size: 14px;
+	color: #b3261e;
+	margin-bottom: 4px;
+}
+.at-reject-line {
+	font-size: 13px;
+	color: #444;
+	margin-bottom: 2px;
+	word-break: break-all;
+}
+
+/* ---------- 自动刷新 ---------- */
+.at-autorefresh { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font-size: 13px; color: #555; }
+.at-autorefresh-label { color: #666; }
+
+/* ---------- Spinner ---------- */
+.at-spinner { text-align: center; padding: 30px; color: #888; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 768px) {
+	.at-field { flex-direction: column; }
+	.at-field-label { flex: none; padding-top: 0; margin-bottom: 4px; }
+	.at-sms-layout { flex-direction: column; }
+	.at-sms-left { flex: none; width: 100%; }
+	.at-sms-right { min-height: 400px; }
+	.at-sms-bubble { max-width: 92%; }
+	.at-panel-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+	.at-btn { width: 100%; text-align: center; }
+	.at-modal-actions { flex-direction: column; }
+	.at-modal-actions .at-btn { width: 100%; }
+}

@@ -1,0 +1,29 @@
+[package]
+name = "at-webserver"
+version = "3.0.2"
+edition = "2021"
+description = "MT5700M 5G module AT WebSocket server (Rust port of at-webserver)"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "io-util", "macros", "signal", "process"] }
+tokio-tungstenite = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+hex = "0.4"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+libc = "0.2"
+async-trait = "0.1"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-package]
+# 保持与 release 相同的优化，用于 OpenWrt 交叉编译的瘦身
+inherits = "release"

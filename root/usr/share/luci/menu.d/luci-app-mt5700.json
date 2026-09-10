@@ -1,0 +1,122 @@
+{
+	"admin/network/at-webserver": {
+		"title": "5G 模组",
+		"order": 90,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-mt5700"
+			]
+		}
+	},
+	"admin/network/at-webserver/status": {
+		"title": "网络状态",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/network_status"
+		}
+	},
+	"admin/network/at-webserver/settings": {
+		"title": "网络设置",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/network_settings"
+		}
+	},
+	"admin/network/at-webserver/dial": {
+		"title": "拨号设置",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/dial"
+		}
+	},
+	"admin/network/at-webserver/scan": {
+		"title": "全网扫频",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/scan"
+		}
+	},
+	"admin/network/at-webserver/schedule": {
+		"title": "定时锁频",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/schedule"
+		}
+	},
+	"admin/services/at-webserver": {
+		"title": "5G 模组",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-mt5700"
+			]
+		}
+	},
+	"admin/services/at-webserver/modem": {
+		"title": "模组设置",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/modem_settings"
+		}
+	},
+	"admin/services/at-webserver/upgrade": {
+		"title": "模组升级",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/upgrade"
+		}
+	},
+	"admin/services/at-webserver/sms": {
+		"title": "短信中心",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/sms_center"
+		}
+	},
+	"admin/services/at-webserver/sms-settings": {
+		"title": "短信设置",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/sms_settings"
+		}
+	},
+	"admin/services/at-webserver/terminal": {
+		"title": "AT 调试终端",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/terminal"
+		}
+	},
+	"admin/services/at-webserver/logs": {
+		"title": "通知日志",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/logs"
+		}
+	},
+	"admin/services/at-webserver/config": {
+		"title": "服务配置",
+		"order": 70,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/service"
+		}
+	}
+}

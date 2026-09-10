@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# 首次安装时确保默认配置存在（config 文件已随包分发，这里做防御性初始化）
+uci -q get at-webserver.config >/dev/null || {
+	uci -q set at-webserver.config=config
+	uci -q commit at-webserver
+}
+
+# 确保日志目录存在
+mkdir -p /tmp
+
+exit 0

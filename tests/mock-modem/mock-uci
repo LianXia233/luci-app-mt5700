@@ -1,0 +1,58 @@
+#!/bin/sh
+# 假 uci 命令：仅供本地链路测试（无 OpenWrt 环境时让 Rust 后端读到测试配置）
+# 用法：把本目录加入 PATH 前端（export PATH="$(dirname $0):$PATH"）
+if [ "$1" = "show" ] && [ "$2" = "at-webserver" ]; then
+	cat <<'EOF'
+at-webserver.config.enabled='1'
+at-webserver.config.connection_type='NETWORK'
+at-webserver.config.network_host='127.0.0.1'
+at-webserver.config.network_port='20249'
+at-webserver.config.network_timeout='10'
+at-webserver.config.serial_port='auto'
+at-webserver.config.serial_baudrate='115200'
+at-webserver.config.websocket_port='8765'
+at-webserver.config.websocket_auth_key='test-key-123'
+at-webserver.config.cellscan_timeout='60'
+at-webserver.config.wechat_webhook=''
+at-webserver.config.log_file='/tmp/at-notifications.log'
+at-webserver.config.notify_sms='1'
+at-webserver.config.notify_call='1'
+at-webserver.config.notify_memory_full='1'
+at-webserver.config.notify_signal='1'
+at-webserver.config.schedule_enabled='0'
+at-webserver.config.schedule_check_interval='60'
+at-webserver.config.schedule_timeout='180'
+at-webserver.config.schedule_unlock_lte='1'
+at-webserver.config.schedule_unlock_nr='1'
+at-webserver.config.schedule_toggle_airplane='1'
+at-webserver.config.schedule_night_enabled='1'
+at-webserver.config.schedule_night_start='22:00'
+at-webserver.config.schedule_night_end='06:00'
+at-webserver.config.schedule_night_lte_type='3'
+at-webserver.config.schedule_night_lte_bands=''
+at-webserver.config.schedule_night_lte_arfcns=''
+at-webserver.config.schedule_night_lte_pcis=''
+at-webserver.config.schedule_night_nr_type='3'
+at-webserver.config.schedule_night_nr_bands=''
+at-webserver.config.schedule_night_nr_arfcns=''
+at-webserver.config.schedule_night_nr_scs_types=''
+at-webserver.config.schedule_night_nr_pcis=''
+at-webserver.config.schedule_day_enabled='1'
+at-webserver.config.schedule_day_lte_type='3'
+at-webserver.config.schedule_day_lte_bands=''
+at-webserver.config.schedule_day_lte_arfcns=''
+at-webserver.config.schedule_day_lte_pcis=''
+at-webserver.config.schedule_day_nr_type='3'
+at-webserver.config.schedule_day_nr_bands=''
+at-webserver.config.schedule_day_nr_arfcns=''
+at-webserver.config.schedule_day_nr_scs_types=''
+at-webserver.config.schedule_day_nr_pcis=''
+EOF
+	exit 0
+fi
+# 其它 uci 调用回退真实 uci（若存在）
+REAL_UCI=$(command -v uci 2>/dev/null)
+if [ -n "$REAL_UCI" ]; then
+	exec "$REAL_UCI" "$@"
+fi
+exit 1

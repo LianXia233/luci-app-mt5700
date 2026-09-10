@@ -1,0 +1,152 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+msgid "5G 模组"
+msgstr "5G 模组"
+
+msgid "网络状态"
+msgstr "网络状态"
+
+msgid "网络设置"
+msgstr "网络设置"
+
+msgid "拨号设置"
+msgstr "拨号设置"
+
+msgid "全网扫频"
+msgstr "全网扫频"
+
+msgid "定时锁频"
+msgstr "定时锁频"
+
+msgid "模组设置"
+msgstr "模组设置"
+
+msgid "模组升级"
+msgstr "模组升级"
+
+msgid "短信中心"
+msgstr "短信中心"
+
+msgid "短信设置"
+msgstr "短信设置"
+
+msgid "AT 调试终端"
+msgstr "AT 调试终端"
+
+msgid "通知日志"
+msgstr "通知日志"
+
+msgid "服务配置"
+msgstr "服务配置"
+
+msgid "AT WebSocket 服务与通知设置（保存后自动重载）"
+msgstr "AT WebSocket 服务与通知设置（保存后自动重载）"
+
+msgid "服务状态"
+msgstr "服务状态"
+
+msgid "运行中"
+msgstr "运行中"
+
+msgid "未运行"
+msgstr "未运行"
+
+msgid "重载服务"
+msgstr "重载服务"
+
+msgid "重启服务"
+msgstr "重启服务"
+
+msgid "调制解调器连接"
+msgstr "调制解调器连接"
+
+msgid "连接类型"
+msgstr "连接类型"
+
+msgid "网络连接（TCP）"
+msgstr "网络连接（TCP）"
+
+msgid "串口连接"
+msgstr "串口连接"
+
+msgid "自动探测（串口优先 ttyUSB1）"
+msgstr "自动探测（串口优先 ttyUSB1）"
+
+msgid "网络主机"
+msgstr "网络主机"
+
+msgid "网络端口"
+msgstr "网络端口"
+
+msgid "模组 TCP 端口，默认 20249"
+msgstr "模组 TCP 端口，默认 20249"
+
+msgid "串口设备"
+msgstr "串口设备"
+
+msgid "波特率"
+msgstr "波特率"
+
+msgid "WebSocket 服务"
+msgstr "WebSocket 服务"
+
+msgid "监听地址"
+msgstr "监听地址"
+
+msgid "留空监听所有接口"
+msgstr "留空监听所有接口"
+
+msgid "WebSocket 端口"
+msgstr "WebSocket 端口"
+
+msgid "认证密钥"
+msgstr "认证密钥"
+
+msgid "前端连接时必须携带该密钥，留空放行"
+msgstr "前端连接时必须携带该密钥，留空放行"
+
+msgid "定时锁频"
+msgstr "定时锁频"
+
+msgid "总开关与默认参数"
+msgstr "总开关与默认参数"
+
+msgid "启用定时锁频"
+msgstr "启用定时锁频"
+
+msgid "通知"
+msgstr "通知"
+
+msgid "来电通知"
+msgstr "来电通知"
+
+msgid "新短信通知"
+msgstr "新短信通知"
+
+msgid "信号变化通知"
+msgstr "信号变化通知"
+
+msgid "短信存储满通知"
+msgstr "短信存储满通知"
+
+msgid "企业微信 WebHook"
+msgstr "企业微信 WebHook"
+
+msgid "通知将推送到该 WebHook 地址"
+msgstr "通知将推送到该 WebHook 地址"
+
+msgid "保存配置"
+msgstr "保存配置"
+
+msgid "保存后自动重载"
+msgstr "保存后自动重载"
+
+msgid "AT WebServer"
+msgstr "AT WebServer"
+
+msgid "LuCI support for AT WebServer"
+msgstr "LuCI support for AT WebServer"
+
+msgid "通知日志：查看短信、来电、信号变化等通知记录"
+msgstr "通知日志：查看短信、来电、信号变化等通知记录"
