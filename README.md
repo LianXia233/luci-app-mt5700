@@ -152,8 +152,8 @@ node parse-extra-test.js   # 前端解析层 19 项单测
 
 | 目标 | 包格式 | SDK 镜像 | 架构 |
 |---|---|---|---|
-| 最新主线（snapshot） | **`.apk`**（OpenWrt 24.10+ apk 包管理器） | `openwrt/sdk:*-main` | x86_64 / aarch64_cortex-a53 / mips_24kc |
-| 老版本 23.05 | **`.ipk`**（opkg 兼容） | `openwrt/sdk:*-23.05.5` | x86_64 / aarch64_cortex-a53 / mips_24kc |
+| 最新主线（snapshot） | **`.apk`**（OpenWrt 24.10+ apk 包管理器） | `openwrt/sdk:*-main` | x86_64 / aarch64_cortex-a53 |
+| 老版本 23.05 | **`.ipk`**（opkg 兼容） | `openwrt/sdk:*-23.05.5` | x86_64 / aarch64_cortex-a53 |
 
 - **触发方式**：
   1. 手动：Actions 页面 → `Build OpenWrt packages (apk + ipk)` → `Run workflow`；

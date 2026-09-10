@@ -25,6 +25,7 @@ endef
 RUST_TARGET_x86_64  := x86_64-unknown-linux-musl
 RUST_TARGET_aarch64 := aarch64-unknown-linux-musl
 RUST_TARGET_mipsel  := mipsel-unknown-linux-musl
+RUST_TARGET_mips    := mipsel-unknown-linux-musl    # realtek/rtl838x 等 target 的 ARCH 名为 mips
 RUST_TARGET_mips_24kc    := mipsel-unknown-linux-musl
 RUST_TARGET_mipsel_24kc  := mipsel-unknown-linux-musl
 RUST_TARGET_arm     := armv7-unknown-linux-musleabihf

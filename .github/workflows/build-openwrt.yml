@@ -3,7 +3,7 @@ name: Build OpenWrt packages (apk + ipk)
 # 云编译 OpenWrt 软件包：
 #   - 最新主线（main snapshot，OpenWrt 24.10+ 包管理器 apk）→ 产出 .apk
 #   - 老版本 23.05（opkg 包管理器）→ 产出 .ipk
-# 架构矩阵：x86_64 / aarch64_cortex-a53 / mips_24kc(mt7621)
+# 架构矩阵：x86_64 / aarch64_cortex-a53（主线 apk + 老版 23.05 ipk）
 # 触发：push 到 main、打 v* 标签、或手动 workflow_dispatch
 # 产物：Actions 页面 Artifacts 下载；打标签时自动发布到 GitHub Release
 
@@ -37,12 +37,6 @@ jobs:
             ver: main
             target: qualcommax/ipq50xx
             fmt: apk
-          - image: mips_24kc-main
-            arch: mips_24kc
-            rust: mipsel-unknown-linux-musl
-            ver: main
-            target: realtek/rtl838x
-            fmt: apk
           # ---- 老版本 23.05 → .ipk ----
           - image: x86_64-23.05.5
             arch: x86_64
@@ -55,12 +49,6 @@ jobs:
             rust: aarch64-unknown-linux-musl
             ver: 23.05.5
             target: mediatek/filogic
-            fmt: ipk
-          - image: mips_24kc-23.05.5
-            arch: mips_24kc
-            rust: mipsel-unknown-linux-musl
-            ver: 23.05.5
-            target: realtek/rtl838x
             fmt: ipk
 
     steps:
