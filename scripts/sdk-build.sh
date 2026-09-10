@@ -121,9 +121,13 @@ make package/at-webserver-rust/compile V=s
 echo "==> 编译 LuCI 插件（luci-app-mt5700）"
 make package/luci-app-mt5700/compile V=s
 
-# ---------- 7) 收集产物到 /out ----------
+# ---------- 7) 收集产物到 /out（白名单：只收本项目包，排除 SDK 顺带编译的系统库）----------
+# 系统库（libc/libgcc1/libstdcpp6/libatomic1/libquadmath1/libpthread/librt 等）由 opkg/apk
+# 在安装时按依赖自动解决，不应出现在 Release 资产里。
 mkdir -p "/out/${ARCH}"
-find bin -type f \( -name '*.apk' -o -name '*.ipk' \) -exec cp {} "/out/${ARCH}/" \;
-echo "==> 产物："
+find bin -type f \( -name '*.apk' -o -name '*.ipk' \) \
+	\( -name 'luci-app-mt5700*' -o -name 'luci-i18n-mt5700*' -o -name 'at-webserver-rust*' \) \
+	-exec cp {} "/out/${ARCH}/" \;
+echo "==> 产物（仅本项目包）："
 ls -la "/out/${ARCH}/"
 echo "==> SDK 构建完成"
