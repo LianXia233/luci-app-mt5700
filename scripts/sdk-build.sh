@@ -49,12 +49,20 @@ cd "$SDK_DIR"
 echo "==> SDK 根目录: $SDK_DIR"
 
 # ---------- 2) Rust 工具链（仅容器内 /opt，不落盘到仓库） ----------
+# mipsel-unknown-linux-musl 在 Rust 1.87+ 已移除预编译，固定用 1.86.0
 export RUSTUP_HOME=/opt/rust
 export CARGO_HOME=/opt/cargo
+if [ "$RUST_TRIPLE" = "mipsel-unknown-linux-musl" ]; then
+  RUST_TOOLCHAIN=1.86.0
+else
+  RUST_TOOLCHAIN=stable
+fi
 if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN" >/dev/null
 fi
 export PATH="$CARGO_HOME/bin:$PATH"
+rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal >/dev/null 2>&1 || true
+rustup default "$RUST_TOOLCHAIN"
 rustup target add "$RUST_TRIPLE"
 
 # ---------- 3) zig（交叉链接器，支持 musl 静态链接全部目标） ----------
