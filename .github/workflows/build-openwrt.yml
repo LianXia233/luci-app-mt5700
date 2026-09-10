@@ -71,8 +71,27 @@ jobs:
           path: out/
           if-no-files-found: error
 
-      - name: Publish to GitHub Release (tag only)
-        if: startsWith(github.ref, 'refs/tags/v')
+  # ---- 统一发布：仅打 v* 标签时运行一次，汇总全部架构产物 ----
+  # 不能放在 build job 内：4 个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
+  # 导致 Release 创建失败或资产互相覆盖。这里由 release job 串行汇总后再发布。
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*'
+          path: out/
+          merge-multiple: true
+
+      - name: List collected packages
+        run: find out -type f | sort
+
+      - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: out/**
