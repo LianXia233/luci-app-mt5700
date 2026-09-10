@@ -49,21 +49,22 @@ cd "$SDK_DIR"
 echo "==> SDK 根目录: $SDK_DIR"
 
 # ---------- 2) Rust 工具链（仅容器内 /opt，不落盘到仓库） ----------
-# mipsel-unknown-linux-musl 在 Rust 1.87+ 已移除预编译，固定用 1.86.0
+# mipsel-unknown-linux-musl 自 Rust 1.75 起无预编译 std：用 nightly + `-Z build-std` 现编
 export RUSTUP_HOME=/opt/rust
 export CARGO_HOME=/opt/cargo
-if [ "$RUST_TRIPLE" = "mipsel-unknown-linux-musl" ]; then
-  RUST_TOOLCHAIN=1.86.0
-else
-  RUST_TOOLCHAIN=stable
-fi
 if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN" >/dev/null
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
 fi
 export PATH="$CARGO_HOME/bin:$PATH"
-rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal >/dev/null 2>&1 || true
-rustup default "$RUST_TOOLCHAIN"
-rustup target add "$RUST_TRIPLE"
+if [ "$RUST_TRIPLE" = "mipsel-unknown-linux-musl" ]; then
+  echo "==> mips: nightly + build-std（musl std 无预编译）"
+  rustup toolchain install nightly --profile minimal --component rust-src >/dev/null 2>&1
+  rustup default nightly
+  export RUSTFLAGS="-Z build-std=std,panic_abort"
+else
+  rustup default stable
+  rustup target add "$RUST_TRIPLE"
+fi
 
 # ---------- 3) zig（交叉链接器，支持 musl 静态链接全部目标） ----------
 ZIG_VER=0.13.0
