@@ -7,7 +7,7 @@
 
 ## [Unreleased]
 
-## [3.0.2] - 2026-09-10
+## [1.0.0] - 2026-09-10
 
 ### 新增
 
@@ -41,14 +41,4 @@
 - LuCI 页面 JS 语法、菜单/ACL JSON、init.d/uci-defaults shell 语法全部通过
 - 说明：OpenWrt SDK 交叉编译 / IPK·APK 实编译 / 真机安装验证需通过 GitHub Actions 云编译或本机 SDK 执行（见 `docs/02`）
 
-## [3.0.1] - 2026-09-09
-
-### 新增
-
-- Rust 后端主体：`main` / `config` / `transport` / `serial_linux` / `serialdetect` / `atclient` / `pdu` / `notify` / `urc` / `schedconfig` / `schedule` / `wsserver`
-- LuCI 前端公共库：`ws.js`（ATClient 等价迁移）/ `parse.js` / `ui.js` / `smsEncode.js`
-- 12 个页面 JS、menu.d / ACL / UCI 默认配置 / procd init.d / po 翻译 / Makefile
-- mock-modem 端到端测试框架（17 项）
-
-[3.0.2]: https://github.com/LianXia233/luci-app-mt5700/releases/tag/v3.0.2
-[3.0.1]: https://github.com/LianXia233/luci-app-mt5700/releases/tag/v3.0.1
+[1.0.0]: https://github.com/LianXia233/luci-app-mt5700/releases/tag/v1.0.0

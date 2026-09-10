@@ -66,11 +66,11 @@ make defconfig
 make package/at-webserver-rust/compile V=s
 make package/luci-app-mt5700/compile V=s
 # 产物（OpenWrt ≤23.05，opkg → .ipk）
-# bin/targets/<arch>/packages/at-webserver-rust_3.0.2-1_<arch>.ipk
-# bin/packages/<arch>/luci/luci-app-mt5700_3.0.2-1_all.ipk
+# bin/targets/<arch>/packages/at-webserver-rust_1.0.0-1_<arch>.ipk
+# bin/packages/<arch>/luci/luci-app-mt5700_1.0.0-1_all.ipk
 # 产物（OpenWrt 24.10+/主线，apk 包管理器 → .apk，路径相同、扩展名为 .apk）
-# bin/targets/<arch>/packages/at-webserver-rust_3.0.2-1_<arch>.apk
-# bin/packages/<arch>/luci/luci-app-mt5700_3.0.2-1_all.apk
+# bin/targets/<arch>/packages/at-webserver-rust_1.0.0-1_<arch>.apk
+# bin/packages/<arch>/luci/luci-app-mt5700_1.0.0-1_all.apk
 ```
 
 > **apk / ipk 说明**：OpenWrt 24.10 起默认包管理器由 opkg 切换为 apk，构建产物为 `.apk`；

@@ -150,7 +150,7 @@ node parse-extra-test.js   # 前端解析层 19 项单测
 - **触发方式**：
   1. 手动：Actions 页面 → `Build OpenWrt packages (apk + ipk)` → `Run workflow`；
   2. 自动：push 到 `main` 分支；
-  3. 发版：打标签 `git tag v3.0.2 && git push --tags` → 自动构建并发布 GitHub Release（含全部架构的 apk/ipk）。
+  3. 发版：打标签 `git tag v1.0.0 && git push --tags` → 自动构建并发布 GitHub Release（含全部架构的 apk/ipk）。
 - **产物获取**：每个构建行的 `Artifacts`（命名 `apk-<arch>` / `ipk-<arch>`）或 Release 附件。
 - **Rust 交叉编译原理**：容器内 `rustup` 安装 Rust 工具链 + `zig` 作为 musl 交叉链接器
   （`scripts/sdk-build.sh` 按目标三元组动态生成 zig wrapper 与 cargo 全局配置），
