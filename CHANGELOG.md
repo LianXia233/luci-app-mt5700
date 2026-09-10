@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **Release 缺少后端包 `at-webserver-rust`（导致 `apk add` 报依赖缺失）**：
+  - 根因：SDK 的 `make defconfig` 不会自动选中后来复制到 `package/` 的包，
+    未选中时 `make package/at-webserver-rust/compile` 只打印 `Nothing to be done` 并返回 0，
+    CI 全程绿灯但后端包从未产出；LuCI 包仍照常声明 `Depends: at-webserver-rust`，
+    于是用户安装时报 `required by: luci-app-mt5700-1.0.0-r1[at-webserver-rust]`
+  - `scripts/sdk-build.sh`：编译前显式写入 `CONFIG_PACKAGE_at-webserver-rust=m`（去重后追加），
+    defconfig 后校验选中状态；编译后校验 cargo 二进制确实存在；收集产物后校验后端包存在
+  - `.github/workflows/build-openwrt.yml`：build job 增加「Verify required packages」闸门，
+    release job 增加「Verify dist completeness」（每个包需覆盖 2 架构 × apk/ipk 共 4 个），
+    缺包即失败，杜绝再次发布不可安装的 Release
+  - README 新增 §8.1「安装（前端 + 后端必须成对安装）」，并标注 v1.0.0 Release 缺后端包
+
 ### 变更
 
 - **菜单收敛为「服务 → 模组管理」，二级菜单全部置于 Plugin Top Navigation**：

@@ -170,6 +170,32 @@ node parse-extra-test.js   # 前端解析层 19 项单测
   架构名需与 OpenWrt SDK 发布名一致；若 Rust 目标三元组未覆盖，先在 `src/rust/Makefile` 的
   `RUST_TARGET_*` 与 `scripts/sdk-build.sh` 的 zig target 映射中补充）。
 
+## 8.1 安装（前端 + 后端必须成对安装）
+
+Release 里每个「架构 × 包格式」都有 3 类包，**后端 `at-webserver-rust` 与前端 `luci-app-mt5700` 必须一起装**，
+只装前端会因为依赖缺失而安装失败（`required by: luci-app-mt5700[at-webserver-rust]`），
+强行绕过依赖则页面能打开但全部功能无后端应答。
+
+```sh
+# apk（OpenWrt 24.10+，以 aarch64_cortex-a53 为例）
+apk add --allow-untrusted \
+  ./aarch64_cortex-a53-at-webserver-rust-1.0.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.0.0-r1.apk \
+  ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
+
+# ipk（23.05，opkg）
+opkg install ./aarch64_cortex-a53-at-webserver-rust_1.0.0-r1_*.ipk \
+             ./aarch64_cortex-a53-luci-app-mt5700_1.0.0_*.ipk
+
+# 安装后启动
+uci set at-webserver.config.enabled=1 && uci commit at-webserver
+service at-webserver restart
+```
+
+> ⚠️ **v1.0.0 Release 缺后端包**：该版本的 Release 只上传了 `luci-app-mt5700` 与中文语言包，
+> 未包含 `at-webserver-rust`（CI 未选中该包，构建静默跳过）。请使用后续版本（v1.0.1+），
+> 或自行用 SDK 编译 `src/rust` 后先安装后端。
+
 ## 9. 更多文档
 
 - `docs/01-原WebUI功能清单与LuCI映射表.md` — 功能 1-75 + 后端 B1-B16 → LuCI 页面/API 映射
