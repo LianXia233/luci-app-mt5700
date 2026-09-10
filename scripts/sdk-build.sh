@@ -82,6 +82,7 @@ zig version
 case "$RUST_TRIPLE" in
   x86_64-unknown-linux-musl)         ZIG_TARGET=x86_64-linux-musl ;;
   aarch64-unknown-linux-musl)        ZIG_TARGET=aarch64-linux-musl ;;
+  mips-unknown-linux-musl)           ZIG_TARGET=mips-linux-musl ;;
   mipsel-unknown-linux-musl)         ZIG_TARGET=mipsel-linux-musl ;;
   armv7-unknown-linux-musleabihf)    ZIG_TARGET=arm-linux-musleabihf ;;
   *) ZIG_TARGET="$(echo "$RUST_TRIPLE" | sed 's/-unknown-/-/')" ;;

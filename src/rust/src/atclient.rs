@@ -9,7 +9,7 @@
 
 use crate::{log_info, log_warn};
 use crate::config::AtConfig;
-use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -67,6 +67,8 @@ pub struct AtClient {
     cfg: AtConfig,
 
     conn: Arc<Mutex<Option<Connection>>>,
+    /// 连接标志（原子，供 Scheduler 等异步任务安全读取，替代阻塞式取锁）。
+    connected_flag: Arc<AtomicBool>,
     urc_tx: mpsc::Sender<Unsolicited>,
 
     cmd_mu: Arc<Mutex<()>>,
@@ -82,6 +84,7 @@ impl AtClient {
         Arc::new(AtClient {
             cfg,
             conn: Arc::new(Mutex::new(None)),
+            connected_flag: Arc::new(AtomicBool::new(false)),
             urc_tx,
             cmd_mu: Arc::new(Mutex::new(())),
             long_cmd: Arc::new(AtomicI32::new(0)),
@@ -96,7 +99,8 @@ impl AtClient {
     }
 
     pub fn connected(&self) -> bool {
-        self.conn.blocking_lock().is_some()
+        // 纯原子读取：绝不能在这里取锁阻塞（Scheduler 在异步循环中调用）。
+        self.connected_flag.load(Ordering::Relaxed)
     }
 
     /// 连接、重连与读循环，直到 ctx 结束。
@@ -130,6 +134,7 @@ impl AtClient {
                 describe,
             };
             *self.conn.lock().await = Some(conn);
+            self.connected_flag.store(true, Ordering::Relaxed);
 
             // 初始化命令要在读循环起来之后发，否则等不到应答。
             let read_ctx = ctx.clone();
@@ -162,6 +167,7 @@ impl AtClient {
     }
 
     async fn teardown(&self) {
+        self.connected_flag.store(false, Ordering::Relaxed);
         let mut guard = self.conn.lock().await;
         guard.take(); // drop transport → 读循环退出
         drop(guard);

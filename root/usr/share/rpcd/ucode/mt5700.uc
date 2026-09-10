@@ -14,14 +14,26 @@
 const fs = require('fs');
 const uci = require('uci');
 
-const cursor = uci.cursor();
-const port = parseInt(cursor.get('at-webserver', 'websocket', 'port'), 10) || 8765;
-const authKey = cursor.get('at-webserver', 'websocket', 'auth_key') || '';
+/*
+ * 实时读取 RPC 配置（每次调用都读，改配置无需重启 rpcd）。
+ * 注意 UCI 段名：配置都在 `config at-webserver 'config'` 段下，
+ * 键是 websocket_port / websocket_auth_key（没有 'websocket' 段）。
+ */
+function readRpcConfig() {
+	const cursor = uci.cursor();
+	const port = parseInt(cursor.get('at-webserver', 'config', 'websocket_port'), 10) || 8765;
+	const authKey = cursor.get('at-webserver', 'config', 'websocket_auth_key') || '';
+	return { port: port, authKey: authKey };
+}
 
 function rpcCall(method, params) {
+	const rpcCfg = readRpcConfig();
+	const port = rpcCfg.port;
+	const authKey = rpcCfg.authKey;
 	let sock;
 	try {
-		sock = fs.connect(`127.0.0.1:${port}`);
+		// 连接带 3s 超时，避免 rpcd worker 被不可达端口拖住
+		sock = fs.connect(`127.0.0.1:${port}`, 3000);
 	} catch (e) {
 		return { success: false, error: 'Rust 后端未运行或端口不可达' };
 	}
@@ -33,7 +45,8 @@ function rpcCall(method, params) {
 
 	try {
 		sock.write(JSON.stringify(payload) + '\n');
-		let line = sock.read('line');
+		// 读取也带 3s 超时：Rust 侧即使无应答，rpcd 线程也不会被无限阻塞
+		let line = sock.read('line', 3000);
 		sock.close();
 		if (!line) {
 			return { success: false, error: 'Rust 后端无应答' };

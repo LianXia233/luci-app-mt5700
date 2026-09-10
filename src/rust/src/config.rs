@@ -208,11 +208,16 @@ impl UciReader {
 
 /// 用一次 `uci show at-webserver` 取回整个配置段。
 pub async fn uci_values() -> Result<UciReader, String> {
-    let out = tokio::process::Command::new("uci")
-        .args(["show", "at-webserver"])
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
+    // 与 Go 版一致：加 5s 超时，避免 uci 命令异常挂起卡死启动。
+    let out = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new("uci")
+            .args(["show", "at-webserver"])
+            .output(),
+    )
+    .await
+    .map_err(|_| "uci show 超时".to_string())?
+    .map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(format!("uci show 退出码 {}", out.status));
     }

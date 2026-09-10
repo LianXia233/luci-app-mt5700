@@ -24,6 +24,8 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 
 const RPC_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// RPC 请求行长度上限（防异常长行撑爆内存；Go 版 WebSocket 是 64KB 读限）。
+const MAX_RPC_LINE: usize = 8192;
 const CELLSCAN_ABORT_TOKEN: &str = "abcd";
 const DEFAULT_SCAN_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -216,6 +218,10 @@ impl RpcServer {
             };
             if n == 0 {
                 break; // EOF
+            }
+            if line.len() > MAX_RPC_LINE {
+                log_warn!("RPC 请求行过长 ({} bytes)，断开连接", line.len());
+                break;
             }
             let line = line.trim();
             if line.is_empty() {
@@ -474,7 +480,11 @@ async fn run_cell_scan(
                 if !line.starts_with("^CELLSCAN:") {
                     return;
                 }
-                let mut scan = scan_state_stream.blocking_lock();
+                // 同步闭包内不能 await，也不能 blocking_lock（会在运行时 panic）。
+                // 用 try_lock：拿不到锁就跳过本次推送，下一条 ^CELLSCAN 行会再触发。
+                let Ok(mut scan) = scan_state_stream.try_lock() else {
+                    return;
+                };
                 scan.lines.push(line.clone());
                 let count = scan.lines.len();
                 drop(scan);
@@ -489,7 +499,8 @@ async fn run_cell_scan(
 
     // running 必须无条件复位：万一出了意外还留着 true，
     // 之后所有 AT 命令都会被"正在扫频"挡住，只能重启服务才能恢复。
-    let mut scan = scan_state.blocking_lock();
+    // run_cell_scan 本身是异步任务，直接用 async lock（禁止 blocking_lock）。
+    let mut scan = scan_state.lock().await;
     let lines = scan.lines.clone();
     let aborted = scan.aborted;
     scan.running = false;
