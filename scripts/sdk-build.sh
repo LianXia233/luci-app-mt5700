@@ -1,6 +1,6 @@
 #!/bin/sh
 # 在 openwrt/sdk 容器内构建 luci-app-mt5700 + at-webserver-rust（Rust 后端）
-# 用法: sdk-build.sh <ARCH> <RUST_TRIPLE> <VER>
+# 用法: sdk-build.sh <ARCH> <RUST_TRIPLE> <VER> [TARGET_DIR]
 #   ARCH        OpenWrt 架构名（x86_64 / aarch64_cortex-a53 / mips_24kc ...）
 #   RUST_TRIPLE Rust musl 目标三元组（x86_64-unknown-linux-musl ...）
 #   VER         OpenWrt 版本（main / 23.05.5 ...，决定 SDK 下载路径）
@@ -34,7 +34,7 @@ case "$VER" in
   main|snapshots) BASE_URL="https://downloads.openwrt.org/snapshots" ;;
   *) BASE_URL="https://downloads.openwrt.org/releases/$VER" ;;
 esac
-TARGET_DIR="${TARGET:-x86/64}"
+TARGET_DIR="${4:-${TARGET:-x86/64}}"
 echo "==> 定位 SDK: $BASE_URL/targets/$TARGET_DIR/"
 LISTING=$(curl -sL "$BASE_URL/targets/$TARGET_DIR/")
 SDK_FILE=$(echo "$LISTING" | grep -oE 'openwrt-sdk-[^"< ]+\.tar\.(xz|zst)' | grep -v '\.asc' | head -1)

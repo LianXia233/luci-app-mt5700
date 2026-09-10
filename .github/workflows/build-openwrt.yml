@@ -29,32 +29,38 @@ jobs:
             arch: x86_64
             rust: x86_64-unknown-linux-musl
             ver: main
+            target: x86/64
             fmt: apk
           - image: aarch64_cortex-a53-main
             arch: aarch64_cortex-a53
             rust: aarch64-unknown-linux-musl
             ver: main
+            target: qualcommax/ipq50xx
             fmt: apk
           - image: mips_24kc-main
             arch: mips_24kc
             rust: mipsel-unknown-linux-musl
             ver: main
+            target: realtek/rtl838x
             fmt: apk
           # ---- 老版本 23.05 → .ipk ----
           - image: x86_64-23.05.5
             arch: x86_64
             rust: x86_64-unknown-linux-musl
             ver: 23.05.5
+            target: x86/64
             fmt: ipk
           - image: aarch64_cortex-a53-23.05.5
             arch: aarch64_cortex-a53
             rust: aarch64-unknown-linux-musl
             ver: 23.05.5
+            target: mediatek/filogic
             fmt: ipk
           - image: mips_24kc-23.05.5
             arch: mips_24kc
             rust: mipsel-unknown-linux-musl
             ver: 23.05.5
+            target: realtek/rtl838x
             fmt: ipk
 
     steps:
@@ -68,7 +74,7 @@ jobs:
             -v "$PWD:/work" \
             -v "$PWD/out:/out" \
             openwrt/sdk:${{ matrix.image }} \
-            /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}"
+            /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
