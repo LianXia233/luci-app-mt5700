@@ -128,8 +128,12 @@ for p in at-webserver-rust luci-app-mt5700; do
 done
 
 make defconfig >/dev/null
+echo "==> package 目录："
+ls -d package/* 2>/dev/null || true
 echo "==> 选中状态："
 grep -E '^CONFIG_PACKAGE_(at-webserver-rust|luci-app-mt5700)=' .config || true
+echo "==> packageinfo 中的本项目包："
+grep -cE '^(Source-)?Package: (at-webserver-rust|luci-app-mt5700)$' tmp/.packageinfo 2>/dev/null || true
 # 未选中必须立刻失败，绝不能静默产出空包集合
 grep -qE '^CONFIG_PACKAGE_at-webserver-rust=[my]$' .config \
 	|| { echo "ERROR: at-webserver-rust 未被 .config 选中"; exit 1; }
@@ -154,6 +158,8 @@ find bin -type f \( -name '*.apk' -o -name '*.ipk' \) \
 	-exec cp {} "/out/${ARCH}/" \;
 echo "==> 产物（仅本项目包）："
 ls -la "/out/${ARCH}/"
+echo "==> bin 下全部包（排查用）："
+find bin -type f \( -name '*.apk' -o -name '*.ipk' \) 2>/dev/null | sort | head -50
 
 # 产物完整性闸门：缺任一必需包就让构建失败，避免再次发布不可安装的 Release
 for p in at-webserver-rust luci-app-mt5700; do
