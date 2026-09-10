@@ -12,11 +12,12 @@
 RUST_DIR := rust
 
 # ---- OpenWrt ARCH → Rust musl target 映射（RUST_TRIPLE 由构建脚本传入时优先）----
+# 注意大小端：mips*_24kc 是 big-endian（mips），mipsel* 是 little-endian。
 RUST_TARGET_x86_64         := x86_64-unknown-linux-musl
 RUST_TARGET_aarch64        := aarch64-unknown-linux-musl
 RUST_TARGET_mipsel         := mipsel-unknown-linux-musl
-RUST_TARGET_mips           := mipsel-unknown-linux-musl
-RUST_TARGET_mips_24kc      := mipsel-unknown-linux-musl
+RUST_TARGET_mips           := mips-unknown-linux-musl
+RUST_TARGET_mips_24kc      := mips-unknown-linux-musl
 RUST_TARGET_mipsel_24kc    := mipsel-unknown-linux-musl
 RUST_TARGET_arm            := armv7-unknown-linux-musleabihf
 

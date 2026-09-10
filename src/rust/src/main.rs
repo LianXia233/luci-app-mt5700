@@ -13,7 +13,11 @@ mod pdu;
 mod rpcserver;
 mod schedconfig;
 mod schedule;
+// 串口模块仅 Linux 可用（termios/AsyncFd），非 Linux 平台条件编译掉，
+// 便于在其它宿主上构建与跑单元测试。
+#[cfg(target_os = "linux")]
 mod serial_linux;
+#[cfg(target_os = "linux")]
 mod serialdetect;
 mod transport;
 mod urc;

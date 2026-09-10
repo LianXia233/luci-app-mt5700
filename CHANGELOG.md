@@ -23,6 +23,30 @@
 
 ### 修复
 
+- **Rust 后端崩溃修复（P0）**：`tokio::sync::Mutex::blocking_lock()` 在异步任务内调用必然 panic
+  （`Cannot block the current thread from within a runtime`），release 配置 `panic="abort"` 下进程直接崩溃：
+  - `AtClient::connected()` 改原子标志（`AtomicBool`），不再取锁阻塞 —— 修复调度器每周期
+    `connected()` 触发崩溃（默认 `schedule_check_interval=60`，服务启动约 60s 后必崩）
+  - 扫频流式回调改 `try_lock()`（同步闭包内不能 await/阻塞）—— 修复 CELLSCAN 期间
+    read_loop 任务 panic 崩溃
+  - 扫频任务收尾改 `lock().await`（异步任务内可用异步锁）—— 修复扫频结束后
+    `running` 状态永不复位导致全部 AT 命令被"正在扫频"挡死
+  - 运行验证：修复前 75s 崩溃（exit -1073740791），修复后 75s 存活 + 扫频全流程通过
+- **LuCI RPC 配置读取修复（P1）**：`mt5700.uc` 与前端 `rpc.js` 此前按不存在的
+  `websocket` UCI 段读取端口/密钥，导致修改 `websocket_port` / `websocket_auth_key` 不生效；
+  配置了密钥时 ucode 不带密钥被 Rust 拒绝（-32001），整个界面不可用：
+  - `mt5700.uc`：改为读取 `config` 段的 `websocket_port` / `websocket_auth_key`，
+    每次调用实时读取（改配置无需重启 rpcd），连接与读取均加 3s 超时（避免阻塞 rpcd worker）
+  - `rpc.js::loadConfig`：同步修正 UCI 段名与键名
+- **`uci show` 读取加 5s 超时**（与 Go 版一致），避免 uci 命令异常挂起卡死服务启动
+- **RPC 请求行加 8KB 长度上限**（对齐 Go 版 64KB 读限的安全意图），超限断开连接
+- **交叉编译映射修正**：`src/Makefile` 的 `mips`/`mips_24kc` 此前错误映射到
+  `mipsel-unknown-linux-musl`（大小端相反），已改为 `mips-unknown-linux-musl`；
+  `scripts/sdk-build.sh` 同步补 `mips-linux-musl` 的 zig 目标
+- **非 Linux 平台可编译**：`serial_linux.rs` / `serialdetect.rs` 增加
+  `#[cfg(target_os = "linux")]` 条件编译（termios/AsyncFd 仅 Linux 可用），
+  其它宿主可直接 `cargo build` / `cargo test` 验证逻辑层
+
 - **Release 缺少后端包 `at-webserver-rust`（导致 `apk add` 报依赖缺失）**：
   - 根因：SDK 的 `make defconfig` 不会自动选中后来复制到 `package/` 的包，
     未选中时 `make package/at-webserver-rust/compile` 只打印 `Nothing to be done` 并返回 0，

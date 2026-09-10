@@ -77,8 +77,9 @@ ATClient.prototype.isReady = function () {
 ATClient.prototype.loadConfig = function () {
 	var self = this;
 	return L.uci.load('at-webserver').then(function () {
-		var port = parseInt(L.uci.get('at-webserver', 'websocket', 'port') || '8765', 10) || 8765;
-		var authKey = L.uci.get('at-webserver', 'websocket', 'auth_key') || '';
+		// UCI 键都在 config 段下（websocket_port / websocket_auth_key），没有 'websocket' 段
+		var port = parseInt(L.uci.get('at-webserver', 'config', 'websocket_port') || '8765', 10) || 8765;
+		var authKey = L.uci.get('at-webserver', 'config', 'websocket_auth_key') || '';
 		self.port = port;
 		self.requireAuth = !!authKey;
 		self.authKey = authKey;
