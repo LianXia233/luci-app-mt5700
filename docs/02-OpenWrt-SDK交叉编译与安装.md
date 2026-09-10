@@ -128,7 +128,7 @@ init.d 启动时按 UCI 配置生成防火墙规则（幂等）：
 
 仓库已内置 `.github/workflows/build-openwrt.yml`，无需本机 SDK 即可产出正式安装包：
 
-- **矩阵**：最新主线（`openwrt/sdk:main-*`）→ `.apk`；老版本 23.05（`openwrt/sdk:23.05.5-*`）→ `.ipk`；
+- **矩阵**：最新主线（`openwrt/sdk:*-main`）→ `.apk`；老版本 23.05（`openwrt/sdk:*-23.05.5`）→ `.ipk`；
   架构 x86_64 / aarch64_cortex-a53 / mips_24kc。
 - **流程**（`scripts/sdk-build.sh`）：容器内装 rustup + zig → 仓库包复制进 `package/`
   → `make package/at-webserver-rust/compile` → `make package/luci-app-mt5700/compile`

@@ -144,8 +144,8 @@ node parse-extra-test.js   # 前端解析层 19 项单测
 
 | 目标 | 包格式 | SDK 镜像 | 架构 |
 |---|---|---|---|
-| 最新主线（snapshot） | **`.apk`**（OpenWrt 24.10+ apk 包管理器） | `openwrt/sdk:main-*` | x86_64 / aarch64_cortex-a53 / mips_24kc |
-| 老版本 23.05 | **`.ipk`**（opkg 兼容） | `openwrt/sdk:23.05.5-*` | x86_64 / aarch64_cortex-a53 / mips_24kc |
+| 最新主线（snapshot） | **`.apk`**（OpenWrt 24.10+ apk 包管理器） | `openwrt/sdk:*-main` | x86_64 / aarch64_cortex-a53 / mips_24kc |
+| 老版本 23.05 | **`.ipk`**（opkg 兼容） | `openwrt/sdk:*-23.05.5` | x86_64 / aarch64_cortex-a53 / mips_24kc |
 
 - **触发方式**：
   1. 手动：Actions 页面 → `Build OpenWrt packages (apk + ipk)` → `Run workflow`；
@@ -155,7 +155,7 @@ node parse-extra-test.js   # 前端解析层 19 项单测
 - **Rust 交叉编译原理**：容器内 `rustup` 安装 Rust 工具链 + `zig` 作为 musl 交叉链接器
   （`scripts/sdk-build.sh` 按目标三元组动态生成 zig wrapper 与 cargo 全局配置），
   `scripts/sdk-build.sh` 将 `src/rust` 编译为 `at-webserver-rust` 包并连同 LuCI 插件一起打包。
-- **扩展架构**：修改 workflow 的 `matrix` 增加行即可（镜像 tag 格式 `openwrt/sdk:<版本>-<架构>`，
+- **扩展架构**：修改 workflow 的 `matrix` 增加行即可（镜像 tag 格式 `openwrt/sdk:<架构>-<版本>`（如 `x86_64-main`、`x86_64-23.05.5`），
   架构名需与 OpenWrt SDK 发布名一致；若 Rust 目标三元组未覆盖，先在 `src/rust/Makefile` 的
   `RUST_TARGET_*` 与 `scripts/sdk-build.sh` 的 zig target 映射中补充）。
 
