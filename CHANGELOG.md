@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **前端与后端合并为单个包（v1.1.0 起）**：
+  - 新增 `src/Makefile`：利用 luci.mk 的 `${CURDIR}/src` 机制（`Build/Compile` 调用
+    `make clean compile`、`Package/install` 调用 `Build/Install/Default`），
+    在编译 LuCI 包时顺带 `cargo build` 并把 `/usr/bin/at-webserver-rust` 装进同一包
+  - 根 `Makefile`：`LUCI_DEPENDS` 清空（不再依赖独立后端包）、`LUCI_PKGARCH` 置空
+    （包内含架构相关二进制，不能是 `all`）、新增 `PKG_PROVIDES:=at-webserver-rust` 兼容旧装
+  - 删除 `src/rust/Makefile`（后端不再作为独立包构建）
+  - 效果：安装只需一个包，彻底消除 `required by: luci-app-mt5700[at-webserver-rust]` 报错
+- **产物校验升级为「包内必须自带后端」**：`scripts/sdk-build.sh` 与 workflow 在产出后解包
+  校验 `usr/bin/at-webserver-rust` 确实存在（apk 支持 gzip/zstd，ipk 解内层 data.tar.gz），
+  避免再次出现"只有前端壳子"的包被发布
+
 ### 修复
 
 - **Release 缺少后端包 `at-webserver-rust`（导致 `apk add` 报依赖缺失）**：

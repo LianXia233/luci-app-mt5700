@@ -1,12 +1,18 @@
 include $(TOPDIR)/rules.mk
 
 LUCI_TITLE:=LuCI support for AT WebServer (MT5700M 5G modem)
-LUCI_DEPENDS:=+at-webserver-rust
-LUCI_PKGARCH:=all
+# 后端 Rust 二进制已随本包一起编译安装（见 src/Makefile），不再依赖独立包
+LUCI_DEPENDS:=
+# 包内含架构相关二进制，不能是 all；置空让 package.mk 按板级架构打包
+LUCI_PKGARCH:=
 
 PKG_NAME:=luci-app-mt5700
-PKG_VERSION:=1.0.0
+PKG_VERSION:=1.1.0
 PKG_RELEASE:=1
+
+# 兼容旧版：已安装 at-webserver-rust 的系统升级到单包后，声明提供同名能力，
+# 避免残留依赖指向不存在的包。
+PKG_PROVIDES:=at-webserver-rust
 
 include $(TOPDIR)/feeds/luci/luci.mk
 

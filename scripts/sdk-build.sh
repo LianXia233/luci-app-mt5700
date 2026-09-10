@@ -101,9 +101,10 @@ EOF
 echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 
 # ---------- 4) 把仓库包放入 buildroot package/ ----------
-mkdir -p package/luci-app-mt5700 package/at-webserver-rust
-cp -r /work/Makefile /work/htdocs /work/po /work/root package/luci-app-mt5700/
-cp -r /work/src/rust/. package/at-webserver-rust/    # 含 Makefile + Cargo.toml（链接器由 cargo 全局 config 提供）
+# 单包结构：src/Makefile 让 luci.mk 在编译 LuCI 包时顺带编译 Rust 后端，
+# 并把 at-webserver-rust 二进制装进同一个包，不再有独立的 at-webserver-rust 包。
+mkdir -p package/luci-app-mt5700
+cp -r /work/Makefile /work/htdocs /work/po /work/root /work/src package/luci-app-mt5700/
 
 # ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
@@ -116,45 +117,46 @@ fi
 # ---------- 6) 配置并编译 ----------
 rm -rf tmp
 
-# 关键：显式选中两个包。SDK 的 defconfig 不会自动选中后复制到 package/ 的包，
+# 关键：显式选中包。SDK 的 defconfig 不会自动选中后复制到 package/ 的包，
 # 未选中时 `make package/<pkg>/compile` 只打印 "Nothing to be done" 并返回 0，
-# 于是 at-webserver-rust 被静默跳过（v1.0.0 Release 就因此只发出 LuCI 前端包，
-# 用户安装时报 `required by: luci-app-mt5700[at-webserver-rust]`）。
+# 于是包被静默跳过（v1.0.0 Release 就因此只发出 LuCI 前端包，缺失后端）。
 touch .config
-for p in at-webserver-rust luci-app-mt5700; do
+for p in luci-app-mt5700; do
 	grep -v "^CONFIG_PACKAGE_${p}=" .config > .config.new || true
 	mv .config.new .config
 	echo "CONFIG_PACKAGE_${p}=m" >> .config
+	# 中文语言包随主包一起发布
+	echo "CONFIG_PACKAGE_luci-i18n-mt5700-zh-cn=m" >> .config
 done
 
 make defconfig >/dev/null
 echo "==> package 目录："
 ls -d package/* 2>/dev/null || true
 echo "==> 选中状态："
-grep -E '^CONFIG_PACKAGE_(at-webserver-rust|luci-app-mt5700)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-app-mt5700|luci-i18n-mt5700-zh-cn)=' .config || true
 echo "==> packageinfo 中的本项目包："
-grep -cE '^(Source-)?Package: (at-webserver-rust|luci-app-mt5700)$' tmp/.packageinfo 2>/dev/null || true
+grep -cE '^(Source-)?Package: luci-app-mt5700$' tmp/.packageinfo 2>/dev/null || true
 # 未选中必须立刻失败，绝不能静默产出空包集合
-grep -qE '^CONFIG_PACKAGE_at-webserver-rust=[my]$' .config \
-	|| { echo "ERROR: at-webserver-rust 未被 .config 选中"; exit 1; }
+grep -qE '^CONFIG_PACKAGE_luci-app-mt5700=[my]$' .config \
+	|| { echo "ERROR: luci-app-mt5700 未被 .config 选中"; exit 1; }
 
-echo "==> 编译 Rust 后端（at-webserver-rust, target=$RUST_TRIPLE）"
-make package/at-webserver-rust/compile V=s
+# RUST_TRIPLE 传给 src/Makefile（子 make 拿不到顶层 ARCH 映射时用得上）
+export RUST_TRIPLE
+
+echo "==> 编译单包（LuCI 前端 + Rust 后端，target=$RUST_TRIPLE）"
+make package/luci-app-mt5700/compile V=s
 
 # 校验 cargo 确实产出了目标二进制（避免 package.mk 空跑但退出码为 0）
 BIN_PATH=$(find build_dir -type f -path "*${RUST_TRIPLE}/release/at-webserver" -print -quit 2>/dev/null)
 [ -n "$BIN_PATH" ] || { echo "ERROR: 未找到 Rust 产物 ${RUST_TRIPLE}/release/at-webserver"; exit 1; }
 echo "==> Rust 产物: $BIN_PATH"
 
-echo "==> 编译 LuCI 插件（luci-app-mt5700）"
-make package/luci-app-mt5700/compile V=s
-
 # ---------- 7) 收集产物到 /out（白名单：只收本项目包，排除 SDK 顺带编译的系统库）----------
 # 系统库（libc/libgcc1/libstdcpp6/libatomic1/libquadmath1/libpthread/librt 等）由 opkg/apk
 # 在安装时按依赖自动解决，不应出现在 Release 资产里。
 mkdir -p "/out/${ARCH}"
 find bin -type f \( -name '*.apk' -o -name '*.ipk' \) \
-	\( -name 'luci-app-mt5700*' -o -name 'luci-i18n-mt5700*' -o -name 'at-webserver-rust*' \) \
+	\( -name 'luci-app-mt5700*' -o -name 'luci-i18n-mt5700*' \) \
 	-exec cp {} "/out/${ARCH}/" \;
 echo "==> 产物（仅本项目包）："
 ls -la "/out/${ARCH}/"
@@ -162,10 +164,34 @@ echo "==> bin 下全部包（排查用）："
 find bin -type f \( -name '*.apk' -o -name '*.ipk' \) 2>/dev/null | sort | head -50
 
 # 产物完整性闸门：缺任一必需包就让构建失败，避免再次发布不可安装的 Release
-for p in at-webserver-rust luci-app-mt5700; do
+for p in luci-app-mt5700; do
 	if [ -z "$(find "/out/${ARCH}" -type f -name "${p}*" -print -quit)" ]; then
 		echo "ERROR: /out/${ARCH} 缺少 ${p} 包产物（arch=${ARCH}）"
 		exit 1
 	fi
 done
+
+# 单包必须内含后端二进制：解包校验 /usr/bin/at-webserver-rust 存在，
+# 否则页面能开但无后端应答（等价于 v1.0.0 的“只装了前端”）。
+PKG_FILE=$(find "/out/${ARCH}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
+[ -n "$PKG_FILE" ] || { echo "ERROR: 未找到 luci-app-mt5700 主包"; exit 1; }
+
+list_pkg_files() {
+	case "$1" in
+		*.apk)
+			# OpenWrt apk 可能是 gzip 或 zstd 压缩
+			tar -tzf "$1" 2>/dev/null || tar --zstd -tzf "$1" 2>/dev/null
+			;;
+		*.ipk)
+			tar -xzOf "$1" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+			;;
+	esac
+}
+
+if list_pkg_files "$PKG_FILE" | grep -q 'usr/bin/at-webserver-rust'; then
+	echo "==> 已确认 $(basename "$PKG_FILE") 内含 usr/bin/at-webserver-rust"
+else
+	echo "ERROR: ${PKG_FILE} 内缺少 usr/bin/at-webserver-rust（前端包未并入后端）"
+	exit 1
+fi
 echo "==> SDK 构建完成"
