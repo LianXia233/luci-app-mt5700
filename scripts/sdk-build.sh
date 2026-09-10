@@ -60,7 +60,8 @@ if [ "$RUST_TRIPLE" = "mipsel-unknown-linux-musl" ]; then
   echo "==> mips: nightly + build-std（musl std 无预编译）"
   rustup toolchain install nightly --profile minimal --component rust-src >/dev/null 2>&1
   rustup default nightly
-  export RUSTFLAGS="-Z build-std=std,panic_abort"
+  # -Z build-std 是 cargo 的 unstable 选项（经 Makefile 的 $(CARGO_BUILD_STD_FLAGS) 传入）
+  export CARGO_BUILD_STD_FLAGS="-Z build-std=std,panic_abort"
 else
   rustup default stable
   rustup target add "$RUST_TRIPLE"
