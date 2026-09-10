@@ -104,15 +104,16 @@ mkdir -p package/luci-app-mt5700 package/at-webserver-rust
 cp -r /work/Makefile /work/htdocs /work/po /work/root package/luci-app-mt5700/
 cp -r /work/src/rust/. package/at-webserver-rust/    # 含 Makefile + Cargo.toml（链接器由 cargo 全局 config 提供）
 
-# ---------- 5) feeds（确保 luci feed 的 luci.mk 可用） ----------
+# ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
-  echo "==> 初始化 feeds"
-  ./scripts/feeds update -a >/dev/null 2>&1 || true
-  ./scripts/feeds install -a >/dev/null 2>&1 || true
+  echo "==> 初始化 feeds（仅 luci）"
+  ./scripts/feeds update luci >/dev/null 2>&1 || echo "WARN: feeds update luci 失败"
+  ./scripts/feeds install luci >/dev/null 2>&1 || true
 fi
 [ -f feeds/luci/luci.mk ] || { echo "ERROR: luci feed 不可用"; exit 1; }
 
 # ---------- 6) 配置并编译 ----------
+rm -rf tmp
 make defconfig >/dev/null
 echo "==> 编译 Rust 后端（at-webserver-rust, target=$RUST_TRIPLE）"
 make package/at-webserver-rust/compile V=s
