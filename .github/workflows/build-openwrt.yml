@@ -58,7 +58,7 @@ jobs:
       - name: Build in OpenWrt SDK container
         run: |
           mkdir -p out
-          docker run --rm \
+          docker run --rm --user root \
             -v "$PWD:/work" \
             -v "$PWD/out:/out" \
             openwrt/sdk:${{ matrix.image }} \
