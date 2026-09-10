@@ -88,19 +88,25 @@ jobs:
           git commit -m "ci log ${{ matrix.fmt }}-${{ matrix.arch }} run ${{ github.run_id }}"
           git push --force origin "HEAD:$BR"
 
-      - name: Verify required packages
+      - name: Verify single package bundle
         run: |
           set -e
-          missing=0
-          for pkg in at-webserver-rust luci-app-mt5700; do
-            if [ -z "$(find "out/${{ matrix.arch }}" -type f \( -name "${pkg}*.apk" -o -name "${pkg}*.ipk" \) -print -quit)" ]; then
-              echo "::error::缺少 ${pkg} 产物（arch=${{ matrix.arch }} fmt=${{ matrix.fmt }}）"
-              missing=1
-            fi
-          done
+          if [ -z "$(find "out/${{ matrix.arch }}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)" ]; then
+            echo "::error::缺少 luci-app-mt5700 主包（arch=${{ matrix.arch }} fmt=${{ matrix.fmt }}）"
+            exit 1
+          fi
           echo "==> out/${{ matrix.arch }} 产物："
           ls -la "out/${{ matrix.arch }}/"
-          [ "$missing" -eq 0 ] || exit 1
+
+          # 单包必须自带后端二进制，否则装完只有前端壳子
+          PKG=$(find "out/${{ matrix.arch }}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
+          case "$PKG" in
+            *.apk) LIST=$(tar -tzf "$PKG" 2>/dev/null || tar --zstd -tzf "$PKG" 2>/dev/null) ;;
+            *.ipk) LIST=$(tar -xzOf "$PKG" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null) ;;
+          esac
+          echo "$LIST" | grep -q 'usr/bin/at-webserver-rust' \
+            && echo "==> 已确认 $(basename "$PKG") 内含 usr/bin/at-webserver-rust" \
+            || { echo "::error::$(basename "$PKG") 缺少 usr/bin/at-webserver-rust"; exit 1; }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -141,15 +147,21 @@ jobs:
       - name: Verify dist completeness
         run: |
           set -e
-          # 每个包必须覆盖全部 4 个构建组合（x86_64/aarch64_cortex-a53 × apk/ipk）
-          for pkg in at-webserver-rust luci-app-mt5700; do
-            count=$(find dist -type f -name "${pkg}*" | wc -l)
-            echo "==> ${pkg}: ${count} 个包"
-            if [ "$count" -lt 4 ]; then
-              echo "::error::${pkg} 仅有 ${count} 个包（期望 4 个：2 架构 × apk/ipk），拒绝发布不完整的 Release"
-              find dist -type f | sort
-              exit 1
-            fi
+          # 主包（前端+后端合一）必须覆盖全部 4 个构建组合（x86_64/aarch64_cortex-a53 × apk/ipk）
+          count=$(find dist -type f -name '*-luci-app-mt5700*' -not -name '*luci-i18n*' | wc -l)
+          echo "==> luci-app-mt5700 主包: ${count} 个"
+          if [ "$count" -lt 4 ]; then
+            echo "::error::主包仅有 ${count} 个（期望 4 个：2 架构 × apk/ipk），拒绝发布不完整的 Release"
+            find dist -type f | sort
+            exit 1
+          fi
+          # 架构覆盖：单包内含二进制，必须每个架构都有
+          for arch in x86_64 aarch64_cortex-a53; do
+            for fmt in apk ipk; do
+              f=$(find dist -type f -name "${arch}-luci-app-mt5700*.${fmt}" -not -name '*luci-i18n*' -print -quit)
+              [ -n "$f" ] || { echo "::error::缺少 ${arch}-${fmt} 主包"; exit 1; }
+              echo "==> 已覆盖 ${arch}/${fmt}: $(basename "$f")"
+            done
           done
 
       - name: Clean up previous draft release (if any)

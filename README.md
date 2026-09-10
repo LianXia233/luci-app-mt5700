@@ -30,10 +30,11 @@ luci-app-mt5700/                        # 仓库根 = LuCI 插件包
 │   └── usr/share/rpcd/
 │       ├── acl.d/luci-app-mt5700.json  # 权限控制（含 mt5700 RPC 对象）
 │       └── ucode/mt5700.uc             # rpcd ucode 插件（LuCI RPC ↔ Rust 代理）
-├── src/rust/                           # Rust 后端（独立包 at-webserver-rust）
-│   ├── Makefile                        # OpenWrt 包 Makefile（cargo + zig 交叉编译）
-│   ├── Cargo.toml
-│   └── src/                            # 13 个源文件（见 §4）
+├── src/
+│   ├── Makefile                        # 由 luci.mk 调用：编译 Rust 后端并装进同一包
+│   └── rust/                           # Rust 后端源码（并入 luci-app-mt5700 单包）
+│       ├── Cargo.toml
+│       └── src/                        # 13 个源文件（见 §4）
 └── tests/mock-modem/                   # 本地链路验证（无硬件环境）
     ├── mock-modem.js                   # MT5700 AT 模组模拟器（TCP 20249）
     ├── mock-uci                        # 假 uci（测试配置注入）
@@ -93,7 +94,9 @@ luci-app-mt5700/                        # 仓库根 = LuCI 插件包
 - 如实说明：OpenWrt SDK 交叉编译 / IPK·APK 实编译 / 真机安装 / 重启后功能 / rpcd ucode 真机代理，
   需在带 SDK 的环境（推荐 **GitHub Actions 云编译**，见 §8）或真机上执行。
 
-## 4. Rust 后端（src/rust，独立包名 at-webserver-rust，服务名 at-webserver）
+## 4. Rust 后端（源码 src/rust，产物 /usr/bin/at-webserver-rust，服务名 at-webserver）
+
+> 后端二进制随 `luci-app-mt5700` 单包一起编译安装（见 `src/Makefile`），不再是独立包。
 
 | 文件 | 职责 |
 |---|---|
@@ -124,7 +127,7 @@ cargo test                   # 7/7 通过
 
 # LuCI 插件（在 OpenWrt buildroot 中）
 # 将本仓库（luci-app-mt5700）放入 feeds/luci/applications/，或作为独立包源
-# 依赖 luci-base、luci-lib-nixio、rpcd-mod-ucode，Depends: at-webserver-rust
+# 依赖 luci-base、luci-lib-nixio、rpcd-mod-ucode；后端二进制由本包自带（src/Makefile 编译）
 ```
 
 ## 6. 测试结果（本机，2026-09-10）
@@ -165,36 +168,49 @@ node parse-extra-test.js   # 前端解析层 19 项单测
 - **产物获取**：每个构建行的 `Artifacts`（命名 `apk-<arch>` / `ipk-<arch>`）或 Release 附件。
 - **Rust 交叉编译原理**：容器内 `rustup` 安装 Rust 工具链 + `zig` 作为 musl 交叉链接器
   （`scripts/sdk-build.sh` 按目标三元组动态生成 zig wrapper 与 cargo 全局配置），
-  `scripts/sdk-build.sh` 将 `src/rust` 编译为 `at-webserver-rust` 包并连同 LuCI 插件一起打包。
+  `scripts/sdk-build.sh` 构建单个 `luci-app-mt5700` 包，由 `src/Makefile` 在包内编译 Rust 后端。
 - **扩展架构**：修改 workflow 的 `matrix` 增加行即可（镜像 tag 格式 `openwrt/sdk:<架构>-<版本>`，
-  架构名需与 OpenWrt SDK 发布名一致；若 Rust 目标三元组未覆盖，先在 `src/rust/Makefile` 的
+  架构名需与 OpenWrt SDK 发布名一致；若 Rust 目标三元组未覆盖，先在 `src/Makefile` 的
   `RUST_TARGET_*` 与 `scripts/sdk-build.sh` 的 zig target 映射中补充）。
 
-## 8.1 安装（前端 + 后端必须成对安装）
+## 8.1 安装（单包，装一个就够）
 
-Release 里每个「架构 × 包格式」都有 3 类包，**后端 `at-webserver-rust` 与前端 `luci-app-mt5700` 必须一起装**，
-只装前端会因为依赖缺失而安装失败（`required by: luci-app-mt5700[at-webserver-rust]`），
-强行绕过依赖则页面能打开但全部功能无后端应答。
+自 v1.1.0 起，**前端页面与 Rust 后端合并为同一个包** `luci-app-mt5700`：
+包内同时含 LuCI 页面（`/www/luci-static/resources/`）和后端二进制（`/usr/bin/at-webserver-rust`），
+不再有独立的 `at-webserver-rust` 包，也就不会出现依赖缺失。
 
 ```sh
 # apk（OpenWrt 24.10+，以 aarch64_cortex-a53 为例）
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-at-webserver-rust-1.0.0-r1.apk \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.0.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.1.0-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 
 # ipk（23.05，opkg）
-opkg install ./aarch64_cortex-a53-at-webserver-rust_1.0.0-r1_*.ipk \
-             ./aarch64_cortex-a53-luci-app-mt5700_1.0.0_*.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.1.0_*.ipk
 
 # 安装后启动
 uci set at-webserver.config.enabled=1 && uci commit at-webserver
 service at-webserver restart
+
+# 确认后端已在包内
+ls -l /usr/bin/at-webserver-rust
 ```
 
-> ⚠️ **v1.0.0 Release 缺后端包**：该版本的 Release 只上传了 `luci-app-mt5700` 与中文语言包，
-> 未包含 `at-webserver-rust`（CI 未选中该包，构建静默跳过）。请使用后续版本（v1.0.1+），
-> 或自行用 SDK 编译 `src/rust` 后先安装后端。
+> ⚠️ **v1.0.0 Release 缺后端**：该版本只上传了前端包，用户安装时报
+> `required by: luci-app-mt5700-1.0.0-r1[at-webserver-rust]`。v1.1.0 起已合为单包，请直接用新版。
+
+### 为什么不能做成「一个静态文件」
+
+后端无法变成纯前端静态资源，它必须是一个常驻进程：
+
+| 后端能力 | 为什么浏览器做不到 |
+|---|---|
+| 打开 `/dev/ttyUSB1` 串口（termios raw + AsyncFd） | 浏览器沙箱无串口/设备文件访问能力 |
+| 定时锁频、无服务自动解锁（24h 循环） | 页面关闭即失效，无法常驻 |
+| 模组 AT 端口 `192.168.8.1:20249`（裸 TCP） | 浏览器 WebSocket 连不了裸 TCP，且跨源被拦截 |
+| `uci show/set`（子进程）、企业微信 WebHook 出站 | 浏览器无法执行本地命令、受同源策略限制 |
+
+所以「整合成一个**安装包**」可以做到（v1.1.0 已实现），「整合成一个**静态文件**」做不到。
 
 ## 9. 更多文档
 
