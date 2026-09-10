@@ -16,9 +16,13 @@ echo "==> 仓库挂载: /work（构建开始）"
 # ---------- 0) 仓库源码布局 ----------
 cd /work
 
-# ---------- 1) 基础工具 ----------
-apt-get update -qq
-apt-get install -y -qq curl xz-utils ca-certificates >/dev/null
+# ---------- 1) 基础工具（SDK 容器默认 buildbot 非 root，需要时用 sudo） ----------
+SUDO=''
+if [ "$(id -u)" -ne 0 ]; then
+  SUDO='sudo'
+fi
+$SUDO apt-get update -qq
+$SUDO apt-get install -y -qq curl xz-utils ca-certificates >/dev/null
 
 # ---------- 2) Rust 工具链（仅容器内 /opt，不落盘到仓库） ----------
 export RUSTUP_HOME=/opt/rust
@@ -31,7 +35,9 @@ rustup target add "$RUST_TRIPLE"
 ZIG_VER=0.13.0
 curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
   | tar -xJ -C /opt
-ln -sf "/opt/zig-linux-x86_64-${ZIG_VER}/zig" /usr/local/bin/zig
+mkdir -p /opt/bin
+ln -sf "/opt/zig-linux-x86_64-${ZIG_VER}/zig" /opt/bin/zig
+export PATH="/opt/bin:$PATH"
 zig version
 
 # Rust triple → zig target 映射（zig 使用 arm-* 而非 armv7-*）
@@ -46,7 +52,7 @@ esac
 # 生成 zig 链接器 wrapper + cargo 全局配置（仅容器内，不写入仓库）
 cat > /opt/zig-linker <<EOF
 #!/bin/sh
-exec zig cc -target ${ZIG_TARGET} "\$@"
+exec /opt/bin/zig cc -target ${ZIG_TARGET} "\$@"
 EOF
 chmod +x /opt/zig-linker
 mkdir -p "${CARGO_HOME}"
