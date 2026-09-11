@@ -58,6 +58,8 @@ function ATClient() {
 	this.pollInterval = 1500;         // 事件轮询间隔（毫秒）
 	this.eventSeq = 0;
 	this.firstPoll = true;
+	this.host = '127.0.0.1';
+	this.port = 8765;
 	this.configReady = this.loadConfig();
 }
 
@@ -77,8 +79,8 @@ ATClient.prototype.isReady = function () {
 
 ATClient.prototype.loadConfig = function () {
 	var self = this;
+	this.host = '127.0.0.1';
 	return L.uci.load('at-webserver').then(function () {
-		// UCI 键都在 config 段下（websocket_port / websocket_auth_key），没有 'websocket' 段
 		var port = parseInt(L.uci.get('at-webserver', 'config', 'websocket_port') || '8765', 10) || 8765;
 		var authKey = L.uci.get('at-webserver', 'config', 'websocket_auth_key') || '';
 		self.port = port;
