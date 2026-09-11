@@ -32,9 +32,13 @@ start_service() {
 		return 1
 	fi
 
-	# 先清残留进程，再立刻拉起 procd，避免防火墙/串口探测拖死 start
+	# 先清残留进程，再立刻拉起 procd，避免防火墙/串口探测拖死 start。
+	# 严重警告：这里绝不能 `killall at-webserver`——init.d 被直接执行时（开机
+	# /etc/rc.d/S*、`/etc/init.d/at-webserver start`、service 命令都是直接 exec 本脚本），
+	# 脚本自身的进程名(comm)就是 "at-webserver"，killall 会把脚本自己一起 SIGTERM，
+	# start 会在 procd_open_instance 之前被打断（exit 143），服务永远起不来。
+	# 旧实例交给 procd 处理（reload_service 已这么做），这里只清遗留二进制。
 	killall -q at-server.py 2>/dev/null
-	killall -q at-webserver 2>/dev/null
 	killall -q "$PROG_NAME" 2>/dev/null
 
 	logger -t at-webserver "配置 procd 实例..."
