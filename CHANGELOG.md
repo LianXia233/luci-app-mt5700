@@ -7,13 +7,14 @@
 
 ## [1.2.0] - 2026-09-11
 
-ImmortalWrt/OpenWrt 实机适配与 LuCI 界面修复版。
+ImmortalWrt/OpenWrt 实机适配、LuCI 界面修复、RPC 可对外监听版。
 
 ### 新增
 
 - **菜单**：一级 `modem`，二级 **5G模组管理**，页面路径 `admin/modem/5g/*`（12 页）
 - **串口下拉**：服务配置页列出系统识别的 `ttyUSB/ttyACM/ttyAMA/ttyS`，支持「自动探测 / PCUI 推荐 / 自定义路径」
-- **连接状态条**：圆点 + 状态色 + 脉冲动画；文案「AT 服务已连接 · 本机 RPC :端口」
+- **RPC 对外监听**：`websocket_allow_wan=1` 或 `websocket_bind=0.0.0.0` 时绑定 `0.0.0.0`；服务配置页增加「RPC 监听范围」
+- **连接状态条**：圆点 + 状态色 + 脉冲动画；文案按实际 bind 显示（本机 RPC / RPC 所有接口 / RPC &lt;host&gt;）
 - **每次编译成功自动发布 GitHub Release**（main 推送用 `PKG_VERSION` 作为 tag）
 
 ### 修复
@@ -25,6 +26,8 @@ ImmortalWrt/OpenWrt 实机适配与 LuCI 界面修复版。
 - **服务配置 UCI**：与后端 `config` 段扁平键对齐；`uci/apply` ubus code 5（无变更）视为成功
 - **`file.list`**：兼容多种返回结构；ACL 放行 `/dev` list
 - **init.d/uci-defaults**：git 模式 `100755`，打包强制 `chmod`，修复安装 `Permission denied`
+- **init.d start 不再阻塞**：先拉起 procd，防火墙/串口探测放后台（`timeout 8`），避免 `firewall reload` 挂死导致服务起不来
+- **页面重载/重启**：改为 `ubus service delete` + `service set`，不再走会卡死的 init.d
 - **ucode 插件**：适配 ImmortalWrt——无 `JSON`/`parseInt`/`s[i]`/`fs.connect`；参数在 `req.args`；经 `nc` 访问回环 RPC
 - **Rust P0/P1/P2**（见 1.1.1）：调度 applied、RPC 行限、CNMI/CMGF、try_send、扫频正则等
 
@@ -33,6 +36,7 @@ ImmortalWrt/OpenWrt 实机适配与 LuCI 界面修复版。
 - 默认连接 **PCUI 串口**（`SERIAL` + `/dev/ttyUSB1`）
 - 单包交付：前端 + `/usr/bin/at-webserver-rust`
 - `LUCI_DEPENDS` 保持为空，避免 SDK 强编 libusb
+- 新增 UCI 键：`websocket_bind`（可选监听地址）；`websocket_allow_wan` 恢复生效（控制是否绑 0.0.0.0）
 
 ## [Unreleased]
 
