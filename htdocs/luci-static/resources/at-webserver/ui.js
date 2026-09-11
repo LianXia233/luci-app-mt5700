@@ -1,7 +1,8 @@
 'use strict';
+'require baseclass';
 'require at-webserver/rpc';
 'require at-webserver/parse';
-/* global L, AtWs, Parse */
+/* global L, AtWs, Parse, baseclass */
 
 /**
  * LuCI 页面公共 UI 辅助：连接状态条、面板、字段、提示、加载态。
@@ -376,5 +377,8 @@ var Ui = (function () {
 	return api;
 })();
 
-if (typeof window !== 'undefined') { window.Ui = Ui; }
-return Ui;
+var UiClass = baseclass.extend(Ui);
+if (typeof window !== 'undefined') {
+	window.Ui = new UiClass();
+}
+return UiClass;
