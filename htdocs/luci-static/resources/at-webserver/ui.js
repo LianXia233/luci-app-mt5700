@@ -197,31 +197,48 @@ var Ui = (function () {
 	/* ---------- 连接状态条 ---------- */
 
 	api.renderConnectionBar = function (container) {
-		var bar = E('div', { 'class': 'at-conn-bar at-conn-idle' }, '正在连接调制解调器…');
+		var bar = E('div', { 'class': 'at-conn-bar at-conn-idle' });
+		function setText(state, text) {
+			bar.className = 'at-conn-bar at-conn-' + state;
+			bar.innerHTML = '';
+			var dot = E('span', { 'class': 'at-conn-dot' });
+			bar.appendChild(dot);
+			bar.appendChild(E('span', { 'class': 'at-conn-text' }, text));
+			return bar;
+		}
+		setText('idle', '正在连接 AT 服务…');
 		container.appendChild(bar);
+
 		var cl = AtWs.client;
+		function labelConnected() {
+			var port = cl.port || 8765;
+			return 'AT 服务已连接 · 本机 RPC :' + port;
+		}
 		cl.onConnectionStateChange(function (state, err) {
-			var texts = {
-				connecting: '正在连接调制解调器…',
-				authenticating: '正在验证连接密钥…',
-				connected: '已连接：' + cl.host + ':' + cl.port,
-				reconnecting: '连接中断，正在重连（第 ' + cl.reconnectAttempts + ' 次）…',
-				disconnected: '未连接',
-				error: err || '连接失败'
-			};
-			var cls = 'at-conn-bar at-conn-' + state;
-			bar.className = cls;
-			bar.textContent = texts[state] || state;
-			if (state === 'connected') bar.textContent = '已连接：' + cl.host + ':' + cl.port;
+			if (state === 'connected') {
+				setText('connected', labelConnected());
+				return;
+			}
 			if (state === 'error') {
+				bar.className = 'at-conn-bar at-conn-error';
 				bar.innerHTML = '';
-				bar.appendChild(document.createTextNode(texts.error + ' '));
+				bar.appendChild(E('span', { 'class': 'at-conn-dot' }));
+				bar.appendChild(E('span', { 'class': 'at-conn-text' }, err || '连接失败'));
 				var retry = api.button('重试', 'cbi-button-action', function () {
 					cl.connect().catch(function () {});
 				});
-				retry.style.marginLeft = '8px';
+				retry.style.marginLeft = '10px';
 				bar.appendChild(retry);
+				return;
 			}
+			var texts = {
+				connecting: '正在连接 AT 服务…',
+				authenticating: '正在验证访问密钥…',
+				reconnecting: '连接中断，正在重连…',
+				disconnected: '未连接 AT 服务',
+				idle: '正在连接 AT 服务…'
+			};
+			setText(state, texts[state] || state);
 		});
 		return bar;
 	};
