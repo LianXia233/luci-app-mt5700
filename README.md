@@ -1,220 +1,265 @@
-# AT WebServer（MT5700M 5G 模组）— LuCI + Rust 管理界面
+# AT WebServer · MT5700M 5G 模组管理
 
-> OpenWrt 插件包：`luci-app-mt5700`（仓库根即 LuCI 插件包，Rust 后端位于 `src/rust/`；
-> 服务名与 UCI 段名沿用 `at-webserver`，保持既有配置兼容）。
+> **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.1.1**
+
+| | |
+|:--|:--|
+| **架构** | LuCI → rpcd ucode → Rust (tokio) → 模组 AT |
+| **默认连接** | PCUI 串口 `/dev/ttyUSB1`（网络 TCP 备用） |
+| **打包** | 单包内含页面 + `/usr/bin/at-webserver-rust` |
+| **云编译** | GitHub Actions · x86_64 / aarch64 · apk + ipk |
+| **发布** | 每次编译成功自动上传 [Release](https://github.com/LianXia233/luci-app-mt5700/releases) |
 
 ---
 
-## 1. 项目构成
+## 目录
 
-```
-luci-app-mt5700/                        # 仓库根 = LuCI 插件包
-├── Makefile                            # luci.mk 打包（PKG_NAME=luci-app-mt5700）
-├── README.md
-├── CHANGELOG.md                        # 更新日志
-├── .github/workflows/build-openwrt.yml # GitHub Actions 云编译（主线 apk + 老版 ipk）
-├── scripts/sdk-build.sh                # SDK 容器内构建脚本（Actions 调用）
-├── docs/
-│   ├── 01-原WebUI功能清单与LuCI映射表.md   # 功能 → LuCI 页面/API 完整映射（8 页 75 项功能 + 后端 B1-B16）
-│   ├── 02-OpenWrt-SDK交叉编译与安装.md      # SDK 构建、IPK/APK 打包、安装/卸载、交叉编译
-│   └── 03-最终验收报告.md                   # 验收结果与未执行项说明
-├── htdocs/luci-static/resources/
-│   ├── at-webserver/                   # 公共库：rpc.js / parse.js / ui.js / smsEncode.js / at.css
-│   └── view/at-webserver/              # 12 个页面 JS
-├── po/                                 # 翻译（templates + zh_Hans）
-├── root/
-│   ├── etc/config/at-webserver         # UCI 默认配置
-│   ├── etc/init.d/at-webserver         # procd 服务脚本
-│   ├── etc/uci-defaults/at-webserver   # 首次安装初始化
-│   ├── usr/share/luci/menu.d/          # LuCI 顶部菜单：服务 → 模组管理（12 个页面全在 Plugin Top Navigation）
-│   └── usr/share/rpcd/
-│       ├── acl.d/luci-app-mt5700.json  # 权限控制（含 mt5700 RPC 对象）
-│       └── ucode/mt5700.uc             # rpcd ucode 插件（LuCI RPC ↔ Rust 代理）
-├── src/
-│   ├── Makefile                        # 由 luci.mk 调用：编译 Rust 后端并装进同一包
-│   └── rust/                           # Rust 后端源码（并入 luci-app-mt5700 单包）
-│       ├── Cargo.toml
-│       └── src/                        # 13 个源文件（见 §4）
-└── tests/mock-modem/                   # 本地链路验证（无硬件环境）
-    ├── mock-modem.js                   # MT5700 AT 模组模拟器（TCP 20249）
-    ├── mock-uci                        # 假 uci（测试配置注入）
-    ├── e2e-test.js                     # RPC 端到端测试（20 项）
-    ├── parse-extra-test.js             # 前端解析层单测（19 项，carrier/reject/simsq）
-    └── run-e2e.sh                      # 一键编排
-```
+- [快速安装](#快速安装)
+- [功能一览](#功能一览)
+- [架构](#架构)
+- [项目结构](#项目结构)
+- [云编译与发布](#云编译与发布)
+- [本地开发与测试](#本地开发与测试)
+- [UCI 配置](#uci-配置)
+- [Rust 后端](#rust-后端)
+- [更多文档](#更多文档)
 
-## 2. 架构
+---
 
-```
-                 OpenWrt
-                    │
-             ┌──────┴──────┐
-             │    LuCI     │  JS + LuCI View/Form/RPC（12 个页面）
-             └──────┬──────┘
-                    │
-               LuCI RPC（L.rpc.declare）
-                    │
-             ┌──────▼──────┐
-             │     rpcd     │  ucode 插件 mt5700.uc（/usr/share/rpcd/ucode/）
-             └──────┬──────┘
-                    │  TCP newline-JSON（仅 127.0.0.1）
-             ┌──────▼──────┐
-             │ Rust Backend│  tokio：RpcServer + AtClient + Dispatcher + Scheduler
-             └──────┬──────┘
-                    │
-        ┌───────────┼───────────┐
-        │           │           │
-      Config      Tasks       System
-        │           │           │
-       UCI        Process     Modem AT
-        │           │           │
-        └───────────┴───────────┘
-```
+## 快速安装
 
-- **LuCI RPC 直连，无 WebSocket**：页面 JS 用 `L.rpc.declare` 调用 rpcd 对象 `mt5700`（`at` 执行 AT 命令、
-  `events` 拉取事件增量）；rpcd ucode 插件把请求转发给 Rust 后端（仅回环 127.0.0.1，不对外暴露端口）。
-- **实时状态**：Rust 维护事件总线（raw_data / new_sms / incoming_call / pdcp_data / memory_full /
-  cellscan / urc_data 带单调 seq），前端订阅后按 1.5s 轮询 `events(since)` 拉取增量；
-  命令应答 `{success,data,error}` 逐条独立，前端仍按发送顺序串行化。
-- **认证**：LuCI 登录态由 rpcd 会话/ACL 保证；UCI `websocket_auth_key` 由 ucode 代理自动附带，
-  密钥配置语义保持兼容；页面无需再输密钥。
-- 服务配置页同时用 LuCI UCI API 与 ubus（service reload/restart、日志文件）。
+从 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载**与目标架构匹配**的主包（约 1.2MB，已含后端）。
 
-## 3. 功能等价性
-
-- 既有 8 个页面全部迁移，见 `docs/01-原WebUI功能清单与LuCI映射表.md`（功能 1-75、后端 B1-B16）。
-- 菜单：原有侧边栏全部入口收敛为 LuCI **服务 → 模组管理** 一组（网络状态/网络设置/拨号设置/全网扫频/定时锁频/
-  模组设置/模组升级/短信中心/短信设置/AT 调试终端/通知日志/服务配置共 12 页），二级菜单全部渲染在
-  LuCI **Plugin Top Navigation**（页面顶部导航条），无入口丢失。
-- 连接：默认 **PCUI 优先**——`connection_type` 默认 `SERIAL`，AT 走串口 `/dev/ttyUSB1`（PCUI）；
-  `auto` 探测同样优先 `ttyUSB1`；网络 TCP（192.168.8.1:20249）保留为备用通道。
-- 全部按钮 → JS → LuCI RPC → Rust → 模组 → 应答 → UI 更新链路真实（见 §6 测试结果）。
-- **未实现项已清零**：全部功能（含载波辅助小区聚合 `^MONSSC`/`^CASCELLINFO`、`^REJINFO` 网络拒绝原因面板、
-  `^SIMSQ` 卡状态、连接诊断面板、温度保护阈值等深层功能）均已完整移植，见 `docs/03-最终验收报告.md`。
-- 如实说明：OpenWrt SDK 交叉编译 / IPK·APK 实编译 / 真机安装 / 重启后功能 / rpcd ucode 真机代理，
-  需在带 SDK 的环境（推荐 **GitHub Actions 云编译**，见 §8）或真机上执行。
-
-## 4. Rust 后端（源码 src/rust，产物 /usr/bin/at-webserver-rust，服务名 at-webserver）
-
-> 后端二进制随 `luci-app-mt5700` 单包一起编译安装（见 `src/Makefile`），不再是独立包。
-
-| 文件 | 职责 |
-|---|---|
-| main.rs | 装配、SIGTERM/SIGINT 优雅退出、watch 统一关闭 |
-| logger.rs | 分级日志（stdout 由 procd/logd 接管） |
-| config.rs | UCI 读取（`uci show at-webserver`）、默认值、键解析 |
-| transport.rs | Transport trait、TCP 带超时 |
-| serial_linux.rs | 串口（AsyncFd + termios raw） |
-| serialdetect.rs | 串口自动探测（优先 ttyUSB1） |
-| atclient.rs | 命令串行 100ms、2s 超时、2048 行上限、URC 分流、`abcd` 打断、重连 |
-| pdu.rs | SMS PDU 解码（GSM7/UCS2/8bit/UDH），7 个单测全过 |
-| notify.rs | 通知（日志/WebHook）、60s 合并、3 次重试 |
-| urc.rs | 来电去重、CMTI→CMGR、长短信拼接、信号阈值、PDCP 14 字段 |
-| schedconfig.rs | 定时锁频 DTO↔UCI 双写、校验、静态频段表 |
-| schedule.rs | 昼夜锁频调度、无服务自动解锁、扫频宽限 60s |
-| rpcserver.rs | LuCI RPC 服务（TCP newline-JSON）、伪命令 CONNECT?/SCHED?/CELLSCAN、事件总线、扫频状态机 |
-
-依赖：tokio、serde、serde_json、chrono、hex、ureq、libc、async-trait。
-release 构建：`opt-level="s"`、LTO、panic=abort、strip（体积优先，适合 OpenWrt）；musl 静态链接（zig），无 glibc 依赖。
-
-## 5. 构建
+### OpenWrt 24.10+（apk）
 
 ```sh
-# Rust 后端（宿主验证用；OpenWrt 目标请用 SDK，见 docs/02）
-cd src/rust
-cargo build --release        # 产物 target/release/at-webserver
-cargo test                   # 7/7 通过
-
-# LuCI 插件（在 OpenWrt buildroot 中）
-# 将本仓库（luci-app-mt5700）放入 feeds/luci/applications/，或作为独立包源
-# 依赖 luci-base、luci-lib-nixio、rpcd-mod-ucode；后端二进制由本包自带（src/Makefile 编译）
-```
-
-## 6. 测试结果（本机，2026-09-10）
-
-- Rust：`cargo build` / `cargo build --release` 通过（0 warning）；`cargo test` **7/7** 通过。
-- 端到端链路（tests/mock-modem，真实 Rust 后端 + mock 模组 + RPC 客户端）：**20/20 通过**，
-  覆盖认证（错误密钥拒/正确通过）、命令应答、伪命令 CONNECT?/SCHED?/CELLSCAN、
-  events 增量拉取、incoming_call / new_sms / REJINFO(raw_data) 事件、MONSSC/CASCELLINFO/SIMSQ。
-- 前端解析层单测（载波聚合 / REJINFO / SIMSQ）：**19/19 通过**。
-- 期间修复 Rust 后端 2 个真实缺陷：
-  1. 空闲期模组主动上报被全部丢弃（与 Go 语义不一致）→ 已按 Go handleLine 修复；
-  2. 广播用 tokio RwLock::blocking_read 在异步任务内 panic → 改 std 锁 + 非阻塞入队。
-- 未执行（宿主无 SDK/硬件/OpenWrt）：IPK/APK 实编译、真机安装、rpcd ucode 真机代理、
-  重启后功能、手机真机浏览 → 见 §8 云编译。
-
-## 7. 快速开始（本机无硬件验证）
-
-```sh
-cd tests/mock-modem
-npm install ws          # 仅测试依赖（e2e 使用 node 内置 net，ws 保留备用）
-sh run-e2e.sh           # 起 mock 模组 + Rust 后端 + 20 项端到端断言
-node parse-extra-test.js   # 前端解析层 19 项单测
-```
-
-## 8. 云编译（GitHub Actions）
-
-本仓库内置 `.github/workflows/build-openwrt.yml`，使用 OpenWrt 官方 `openwrt/sdk` 容器云编译，**无需本机 SDK**：
-
-| 目标 | 包格式 | SDK 镜像 | 架构 |
-|---|---|---|---|
-| 最新主线（snapshot） | **`.apk`**（OpenWrt 24.10+ apk 包管理器） | `openwrt/sdk:*-main` | x86_64 / aarch64_cortex-a53 |
-| 老版本 23.05 | **`.ipk`**（opkg 兼容） | `openwrt/sdk:*-23.05.5` | x86_64 / aarch64_cortex-a53 |
-
-- **触发方式**：
-  1. 手动：Actions 页面 → `Build OpenWrt packages (apk + ipk)` → `Run workflow`；
-  2. 自动：push 到 `main` 分支；
-  3. 发版：打标签 `git tag v1.0.0 && git push --tags` → 自动构建并发布 GitHub Release（含全部架构的 apk/ipk）。
-- **产物获取**：每个构建行的 `Artifacts`（命名 `apk-<arch>` / `ipk-<arch>`）或 Release 附件。
-- **Rust 交叉编译原理**：容器内 `rustup` 安装 Rust 工具链 + `zig` 作为 musl 交叉链接器
-  （`scripts/sdk-build.sh` 按目标三元组动态生成 zig wrapper 与 cargo 全局配置），
-  `scripts/sdk-build.sh` 构建单个 `luci-app-mt5700` 包，由 `src/Makefile` 在包内编译 Rust 后端。
-- **扩展架构**：修改 workflow 的 `matrix` 增加行即可（镜像 tag 格式 `openwrt/sdk:<架构>-<版本>`，
-  架构名需与 OpenWrt SDK 发布名一致；若 Rust 目标三元组未覆盖，先在 `src/Makefile` 的
-  `RUST_TARGET_*` 与 `scripts/sdk-build.sh` 的 zig target 映射中补充）。
-
-## 8.1 安装（单包，装一个就够）
-
-自 v1.1.0 起，**前端页面与 Rust 后端合并为同一个包** `luci-app-mt5700`：
-包内同时含 LuCI 页面（`/www/luci-static/resources/`）和后端二进制（`/usr/bin/at-webserver-rust`），
-不再有独立的 `at-webserver-rust` 包，也就不会出现依赖缺失。
-
-```sh
-# apk（OpenWrt 24.10+，以 aarch64_cortex-a53 为例）
+# 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.1.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.1.1-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
+```
 
-# ipk（23.05，opkg）
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.1.0_*.ipk
+### OpenWrt 23.05（opkg / ipk）
 
-# 安装后启动
-uci set at-webserver.config.enabled=1 && uci commit at-webserver
+```sh
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.1.1_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
+```
+
+### 启动与确认
+
+```sh
+uci set at-webserver.config.enabled=1
+uci set at-webserver.config.connection_type=SERIAL   # 默认 PCUI
+uci set at-webserver.config.serial_port=auto         # 优先探测 ttyUSB1
+uci commit at-webserver
 service at-webserver restart
 
-# 确认后端已在包内
+# 单包自检：后端二进制应存在
 ls -l /usr/bin/at-webserver-rust
 ```
 
-> ⚠️ **v1.0.0 Release 缺后端**：该版本只上传了前端包，用户安装时报
-> `required by: luci-app-mt5700-1.0.0-r1[at-webserver-rust]`。v1.1.0 起已合为单包，请直接用新版。
+浏览器登录 LuCI → **服务 → AT WebServer → 模组管理**，即可看到 12 个页面。
 
-### 为什么不能做成「一个静态文件」
+> **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
+> 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
-后端无法变成纯前端静态资源，它必须是一个常驻进程：
+---
 
-| 后端能力 | 为什么浏览器做不到 |
-|---|---|
-| 打开 `/dev/ttyUSB1` 串口（termios raw + AsyncFd） | 浏览器沙箱无串口/设备文件访问能力 |
-| 定时锁频、无服务自动解锁（24h 循环） | 页面关闭即失效，无法常驻 |
-| 模组 AT 端口 `192.168.8.1:20249`（裸 TCP） | 浏览器 WebSocket 连不了裸 TCP，且跨源被拦截 |
-| `uci show/set`（子进程）、企业微信 WebHook 出站 | 浏览器无法执行本地命令、受同源策略限制 |
+## 功能一览
 
-所以「整合成一个**安装包**」可以做到（v1.1.0 已实现），「整合成一个**静态文件**」做不到。
+| 分组 | 页面 |
+|:--|:--|
+| 网络 | 网络状态 · 网络设置 · 拨号设置 · 全网扫频 · 定时锁频 |
+| 模组 | 模组设置 · 模组升级 |
+| 短信 | 短信中心 · 短信设置（含 USSD） |
+| 工具 | AT 调试终端 · 通知日志 · 服务配置 |
 
-## 9. 更多文档
+原 WebUI 的深层能力均已保留，例如：
 
-- `docs/01-原WebUI功能清单与LuCI映射表.md` — 功能 1-75 + 后端 B1-B16 → LuCI 页面/API 映射
-- `docs/02-OpenWrt-SDK交叉编译与安装.md` — SDK 构建、IPK/APK 打包、安装/卸载、服务管理、Rust 交叉编译 target 表
-- `docs/03-最终验收报告.md` — 验收结论、测试清单、未执行项如实说明
-- `CHANGELOG.md` — 更新日志
+- 服务小区 / 辅载波聚合（`^MONSSC` · `^CASCELLINFO`）
+- 网络拒绝原因（`^REJINFO`）实时面板
+- SIM 卡状态（`^SIMSQ`）、温度保护、PDCP 实时速率
+- 定时锁频（夜间/日间）、全网扫频、企业微信通知
+
+完整映射见 [`docs/01-原WebUI功能清单与LuCI映射表.md`](docs/01-原WebUI功能清单与LuCI映射表.md)。
+
+---
+
+## 架构
+
+```text
+                    ┌─────────────────────────────────────┐
+                    │                LuCI                 │
+                    │   12 个页面 · L.rpc.declare('mt5700')│
+                    └──────────────────┬──────────────────┘
+                                       │  ubus / rpcd 会话 + ACL
+                    ┌──────────────────▼──────────────────┐
+                    │         rpcd + ucode 插件           │
+                    │   mt5700.uc（读 UCI，附 auth_key）   │
+                    └──────────────────┬──────────────────┘
+                                       │  TCP newline-JSON
+                                       │  仅 127.0.0.1:8765
+                    ┌──────────────────▼──────────────────┐
+                    │        Rust at-webserver-rust       │
+                    │  RpcServer · AtClient · Scheduler   │
+                    │  URC 分发 · PDU · 扫频 · 通知       │
+                    └──────────────────┬──────────────────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+         /dev/ttyUSB1              192.168.8.1:20249            UCI
+            (PCUI)                    (TCP 备用)           at-webserver
+```
+
+要点：
+
+- **无 WebSocket 对外端口**：后端只监听回环；页面经 rpcd 代理，依赖 LuCI 登录态 + ACL。
+- **事件**：后端维护事件总线（`raw_data` / `new_sms` / `incoming_call` / `pdcp_data` / `cellscan` / `memory_full` / `urc_data`），前端约 1.5s 轮询 `events(since)`。
+- **命令**：`mt5700.at` 返回 `{success,data,error}`，前端仍串行发送，避免串号。
+- **默认 PCUI**：`connection_type=SERIAL`，串口优先 `/dev/ttyUSB1`；`serial_port=auto` 时自动探测。
+
+---
+
+## 项目结构
+
+```text
+luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.1.1
+├── .github/workflows/build-openwrt.yml
+├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
+├── docs/                            # 功能映射 / SDK 说明 / 验收
+├── htdocs/luci-static/resources/
+│   ├── at-webserver/                # rpc.js · parse.js · ui.js · smsEncode.js · at.css
+│   └── view/at-webserver/           # 12 个页面
+├── po/                              # 中文翻译
+├── root/
+│   ├── etc/config/at-webserver      # UCI 默认（SERIAL / ttyUSB1）
+│   ├── etc/init.d/at-webserver      # procd
+│   └── usr/share/rpcd/ucode/mt5700.uc
+├── src/
+│   ├── Makefile                     # 编译并安装 at-webserver-rust 到本包
+│   └── rust/                        # tokio 后端（约 13 个源文件）
+└── tests/mock-modem/                # 无硬件 e2e（mock AT 模组）
+```
+
+---
+
+## 云编译与发布
+
+workflow：`.github/workflows/build-openwrt.yml`  
+镜像：官方 `openwrt/sdk`
+
+| 目标系统 | 包格式 | 架构 | 产物示例 |
+|:--|:--|:--|:--|
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.1.1-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.1.1_x86_64.ipk` |
+
+**触发方式**
+
+1. push 到 `main`
+2. 打 `v*` 标签（如 `v1.1.1`）
+3. Actions 手动 `Run workflow`
+
+**每次编译成功后自动发布 Release**
+
+- 标签推送 → Release tag = 标签名  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.1.1`）  
+- 同名 Release 先删后建；资产带架构前缀，避免同名冲突
+
+交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。
+
+---
+
+## 本地开发与测试
+
+### Rust
+
+```sh
+cd src/rust
+cargo test              # PDU 单测 7/7
+cargo build --release
+```
+
+> Windows 上路径若含中文，可能影响 dlltool；建议用纯 ASCII 路径编译。
+
+### 无硬件端到端
+
+```sh
+cd tests/mock-modem
+npm install ws          # 仅测试依赖
+sh run-e2e.sh           # mock 模组 + 真实 Rust + RPC 客户端
+node parse-extra-test.js
+```
+
+### 页面语法
+
+```sh
+# 仓库根
+find htdocs -name '*.js' -exec node --check {} \;
+```
+
+---
+
+## UCI 配置
+
+配置文件：`/etc/config/at-webserver`，**单 section `config` + 扁平键**（与 Rust / ucode / 服务配置页一致）。
+
+| 键 | 默认 | 说明 |
+|:--|:--|:--|
+| `enabled` | `1` | 总开关 |
+| `connection_type` | `SERIAL` | `SERIAL`=PCUI 串口；`NETWORK`=TCP 备用 |
+| `serial_port` | `auto` | `auto` 优先探测 ttyUSB1；可填 `/dev/ttyUSB1` |
+| `serial_baudrate` | `115200` | 波特率 |
+| `network_host` / `network_port` | `192.168.8.1` / `20249` | 网络通道 |
+| `websocket_port` | `8765` | 后端 RPC 端口（仅回环） |
+| `websocket_auth_key` | 空 | 由 ucode 自动附带；空则不校验密钥 |
+| `notify_*` / `wechat_webhook` | 见默认文件 | 通知 |
+| `schedule_*` | 见默认文件 | 定时锁频 |
+
+改配置后：
+
+```sh
+uci commit at-webserver
+service at-webserver restart
+# 或在 LuCI「服务配置」页保存（会自动 reload）
+```
+
+---
+
+## Rust 后端
+
+| 模块 | 职责 |
+|:--|:--|
+| `main.rs` | 装配与优雅退出 |
+| `rpcserver.rs` | TCP RPC、伪命令、事件总线、扫频 |
+| `atclient.rs` | 命令串行、超时、URC 分流 |
+| `transport.rs` / `serial_*.rs` | TCP / 串口通道 |
+| `pdu.rs` | SMS PDU 编解码 |
+| `urc.rs` | 来电/短信/信号等上报 |
+| `schedule.rs` / `schedconfig.rs` | 定时锁频 |
+| `notify.rs` | 日志与 WebHook |
+| `config.rs` | UCI 读取 |
+
+依赖：`tokio` · `serde` · `chrono` · `ureq` · `libc` 等。  
+Release：`opt-level=s` + LTO + strip，musl 静态链接，适合嵌入式。
+
+---
+
+## 更多文档
+
+| 文档 | 内容 |
+|:--|:--|
+| [`docs/01-原WebUI功能清单与LuCI映射表.md`](docs/01-原WebUI功能清单与LuCI映射表.md) | 功能 1–75 与后端 B1–B16 映射 |
+| [`docs/02-OpenWrt-SDK交叉编译与安装.md`](docs/02-OpenWrt-SDK交叉编译与安装.md) | SDK、安装/卸载、交叉编译 |
+| [`docs/03-最终验收报告.md`](docs/03-最终验收报告.md) | 验收与未执行项说明 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 版本变更 |
+
+---
+
+## 许可
+
+以仓库内声明为准（当前 `Cargo.toml` 为 MIT）。
+
+**MT5700M** 相关 AT 行为以厂商手册为准；本项目在无官方 OpenWrt 包源的前提下提供管理界面与后端。
