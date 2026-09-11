@@ -1,6 +1,6 @@
 [package]
 name = "at-webserver"
-version = "1.0.0"
+version = "1.2.2"
 edition = "2021"
 description = "MT5700M 5G module management backend: LuCI RPC bridge, AT command, URC/event bus, schedule and cellscan"
 license = "MIT"

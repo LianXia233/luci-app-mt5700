@@ -98,7 +98,9 @@ function jsonParse(s) {
 		ws();
 		if (ch() == ']') { i++; return arr; }
 		while (i < n) {
-			arr.push(parseVal());
+			// 本固件 ucode 的数组没有 push 方法（调用会抛
+			// "left-hand side is not a function"），只能按下标追加。
+			arr[length(arr)] = parseVal();
 			ws();
 			if (ch() == ',') { i++; ws(); continue; }
 			if (ch() == ']') { i++; break; }

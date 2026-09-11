@@ -5,6 +5,39 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.2] - 2026-09-12
+
+实机（ImmortalWrt aarch64 · Fibocom FM350-GL）「后端服务无法启动 / AT 全部无响应」修复。
+
+### 修复
+
+- **init.d 启动脚本 killall 自杀（服务永远起不来，P0）**：`start_service()` 里的
+  `killall -q at-webserver` 会把脚本自身一起杀掉——init.d 被直接执行时（开机
+  `/etc/rc.d/S*`、`/etc/init.d/at-webserver start`、`service` 命令）进程名(comm)就是
+  `at-webserver`，
+  于是 `start` 在 `procd_open_instance` 之前收到 SIGTERM（exit 143），procd 从未注册
+  实例，`status` 永远是 `inactive`。已删除该行；遗留进程只按 `at-webserver-rust` /
+  `at-server.py` 清理，旧 procd 实例交给 procd 处理。
+- **串口读循环把「0 字节读」当 EOF（刚连上就断，AT 全部「模组无响应」，P0）**：
+  `AtClient::read_loop` 收到 0 字节即返回并触发重连；而 Linux tty 在
+  `VMIN=0/VTIME=0` 下「暂无数据」的 `read()` 正是返回 0，于是读循环连接后立刻结束，
+  此后每条命令都等 2s 超时，日志表现为每十几秒一轮「模组无响应」并反复重连
+  （实机可证：进程只剩写侧一个 ttyUSB fd）。改为 0 字节读让步 50ms 重试，连续 20 次
+  （约 1s）才判定链路断开并重连。
+- **串口 termios 改为 `VMIN=1`**：消除「无数据 read 返回 0」的歧义——非阻塞 fd 下
+  无数据返回 `EAGAIN`，交由 tokio `AsyncFd` 等待，不再空转。
+- **ucode 插件解析数组必然失败（`events` 接口不可用，P1）**：该 ucode 构建的数组没有
+  `push` 方法，`jsonParse` 中 `arr.push(parseVal())` 抛
+  `left-hand side is not a function`，凡是应答含数组（`events`）就报「解析应答失败」。
+  已改为 `arr[length(arr)] = parseVal()`（与既有「无 JSON / parseInt / s[i]」适配一致）。
+
+### 验证
+
+- 实机 aarch64_cortex-a53 / ImmortalWrt SNAPSHOT：`/etc/init.d/at-webserver start`
+  返回 0、`status=running`；`/proc/<pid>/fd` 常驻 2 个 ttyUSB（读+写侧）；
+  启动后日志 0 条 WRN；`ubus call mt5700 at '{"cmd":"ATI"}'` 与 `events` 均正常返回。
+- Rust 单测 8/8（新增回归用例 `read_loop_survives_zero_reads`）。
+
 ## [1.2.1] - 2026-09-11
 
 ### 修复
