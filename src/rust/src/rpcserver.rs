@@ -171,13 +171,13 @@ impl RpcServer {
         }
     }
 
-    /// 绑定并服务 RPC，直到 ctx 结束。仅监听回环地址：LuCI 经 rpcd/ucode 本机转发，
-    /// 不对外暴露端口。
-    pub async fn serve(&self, port: u16) -> Result<(), String> {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+    /// 绑定并服务 RPC，直到 ctx 结束。
+    /// bind 默认 127.0.0.1；websocket_allow_wan=1 或 websocket_bind=0.0.0.0 时对外监听。
+    pub async fn serve(&self, port: u16, bind: &str) -> Result<(), String> {
+        let listener = tokio::net::TcpListener::bind((bind, port))
             .await
-            .map_err(|e| format!("监听 RPC 端口 127.0.0.1:{port} 失败: {e}"))?;
-        log_info!("LuCI RPC 监听 127.0.0.1:{port}");
+            .map_err(|e| format!("监听 RPC 端口 {bind}:{port} 失败: {e}"))?;
+        log_info!("LuCI RPC 监听 {bind}:{port}");
 
         let mut ctx_c = self.ctx.clone();
         loop {

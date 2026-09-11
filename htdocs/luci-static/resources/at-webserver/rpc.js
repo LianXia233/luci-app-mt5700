@@ -79,17 +79,25 @@ ATClient.prototype.isReady = function () {
 
 ATClient.prototype.loadConfig = function () {
 	var self = this;
-	this.host = '127.0.0.1';
 	return L.uci.load('at-webserver').then(function () {
 		var port = parseInt(L.uci.get('at-webserver', 'config', 'websocket_port') || '8765', 10) || 8765;
 		var authKey = L.uci.get('at-webserver', 'config', 'websocket_auth_key') || '';
+		var bind = L.uci.get('at-webserver', 'config', 'websocket_bind') || '';
+		var allowWan = L.uci.get('at-webserver', 'config', 'websocket_allow_wan') === '1';
+		if (!bind) {
+			bind = allowWan ? '0.0.0.0' : '127.0.0.1';
+		}
 		self.port = port;
+		self.bind = bind;
+		self.host = bind;
 		self.requireAuth = !!authKey;
 		self.authKey = authKey;
 		return self.port;
 	}).catch(function (err) {
 		console.warn('加载 UCI 配置失败，使用默认值', err);
 		self.port = 8765;
+		self.bind = '127.0.0.1';
+		self.host = '127.0.0.1';
 		return self.port;
 	});
 };

@@ -212,7 +212,16 @@ var Ui = (function () {
 		var cl = AtWs.client;
 		function labelConnected() {
 			var port = cl.port || 8765;
-			return 'AT 服务已连接 · 本机 RPC :' + port;
+			var host = cl.bind || cl.host || '127.0.0.1';
+			var where;
+			if (host === '127.0.0.1' || host === 'localhost') {
+				where = '本机 RPC';
+			} else if (host === '0.0.0.0' || host === '::') {
+				where = 'RPC 所有接口';
+			} else {
+				where = 'RPC ' + host;
+			}
+			return 'AT 服务已连接 · ' + where + ' :' + port;
 		}
 		cl.onConnectionStateChange(function (state, err) {
 			if (state === 'connected') {
