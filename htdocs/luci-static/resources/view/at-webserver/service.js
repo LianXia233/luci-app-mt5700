@@ -280,15 +280,36 @@ return L.view.extend({
 		actions2.appendChild(saveBtn);
 		body.appendChild(actions2);
 
-		/* ---------- 服务操作 ---------- */
+		/* ---------- 服务操作（经 ubus service set，避免 init.d/firewall 阻塞） ---------- */
+		function startViaUbus() {
+			return L.rpc.declare({
+				object: 'service',
+				method: 'set',
+				params: ['name', 'instances']
+			})({
+				name: 'at-webserver',
+				instances: {
+					instance1: {
+						command: ['/usr/bin/at-webserver-rust'],
+						respawn: ['3600', '5', '5'],
+						stdout: true,
+						stderr: true
+					}
+				}
+			});
+		}
+
 		function reloadService() {
 			reloadBtn.disabled = true;
 			return L.rpc.declare({
 				object: 'service',
-				method: 'reload',
-				params: ['name'],
-				expect: { result: 0 }
-			})('at-webserver').then(function () {
+				method: 'delete',
+				params: ['name']
+			})({ name: 'at-webserver' }).catch(function () {
+				/* 实例可能不存在 */
+			}).then(function () {
+				return startViaUbus();
+			}).then(function () {
 				Ui.success('服务已重载');
 			}).catch(function (err) {
 				Ui.error('重载失败: ' + ((err && err.message) || '未知错误'));
@@ -300,16 +321,7 @@ return L.view.extend({
 		function restartService() {
 			Ui.confirm('确定重启 AT 服务？现有 RPC 调用将短暂中断。', function () {
 				restartBtn.disabled = true;
-				return L.rpc.declare({
-					object: 'service',
-					method: 'restart',
-					params: ['name'],
-					expect: { result: 0 }
-				})('at-webserver').then(function () {
-					Ui.success('服务已重启');
-				}).catch(function (err) {
-					Ui.error('重启失败: ' + ((err && err.message) || '未知错误'));
-				}).finally(function () {
+				reloadService().finally(function () {
 					restartBtn.disabled = false;
 				});
 			});
