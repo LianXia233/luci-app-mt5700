@@ -569,3 +569,7 @@ var AtWs = {
 	bandName: bandName,
 	isUnsolicitedText: isUnsolicitedText
 };
+
+/* LuCI 模块：必须 return；挂 window 供页面 global AtWs 使用 */
+if (typeof window !== 'undefined') { window.AtWs = AtWs; }
+return AtWs;

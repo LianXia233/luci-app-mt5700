@@ -375,3 +375,6 @@ var Ui = (function () {
 
 	return api;
 })();
+
+if (typeof window !== 'undefined') { window.Ui = Ui; }
+return Ui;

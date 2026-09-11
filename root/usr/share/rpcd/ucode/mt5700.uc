@@ -1,84 +1,233 @@
 'use strict';
 /*
- * rpcd ucode 插件：mt5700 —— LuCI 与 Rust 后端（at-webserver-rust）之间的 RPC 代理。
- *
- * 链路：LuCI JS（L.rpc.declare）→ rpcd → 本 ucode → 127.0.0.1:<websocket_port>（TCP newline-JSON）
- *       → Rust 后端（AT 客户端 / 调度 / 事件总线）
- *
- * 认证：LuCI 登录态由 rpcd 会话/ACL 保证；Rust 侧密钥（websocket_auth_key）由本插件从 UCI
- *       读取并附加到每个请求，保持原配置语义兼容。
- *
- * rpcd 会自动加载 /usr/share/rpcd/ucode/*.uc 并注册返回对象中的 ubus 对象。
+ * rpcd ucode 插件：mt5700。
+ * OpenWrt ucode 语法：无 ===/模板字符串；无 require('json')，
+ * 序列化用 sprintf('%J')，反序列化用内置迷你解析器。
+ * 参数在 req.args 上（不是 req 顶层）。
  */
 
 const fs = require('fs');
 const uci = require('uci');
 
-/*
- * 实时读取 RPC 配置（每次调用都读，改配置无需重启 rpcd）。
- * 注意 UCI 段名：配置都在 `config at-webserver 'config'` 段下，
- * 键是 websocket_port / websocket_auth_key（没有 'websocket' 段）。
- */
 function readRpcConfig() {
 	const cursor = uci.cursor();
-	const port = parseInt(cursor.get('at-webserver', 'config', 'websocket_port'), 10) || 8765;
+	const port = int(cursor.get('at-webserver', 'config', 'websocket_port')) || 8765;
 	const authKey = cursor.get('at-webserver', 'config', 'websocket_auth_key') || '';
 	return { port: port, authKey: authKey };
+}
+
+function getStr(obj, key) {
+	if (obj == null) {
+		return null;
+	}
+	let v = obj[key];
+	if (v == null) {
+		return null;
+	}
+	return v;
+}
+
+/* 迷你 JSON 解析：ucode 无 s[i]、嵌套函数不提升，用 substr + 前置声明 */
+function jsonParse(s) {
+	let i = 0;
+	let n = length(s);
+	let parseVal;
+
+	function ch() {
+		if (i >= n) {
+			return '';
+		}
+		return substr(s, i, 1);
+	}
+
+	function ws() {
+		while (i < n) {
+			let c = ch();
+			if (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+				i++;
+			} else {
+				break;
+			}
+		}
+	}
+
+	function parseStr() {
+		i++;
+		let out = '';
+		while (i < n) {
+			let c = ch();
+			if (c == '\\') {
+				i++;
+				let e = ch();
+				if (e == 'n') { out += '\n'; }
+				else if (e == 't') { out += '\t'; }
+				else if (e == 'r') { out += '\r'; }
+				else if (e == '"') { out += '"'; }
+				else if (e == '\\') { out += '\\'; }
+				else if (e == '/') { out += '/'; }
+				else { out += e; }
+				i++;
+			} else if (c == '"') {
+				i++;
+				return out;
+			} else {
+				out += c;
+				i++;
+			}
+		}
+		return out;
+	}
+
+	function parseNum() {
+		let start = i;
+		if (ch() == '-') { i++; }
+		while (i < n) {
+			let c = ch();
+			if ((c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') {
+				i++;
+			} else {
+				break;
+			}
+		}
+		return int(substr(s, start, i - start));
+	}
+
+	function parseArr() {
+		i++;
+		let arr = [];
+		ws();
+		if (ch() == ']') { i++; return arr; }
+		while (i < n) {
+			arr.push(parseVal());
+			ws();
+			if (ch() == ',') { i++; ws(); continue; }
+			if (ch() == ']') { i++; break; }
+			break;
+		}
+		return arr;
+	}
+
+	function parseObj() {
+		i++;
+		let obj = {};
+		ws();
+		if (ch() == '}') { i++; return obj; }
+		while (i < n) {
+			ws();
+			if (ch() != '"') { break; }
+			let k = parseStr();
+			ws();
+			if (ch() == ':') { i++; }
+			let v = parseVal();
+			obj[k] = v;
+			ws();
+			if (ch() == ',') { i++; continue; }
+			if (ch() == '}') { i++; break; }
+			break;
+		}
+		return obj;
+	}
+
+	parseVal = function () {
+		ws();
+		let c = ch();
+		if (c == '{') { return parseObj(); }
+		if (c == '[') { return parseArr(); }
+		if (c == '"') { return parseStr(); }
+		if (c == 't') { i += 4; return true; }
+		if (c == 'f') { i += 5; return false; }
+		if (c == 'n') { i += 4; return null; }
+		return parseNum();
+	};
+
+	return parseVal();
 }
 
 function rpcCall(method, params) {
 	const rpcCfg = readRpcConfig();
 	const port = rpcCfg.port;
 	const authKey = rpcCfg.authKey;
-	let sock;
-	try {
-		// 连接带 3s 超时，避免 rpcd worker 被不可达端口拖住
-		sock = fs.connect(`127.0.0.1:${port}`, 3000);
-	} catch (e) {
-		return { success: false, error: 'Rust 后端未运行或端口不可达' };
-	}
 
 	const payload = { id: 1, method: method, params: params };
-	if (authKey !== '') {
+	if (authKey != '') {
 		payload.params.auth_key = authKey;
 	}
 
+	/* 本固件 ucode fs 无 connect，经 busybox nc 管道访问回环 RPC */
+	const body = sprintf('%J', payload);
+	const tmp = '/tmp/mt5700-rpc.json';
+	let f;
 	try {
-		sock.write(JSON.stringify(payload) + '\n');
-		// 读取 10s：须覆盖后端命令总超时（AT 2s + 余量 3s ≈ 5s），避免慢命令被误报「无应答」
-		let line = sock.read('line', 10000);
-		sock.close();
-		if (!line) {
-			return { success: false, error: 'Rust 后端无应答' };
-		}
-		let resp = JSON.parse(line);
-		if (resp.error) {
-			return { success: false, error: resp.error.message || 'RPC 错误' };
-		}
-		return resp.result || {};
+		f = fs.open(tmp, 'w');
 	} catch (e) {
-		try { sock.close(); } catch (_) { /* ignore */ }
-		return { success: false, error: `RPC 调用失败: ${e.message}` };
+		return { success: false, error: '无法写临时文件' };
+	}
+	if (!f) {
+		return { success: false, error: '无法写临时文件' };
+	}
+	f.write(body + '\n');
+	f.close();
+
+	let p;
+	try {
+		p = fs.popen('nc 127.0.0.1 ' + port + ' < ' + tmp, 'r');
+	} catch (e) {
+		return { success: false, error: '无法连接 Rust 后端' };
+	}
+	if (!p) {
+		return { success: false, error: '无法连接 Rust 后端' };
+	}
+
+	let line = p.read('line');
+	p.close();
+
+	if (!line) {
+		return { success: false, error: 'Rust 后端无应答' };
+	}
+
+	try {
+		let resp = jsonParse(line);
+		if (resp.error) {
+			let msg = 'RPC 错误';
+			if (resp.error.message) {
+				msg = resp.error.message;
+			}
+			return { success: false, error: msg };
+		}
+		if (resp.result) {
+			return resp.result;
+		}
+		return {};
+	} catch (e) {
+		return { success: false, error: '解析应答失败: ' + e.message };
 	}
 }
 
 return {
 	mt5700: {
-		/* 执行 AT 命令（含 CONNECT?/SCHED?/CELLSCAN 伪命令），返回 {success,data,error} */
 		at: {
-			call: function (params) {
-				let cmd = params && params.cmd;
-				if (typeof cmd !== 'string' || cmd === '') {
+			args: { cmd: '' },
+			call: function (req) {
+				let a = req.args;
+				let cmd = getStr(a, 'cmd');
+				if (cmd == null || cmd == '') {
 					return { success: false, error: '缺少参数 cmd' };
 				}
 				return rpcCall('at', { cmd: cmd });
 			}
 		},
-		/* 拉取自 since 之后的事件增量，返回 {seq, events} */
 		events: {
-			call: function (params) {
-				let since = (params && params.since) ? parseInt(params.since, 10) || 0 : 0;
-				if (since < 0) since = 0;
+			args: { since: 0 },
+			call: function (req) {
+				let a = req.args;
+				let since = 0;
+				let s = getStr(a, 'since');
+				if (s != null && s != '') {
+					since = int(s) || 0;
+				}
+				if (since < 0) {
+					since = 0;
+				}
 				return rpcCall('events', { since: since });
 			}
 		}

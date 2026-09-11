@@ -241,3 +241,6 @@ var SmsEncode = (function () {
 
 	return api;
 })();
+
+if (typeof window !== 'undefined') { window.SmsEncode = SmsEncode; }
+return SmsEncode;
