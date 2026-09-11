@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **每次编译成功自动发布 GitHub Release**（不再仅限 `v*` 标签）：
+  - 标签推送使用标签名；main 推送使用 `Makefile` 的 `PKG_VERSION`（当前 `v1.1.1`）
+  - 同名 Release 先删后建，资产带架构前缀（`x86_64-` / `aarch64_cortex-a53-`）
+
 ### 修复（独立核查 P0/P1/P2）
 
 - **服务配置页 UCI 读写与后端对齐（P0）**：`service.js` 此前按 `connection/*`、`websocket/*`
