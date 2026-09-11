@@ -260,8 +260,24 @@
 .at-console-entry { margin-bottom: 10px; }
 .at-console-cmd { color: #9cdcfe; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .at-console-prompt { color: #6a9955; }
-.at-console-cmd time { color: #666; font-size: 11px; }
-.at-console-res { margin: 3px 0 0; color: #dcdcaa; white-space: pre-wrap; word-break: break-all; }
+.at-console-cmd time { color: #8b949e; font-size: 11px; }
+.at-console-res {
+	margin: 4px 0 0;
+	padding: 6px 8px;
+	/* 主题会给 pre 铺底色（aurora: background-color: var(--surface-sunken)，浅色下 #f4f7fa），
+	   只覆盖 color 会变成「浅底 + 浅黄字」，深色终端里结果完全看不清。
+	   这里显式重置 pre 的底色/边框，保证与终端深色背景一致。 */
+	background: rgba(255, 255, 255, .05);
+	border: 0;
+	border-radius: 4px;
+	color: #dcdcaa;
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	white-space: pre-wrap;
+	word-break: break-all;
+	overflow-x: auto;
+}
 .at-console-res--err { color: #f48771; }
 .at-terminal-input { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .at-terminal-input .cbi-input-text { flex: 1 1 260px; }
