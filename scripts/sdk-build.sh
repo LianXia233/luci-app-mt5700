@@ -122,13 +122,11 @@ echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 mkdir -p package/luci-app-mt5700
 cp -r /work/Makefile /work/htdocs /work/po /work/root /work/src package/luci-app-mt5700/
 
-# ---------- 5) feeds（luci + packages：luci.mk 与 LUCI_DEPENDS 的 rpcd/ucode/usbutils） ----------
+# ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
-  echo "==> 初始化 feeds（luci + packages）"
+  echo "==> 初始化 feeds（仅 luci）"
   ./scripts/feeds update luci >/dev/null 2>&1 || echo "WARN: feeds update luci 失败"
-  ./scripts/feeds update packages >/dev/null 2>&1 || echo "WARN: feeds update packages 失败"
   ./scripts/feeds install luci >/dev/null 2>&1 || true
-  ./scripts/feeds install rpcd ucode ucode-mod-uci usbutils >/dev/null 2>&1 || true
 fi
 [ -f feeds/luci/luci.mk ] || { echo "ERROR: luci feed 不可用"; exit 1; }
 
