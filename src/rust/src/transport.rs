@@ -2,9 +2,8 @@
 //! 拆成独立的 reader / writer，读循环与命令写入可并发（与 Go 语义一致）。
 
 use crate::config::AtConfig;
-use std::future::Future;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[async_trait::async_trait]
 pub trait Transport: Send {
@@ -21,7 +20,6 @@ pub struct TransportParts {
 pub struct TcpTransport {
     stream: tokio::net::TcpStream,
     addr: String,
-    write_timeout: Duration,
 }
 
 impl TcpTransport {
@@ -31,13 +29,12 @@ impl TcpTransport {
             .await
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "连接超时"))??;
         stream.set_nodelay(true).ok();
-        Ok(TcpTransport { stream, addr, write_timeout: timeout })
+        Ok(TcpTransport { stream, addr })
     }
 }
 
 struct TcpWriter {
     stream: Box<dyn AsyncWrite + Unpin + Send>,
-    write_timeout: Duration,
 }
 
 impl AsyncWrite for TcpWriter {
@@ -46,17 +43,9 @@ impl AsyncWrite for TcpWriter {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
+        // 写超时由上层 send_command / RPC 写路径负责；此处不可每 poll 重建 timeout future
         let this = self.get_mut();
-        let fut = this.stream.write(buf);
-        let fut = tokio::time::timeout(this.write_timeout, fut);
-        let mut fut = std::pin::pin!(fut);
-        match fut.as_mut().poll(cx) {
-            std::task::Poll::Ready(Ok(r)) => std::task::Poll::Ready(r),
-            std::task::Poll::Ready(Err(_)) => {
-                std::task::Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "写超时")))
-            }
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
+        std::pin::Pin::new(&mut this.stream).poll_write(cx, buf)
     }
 
     fn poll_flush(
@@ -79,7 +68,7 @@ impl AsyncWrite for TcpWriter {
 impl Transport for TcpTransport {
     fn into_parts(self: Box<Self>) -> TransportParts {
         let (reader, stream) = self.stream.into_split();
-        let writer = TcpWriter { stream: Box::new(stream), write_timeout: self.write_timeout };
+        let writer = TcpWriter { stream: Box::new(stream) };
         TransportParts {
             reader: Box::new(reader),
             writer: Box::new(writer),

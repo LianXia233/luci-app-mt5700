@@ -185,15 +185,18 @@ impl AtClient {
             log_warn!("开启详细错误码失败: {}", e);
         }
         // 短信走 PDU 模式并开启新短信主动上报，来电开启号码显示。
-        if let Ok(resp) = self.send_command(ctx, "AT+CNMI?", COMMAND_TIMEOUT, None).await {
-            if !resp.contains("+CNMI: 2,1,0,2,0") {
+        // 与 Go 一致：查询失败或不含目标值时都要 SET，避免模组刚连上超时导致模式未启用。
+        match self.send_command(ctx, "AT+CNMI?", COMMAND_TIMEOUT, None).await {
+            Ok(resp) if resp.contains("+CNMI: 2,1,0,2,0") => {}
+            _ => {
                 if let Err(e) = self.send_command(ctx, "AT+CNMI=2,1,0,2,0", COMMAND_TIMEOUT, None).await {
                     log_warn!("设置短信上报模式失败: {}", e);
                 }
             }
         }
-        if let Ok(resp) = self.send_command(ctx, "AT+CMGF?", COMMAND_TIMEOUT, None).await {
-            if !resp.contains("+CMGF: 0") {
+        match self.send_command(ctx, "AT+CMGF?", COMMAND_TIMEOUT, None).await {
+            Ok(resp) if resp.contains("+CMGF: 0") => {}
+            _ => {
                 if let Err(e) = self.send_command(ctx, "AT+CMGF=0", COMMAND_TIMEOUT, None).await {
                     log_warn!("设置短信 PDU 模式失败: {}", e);
                 }
@@ -245,11 +248,16 @@ impl AtClient {
         if ns == 0 {
             return None;
         }
-        Some(Instant::now() - Duration::from_nanos((std::time::SystemTime::now()
+        let now_ns = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos() as i64
-            - ns) as u64))
+            .as_nanos() as i64;
+        if now_ns < ns {
+            // 时钟回拨：视为刚结束
+            return Some(Instant::now());
+        }
+        let delta = (now_ns - ns) as u64;
+        Instant::now().checked_sub(Duration::from_nanos(delta))
     }
 
     /// 绕过命令锁直接向模组写入原始字符串（打断扫频用）。
@@ -454,8 +462,12 @@ impl AtClient {
     }
 
     async fn emit(&self, u: Unsolicited) {
-        if let Err(_e) = self.urc_tx.send(u).await {
-            // 队列关闭（服务退出）时忽略
+        // 队列满时丢弃而非阻塞：唯一读循环绝不能被 URC 背压卡住
+        match self.urc_tx.try_send(u) {
+            Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                log_warn!("URC 队列已满，丢弃一条主动上报");
+            }
         }
     }
 }

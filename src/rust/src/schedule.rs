@@ -156,17 +156,24 @@ impl Scheduler {
         };
 
         if target != mode || !applied || want != last {
-            if !target.is_empty() {
+            let ok = if !target.is_empty() {
                 log_info!("时段切换: {} -> {}", or_none(&mode), target);
-                self.apply_lock(&want, &target).await;
+                self.apply_lock(&want, &target).await
             } else if applied {
                 log_info!("当前时段无需锁频，解锁所有频段");
-                self.apply_lock(&unlock_config(), "解锁").await;
+                self.apply_lock(&unlock_config(), "解锁").await
+            } else {
+                true
+            };
+            // 仅在下发成功时标记 applied，失败留给下一周期重试
+            if ok {
+                let mut s = self.state.write().await;
+                s.current_mode = target.clone();
+                s.last_applied = want.clone();
+                s.applied = true;
+            } else {
+                log_warn!("锁频下发失败，保持 applied=false 以便下周期重试");
             }
-            let mut s = self.state.write().await;
-            s.current_mode = target.clone();
-            s.last_applied = want.clone();
-            s.applied = true;
         }
 
         if self.has_service().await {
@@ -240,8 +247,8 @@ impl Scheduler {
         false
     }
 
-    /// 下发一次完整的锁频切换。
-    async fn apply_lock(&self, cfg: &LockPair, mode: &str) {
+    /// 下发一次完整的锁频切换。返回是否成功（全部实际下发的锁频命令均 OK）。
+    async fn apply_lock(&self, cfg: &LockPair, mode: &str) -> bool {
         let switch_count = {
             let mut s = self.state.write().await;
             s.switch_count += 1;
@@ -251,13 +258,15 @@ impl Scheduler {
         log_info!("开始切换到{mode}锁频设置 (第 {switch_count} 次)");
 
         let mut done: Vec<String> = Vec::new();
+        let mut lock_ok = true;
+        let mut lock_attempts = 0usize;
 
         if sched.toggle_airplane {
             match self.client.send_command(&self.ctx, "AT+CFUN=0", crate::atclient::COMMAND_TIMEOUT, None).await {
                 Ok(r) if r.ok() => {
                     log_info!("已进入飞行模式");
                     if !sleep_ctx(&self.ctx, Duration::from_secs(2)).await {
-                        return;
+                        return false;
                     }
                 }
                 _ => log_warn!("进入飞行模式失败"),
@@ -265,20 +274,26 @@ impl Scheduler {
         }
 
         if let Some((cmd, action)) = self.lte_command(&cfg.lte).await {
+            lock_attempts += 1;
             if self.run_lock_command(&cmd, &action).await {
                 done.push(action);
+            } else {
+                lock_ok = false;
             }
             if !sleep_ctx(&self.ctx, Duration::from_secs(1)).await {
-                return;
+                return false;
             }
         }
 
         if let Some((cmd, action)) = self.nr_command(&cfg.nr).await {
+            lock_attempts += 1;
             if self.run_lock_command(&cmd, &action).await {
                 done.push(action);
+            } else {
+                lock_ok = false;
             }
             if !sleep_ctx(&self.ctx, Duration::from_secs(1)).await {
-                return;
+                return false;
             }
         }
 
@@ -291,27 +306,35 @@ impl Scheduler {
                 _ => log_warn!("退出飞行模式失败"),
             }
             if !sleep_ctx(&self.ctx, Duration::from_secs(3)).await {
-                return;
+                return false;
             }
+        }
+
+        // 一条锁频命令都未下发（如 type=3 且 bands 为空）视为失败，避免空操作被标成 applied
+        if lock_attempts == 0 {
+            log_warn!("未生成任何锁频命令（配置可能为空），视为下发失败");
+            lock_ok = false;
         }
 
         let actions = if done.is_empty() { "未执行任何操作".to_string() } else { done.join("、") };
         let notifier = self.notifier.clone();
         let content = format!(
-            "🔄 定时锁频切换\n时间: {}\n模式: {}\nLTE: {}\nNR: {}\n执行操作: {}\n切换次数: 第 {} 次",
+            "🔄 定时锁频切换\n时间: {}\n模式: {}\nLTE: {}\nNR: {}\n执行操作: {}\n切换次数: 第 {} 次\n结果: {}",
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
             mode,
             lock_summary("LTE", &cfg.lte),
             lock_summary("NR", &cfg.nr),
             actions,
-            switch_count
+            switch_count,
+            if lock_ok { "成功" } else { "失败" }
         );
         tokio::spawn(async move {
             notifier
                 .notify(Notification { sender: SENDER_SIGNAL.into(), content, kind: NotifyKind::Signal, memory_full: false })
                 .await;
         });
-        log_info!("定时锁频切换完成: {}", actions);
+        log_info!("定时锁频切换完成: {}（{}）", actions, if lock_ok { "成功" } else { "失败" });
+        lock_ok
     }
 
     async fn run_lock_command(&self, cmd: &str, action: &str) -> bool {

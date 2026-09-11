@@ -7,6 +7,32 @@
 
 ## [Unreleased]
 
+### 修复（独立核查 P0/P1/P2）
+
+- **服务配置页 UCI 读写与后端对齐（P0）**：`service.js` 此前按 `connection/*`、`websocket/*`
+  等多 section 写入，与 Rust/ucode 读取的 `config` 段扁平键（`connection_type`、`websocket_port`…）
+  完全不一致，保存后不生效。已统一为 `config` 段；webhook 键改为 `wechat_webhook`；
+  服务运行状态改读 `instances.instance1.running`；去掉无效的 `connection_type=AUTO` 选项。
+- **定时锁频下发失败不再标记 applied（P0）**：`schedule.rs::apply_lock` 返回成功与否，
+  失败或未生成任何锁频命令时保持 `applied=false`，下周期自动重试；空 bands type=3 视为失败。
+- **RPC 单行长度前置限制（P0）**：`read_line_limited` 按行 `take(8KB)`，超长行排空并断开，
+  杜绝无换行超长请求 OOM。
+- **ucode 读超时 3s→10s**：覆盖后端命令总超时（2s+3s），消除慢命令误报「无应答」。
+- **CNMI/CMGF 初始化**：查询失败仍强制 SET（与 Go 一致），避免短信模式未启用。
+- **URC/通知队列满改为 try_send 丢弃**，不再阻塞 AT 唯一读循环。
+- **`long_command_ended_at` 时钟回拨安全**：`checked_sub`，避免 Instant 下溢 panic。
+- **`isScanRunning` 正则**：补上 `\\^`，恢复扫频运行状态检测。
+- **init.d reload**：优先 `ubus service delete` 再 start，降低与 respawn 的双实例竞态。
+- **TCP Writer**：去掉每 poll 重建 timeout future 的错误实现，写超时交由上层。
+- **+CMTI 索引校验**：必须为纯数字，堵住 NETWORK 模式 URC 注入面。
+- **页面定时器生命周期**：`Ui.interval`/`Ui.subscribe` 在 hashchange 时自动清理，
+  修复切页后幽灵 AT 轮询泄漏。
+- **默认连接 PCUI**：`config.rs` 默认 `SERIAL` + `/dev/ttyUSB1`，与 UCI 一致；非 NETWORK 一律走串口。
+- **LUCI_DEPENDS**：`+rpcd +ucode +ucode-mod-uci +usbutils`。
+- **ACL**：去掉 `file.remove` 与整包 firewall 写权限。
+- **单包云编译**：v1.1.0 起已为前后端一体包；本版 `PKG_VERSION=1.1.1`，workflow/sdk-build
+  继续校验包内必须含 `usr/bin/at-webserver-rust`。
+
 ### 变更
 
 - **前端与后端合并为单个包（v1.1.0 起）**：

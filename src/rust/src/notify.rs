@@ -100,7 +100,7 @@ impl Notifier {
             return;
         }
         let sender = msg.sender.clone();
-        if self.tx.send(msg).await.is_err() {
+        if self.tx.try_send(msg).is_err() {
             log_warn!("通知队列已满，丢弃一条: {}", sender);
         }
     }

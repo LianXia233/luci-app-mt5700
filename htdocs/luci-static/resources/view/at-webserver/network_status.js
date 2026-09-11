@@ -731,9 +731,9 @@ return L.view.extend({
 
 		var ar = Ui.autoRefresh(function (enabled, interval) {
 			if (timer) { clearInterval(timer); timer = null; }
-			if (enabled) timer = setInterval(refreshAll, interval * 1000);
+			if (enabled) timer = Ui.interval(interval * 1000, refreshAll);
 		});
-		var timer = setInterval(refreshAll, 5000);
+		var timer = Ui.interval(5000, refreshAll);
 
 		var extra = E('div', { 'class': 'at-panel-actions' });
 		extra.appendChild(ar.el);

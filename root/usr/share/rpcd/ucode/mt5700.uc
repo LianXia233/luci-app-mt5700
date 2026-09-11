@@ -45,8 +45,8 @@ function rpcCall(method, params) {
 
 	try {
 		sock.write(JSON.stringify(payload) + '\n');
-		// 读取也带 3s 超时：Rust 侧即使无应答，rpcd 线程也不会被无限阻塞
-		let line = sock.read('line', 3000);
+		// 读取 10s：须覆盖后端命令总超时（AT 2s + 余量 3s ≈ 5s），避免慢命令被误报「无应答」
+		let line = sock.read('line', 10000);
 		sock.close();
 		if (!line) {
 			return { success: false, error: 'Rust 后端无应答' };
