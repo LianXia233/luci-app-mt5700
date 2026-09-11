@@ -47,8 +47,11 @@ compile:
 	@echo "==> [mt5700] 后端二进制就绪: $(BIN)"
 
 install: compile
-	$(INSTALL_DIR) $(DESTDIR)/usr/bin
-	$(INSTALL_BIN) "$(BIN)" $(DESTDIR)/usr/bin/at-webserver-rust
+	# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
+	# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
+	mkdir -p "$(DESTDIR)/usr/bin"
+	cp "$(BIN)" "$(DESTDIR)/usr/bin/at-webserver-rust"
+	chmod 0755 "$(DESTDIR)/usr/bin/at-webserver-rust"
 
 clean:
 	cd $(RUST_DIR) && cargo clean 2>/dev/null || true
