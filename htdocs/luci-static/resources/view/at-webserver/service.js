@@ -16,6 +16,12 @@
 
 return L.view.extend({
 	load: function () {
+		var listSerial = L.rpc.declare({
+			object: 'file',
+			method: 'list',
+			params: ['path'],
+			expect: { entries: [] }
+		});
 		return Promise.all([
 			L.uci.load('at-webserver'),
 			L.rpc.declare({
@@ -23,10 +29,21 @@ return L.view.extend({
 				method: 'list',
 				params: ['name'],
 				expect: { '': {} }
-			})('at-webserver').catch(function () { return {}; })
+			})('at-webserver').catch(function () { return {}; }),
+			listSerial('/dev').catch(function () { return { entries: [] }; })
 		]).then(function (res) {
+			var entries = (res[2] && res[2].entries) || [];
+			var serials = [];
+			entries.forEach(function (e) {
+				if (!e || !e.name) return;
+				if (/^(ttyUSB|ttyACM|ttyAMA|ttyS)/.test(e.name)) {
+					serials.push('/dev/' + e.name);
+				}
+			});
+			serials.sort();
 			return {
-				service: res[1] && res[1]['at-webserver'] ? res[1]['at-webserver'] : {}
+				service: res[1] && res[1]['at-webserver'] ? res[1]['at-webserver'] : {},
+				serials: serials
 			};
 		});
 	},
@@ -78,10 +95,43 @@ return L.view.extend({
 		netPortInput.max = 65535;
 		connPanel._body.appendChild(Ui.field('网络端口', netPortInput, '模组 TCP 端口，默认 20249'));
 
-		var serialInput = document.createElement('input');
-		serialInput.className = 'cbi-input-text';
-		serialInput.placeholder = '/dev/ttyUSB1';
-		connPanel._body.appendChild(Ui.field('串口设备', serialInput, 'auto 表示自动探测'));
+		/* 串口：下拉 + 自定义；选项来自系统 /dev 识别结果 */
+		var serialSel = document.createElement('select');
+		serialSel.className = 'cbi-input-select';
+		function fillSerialOptions(current) {
+			while (serialSel.firstChild) serialSel.removeChild(serialSel.firstChild);
+			function add(v, label) {
+				var o = document.createElement('option');
+				o.value = v; o.textContent = label || v;
+				serialSel.appendChild(o);
+			}
+			add('auto', '自动探测（优先 /dev/ttyUSB1 PCUI）');
+			(state.serials || []).forEach(function (p) {
+				var hint = p === '/dev/ttyUSB1' ? '（PCUI 推荐）' : '';
+				add(p, p + hint);
+			});
+			add('__custom__', '自定义路径…');
+			if (current) {
+				var exists = false;
+				for (var i = 0; i < serialSel.options.length; i++) {
+					if (serialSel.options[i].value === current) { exists = true; break; }
+				}
+				if (!exists && current !== '__custom__') {
+					add(current, current + '（当前配置）');
+				}
+				serialSel.value = current;
+				if (!exists && current !== '__custom__') serialSel.value = current;
+			}
+		}
+		var serialCustom = document.createElement('input');
+		serialCustom.className = 'cbi-input-text';
+		serialCustom.placeholder = '例如 /dev/ttyUSB2';
+		serialCustom.style.display = 'none';
+		serialSel.addEventListener('change', function () {
+			serialCustom.style.display = serialSel.value === '__custom__' ? '' : 'none';
+		});
+		connPanel._body.appendChild(Ui.field('串口设备', serialSel, '列出系统已识别的 ttyUSB/ttyACM/ttyS 设备'));
+		connPanel._body.appendChild(Ui.field('自定义串口路径', serialCustom, '仅在选择「自定义路径」时生效'));
 
 		var baudInput = document.createElement('input');
 		baudInput.type = 'number';
@@ -154,7 +204,7 @@ return L.view.extend({
 		connTypeSel.value = String(get('connection_type', 'SERIAL'));
 		hostInput.value = String(get('network_host', '192.168.8.1'));
 		netPortInput.value = String(get('network_port', '20249'));
-		serialInput.value = String(get('serial_port', 'auto'));
+		fillSerialOptions(String(get('serial_port', 'auto')));
 		baudInput.value = String(get('serial_baudrate', '115200'));
 		wsHostInput.value = '';
 		wsPortInput.value = String(get('websocket_port', '8765'));
@@ -174,7 +224,11 @@ return L.view.extend({
 			set('connection_type', connTypeSel.value);
 			set('network_host', hostInput.value.trim() || '192.168.8.1');
 			set('network_port', String(parseInt(netPortInput.value, 10) || 20249));
-			set('serial_port', serialInput.value.trim() || 'auto');
+			var serialVal = serialSel.value;
+			if (serialVal === '__custom__') {
+				serialVal = serialCustom.value.trim() || 'auto';
+			}
+			set('serial_port', serialVal || 'auto');
 			set('serial_baudrate', String(parseInt(baudInput.value, 10) || 115200));
 			set('websocket_port', String(parseInt(wsPortInput.value, 10) || 8765));
 			set('websocket_auth_key', authKeyInput.value.trim());
@@ -189,6 +243,15 @@ return L.view.extend({
 				return L.uci.apply(false).then(function () {
 					Ui.success('配置已保存');
 					return reloadService();
+				}, function (err) {
+					// ubus 5 = NO_DATA：无待应用变更时 rpcd 不回数据，视为成功
+					var code = err && err.code;
+					var msg = (err && err.message) || '';
+					if (code === 5 || /未收到数据|No data/i.test(msg)) {
+						Ui.success('配置已保存');
+						return reloadService();
+					}
+					throw err;
 				});
 			}).catch(function (err) {
 				Ui.error('保存失败: ' + ((err && err.message) || '未知错误'));
