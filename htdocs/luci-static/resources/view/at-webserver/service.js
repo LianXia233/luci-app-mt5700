@@ -32,14 +32,33 @@ return L.view.extend({
 			})('at-webserver').catch(function () { return {}; }),
 			listSerial('/dev').catch(function () { return { entries: [] }; })
 		]).then(function (res) {
-			var entries = (res[2] && res[2].entries) || [];
+			var raw = res[2];
+			var entries = [];
+			if (Array.isArray(raw)) {
+				entries = raw;
+			} else if (raw && Array.isArray(raw.entries)) {
+				entries = raw.entries;
+			} else if (raw && typeof raw === 'object') {
+				// 某些 rpcd 返回 { name: type } 映射
+				Object.keys(raw).forEach(function (k) {
+					var v = raw[k];
+					if (v && typeof v === 'object') {
+						entries.push(Object.assign({ name: k }, v));
+					} else {
+						entries.push({ name: k, type: String(v || '') });
+					}
+				});
+			}
 			var serials = [];
 			entries.forEach(function (e) {
-				if (!e || !e.name) return;
-				if (/^(ttyUSB|ttyACM|ttyAMA|ttyS)/.test(e.name)) {
-					serials.push('/dev/' + e.name);
+				var name = e && (e.name || e.path || '');
+				if (!name) return;
+				name = String(name).replace(/^\/dev\//, '');
+				if (/^(ttyUSB|ttyACM|ttyAMA|ttyS)\d+/.test(name)) {
+					serials.push('/dev/' + name);
 				}
 			});
+			serials = serials.filter(function (p, i, a) { return a.indexOf(p) === i; });
 			serials.sort();
 			return {
 				service: res[1] && res[1]['at-webserver'] ? res[1]['at-webserver'] : {},
