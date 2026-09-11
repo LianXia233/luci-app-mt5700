@@ -152,20 +152,21 @@ export RUST_TRIPLE
 echo "==> 编译单包（LuCI 前端 + Rust 后端，target=$RUST_TRIPLE）"
 make package/luci-app-mt5700/compile V=s
 
-# 校验 cargo 确实产出了目标二进制（避免 package.mk 空跑但退出码为 0）。
-# 注意：build_dir/target-*/luci-app-mt5700 可能是符号链接（src/ 包常见），
-# find 默认不跟随 symlink 会找不到，必须用 find -L 或精确通配。
+# 校验后端二进制确实被打包进主包（.pkgdir 是最终进包目录）。
+# 注意：LuCI 编译完成后会清理 build_dir 下的 src/ 源码目录（含 cargo target），
+# 所以不能找 src/target/.../release/at-webserver，改找 .pkgdir 里的安装文件
+# at-webserver-rust（这正是 install 步骤 cp 的产物，也对应包内路径 usr/bin/at-webserver-rust）。
 BIN_PATH=""
-BIN_PATH=$(ls build_dir/target-*_musl/luci-app-mt5700/src/target/${RUST_TRIPLE}/release/at-webserver 2>/dev/null | head -1)
-[ -n "$BIN_PATH" ] || BIN_PATH=$(find -L build_dir -type f -path "*/${RUST_TRIPLE}/release/at-webserver" -print -quit 2>/dev/null)
+BIN_PATH=$(find build_dir -type f -name 'at-webserver-rust' -print -quit 2>/dev/null)
 [ -n "$BIN_PATH" ] || {
-	echo "ERROR: 未找到 Rust 产物 ${RUST_TRIPLE}/release/at-webserver"
-	echo "--- build_dir/target-*_musl ---"; ls -la build_dir/target-*_musl 2>/dev/null | head -20
-	echo "--- find -L 全盘搜索 ---"
-	find -L build_dir -name at-webserver -type f 2>/dev/null | head -10
+	echo "ERROR: 未找到打包产物 at-webserver-rust"
+	echo "--- 全盘搜索 at-webserver* ---"
+	find build_dir -name 'at-webserver*' 2>/dev/null | head -10
+	echo "--- .pkgdir usr/bin ---"
+	ls -la build_dir/target-*_musl/luci-app-mt5700/.pkgdir/*/usr/bin/ 2>/dev/null | head -10
 	exit 1
 }
-echo "==> Rust 产物: $BIN_PATH"
+echo "==> 后端产物: $BIN_PATH"
 
 # ---------- 7) 收集产物到 /out（白名单：只收本项目包，排除 SDK 顺带编译的系统库）----------
 # 系统库（libc/libgcc1/libstdcpp6/libatomic1/libquadmath1/libpthread/librt 等）由 opkg/apk
