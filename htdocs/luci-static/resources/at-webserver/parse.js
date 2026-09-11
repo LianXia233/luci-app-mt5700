@@ -1,5 +1,6 @@
 'use strict';
-/* global AtWs */
+'require baseclass';
+/* global AtWs, baseclass */
 
 /**
  * 补充解析库：运行状态 / 扫频 / USSD / 短信 / 锁频 / 定时锁频 DTO。
@@ -895,6 +896,12 @@ var Parse = (function () {
 	return api;
 })();
 
-/* LuCI module export: return + window global for page `Parse` */
-if (typeof window !== 'undefined') { window.Parse = Parse; }
-return Parse;
+/*
+ * LuCI requires factory to return a Class subclass (instantiated once).
+ * Also set window.Parse for page-side global.
+ */
+var ParseClass = baseclass.extend(Parse);
+if (typeof window !== 'undefined') {
+	window.Parse = new ParseClass();
+}
+return ParseClass;

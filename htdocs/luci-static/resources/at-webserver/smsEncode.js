@@ -1,4 +1,6 @@
 'use strict';
+'require baseclass';
+/* global baseclass */
 
 /**
  * 短信发送 PDU 编码器（等价原前端 node-pdu 的 SMS-SUBMIT 编码）。
@@ -242,5 +244,8 @@ var SmsEncode = (function () {
 	return api;
 })();
 
-if (typeof window !== 'undefined') { window.SmsEncode = SmsEncode; }
-return SmsEncode;
+var SmsEncodeClass = baseclass.extend(SmsEncode);
+if (typeof window !== 'undefined') {
+	window.SmsEncode = new SmsEncodeClass();
+}
+return SmsEncodeClass;
