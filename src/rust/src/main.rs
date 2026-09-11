@@ -114,7 +114,8 @@ async fn run(verbose: bool) -> Result<(), String> {
     let serve_task = tokio::spawn({
         let rpc = rpc.clone();
         let port = cfg.websocket.port;
-        async move { rpc.serve(port).await }
+        let bind = cfg.websocket.bind.clone();
+        async move { rpc.serve(port, &bind).await }
     });
 
     // 等待退出信号或服务异常。
@@ -173,12 +174,17 @@ fn log_config(cfg: &Config) {
     }
 
     log_info!(
-        "LuCI RPC 端口: {}，连接密钥: {}",
+        "LuCI RPC: {}:{}，密钥: {}",
+        cfg.websocket.bind,
         cfg.websocket.port,
         if cfg.websocket.auth_key.is_empty() { "未设置" } else { "已设置" }
     );
-    if cfg.websocket.allow_wan {
-        log_warn!("配置中允许外网访问 WebSocket——RPC 仅监听回环地址，该键保留兼容但不生效");
+    if cfg.websocket.bind != "127.0.0.1" {
+        log_warn!(
+            "RPC 对外监听 {}:{} —— 请确保防火墙已限制访问，并设置 websocket_auth_key",
+            cfg.websocket.bind,
+            cfg.websocket.port
+        );
     }
 
     log_info!(

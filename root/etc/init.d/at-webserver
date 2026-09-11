@@ -77,19 +77,35 @@ at_webserver_post_start() {
 		fi
 	fi
 
-	# 防火墙规则（RPC 仅回环，此处只管模块 AT 端口）
+	# 防火墙规则（RPC + 模块 AT 端口）
 	local module_allow_wan restrict_module module_host module_port
+	local rpc_allow_wan rpc_port
 	config_get_bool module_allow_wan config network_allow_wan 0
 	config_get_bool restrict_module config network_restrict_access 0
 	config_get module_host config network_host '192.168.8.1'
 	config_get module_port config network_port '20249'
+	config_get_bool rpc_allow_wan config websocket_allow_wan 0
+	config_get rpc_port config websocket_port 8765
 
 	local rule_name rule_idx
-	for rule_name in at_webserver_wan_block at_webserver_wan_allow at_module_restrict at_module_wan_block at_module_wan_allow; do
+	for rule_name in at_webserver_wan_block at_webserver_wan_allow at_module_restrict at_module_wan_block at_module_wan_allow at_rpc_wan_allow at_rpc_wan_block; do
 		rule_idx=$(uci show firewall 2>/dev/null | grep "\.name='$rule_name'" | cut -d'[' -f2 | cut -d']' -f1 | head -n1)
 		[ -n "$rule_idx" ] && uci delete firewall.@rule[$rule_idx] 2>/dev/null
 	done
 	uci commit firewall 2>/dev/null
+
+	# RPC 对外监听时放行端口；否则保持无 WAN 规则（仅回环）
+	if [ "$rpc_allow_wan" -eq 1 ]; then
+		uci add firewall rule >/dev/null
+		uci set firewall.@rule[-1].name='at_rpc_wan_allow'
+		uci set firewall.@rule[-1].src='lan'
+		uci set firewall.@rule[-1].dest='*'
+		uci set firewall.@rule[-1].dest_port="$rpc_port"
+		uci set firewall.@rule[-1].proto='tcp'
+		uci set firewall.@rule[-1].target='ACCEPT'
+		uci set firewall.@rule[-1].enabled='1'
+		logger -t at-webserver "已允许访问 RPC 端口 $rpc_port（建议设置 auth_key）"
+	fi
 
 	if [ "$module_allow_wan" -eq 1 ]; then
 		uci add firewall rule >/dev/null
