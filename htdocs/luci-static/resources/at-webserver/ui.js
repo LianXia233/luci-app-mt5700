@@ -329,5 +329,49 @@ var Ui = (function () {
 		};
 	};
 
+	/* ---------- 定时器/订阅生命周期（切页自动清理） ---------- */
+
+	var _hooks = [];
+
+	function _installHashHook() {
+		if (_installHashHook._done) return;
+		_installHashHook._done = true;
+		window.addEventListener('hashchange', function () {
+			// 延后一拍，避免同 tick 内先注册又被立刻清掉
+			setTimeout(function () {
+				var old = _hooks;
+				_hooks = [];
+				old.forEach(function (fn) { try { fn(); } catch (e) { /* ignore */ } });
+			}, 0);
+		});
+	}
+
+	/**
+	 * set interval，路由切换（hashchange）时自动 clear。
+	 * 返回原 timer id。
+	 */
+	api.interval = function (ms, fn) {
+		_installHashHook();
+		var id = setInterval(fn, ms);
+		_hooks.push(function () { clearInterval(id); });
+		return id;
+	};
+
+	/**
+	 * 订阅 AtWs 事件，hashchange 时自动 unsubscribe。
+	 */
+	api.subscribe = function (handler) {
+		_installHashHook();
+		if (AtWs && AtWs.client && typeof AtWs.client.subscribe === 'function') {
+			AtWs.client.subscribe(handler);
+		}
+		_hooks.push(function () {
+			if (AtWs && AtWs.client && typeof AtWs.client.unsubscribe === 'function') {
+				AtWs.client.unsubscribe(handler);
+			}
+		});
+		return handler;
+	};
+
 	return api;
 })();

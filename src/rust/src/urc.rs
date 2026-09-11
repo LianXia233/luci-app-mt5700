@@ -554,8 +554,12 @@ fn cmti_capture(line: &str) -> Option<(String, String)> {
     let end = rest.find('"')?;
     let storage = rest[..end].to_string();
     let after = rest[end + 1..].trim_start().trim_start_matches(',').trim();
-    let index = after.split(',').next()?.to_string();
-    Some((storage, index))
+    let index = after.split(',').next()?.trim();
+    // 索引必须是纯数字，防止 NETWORK 模式下 URC 注入 AT 命令
+    if index.is_empty() || !index.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((storage, index.to_string()))
 }
 
 /// 从 +CMGR/+CMGL 的应答里取出 PDU 并解码。

@@ -230,7 +230,7 @@ var Parse = (function () {
 
 	api.SCAN_ABORT_COMMAND = 'AT^CELLSCAN=ABORT';
 	api.SCAN_STATE_COMMAND = 'AT^CELLSCAN=STATE';
-	api.isScanRunning = function (text) { return /^CELLSCAN:\s*RUNNING/i.test(text); };
+	api.isScanRunning = function (text) { return /\^CELLSCAN:\s*RUNNING/i.test(text); };
 
 	/* ================= USSD ================= */
 
