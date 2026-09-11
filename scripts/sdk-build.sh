@@ -153,17 +153,16 @@ echo "==> 编译单包（LuCI 前端 + Rust 后端，target=$RUST_TRIPLE）"
 make package/luci-app-mt5700/compile V=s
 
 # 校验 cargo 确实产出了目标二进制（避免 package.mk 空跑但退出码为 0）。
-# 优先用固定路径（与 src/Makefile 的 $(CURDIR)/target 一致，test -x 已确认存在），
-# 再以 find 兜底，避免容器环境下 -path 匹配的意外差异。
+# 注意：build_dir/target-*/luci-app-mt5700 可能是符号链接（src/ 包常见），
+# find 默认不跟随 symlink 会找不到，必须用 find -L 或精确通配。
 BIN_PATH=""
-for d in build_dir/*/luci-app-mt5700/src/target/${RUST_TRIPLE}/release/at-webserver; do
-	[ -f "$d" ] && BIN_PATH="$d" && break
-done
-[ -n "$BIN_PATH" ] || BIN_PATH=$(find build_dir -type f -path "*/${RUST_TRIPLE}/release/at-webserver" -print -quit 2>/dev/null)
+BIN_PATH=$(ls build_dir/target-*_musl/luci-app-mt5700/src/target/${RUST_TRIPLE}/release/at-webserver 2>/dev/null | head -1)
+[ -n "$BIN_PATH" ] || BIN_PATH=$(find -L build_dir -type f -path "*/${RUST_TRIPLE}/release/at-webserver" -print -quit 2>/dev/null)
 [ -n "$BIN_PATH" ] || {
 	echo "ERROR: 未找到 Rust 产物 ${RUST_TRIPLE}/release/at-webserver"
-	echo "--- build_dir 顶层 ---"; ls -la build_dir 2>/dev/null | head -20
-	echo "--- 候选目录 ---"; ls -la build_dir/*/luci-app-mt5700/src/target/${RUST_TRIPLE}/release/ 2>/dev/null | head -20
+	echo "--- build_dir/target-*_musl ---"; ls -la build_dir/target-*_musl 2>/dev/null | head -20
+	echo "--- find -L 全盘搜索 ---"
+	find -L build_dir -name at-webserver -type f 2>/dev/null | head -10
 	exit 1
 }
 echo "==> Rust 产物: $BIN_PATH"
