@@ -894,3 +894,7 @@ var Parse = (function () {
 
 	return api;
 })();
+
+/* LuCI module export: return + window global for page `Parse` */
+if (typeof window !== 'undefined') { window.Parse = Parse; }
+return Parse;
