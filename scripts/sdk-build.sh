@@ -98,6 +98,11 @@ mkdir -p "${CARGO_HOME}"
 cat > "${CARGO_HOME}/config.toml" <<EOF
 [target.${RUST_TRIPLE}]
 linker = "/opt/zig-linker"
+# 关键修复：让 zig 全权负责 crt（crt1/crti/crtn 等），rustc 不再传递
+# self-contained crt，否则两者叠加导致 ld.lld duplicate symbol:
+# _start/_init/_fini/_start_c（此前云编译在链接阶段必然失败）。
+# 已用 zig 0.13 + rust stable 本地实测 x86_64 musl 构建通过。
+rustflags = ["-C", "link-self-contained=no"]
 EOF
 echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 
