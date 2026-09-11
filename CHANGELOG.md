@@ -28,7 +28,7 @@
 - **页面定时器生命周期**：`Ui.interval`/`Ui.subscribe` 在 hashchange 时自动清理，
   修复切页后幽灵 AT 轮询泄漏。
 - **默认连接 PCUI**：`config.rs` 默认 `SERIAL` + `/dev/ttyUSB1`，与 UCI 一致；非 NETWORK 一律走串口。
-- **LUCI_DEPENDS**：`+rpcd +ucode +ucode-mod-uci +usbutils`。
+- **LUCI_DEPENDS**：保持为空（luci-base 已带 rpcd/ucode；硬依赖 usbutils 会在 SDK 拖 libusb 编译失败）。
 - **ACL**：去掉 `file.remove` 与整包 firewall 写权限。
 - **单包云编译**：v1.1.0 起已为前后端一体包；本版 `PKG_VERSION=1.1.1`，workflow/sdk-build
   继续校验包内必须含 `usr/bin/at-webserver-rust`。
