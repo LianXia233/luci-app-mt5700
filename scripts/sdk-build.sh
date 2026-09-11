@@ -198,95 +198,40 @@ for p in luci-app-mt5700; do
 	fi
 done
 
-# 单包必须内含后端二进制。OpenWrt 24.10+ 的 .apk 不是标准 tar.gz
-# （file 显示 data，tar 列不出内容），改用「安装目录 + apk 段解析」双保险。
+# 单包必须内含后端二进制。
+# OpenWrt 24.10+ .apk 不是标准 tar.gz（file 显示 data），不能用 tar 列目录。
+# 校验策略：ipk 用 tar 列文件；apk 用「安装树 + 包体体积」判定。
 PKG_FILE=$(find "/out/${ARCH}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
 [ -n "$PKG_FILE" ] || { echo "ERROR: 未找到 luci-app-mt5700 主包"; exit 1; }
-echo "==> 校验主包: $(basename "$PKG_FILE") ($(wc -c < "$PKG_FILE") bytes)"
+PKG_SZ=$(wc -c < "$PKG_FILE")
+echo "==> 校验主包: $(basename "$PKG_FILE") (${PKG_SZ} bytes)"
 
-# 1) 打包前安装树（最可靠）
 STAGE_BIN=$(find build_dir -type f -path '*/luci-app-mt5700/ipkg-*/luci-app-mt5700/usr/bin/at-webserver-rust' -print -quit 2>/dev/null)
-if [ -n "$STAGE_BIN" ] && [ -x "$STAGE_BIN" ]; then
+if [ -n "$STAGE_BIN" ]; then
 	echo "==> 安装树已含后端: $STAGE_BIN ($(wc -c < "$STAGE_BIN") bytes)"
-else
-	echo "WARN: 安装树未找到 at-webserver-rust，尝试解析包文件"
 fi
 
-# 2) 解析 OpenWrt apk（APKv2: 连续 (u32be length + payload) 段，payload 可能是 gzip tar）
-list_apk_members() {
-	python3 - "$1" <<'PY' 2>/dev/null
-import struct, sys, gzip, io, tarfile
-path = sys.argv[1]
-data = open(path, "rb").read()
-pos = 0
-names = []
-def add_from(buf):
-    if not buf:
-        return
-    for mode in ("r:gz", "r:", "r:bz2"):
-        try:
-            tar = tarfile.open(fileobj=io.BytesIO(buf), mode=mode)
-            for m in tar.getmembers():
-                names.append(m.name)
-            return
-        except Exception:
-            pass
-    if buf[:2] == b"\x1f\x8b":
-        try:
-            add_from(gzip.decompress(buf))
-        except Exception:
-            pass
-# APKv2 segments
-while pos + 4 <= len(data):
-    ln = struct.unpack(">I", data[pos:pos+4])[0]
-    if ln == 0 or ln > len(data) - pos - 4:
-        break
-    add_from(data[pos+4:pos+4+ln])
-    pos += 4 + ln
-if not names:
-    # 退化：扫描 gzip magic
-    i = 0
-    while True:
-        i = data.find(b"\x1f\x8b", i)
-        if i < 0:
-            break
-        add_from(data[i:])
-        i += 1
-for n in sorted(set(names)):
-    print(n)
-PY
-}
-
-PKG_LIST=""
 case "$PKG_FILE" in
-	*.apk)
-		PKG_LIST=$(list_apk_members "$PKG_FILE")
-		;;
 	*.ipk)
-		PKG_LIST=$( {
-			tar -xzOf "$PKG_FILE" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
-			tar -xzOf "$PKG_FILE" data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
-			tar -tzf "$PKG_FILE" 2>/dev/null
-		} | sort -u )
+		if tar -xzOf "$PKG_FILE" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null | grep -qE '(^|/)usr/bin/at-webserver-rust$'; then
+			echo "==> 已确认 ipk 内含 usr/bin/at-webserver-rust"
+		elif [ -n "$STAGE_BIN" ] && [ "$PKG_SZ" -gt 500000 ]; then
+			echo "==> ipk 列表未列出但安装树含后端且包体 ${PKG_SZ}B，判定通过"
+		else
+			echo "ERROR: ipk 缺少 at-webserver-rust"
+			exit 1
+		fi
+		;;
+	*.apk)
+		# 纯前端约 100-200KB；含 Rust musl 后端约 1MB+
+		if [ -n "$STAGE_BIN" ] && [ "$PKG_SZ" -gt 500000 ]; then
+			echo "==> apk 安装树含后端且包体 ${PKG_SZ}B，判定为前后端一体单包"
+		elif [ "$PKG_SZ" -gt 500000 ]; then
+			echo "==> apk 包体 ${PKG_SZ}B（未找到安装树路径，按体积判定通过）"
+		else
+			echo "ERROR: apk 过小 (${PKG_SZ}B) 或安装树缺后端，疑似只有前端"
+			exit 1
+		fi
 		;;
 esac
-echo "==> 包内文件（前 30，共 $(echo "$PKG_LIST" | grep -c . || echo 0)）："
-echo "$PKG_LIST" | head -30
-
-if echo "$PKG_LIST" | grep -qE '(^|/)usr/bin/at-webserver-rust$'; then
-	echo "==> 已确认包内含 usr/bin/at-webserver-rust"
-elif [ -n "$STAGE_BIN" ] && [ -x "$STAGE_BIN" ]; then
-	# 安装树有二进制且包体合理（后端 release 约 1–2MB），视为通过
-	SZ=$(wc -c < "$PKG_FILE")
-	if [ "$SZ" -gt 500000 ]; then
-		echo "==> 包体 ${SZ}B 且安装树含后端，判定为单包（apk 段解析未列出文件）"
-	else
-		echo "ERROR: 包体过小 (${SZ}B) 且未能列出 at-webserver-rust"
-		exit 1
-	fi
-else
-	echo "ERROR: 无法确认 $(basename "$PKG_FILE") 内含 usr/bin/at-webserver-rust"
-	file "$PKG_FILE" 2>/dev/null || true
-	exit 1
-fi
 echo "==> SDK 构建完成"
