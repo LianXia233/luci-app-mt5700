@@ -1,7 +1,8 @@
 'use strict';
+'require baseclass';
 'require at-webserver/parse';
 'require rpc';
-/* global L */
+/* global L, baseclass */
 
 /**
  * AT LuCI RPC 客户端（保持原 ATClient 的 API 面）。
@@ -570,6 +571,9 @@ var AtWs = {
 	isUnsolicitedText: isUnsolicitedText
 };
 
-/* LuCI 模块：必须 return；挂 window 供页面 global AtWs 使用 */
-if (typeof window !== 'undefined') { window.AtWs = AtWs; }
-return AtWs;
+/* LuCI factory 必须返回 Class 子类；挂 window.AtWs 供页面使用 */
+var AtWsClass = baseclass.extend(AtWs);
+if (typeof window !== 'undefined') {
+	window.AtWs = new AtWsClass();
+}
+return AtWsClass;
