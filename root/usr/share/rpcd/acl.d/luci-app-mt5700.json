@@ -34,6 +34,12 @@
 				]
 			},
 			"file": {
+				"/dev": [
+					"list"
+				],
+				"/dev/*": [
+					"stat"
+				],
 				"/etc/config/at-webserver": [
 					"read",
 					"stat"
