@@ -10,11 +10,19 @@ LUCI_PKGARCH:=
 
 PKG_NAME:=luci-app-mt5700
 PKG_VERSION:=1.1.1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # 兼容旧版：已安装 at-webserver-rust 的系统升级到单包后，声明提供同名能力，
 # 避免残留依赖指向不存在的包。
 PKG_PROVIDES:=at-webserver-rust
+
+# 打包前强制 init.d / uci-defaults 可执行（防止部分 checkout 丢失 +x 导致
+# post-install 报 Permission denied）
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/at-webserver 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/uci-defaults/at-webserver 2>/dev/null || true
+endef
 
 include $(TOPDIR)/feeds/luci/luci.mk
 

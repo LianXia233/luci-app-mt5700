@@ -121,6 +121,9 @@ echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 # 并把 at-webserver-rust 二进制装进同一个包，不再有独立的 at-webserver-rust 包。
 mkdir -p package/luci-app-mt5700
 cp -r /work/Makefile /work/htdocs /work/po /work/root /work/src package/luci-app-mt5700/
+# 确保 init.d / uci-defaults 可执行（cp -r 在部分环境可能丢 +x）
+chmod 0755 package/luci-app-mt5700/root/etc/init.d/at-webserver
+chmod 0755 package/luci-app-mt5700/root/etc/uci-defaults/at-webserver
 
 # ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
