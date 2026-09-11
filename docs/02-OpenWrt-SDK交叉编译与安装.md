@@ -60,8 +60,8 @@ cp -r /path/to/luci-app-mt5700 feeds/luci/applications/luci-app-mt5700/
 
 产物形态：
 
-- OpenWrt **23.05** → `luci-app-mt5700_1.1.1_<arch>.ipk`
-- OpenWrt **24.10+** → `luci-app-mt5700-1.1.1-r1.apk`
+- OpenWrt **23.05** → `luci-app-mt5700_1.2.0_<arch>.ipk`
+- OpenWrt **24.10+** → `luci-app-mt5700-1.2.0-r1.apk`
 
 体积约 **1.2MB**（含静态 musl 后端）。
 
@@ -101,10 +101,10 @@ ls build_dir/target-*/luci-app-mt5700/ipkg-*/luci-app-mt5700/usr/bin/at-webserve
 
 ```sh
 # apk（24.10+）
-apk add --allow-untrusted ./<arch>-luci-app-mt5700-1.1.1-r1.apk
+apk add --allow-untrusted ./<arch>-luci-app-mt5700-1.2.0-r1.apk
 
 # opkg（23.05）
-opkg install ./luci-app-mt5700_1.1.1_<arch>.ipk
+opkg install ./luci-app-mt5700_1.2.0_<arch>.ipk
 
 # 启用
 uci set at-webserver.config.enabled=1

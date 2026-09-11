@@ -5,6 +5,35 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.0] - 2026-09-11
+
+ImmortalWrt/OpenWrt 实机适配与 LuCI 界面修复版。
+
+### 新增
+
+- **菜单**：一级 `modem`，二级 **5G模组管理**，页面路径 `admin/modem/5g/*`（12 页）
+- **串口下拉**：服务配置页列出系统识别的 `ttyUSB/ttyACM/ttyAMA/ttyS`，支持「自动探测 / PCUI 推荐 / 自定义路径」
+- **连接状态条**：圆点 + 状态色 + 脉冲动画；文案「AT 服务已连接 · 本机 RPC :端口」
+- **每次编译成功自动发布 GitHub Release**（main 推送用 `PKG_VERSION` 作为 tag）
+
+### 修复
+
+- **LuCI 模块加载**：库改为 `L.Class.extend` 并 `return`，修复 `factory yields invalid constructor`
+- **`AtWs.client`**：改为单例实例（原先误挂工厂函数，导致 `onConnectionStateChange` 不存在）
+- **页面 DOM**：`insertBefore` 改为 `appendChild`，修复 `NotFoundError`
+- **`network_status`**：`carriers` 提升作用域，修复 `carriers is not defined`
+- **服务配置 UCI**：与后端 `config` 段扁平键对齐；`uci/apply` ubus code 5（无变更）视为成功
+- **`file.list`**：兼容多种返回结构；ACL 放行 `/dev` list
+- **init.d/uci-defaults**：git 模式 `100755`，打包强制 `chmod`，修复安装 `Permission denied`
+- **ucode 插件**：适配 ImmortalWrt——无 `JSON`/`parseInt`/`s[i]`/`fs.connect`；参数在 `req.args`；经 `nc` 访问回环 RPC
+- **Rust P0/P1/P2**（见 1.1.1）：调度 applied、RPC 行限、CNMI/CMGF、try_send、扫频正则等
+
+### 变更
+
+- 默认连接 **PCUI 串口**（`SERIAL` + `/dev/ttyUSB1`）
+- 单包交付：前端 + `/usr/bin/at-webserver-rust`
+- `LUCI_DEPENDS` 保持为空，避免 SDK 强编 libusb
+
 ## [Unreleased]
 
 ### 修复
@@ -17,7 +46,7 @@
 ### 变更
 
 - **每次编译成功自动发布 GitHub Release**（不再仅限 `v*` 标签）：
-  - 标签推送使用标签名；main 推送使用 `Makefile` 的 `PKG_VERSION`（当前 `v1.1.1`）
+  - 标签推送使用标签名；main 推送使用 `Makefile` 的 `PKG_VERSION`
   - 同名 Release 先删后建，资产带架构前缀（`x86_64-` / `aarch64_cortex-a53-`）
 
 ### 修复（独立核查 P0/P1/P2）
@@ -43,7 +72,7 @@
 - **默认连接 PCUI**：`config.rs` 默认 `SERIAL` + `/dev/ttyUSB1`，与 UCI 一致；非 NETWORK 一律走串口。
 - **LUCI_DEPENDS**：保持为空（luci-base 已带 rpcd/ucode；硬依赖 usbutils 会在 SDK 拖 libusb 编译失败）。
 - **ACL**：去掉 `file.remove` 与整包 firewall 写权限。
-- **单包云编译**：v1.1.0 起已为前后端一体包；本版 `PKG_VERSION=1.1.1`，workflow/sdk-build
+- **单包云编译**：v1.1.0 起已为前后端一体包；workflow/sdk-build
   继续校验包内必须含 `usr/bin/at-webserver-rust`。
 
 ### 变更
