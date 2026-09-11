@@ -97,7 +97,8 @@ pub fn default_config() -> Config {
     Config {
         enabled: true,
         at: AtConfig {
-            type_: "NETWORK".into(),
+            // 默认 PCUI 串口优先（与 UCI 默认配置一致）
+            type_: "SERIAL".into(),
             network: NetworkConfig {
                 host: "192.168.8.1".into(),
                 port: 20249,
@@ -251,7 +252,8 @@ pub async fn load_config() -> Config {
     cfg.enabled = values.bool("enabled", true);
 
     let t = values.str("connection_type", "SERIAL").to_uppercase();   // PCUI 优先
-    cfg.at.type_ = if t == "SERIAL" { "SERIAL" } else { "NETWORK" }.to_string();
+    // 非 NETWORK 一律走串口（含历史误写 AUTO），保证默认/兼容均为 PCUI
+    cfg.at.type_ = if t == "NETWORK" { "NETWORK" } else { "SERIAL" }.to_string();
 
     cfg.at.network.host = values.str("network_host", &cfg.at.network.host);
     cfg.at.network.port = values.int("network_port", cfg.at.network.port as i64).clamp(1, 65535) as u16;
