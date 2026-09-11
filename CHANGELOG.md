@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.3] - 2026-09-12
+
+### 修复
+
+- **AT 调试终端回复看不清（P1）**：回复正文渲染为 `<pre class="at-console-res">`，此前只覆盖了
+  `color`（浅黄 `#dcdcaa`），而 LuCI 主题会给 `pre` 铺底色（aurora：
+  `background-color: var(--surface-sunken)`，浅色模式为 `#f4f7fa`），于是深色终端里出现
+  「浅底 + 浅黄字」，`ATI` 等命令的结果几乎不可读。已在 `.at-console-res` 显式重置
+  `pre` 的底色/边框/字体/行高，与终端深色背景一致；同时提高命令时间戳的对比度。
+  **仅改样式，未改动终端任何命令（含 IMEI / `AT+CGSN`）。**
+- **静态样式缓存**：`ui.js` 注入的 `at.css` 改为带版本查询串
+  （`at.css?v=1.2.3`，与主题 `main.css?v=1.3.1` 的做法一致）。uhttpd 给静态资源的
+  `Last-Modified` 为 1970，浏览器会长期复用缓存，不加版本号会导致升级后看不到样式修复。
+
 ## [1.2.2] - 2026-09-12
 
 实机（ImmortalWrt aarch64 · Fibocom FM350-GL）「后端服务无法启动 / AT 全部无响应」修复。
