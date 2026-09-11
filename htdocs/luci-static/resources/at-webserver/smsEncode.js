@@ -244,7 +244,7 @@ var SmsEncode = (function () {
 	return api;
 })();
 
-var SmsEncodeClass = baseclass.extend(SmsEncode);
+var SmsEncodeClass = L.Class.extend(SmsEncode);
 if (typeof window !== 'undefined') {
 	window.SmsEncode = new SmsEncodeClass();
 }

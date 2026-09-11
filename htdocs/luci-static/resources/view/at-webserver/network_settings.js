@@ -527,7 +527,11 @@ return L.view.extend({
 		autoRow.appendChild(ar.el);
 		var refreshBtn = Ui.primaryButton('刷新锁频', fetchCurrent);
 		autoRow.appendChild(refreshBtn);
-		neighPanel._body.parentNode.insertBefore(autoRow, neighPanel);
+		if (neighPanel.parentNode) {
+			neighPanel.parentNode.insertBefore(autoRow, neighPanel);
+		} else {
+			autoRow.parentNode && autoRow.parentNode.appendChild(autoRow);
+		}
 		var autoTimer = null;
 
 		/* ---------- 初始化 ---------- */

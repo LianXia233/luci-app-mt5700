@@ -377,7 +377,7 @@ var Ui = (function () {
 	return api;
 })();
 
-var UiClass = baseclass.extend(Ui);
+var UiClass = L.Class.extend(Ui);
 if (typeof window !== 'undefined') {
 	window.Ui = new UiClass();
 }
