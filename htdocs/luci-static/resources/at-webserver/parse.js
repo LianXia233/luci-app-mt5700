@@ -900,7 +900,7 @@ var Parse = (function () {
  * LuCI requires factory to return a Class subclass (instantiated once).
  * Also set window.Parse for page-side global.
  */
-var ParseClass = baseclass.extend(Parse);
+var ParseClass = L.Class.extend(Parse);
 if (typeof window !== 'undefined') {
 	window.Parse = new ParseClass();
 }

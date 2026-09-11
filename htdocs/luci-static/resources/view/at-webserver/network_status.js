@@ -627,10 +627,11 @@ return L.view.extend({
 		}
 
 		function updateNetworkInfo() {
+			var carriers = [];
 			return AtWs.client.sendCommand('AT^MONSC').then(function (monsc) {
 				var serving = monsc.success && monsc.data ? AtWs.parseMONSC(monsc.data) : null;
 				return AtWs.client.sendCommand('AT^HFREQINFO?').then(function (hfreq) {
-					var carriers = hfreq.success && hfreq.data ? AtWs.parseHFREQINFO(hfreq.data) : [];
+					carriers = hfreq.success && hfreq.data ? AtWs.parseHFREQINFO(hfreq.data) : [];
 					if (!carriers.length) return AtWs.client.sendCommand('AT^HCSQ?').then(function (hcsq) {
 						var hcsqData = hcsq.success && hcsq.data ? AtWs.parseHCSQ(hcsq.data) : null;
 						if (hcsqData) {
@@ -739,7 +740,11 @@ return L.view.extend({
 		extra.appendChild(ar.el);
 		var refreshBtn = Ui.primaryButton('刷新', function () { refreshAll(); });
 		extra.appendChild(refreshBtn);
-		conn._body.parentNode.insertBefore(extra, conn);
+		if (conn.parentNode) {
+			conn.parentNode.insertBefore(extra, conn);
+		} else {
+			body.insertBefore(extra, conn);
+		}
 
 		/* ---------- 初始化 ---------- */
 

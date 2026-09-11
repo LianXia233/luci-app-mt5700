@@ -572,7 +572,7 @@ var AtWs = {
 };
 
 /* LuCI factory 必须返回 Class 子类；挂 window.AtWs 供页面使用 */
-var AtWsClass = baseclass.extend(AtWs);
+var AtWsClass = L.Class.extend(AtWs);
 if (typeof window !== 'undefined') {
 	window.AtWs = new AtWsClass();
 }
