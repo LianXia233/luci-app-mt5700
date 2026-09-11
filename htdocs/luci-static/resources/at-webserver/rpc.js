@@ -542,7 +542,7 @@ var atClient = (function () {
 })();
 
 var AtWs = {
-	client: atClient,
+	client: atClient(),
 	extractATData: extractATData,
 	extractATDataMultiline: extractATDataMultiline,
 	convertRsrp: convertRsrp,
