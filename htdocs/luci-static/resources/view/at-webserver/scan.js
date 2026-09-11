@@ -274,7 +274,7 @@ return L.view.extend({
 			});
 		}
 
-		var pollTimer = setInterval(function () {
+		var pollTimer = Ui.interval(2000, function () {
 			if (!scanning) return;
 			AtWs.client.sendCommand(Parse.SCAN_STATE_COMMAND).then(function (res) {
 				if (res.success && !Parse.isScanRunning(String(res.data || ''))) {
@@ -286,7 +286,7 @@ return L.view.extend({
 					render();
 				}
 			});
-		}, 5000);
+		});
 
 		this._dispose = function () {
 			clearInterval(pollTimer);

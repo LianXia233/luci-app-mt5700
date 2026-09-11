@@ -37,7 +37,10 @@ return L.view.extend({
 		var body = page._body;
 
 		var state = data || {};
-		var serviceRunning = !!(state.service && state.service.instance);
+		var svc = state.service || {};
+		// rpcd service.list 结构：{at-webserver:{instances:{instance1:{running:...}}}}
+		var inst = (svc.instances && (svc.instances.instance1 || svc.instances.at-webserver)) || svc.instance || {};
+		var serviceRunning = !!(inst.running || inst.pid);
 
 		/* ---------- 服务状态 ---------- */
 		var statusPanel = Ui.panel('服务状态', '');
@@ -56,7 +59,7 @@ return L.view.extend({
 		var connPanel = Ui.panel('调制解调器连接', '后端连接模组的通道');
 		var connTypeSel = document.createElement('select');
 		connTypeSel.className = 'cbi-input-select';
-		[{ v: 'SERIAL', l: 'PCUI 串口（默认，优先 /dev/ttyUSB1）' }, { v: 'AUTO', l: '自动探测（串口优先 ttyUSB1）' }, { v: 'NETWORK', l: '网络连接（TCP，备用）' }].forEach(function (o) {
+		[{ v: 'SERIAL', l: 'PCUI 串口（默认，优先 /dev/ttyUSB1）' }, { v: 'NETWORK', l: '网络连接（TCP，备用）' }].forEach(function (o) {
 			var opt = document.createElement('option');
 			opt.value = o.v; opt.textContent = o.l;
 			connTypeSel.appendChild(opt);
@@ -143,48 +146,44 @@ return L.view.extend({
 		notifPanel._body.appendChild(Ui.field('企业微信 WebHook', webhookInput, '通知将推送到该 WebHook 地址'));
 		body.appendChild(notifPanel);
 
-		/* ---------- 载入 UCI ---------- */
-		var get = function (section, key, def) {
-			var v = L.uci.get('at-webserver', section, key);
+		/* ---------- 载入 UCI（单 section `config` + 扁平键，与 Rust/ucode 一致） ---------- */
+		var get = function (key, def) {
+			var v = L.uci.get('at-webserver', 'config', key);
 			return v == null || v === '' ? def : v;
 		};
-		connTypeSel.value = String(get('connection', 'type', 'SERIAL'));
-		hostInput.value = String(get('connection', 'host', '192.168.8.1'));
-		netPortInput.value = String(get('connection', 'port', '20249'));
-		serialInput.value = String(get('connection', 'serial_port', 'auto'));
-		baudInput.value = String(get('connection', 'baud_rate', '115200'));
-		wsHostInput.value = String(get('websocket', 'host', ''));
-		wsPortInput.value = String(get('websocket', 'port', '8765'));
-		authKeyInput.value = String(get('websocket', 'auth_key', ''));
-		schedChk.checked = get('schedule', 'enabled', '0') === '1';
-		notifyCallsChk.checked = get('notification', 'notify_call', '1') === '1';
-		notifySmsChk.checked = get('notification', 'notify_sms', '1') === '1';
-		notifySignalChk.checked = get('notification', 'notify_signal', '1') === '1';
-		notifyMemChk.checked = get('notification', 'notify_memory_full', '1') === '1';
-		webhookInput.value = String(get('notification', 'webhook_url', ''));
+		connTypeSel.value = String(get('connection_type', 'SERIAL'));
+		hostInput.value = String(get('network_host', '192.168.8.1'));
+		netPortInput.value = String(get('network_port', '20249'));
+		serialInput.value = String(get('serial_port', 'auto'));
+		baudInput.value = String(get('serial_baudrate', '115200'));
+		wsHostInput.value = '';
+		wsPortInput.value = String(get('websocket_port', '8765'));
+		authKeyInput.value = String(get('websocket_auth_key', ''));
+		schedChk.checked = get('schedule_enabled', '0') === '1';
+		notifyCallsChk.checked = get('notify_call', '1') === '1';
+		notifySmsChk.checked = get('notify_sms', '1') === '1';
+		notifySignalChk.checked = get('notify_signal', '1') === '1';
+		notifyMemChk.checked = get('notify_memory_full', '1') === '1';
+		webhookInput.value = String(get('wechat_webhook', ''));
 
 		/* ---------- 保存 ---------- */
 		var saveBtn = Ui.primaryButton('保存配置', function () {
-			var set = function (section, key, value) {
-				if (!L.uci.get('at-webserver', section)) {
-					L.uci.add('at-webserver', section, section);
-				}
-				L.uci.set('at-webserver', section, key, value);
+			var set = function (key, value) {
+				L.uci.set('at-webserver', 'config', key, value);
 			};
-			set('connection', 'type', connTypeSel.value);
-			set('connection', 'host', hostInput.value.trim() || '192.168.8.1');
-			set('connection', 'port', String(parseInt(netPortInput.value, 10) || 20249));
-			set('connection', 'serial_port', serialInput.value.trim() || 'auto');
-			set('connection', 'baud_rate', String(parseInt(baudInput.value, 10) || 115200));
-			set('websocket', 'host', wsHostInput.value.trim());
-			set('websocket', 'port', String(parseInt(wsPortInput.value, 10) || 8765));
-			set('websocket', 'auth_key', authKeyInput.value.trim());
-			set('schedule', 'enabled', schedChk.checked ? '1' : '0');
-			set('notification', 'notify_call', notifyCallsChk.checked ? '1' : '0');
-			set('notification', 'notify_sms', notifySmsChk.checked ? '1' : '0');
-			set('notification', 'notify_signal', notifySignalChk.checked ? '1' : '0');
-			set('notification', 'notify_memory_full', notifyMemChk.checked ? '1' : '0');
-			set('notification', 'webhook_url', webhookInput.value.trim());
+			set('connection_type', connTypeSel.value);
+			set('network_host', hostInput.value.trim() || '192.168.8.1');
+			set('network_port', String(parseInt(netPortInput.value, 10) || 20249));
+			set('serial_port', serialInput.value.trim() || 'auto');
+			set('serial_baudrate', String(parseInt(baudInput.value, 10) || 115200));
+			set('websocket_port', String(parseInt(wsPortInput.value, 10) || 8765));
+			set('websocket_auth_key', authKeyInput.value.trim());
+			set('schedule_enabled', schedChk.checked ? '1' : '0');
+			set('notify_call', notifyCallsChk.checked ? '1' : '0');
+			set('notify_sms', notifySmsChk.checked ? '1' : '0');
+			set('notify_signal', notifySignalChk.checked ? '1' : '0');
+			set('notify_memory_full', notifyMemChk.checked ? '1' : '0');
+			set('wechat_webhook', webhookInput.value.trim());
 
 			L.uci.save('at-webserver').then(function () {
 				return L.uci.apply(false).then(function () {

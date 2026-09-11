@@ -65,15 +65,13 @@
 		},
 		"write": {
 			"uci": [
-				"at-webserver",
-				"firewall"
+				"at-webserver"
 			],
 			"ubus": {
 				"file": [
 					"write",
 					"read",
-					"stat",
-					"remove"
+					"stat"
 				],
 				"luci": [
 					"setInitAction"

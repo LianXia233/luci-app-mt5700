@@ -82,7 +82,7 @@ return L.view.extend({
 		refreshLog();
 
 		// 自动刷新（10 秒）
-		var timer = setInterval(refreshLog, 10000);
+		var timer = Ui.interval(10000, refreshLog);
 		this._dispose = function () { clearInterval(timer); };
 
 		return page;

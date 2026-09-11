@@ -200,10 +200,15 @@ reload_service() {
 
 	uci -q commit at-webserver
 
+	# 通过 procd 重启实例，避免 killall 与 respawn 竞态导致双实例
+	if ubus -q call service list '{"name":"at-webserver"}' >/dev/null 2>&1; then
+		ubus call service delete '{"name":"at-webserver"}' >/dev/null 2>&1 || true
+		sleep 1
+	fi
+	# 兜底清理残留（仅一次，不依赖 killall 反复拉起）
 	killall -q "$PROG_NAME" 2>/dev/null
 	rm -f /var/run/at-webserver-rust.pid
-
-	sleep 2
+	sleep 1
 
 	start_service
 

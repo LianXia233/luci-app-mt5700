@@ -19,7 +19,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncRead;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -206,23 +207,21 @@ impl RpcServer {
         let mut reader = BufReader::new(read_half);
         let mut ctx_c = self.ctx.clone();
         loop {
-            let mut line = String::new();
-            let n = tokio::select! {
+            let line = tokio::select! {
                 _ = ctx_c.changed() => break,
-                r = tokio::time::timeout(RPC_READ_TIMEOUT, reader.read_line(&mut line)) => {
+                r = tokio::time::timeout(RPC_READ_TIMEOUT, read_line_limited(&mut reader, MAX_RPC_LINE)) => {
                     match r {
-                        Ok(Ok(n)) => n,
+                        Ok(Ok(Some(line))) => line,
+                        Ok(Ok(None)) => break,
                         _ => break,
                     }
                 }
             };
-            if n == 0 {
-                break; // EOF
-            }
-            if line.len() > MAX_RPC_LINE {
-                log_warn!("RPC 请求行过长 ({} bytes)，断开连接", line.len());
+            if line.1 {
+                log_warn!("RPC 请求行过长 ({} bytes)，断开连接", line.0.len());
                 break;
             }
+            let line = line.0;
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -562,4 +561,35 @@ fn normalize_syscfgex(command: &str) -> String {
         }
     }
     cleaned
+}
+
+/// 按行读取，单行最多 max 字节。超限时标记 overlong 并排空该行剩余数据。
+/// 返回 None 表示 EOF；Some((line, overlong)) 表示读到一行。
+async fn read_line_limited<R>(reader: &mut BufReader<R>, max: usize) -> std::io::Result<Option<(String, bool)>>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut raw: Vec<u8> = Vec::new();
+    {
+        let mut limited = (&mut *reader).take(max as u64);
+        let n = limited.read_until(b'\n', &mut raw).await?;
+        if n == 0 && raw.is_empty() {
+            return Ok(None);
+        }
+    }
+    let mut overlong = false;
+    if raw.last() != Some(&b'\n') {
+        // take 用尽仍未见换行：本行超长，排空剩余
+        if raw.len() >= max {
+            overlong = true;
+            let mut drain = Vec::new();
+            let _ = (&mut *reader).read_until(b'\n', &mut drain).await;
+        }
+    } else {
+        raw.pop();
+        if raw.last() == Some(&b'\r') {
+            raw.pop();
+        }
+    }
+    Ok(Some((String::from_utf8_lossy(&raw).into_owned(), overlong)))
 }

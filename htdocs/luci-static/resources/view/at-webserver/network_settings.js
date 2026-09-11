@@ -522,7 +522,7 @@ return L.view.extend({
 		autoRow.appendChild(scanBtn);
 		var ar = Ui.autoRefresh(function (enabled, interval) {
 			if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-			if (enabled) autoTimer = setInterval(scanNeighbors, interval * 1000);
+			if (enabled) autoTimer = Ui.interval(interval * 1000, scanNeighbors);
 		});
 		autoRow.appendChild(ar.el);
 		var refreshBtn = Ui.primaryButton('刷新锁频', fetchCurrent);

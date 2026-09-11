@@ -371,7 +371,7 @@ return L.view.extend({
 		});
 
 		// 定时刷新运行状态（不覆盖表单草稿）
-		var statusTimer = setInterval(function () {
+		var statusTimer = Ui.interval(15000, function () {
 			if (expanded) return;
 			AtWs.client.sendCommand('AT+SCHED?').then(function (res) {
 				if (res.success && res.data) {
@@ -379,7 +379,7 @@ return L.view.extend({
 					if (parsed) { cfg = parsed; render(); }
 				}
 			}).catch(function () {});
-		}, 15000);
+		});
 
 		this._dispose = function () { clearInterval(statusTimer); };
 
