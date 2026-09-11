@@ -101,12 +101,29 @@ jobs:
           # 单包必须自带后端二进制，否则装完只有前端壳子
           PKG=$(find "out/${{ matrix.arch }}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
           case "$PKG" in
-            *.apk) LIST=$(tar -tzf "$PKG" 2>/dev/null || tar --zstd -tzf "$PKG" 2>/dev/null) ;;
-            *.ipk) LIST=$(tar -xzOf "$PKG" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null) ;;
+            *.apk)
+              LIST=$({
+                tar -tzf "$PKG" 2>/dev/null
+                tar --zstd -tzf "$PKG" 2>/dev/null
+                tar -xzOf "$PKG" data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+                tar -xzOf "$PKG" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+                tar --zstd -xOf "$PKG" data.tar.zst 2>/dev/null | tar -tf - 2>/dev/null
+                tar -tf "$PKG" 2>/dev/null
+              } | sort -u)
+              ;;
+            *.ipk)
+              LIST=$({
+                tar -xzOf "$PKG" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+                tar -xzOf "$PKG" data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+                tar -tzf "$PKG" 2>/dev/null
+              } | sort -u)
+              ;;
           esac
-          echo "$LIST" | grep -q 'usr/bin/at-webserver-rust' \
+          echo "==> 包内文件示例："
+          echo "$LIST" | head -30
+          echo "$LIST" | grep -qE '(^|/)usr/bin/at-webserver-rust$' \
             && echo "==> 已确认 $(basename "$PKG") 内含 usr/bin/at-webserver-rust" \
-            || { echo "::error::$(basename "$PKG") 缺少 usr/bin/at-webserver-rust"; exit 1; }
+            || { echo "::error::$(basename "$PKG") 缺少 usr/bin/at-webserver-rust"; echo "$LIST"; exit 1; }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
