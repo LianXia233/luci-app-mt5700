@@ -2,6 +2,7 @@
 //! 打开后拆成读写两半：读侧由 tokio AsyncFd 事件驱动，空闲不占 CPU。
 
 use crate::config::SerialConfig;
+use crate::log_error;
 use crate::transport::{Transport, TransportParts};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::pin::Pin;
@@ -130,8 +131,8 @@ impl AsyncWrite for SerialWriter {
 }
 
 pub struct SerialTransport {
-    reader_fd: OwnedFd,
-    writer_fd: OwnedFd,
+    reader_fd: Option<OwnedFd>,
+    writer_fd: Option<OwnedFd>,
     port: String,
     write_timeout: Duration,
 }
@@ -161,8 +162,8 @@ pub async fn open_serial(cfg: &SerialConfig) -> Result<Box<dyn Transport>, Strin
     }
 
     Ok(Box::new(SerialTransport {
-        reader_fd: unsafe { OwnedFd::from_raw_fd(fd) },
-        writer_fd: unsafe { OwnedFd::from_raw_fd(write_fd) },
+        reader_fd: Some(unsafe { OwnedFd::from_raw_fd(fd) }),
+        writer_fd: Some(unsafe { OwnedFd::from_raw_fd(write_fd) }),
         port: cfg.port.clone(),
         write_timeout: cfg.timeout,
     }))
@@ -171,11 +172,40 @@ pub async fn open_serial(cfg: &SerialConfig) -> Result<Box<dyn Transport>, Strin
 #[async_trait::async_trait]
 impl Transport for SerialTransport {
     fn into_parts(mut self: Box<Self>) -> TransportParts {
-        let reader_fd = std::mem::replace(&mut self.reader_fd, unsafe { OwnedFd::from_raw_fd(-1) });
-        let writer_fd = std::mem::replace(&mut self.writer_fd, unsafe { OwnedFd::from_raw_fd(-1) });
+        // Option::take 避免 OwnedFd::from_raw_fd(-1)（该断言会 panic / abort）
+        let reader_fd = self
+            .reader_fd
+            .take()
+            .expect("SerialTransport reader_fd missing");
+        let writer_fd = self
+            .writer_fd
+            .take()
+            .expect("SerialTransport writer_fd missing");
+        let reader_afd = match tokio::io::unix::AsyncFd::new(reader_fd) {
+            Ok(a) => a,
+            Err(e) => {
+                log_error!("串口读侧 AsyncFd 失败: {e}");
+                // 用 /dev/null 退化，避免进程 abort
+                let null = std::fs::File::open("/dev/null").expect("open /dev/null");
+                let owned: OwnedFd = null.into();
+                tokio::io::unix::AsyncFd::new(owned).expect("null async fd")
+            }
+        };
+        let writer_afd = match tokio::io::unix::AsyncFd::new(writer_fd) {
+            Ok(a) => a,
+            Err(e) => {
+                log_error!("串口写侧 AsyncFd 失败: {e}");
+                let null = std::fs::File::open("/dev/null").expect("open /dev/null");
+                let owned: OwnedFd = null.into();
+                tokio::io::unix::AsyncFd::new(owned).expect("null async fd")
+            }
+        };
         TransportParts {
-            reader: Box::new(SerialReader { afd: tokio::io::unix::AsyncFd::new(reader_fd).expect("async fd") }),
-            writer: Box::new(SerialWriter { afd: tokio::io::unix::AsyncFd::new(writer_fd).expect("async fd"), write_timeout: self.write_timeout }),
+            reader: Box::new(SerialReader { afd: reader_afd }),
+            writer: Box::new(SerialWriter {
+                afd: writer_afd,
+                write_timeout: self.write_timeout,
+            }),
         }
     }
 
