@@ -89,11 +89,21 @@ case "$RUST_TRIPLE" in
 esac
 
 # 生成 zig 链接器 wrapper + cargo 全局配置（仅容器内，不写入仓库）
+# 过滤 zig 不认识的 OpenWrt/LLD 旗标（aarch64_cortex-a53 会注入 --fix-cortex-a53-843419）
 cat > /opt/zig-linker <<EOF
 #!/bin/sh
+# zig 0.13 不支持 --fix-cortex-a53-843419 等 LLD 专有旗标，链接时丢弃
+for a in "\$@"; do
+  case "\$a" in
+    *--fix-cortex-a53*) ;;
+    *) set -- "\$@" "\$a" ;;
+  esac
+  shift
+done
 exec /opt/bin/zig cc -target ${ZIG_TARGET} "\$@"
 EOF
 chmod +x /opt/zig-linker
+sh -n /opt/zig-linker && echo "==> zig-linker 语法 OK, target=${ZIG_TARGET}"
 mkdir -p "${CARGO_HOME}"
 cat > "${CARGO_HOME}/config.toml" <<EOF
 [target.${RUST_TRIPLE}]
@@ -112,11 +122,13 @@ echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 mkdir -p package/luci-app-mt5700
 cp -r /work/Makefile /work/htdocs /work/po /work/root /work/src package/luci-app-mt5700/
 
-# ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
+# ---------- 5) feeds（luci + packages：luci.mk 与 LUCI_DEPENDS 的 rpcd/ucode/usbutils） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
-  echo "==> 初始化 feeds（仅 luci）"
+  echo "==> 初始化 feeds（luci + packages）"
   ./scripts/feeds update luci >/dev/null 2>&1 || echo "WARN: feeds update luci 失败"
+  ./scripts/feeds update packages >/dev/null 2>&1 || echo "WARN: feeds update packages 失败"
   ./scripts/feeds install luci >/dev/null 2>&1 || true
+  ./scripts/feeds install rpcd ucode ucode-mod-uci usbutils >/dev/null 2>&1 || true
 fi
 [ -f feeds/luci/luci.mk ] || { echo "ERROR: luci feed 不可用"; exit 1; }
 
@@ -196,19 +208,48 @@ PKG_FILE=$(find "/out/${ARCH}" -type f -name 'luci-app-mt5700*' -not -name 'luci
 list_pkg_files() {
 	case "$1" in
 		*.apk)
-			# OpenWrt apk 可能是 gzip 或 zstd 压缩
-			tar -tzf "$1" 2>/dev/null || tar --zstd -tzf "$1" 2>/dev/null
+			# OpenWrt 24.10+ apk：可能是 gzip/zstd 整包，或内嵌 data.tar.*
+			# 多种尝试后合并输出，避免单一 tar 实现差异导致漏检
+			{
+				tar -tzf "$1" 2>/dev/null
+				tar --zstd -tzf "$1" 2>/dev/null
+				# 部分 apk 内层为 data.tar.gz / data.tar.zst
+				tar -xzOf "$1" data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+				tar -xzOf "$1" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+				tar --zstd -xOf "$1" data.tar.zst 2>/dev/null | tar -tf - 2>/dev/null
+				# alpine 风格：控制/数据合在顶层 tar
+				tar -tf "$1" 2>/dev/null
+			} | sort -u
 			;;
 		*.ipk)
-			tar -xzOf "$1" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+			{
+				tar -xzOf "$1" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+				tar -xzOf "$1" data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null
+				tar -tzf "$1" 2>/dev/null
+			} | sort -u
 			;;
 	esac
 }
 
-if list_pkg_files "$PKG_FILE" | grep -q 'usr/bin/at-webserver-rust'; then
+PKG_LIST=$(list_pkg_files "$PKG_FILE")
+echo "==> 包内文件（前 40 条，共 $(echo "$PKG_LIST" | grep -c . || true)）："
+echo "$PKG_LIST" | head -40
+
+if echo "$PKG_LIST" | grep -qE '(^|/)usr/bin/at-webserver-rust$'; then
 	echo "==> 已确认 $(basename "$PKG_FILE") 内含 usr/bin/at-webserver-rust"
 else
+	# 兜底：用 zipinfo / apk 信息（若容器有）
+	if command -v apk >/dev/null 2>&1; then
+		apk info --contents "$(basename "$PKG_FILE")" 2>/dev/null | grep -q 'at-webserver-rust' && {
+			echo "==> 已通过 apk info 确认包含 at-webserver-rust"
+			exit 0
+		}
+	fi
 	echo "ERROR: ${PKG_FILE} 内缺少 usr/bin/at-webserver-rust（前端包未并入后端）"
+	echo "--- 包文件列表 dump ---"
+	echo "$PKG_LIST"
+	# 看 file 类型，便于判断压缩格式
+	file "$PKG_FILE" 2>/dev/null || true
 	exit 1
 fi
 echo "==> SDK 构建完成"
