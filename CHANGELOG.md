@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.1] - 2026-09-11
+
+### 修复
+
+- **串口自动探测导致进程 abort（exit 134）**：`serial_linux.rs::into_parts` 用
+  `OwnedFd::from_raw_fd(-1)` 作占位，触发 `fd != -1` 断言，在 `panic=abort` 下整个
+  服务崩溃（`/dev/ttyUSB*` 自动探测时必现）。改为 `Option<OwnedFd>::take`，
+  `AsyncFd::new` 失败时退回 `/dev/null` 而非 abort。
+
+### 变更
+
+- 版本号 **1.2.1**；RPC 对外监听（`websocket_allow_wan` / `websocket_bind`）随本版发布
+
 ## [1.2.0] - 2026-09-11
 
 ImmortalWrt/OpenWrt 实机适配、LuCI 界面修复、RPC 可对外监听版。
