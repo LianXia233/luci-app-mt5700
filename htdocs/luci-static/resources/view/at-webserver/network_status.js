@@ -740,11 +740,7 @@ return L.view.extend({
 		extra.appendChild(ar.el);
 		var refreshBtn = Ui.primaryButton('刷新', function () { refreshAll(); });
 		extra.appendChild(refreshBtn);
-		if (conn.parentNode) {
-			conn.parentNode.insertBefore(extra, conn);
-		} else {
-			body.insertBefore(extra, conn);
-		}
+		body.appendChild(extra);
 
 		/* ---------- 初始化 ---------- */
 

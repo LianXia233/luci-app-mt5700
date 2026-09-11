@@ -570,9 +570,7 @@ return L.view.extend({
 		var refreshBtn = Ui.primaryButton('刷新', loadAll);
 		var extra = E('div', { 'class': 'at-panel-actions' });
 		extra.appendChild(refreshBtn);
-		if (devPanel.parentNode) {
-			devPanel.parentNode.insertBefore(extra, devPanel);
-		}
+		body.appendChild(extra);
 
 		AtWs.client.connect().catch(function (err) {
 			if (err && err.message === 'REQUIRE_AUTH_KEY') {
