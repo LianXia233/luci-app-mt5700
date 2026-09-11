@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **init.d 安装后无执行权限（Permission denied）**：`root/etc/init.d/at-webserver` 与
+  `root/etc/uci-defaults/at-webserver` 在 git 中为 `100644`，apk/ipk 安装后
+  post-install 调用服务脚本失败。已改为 `100755`，并在 `Build/Prepare` 与
+  `scripts/sdk-build.sh` 中强制 `chmod 0755` 兜底。`PKG_RELEASE=2`。
+
 ### 变更
 
 - **每次编译成功自动发布 GitHub Release**（不再仅限 `v*` 标签）：
