@@ -20,6 +20,10 @@ pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const READ_BUF_SIZE: usize = 4096;
 const MAX_RESPONSE_LINES: usize = 2048;
 const MAX_RESIDUAL_BYTES: usize = 64 * 1024;
+/// 读到 0 字节时的让步间隔（详见 read_loop 内注释）。
+const ZERO_READ_BACKOFF: Duration = Duration::from_millis(50);
+/// 连续 0 字节读达到该次数才判定链路断开（50ms × 20 ≈ 1s）。
+const ZERO_READ_RETRY_LIMIT: u32 = 20;
 
 #[derive(Debug, Clone)]
 pub struct AtResponse {
@@ -371,6 +375,7 @@ impl AtClient {
     ) -> Result<(), String> {
         let mut buf = vec![0u8; READ_BUF_SIZE];
         let mut residual: Vec<u8> = Vec::new();
+        let mut zero_reads: u32 = 0;
 
         loop {
             let mut ctx_c = ctx.clone();
@@ -381,9 +386,24 @@ impl AtClient {
                 },
                 _ = ctx_c.changed() => return Ok(()),
             };
+
             if n == 0 {
-                return Ok(()); // EOF
+                // 不能立刻当 EOF：串口在 VMIN=0/VTIME=0 下「暂无数据」时 read 返回 0
+                // 而不是 EAGAIN，直接退出会让读循环刚连上就结束，此后所有 AT 命令都
+                // 超时（实机表现为「模组无响应」+ 每十几秒反复重连）。
+                zero_reads += 1;
+                if zero_reads >= ZERO_READ_RETRY_LIMIT {
+                    return Ok(()); // 持续为 0：判定链路已断开，交给上层重连
+                }
+                let mut ctx_c = ctx.clone();
+                tokio::select! {
+                    _ = tokio::time::sleep(ZERO_READ_BACKOFF) => {}
+                    _ = ctx_c.changed() => return Ok(()),
+                }
+                continue;
             }
+            zero_reads = 0;
+
             residual.extend_from_slice(&buf[..n]);
             residual = self.consume(residual).await;
         }
@@ -519,4 +539,58 @@ async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> boo
 
 pub fn humandur(d: Duration) -> String {
     format!("{}s", d.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, ReadBuf};
+
+    /// 模拟「暂无数据时 read 返回 0 字节」的串口：先给若干次 0，再给出数据。
+    struct ZeroThenData {
+        zeros: u32,
+        data: Vec<u8>,
+    }
+
+    impl AsyncRead for ZeroThenData {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            if self.zeros > 0 {
+                self.zeros -= 1;
+                return Poll::Ready(Ok(())); // 0 字节 = 暂无数据（非 EOF）
+            }
+            let n = self.data.len().min(buf.remaining());
+            let chunk: Vec<u8> = self.data.drain(..n).collect();
+            buf.put_slice(&chunk);
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// 回归：0 字节读不能被当成 EOF，读循环必须继续并派发后续数据。
+    #[tokio::test]
+    async fn read_loop_survives_zero_reads() {
+        let (tx, mut rx) = mpsc::channel::<Unsolicited>(8);
+        let client = AtClient::new(crate::config::default_config().at, tx);
+        let (_ctx_tx, ctx) = tokio::sync::watch::channel(false);
+
+        let reader = ZeroThenData {
+            zeros: 3,
+            data: b"^HCSQ: 1,2,3,4\r\nOK\r\n".to_vec(),
+        };
+        let c = client.clone();
+        let handle = tokio::spawn(async move { c.read_loop(&ctx, Box::new(reader)).await });
+
+        let urc = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .expect("0 字节读之后读循环不应退出")
+            .expect("应收到主动上报");
+        assert_eq!(urc.line, "^HCSQ: 1,2,3,4");
+        assert!(urc.broadcast);
+        handle.abort();
+    }
 }

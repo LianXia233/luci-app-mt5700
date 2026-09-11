@@ -49,8 +49,10 @@ fn configure_termios(fd: i32, speed: libc::speed_t) -> std::io::Result<()> {
     t.c_cflag &= !(libc::CSIZE | libc::PARENB | libc::CSTOPB | libc::CRTSCTS);
     t.c_cflag |= libc::CS8 | libc::CREAD | libc::CLOCAL;
 
-    // 阻塞语义交给 tokio AsyncFd，termios 层设成立即返回。
-    t.c_cc[libc::VMIN] = 0;
+    // 阻塞语义交给 tokio AsyncFd：fd 为 O_NONBLOCK，VMIN=1 时无数据会返回 EAGAIN。
+    // 不能用 VMIN=0：Linux tty 在 VMIN=0/VTIME=0 下「暂无数据」的 read 返回 0，
+    // 会被读循环当成 EOF，刚连上就退出导致所有 AT 命令超时（实机必现）。
+    t.c_cc[libc::VMIN] = 1;
     t.c_cc[libc::VTIME] = 0;
 
     // 波特率写进 c_cflag 的 CBAUD 位（与 Go 实现对 Linux 的处理一致）。
