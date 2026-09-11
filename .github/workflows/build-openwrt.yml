@@ -5,7 +5,9 @@ name: Build OpenWrt packages (apk + ipk)
 #   - 老版本 23.05（opkg 包管理器）→ 产出 .ipk
 # 架构矩阵：x86_64 / aarch64_cortex-a53（主线 apk + 老版 23.05 ipk）
 # 触发：push 到 main、打 v* 标签、或手动 workflow_dispatch
-# 产物：Actions 页面 Artifacts 下载；打标签时自动发布到 GitHub Release
+# 产物：**每次编译成功后自动发布 GitHub Release**
+#   - 标签推送 → 使用该标签名（如 v1.1.1）
+#   - main 推送 → 使用 Makefile 的 PKG_VERSION（如 v1.1.1），同名则覆盖更新
 
 on:
   push:
@@ -116,18 +118,33 @@ jobs:
           path: out/
           if-no-files-found: error
 
-  # ---- 统一发布：仅打 v* 标签时运行一次，汇总全部架构产物 ----
+  # ---- 统一发布：每次编译成功后运行一次，汇总全部架构产物并上传 Release ----
   # 不能放在 build job 内：4 个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
   # 导致 Release 创建失败或资产互相覆盖。这里由 release job 串行汇总后再发布。
   # 资产统一加 <架构>- 前缀：不同架构的依赖包 basename 相同（如 libc-1.2.6-r5.apk），
   # 同名文件在同一 Release 内必然冲突。用 gh CLI 替代 softprops 避免元数据更新 404 竞态。
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Checkout (read PKG_VERSION)
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VER=$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -1 | tr -d '[:space:]')
+            [ -n "$VER" ] || VER="0.0.0-dev"
+            TAG="v${VER}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "==> 发布版本: ${TAG} (ref=${GITHUB_REF})"
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -165,22 +182,24 @@ jobs:
             done
           done
 
-      - name: Clean up previous draft release (if any)
+      - name: Clean up previous release (same tag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release delete "${GITHUB_REF_NAME}" --yes --repo "${GITHUB_REPOSITORY}"
-            echo "==> 已清理旧 Release ${GITHUB_REF_NAME}"
+          TAG="${{ steps.ver.outputs.tag }}"
+          if gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --repo "${GITHUB_REPOSITORY}"
+            echo "==> 已清理旧 Release ${TAG}，将重建"
           fi
 
       - name: Publish to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ steps.ver.outputs.tag }}"
           mapfile -t FILES < <(find dist -type f | sort)
-          gh release create "${GITHUB_REF_NAME}" "${FILES[@]}" \
+          gh release create "$TAG" "${FILES[@]}" \
             --repo "${GITHUB_REPOSITORY}" \
             --generate-notes \
-            --title "AT WebServer ${GITHUB_REF_NAME}"
-          echo "==> Release ${GITHUB_REF_NAME} 已发布，资产 ${#FILES[@]} 个"
+            --title "AT WebServer ${TAG}"
+          echo "==> Release ${TAG} 已发布，资产 ${#FILES[@]} 个"
