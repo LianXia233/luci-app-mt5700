@@ -60,6 +60,8 @@ pub struct WebSocketConfig {
     pub port: u16,
     pub auth_key: String,
     pub allow_wan: bool,
+    /// RPC 监听地址：127.0.0.1（默认）或 0.0.0.0（allow_wan / websocket_bind）
+    pub bind: String,
     /// 一次 ^CELLSCAN 允许跑多久
     pub scan_timeout: Duration,
 }
@@ -124,6 +126,7 @@ pub fn default_config() -> Config {
             port: 8765,
             auth_key: String::new(),
             allow_wan: false,
+            bind: "127.0.0.1".into(),
             scan_timeout: Duration::from_secs(180),
         },
         schedule: ScheduleConfig {
@@ -271,6 +274,15 @@ pub async fn load_config() -> Config {
     cfg.websocket.port = values.int("websocket_port", 8765).clamp(1, 65535) as u16;
     cfg.websocket.auth_key = values.str("websocket_auth_key", "");
     cfg.websocket.allow_wan = values.bool("websocket_allow_wan", false);
+    // 监听地址：显式 websocket_bind 优先；否则 allow_wan=1 → 0.0.0.0，否则 127.0.0.1
+    let bind = values.str("websocket_bind", "");
+    cfg.websocket.bind = if !bind.is_empty() {
+        bind
+    } else if cfg.websocket.allow_wan {
+        "0.0.0.0".into()
+    } else {
+        "127.0.0.1".into()
+    };
     // 下限 10 秒而不是默认 3 分钟：用户配置的小于 3 分钟的值不能被悄悄抬回。
     cfg.websocket.scan_timeout = values.seconds("cellscan_timeout", cfg.websocket.scan_timeout, Duration::from_secs(10));
 

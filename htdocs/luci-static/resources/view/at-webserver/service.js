@@ -173,6 +173,18 @@ return L.view.extend({
 		wsPortInput.max = 65535;
 		wsPanel._body.appendChild(Ui.field('RPC 端口', wsPortInput, '默认 8765'));
 
+		var wsBindSel = document.createElement('select');
+		wsBindSel.className = 'cbi-input-select';
+		[
+			{ v: '127.0.0.1', l: '仅本机（127.0.0.1，经 rpcd 代理）' },
+			{ v: '0.0.0.0', l: '所有接口（0.0.0.0，可被外部访问）' }
+		].forEach(function (o) {
+			var opt = document.createElement('option');
+			opt.value = o.v; opt.textContent = o.l;
+			wsBindSel.appendChild(opt);
+		});
+		wsPanel._body.appendChild(Ui.field('RPC 监听范围', wsBindSel, '对外监听时请务必设置认证密钥'));
+
 		var authKeyInput = document.createElement('input');
 		authKeyInput.className = 'cbi-input-text';
 		authKeyInput.placeholder = '留空表示无需认证';
@@ -227,6 +239,11 @@ return L.view.extend({
 		baudInput.value = String(get('serial_baudrate', '115200'));
 		wsHostInput.value = '';
 		wsPortInput.value = String(get('websocket_port', '8765'));
+		var bindCur = get('websocket_bind', '');
+		if (!bindCur) {
+			bindCur = get('websocket_allow_wan', '0') === '1' ? '0.0.0.0' : '127.0.0.1';
+		}
+		wsBindSel.value = bindCur === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
 		authKeyInput.value = String(get('websocket_auth_key', ''));
 		schedChk.checked = get('schedule_enabled', '0') === '1';
 		notifyCallsChk.checked = get('notify_call', '1') === '1';
@@ -250,6 +267,9 @@ return L.view.extend({
 			set('serial_port', serialVal || 'auto');
 			set('serial_baudrate', String(parseInt(baudInput.value, 10) || 115200));
 			set('websocket_port', String(parseInt(wsPortInput.value, 10) || 8765));
+			var bind = wsBindSel.value === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
+			set('websocket_bind', bind);
+			set('websocket_allow_wan', bind === '0.0.0.0' ? '1' : '0');
 			set('websocket_auth_key', authKeyInput.value.trim());
 			set('schedule_enabled', schedChk.checked ? '1' : '0');
 			set('notify_call', notifyCallsChk.checked ? '1' : '0');
