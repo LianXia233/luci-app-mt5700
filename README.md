@@ -65,6 +65,39 @@ ls -l /usr/bin/at-webserver-rust
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
+### 服务状态怎么看
+
+「服务配置」页顶部的状态标签按以下优先级判定，并附带原因提示：
+
+| 状态 | 颜色 | 含义与处理 |
+|:--|:--|:--|
+| 运行中 | 绿 | procd 实例存活，标签旁附带 PID |
+| 已禁用 | 灰 | UCI `enabled=0`，服务被刻意关闭 |
+| 未安装 | 红 | 找不到 `/usr/bin/at-webserver-rust`，需重装软件包 |
+| 不可执行 | 红 | 二进制缺少执行位，执行 `chmod 0755` |
+| 未注册 | 橙 | 已启用且二进制正常，但 procd 无实例——通常是 `/etc/init.d/at-webserver` 缺失或被 overlay 白化 |
+| 已停止 | 红 | 实例已注册但进程未运行，查日志后重载 |
+
+排查命令：
+
+```sh
+# 服务脚本是否还在？（ROM 里应有，overlay 不得有白化设备）
+ls -l /etc/init.d/at-webserver /rom/etc/init.d/at-webserver
+ls -l /overlay/upper/etc/init.d/at-webserver   # c--------- 0,0 即为白化，需删除该白化节点
+
+# procd 注册状态与进程
+ubus call service list '{"name":"at-webserver"}'
+ps w | grep at-webserver-rust | grep -v grep
+
+# 不经 init 脚本，直接用 ubus 拉起（init 脚本缺失时的应急路径，页面「重载服务」按钮即走此路）
+ubus call service set '{"name":"at-webserver","instances":{"instance1":{
+  "command":["/usr/bin/at-webserver-rust"],"respawn":["3600","5","5"],
+  "stdout":true,"stderr":true}}}'
+
+# 日志
+logread -e at-webserver | tail -30
+```
+
 ---
 
 ## 功能一览
