@@ -1,0 +1,1461 @@
+Unable to find image 'openwrt/sdk:aarch64_cortex-a53-23.05.5' locally
+aarch64_cortex-a53-23.05.5: Pulling from openwrt/sdk
+203e9cf21bd2: Pulling fs layer
+36143617dfa2: Pulling fs layer
+329f84785ccc: Pulling fs layer
+fdb51cfb16b2: Pulling fs layer
+64a50421c5e0: Pulling fs layer
+7acb84b200b0: Pulling fs layer
+2081a7fe86e5: Pulling fs layer
+4f4fb700ef54: Pulling fs layer
+199b77ec5013: Pulling fs layer
+fdb51cfb16b2: Waiting
+64a50421c5e0: Waiting
+7acb84b200b0: Waiting
+2081a7fe86e5: Waiting
+4f4fb700ef54: Waiting
+199b77ec5013: Waiting
+329f84785ccc: Verifying Checksum
+329f84785ccc: Download complete
+203e9cf21bd2: Verifying Checksum
+203e9cf21bd2: Download complete
+fdb51cfb16b2: Verifying Checksum
+fdb51cfb16b2: Download complete
+64a50421c5e0: Verifying Checksum
+64a50421c5e0: Download complete
+7acb84b200b0: Verifying Checksum
+7acb84b200b0: Download complete
+2081a7fe86e5: Download complete
+4f4fb700ef54: Verifying Checksum
+4f4fb700ef54: Download complete
+36143617dfa2: Verifying Checksum
+36143617dfa2: Download complete
+199b77ec5013: Verifying Checksum
+199b77ec5013: Download complete
+203e9cf21bd2: Pull complete
+36143617dfa2: Pull complete
+329f84785ccc: Pull complete
+fdb51cfb16b2: Pull complete
+64a50421c5e0: Pull complete
+7acb84b200b0: Pull complete
+2081a7fe86e5: Pull complete
+4f4fb700ef54: Pull complete
+199b77ec5013: Pull complete
+Digest: sha256:bec7d1e18dc725a28bf8dd0864a70ae653f747aa2bceb99ac204eab4545f0818
+Status: Downloaded newer image for openwrt/sdk:aarch64_cortex-a53-23.05.5
+==> 仓库挂载: /work / out:/out（构建开始, arch=aarch64_cortex-a53 ver=23.05.5）
+==> 定位 SDK: https://downloads.openwrt.org/releases/23.05.5/targets/mediatek/filogic/
+==> 下载 SDK: openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+==> SDK 根目录: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64
+info: downloading installer
+info: profile set to minimal
+info: default host tuple is x86_64-unknown-linux-gnu
+info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+info: latest update on 2026-09-03 for version 1.98.1 (48a229cea 2026-09-01)
+info: downloading 3 components
+info: default toolchain set to stable-x86_64-unknown-linux-gnu
+info: using existing install for stable-x86_64-unknown-linux-gnu
+
+info: default toolchain set to stable-x86_64-unknown-linux-gnu
+  stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+
+info: downloading component rust-std
+0.13.0
+==> zig-linker 语法 OK, target=aarch64-linux-musl
+==> zig linker: aarch64-unknown-linux-musl -> aarch64-linux-musl
+==> 初始化 feeds（仅 luci）
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'eip197-mini-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8169-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'e100-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2x-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'ar3k-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'mwifiex-sdio-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb2', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'edgeport-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8152-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb3', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'amdgpu-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'radeon-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'mt7622bt-firmware', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a dependency on 'uci-firewall', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-opkg/Makefile' has a dependency on 'opkg', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-opkg/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-opkg/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-file', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'cgi-io', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-fs', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-uci', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-math', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'libiwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'liblua', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'libucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libnl-tiny', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/ucode-mod-html/Makefile' has a dependency on 'libucode', which does not exist
+tmp/.config-package.in:70:warning: ignoring type redefinition of 'PACKAGE_libc' from 'bool' to 'tristate'
+tmp/.config-package.in:98:warning: ignoring type redefinition of 'PACKAGE_libgcc' from 'bool' to 'tristate'
+tmp/.config-package.in:219:warning: ignoring type redefinition of 'PACKAGE_libpthread' from 'bool' to 'tristate'
+tmp/.config-package.in:461:warning: ignoring type redefinition of 'PACKAGE_liblucihttp' from 'bool' to 'tristate'
+tmp/.config-package.in:481:warning: ignoring type redefinition of 'PACKAGE_liblucihttp-ucode' from 'bool' to 'tristate'
+tmp/.config-package.in:492:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-luci' from 'bool' to 'tristate'
+tmp/.config-package.in:505:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-rrdns' from 'bool' to 'tristate'
+tmp/.config-package.in:522:warning: ignoring type redefinition of 'PACKAGE_luci' from 'bool' to 'tristate'
+tmp/.config-package.in:534:warning: ignoring type redefinition of 'PACKAGE_luci-light' from 'bool' to 'tristate'
+tmp/.config-package.in:554:warning: ignoring type redefinition of 'PACKAGE_luci-base' from 'bool' to 'tristate'
+tmp/.config-package.in:591:warning: ignoring type redefinition of 'LUCI_LANG_ar' from 'bool' to 'tristate'
+tmp/.config-package.in:594:warning: ignoring type redefinition of 'LUCI_LANG_bg' from 'bool' to 'tristate'
+tmp/.config-package.in:597:warning: ignoring type redefinition of 'LUCI_LANG_bn_BD' from 'bool' to 'tristate'
+tmp/.config-package.in:600:warning: ignoring type redefinition of 'LUCI_LANG_ca' from 'bool' to 'tristate'
+tmp/.config-package.in:603:warning: ignoring type redefinition of 'LUCI_LANG_cs' from 'bool' to 'tristate'
+tmp/.config-package.in:606:warning: ignoring type redefinition of 'LUCI_LANG_da' from 'bool' to 'tristate'
+tmp/.config-package.in:609:warning: ignoring type redefinition of 'LUCI_LANG_de' from 'bool' to 'tristate'
+tmp/.config-package.in:612:warning: ignoring type redefinition of 'LUCI_LANG_el' from 'bool' to 'tristate'
+tmp/.config-package.in:615:warning: ignoring type redefinition of 'LUCI_LANG_es' from 'bool' to 'tristate'
+tmp/.config-package.in:618:warning: ignoring type redefinition of 'LUCI_LANG_fi' from 'bool' to 'tristate'
+tmp/.config-package.in:621:warning: ignoring type redefinition of 'LUCI_LANG_fr' from 'bool' to 'tristate'
+tmp/.config-package.in:624:warning: ignoring type redefinition of 'LUCI_LANG_he' from 'bool' to 'tristate'
+tmp/.config-package.in:627:warning: ignoring type redefinition of 'LUCI_LANG_hi' from 'bool' to 'tristate'
+tmp/.config-package.in:630:warning: ignoring type redefinition of 'LUCI_LANG_hu' from 'bool' to 'tristate'
+tmp/.config-package.in:633:warning: ignoring type redefinition of 'LUCI_LANG_it' from 'bool' to 'tristate'
+tmp/.config-package.in:636:warning: ignoring type redefinition of 'LUCI_LANG_ja' from 'bool' to 'tristate'
+tmp/.config-package.in:639:warning: ignoring type redefinition of 'LUCI_LANG_ko' from 'bool' to 'tristate'
+tmp/.config-package.in:642:warning: ignoring type redefinition of 'LUCI_LANG_lt' from 'bool' to 'tristate'
+tmp/.config-package.in:645:warning: ignoring type redefinition of 'LUCI_LANG_mr' from 'bool' to 'tristate'
+tmp/.config-package.in:648:warning: ignoring type redefinition of 'LUCI_LANG_ms' from 'bool' to 'tristate'
+tmp/.config-package.in:651:warning: ignoring type redefinition of 'LUCI_LANG_nb_NO' from 'bool' to 'tristate'
+tmp/.config-package.in:654:warning: ignoring type redefinition of 'LUCI_LANG_nl' from 'bool' to 'tristate'
+tmp/.config-package.in:657:warning: ignoring type redefinition of 'LUCI_LANG_pl' from 'bool' to 'tristate'
+tmp/.config-package.in:660:warning: ignoring type redefinition of 'LUCI_LANG_pt' from 'bool' to 'tristate'
+tmp/.config-package.in:663:warning: ignoring type redefinition of 'LUCI_LANG_pt_BR' from 'bool' to 'tristate'
+tmp/.config-package.in:666:warning: ignoring type redefinition of 'LUCI_LANG_ro' from 'bool' to 'tristate'
+tmp/.config-package.in:669:warning: ignoring type redefinition of 'LUCI_LANG_ru' from 'bool' to 'tristate'
+tmp/.config-package.in:672:warning: ignoring type redefinition of 'LUCI_LANG_sk' from 'bool' to 'tristate'
+tmp/.config-package.in:675:warning: ignoring type redefinition of 'LUCI_LANG_sv' from 'bool' to 'tristate'
+tmp/.config-package.in:678:warning: ignoring type redefinition of 'LUCI_LANG_tr' from 'bool' to 'tristate'
+tmp/.config-package.in:681:warning: ignoring type redefinition of 'LUCI_LANG_uk' from 'bool' to 'tristate'
+tmp/.config-package.in:684:warning: ignoring type redefinition of 'LUCI_LANG_vi' from 'bool' to 'tristate'
+tmp/.config-package.in:687:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hans' from 'bool' to 'tristate'
+tmp/.config-package.in:690:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hant' from 'bool' to 'tristate'
+tmp/.config-package.in:695:warning: ignoring type redefinition of 'PACKAGE_luci-mod-admin-full' from 'bool' to 'tristate'
+tmp/.config-package.in:709:warning: ignoring type redefinition of 'PACKAGE_luci-mod-network' from 'bool' to 'tristate'
+tmp/.config-package.in:721:warning: ignoring type redefinition of 'PACKAGE_luci-mod-status' from 'bool' to 'tristate'
+tmp/.config-package.in:734:warning: ignoring type redefinition of 'PACKAGE_luci-mod-system' from 'bool' to 'tristate'
+tmp/.config-package.in:747:warning: ignoring type redefinition of 'PACKAGE_luci-app-firewall' from 'bool' to 'tristate'
+tmp/.config-package.in:768:warning: ignoring type redefinition of 'PACKAGE_luci-app-opkg' from 'bool' to 'tristate'
+tmp/.config-package.in:781:warning: ignoring type redefinition of 'PACKAGE_luci-theme-bootstrap' from 'bool' to 'tristate'
+tmp/.config-package.in:794:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ipv6' from 'bool' to 'tristate'
+tmp/.config-package.in:805:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ppp' from 'bool' to 'tristate'
+tmp/.config-package.in:1906:warning: ignoring type redefinition of 'PACKAGE_ucode-mod-html' from 'bool' to 'tristate'
+Config-build.in:1631:warning: defaults for choice values not supported
+Config-build.in:1635:warning: defaults for choice values not supported
+Config-build.in:1639:warning: defaults for choice values not supported
+==> package 目录：
+package/feeds
+package/kernel
+package/luci-app-mt5700
+package/Makefile
+package/toolchain
+==> 选中状态：
+CONFIG_PACKAGE_luci-app-mt5700=m
+CONFIG_PACKAGE_luci-i18n-mt5700-zh-cn=m
+==> packageinfo 中的本项目包：
+1
+==> 编译单包（LuCI 前端 + Rust 后端，target=aarch64-unknown-linux-musl）
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'eip197-mini-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8169-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'e100-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2x-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'ar3k-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'mwifiex-sdio-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb2', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'edgeport-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8152-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb3', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'amdgpu-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'radeon-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'mt7622bt-firmware', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a dependency on 'uci-firewall', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-opkg/Makefile' has a dependency on 'opkg', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-opkg/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-opkg/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-file', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'cgi-io', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-fs', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-uci', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-math', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'libiwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'liblua', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'libucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libnl-tiny', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/ucode-mod-html/Makefile' has a dependency on 'libucode', which does not exist
+make[2]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/config'
+make[2]: 'conf' is up to date.
+make[2]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/config'
+tmp/.config-package.in:70:warning: ignoring type redefinition of 'PACKAGE_libc' from 'bool' to 'tristate'
+tmp/.config-package.in:98:warning: ignoring type redefinition of 'PACKAGE_libgcc' from 'bool' to 'tristate'
+tmp/.config-package.in:219:warning: ignoring type redefinition of 'PACKAGE_libpthread' from 'bool' to 'tristate'
+tmp/.config-package.in:461:warning: ignoring type redefinition of 'PACKAGE_liblucihttp' from 'bool' to 'tristate'
+tmp/.config-package.in:481:warning: ignoring type redefinition of 'PACKAGE_liblucihttp-ucode' from 'bool' to 'tristate'
+tmp/.config-package.in:492:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-luci' from 'bool' to 'tristate'
+tmp/.config-package.in:505:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-rrdns' from 'bool' to 'tristate'
+tmp/.config-package.in:522:warning: ignoring type redefinition of 'PACKAGE_luci' from 'bool' to 'tristate'
+tmp/.config-package.in:534:warning: ignoring type redefinition of 'PACKAGE_luci-light' from 'bool' to 'tristate'
+tmp/.config-package.in:554:warning: ignoring type redefinition of 'PACKAGE_luci-base' from 'bool' to 'tristate'
+tmp/.config-package.in:591:warning: ignoring type redefinition of 'LUCI_LANG_ar' from 'bool' to 'tristate'
+tmp/.config-package.in:594:warning: ignoring type redefinition of 'LUCI_LANG_bg' from 'bool' to 'tristate'
+tmp/.config-package.in:597:warning: ignoring type redefinition of 'LUCI_LANG_bn_BD' from 'bool' to 'tristate'
+tmp/.config-package.in:600:warning: ignoring type redefinition of 'LUCI_LANG_ca' from 'bool' to 'tristate'
+tmp/.config-package.in:603:warning: ignoring type redefinition of 'LUCI_LANG_cs' from 'bool' to 'tristate'
+tmp/.config-package.in:606:warning: ignoring type redefinition of 'LUCI_LANG_da' from 'bool' to 'tristate'
+tmp/.config-package.in:609:warning: ignoring type redefinition of 'LUCI_LANG_de' from 'bool' to 'tristate'
+tmp/.config-package.in:612:warning: ignoring type redefinition of 'LUCI_LANG_el' from 'bool' to 'tristate'
+tmp/.config-package.in:615:warning: ignoring type redefinition of 'LUCI_LANG_es' from 'bool' to 'tristate'
+tmp/.config-package.in:618:warning: ignoring type redefinition of 'LUCI_LANG_fi' from 'bool' to 'tristate'
+tmp/.config-package.in:621:warning: ignoring type redefinition of 'LUCI_LANG_fr' from 'bool' to 'tristate'
+tmp/.config-package.in:624:warning: ignoring type redefinition of 'LUCI_LANG_he' from 'bool' to 'tristate'
+tmp/.config-package.in:627:warning: ignoring type redefinition of 'LUCI_LANG_hi' from 'bool' to 'tristate'
+tmp/.config-package.in:630:warning: ignoring type redefinition of 'LUCI_LANG_hu' from 'bool' to 'tristate'
+tmp/.config-package.in:633:warning: ignoring type redefinition of 'LUCI_LANG_it' from 'bool' to 'tristate'
+tmp/.config-package.in:636:warning: ignoring type redefinition of 'LUCI_LANG_ja' from 'bool' to 'tristate'
+tmp/.config-package.in:639:warning: ignoring type redefinition of 'LUCI_LANG_ko' from 'bool' to 'tristate'
+tmp/.config-package.in:642:warning: ignoring type redefinition of 'LUCI_LANG_lt' from 'bool' to 'tristate'
+tmp/.config-package.in:645:warning: ignoring type redefinition of 'LUCI_LANG_mr' from 'bool' to 'tristate'
+tmp/.config-package.in:648:warning: ignoring type redefinition of 'LUCI_LANG_ms' from 'bool' to 'tristate'
+tmp/.config-package.in:651:warning: ignoring type redefinition of 'LUCI_LANG_nb_NO' from 'bool' to 'tristate'
+tmp/.config-package.in:654:warning: ignoring type redefinition of 'LUCI_LANG_nl' from 'bool' to 'tristate'
+tmp/.config-package.in:657:warning: ignoring type redefinition of 'LUCI_LANG_pl' from 'bool' to 'tristate'
+tmp/.config-package.in:660:warning: ignoring type redefinition of 'LUCI_LANG_pt' from 'bool' to 'tristate'
+tmp/.config-package.in:663:warning: ignoring type redefinition of 'LUCI_LANG_pt_BR' from 'bool' to 'tristate'
+tmp/.config-package.in:666:warning: ignoring type redefinition of 'LUCI_LANG_ro' from 'bool' to 'tristate'
+tmp/.config-package.in:669:warning: ignoring type redefinition of 'LUCI_LANG_ru' from 'bool' to 'tristate'
+tmp/.config-package.in:672:warning: ignoring type redefinition of 'LUCI_LANG_sk' from 'bool' to 'tristate'
+tmp/.config-package.in:675:warning: ignoring type redefinition of 'LUCI_LANG_sv' from 'bool' to 'tristate'
+tmp/.config-package.in:678:warning: ignoring type redefinition of 'LUCI_LANG_tr' from 'bool' to 'tristate'
+tmp/.config-package.in:681:warning: ignoring type redefinition of 'LUCI_LANG_uk' from 'bool' to 'tristate'
+tmp/.config-package.in:684:warning: ignoring type redefinition of 'LUCI_LANG_vi' from 'bool' to 'tristate'
+tmp/.config-package.in:687:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hans' from 'bool' to 'tristate'
+tmp/.config-package.in:690:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hant' from 'bool' to 'tristate'
+tmp/.config-package.in:695:warning: ignoring type redefinition of 'PACKAGE_luci-mod-admin-full' from 'bool' to 'tristate'
+tmp/.config-package.in:709:warning: ignoring type redefinition of 'PACKAGE_luci-mod-network' from 'bool' to 'tristate'
+tmp/.config-package.in:721:warning: ignoring type redefinition of 'PACKAGE_luci-mod-status' from 'bool' to 'tristate'
+tmp/.config-package.in:734:warning: ignoring type redefinition of 'PACKAGE_luci-mod-system' from 'bool' to 'tristate'
+tmp/.config-package.in:747:warning: ignoring type redefinition of 'PACKAGE_luci-app-firewall' from 'bool' to 'tristate'
+tmp/.config-package.in:768:warning: ignoring type redefinition of 'PACKAGE_luci-app-opkg' from 'bool' to 'tristate'
+tmp/.config-package.in:781:warning: ignoring type redefinition of 'PACKAGE_luci-theme-bootstrap' from 'bool' to 'tristate'
+tmp/.config-package.in:794:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ipv6' from 'bool' to 'tristate'
+tmp/.config-package.in:805:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ppp' from 'bool' to 'tristate'
+tmp/.config-package.in:1906:warning: ignoring type redefinition of 'PACKAGE_ucode-mod-html' from 'bool' to 'tristate'
+Config-build.in:1631:warning: defaults for choice values not supported
+Config-build.in:1635:warning: defaults for choice values not supported
+Config-build.in:1639:warning: defaults for choice values not supported
+#
+# No change to .config
+#
+make[1]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64'
+make[2]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/feeds/luci/modules/luci-base'
+[ ! -d ./src/ ] || cp -fpR ./src/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/luci-base
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/luci-base/.prepared57eab3c81f12b255ee1932a8f690acf3_18f1e190c5d53547fed41a3eaa76e9e9
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/luci-base/.configured
+make -C src/ clean po2lmo jsmin
+make[3]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/feeds/luci/modules/luci-base/src'
+rm -f contrib/lemon lib/*.o lib/plural_formula.c lib/plural_formula.h core.so version.uc
+cc    -DNDEBUG -c -o po2lmo.o po2lmo.c
+cc -o contrib/lemon contrib/lemon.c
+./contrib/lemon -q lib/plural_formula.y
+cc    -DNDEBUG -c -o lib/lmo.o lib/lmo.c
+cc    -DNDEBUG -c -o lib/plural_formula.o lib/plural_formula.c
+cc  -o po2lmo po2lmo.o lib/lmo.o lib/plural_formula.o
+cc    -DNDEBUG -c -o jsmin.o jsmin.c
+cc  -o jsmin jsmin.o
+make[3]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/feeds/luci/modules/luci-base/src'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/luci-base/.built
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/bin
+install -m0755 src/po2lmo /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/bin/po2lmo
+install -m0755 src/jsmin /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/bin/jsmin
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/stamp
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/luci-base/.built
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/stamp/.luci-base_installed 
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/luci-base -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/feeds/luci/modules/luci-base'
+time: package/feeds/luci/luci-base/host-compile#1.71#0.89#2.47
+make[2]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/package/toolchain'
+Makefile:735: WARNING: skipping libgomp -- package has no install section
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.prepared_4b9fb8a16e7e849f34cdf0aabc175b44_18f1e190c5d53547fed41a3eaa76e9e9_check
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.prepared_4b9fb8a16e7e849f34cdf0aabc175b44_18f1e190c5d53547fed41a3eaa76e9e9
+rm -f /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.configured_*
+rm -f /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/stamp/.toolchain_installed
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/./; if [ -x ./configure ]; then find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ -name config.guess | xargs -r chmod u+w; find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ -name config.guess | xargs -r -n1 cp --remove-destination /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/config.guess; find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ -name config.sub | xargs -r chmod u+w; find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ -name config.sub | xargs -r -n1 cp --remove-destination /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/config.sub; AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain=toolchain -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD=aarch64-openwrt-linux-musl-ld NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain=toolchain -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro " CXXFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain=toolchain -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro " CPPFLAGS="-I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " LDFLAGS="-L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib -znow -zrelro "   ./configure --target=aarch64-openwrt-linux --host=aarch64-openwrt-linux --build=x86_64-pc-linux-gnu --disable-dependency-tracking --program-prefix="" --program-suffix="" --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/sbin --libexecdir=/usr/lib --sysconfdir=/etc --datadir=/usr/share --localstatedir=/var --mandir=/usr/man --infodir=/usr/info --disable-nls  ; fi; )
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.configured_68b329da9893e34099c7d8ad5cb9c940
+rm -f /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.built
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.built_check
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libgcc_s.so.1 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.built
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/lib /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/usr/bin
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/ld-musl-*.so* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/lib/
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libc.so* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/lib/
+ln -sf ../../lib/libc.so /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/usr/bin/ldd
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libatomic.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libc.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libcrypt.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libdl.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libitm.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libm.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libpthread.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libresolv.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/librt.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libssp_nonshared.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libstdc++.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libstdc++fs.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libsupc++.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libutil.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libxnet.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/lib/
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/gcc/aarch64-openwrt-linux-musl/12.3.0/libgcc_pic.a /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/lib/libgcc_s_pic.a; cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/gcc/aarch64-openwrt-linux-musl/12.3.0/libgcc.map /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/lib/libgcc_s_pic.map 
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc.installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libc/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.libc_installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc/lib
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libgcc_s.so.* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc/lib/
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc
+rstrip.sh: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc/lib/libgcc_s.so.1: shared object
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libgcc into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages/libgcc1_12.3.0-4_aarch64_cortex-a53.ipk
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/lib /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/usr/bin
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/ld-musl-*.so* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/lib/
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libc.so* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/lib/
+ln -sf ../../lib/libc.so /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/usr/bin/ldd
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc
+rstrip.sh: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/lib/libc.so: shared object
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libc into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages/libc_1.2.4-4_aarch64_cortex-a53.ipk
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic/lib
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libatomic.so.* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic/lib/
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic
+rstrip.sh: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic/lib/libatomic.so.1.2.0: shared object
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libatomic into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages/libatomic1_12.3.0-4_aarch64_cortex-a53.ipk
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp/usr/lib
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libstdc++.so.* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp/usr/lib/
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp/usr/lib/*-gdb.py
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp
+rstrip.sh: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp/usr/lib/libstdc++.so.6.0.30: shared object
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libstdcpp into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages/libstdcpp6_12.3.0-4_aarch64_cortex-a53.ipk
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libpthread/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libpthread/lib
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libpthread -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libpthread
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libpthread/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libpthread /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/libpthread into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages/libpthread_1.2.4-4_aarch64_cortex-a53.ipk
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/librt/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/librt/lib
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/librt -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/librt
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/librt/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/librt /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/ipkg-aarch64_cortex-a53/librt into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages/librt_1.2.4-4_aarch64_cortex-a53.ipk
+echo "libc" >> /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/toolchain.default.install
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libgcc.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libgcc
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libgcc
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libgcc/lib
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libgcc_s.so.* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libgcc/lib/
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libgcc.installed
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libatomic.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libatomic
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libatomic
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libatomic/lib
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libatomic.so.* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libatomic/lib/
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libatomic.installed
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp/usr/lib
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib/libstdc++.so.* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp/usr/lib/
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp/usr/lib/*-gdb.py
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp.installed
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libpthread.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libpthread
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libpthread
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libpthread/lib
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libpthread.installed
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/librt.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/librt
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/librt
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/librt/lib
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/librt.installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+echo '1' | cmp -s - /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/libgcc.version || { echo '1' > /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/libgcc.version;  } 
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libgcc/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.libgcc_installed
+echo "libgcc" >> /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/toolchain.default.install
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+echo '1' | cmp -s - /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/libatomic.version || { echo '1' > /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/libatomic.version;  } 
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libatomic/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.libatomic_installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+echo '6' | cmp -s - /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/libstdcpp.version || { echo '6' > /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/libstdcpp.version;  } 
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libstdcpp/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.libstdcpp_installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/libpthread/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.libpthread_installed
+echo "libpthread" >> /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo/toolchain.default.install
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.pkgdir/librt/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.librt_installed
+touch -r /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.built /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain/.autoremove 2>/dev/null >/dev/null
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/toolchain -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -and -not -name '.pkgdir'  -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/package/toolchain'
+time: package/toolchain/compile#0.57#1.08#1.58
+make[2]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/feeds/luci/contrib/package/csstidy'
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/dl
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.csstidy-2021-06-13-707feaec.tar.xz.flock -c '  	/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/download.pl "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/dl" "csstidy-2021-06-13-707feaec.tar.xz" "a6db35de692d1b94561e725634ce410b75f5f7e26dc6f3fc92931813c0721ded" "" || (  /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/dl_github_archive.py --dl-dir="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/dl" --url="https://github.com/jow-/csstidy-cpp.git" --version="707feaec556c40c999514a598b1a1ea5b50826c6" --subdir="csstidy-2021-06-13-707feaec" --source="csstidy-2021-06-13-707feaec.tar.xz" --hash="a6db35de692d1b94561e725634ce410b75f5f7e26dc6f3fc92931813c0721ded" || ( 	echo "Checking out files from the git repository..."; mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/dl && cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/dl && rm -rf csstidy-2021-06-13-707feaec && [ \! -d csstidy-2021-06-13-707feaec ] && git clone  https://github.com/jow-/csstidy-cpp.git csstidy-2021-06-13-707feaec && (cd csstidy-2021-06-13-707feaec && git checkout 707feaec556c40c999514a598b1a1ea5b50826c6 && git submodule update --init --recursive) && echo "Packing checkout..." && export TAR_TIMESTAMP=`cd csstidy-2021-06-13-707feaec && git log -1 --format='\''@%ct'\''` && rm -rf csstidy-2021-06-13-707feaec/.git && 	tar --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name ${TAR_TIMESTAMP:+--mtime="$TAR_TIMESTAMP"} -c csstidy-2021-06-13-707feaec | 	xz -zc -7e > /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/dl/csstidy-2021-06-13-707feaec.tar.xz && mv /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/dl/csstidy-2021-06-13-707feaec.tar.xz /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/dl/ && rm -rf csstidy-2021-06-13-707feaec; );  )    '
++ curl -f --connect-timeout 20 --retry 5 --location https://sources.cdn.openwrt.org/csstidy-2021-06-13-707feaec.tar.xz
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100 30260  100 30260    0     0   314k      0 --:--:-- --:--:-- --:--:--  317k
+. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/include/shell.sh; xzcat /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/dl/csstidy-2021-06-13-707feaec.tar.xz | tar -C /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec/.. -xf -
+[ ! -d ./src/ ] || cp -fpR ./src/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec/.prepared560daccae2269a6ee00afa99e615f443_18f1e190c5d53547fed41a3eaa76e9e9
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec/; if [ -x configure ]; then cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/config.{guess,sub} /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec// && CC="gcc" CFLAGS="-O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include" CXX="g++" CPPFLAGS="-I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include" CXXFLAGS="" LDFLAGS="-L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/lib" CONFIG_SHELL="/usr/bin/env bash"  bash ./configure --target=x86_64-pc-linux-gnu --host=x86_64-pc-linux-gnu --build=x86_64-pc-linux-gnu --disable-dependency-tracking --program-prefix="" --program-suffix="" --prefix=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg --exec-prefix=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg --sysconfdir=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/etc --localstatedir=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/var --sbindir=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/bin ; fi )
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec/.configured
+CFLAGS="-O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include" CPPFLAGS="-I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include" CXXFLAGS="" LDFLAGS="-L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/lib" make -j1 -C /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec  
+make[3]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec'
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/background.o csstidy/background.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/conversions.o csstidy/conversions.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/cssopt.o csstidy/cssopt.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/csspp_globals.o csstidy/csspp_globals.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/csstidy.o csstidy/csstidy.cpp
+In file included from csstidy/csspp_globals.hpp:34,
+                 from csstidy/csstidy.cpp:20:
+csstidy/umap.hpp: In member function 'valT& umap<keyT, valT>::at(int) [with keyT = std::__cxx11::basic_string<char>; valT = std::__cxx11::basic_string<char>]':
+csstidy/umap.hpp:125:3: warning: control reaches end of non-void function [-Wreturn-type]
+  125 |   }
+      |   ^
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/file_functions.o csstidy/file_functions.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/important.o csstidy/important.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/main.o csstidy/main.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/misc.o csstidy/misc.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/parse_css.o csstidy/parse_css.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/prepare.o csstidy/prepare.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/print_css.o csstidy/print_css.cpp
+csstidy/print_css.cpp: In member function 'int csstidy::_seeknocomment(int, int)':
+csstidy/print_css.cpp:76:1: warning: control reaches end of non-void function [-Wreturn-type]
+   76 | }
+      | ^
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/trim.o csstidy/trim.cpp
+g++ -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -O2 -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/include -c -o csstidy/umap.o csstidy/umap.cpp
+g++ -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/host/lib -o csstidy/csstidy csstidy/background.o csstidy/conversions.o csstidy/cssopt.o csstidy/csspp_globals.o csstidy/csstidy.o csstidy/file_functions.o csstidy/important.o csstidy/main.o csstidy/misc.o csstidy/parse_css.o csstidy/prepare.o csstidy/print_css.o csstidy/trim.o csstidy/umap.o
+make[3]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec/.built
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/bin/
+install -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec/csstidy/csstidy /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/bin/
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/stamp
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec/.built
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/hostpkg/stamp/.csstidy_installed 
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/hostpkg/csstidy-2021-06-13-707feaec -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/feeds/luci/contrib/package/csstidy'
+time: package/feeds/luci/csstidy/host-compile#9.53#0.96#10.44
+make[2]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/package/luci-app-mt5700'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.prepared_ac9214c91a9e7cf5945a8d2912157379_18f1e190c5d53547fed41a3eaa76e9e9_check
+for d in luasrc ucode htdocs root src; do if [ -d ./$d ]; then mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/$d; cp -fpR ./$d/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/$d/; fi; done
+true
+[ ! -d ./src/ ] || cp -fpR ./src/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.prepared_ac9214c91a9e7cf5945a8d2912157379_18f1e190c5d53547fed41a3eaa76e9e9
+rm -f /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.configured_*
+rm -f /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/stamp/.luci-app-mt5700_installed
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.configured_811dc2f0ccfbe4b68a068320f8578dbe
+rm -f /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.built
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.built_check
+CFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " CXXFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " LDFLAGS="-L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="260912.51828" LUCI_GITBRANCH="LuCI" make -j1 -C /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD=aarch64-openwrt-linux-musl-ld NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" clean compile;
+make[3]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+cd rust && cargo clean 2>/dev/null || true
+rm -rf "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target"
+==> [mt5700] cargo build: ARCH=aarch64 RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded mio v1.2.3
+  Downloaded async-trait v0.1.92
+  Downloaded zmij v1.0.23
+  Downloaded cc v1.4.5
+  Downloaded base64 v0.22.1
+  Downloaded autocfg v1.5.1
+  Downloaded memchr v2.8.3
+  Downloaded icu_provider v2.3.1
+  Downloaded num-traits v0.2.19
+  Downloaded subtle v2.6.1
+  Downloaded idna_adapter v1.2.2
+  Downloaded itoa v1.0.18
+  Downloaded litemap v0.8.3
+  Downloaded bytes v1.12.1
+  Downloaded shlex v2.0.1
+  Downloaded find-msvc-tools v0.1.12
+  Downloaded iana-time-zone v0.1.65
+  Downloaded icu_properties_data v2.3.0
+  Downloaded serde_core v1.0.229
+  Downloaded yoke v0.8.3
+  Downloaded zerofrom v0.1.8
+  Downloaded form_urlencoded v1.2.2
+  Downloaded log v0.4.34
+  Downloaded errno v0.3.14
+  Downloaded potential_utf v0.1.6
+  Downloaded hex v0.4.3
+  Downloaded quote v1.0.47
+  Downloaded icu_properties v2.3.0
+  Downloaded tokio-macros v2.7.2
+  Downloaded webpki-roots v0.26.11
+  Downloaded stable_deref_trait v1.2.1
+  Downloaded untrusted v0.9.0
+  Downloaded yoke-derive v0.8.2
+  Downloaded displaydoc v0.2.7
+  Downloaded once_cell v1.21.4
+  Downloaded percent-encoding v2.3.2
+  Downloaded serde v1.0.229
+  Downloaded zerovec-derive v0.11.6
+  Downloaded utf8_iter v1.0.4
+  Downloaded zerofrom-derive v0.1.7
+  Downloaded cfg-if v1.0.4
+  Downloaded synstructure v0.13.2
+  Downloaded tinystr v0.8.4
+  Downloaded icu_locale_core v2.3.0
+  Downloaded pin-project-lite v0.2.17
+  Downloaded signal-hook-registry v1.4.8
+  Downloaded smallvec v1.16.0
+  Downloaded rustls-pki-types v1.15.1
+  Downloaded unicode-ident v1.0.24
+  Downloaded url v2.5.8
+  Downloaded writeable v0.6.4
+  Downloaded zeroize v1.9.0
+  Downloaded getrandom v0.2.17
+  Downloaded serde_derive v1.0.229
+  Downloaded ureq v2.12.1
+  Downloaded proc-macro2 v1.0.107
+  Downloaded zerotrie v0.2.5
+  Downloaded icu_collections v2.3.0
+  Downloaded icu_normalizer_data v2.3.0
+  Downloaded rustls-webpki v0.103.15
+  Downloaded socket2 v0.6.5
+  Downloaded idna v1.1.0
+  Downloaded zerovec v0.11.8
+  Downloaded serde_json v1.0.151
+  Downloaded webpki-roots v1.0.9
+  Downloaded chrono v0.4.45
+  Downloaded syn v2.0.119
+  Downloaded syn v3.0.5
+  Downloaded rustls v0.23.44
+  Downloaded icu_normalizer v2.3.0
+  Downloaded libc v0.2.189
+  Downloaded tokio v1.53.1
+  Downloaded ring v0.17.14
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling stable_deref_trait v1.2.1
+   Compiling libc v0.2.189
+   Compiling writeable v0.6.4
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling litemap v0.8.3
+   Compiling cc v1.4.5
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_properties_data v2.3.0
+   Compiling utf8_iter v1.0.4
+   Compiling zeroize v1.9.0
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling rustls-pki-types v1.15.1
+   Compiling ring v0.17.14
+   Compiling cfg-if v1.0.4
+   Compiling smallvec v1.16.0
+   Compiling getrandom v0.2.17
+   Compiling serde_core v1.0.229
+   Compiling autocfg v1.5.1
+   Compiling untrusted v0.9.0
+   Compiling num-traits v0.2.19
+   Compiling zmij v1.0.23
+   Compiling synstructure v0.13.2
+   Compiling rustls v0.23.44
+   Compiling percent-encoding v2.3.2
+   Compiling form_urlencoded v1.2.2
+   Compiling zerofrom-derive v0.1.7
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.2
+   Compiling yoke v0.8.3
+   Compiling webpki-roots v1.0.9
+   Compiling errno v0.3.14
+   Compiling zerovec-derive v0.11.6
+   Compiling displaydoc v0.2.7
+   Compiling once_cell v1.21.4
+   Compiling serde v1.0.229
+   Compiling zerotrie v0.2.5
+   Compiling serde_json v1.0.151
+   Compiling rustls-webpki v0.103.15
+   Compiling log v0.4.34
+   Compiling zerovec v0.11.8
+   Compiling subtle v2.6.1
+   Compiling serde_derive v1.0.229
+   Compiling tinystr v0.8.4
+   Compiling icu_locale_core v2.3.0
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.3.0
+   Compiling icu_provider v2.3.1
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling tokio-macros v2.7.2
+   Compiling signal-hook-registry v1.4.8
+   Compiling webpki-roots v0.26.11
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling socket2 v0.6.5
+   Compiling url v2.5.8
+   Compiling mio v1.2.3
+   Compiling memchr v2.8.3
+   Compiling bytes v1.12.1
+   Compiling base64 v0.22.1
+   Compiling iana-time-zone v0.1.65
+   Compiling itoa v1.0.18
+   Compiling pin-project-lite v0.2.17
+   Compiling tokio v1.53.1
+   Compiling chrono v0.4.45
+   Compiling ureq v2.12.1
+   Compiling async-trait v0.1.92
+   Compiling hex v0.4.3
+   Compiling at-webserver v1.5.0 (/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/rust)
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 54.18s
+test -x "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+make[3]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+CFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " CXXFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " LDFLAGS="-L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="260912.51828" LUCI_GITBRANCH="LuCI" make -C /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD=aarch64-openwrt-linux-musl-ld NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" DESTDIR="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install"  install;
+make[3]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+==> [mt5700] cargo build: ARCH=aarch64 RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.06s
+test -x "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
+# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
+mkdir -p "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin"
+cp "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+chmod 0755 "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+make[3]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.built
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www
+cp -pR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/htdocs/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www/
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www/ -type f -name '*.js' | while read src; do if jsmin < "$src" > "$src.o"; then mv "$src.o" "$src"; fi; done
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www/ -type f -name '*.css' | while read src; do if csstidy "$src" --template=highest --remove_last_semicolon=true "$src.o"; then mv "$src.o" "$src"; fi; done
+
+Selectors: 166 | Properties: 566
+Input size: 17.193KiB  Output size: 12.388KiB  Compression ratio: 27.95%
+-----------------------------------
+
+33: Invalid property in CSS3.0: gap
+76: Invalid property in CSS3.0: accent-color
+84: Invalid property in CSS3.0: word-break
+111: Invalid property in CSS3.0: word-break
+124: Invalid property in CSS3.0: gap
+166: Invalid property in CSS3.0: transform
+186: Invalid property in CSS3.0: inset
+207: Invalid property in CSS3.0: gap
+214: Invalid property in CSS3.0: gap
+238: Invalid property in CSS3.0: transform
+239: Invalid property in CSS3.0: transform
+242: Invalid property in CSS3.0: gap
+265: Invalid property in CSS3.0: gap
+283: Invalid property in CSS3.0: gap
+292: Invalid property in CSS3.0: word-break
+294: Invalid property in CSS3.0: border-bottom-right-radius
+295: Invalid property in CSS3.0: border-bottom-left-radius
+300: Invalid property in CSS3.0: gap
+302: Invalid property in CSS3.0: resize
+307: Invalid property in CSS3.0: gap
+314: Invalid property in CSS3.0: word-break
+324: Invalid property in CSS3.0: word-break
+327: Invalid property in CSS3.0: gap
+344: Invalid property in CSS3.0: word-break
+348: Invalid property in CSS3.0: gap
+356: Invalid property in CSS3.0: word-break
+361: Invalid property in CSS3.0: gap
+362: Invalid property in CSS3.0: gap
+368: Invalid property in CSS3.0: grid-template-columns
+369: Invalid property in CSS3.0: gap
+379: Invalid property in CSS3.0: word-break
+384: Invalid property in CSS3.0: gap
+391: Invalid property in CSS3.0: gap
+414: Invalid property in CSS3.0: gap
+417: Invalid property in CSS3.0: gap
+426: Invalid property in CSS3.0: gap
+439: Invalid property in CSS3.0: gap
+446: Invalid property in CSS3.0: gap
+456: Invalid property in CSS3.0: word-break
+473: Invalid property in CSS3.0: word-break
+477: Invalid property in CSS3.0: gap
+491: Invalid property in CSS3.0: gap
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+
+Selectors: 295 | Properties: 1020
+Input size: 45.159KiB  Output size: 34.03KiB  Compression ratio: 24.64%
+-----------------------------------
+
+10: Invalid property in CSS3.0: --mt5700-bg
+11: Invalid property in CSS3.0: --mt5700-card-bg
+12: Invalid property in CSS3.0: --mt5700-card-bg-hover
+13: Invalid property in CSS3.0: --mt5700-glass-bg
+14: Invalid property in CSS3.0: --mt5700-float-bg
+15: Invalid property in CSS3.0: --mt5700-text
+16: Invalid property in CSS3.0: --mt5700-text-secondary
+17: Invalid property in CSS3.0: --mt5700-text-muted
+18: Invalid property in CSS3.0: --mt5700-border
+19: Invalid property in CSS3.0: --mt5700-border-subtle
+20: Invalid property in CSS3.0: --mt5700-divider
+23: Invalid property in CSS3.0: --mt5700-blur
+24: Invalid property in CSS3.0: --mt5700-saturate
+25: Invalid property in CSS3.0: --mt5700-glass
+28: Invalid property in CSS3.0: --mt5700-sh-1
+29: Invalid property in CSS3.0: --mt5700-sh-2
+30: Invalid property in CSS3.0: --mt5700-sh-3
+31: Invalid property in CSS3.0: --mt5700-sh-float
+32: Invalid property in CSS3.0: --mt5700-sh-inset
+34: Invalid property in CSS3.0: --mt5700-shadow-sm
+35: Invalid property in CSS3.0: --mt5700-shadow-md
+36: Invalid property in CSS3.0: --mt5700-shadow-lg
+37: Invalid property in CSS3.0: --mt5700-shadow-xl
+40: Invalid property in CSS3.0: --mt5700-radius-sm
+41: Invalid property in CSS3.0: --mt5700-radius-md
+42: Invalid property in CSS3.0: --mt5700-radius-lg
+43: Invalid property in CSS3.0: --mt5700-radius-xl
+44: Invalid property in CSS3.0: --mt5700-radius-full
+47: Invalid property in CSS3.0: --mt5700-space-xs
+48: Invalid property in CSS3.0: --mt5700-space-sm
+49: Invalid property in CSS3.0: --mt5700-space-md
+50: Invalid property in CSS3.0: --mt5700-space-lg
+51: Invalid property in CSS3.0: --mt5700-space-xl
+54: Invalid property in CSS3.0: --mt5700-accent
+55: Invalid property in CSS3.0: --mt5700-accent-light
+56: Invalid property in CSS3.0: --mt5700-success
+57: Invalid property in CSS3.0: --mt5700-success-light
+58: Invalid property in CSS3.0: --mt5700-warning
+59: Invalid property in CSS3.0: --mt5700-warning-light
+60: Invalid property in CSS3.0: --mt5700-danger
+61: Invalid property in CSS3.0: --mt5700-danger-light
+62: Invalid property in CSS3.0: --mt5700-info
+63: Invalid property in CSS3.0: --mt5700-info-light
+65: Invalid property in CSS3.0: --mt5700-sig-exc
+66: Invalid property in CSS3.0: --mt5700-sig-good
+67: Invalid property in CSS3.0: --mt5700-sig-fair
+68: Invalid property in CSS3.0: --mt5700-sig-poor
+69: Invalid property in CSS3.0: --mt5700-sig-bad
+72: Invalid property in CSS3.0: --mt5700-font-sans
+73: Invalid property in CSS3.0: --mt5700-font-mono
+74: Invalid property in CSS3.0: --mt5700-font-size-xs
+75: Invalid property in CSS3.0: --mt5700-font-size-sm
+76: Invalid property in CSS3.0: --mt5700-font-size-base
+77: Invalid property in CSS3.0: --mt5700-font-size-lg
+78: Invalid property in CSS3.0: --mt5700-font-size-xl
+79: Invalid property in CSS3.0: --mt5700-font-size-2xl
+80: Invalid property in CSS3.0: --mt5700-font-size-3xl
+83: Invalid property in CSS3.0: --mt5700-transition-fast
+84: Invalid property in CSS3.0: --mt5700-transition-base
+85: Invalid property in CSS3.0: --mt5700-transition-slow
+91: Invalid property in CSS3.0: --mt5700-bg
+92: Invalid property in CSS3.0: --mt5700-card-bg
+93: Invalid property in CSS3.0: --mt5700-card-bg-hover
+94: Invalid property in CSS3.0: --mt5700-glass-bg
+95: Invalid property in CSS3.0: --mt5700-float-bg
+96: Invalid property in CSS3.0: --mt5700-text
+97: Invalid property in CSS3.0: --mt5700-text-secondary
+98: Invalid property in CSS3.0: --mt5700-text-muted
+99: Invalid property in CSS3.0: --mt5700-border
+100: Invalid property in CSS3.0: --mt5700-border-subtle
+101: Invalid property in CSS3.0: --mt5700-divider
+102: Invalid property in CSS3.0: --mt5700-sh-1
+103: Invalid property in CSS3.0: --mt5700-sh-2
+104: Invalid property in CSS3.0: --mt5700-sh-3
+105: Invalid property in CSS3.0: --mt5700-sh-float
+106: Invalid property in CSS3.0: --mt5700-sh-inset
+126: Invalid property in CSS3.0: inset
+133: Invalid property in CSS3.0: backdrop-filter
+134: Invalid property in CSS3.0: -webkit-backdrop-filter
+157: Invalid property in CSS3.0: gap
+169: Optimised shorthand notation (margin): Changed "0 0 var(--mt5700-space-sm) 0" to "0 0 var(--mt5700-space-sm)"
+185: Invalid property in CSS3.0: backdrop-filter
+186: Invalid property in CSS3.0: -webkit-backdrop-filter
+203: Invalid property in CSS3.0: gap
+204: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+218: Optimised shorthand notation (margin): Changed "var(--mt5700-space-xs) 0 0 0" to "var(--mt5700-space-xs) 0 0"
+240: Invalid property in CSS3.0: gap
+241: Invalid property in CSS3.0: grid-template-columns
+244: Invalid property in CSS3.0: grid-template-columns
+245: Invalid property in CSS3.0: grid-template-columns
+246: Invalid property in CSS3.0: grid-template-columns
+252: Invalid property in CSS3.0: grid-template-columns
+261: Invalid property in CSS3.0: grid-template-columns
+271: Invalid property in CSS3.0: backdrop-filter
+272: Invalid property in CSS3.0: -webkit-backdrop-filter
+282: Invalid property in CSS3.0: transform
+298: Invalid property in CSS3.0: word-break
+308: Invalid property in CSS3.0: grid-template-columns
+309: Invalid property in CSS3.0: gap
+320: Invalid property in CSS3.0: gap
+323: Invalid property in CSS3.0: backdrop-filter
+324: Invalid property in CSS3.0: -webkit-backdrop-filter
+332: Invalid property in CSS3.0: transform
+350: Invalid property in CSS3.0: fill
+351: Invalid property in CSS3.0: stroke
+352: Invalid property in CSS3.0: stroke-linecap
+356: Invalid property in CSS3.0: fill
+357: Invalid property in CSS3.0: stroke-linecap
+359: Invalid property in CSS3.0: filter
+364: Invalid property in CSS3.0: inset
+369: Invalid property in CSS3.0: pointer-events
+377: Invalid property in CSS3.0: font-variant-numeric
+437: Invalid property in CSS3.0: pointer-events
+439: Invalid property in CSS3.0: backdrop-filter
+440: Invalid property in CSS3.0: -webkit-backdrop-filter
+450: Invalid property in CSS3.0: transform
+458: Invalid property in CSS3.0: gap
+468: Invalid property in CSS3.0: gap
+485: Invalid property in CSS3.0: gap
+495: Invalid property in CSS3.0: user-select
+506: Invalid property in CSS3.0: pointer-events
+507: Invalid property in CSS3.0: filter
+512: Invalid property in CSS3.0: transform
+518: Optimised color: Changed "white" to "#fff"
+526: Invalid property in CSS3.0: transform
+531: Invalid property in CSS3.0: transform
+543: Invalid property in CSS3.0: transform
+548: Optimised color: Changed "white" to "#fff"
+556: Invalid property in CSS3.0: transform
+562: Optimised color: Changed "white" to "#fff"
+570: Invalid property in CSS3.0: transform
+615: Invalid property in CSS3.0: gap
+684: Invalid property in CSS3.0: appearance
+694: Invalid property in CSS3.0: gap
+701: Invalid property in CSS3.0: accent-color
+708: Invalid property in CSS3.0: gap
+717: Invalid property in CSS3.0: appearance
+736: Optimised color: Changed "white" to "#fff"
+744: Invalid property in CSS3.0: transform
+760: Invalid property in CSS3.0: appearance
+787: Invalid property in CSS3.0: filter
+792: Invalid property in CSS3.0: outline-offset
+849: Invalid property in CSS3.0: gap
+872: Invalid property in CSS3.0: --at-color
+873: Invalid property in CSS3.0: --at-bg
+874: Invalid property in CSS3.0: --at-border
+875: Invalid property in CSS3.0: --at-text
+876: Invalid property in CSS3.0: --at-muted
+883: Invalid property in CSS3.0: gap
+892: Invalid property in CSS3.0: backdrop-filter
+893: Invalid property in CSS3.0: -webkit-backdrop-filter
+940: Invalid property in CSS3.0: fill
+941: Invalid property in CSS3.0: stroke
+943: Invalid property in CSS3.0: stroke-width
+944: Invalid property in CSS3.0: stroke-linecap
+945: Invalid property in CSS3.0: stroke-linejoin
+966: Invalid property in CSS3.0: transform
+967: Invalid property in CSS3.0: transform
+979: Invalid property in CSS3.0: gap
+1039: Invalid property in CSS3.0: gap
+1071: Invalid property in CSS3.0: --at-color
+1072: Invalid property in CSS3.0: --at-color
+1073: Invalid property in CSS3.0: --at-color
+1074: Invalid property in CSS3.0: --at-color
+1080: Invalid property in CSS3.0: gap
+1124: Invalid property in CSS3.0: gap
+1136: Invalid property in CSS3.0: --at-bg
+1137: Invalid property in CSS3.0: --at-border
+1138: Invalid property in CSS3.0: --at-text
+1139: Invalid property in CSS3.0: --at-muted
+1161: Invalid property in CSS3.0: inset
+1163: Invalid property in CSS3.0: backdrop-filter
+1164: Invalid property in CSS3.0: -webkit-backdrop-filter
+1174: Invalid property in CSS3.0: backdrop-filter
+1175: Invalid property in CSS3.0: -webkit-backdrop-filter
+1187: Invalid property in CSS3.0: transform
+1188: Invalid property in CSS3.0: transform
+1192: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+1199: Optimised shorthand notation (margin): Changed "0 0 6px 0" to "0 0 6px"
+1209: Optimised shorthand notation (padding): Changed "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-lg)" to "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg)"
+1212: Invalid property in CSS3.0: gap
+1220: Invalid property in CSS3.0: transform
+1232: Invalid property in CSS3.0: transform
+1233: Invalid property in CSS3.0: transform
+1236: Optimised color: Changed "white" to "#fff"
+1237: Optimised color: Changed "white" to "#fff"
+1238: Optimised color: Changed "white" to "#fff"
+1239: Optimised color: Changed "white" to "#fff"
+1246: Invalid property in CSS3.0: transform
+1256: Invalid property in CSS3.0: gap
+1269: Invalid property in CSS3.0: transform
+1302: Invalid property in CSS3.0: gap
+1324: Invalid property in CSS3.0: gap
+1342: Invalid property in CSS3.0: gap
+1350: Invalid property in CSS3.0: gap
+1355: Invalid property in CSS3.0: accent-color
+1371: Invalid property in CSS3.0: gap
+1384: Invalid property in CSS3.0: gap
+1388: Invalid property in CSS3.0: backdrop-filter
+1389: Invalid property in CSS3.0: -webkit-backdrop-filter
+1406: Invalid property in CSS3.0: gap
+1412: Invalid property in CSS3.0: grid-template-columns
+1413: Invalid property in CSS3.0: gap
+1422: Invalid property in CSS3.0: gap
+1425: Invalid property in CSS3.0: backdrop-filter
+1426: Invalid property in CSS3.0: -webkit-backdrop-filter
+1435: Invalid property in CSS3.0: transform
+1449: Invalid property in CSS3.0: font-variant-numeric
+1455: Invalid property in CSS3.0: gap
+1484: Invalid property in CSS3.0: grid-template-columns
+1485: Invalid property in CSS3.0: gap
+1491: Invalid property in CSS3.0: grid-template-columns
+1565: Invalid property in CSS3.0: word-break
+1571: Optimised color: Changed "white" to "#fff"
+1573: Invalid property in CSS3.0: border-bottom-right-radius
+1579: Invalid property in CSS3.0: border-bottom-left-radius
+1602: Invalid property in CSS3.0: gap
+1634: Invalid property in CSS3.0: word-break
+1644: Invalid property in CSS3.0: gap
+1651: Optimised color: Changed "white" to "#fff"
+1662: Invalid property in CSS3.0: gap
+1728: Invalid property in CSS3.0: word-break
+1742: Invalid property in CSS3.0: word-break
+1752: Invalid property in CSS3.0: gap
+1772: Invalid property in CSS3.0: gap
+1778: Invalid property in CSS3.0: gap
+1785: Invalid property in CSS3.0: gap
+1823: Invalid property in CSS3.0: gap
+1848: Invalid property in CSS3.0: gap
+1849: Invalid property in CSS3.0: gap
+1850: Invalid property in CSS3.0: gap
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/
+cp -pR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/root/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/
+CFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " CXXFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " LDFLAGS="-L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="260912.51828" LUCI_GITBRANCH="LuCI" make -C /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD=aarch64-openwrt-linux-musl-ld NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" DESTDIR="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install"  install;
+make[3]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+==> [mt5700] cargo build: ARCH=aarch64 RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.06s
+test -x "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
+# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
+mkdir -p "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin"
+cp "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+chmod 0755 "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+make[3]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700.installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.luci-app-mt5700_installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/www
+cp -pR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/htdocs/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/www/
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/www/ -type f -name '*.js' | while read src; do if jsmin < "$src" > "$src.o"; then mv "$src.o" "$src"; fi; done
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/www/ -type f -name '*.css' | while read src; do if csstidy "$src" --template=highest --remove_last_semicolon=true "$src.o"; then mv "$src.o" "$src"; fi; done
+
+Selectors: 166 | Properties: 566
+Input size: 17.193KiB  Output size: 12.388KiB  Compression ratio: 27.95%
+-----------------------------------
+
+33: Invalid property in CSS3.0: gap
+76: Invalid property in CSS3.0: accent-color
+84: Invalid property in CSS3.0: word-break
+111: Invalid property in CSS3.0: word-break
+124: Invalid property in CSS3.0: gap
+166: Invalid property in CSS3.0: transform
+186: Invalid property in CSS3.0: inset
+207: Invalid property in CSS3.0: gap
+214: Invalid property in CSS3.0: gap
+238: Invalid property in CSS3.0: transform
+239: Invalid property in CSS3.0: transform
+242: Invalid property in CSS3.0: gap
+265: Invalid property in CSS3.0: gap
+283: Invalid property in CSS3.0: gap
+292: Invalid property in CSS3.0: word-break
+294: Invalid property in CSS3.0: border-bottom-right-radius
+295: Invalid property in CSS3.0: border-bottom-left-radius
+300: Invalid property in CSS3.0: gap
+302: Invalid property in CSS3.0: resize
+307: Invalid property in CSS3.0: gap
+314: Invalid property in CSS3.0: word-break
+324: Invalid property in CSS3.0: word-break
+327: Invalid property in CSS3.0: gap
+344: Invalid property in CSS3.0: word-break
+348: Invalid property in CSS3.0: gap
+356: Invalid property in CSS3.0: word-break
+361: Invalid property in CSS3.0: gap
+362: Invalid property in CSS3.0: gap
+368: Invalid property in CSS3.0: grid-template-columns
+369: Invalid property in CSS3.0: gap
+379: Invalid property in CSS3.0: word-break
+384: Invalid property in CSS3.0: gap
+391: Invalid property in CSS3.0: gap
+414: Invalid property in CSS3.0: gap
+417: Invalid property in CSS3.0: gap
+426: Invalid property in CSS3.0: gap
+439: Invalid property in CSS3.0: gap
+446: Invalid property in CSS3.0: gap
+456: Invalid property in CSS3.0: word-break
+473: Invalid property in CSS3.0: word-break
+477: Invalid property in CSS3.0: gap
+491: Invalid property in CSS3.0: gap
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+
+Selectors: 295 | Properties: 1020
+Input size: 45.159KiB  Output size: 34.03KiB  Compression ratio: 24.64%
+-----------------------------------
+
+10: Invalid property in CSS3.0: --mt5700-bg
+11: Invalid property in CSS3.0: --mt5700-card-bg
+12: Invalid property in CSS3.0: --mt5700-card-bg-hover
+13: Invalid property in CSS3.0: --mt5700-glass-bg
+14: Invalid property in CSS3.0: --mt5700-float-bg
+15: Invalid property in CSS3.0: --mt5700-text
+16: Invalid property in CSS3.0: --mt5700-text-secondary
+17: Invalid property in CSS3.0: --mt5700-text-muted
+18: Invalid property in CSS3.0: --mt5700-border
+19: Invalid property in CSS3.0: --mt5700-border-subtle
+20: Invalid property in CSS3.0: --mt5700-divider
+23: Invalid property in CSS3.0: --mt5700-blur
+24: Invalid property in CSS3.0: --mt5700-saturate
+25: Invalid property in CSS3.0: --mt5700-glass
+28: Invalid property in CSS3.0: --mt5700-sh-1
+29: Invalid property in CSS3.0: --mt5700-sh-2
+30: Invalid property in CSS3.0: --mt5700-sh-3
+31: Invalid property in CSS3.0: --mt5700-sh-float
+32: Invalid property in CSS3.0: --mt5700-sh-inset
+34: Invalid property in CSS3.0: --mt5700-shadow-sm
+35: Invalid property in CSS3.0: --mt5700-shadow-md
+36: Invalid property in CSS3.0: --mt5700-shadow-lg
+37: Invalid property in CSS3.0: --mt5700-shadow-xl
+40: Invalid property in CSS3.0: --mt5700-radius-sm
+41: Invalid property in CSS3.0: --mt5700-radius-md
+42: Invalid property in CSS3.0: --mt5700-radius-lg
+43: Invalid property in CSS3.0: --mt5700-radius-xl
+44: Invalid property in CSS3.0: --mt5700-radius-full
+47: Invalid property in CSS3.0: --mt5700-space-xs
+48: Invalid property in CSS3.0: --mt5700-space-sm
+49: Invalid property in CSS3.0: --mt5700-space-md
+50: Invalid property in CSS3.0: --mt5700-space-lg
+51: Invalid property in CSS3.0: --mt5700-space-xl
+54: Invalid property in CSS3.0: --mt5700-accent
+55: Invalid property in CSS3.0: --mt5700-accent-light
+56: Invalid property in CSS3.0: --mt5700-success
+57: Invalid property in CSS3.0: --mt5700-success-light
+58: Invalid property in CSS3.0: --mt5700-warning
+59: Invalid property in CSS3.0: --mt5700-warning-light
+60: Invalid property in CSS3.0: --mt5700-danger
+61: Invalid property in CSS3.0: --mt5700-danger-light
+62: Invalid property in CSS3.0: --mt5700-info
+63: Invalid property in CSS3.0: --mt5700-info-light
+65: Invalid property in CSS3.0: --mt5700-sig-exc
+66: Invalid property in CSS3.0: --mt5700-sig-good
+67: Invalid property in CSS3.0: --mt5700-sig-fair
+68: Invalid property in CSS3.0: --mt5700-sig-poor
+69: Invalid property in CSS3.0: --mt5700-sig-bad
+72: Invalid property in CSS3.0: --mt5700-font-sans
+73: Invalid property in CSS3.0: --mt5700-font-mono
+74: Invalid property in CSS3.0: --mt5700-font-size-xs
+75: Invalid property in CSS3.0: --mt5700-font-size-sm
+76: Invalid property in CSS3.0: --mt5700-font-size-base
+77: Invalid property in CSS3.0: --mt5700-font-size-lg
+78: Invalid property in CSS3.0: --mt5700-font-size-xl
+79: Invalid property in CSS3.0: --mt5700-font-size-2xl
+80: Invalid property in CSS3.0: --mt5700-font-size-3xl
+83: Invalid property in CSS3.0: --mt5700-transition-fast
+84: Invalid property in CSS3.0: --mt5700-transition-base
+85: Invalid property in CSS3.0: --mt5700-transition-slow
+91: Invalid property in CSS3.0: --mt5700-bg
+92: Invalid property in CSS3.0: --mt5700-card-bg
+93: Invalid property in CSS3.0: --mt5700-card-bg-hover
+94: Invalid property in CSS3.0: --mt5700-glass-bg
+95: Invalid property in CSS3.0: --mt5700-float-bg
+96: Invalid property in CSS3.0: --mt5700-text
+97: Invalid property in CSS3.0: --mt5700-text-secondary
+98: Invalid property in CSS3.0: --mt5700-text-muted
+99: Invalid property in CSS3.0: --mt5700-border
+100: Invalid property in CSS3.0: --mt5700-border-subtle
+101: Invalid property in CSS3.0: --mt5700-divider
+102: Invalid property in CSS3.0: --mt5700-sh-1
+103: Invalid property in CSS3.0: --mt5700-sh-2
+104: Invalid property in CSS3.0: --mt5700-sh-3
+105: Invalid property in CSS3.0: --mt5700-sh-float
+106: Invalid property in CSS3.0: --mt5700-sh-inset
+126: Invalid property in CSS3.0: inset
+133: Invalid property in CSS3.0: backdrop-filter
+134: Invalid property in CSS3.0: -webkit-backdrop-filter
+157: Invalid property in CSS3.0: gap
+169: Optimised shorthand notation (margin): Changed "0 0 var(--mt5700-space-sm) 0" to "0 0 var(--mt5700-space-sm)"
+185: Invalid property in CSS3.0: backdrop-filter
+186: Invalid property in CSS3.0: -webkit-backdrop-filter
+203: Invalid property in CSS3.0: gap
+204: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+218: Optimised shorthand notation (margin): Changed "var(--mt5700-space-xs) 0 0 0" to "var(--mt5700-space-xs) 0 0"
+240: Invalid property in CSS3.0: gap
+241: Invalid property in CSS3.0: grid-template-columns
+244: Invalid property in CSS3.0: grid-template-columns
+245: Invalid property in CSS3.0: grid-template-columns
+246: Invalid property in CSS3.0: grid-template-columns
+252: Invalid property in CSS3.0: grid-template-columns
+261: Invalid property in CSS3.0: grid-template-columns
+271: Invalid property in CSS3.0: backdrop-filter
+272: Invalid property in CSS3.0: -webkit-backdrop-filter
+282: Invalid property in CSS3.0: transform
+298: Invalid property in CSS3.0: word-break
+308: Invalid property in CSS3.0: grid-template-columns
+309: Invalid property in CSS3.0: gap
+320: Invalid property in CSS3.0: gap
+323: Invalid property in CSS3.0: backdrop-filter
+324: Invalid property in CSS3.0: -webkit-backdrop-filter
+332: Invalid property in CSS3.0: transform
+350: Invalid property in CSS3.0: fill
+351: Invalid property in CSS3.0: stroke
+352: Invalid property in CSS3.0: stroke-linecap
+356: Invalid property in CSS3.0: fill
+357: Invalid property in CSS3.0: stroke-linecap
+359: Invalid property in CSS3.0: filter
+364: Invalid property in CSS3.0: inset
+369: Invalid property in CSS3.0: pointer-events
+377: Invalid property in CSS3.0: font-variant-numeric
+437: Invalid property in CSS3.0: pointer-events
+439: Invalid property in CSS3.0: backdrop-filter
+440: Invalid property in CSS3.0: -webkit-backdrop-filter
+450: Invalid property in CSS3.0: transform
+458: Invalid property in CSS3.0: gap
+468: Invalid property in CSS3.0: gap
+485: Invalid property in CSS3.0: gap
+495: Invalid property in CSS3.0: user-select
+506: Invalid property in CSS3.0: pointer-events
+507: Invalid property in CSS3.0: filter
+512: Invalid property in CSS3.0: transform
+518: Optimised color: Changed "white" to "#fff"
+526: Invalid property in CSS3.0: transform
+531: Invalid property in CSS3.0: transform
+543: Invalid property in CSS3.0: transform
+548: Optimised color: Changed "white" to "#fff"
+556: Invalid property in CSS3.0: transform
+562: Optimised color: Changed "white" to "#fff"
+570: Invalid property in CSS3.0: transform
+615: Invalid property in CSS3.0: gap
+684: Invalid property in CSS3.0: appearance
+694: Invalid property in CSS3.0: gap
+701: Invalid property in CSS3.0: accent-color
+708: Invalid property in CSS3.0: gap
+717: Invalid property in CSS3.0: appearance
+736: Optimised color: Changed "white" to "#fff"
+744: Invalid property in CSS3.0: transform
+760: Invalid property in CSS3.0: appearance
+787: Invalid property in CSS3.0: filter
+792: Invalid property in CSS3.0: outline-offset
+849: Invalid property in CSS3.0: gap
+872: Invalid property in CSS3.0: --at-color
+873: Invalid property in CSS3.0: --at-bg
+874: Invalid property in CSS3.0: --at-border
+875: Invalid property in CSS3.0: --at-text
+876: Invalid property in CSS3.0: --at-muted
+883: Invalid property in CSS3.0: gap
+892: Invalid property in CSS3.0: backdrop-filter
+893: Invalid property in CSS3.0: -webkit-backdrop-filter
+940: Invalid property in CSS3.0: fill
+941: Invalid property in CSS3.0: stroke
+943: Invalid property in CSS3.0: stroke-width
+944: Invalid property in CSS3.0: stroke-linecap
+945: Invalid property in CSS3.0: stroke-linejoin
+966: Invalid property in CSS3.0: transform
+967: Invalid property in CSS3.0: transform
+979: Invalid property in CSS3.0: gap
+1039: Invalid property in CSS3.0: gap
+1071: Invalid property in CSS3.0: --at-color
+1072: Invalid property in CSS3.0: --at-color
+1073: Invalid property in CSS3.0: --at-color
+1074: Invalid property in CSS3.0: --at-color
+1080: Invalid property in CSS3.0: gap
+1124: Invalid property in CSS3.0: gap
+1136: Invalid property in CSS3.0: --at-bg
+1137: Invalid property in CSS3.0: --at-border
+1138: Invalid property in CSS3.0: --at-text
+1139: Invalid property in CSS3.0: --at-muted
+1161: Invalid property in CSS3.0: inset
+1163: Invalid property in CSS3.0: backdrop-filter
+1164: Invalid property in CSS3.0: -webkit-backdrop-filter
+1174: Invalid property in CSS3.0: backdrop-filter
+1175: Invalid property in CSS3.0: -webkit-backdrop-filter
+1187: Invalid property in CSS3.0: transform
+1188: Invalid property in CSS3.0: transform
+1192: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+1199: Optimised shorthand notation (margin): Changed "0 0 6px 0" to "0 0 6px"
+1209: Optimised shorthand notation (padding): Changed "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-lg)" to "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg)"
+1212: Invalid property in CSS3.0: gap
+1220: Invalid property in CSS3.0: transform
+1232: Invalid property in CSS3.0: transform
+1233: Invalid property in CSS3.0: transform
+1236: Optimised color: Changed "white" to "#fff"
+1237: Optimised color: Changed "white" to "#fff"
+1238: Optimised color: Changed "white" to "#fff"
+1239: Optimised color: Changed "white" to "#fff"
+1246: Invalid property in CSS3.0: transform
+1256: Invalid property in CSS3.0: gap
+1269: Invalid property in CSS3.0: transform
+1302: Invalid property in CSS3.0: gap
+1324: Invalid property in CSS3.0: gap
+1342: Invalid property in CSS3.0: gap
+1350: Invalid property in CSS3.0: gap
+1355: Invalid property in CSS3.0: accent-color
+1371: Invalid property in CSS3.0: gap
+1384: Invalid property in CSS3.0: gap
+1388: Invalid property in CSS3.0: backdrop-filter
+1389: Invalid property in CSS3.0: -webkit-backdrop-filter
+1406: Invalid property in CSS3.0: gap
+1412: Invalid property in CSS3.0: grid-template-columns
+1413: Invalid property in CSS3.0: gap
+1422: Invalid property in CSS3.0: gap
+1425: Invalid property in CSS3.0: backdrop-filter
+1426: Invalid property in CSS3.0: -webkit-backdrop-filter
+1435: Invalid property in CSS3.0: transform
+1449: Invalid property in CSS3.0: font-variant-numeric
+1455: Invalid property in CSS3.0: gap
+1484: Invalid property in CSS3.0: grid-template-columns
+1485: Invalid property in CSS3.0: gap
+1491: Invalid property in CSS3.0: grid-template-columns
+1565: Invalid property in CSS3.0: word-break
+1571: Optimised color: Changed "white" to "#fff"
+1573: Invalid property in CSS3.0: border-bottom-right-radius
+1579: Invalid property in CSS3.0: border-bottom-left-radius
+1602: Invalid property in CSS3.0: gap
+1634: Invalid property in CSS3.0: word-break
+1644: Invalid property in CSS3.0: gap
+1651: Optimised color: Changed "white" to "#fff"
+1662: Invalid property in CSS3.0: gap
+1728: Invalid property in CSS3.0: word-break
+1742: Invalid property in CSS3.0: word-break
+1752: Invalid property in CSS3.0: gap
+1772: Invalid property in CSS3.0: gap
+1778: Invalid property in CSS3.0: gap
+1785: Invalid property in CSS3.0: gap
+1823: Invalid property in CSS3.0: gap
+1848: Invalid property in CSS3.0: gap
+1849: Invalid property in CSS3.0: gap
+1850: Invalid property in CSS3.0: gap
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/
+cp -pR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/root/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/
+CFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " CXXFLAGS="-Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/include -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include/fortify -I/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/include " LDFLAGS="-L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/usr/lib -L/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/toolchain-aarch64_cortex-a53_gcc-12.3.0_musl/lib -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="260912.51828" LUCI_GITBRANCH="LuCI" make -C /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=cortex-a53 -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD=aarch64-openwrt-linux-musl-ld NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" DESTDIR="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install"  install;
+make[3]: Entering directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+==> [mt5700] cargo build: ARCH=aarch64 RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.06s
+test -x "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
+# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
+mkdir -p "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin"
+cp "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+chmod 0755 "/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+make[3]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/src'
+cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-install/* /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700 -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700
+rstrip.sh: /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/usr/bin/at-webserver-rust: executable
+patchelf: cannot find section '.dynamic'. The input file is most likely statically linked
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm; echo "$V_Package_luci_app_mt5700_postinst" > postinst-pkg; chmod 0755 postinst-pkg; )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/packages/aarch64_cortex-a53/base
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/packages/aarch64_cortex-a53/base
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-aarch64_cortex-a53/luci-app-mt5700 into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/packages/aarch64_cortex-a53/base/luci-app-mt5700_1.5.0_aarch64_cortex-a53.ipk
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/targets/mediatek/filogic/packages /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/CONTROL /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/pkginfo
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/etc/uci-defaults
+echo "uci set luci.languages.zh_cn='简体中文 (Chinese Simplified)'; uci commit luci" > /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/etc/uci-defaults/luci-i18n-mt5700-zh-cn
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n
+po2lmo /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/package/luci-app-mt5700/po/zh_Hans/luci-app-mt5700.po /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n/luci-app-mt5700.zh-cn.lmo;
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/strip-kmod.sh" PATCHELF="/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/patchelf" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/rstrip.sh /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn
+(cd /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/packages/aarch64_cortex-a53/base
+/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/fakeroot /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/host/bin/bash /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/scripts/ipkg-build -m "" /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/packages/aarch64_cortex-a53/base
+Packaged contents of /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn into /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/bin/packages/aarch64_cortex-a53/base/luci-i18n-mt5700-zh-cn_260912.51828_all.ipk
+rm -rf /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn.installed /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/etc/uci-defaults
+echo "uci set luci.languages.zh_cn='简体中文 (Chinese Simplified)'; uci commit luci" > /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/etc/uci-defaults/luci-i18n-mt5700-zh-cn
+install -d -m0755 /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n
+po2lmo /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/package/luci-app-mt5700/po/zh_Hans/luci-app-mt5700.po /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n/luci-app-mt5700.zh-cn.lmo;
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn.installed
+mkdir -p /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp
+SHELL= flock /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/tmp/.root-copy.flock -c 'cp -fpR /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/. /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/'
+touch /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/staging_dir/target-aarch64_cortex-a53_musl/root-mediatek/stamp/.luci-i18n-mt5700-zh-cn_installed
+touch -r /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.built /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.autoremove 2>/dev/null >/dev/null
+find /builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700 -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -and -not -name '.pkgdir'  -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64/package/luci-app-mt5700'
+time: package/luci-app-mt5700/compile#113.61#28.64#55.97
+make[1]: Leaving directory '/builder/openwrt-sdk-23.05.5-mediatek-filogic_gcc-12.3.0_musl.Linux-x86_64'
+==> 后端产物: build_dir/target-aarch64_cortex-a53_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/usr/bin/at-webserver-rust
+==> 产物（仅本项目包）：
+total 1216
+drwxr-xr-x 2 root root    4096 Sep 12 14:26 .
+drwxr-xr-x 3 1001 1001    4096 Sep 12 14:26 ..
+-rw-r--r-- 1 root root 1231389 Sep 12 14:26 luci-app-mt5700_1.5.0_aarch64_cortex-a53.ipk
+-rw-r--r-- 1 root root    1084 Sep 12 14:26 luci-i18n-mt5700-zh-cn_260912.51828_all.ipk
+==> bin 下全部包（排查用）：
+bin/packages/aarch64_cortex-a53/base/luci-app-mt5700_1.5.0_aarch64_cortex-a53.ipk
+bin/packages/aarch64_cortex-a53/base/luci-i18n-mt5700-zh-cn_260912.51828_all.ipk
+bin/targets/mediatek/filogic/packages/libatomic1_12.3.0-4_aarch64_cortex-a53.ipk
+bin/targets/mediatek/filogic/packages/libc_1.2.4-4_aarch64_cortex-a53.ipk
+bin/targets/mediatek/filogic/packages/libgcc1_12.3.0-4_aarch64_cortex-a53.ipk
+bin/targets/mediatek/filogic/packages/libpthread_1.2.4-4_aarch64_cortex-a53.ipk
+bin/targets/mediatek/filogic/packages/librt_1.2.4-4_aarch64_cortex-a53.ipk
+bin/targets/mediatek/filogic/packages/libstdcpp6_12.3.0-4_aarch64_cortex-a53.ipk
+==> 校验主包: luci-app-mt5700_1.5.0_aarch64_cortex-a53.ipk (1231389 bytes)
+==> 已确认 ipk 内含 usr/bin/at-webserver-rust
+==> SDK 构建完成
