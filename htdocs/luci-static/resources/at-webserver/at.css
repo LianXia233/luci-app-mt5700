@@ -36,6 +36,9 @@
 .at-field { display: flex; align-items: flex-start; margin-bottom: 10px; }
 .at-field-label { flex: 0 0 160px; padding-top: 6px; font-weight: 500; color: #333; }
 .at-field-control { flex: 1 1 auto; }
+/* 输入控件覆盖层：表单控件保留了 cbi-input-* 类名，部分视图（dial.js 等）按类名查找控件，
+   不能改类名；此处以 .at-field-control 作用域统一覆盖主题对 input/select 的默认外观，
+   保证视觉由本文件决定：浅色底、细边框、圆角、蓝色聚焦环。 */
 .at-field-control .cbi-input-text,
 .at-field-control .cbi-input-select,
 .at-field-control input[type="text"],
@@ -45,6 +48,32 @@
 	width: 100%;
 	max-width: 420px;
 	box-sizing: border-box;
+	height: 32px;
+	padding: 0 10px;
+	border: 1px solid #d0d5dd;
+	border-radius: 6px;
+	background: #fff;
+	color: #222;
+	font-size: 13px;
+	line-height: normal;
+	box-shadow: none;
+	transition: border-color .15s, box-shadow .15s;
+}
+.at-field-control .cbi-input-text:focus,
+.at-field-control .cbi-input-select:focus,
+.at-field-control input[type="text"]:focus,
+.at-field-control input[type="number"]:focus,
+.at-field-control input[type="password"]:focus,
+.at-field-control select:focus {
+	border-color: #1668dc;
+	box-shadow: 0 0 0 3px rgba(22, 104, 220, .12);
+	outline: none;
+}
+/* 复选/开关：保持原尺寸，仅统一主题强调色 */
+.at-panel .cbi-input-checkbox {
+	width: auto;
+	height: auto;
+	accent-color: #1668dc;
 }
 .at-field-hint { color: #999; font-size: 12px; margin-top: 3px; }
 
@@ -53,6 +82,43 @@
 .at-kv td { padding: 6px 10px; border-bottom: 1px solid #f4f5f7; font-size: 13px; }
 .at-kv-label { color: #666; white-space: nowrap; width: 1%; }
 .at-kv-value { color: #222; word-break: break-all; }
+
+/* ---------- 表格 ---------- */
+/* 视图动态创建的表格元素同时带有 cbi-section-table 与 at-table 两个类。
+   此处统一用 .at-panel 作用域提升优先级，保证外观由本文件决定、不受 LuCI 主题影响。 */
+.at-panel .at-table {
+	width: 100%;
+	border-collapse: collapse;
+	border: 1px solid #e5e8ec;
+	border-radius: 6px;
+	font-size: 13px;
+	background: #fff;
+	color: #333;
+}
+.at-panel .at-table th {
+	background: #fafbfc;
+	color: #555;
+	font-weight: 600;
+	text-align: left;
+	padding: 8px 10px;
+	border-bottom: 1px solid #e5e8ec;
+	white-space: nowrap;
+}
+.at-panel .at-table td {
+	padding: 8px 10px;
+	border-bottom: 1px solid #f0f2f5;
+	vertical-align: middle;
+	word-break: break-all;
+}
+.at-panel .at-table tbody tr:nth-child(even) { background: #fafbfc; }
+.at-panel .at-table tbody tr:hover { background: #f4f8fe; }
+.at-panel .at-table tbody tr:last-child td { border-bottom: 0; }
+.at-panel .at-table .at-btn,
+.at-panel .at-table .cbi-button {
+	padding: 3px 10px;
+	font-size: 12px;
+	line-height: 18px;
+}
 
 /* ---------- 标签 ---------- */
 .at-tags { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -426,4 +492,6 @@
 	.at-btn { width: 100%; text-align: center; }
 	.at-modal-actions { flex-direction: column; }
 	.at-modal-actions .at-btn { width: 100%; }
+	/* 表格在窄屏下改为横向滚动，避免挤压列宽 */
+	.at-panel .at-table { display: block; overflow-x: auto; white-space: nowrap; }
 }
