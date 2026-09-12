@@ -84,7 +84,13 @@ return L.view.extend({
 			return readFile(path).then(function (content) {
 				renderLog(content, 'ok');
 			}).catch(function (err) {
-				renderLog((err && err.message) || 'failed', 'error');
+				var msg = (err && err.message) || 'failed';
+				// 后端尚未写入过通知时日志文件不存在，这不算错误，按空日志展示
+				if (/未找到资源|Not found|No such file|ENOENT/.test(msg)) {
+					renderLog('', 'ok');
+					return;
+				}
+				renderLog(msg, 'error');
 			});
 		}
 
