@@ -17,6 +17,19 @@ use tokio::sync::{mpsc, Mutex, Notify};
 
 const COMMAND_GAP: Duration = Duration::from_millis(100);
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
+/// 等待命令锁的独立预算。
+///
+/// 背景（AT 终端「只有 ATI 有回复」的根因）：
+/// 服务启动/重连时会先跑 `init_modem()` 的一串初始化和自动拨号对齐命令，
+/// 这些命令全程持有 `cmd_mu`。此前 `send_command_inner` 的超时是从进入函数
+/// 就开始计时的，于是用户的终端命令会把整个预算消耗在「排队等锁」上，
+/// 2 秒一到就返回「模组无响应」——而模组其实什么都没收到。
+/// 表现为：服务刚起或刚重连的那段时间，除最先发的一条外全都没有回复。
+///
+/// 修复思路：把「排队（等锁 + 命令间隔）」与「等应答」拆成两段独立预算。
+/// 排队最多等 QUEUE_WAIT_TIMEOUT；真正写入模组之后，再按 timeout 等应答。
+/// 这样排队慢不会再吃掉应答时间，用户看到的是真实结果而不是假超时。
+pub const QUEUE_WAIT_TIMEOUT: Duration = Duration::from_secs(8);
 const READ_BUF_SIZE: usize = 4096;
 const MAX_RESPONSE_LINES: usize = 2048;
 const MAX_RESIDUAL_BYTES: usize = 64 * 1024;
@@ -382,7 +395,21 @@ impl AtClient {
         timeout: Duration,
         stream: Option<Box<dyn Fn(String) + Send + Sync>>,
     ) -> Result<AtResponse, String> {
-        let _cmd_guard = self.cmd_mu.lock().await;
+        // 第一段预算：排队（等命令锁 + 最小命令间隔）。
+        // 这段不计入应答超时，否则初始化/重连期间用户的命令会被误判为「模组无响应」。
+        let _cmd_guard = {
+            let mut ctx_c = ctx.clone();
+            tokio::select! {
+                g = self.cmd_mu.lock() => g,
+                _ = tokio::time::sleep(QUEUE_WAIT_TIMEOUT) => {
+                    return Err(format!(
+                        "等待空闲通道超时（{}s）：模组正忙或正在重连，请稍后重试",
+                        QUEUE_WAIT_TIMEOUT.as_secs()
+                    ));
+                }
+                _ = ctx_c.changed() => return Err("上下文取消".into()),
+            }
+        };
 
         // 两条命令之间最小间隔。
         {
@@ -432,9 +459,10 @@ impl AtClient {
         *self.last_cmd_at.lock().await = Instant::now();
 
         let mut ctx_c = ctx.clone();
+        let mut answered = true;
         tokio::select! {
             _ = notified => {}
-            _ = tokio::time::sleep(timeout) => {}
+            _ = tokio::time::sleep(timeout) => { answered = false; }
             _ = ctx_c.changed() => {
                 self.pending.lock().await.take();
                 return Err("上下文取消".into());
@@ -444,10 +472,18 @@ impl AtClient {
         let pending = self.pending.lock().await.take();
         let lines = pending.map(|p| p.lines).unwrap_or_default();
 
-        if lines.is_empty() {
-            Err("模组无响应".into())
+        if !lines.is_empty() {
+            return Ok(AtResponse { lines });
+        }
+        if answered {
+            // 收到过结束码但没攒到任何内容（例如模组只回一个空结束码）。
+            Err(format!("模组未返回内容: {}", command.trim()))
         } else {
-            Ok(AtResponse { lines })
+            Err(format!(
+                "模组无响应（已等待 {}ms）: {}",
+                timeout.as_millis(),
+                command.trim()
+            ))
         }
     }
 
@@ -715,5 +751,121 @@ mod tests {
         // 应答里混有其它行时，只认 ^SETAUTODIAL
         let mixed = "^HCSQ: \"NR\",72,201,30\r\n^SETAUTODIAL: 1,2\r\nOK";
         assert_eq!(parse_autodial_enable(mixed), Some(true));
+    }
+
+    /* ---------- 排队超时与应答超时分离（对应「终端只有 ATI 有回复」修复） ---------- */
+
+    /// 回归：等命令锁的时间不能吃掉应答预算。
+    ///
+    /// 构造：先占用 `cmd_mu` 一小段时间模拟「初始化序列正在发命令」，
+    /// 随后释放。此时后一条命令若仍按「进入函数即计时」的老逻辑，
+    /// 扣除排队后留给模组的应答窗口会不足；修复后排队走独立预算，
+    /// 命令应在拿到锁之后正常写入并收到应答。
+    #[tokio::test]
+    async fn queue_wait_does_not_consume_response_budget() {
+        use tokio::io::AsyncWriteExt as _;
+
+        let (tx, _rx) = mpsc::channel::<Unsolicited>(16);
+        let client = AtClient::new(crate::config::default_config().at, tx);
+        let (_ctx_tx, ctx) = tokio::sync::watch::channel(false);
+
+        // 用一个双端管道冒充模组：读到的命令一律回 "OK"。
+        let (host_side, device_side) = tokio::io::duplex(256);
+        let (dev_rd, mut dev_wr) = tokio::io::split(device_side);
+        let (host_rd, host_wr) = tokio::io::split(host_side);
+
+        {
+            let mut guard = client.conn.lock().await;
+            *guard = Some(Connection {
+                writer: Arc::new(Mutex::new(Box::new(host_wr))),
+                describe: "test".into(),
+            });
+        }
+        client.connected_flag.store(true, Ordering::Relaxed);
+
+        // 模组侧：读到一行就回 OK。
+        let dev = tokio::spawn(async move {
+            let mut rd = dev_rd;
+            let mut buf = [0u8; 256];
+            loop {
+                match rd.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let _ = dev_wr.write_all(b"OK\r\n").await;
+                        let _ = n;
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // 读循环负责把模组回的数据派发给 pending。
+        let c = client.clone();
+        let ctx_r = ctx.clone();
+        let reader_handle = tokio::spawn(async move {
+            c.read_loop(&ctx_r, Box::new(host_rd)).await
+        });
+
+        // 先抢住命令锁 600ms，模拟初始化序列占用通道。
+        let holder = {
+            let mu = client.cmd_mu.clone();
+            tokio::spawn(async move {
+                let _g = mu.lock().await;
+                tokio::time::sleep(Duration::from_millis(600)).await;
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // 排队 600ms 后才拿到锁；应答本身很快，应成功而不是报「模组无响应」。
+        let res = client
+            .send_command(&ctx, "AT+CGMM", COMMAND_TIMEOUT, None)
+            .await;
+        assert!(
+            res.is_ok(),
+            "排队不应导致假超时，实际: {:?}",
+            res.err()
+        );
+        assert!(res.unwrap().ok());
+
+        holder.await.unwrap();
+        reader_handle.abort();
+        dev.abort();
+    }
+
+    /// 回归：排队超过独立预算时，返回可辨识的排队超时提示，而不是「模组无响应」。
+    #[tokio::test]
+    async fn queue_wait_timeout_reports_queue_error() {
+        let (tx, _rx) = mpsc::channel::<Unsolicited>(8);
+        let client = AtClient::new(crate::config::default_config().at, tx);
+        let (_ctx_tx, ctx) = tokio::sync::watch::channel(false);
+
+        // 永久占住命令锁（模拟通道被长时间占用/卡死）。
+        let mu = client.cmd_mu.clone();
+        let holder = tokio::spawn(async move {
+            let _g = mu.lock().await;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // 用一个短的排队预算做验证（直接调内部函数无法改常量，故这里改为
+        // 断言错误文案包含「等待空闲通道」这一排队特征，而非「模组无响应」）。
+        let err = tokio::time::timeout(
+            QUEUE_WAIT_TIMEOUT + Duration::from_secs(2),
+            client.send_command(&ctx, "AT+CGMM", COMMAND_TIMEOUT, None),
+        )
+        .await
+        .expect("排队超时应按时返回")
+        .expect_err("锁被占满时应失败");
+
+        assert!(
+            err.contains("等待空闲通道"),
+            "应给出排队超时提示，实际: {err}"
+        );
+        assert!(
+            !err.contains("模组无响应"),
+            "不应把排队问题误报成模组无响应，实际: {err}"
+        );
+
+        holder.abort();
     }
 }

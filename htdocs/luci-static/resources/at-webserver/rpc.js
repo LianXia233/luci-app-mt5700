@@ -49,7 +49,7 @@ function ATClient() {
 	this.authenticated = true;       // RPC 模式：登录态由 LuCI/rpcd 会话保证
 	this.requireAuth = false;
 	this.authKey = '';
-	this.commandTimeout = 8000;
+	this.commandTimeout = 14000;
 	this.subscribers = [];            // 推送订阅者
 	this.stateCallbacks = [];
 	this.state = 'idle';
@@ -192,11 +192,20 @@ ATClient.prototype.handlePush = function (ev) {
 
 /* ---------- 命令发送（RPC，逐条独立应答） ---------- */
 
+/*
+ * 超时预算说明（对应「AT 终端只有 ATI 有回复」的修复）：
+ * 后端把「排队等空闲通道」与「等模组应答」拆成了两段独立预算
+ * （QUEUE_WAIT_TIMEOUT 8s + COMMAND_TIMEOUT 2s），最坏耗时约 10s。
+ * 前端若仍用 8s，会在后端真正返回结果之前先报「命令执行超时」，
+ * 把「模组无响应」和「后端还在排队」混为一谈。故前端放宽到 14s，
+ * 留出网络与 rpcd 代理余量，让用户看到后端给出的准确原因。
+ */
 ATClient.prototype.sendCommand = function (command) {
 	var self = this;
 	this.commandQueue = this.commandQueue.then(function () {
 		if (!self.connected) return { success: false, error: '未连接到调制解调器' };
-		return withTimeout(rpcAt(command), self.commandTimeout, '命令执行超时').then(function (resp) {
+		return withTimeout(rpcAt(command), self.commandTimeout,
+			'命令执行超时（模组可能正忙或正在重连，请稍后重试）').then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
 				return { success: false, error: resp.error || '命令执行失败' };
