@@ -5,6 +5,46 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.4.1] - 2026-09-12
+
+### 修复 - LuCI 依赖指令被压缩器剥离（12 页白屏）
+
+- **根因**：v1.4.0 把 LuCI 依赖写成注释形式（`/* require at-webserver/rpc */`），
+  LuCI 构建期的 JS 压缩器会将其当作普通注释剥离，导致运行时 `Mt5700 is not defined`。
+- **修复**：12 个视图 + `mt5700.js` 的依赖指令全部改为字符串指令形式
+  （`'require at-webserver/rpc';`），与 LuCI 官方模块（如 `view/network/interfaces.js`）一致。
+- `mt5700.js` 补齐 `baseclass` / `compat` / `rpc` / `parse` 依赖，消除
+  `"%s/%s.js%s".format is not a function` 竞态报错。
+
+### 修复 - 以 v1.3.4（971008ca）为基准恢复被 UI 重构改废的功能
+
+本次以 `971008ca8f0e9fe586d6033e0728831f99d541e0`（v1.3.4）为基准，
+保留 v1.4.x 新 UI 视觉，逐页恢复缺失/失效功能：
+
+| 页面 | 文件 | 恢复/修复内容 |
+|:--|:--|:--|
+| 模组升级 | `upgrade.js` | 免责声明、`AT+CGMR` 取版本、`AT^FOTASTATE?` 状态机轮询、`AT^FOTADLQ` 进度、`AT^FOTADL=1` 续传、`AT^FOTAMODE`/`AT^FOTAOEMDL` 触发、`AT^FWUP`、5 步步骤条与进度条 |
+| 模组设置 | `modem_settings.js` | 设备信息（ATI/连接模式）、SIM 槽位切换（HVSST+SCICHG+CFUN）、热插拔（TDSIMHP）、PIN 四类操作、飞行模式、网卡速率（TDPCIELANCFG）、电源管理（TDPMCFG）、NR 能力（CA/VoNR/DSS）、SYSCFGEX、温度保护（THERM*）、重启与恢复出厂 |
+| 网络设置 | `network_settings.js` | LTE/NR 锁频编辑器、`AT^MONNC` 邻区扫描与一键锁定、`AT^C5GOPTION` 5G 选项、`^REJINFO` 网络拒绝订阅、飞行模式切换式锁频应用流程 |
+| 拨号设置 | `dial.js` | 自动拨号（`AT^SETAUTODIAL`）、APN/认证保存、拨号方式、USB 端口模式（`AT^SETMODE`）、网口模式/后路由/DMZ（`AT^TDCFG`）、PDP 上下文 CRUD（`AT+CGDCONT`/`AT+CGACT`）、表单回填与 UCI 同步 |
+| 全网扫频 | `scan.js` | 由「同步等返回值」改为基准的异步推送订阅（`cellscan`），补齐筛选条件与结果一键锁定 |
+| 定时锁频 | `schedule.js` | `AT+SCHED?` 运行状态、夜间/日间两时段 4G/5G 锁频编辑器、`AT+SCHED=<json>` 保存、15 秒状态轮询 |
+| 短信中心 | `sms_center.js` | 联系人聚合、会话气泡、PDU 编码发送与长短信分片、单条/批量删除、存储量、`new_sms` 实时推送、已发缓存 |
+| 短信设置 | `sms_settings.js` | IMS/短信开关分步流程、`AT+CSCA` 中心号码、`AT+CPMS` 存储位置与用量、清空全部短信、缓存导出/导入/清空、USSD 查询与 `+CUSD` URC |
+| AT 调试终端 | `terminal.js` | 常用命令点击后二次确认、回车发送、清空、命令保存（localStorage）与删除 |
+| 通知日志 | `logs.js` | 读取 UCI `log_file` 日志（最近 300 行）、清空日志（`L.fs.write`，缺失时降级 ubus `file.write`）、10 秒自动刷新 |
+| 服务配置 | `service.js` | 五态服务状态判定（运行中/已停止/未注册/未安装/已禁用 + 未注册时给出修复建议）、连接与 RPC 全量配置项、通知开关、「保存并应用」完整链路 |
+| 网络状态 | `network_status.js` | 补齐签约速率（`AT^DSAMBR`，kbps 口径）、QCI（`AT+CGEQOSRDP`）、DHCP/IPv6（`AT^DHCP`/`AT^DHCPV6`/`AT^IPV6CAP`）、MCS（`AT^MCS`）、辅载波信号（`AT^MONSSC`/`AT^CASCELLINFO`）、连接诊断（`AT^LENDC`/`AT+C5GREG`/`AT^TXPOWER`/`AT^NTXPOWER`/`AT+CGPADDR`） |
+
+**两面板语义保持分离**：「连接状态」= 签约速率（`ambrDown`/`ambrUp`，kbps）；
+「实时速率」= 接口实时速率（`rtDown`/`rtUp`，`/sys/class/net` 字节计数差分，不发 AT）。
+
+### 其他
+
+- `mt5700.css` 补充步骤条、进度条、终端、锁频编辑器、指标栅格、单元格按钮等样式
+- 仓库级 `.gitattributes`（`* text=auto eol=lf` + 二进制豁免），强制所有文本产物 LF，避免 CRLF 导致 BusyBox ash / procd 启动失败
+- IMEI 相关命令（`AT+CGSN` / `AT^PHYNUM`）完全沿用基准实现，未做任何改动
+
 ## [1.4.0] - 2026-09-12
 
 ### 新增 - 玻璃拟态设计系统
