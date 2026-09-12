@@ -1,0 +1,2 @@
+out/x86_64/luci-app-mt5700_1.5.0_x86_64.ipk
+out/x86_64/luci-i18n-mt5700-zh-cn_260912.51849_all.ipk
