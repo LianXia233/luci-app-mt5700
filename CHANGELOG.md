@@ -5,7 +5,54 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [1.5.0] - 2026-09-12
+
+本版为 UI 与解析层的较大更新：全站视觉升级为「Modern Dimensional Layering」v2，
+配置修改统一接入暂存式「保存并应用」，并修复短信乱码、SINR/MCS 数据源等解析缺陷。
+
+### 新增 / 变更 - UI v2「Modern Dimensional Layering」
+
+- `mt5700.css` 全量重写（v2.0.0）：L1-L4 分层、玻璃拟态材质、多层阴影、
+  SVG 圆形仪表（`stroke-dasharray`/`stroke-dashoffset` 动画）、信号分档配色
+  （RSRP/RSRQ/SINR/百分比各自独立阈值）；根治此前全页卡片间距重叠
+  （`.mt5700-page-body` 此前从未定义，补 flex column + 24px gap）。
+- `mt5700.js`：新增 `gauge()` 仪表工厂 + `SIGNAL_SPECS` + `api.signalLevel`；
+  `lineChart` v2（渐变填充 + tooltip）；修复 `E()` 把 DOM 节点序列化成
+  `[object HTMLDivElement]` 导致升级页弹窗显示异常的问题。
+- 网络状态页：信号质量卡置顶，4 枚圆形仪表（RSRP/RSRQ/SINR/信号百分比），
+  MCS 显示「下行调制 16QAM MCS 15 · 1 层」格式，速率图表带格式化 tooltip。
+- 所有页面按钮与开关统一样式与状态反馈（默认/悬停/点击/禁用/键盘焦点）。
+
+### 新增 - 暂存式「保存并应用」（拨号设置页）
+
+- 页面内所有写操作（自动拨号、APN、拨号方式、USB 端口模式、网口模式、
+  后置路由、DMZ、PDP 上下文增删改）不再立即下发，改为先暂存，
+  底部粘性条统一提供「撤销更改 / 应用更改」，行为与 LuCI 原生一致。
+
+### 修复 - 短信中心乱码（三重根因）
+
+1. `parse.js` 中 USSD 用的 `var decodeUcs2`（hex 串版）遮蔽了提升声明的字节数组版，
+   PDU 字节数组被当 hex 串 `parseInt` 解析出乱字符（如「ĉ」）；字节数组版改名
+   `decodeUcs2Bytes`。
+2. 7-bit 字母表含用户数据头（UDH）时按字节切片导致位错位；改为先按 septet 总数
+   解包再切掉 UDH 占用的 `ceil((ud[0]+1)*8/7)` 个 septet。
+3. DCS 编码判定只看 `(dcs & 0x0C) === 0x08`；新增 `dcsEncoding()` 按编码组
+   （0x00-0x3F / 0xC0-0xDF / 0xF0-0xFF）判定，F 组恒 GSM7，C/D/E 组 bit3=1 为 UCS2。
+   另：字母数字发件号长度修正为 `floor(lenNibbles * 4 / 7)`。
+- 新增 Node 单测（UCS2 / GSM7 / 两种 UDH / DCS 组 / 字母数字发件号 / MCS 映射，
+  8 组断言）。
+
+### 修复 - SINR 数据源错误（恒显示 -20 附近）
+
+- `parseMONSC` 未区分 NR 格式（带前导系统模式字段、直接输出工程值）与旧格式
+  （需偏移换算），导致 NR 下 SINR 取错列；现按首字段是否为数字识别格式，
+  NR 格式直接取 `rsrp/rsrq/sinr` 工程值，并与 `^HCSQ: "NR",...` 交叉验证一致。
+
+### 修复 - 调制方式（MCS）字段读取错误
+
+- `^MCS: <方向回显>,<层数>,<保留>,<MCS>,<255>` 此前误读第 1 字段（方向回显，
+  恒 0/1）；修正为读第 4 字段，层数读第 2 字段，范围校验 0-31 / 1-8；
+  新增 `mcsModulation()` 映射（0-9 QPSK / 10-16 16QAM / 17-25 64QAM / 26-31 256QAM）。
 
 ### 修复 - 所有页面开关样式异常（Aurora 主题伪元素串扰）
 
