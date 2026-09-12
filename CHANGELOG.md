@@ -5,6 +5,63 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.3.1] - 2026-09-12
+
+修复 AT 调试终端「只有 ATI 能返回结果、其余命令无任何回复」的问题。
+
+### 定位过程与根因
+
+实机实测（ImmortalWrt aarch64 · H5000M · MT5700M-CN）确认：
+
+1. **后端链路本身正常。** 经 `mt5700.uc` → `nc 127.0.0.1 8765` 直连 Rust 后端，
+   `AT` / `AT+CGMM` / `AT+CSQ` / `AT^HCSQ?` / `AT+CGMR` / `AT+CPIN?` / `AT+CGSN` /
+   `AT+CGDCONT?`（393 字节多行）等全部正常返回，应答始终是**单行 JSON**，
+   `p.read('line')` 不存在截断。
+2. **浏览器端实测同样全部正常。** 用无头浏览器登录 LuCI 打开终端页，
+   逐个发送常用命令与快速连发，均正常回显。
+3. **唯一可稳定复现的失败窗口：服务启动/重连期间。** 重启服务后立即连发命令，
+   **前约 4 秒所有命令（含 ATI）全部无应答**，之后才恢复。
+
+根因在 `atclient.rs::send_command_inner`：
+
+```
+let _cmd_guard = self.cmd_mu.lock().await;   // ① 排队等锁
+...
+tokio::select! { _ = notified => {} _ = sleep(timeout) => {} }   // ② 等应答
+```
+
+该函数在 `rpcserver.rs` 中被包在 `timeout(COMMAND_TIMEOUT + 3s)` 里，
+而 `COMMAND_TIMEOUT` 仅 **2 秒**，且**从进入函数就开始计时**。于是：
+
+- 服务启动/重连时 `init_modem()` 会连发 8 条命令（`AT+CMEE=2`、`AT+CNMI?/=`、
+  `AT+CMGF?/=`、`AT+CLIP=1`、`AT^SETAUTODIAL?/=`）并全程持有 `cmd_mu`；
+- 用户在这个窗口内发命令，**2 秒预算被「排队等锁」全部吃掉**，
+  命令根本没写进模组，却返回「模组无响应」；
+- 表现为服务刚起或刚重连时，除最早发的一条外其余全部无回复。
+
+### 修复
+
+| 文件 | 改动 |
+|:--|:--|
+| `src/rust/src/atclient.rs` | 新增 `QUEUE_WAIT_TIMEOUT`（8s）。把「排队（等锁 + 命令间隔）」与「等应答」拆成两段**独立预算**，排队不再消耗应答超时 |
+| `src/rust/src/atclient.rs` | 超时文案细化：排队超时 → 「等待空闲通道超时」；模组真的没回 → 「模组无响应（已等待 Nms）」；收到结束码但无内容 → 「模组未返回内容」 |
+| `src/rust/src/rpcserver.rs` | 外层超时改为 `QUEUE_WAIT_TIMEOUT + COMMAND_TIMEOUT + 3s`，与内层预算对齐，避免外层提前掐断 |
+| `htdocs/.../at-webserver/rpc.js` | 前端 `commandTimeout` 8s → **14s**，覆盖后端最坏耗时（8+2s）加网络余量，避免前端先超时而掩盖后端真实原因 |
+
+### 新增回归测试
+
+- `queue_wait_does_not_consume_response_budget`：用双端管道模拟模组，
+  先让初始化序列占用命令锁 600ms，验证后续命令排队后仍能正常拿到应答
+  （而不是被误判为「模组无响应」）。
+- `queue_wait_timeout_reports_queue_error`：通道被长时间占用时，
+  验证返回的是可辨识的排队超时文案，而非笼统的「模组无响应」。
+
+`cargo test`：**14 passed / 0 failed**。
+
+### 约束确认
+
+未改动任何 IMEI 相关命令与逻辑（`AT+CGSN` 及其调用路径保持原行为）。
+
 ## [1.3.0] - 2026-09-12
 
 本轮针对实机（ImmortalWrt aarch64 · H5000M · MT5700M-CN）的五个问题做集中修复。
