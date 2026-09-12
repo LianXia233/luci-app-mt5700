@@ -1,0 +1,2 @@
+out/x86_64/luci-app-mt5700-1.5.0-r1.apk
+out/x86_64/luci-i18n-mt5700-zh-cn-0.260912.51816.apk
