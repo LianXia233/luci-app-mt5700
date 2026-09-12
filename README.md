@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.3.4**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.4.1**
 
 | | |
 |:--|:--|
@@ -64,6 +64,10 @@ ls -l /usr/bin/at-webserver-rust
 
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
+
+> **v1.4.1 说明**：v1.4.0 的 UI 重构把多个页面降级为骨架、且 LuCI 依赖指令被压缩器剥离
+> （运行时 `Mt5700 is not defined`）。v1.4.1 以 v1.3.4（`971008ca`）为基准逐页恢复功能，
+> 同时保留 v1.4.x 的新 UI 视觉。详见 [CHANGELOG](CHANGELOG.md) 的 `[1.4.1]` 段。
 
 ### 保存配置
 

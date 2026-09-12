@@ -1,64 +1,115 @@
 'use strict';
-/* require at-webserver/rpc */
-/* require at-webserver/parse */
-/* require at-webserver/mt5700 */
+'require fs';
+'require uci';
+'require at-webserver/rpc';
+'require at-webserver/parse';
+'require at-webserver/mt5700';
 /* global L, AtWs, Parse, Mt5700 */
 
 /**
- * 通知日志 - 新 UI
+ * 通知日志 - 新 UI 视觉 + 基准 v1.3.4 功能
+ *
+ * - 读取 UCI log_file（默认 /tmp/at-notifications.log，回退 /var/log/at-notifications.log）
+ * - 显示最近 300 行，单色文本风格
+ * - 清空日志（L.fs.write，失败降级 ubus file.write）
+ * - 10 秒自动刷新
  */
 
 return L.view.extend({
-	render: function () {
+	load: function () {
+		return L.uci.load('at-webserver').then(function () {
+			var logFile = L.uci.get('at-webserver', 'config', 'log_file') || '';
+			return { path: logFile || '/tmp/at-notifications.log', content: '', status: 'loading' };
+		}).catch(function () {
+			return { path: '/tmp/at-notifications.log', content: '', status: 'loading' };
+		});
+	},
+
+	render: function (data) {
 		var self = this;
-		var page = Mt5700.page('通知日志', '系统日志与事件');
+		var page = Mt5700.page('通知日志', '短信、来电、信号变化等通知记录');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
+		var path = (data && data.path) || '/tmp/at-notifications.log';
 
-		var logCard = Mt5700.card('系统日志', '最近的事件记录');
-		var logBody = E('div', { 'class': 'mt5700-terminal' });
+		var logCard = Mt5700.card('通知日志', '文件：' + path);
+		var logBody = E('div');
 		logCard._body.appendChild(logBody);
 		body.appendChild(logCard);
 
-		var output = E('div', { 'class': 'mt5700-terminal-body', style: 'max-height: 500px;' });
-		logBody.appendChild(output);
+		var consoleEl = E('pre', { 'class': 'mt5700-terminal-log' }, '加载中…');
+		logBody.appendChild(consoleEl);
+
+		var fileRead = L.rpc.declare({
+			object: 'file',
+			method: 'read',
+			params: ['path'],
+			expect: { data: '' }
+		});
+		var fileWrite = L.rpc.declare({
+			object: 'file',
+			method: 'write',
+			params: ['path', 'data'],
+			expect: {}
+		});
+
+		// L.fs 在部分 LuCI 版本被移除，缺失时降级到 rpcd 的 file 插件
+		function readFile(p) {
+			if (L.fs && typeof L.fs.read === 'function') return L.fs.read(p);
+			return fileRead(p).then(function (r) { return (r && r.data != null) ? r.data : ''; });
+		}
+
+		function writeFile(p, content) {
+			if (L.fs && typeof L.fs.write === 'function') return L.fs.write(p, content);
+			return fileWrite(p, content);
+		}
 
 		var actions = Mt5700.panelActions(
-			Mt5700.primaryButton('刷新', function () { loadLogs(); }),
-			Mt5700.dangerButton('清空', function () { clearLogs(); })
+			Mt5700.primaryButton('刷新', function () { refreshLog(); }),
+			Mt5700.dangerButton('清空日志', function () { clearLog(); })
 		);
 		logBody.appendChild(actions);
 
-		function loadLogs() {
-			output.innerHTML = '';
-			output.appendChild(Mt5700.loading('加载中...'));
-			AtWs.client.sendCommand('logread -e at-webserver -n 50').then(function (res) {
-				output.innerHTML = '';
-				if (res.success && res.data) {
-					var lines = String(res.data).split('\n').filter(function (l) { return l.trim(); });
-					if (!lines.length) {
-						output.appendChild(Mt5700.empty('暂无日志'));
-						return;
-					}
-					lines.forEach(function (line) {
-						var lineEl = E('div', { 'class': 'mt5700-terminal-line' }, line);
-						output.appendChild(lineEl);
-					});
-				} else {
-					output.appendChild(Mt5700.errorState('加载日志失败'));
-				}
+		function renderLog(content, status) {
+			if (status === 'error') {
+				consoleEl.textContent = '读取日志失败：' + (content || '文件不可用');
+				return;
+			}
+			var lines = (content || '').trim().split('\n');
+			if (lines.length > 300) lines = lines.slice(lines.length - 300);
+			consoleEl.textContent = lines.join('\n') || '（暂无日志）';
+		}
+
+		function refreshLog() {
+			return readFile(path).then(function (content) {
+				renderLog(content, 'ok');
+			}).catch(function (err) {
+				renderLog((err && err.message) || 'failed', 'error');
 			});
 		}
 
-		function clearLogs() {
-			output.innerHTML = '';
-			output.appendChild(Mt5700.empty('日志已清空'));
+		function clearLog() {
+			Mt5700.confirm('确定清空通知日志？', function () {
+				return writeFile(path, '').then(function () {
+					Mt5700.success('通知日志已清空');
+					refreshLog();
+				}).catch(function (err) {
+					// 两条通道都试过仍失败才报错
+					return fileWrite(path, '').then(function () {
+						Mt5700.success('通知日志已清空');
+						refreshLog();
+					}).catch(function (err2) {
+						Mt5700.error('清空失败：' + ((err2 && err2.message) || (err && err.message) || '未知错误'));
+					});
+				});
+			});
 		}
 
-		AtWs.client.connect().then(function () { loadLogs(); });
+		refreshLog();
+
+		// 自动刷新（10 秒）
+		var timer = setInterval(refreshLog, 10000);
+		self._dispose = function () { clearInterval(timer); };
 
 		return page;
 	}
