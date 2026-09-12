@@ -23,7 +23,6 @@
 - [本地开发与测试](#本地开发与测试)
 - [UCI 配置](#uci-配置)
 - [Rust 后端](#rust-后端)
-- [更多文档](#更多文档)
 
 ---
 
@@ -237,8 +236,6 @@ logread -e at-webserver | tail -30
 - SIM 卡状态（`^SIMSQ`）、温度保护、PDCP 实时速率
 - 定时锁频（夜间/日间）、全网扫频、企业微信通知
 
-完整映射见 [`docs/01-原WebUI功能清单与LuCI映射表.md`](docs/01-原WebUI功能清单与LuCI映射表.md)。
-
 ---
 
 ## 架构
@@ -283,7 +280,6 @@ luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
 ├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.2.0
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
-├── docs/                            # 功能映射 / SDK 说明 / 验收
 ├── htdocs/luci-static/resources/
 │   ├── at-webserver/                # rpc.js · parse.js · ui.js · smsEncode.js · at.css
 │   └── view/at-webserver/           # 12 个页面
@@ -403,19 +399,10 @@ Release：`opt-level=s` + LTO + strip，musl 静态链接，适合嵌入式。
 
 ---
 
-## 更多文档
-
-| 文档 | 内容 |
-|:--|:--|
-| [`docs/01-原WebUI功能清单与LuCI映射表.md`](docs/01-原WebUI功能清单与LuCI映射表.md) | 功能 1–75 与后端 B1–B16 映射 |
-| [`docs/02-OpenWrt-SDK交叉编译与安装.md`](docs/02-OpenWrt-SDK交叉编译与安装.md) | SDK、安装/卸载、交叉编译 |
-| [`docs/03-最终验收报告.md`](docs/03-最终验收报告.md) | 验收与未执行项说明 |
-| [`CHANGELOG.md`](CHANGELOG.md) | 版本变更 |
-
----
-
 ## 许可
 
-以仓库内声明为准（当前 `Cargo.toml` 为 MIT）。
+本项目以 **[MIT License](LICENSE)** 发布，Copyright (c) 2026 LianXia233。
+
+Rust 后端（`src/rust/`）在 `Cargo.toml` 中同样声明 `license = "MIT"`，两层一致。
 
 **MT5700M** 相关 AT 行为以厂商手册为准；本项目在无官方 OpenWrt 包源的前提下提供管理界面与后端。
