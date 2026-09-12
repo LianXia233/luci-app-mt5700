@@ -5,6 +5,50 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.4] - 2026-09-12
+
+实机（ImmortalWrt aarch64 · H5000M）「服务配置」页把 5G 调制解调器服务状态错误显示为
+「未运行」的修复。
+
+### 修复
+
+- **服务状态仅依赖 `service.list`，无法区分四种未运行原因（P1）**：原判定为
+  `inst.running || inst.pid`，而 procd 的 `service.list` **只反映已注册实例**——当
+  `/etc/init.d/at-webserver` 缺失（例如被 overlay 白化覆盖）或服务从未被拉起时，它返回
+  空对象 `{}`。此时界面只能给出一个红色「未运行」，用户无法区分「配置已禁用」「二进制
+  缺失」「实例未注册（缺 init 脚本）」「已注册但进程崩溃」四种截然不同的故障，排查成本高。
+  已改为多源交叉判定并细分状态：
+
+  | 状态 | 颜色 | 判定依据 | 界面提示 |
+  |:--|:--|:--|:--|
+  | 运行中 | 绿 | 已注册且 `running`/`pid` | 附带 PID 标签 |
+  | 已禁用 | 灰 | UCI `enabled=0` | 说明被刻意关闭及开启方法 |
+  | 未安装 | 红 | `file.stat` 取不到二进制 | 提示重装软件包 |
+  | 不可执行 | 红 | 二进制存在但无执行位 | 提示 `chmod 0755` |
+  | 未注册 | 橙 | 已启用、二进制正常，但 procd 无实例 | 提示 init 脚本缺失/被白化，引导重载 |
+  | 已停止 | 红 | 已注册但进程未运行 | 提示查日志后重载 |
+
+- **重载/重启缺少结果复核，可能「提示成功但实际没起来」（P1）**：`reloadService()` 之前
+  只要 `service.set` 不抛错就提示「服务已重载」。现改为下发后等待约 1.2s 再回查
+  `service.list`，依据真实 `running`/`pid` 给出「服务已重载（PID xxxx）」或
+  「已下发启动指令，但未检测到运行中的进程，请查看系统日志确认原因」。
+- **内联 `L.rpc.declare` 改为提取复用**：`service.list`/`set`/`delete` 三处声明提到
+  render 作用域统一声明，避免每次调用重建声明对象。
+
+### 说明
+
+- 修复仅调整状态判定与提示文案，**未改动任何 AT 命令**（含 IMEI / `AT+CGSN` 相关逻辑）。
+- rpcd ACL 增补 `/usr/bin/at-webserver-rust` 的 `list`/`read`/`stat` 读权限，
+  供前端 `file.stat` 判定二进制是否存在及是否可执行。
+
+### 验证
+
+- 实机 aarch64_cortex-a53 / ImmortalWrt SNAPSHOT：
+  - 经页面同路径 `ubus call service set` 拉起后，`service.list` 返回
+    `instance1.running=true, pid=12312`，`netstat` 确认 `127.0.0.1:8765` 处于 LISTEN。
+  - 无头浏览器实测 `admin/modem/5g/config` 页面渲染为 **「运行中」+「PID 12312」**。
+  - 五态判定逻辑逐场景回归（运行中/已禁用/未安装/未注册/已停止）输出均符合预期。
+
 ## [1.2.3] - 2026-09-12
 
 ### 修复

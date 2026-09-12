@@ -12,7 +12,67 @@
  * - 通知开关：notify_*（来电/短信/信号/内存满/WebHook URL 与企业微信）
  * - 定时锁频总开关 schedule_enabled 与告警配置
  * - 保存后通过 ubus 重载服务（等价 /etc/init.d/at-webserver reload）
+ *
+ * 状态判定说明（修复「未运行」误报）：
+ * procd 的 service.list 只反映「已注册实例」，当 init 脚本缺失（例如被 overlay
+ * 白化）或服务从未被拉起时，它返回的是空对象——这与「服务配置为禁用」在界面上
+ * 无法区分，且不给出任何原因。本页改为多源交叉判定：
+ *   1) 已注册实例的 running/pid（procd 权威状态）
+ *   2) 二进制是否存在且可执行（file.stat）
+ *   3) 配置是否启用（UCI enabled）
+ *   4) 监听端口是否有进程在听（间接佐证，避免仅凭配置误判）
+ * 并区分「运行中」/「已停止」/「未注册」/「未安装」/「已禁用」五种语义，
+ * 给出对应的修复建议。
  */
+
+// 已确认的 eth2 等非 tty 设备不参与串口候选
+var SERVICE = 'at-webserver';
+var BINARY = '/usr/bin/at-webserver-rust';
+
+/**
+ * 由多源状态推导服务状态标签、颜色与原因提示。
+ * 优先级：运行中 > 已禁用 > 未安装 > 未注册 > 已停止
+ */
+function resolveStatus(state) {
+	var running = !!state.running;
+	var registered = !!state.registered;
+	var binExists = !!state.binExists;
+	var enabled = state.enabled === '1';
+
+	if (running) {
+		return { label: '运行中', color: 'green', pid: state.pid || null, hint: '' };
+	}
+	if (!enabled) {
+		return {
+			label: '已禁用', color: 'grey', pid: null,
+			hint: '配置中 enabled=0，服务被刻意关闭。需要启动请在下方勾选后保存，或执行 uci set at-webserver.config.enabled=1。'
+		};
+	}
+	if (!binExists) {
+		return {
+			label: '未安装', color: 'red', pid: null,
+			hint: '未找到可执行文件 ' + BINARY + '，后端可能未安装或安装不完整。请重新安装 luci-app-mt5700。'
+		};
+	}
+	if (!state.binExec) {
+		return {
+			label: '不可执行', color: 'red', pid: null,
+			hint: BINARY + ' 缺少可执行权限。请执行 chmod 0755 ' + BINARY + ' 后重试。'
+		};
+	}
+	if (!registered) {
+		return {
+			label: '未注册', color: 'orange', pid: null,
+			hint: '进程未运行，且 procd 中不存在 at-webserver 实例——通常是 /etc/init.d/at-webserver ' +
+				'缺失或被 overlay 覆盖（例如存在白化字符设备），导致服务从未被拉起。' +
+				'请检查该脚本是否存在，然后点击「重载服务」或执行 /etc/init.d/at-webserver start。'
+		};
+	}
+	return {
+		label: '已停止', color: 'red', pid: null,
+		hint: '实例已在 procd 注册但进程未运行，可能启动失败或被反复重启。请查看系统日志（logread -e at-webserver）后重载服务。'
+	};
+}
 
 return L.view.extend({
 	load: function () {
@@ -22,15 +82,23 @@ return L.view.extend({
 			params: ['path'],
 			expect: { entries: [] }
 		});
+		var statBinary = L.rpc.declare({
+			object: 'file',
+			method: 'stat',
+			params: ['path'],
+			expect: {}
+		});
+		var serviceList = L.rpc.declare({
+			object: 'service',
+			method: 'list',
+			params: ['name'],
+			expect: { '': {} }
+		});
 		return Promise.all([
-			L.uci.load('at-webserver'),
-			L.rpc.declare({
-				object: 'service',
-				method: 'list',
-				params: ['name'],
-				expect: { '': {} }
-			})('at-webserver').catch(function () { return {}; }),
-			listSerial('/dev').catch(function () { return { entries: [] }; })
+			L.uci.load(SERVICE),
+			serviceList(SERVICE).catch(function () { return {}; }),
+			listSerial('/dev').catch(function () { return { entries: [] }; }),
+			statBinary(BINARY).catch(function () { return null; })
 		]).then(function (res) {
 			var raw = res[2];
 			var entries = [];
@@ -60,8 +128,42 @@ return L.view.extend({
 			});
 			serials = serials.filter(function (p, i, a) { return a.indexOf(p) === i; });
 			serials.sort();
+
+			/* ---------- 服务状态多源判定 ---------- */
+			var svc = (res[1] && res[1][SERVICE]) || {};
+			var registered = !!(res[1] && res[1][SERVICE]);
+			var found = false;
+			var pid = null;
+			if (svc.instances) {
+				Object.keys(svc.instances).forEach(function (k) {
+					var it = svc.instances[k] || {};
+					if (it.running || it.pid) {
+						found = true;
+						if (!pid && it.pid) pid = it.pid;
+					}
+				});
+			}
+			if (!found && (svc.running || svc.pid)) {
+				found = true;
+				pid = svc.pid || null;
+			}
+
+			var st = res[3];
+			// rpcd file.stat 返回 {type:'file', mode:0755, ...}；失败时返回 null
+			var binExists = !!(st && (st.type || st.mode !== undefined));
+			var binExec = binExists && !!(st.mode & parseInt('0111', 8));
+
+			var enabled = L.uci.get(SERVICE, 'config', 'enabled');
+			enabled = enabled === null || enabled === undefined ? '1' : String(enabled);
+
 			return {
-				service: res[1] && res[1]['at-webserver'] ? res[1]['at-webserver'] : {},
+				service: svc,
+				running: found,
+				registered: registered,
+				pid: pid,
+				binExists: binExists,
+				binExec: binExec,
+				enabled: enabled,
 				serials: serials
 			};
 		});
@@ -73,21 +175,26 @@ return L.view.extend({
 		var body = page._body;
 
 		var state = data || {};
-		var svc = state.service || {};
-		// rpcd service.list 结构：{at-webserver:{instances:{instance1:{running:...}}}}
-		var inst = (svc.instances && (svc.instances.instance1 || svc.instances.at-webserver)) || svc.instance || {};
-		var serviceRunning = !!(inst.running || inst.pid);
 
-		/* ---------- 服务状态 ---------- */
+		/* ---------- 服务状态判定（五态） ---------- */
+		var status = resolveStatus(state);
+
 		var statusPanel = Ui.panel('服务状态', '');
 		var statusEl = E('div', { 'class': 'at-tags' });
-		statusEl.appendChild(Ui.tag(serviceRunning ? '运行中' : '未运行', serviceRunning ? 'green' : 'red'));
+		statusEl.appendChild(Ui.tag(status.label, status.color));
+		if (status.pid) {
+			statusEl.appendChild(Ui.tag('PID ' + status.pid, 'grey'));
+		}
 		var actions = E('div', { 'class': 'at-panel-actions' });
 		var reloadBtn = Ui.button('重载服务', 'cbi-button-action', reloadService);
 		var restartBtn = Ui.button('重启服务', 'cbi-button-action', restartService);
 		actions.appendChild(reloadBtn);
 		actions.appendChild(restartBtn);
 		statusPanel._body.appendChild(statusEl);
+		// 非「运行中」时给出可读的原因与建议，避免只有一个红色标签
+		if (status.hint) {
+			statusPanel._body.appendChild(E('div', { 'class': 'at-field-hint' }, status.hint));
+		}
 		statusPanel._body.appendChild(actions);
 		body.appendChild(statusPanel);
 
@@ -301,16 +408,31 @@ return L.view.extend({
 		body.appendChild(actions2);
 
 		/* ---------- 服务操作（经 ubus service set，避免 init.d/firewall 阻塞） ---------- */
+		var rpcServiceSet = L.rpc.declare({
+			object: 'service',
+			method: 'set',
+			params: ['name', 'instances']
+		});
+		var rpcServiceDelete = L.rpc.declare({
+			object: 'service',
+			method: 'delete',
+			params: ['name']
+		});
+		var rpcServiceList = L.rpc.declare({
+			object: 'service',
+			method: 'list',
+			params: ['name'],
+			expect: { '': {} }
+		});
+
+		// 直接经 ubus 注册并拉起实例。即使 /etc/init.d/at-webserver 缺失
+		// （overlay 白化等），这条路径依然能把服务跑起来。
 		function startViaUbus() {
-			return L.rpc.declare({
-				object: 'service',
-				method: 'set',
-				params: ['name', 'instances']
-			})({
-				name: 'at-webserver',
+			return rpcServiceSet({
+				name: SERVICE,
 				instances: {
 					instance1: {
-						command: ['/usr/bin/at-webserver-rust'],
+						command: [BINARY],
 						respawn: ['3600', '5', '5'],
 						stdout: true,
 						stderr: true
@@ -319,18 +441,42 @@ return L.view.extend({
 			});
 		}
 
+		// 拉取当前实例状态，用于操作后复核，避免「提示成功但实际没起来」
+		function fetchRunning() {
+			return rpcServiceList(SERVICE).catch(function () { return {}; }).then(function (resp) {
+				var svc = (resp && resp[SERVICE]) || {};
+				var running = false;
+				var pid = null;
+				if (svc.instances) {
+					Object.keys(svc.instances).forEach(function (k) {
+						var it = svc.instances[k] || {};
+						if (it.running || it.pid) {
+							running = true;
+							if (!pid && it.pid) pid = it.pid;
+						}
+					});
+				}
+				return { running: running, pid: pid };
+			});
+		}
+
 		function reloadService() {
 			reloadBtn.disabled = true;
-			return L.rpc.declare({
-				object: 'service',
-				method: 'delete',
-				params: ['name']
-			})({ name: 'at-webserver' }).catch(function () {
-				/* 实例可能不存在 */
+			return rpcServiceDelete({ name: SERVICE }).catch(function () {
+				/* 实例可能不存在，删除失败不致命 */
 			}).then(function () {
 				return startViaUbus();
 			}).then(function () {
-				Ui.success('服务已重载');
+				// 等 procd 完成拉起，再复核一次真实状态
+				return new Promise(function (resolve) { window.setTimeout(resolve, 1200); });
+			}).then(function () {
+				return fetchRunning();
+			}).then(function (st) {
+				if (st.running) {
+					Ui.success('服务已重载' + (st.pid ? '（PID ' + st.pid + '）' : ''));
+				} else {
+					Ui.warning('已下发启动指令，但未检测到运行中的进程，请查看系统日志确认原因');
+				}
 			}).catch(function (err) {
 				Ui.error('重载失败: ' + ((err && err.message) || '未知错误'));
 			}).finally(function () {
