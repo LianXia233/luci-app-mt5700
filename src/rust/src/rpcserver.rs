@@ -305,8 +305,13 @@ impl RpcServer {
 
         let command = normalize_syscfgex(command);
 
+        // 外层超时 = 排队预算 + 应答预算 + 余量。
+        // 排队预算单独给足，避免初始化/重连期间用户的终端命令被外层提前掐断，
+        // 从而出现「模组无响应」的假失败（终端页只有 ATI 有回复的根因）。
         let result = tokio::time::timeout(
-            crate::atclient::COMMAND_TIMEOUT + Duration::from_secs(3),
+            crate::atclient::QUEUE_WAIT_TIMEOUT
+                + crate::atclient::COMMAND_TIMEOUT
+                + Duration::from_secs(3),
             self.client.send_command(&self.ctx, &command, crate::atclient::COMMAND_TIMEOUT, None),
         )
         .await;
