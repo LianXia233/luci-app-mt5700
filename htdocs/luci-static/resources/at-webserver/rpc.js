@@ -527,8 +527,15 @@ function parseHCSQ(data) {
 	else networkMode = mode || '';
 	var result = { networkMode: networkMode, rssi: null, rsrp: null, rsrq: null, sinr: null };
 	if (networkMode === 'NR') {
-		if (p.length >= 4) { result.rsrp = convertRsrp(parseInt(p[2], 10)); result.sinr = convertSinr(parseInt(p[3], 10)); }
-		if (p.length >= 5) result.rsrq = convertRsrq(parseInt(p[4], 10));
+		/*
+		 * NR 格式（实测 ^HCSQ: "NR",77,236,31）与 LTE 顺序不同：
+		 *   "NR",<rsrp_raw>,<sinr_raw>,<rsrq_raw>
+		 * 交叉验证：rsrp 77 → -63 dBm、sinr 236 → 27.2 dB，与 ^MONSC 的
+		 * -65 dBm / 28 dB 独立吻合，故按此顺序解析（兼容 3 或 4 数值字段）。
+		 */
+		if (p.length >= 2) result.rsrp = convertRsrp(parseInt(p[1], 10));
+		if (p.length >= 3) result.sinr = convertSinr(parseInt(p[2], 10));
+		if (p.length >= 4) result.rsrq = convertRsrq(parseInt(p[3], 10));
 	} else if (networkMode === 'LTE') {
 		if (p.length >= 3) result.rsrp = convertRsrp(parseInt(p[2], 10));
 		if (p.length >= 4) result.rsrq = convertRsrq(parseInt(p[3], 10));
@@ -643,19 +650,46 @@ function parsePDCP(fields) {
 function parseMONSC(data) {
 	var str = extractATData(data, '^MONSC');
 	if (!str) return null;
-	var p = str.split(',');
-	var d = {
-		mcc: p[0] ? p[0].trim() : '',
-		mnc: p[1] ? p[1].trim() : '',
-		lac: p[2] ? p[2].trim() : '',
-		cid: p[3] ? p[3].trim() : '',
-		pci: p[4] ? parseInt(p[4], 10) : 0,
-		channel: p[5] ? p[5].trim() : '',
-		rsrp: p[6] !== undefined ? convertRsrp(parseInt(p[6], 10)) : null,
-		rsrq: p[7] !== undefined ? convertRsrq(parseInt(p[7], 10)) : null,
-		sinr: p[8] !== undefined ? convertSinr(parseInt(p[8], 10)) : null,
-		sysMode: p[9] ? p[9].replace(/"/g, '').trim() : ''
-	};
+	var p = str.split(',').map(function (s) { return s.trim(); });
+	/*
+	 * 两种实测格式，按首字段是否为纯数字自动判别：
+	 *   格式 A（NR，带前导制式）:
+	 *     ^MONSC: NR,<mcc>,<mnc>,<tac>,<flag>,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<sinr>
+	 *     实测: ^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-10,28
+	 *     RSRP/RSRQ/SINR 为直接工程值（dBm/dB/dB），无需 convert* 换算。
+	 *     与 ^HCSQ: "NR",77,236,31 独立交叉验证一致（77→-63, 236→27.2）。
+	 *   格式 B（旧版，无前导制式，原始编码值）:
+	 *     ^MONSC: <mcc>,<mnc>,<lac>,<cid>,<pci>,<ch>,<rsrp_raw>,<rsrq_raw>,<sinr_raw>,<sysmode>
+	 */
+	var hasLeadingMode = p.length > 0 && !/^-?\d+$/.test(p[0]);
+	var d;
+	if (hasLeadingMode) {
+		d = {
+			sysMode: p[0] || '',
+			mcc: p[1] || '',
+			mnc: p[2] || '',
+			lac: p[3] || '',
+			cid: p[5] || '',
+			pci: p[6] !== undefined ? parseInt(p[6], 10) : 0,
+			channel: p[7] || '',
+			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
+			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
+			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
+		};
+	} else {
+		d = {
+			mcc: p[0] || '',
+			mnc: p[1] || '',
+			lac: p[2] || '',
+			cid: p[3] || '',
+			pci: p[4] ? parseInt(p[4], 10) : 0,
+			channel: p[5] ? p[5].trim() : '',
+			rsrp: p[6] !== undefined ? convertRsrp(parseInt(p[6], 10)) : null,
+			rsrq: p[7] !== undefined ? convertRsrq(parseInt(p[7], 10)) : null,
+			sinr: p[8] !== undefined ? convertSinr(parseInt(p[8], 10)) : null,
+			sysMode: p[9] ? p[9].replace(/"/g, '').trim() : ''
+		};
+	}
 	d.signalPercent = calculateSignalPercent(d.rsrp);
 	return d;
 }

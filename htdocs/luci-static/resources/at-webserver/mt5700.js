@@ -1,4 +1,4 @@
-/* use strict */
+'use strict';
 'require baseclass';
 'require at-webserver/compat';
 'require at-webserver/rpc';
@@ -6,12 +6,12 @@
 /* global L, AtWs, Parse, baseclass */
 
 /**
- * MT5700 LuCI 前端 - 新 UI 组件系统
- * 玻璃拟态 + 卡片式 + 数据可视化
+ * MT5700 LuCI 前端 - Modern Dimensional Layering 组件系统 v2
+ * 软极简 + 玻璃拟态材质 + 现代数据看板
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '1.0.0';
+var MT5700_CSS_VERSION = '2.0.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -45,7 +45,14 @@ var Mt5700 = (function () {
 				}
 			}
 		}
-		if (text != null) el.textContent = String(text);
+		// 文本内容：字符串走 textContent，DOM 节点直接挂载（避免被 String() 序列化成 [object HTMLDivElement]）
+		if (text != null) {
+			if (typeof text === 'object' && text.nodeType) {
+				el.appendChild(text);
+			} else {
+				el.textContent = String(text);
+			}
+		}
 		return el;
 	}
 
@@ -103,6 +110,115 @@ var Mt5700 = (function () {
 		if (color) v.classList.add(color);
 		m.appendChild(v);
 		return m;
+	};
+
+	/* ================= 环形仪表 (Circular Gauge) ================= */
+
+	// 信号等级色 (绿→青→黄→橙→红)
+	var GAUGE_COLORS = { exc: '#10b981', good: '#06b6d4', fair: '#f59e0b', poor: '#f97316', bad: '#ef4444' };
+	var GAUGE_CAPTIONS = { exc: '优秀', good: '良好', fair: '一般', poor: '较差', bad: '极差' };
+
+	/*
+	 * 各信号指标使用独立阈值与量程，绝不共用一套 0-100% 算法：
+	 *   RSRP (dBm): >=-80 优秀 / >=-90 良好 / >=-100 一般 / >=-110 较差 / 更低 极差
+	 *   RSRQ (dB) : >=-10 优秀 / >=-15 良好 / >=-20 一般 / 更低 极差
+	 *   SINR (dB) : >=20 优秀 / >=13 良好 / >=5 一般 / 更低 极差
+	 * 量程仅用于弧长百分比映射（视觉刻度），等级判定只看阈值。
+	 */
+	var SIGNAL_SPECS = {
+		rsrp: {
+			min: -120, max: -70,
+			level: function (v) {
+				return v >= -80 ? 'exc' : v >= -90 ? 'good' : v >= -100 ? 'fair' : v >= -110 ? 'poor' : 'bad';
+			}
+		},
+		rsrq: {
+			min: -20, max: -3,
+			level: function (v) {
+				return v >= -10 ? 'exc' : v >= -15 ? 'good' : v >= -20 ? 'fair' : 'bad';
+			}
+		},
+		sinr: {
+			min: 0, max: 30,
+			level: function (v) {
+				return v >= 20 ? 'exc' : v >= 13 ? 'good' : v >= 5 ? 'fair' : 'bad';
+			}
+		},
+		/* 信号百分比（0-100）：阈值与 RSRP 分级对齐（-80→75 / -90→50 / -100→25） */
+		pct: {
+			min: 0, max: 100,
+			level: function (v) {
+				return v >= 75 ? 'exc' : v >= 50 ? 'good' : v >= 25 ? 'fair' : 'bad';
+			}
+		}
+	};
+
+	// 判定信号等级（kind: rsrp | rsrq | sinr），无法判定时返回 null
+	api.signalLevel = function (kind, value) {
+		var spec = SIGNAL_SPECS[kind];
+		if (!spec || value == null || isNaN(value)) return null;
+		return spec.level(value);
+	};
+
+	/**
+	 * 创建环形仪表。SVG viewBox 缩放自适应容器，DOM 开销固定（1 svg + 2 circle）。
+	 * 返回 { el, set(value) }：set(null) 显示占位符并隐藏弧线与等级。
+	 */
+	api.gauge = function (label, unit, kind) {
+		var C = (2 * Math.PI * 42).toFixed(2);
+
+		var root = E('div', { 'class': 'mt5700-gauge' });
+		var dial = E('div', { 'class': 'mt5700-gauge-dial' });
+		var svg = svgEl('svg', { viewBox: '0 0 100 100', role: 'img' });
+		svg.appendChild(svgEl('circle', {
+			'class': 'mt5700-gauge-track', cx: 50, cy: 50, r: 42, 'stroke-width': 8
+		}));
+		var bar = svgEl('circle', {
+			'class': 'mt5700-gauge-bar', cx: 50, cy: 50, r: 42, 'stroke-width': 8,
+			transform: 'rotate(-90 50 50)',
+			'stroke-dasharray': C, 'stroke-dashoffset': C
+		});
+		svg.appendChild(bar);
+		dial.appendChild(svg);
+
+		var center = E('div', { 'class': 'mt5700-gauge-center' });
+		var valueEl = E('div', { 'class': 'mt5700-gauge-value' }, '—');
+		var unitEl = E('div', { 'class': 'mt5700-gauge-unit' }, unit || '');
+		center.appendChild(valueEl);
+		center.appendChild(unitEl);
+		dial.appendChild(center);
+		root.appendChild(dial);
+
+		root.appendChild(E('div', { 'class': 'mt5700-gauge-label' }, label || ''));
+		var caption = E('div', { 'class': 'mt5700-gauge-caption' });
+		root.appendChild(caption);
+
+		return {
+			el: root,
+			set: function (value) {
+				var spec = SIGNAL_SPECS[kind];
+				if (value == null || isNaN(value)) {
+					valueEl.textContent = '—';
+					bar.setAttribute('stroke-dashoffset', C);
+					bar.removeAttribute('stroke');
+					caption.textContent = '';
+					caption.className = 'mt5700-gauge-caption';
+					return;
+				}
+				valueEl.textContent = String(value);
+				var level = spec ? spec.level(value) : 'fair';
+				var color = GAUGE_COLORS[level] || GAUGE_COLORS.fair;
+				var pct = 0;
+				if (spec) {
+					pct = (value - spec.min) / (spec.max - spec.min);
+					pct = Math.max(0, Math.min(1, pct));
+				}
+				bar.setAttribute('stroke', color);
+				bar.setAttribute('stroke-dashoffset', (C * (1 - pct)).toFixed(2));
+				caption.textContent = GAUGE_CAPTIONS[level] || '';
+				caption.className = 'mt5700-gauge-caption ' + level;
+			}
+		};
 	};
 
 	/* ================= 按钮 ================= */
@@ -290,7 +406,14 @@ var Mt5700 = (function () {
 
 	/* ================= 图表 ================= */
 
-	// 折线图
+	var _gradSeq = 0;
+
+	/**
+	 * 实时速率折线图（v2 视觉版）
+	 * - 双折线（下行/上行）+ 下行面积渐变填充
+	 * - 悬浮提示（tooltip，L4 浮层），数据格式通过 options.tipFormat(point, index) 定制
+	 * - 函数签名与数据格式（[{down, up}, ...]）与 v1 完全兼容，旧调用无需改动
+	 */
 	api.lineChart = function (data, options) {
 		options = options || {};
 		var w = options.width || 600;
@@ -299,13 +422,21 @@ var Mt5700 = (function () {
 		var downColor = options.downColor || '#3b82f6';
 		var upColor = options.upColor || '#10b981';
 
-		var svg = svgEl('svg', { width: w, height: h });
+		// 外层容器（tooltip 需要 relative 定位与 L4 浮层）
+		var wrap = E('div', { style: 'position:relative;width:100%;height:100%;' });
+		var svg = svgEl('svg', {
+			viewBox: '0 0 ' + w + ' ' + h,
+			preserveAspectRatio: 'none'
+		});
+		wrap.appendChild(svg);
+		var tip = E('div', { 'class': 'mt5700-chart-tip' });
+		wrap.appendChild(tip);
 
 		if (!data || !data.length) {
-			return svg;
+			return wrap;
 		}
 
-		// 找最大值
+		// 找最大值（自然取整到 10 的倍数刻度，避免顶格）
 		var actualMax = max;
 		if (actualMax <= 1) {
 			data.forEach(function (p) {
@@ -313,51 +444,82 @@ var Mt5700 = (function () {
 			});
 		}
 
-		// 绘制网格线
+		// 面积渐变定义
+		var gradId = 'mt5700-grad-' + (++_gradSeq);
+		var defs = svgEl('defs');
+		var grad = svgEl('linearGradient', { id: gradId, x1: 0, y1: 0, x2: 0, y2: 1 });
+		var stop1 = svgEl('stop', { offset: '0%', 'stop-color': downColor, 'stop-opacity': 0.22 });
+		var stop2 = svgEl('stop', { offset: '100%', 'stop-color': downColor, 'stop-opacity': 0 });
+		grad.appendChild(stop1);
+		grad.appendChild(stop2);
+		defs.appendChild(grad);
+		svg.appendChild(defs);
+
+		// 网格线
 		var gridCount = 4;
 		for (var i = 0; i <= gridCount; i++) {
-			var y = 10 + (h - 30) * i / gridCount;
+			var gy = 10 + (h - 30) * i / gridCount;
 			svg.appendChild(svgEl('line', {
-				x1: 2, y1: y, x2: w - 2, y2: y,
-				stroke: 'rgba(0, 0, 0, 0.05)',
+				x1: 2, y1: gy, x2: w - 2, y2: gy,
+				stroke: 'rgba(127, 127, 127, 0.14)',
 				'stroke-width': 1
 			}));
 		}
 
-		// 绘制折线
-		var points = [];
 		var n = data.length;
+		function px(j) { return (j / Math.max(1, n - 1)) * (w - 4) + 2; }
+		function py(v) { return h - 15 - (v / actualMax) * (h - 30); }
+
+		var downPts = [], upPts = [];
 		for (var j = 0; j < n; j++) {
-			var x = (j / Math.max(1, n - 1)) * (w - 4) + 2;
-			var y = h - 15 - ((data[j].down || 0) / actualMax) * (h - 30);
-			points.push(x.toFixed(1) + ',' + y.toFixed(1));
+			downPts.push(px(j).toFixed(1) + ',' + py(data[j].down || 0).toFixed(1));
+			upPts.push(px(j).toFixed(1) + ',' + py(data[j].up || 0).toFixed(1));
 		}
-		if (points.length > 1) {
-			svg.appendChild(svgEl('polyline', {
-				fill: 'none',
-				stroke: downColor,
-				'stroke-width': 2,
-				points: points.join(' ')
+
+		// 下行面积填充
+		if (n > 1) {
+			svg.appendChild(svgEl('polygon', {
+				fill: 'url(#' + gradId + ')',
+				points: downPts.join(' ') + ' ' + px(n - 1).toFixed(1) + ',' + (h - 15) + ' ' + px(0).toFixed(1) + ',' + (h - 15)
 			}));
 		}
 
-		// 上行折线
-		var upPoints = [];
-		for (var k = 0; k < n; k++) {
-			var x2 = (k / Math.max(1, n - 1)) * (w - 4) + 2;
-			var y2 = h - 15 - ((data[k].up || 0) / actualMax) * (h - 30);
-			upPoints.push(x2.toFixed(1) + ',' + y2.toFixed(1));
-		}
-		if (upPoints.length > 1) {
+		// 双折线
+		if (n > 1) {
 			svg.appendChild(svgEl('polyline', {
-				fill: 'none',
-				stroke: upColor,
-				'stroke-width': 2,
-				points: upPoints.join(' ')
+				fill: 'none', stroke: downColor, 'stroke-width': 2,
+				'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+				points: downPts.join(' ')
+			}));
+			svg.appendChild(svgEl('polyline', {
+				fill: 'none', stroke: upColor, 'stroke-width': 2,
+				'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+				points: upPts.join(' ')
 			}));
 		}
 
-		return svg;
+		// 悬浮提示：跟随鼠标取最近采样点
+		function fmtDefault(p) {
+			function f(v) { return v >= 1e6 ? (v / 1e6).toFixed(2) + ' Mbps' : v >= 1e3 ? (v / 1e3).toFixed(1) + ' Kbps' : Math.round(v) + ' bps'; }
+			return '↓ ' + f(p.down || 0) + ' · ↑ ' + f(p.up || 0);
+		}
+		wrap.addEventListener('mousemove', function (e) {
+			var rect = wrap.getBoundingClientRect();
+			var ratio = (e.clientX - rect.left) / Math.max(1, rect.width);
+			var idx = Math.max(0, Math.min(n - 1, Math.round(ratio * (n - 1))));
+			var p = data[idx];
+			if (!p) return;
+			tip.textContent = options.tipFormat ? options.tipFormat(p, idx) : fmtDefault(p);
+			var tx = Math.max(60, Math.min(rect.width - 60, px(idx) / w * rect.width));
+			tip.style.left = tx + 'px';
+			tip.style.top = (Math.max(py(p.down || 0), py(p.up || 0)) / h * rect.height) + 'px';
+			tip.classList.add('show');
+		});
+		wrap.addEventListener('mouseleave', function () {
+			tip.classList.remove('show');
+		});
+
+		return wrap;
 	};
 
 	// 信号强度条
@@ -456,7 +618,94 @@ var Mt5700 = (function () {
 		return el;
 	};
 
-	/* ================= 速率显示 ================= */
+	/* ================= 未保存更改（暂存 / 保存并应用 / 撤销） ================= */
+
+	/*
+	 * OpenWrt 标准「保存并应用」语义的前端实现：
+	 * - 页面修改不立即下发，先调用 staged.set(key, label, run) 暂存
+	 * - 同一 key 重复修改自动覆盖（只应用最后一次）
+	 * - 悬浮条实时显示未保存项数量，提供「保存并应用」「撤销更改」两个入口
+	 * - 应用时逐项执行 run()（返回 Promise），成功/失败后回调刷新实际状态
+	 */
+	api.staged = function (options) {
+		options = options || {};
+		var items = []; // { key, label, run }
+		var bar = E('div', { 'class': 'mt5700-applybar mt5700-applybar-hidden' });
+		var text = E('span', { 'class': 'mt5700-applybar-text' });
+		var actions = E('div', { 'class': 'mt5700-applybar-actions' });
+		var revertBtn = api.ghostButton('撤销更改', doRevert);
+		var applyBtn = api.primaryButton('保存并应用', doApply);
+		actions.appendChild(revertBtn);
+		actions.appendChild(applyBtn);
+		bar.appendChild(text);
+		bar.appendChild(actions);
+
+		function refresh() {
+			if (items.length) {
+				text.textContent = '有 ' + items.length + ' 项未保存的更改';
+				bar.classList.remove('mt5700-applybar-hidden');
+			} else {
+				bar.classList.add('mt5700-applybar-hidden');
+			}
+		}
+
+		function doApply() {
+			if (!items.length) return;
+			var queue = items.slice();
+			applyBtn.disabled = true;
+			revertBtn.disabled = true;
+			text.textContent = '正在应用更改（' + queue.length + ' 项）…';
+			var chain = Promise.resolve();
+			queue.forEach(function (it) {
+				chain = chain.then(function () { return it.run(); });
+			});
+			return chain.then(function () {
+				items = [];
+				api.success('更改已应用');
+			}).catch(function (err) {
+				api.error((err && err.message) || '应用更改失败');
+			}).then(function () {
+				applyBtn.disabled = false;
+				revertBtn.disabled = false;
+				refresh();
+				/* 成败都重新拉取，让界面与实际状态对齐 */
+				if (options.onChanged) options.onChanged();
+			});
+		}
+
+		function doRevert() {
+			api.confirm('确定放弃全部未保存的更改？', function () {
+				items = [];
+				refresh();
+				if (options.onChanged) options.onChanged();
+			}, '放弃更改');
+		}
+
+		return {
+			el: bar,
+			/* key 相同的暂存项会被覆盖，避免重复下发同一配置 */
+			set: function (key, label, run) {
+				for (var i = 0; i < items.length; i++) {
+					if (items[i].key === key) {
+						items[i].label = label;
+						items[i].run = run;
+						refresh();
+						return;
+					}
+				}
+				items.push({ key: key, label: label, run: run });
+				refresh();
+			},
+			remove: function (key) {
+				items = items.filter(function (it) { return it.key !== key; });
+				refresh();
+			},
+			clear: function () { items = []; refresh(); },
+			count: function () { return items.length; }
+		};
+	};
+
+	/* ================= 速率显示 (L3 浮动) ================= */
 
 	api.speedBox = function (label, value) {
 		var box = E('div', { 'class': 'mt5700-speed-box' });

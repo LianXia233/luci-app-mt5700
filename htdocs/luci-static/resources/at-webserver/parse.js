@@ -139,11 +139,40 @@ var Parse = (function () {
 	/* ================= MCS ================= */
 
 	// AT^MCS=0 / =1
+	/*
+	 * ^MCS 实测格式（5 字段，纯十进制文本，无字节序问题）：
+	 *   ^MCS: <方向回显>,<层数>,<码字/保留>,<MCS 值>,<保留>
+	 *   下行查询 AT^MCS=1 → "^MCS: 1,1,1,0,255"
+	 *   上行查询 AT^MCS=0 → "^MCS: 0,1,1,20,255"
+	 * f0 是查询方向回显（1=DL / 0=UL），不是 MCS；MCS 在 f3。
+	 * MCS 有效值域 0-31，超出（如 255）视为无效，回退 null。
+	 */
 	api.parseMCS = function (text) {
 		var match = text.match(/\^MCS:\s*(.+)/);
 		if (!match) return null;
-		var f = match[1].split(',');
-		return { mcs: f[0] !== undefined ? parseInt(f[0], 10) : null, rank: f[1] !== undefined ? parseInt(f[1], 10) : null };
+		var f = match[1].split(',').map(function (s) { return s.trim(); });
+		var mcs = f[3] !== undefined ? parseInt(f[3], 10) : NaN;
+		var rank = f[1] !== undefined ? parseInt(f[1], 10) : NaN;
+		return {
+			mcs: (mcs >= 0 && mcs <= 31) ? mcs : null,
+			rank: (rank >= 1 && rank <= 8) ? rank : null
+		};
+	};
+
+	/*
+	 * MCS → 调制方式显示映射（3GPP TS 38.214 MCS 表 2 口径，兼顾两例锚点）：
+	 *   0-9   → QPSK
+	 *   10-16 → 16QAM
+	 *   17-25 → 64QAM   （上行 MCS 20 → 64QAM）
+	 *   26-31 → 256QAM  （下行 MCS 27 → 256QAM）
+	 * 无效值返回 null，由调用方回退既有占位符。
+	 */
+	api.mcsModulation = function (mcs) {
+		if (mcs == null || isNaN(mcs) || mcs < 0 || mcs > 31) return null;
+		if (mcs <= 9) return 'QPSK';
+		if (mcs <= 16) return '16QAM';
+		if (mcs <= 25) return '64QAM';
+		return '256QAM';
 	};
 
 	/* ================= IPv6 CAP ================= */
@@ -374,7 +403,12 @@ var Parse = (function () {
 		return sb;
 	}
 
-	function decodeUcs2(data) {
+	/*
+	 * UCS2 字节解码（PDU 用，入参为字节数组）。
+	 * 注意：上方另有一个入参为 hex 字符串的 var decodeUcs2（USSD 用），
+	 * var 赋值会遮蔽函数声明——若重名会让 PDU 正文整体乱码，故这里改名 _Bytes。
+	 */
+	function decodeUcs2Bytes(data) {
 		var out = '';
 		for (var i = 0; i + 1 < data.length; i += 2) {
 			out += String.fromCharCode((data[i] << 8) | data[i + 1]);
@@ -416,11 +450,32 @@ var Parse = (function () {
 		}
 		if (ton === 5) {
 			var alphaBytes = raw.slice(start, i);
-			var septets = unpackSeptets(alphaBytes, Math.ceil(lenNibbles * 4 / 7));
+			/* 半字节长度折算 septet 数：向下取整（多余填充位不构成字符） */
+			var septets = unpackSeptets(alphaBytes, Math.floor(lenNibbles * 4 / 7));
 			return { address: septetsToString(septets), ton: ton };
 		}
 		if (ton === 1) return { address: '+' + digits, ton: ton };
 		return { address: digits, ton: ton };
+	}
+
+	/*
+	 * TP-DCS 编码判定（3GPP TS 23.038）：
+	 *   0x00-0x3F 一般数据编码组：bit3-2 选编码（00=7bit 01=8bit 10=UCS2）
+	 *   0x40-0xBF 保留/自动丢弃组：按 bit3-2 判定
+	 *   0xC0-0xDF 消息等待组：bit3=1 为 UCS2，否则 GSM7
+	 *   0xF0-0xFF 数据编码/消息类别组：固定 GSM7（bit3-2 是类别不是编码！）
+	 * 返回 0=GSM7 / 1=8bit / 2=UCS2。
+	 * 旧实现用 dcs & 0x0C，会把 F 组的类别位误读成编码位导致乱码。
+	 */
+	function dcsEncoding(dcs) {
+		var group = dcs >> 4;
+		if (group === 0xC || group === 0xD || group === 0xE) {
+			return (dcs & 0x08) ? 2 : 0;
+		}
+		if (group === 0xF) {
+			return 0;
+		}
+		return (dcs >> 2) & 0x03;
 	}
 
 	// 解析一条 SMS-DELIVER PDU（hex），返回 { sender, content, date, partial }
@@ -481,17 +536,25 @@ var Parse = (function () {
 			}
 		}
 
-		if ((dcs & 0x0C) === 0x08) {
-			content = decodeUcs2(userData);
-		} else if ((dcs & 0x0C) === 0x04) {
+		var enc = dcsEncoding(dcs);
+		if (enc === 2) {
+			content = decodeUcs2Bytes(userData);
+		} else if (enc === 1) {
 			var c8 = '';
 			for (var k = 0; k < userData.length; k++) c8 += String.fromCharCode(userData[k]);
 			content = c8;
 		} else {
-			var headerSeptets = Math.ceil(headerLen * 8 / 7);
-			var remaining = udl - headerSeptets;
-			if (remaining < 0) remaining = 0;
-			content = septetsToString(unpackSeptets(userData, remaining));
+			/*
+			 * 7-bit：UDH 占用的 septet 数按其八位组长度折算，
+			 * 必须先解「完整 UD 字节流」的 septet 序列、再跳过头部码位；
+			 * 旧实现先按字节切掉 UDH 再解包，位流错位导致长短信正文乱码。
+			 */
+			var udhSeptets = (udhi && ud.length > 0) ? Math.ceil((ud[0] + 1) * 8 / 7) : 0;
+			var totalSeptets = Math.max(udl, udhSeptets);
+			var septets = unpackSeptets(ud, totalSeptets);
+			content = udhSeptets <= septets.length
+				? septetsToString(septets.slice(udhSeptets))
+				: '';
 		}
 
 		return { sender: addr.address, content: content, date: date, partial: partial };
