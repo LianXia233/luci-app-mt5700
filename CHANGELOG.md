@@ -5,6 +5,79 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.3.2] - 2026-09-12
+
+修复「连接状态」与「实时速率」面板中签约速率显示为 `819 bps` 的问题。
+
+### 现象
+
+实机（ImmortalWrt aarch64 · H5000M · MT5700M-CN）「网络状态」页：
+
+| 字段 | 修复前 | 修复后 |
+|:--|:--|:--|
+| 连接状态 · 下行速率 | `819 bps` | `102.40 Mbps` |
+| 连接状态 · 上行速率 | `819 bps` | `102.40 Mbps` |
+| 实时速率 · ↓ / ↑ | `819 bps` | `102.40 Mbps` |
+
+### 定位过程与根因
+
+实机 `AT^DSAMBR` 返回：
+
+```
+^DSAMBR: 1,102400,102400,"cmiot5g",5
+```
+
+对照手册 16.17 节，字段定义是 `^DSAMBR: <cid>,<DlApnAmbr>,<UlApnAmbr>`，
+`DlApnAmbr` / `UlApnAmbr` 单位均为 **kbps**。即下行签约速率 = 102400 kbps = **102.40 Mbps**。
+（字段顺序在代码中原本就正确，问题不在取值位置。）
+
+真正根因是**同一组 `state.downSpeed` / `state.upSpeed` 被两个物理单位完全不同的数据源共用**，
+而格式化函数 `splitSpeedUI` 只实现了「字节/秒」这一种口径：
+
+```
+102400 kbps  --(/1000)-->  102.4  --(splitSpeedUI 的 ×8)-->  819.2  -->  显示 "819 bps"
+```
+
+两个数据源的单位差异：
+
+| 数据源 | 字段 | 物理单位 | 正确换算 |
+|:--|:--|:--|:--|
+| PDCP 实时速率 | `d.rx_rate` / `d.tx_rate` | 字节/秒（÷1024 后为 KiB/s） | ×8 得 bps |
+| 签约速率 | `AT^DSAMBR` 第 2/3 字段 | kbps（本身就是比特单位） | ×1000 得 bps |
+
+`getAMBR` 先做了一次 `/1000`（把 kbps 误当 bps 降一档），`splitSpeedUI` 又无条件 `×8`，
+两次错误叠加，最终数值恰好落在 819 这个巧合数字上（102400 ÷ 1000 × 8 = 819.2）。
+
+### 修复
+
+| 文件 | 改动 |
+|:--|:--|
+| `htdocs/.../view/at-webserver/network_status.js` | `state` 新增 `speedUnit` 字段，显式记录当前速率的单位口径（`'bytes'` / `'kbps'`） |
+| 同上 | `splitSpeedUI(value, unitMode)` 增加 `unitMode` 参数：`'kbps'` 走 `×1000`，`'bytes'` 走 `×8` |
+| 同上 | `getAMBR` 去掉错误的 `/1000`，保留 kbps 原值并将 `speedUnit` 标记为 `'kbps'` |
+| 同上 | `pdcpHandler` 显式将 `speedUnit` 标记为 `'bytes'`，两个来源互不串扰 |
+| 同上 | `^DSAMBR` 第 4 字段（手册标准格式中不存在，属部分固件扩展）增加护栏：仅当确实是带引号字符串时才采信为 APN，避免把数字当 APN 显示 |
+
+修复思路是**把隐式的单位假设变为显式状态**：不再让格式化函数去猜输入是什么单位，
+而是由赋值方在写入时声明口径。这样后续若再新增速率来源（如 `AT+CGEQOSRDP` 的 QoS 速率），
+只需声明一次单位归属即可，不会再产生同类错位。
+
+### 回归验证
+
+`node --check` 通过；独立算式脚本 `verify_calc.js` 覆盖：
+
+- kbps 口径主用例：`102400 kbps → 102.40 Mbps`（PASS）
+- 修复前对比基线：`102400 kbps → 819 bps`（复现原缺陷）
+- bytes 口径回归 4/4 PASS（`0.5 → 4 bps`、`125 → 1.00 Kbps`、`1000 → 8.00 Kbps`、`125000 → 1.00 Mbps`）
+- kbps 边界 3/3 PASS
+- APN 引号护栏 4/4 PASS
+
+实机部署后无头浏览器复验：两个面板均已显示 `102.40 Mbps`。
+
+### 约束确认
+
+未改动任何 IMEI 相关命令与逻辑（本轮改动文件中不含 `AT+CGSN` / IMEI 相关引用）。
+
 ## [1.3.1] - 2026-09-12
 
 修复 AT 调试终端「只有 ATI 能返回结果、其余命令无任何回复」的问题。

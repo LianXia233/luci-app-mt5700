@@ -92,7 +92,9 @@ return L.view.extend({
 			dhcpv4: null, dhcpv6: null, ipv6Cap: null,
 			uplinkMCS: null, downlinkMCS: null,
 			activeCid: null,
-			downSpeed: 0, upSpeed: 0
+			downSpeed: 0, upSpeed: 0,
+			/* 'bytes' = PDCP 实时速率（字节/秒）；'kbps' = AT^DSAMBR 签约速率。 */
+			speedUnit: 'bytes'
 		};
 		var history = [];
 		var HISTORY_POINTS = 60;
@@ -318,10 +320,16 @@ return L.view.extend({
 			}
 		}
 
+		/*
+		 * 速率来源有两种，单位语义不同，必须显式区分，不能共用同一个换算：
+		 *   - PDCP 实时速率（第 707/708 行）：字节/秒，需 ×8 换成比特；
+		 *   - 签约速率（AT^DSAMBR，第 512/513 行）：kbps，本身就是比特单位，不得再 ×8。
+		 * state.speedUnit 记录当前值属于哪种，splitSpeedUI 据此选择换算路径。
+		 */
 		function renderSpeed() {
 			speedRow.innerHTML = '';
-			var d = splitSpeedUI(state.downSpeed);
-			var u = splitSpeedUI(state.upSpeed);
+			var d = splitSpeedUI(state.downSpeed, state.speedUnit);
+			var u = splitSpeedUI(state.upSpeed, state.speedUnit);
 			downSpeed = d; upSpeed = u;
 			var box = E('div', { 'class': 'at-speed-box' });
 			var dEl = E('div', { 'class': 'at-speed-dir' });
@@ -337,8 +345,14 @@ return L.view.extend({
 			renderChart();
 		}
 
-		function splitSpeedUI(bytes) {
-			var bits = bytes * 8;
+		/*
+		 * 把速率值格式化为 {value, unit}。
+		 * unitMode：
+		 *   'kbps'  —— 输入单位是 kbps（比特），直接乘 1000 得 bps；
+		 *   'bytes' —— 输入单位是字节/秒，乘 8 得 bps（PDCP 实时速率的默认口径）。
+		 */
+		function splitSpeedUI(value, unitMode) {
+			var bits = (unitMode === 'kbps') ? (value * 1000) : (value * 8);
 			if (bits >= 1e9) return { value: (bits / 1e9).toFixed(2), unit: 'Gbps' };
 			if (bits >= 1e6) return { value: (bits / 1e6).toFixed(2), unit: 'Mbps' };
 			if (bits >= 1e3) return { value: (bits / 1e3).toFixed(2), unit: 'Kbps' };
@@ -508,11 +522,30 @@ return L.view.extend({
 							var str = AtWs.extractATData(res.data, '^DSAMBR');
 							if (!str) return;
 							var parts = str.split(',');
+							/*
+							 * 手册 16.17 节：^DSAMBR: <cid>,<DlApnAmbr>,<UlApnAmbr>
+							 *   DlApnAmbr / UlApnAmbr 均为 kbps（不是 bps、更不是字节）。
+							 * 故此处保留 kbps 原值，并把单位口径标记为 'kbps'，
+							 * 由 splitSpeedUI 按 kbps→bps（×1000）换算，
+							 * 绝不能再走字节口径的 ×8（那会把 102.4 Mbps 显示成 819 bps）。
+							 */
 							if (parts.length >= 3) {
-								state.downSpeed = (parseInt(parts[1], 10) || 0) / 1000;
-								state.upSpeed = (parseInt(parts[2], 10) || 0) / 1000;
+								state.downSpeed = parseInt(parts[1], 10) || 0;
+								state.upSpeed = parseInt(parts[2], 10) || 0;
+								state.speedUnit = 'kbps';
 							}
-							if (parts.length >= 4) apn.textContent = parts[3].trim().replace(/^["']|["']$/g, '') || '未知';
+							/*
+							 * 第 4 个字段（索引 3）在手册标准格式中并不存在，
+							 * 属部分固件版本的扩展字段且语义为 APN 字符串。
+							 * 仅当它确实是「带引号的字符串」时才采信；若是纯数字
+							 * （其他固件可能在此处返回计数值）则忽略，避免把数字当 APN。
+							 */
+							if (parts.length >= 4) {
+								var apnRaw = parts[3].trim();
+								if (/^".*"$/.test(apnRaw) || /^'.*'$/.test(apnRaw)) {
+									apn.textContent = apnRaw.replace(/^["']|["']$/g, '') || '未知';
+								}
+							}
 							throw 'done';
 						}).catch(function (e) {
 							if (e === 'done') return Promise.reject('break');
@@ -704,8 +737,10 @@ return L.view.extend({
 		var pdcpHandler = function (resp) {
 			if (!resp || resp.type !== 'pdcp_data' || !resp.data) return;
 			var d = resp.data;
+			/* PDCP 上报单位为字节/秒，除以 1024 归一为 KiB/s，按 'bytes' 口径 ×8 显示。 */
 			state.downSpeed = (d.rx_rate || 0) / 1024;
 			state.upSpeed = (d.tx_rate || 0) / 1024;
+			state.speedUnit = 'bytes';
 			history.push({ down: state.downSpeed, up: state.upSpeed });
 			if (history.length > HISTORY_POINTS) history = history.slice(history.length - HISTORY_POINTS);
 			renderSpeed();
