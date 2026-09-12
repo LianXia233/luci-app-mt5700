@@ -1,5 +1,6 @@
 'use strict';
 'require baseclass';
+'require at-webserver/compat';
 'require at-webserver/rpc';
 'require at-webserver/parse';
 /* global L, AtWs, Parse, baseclass */
@@ -13,7 +14,7 @@
 // uhttpd 给静态资源的 Last-Modified 为 1970，浏览器会长期复用缓存；LuCI 主题同样
 // 采用「css?v=版本」的做法（aurora: main.css?v=1.3.1）。样式版本随包版本递增，
 // 保证升级/修复样式后用户刷新即可生效。
-var AT_CSS_VERSION = '1.2.4';
+var AT_CSS_VERSION = '1.3.0';
 
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION;

@@ -359,8 +359,15 @@ return L.view.extend({
 		notifyMemChk.checked = get('notify_memory_full', '1') === '1';
 		webhookInput.value = String(get('wechat_webhook', ''));
 
-		/* ---------- 保存 ---------- */
-		var saveBtn = Ui.primaryButton('保存配置', function () {
+		/* ---------- 保存（OpenWrt 标准「保存并应用」流程） ----------
+		 *
+		 * 修复（问题一）：
+		 *  - 变更先只写 UCI 内存，页面立刻标记「未保存更改」，离开时浏览器会拦截；
+		 *  - 点击「保存并应用」才走 changes → save → apply 完整链路，apply 成功即
+		 *    代表 procd reload trigger 已生效（at-webserver 有 procd_add_reload_trigger）；
+		 *  - 无待应用变更（ubus NO_DATA）视为成功，不再误报「保存失败」。
+		 */
+		var saveBtn = Ui.primaryButton('保存并应用', function () {
 			var set = function (key, value) {
 				L.uci.set('at-webserver', 'config', key, value);
 			};
@@ -385,27 +392,39 @@ return L.view.extend({
 			set('notify_memory_full', notifyMemChk.checked ? '1' : '0');
 			set('wechat_webhook', webhookInput.value.trim());
 
-			L.uci.save('at-webserver').then(function () {
-				return L.uci.apply(false).then(function () {
-					Ui.success('配置已保存');
-					return reloadService();
-				}, function (err) {
-					// ubus 5 = NO_DATA：无待应用变更时 rpcd 不回数据，视为成功
-					var code = err && err.code;
-					var msg = (err && err.message) || '';
-					if (code === 5 || /未收到数据|No data/i.test(msg)) {
-						Ui.success('配置已保存');
-						return reloadService();
-					}
-					throw err;
-				});
+			// 写内存后立刻标脏，未点保存就离开会被浏览器拦截
+			AtWs.uci.markDirty();
+			saveBtn.disabled = true;
+			saveStatus.textContent = '正在保存并应用…';
+			saveStatus.style.color = '';
+
+			AtWs.uci.uciSave(SERVICE).then(function (res) {
+				AtWs.uci.clearDirty();
+				if (res.appliedSkipped) {
+					saveStatus.textContent = '配置已应用（无待处理的变更）';
+				} else {
+					saveStatus.textContent = '配置已保存并应用';
+				}
+				Ui.success('配置已保存并应用');
+				return reloadService();
 			}).catch(function (err) {
-				Ui.error('保存失败: ' + ((err && err.message) || '未知错误'));
+				var msg = (err && err.message) || '未知错误';
+				saveStatus.textContent = '保存失败：' + msg;
+				saveStatus.style.color = '#b3261e';
+				Ui.error('保存失败: ' + msg);
+			}).finally(function () {
+				saveBtn.disabled = false;
 			});
 		});
+		var saveStatus = E('span', { 'class': 'at-hint' }, '');
 		var actions2 = E('div', { 'class': 'at-panel-actions' });
 		actions2.appendChild(saveBtn);
+		actions2.appendChild(saveStatus);
 		body.appendChild(actions2);
+
+		// 任何表单控件变更都标记为「未保存」，与 CBI 表单行为对齐
+		page.addEventListener('change', function () { AtWs.uci.markDirty(); });
+		page.addEventListener('input', function () { AtWs.uci.markDirty(); });
 
 		/* ---------- 服务操作（经 ubus service set，避免 init.d/firewall 阻塞） ---------- */
 		var rpcServiceSet = L.rpc.declare({

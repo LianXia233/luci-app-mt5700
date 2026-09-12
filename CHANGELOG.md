@@ -5,6 +5,110 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.3.0] - 2026-09-12
+
+本轮针对实机（ImmortalWrt aarch64 · H5000M · MT5700M-CN）的五个问题做集中修复。
+其中「接口拿不到 IP」导致无法联网是最高优先级缺陷。
+
+### 修复
+
+- **一、LuCI 保存未走 OpenWrt「保存并应用」流程（P1）**
+
+  原实现是页面里连续调用 `L.uci.set(...)` → `L.uci.save()` → `L.uci.apply(false)`，
+  与 OpenWrt 标准流程有三处偏差：缺少「未保存更改」提示（改完不点保存就切页，改动静默
+  丢失，表现为「保存了但没生效」）；三段调用各自独立，失败原因无法区分；`apply()` 依赖
+  配置 hash，当无待应用变更时 rpcd 返回 ubus 状态码 5（NO_DATA）而被误判为失败。
+
+  新增 `AtWs.uci` 编排层（`rpc.js`），对外只暴露 `uciSave()` / `uciCommit()` /
+  `uciHasChanges()` / `markDirty()` / `clearDirty()`，语义与 CBI 底部按钮对齐：
+
+  | 阶段 | 行为 |
+  |:--|:--|
+  | 编辑 | `set()` 写内存后 `markDirty()`，`beforeunload` 拦截离开 |
+  | 保存并应用 | `changes()` → `save()` → `apply(false, true)` |
+  | 无待应用变更 | `NO_DATA` 视为已生效，提示「无待处理的变更」而非报错 |
+  | 成功 | `clearDirty()` 解除拦截，随后重载服务 |
+
+  「服务配置」页按钮文案由「保存配置」改为**「保存并应用」**，并增加结果状态行。
+
+- **二、模组在线但接口无 IP，无法联网（P0）**
+
+  取证：`ifstatus MT5700M` 为 `"up": false, "autostart": false`，而 UCI 中该接口只有
+  `device`/`ifname`/`proto`/`metric`/`defaultroute`/`norelease` —— **既没有 `auto='1'`
+  也没人主动 `ifup`**，netifd 因此从不启动它。即使模组拨号成功、`eth2` 已可 DHCP，
+  接口也不会去申请地址。
+
+  两条修复路径：
+
+  1. **init.d 新增 `ensure_modem_interface()`**（`root/etc/init.d/at-webserver`）：
+     幂等地把 `MT5700M` / `MT5700Mv6` 的 `auto` 置 1（写入用 `uci set network.X.auto=1`，
+     不带引号，避免产生 `auto=''1''` 这样的双重引号），等待 `eth2` 枚举完成后
+     `ifup` 拉起，并最多等 20s 等 DHCP 拿到地址；不硬编码 IP/网关，全部交给 dhcp 协商。
+  2. **后端新增 `ensure_autodial()`**（`src/rust/src/atclient.rs`）：每次连上模组后对齐
+     自动拨号状态。模组不拨号就不会向 USB 网口下发 DHCP，是接口拿不到 IP 的上游原因。
+     实现为幂等：先查 `AT^SETAUTODIAL?`，已是目标值则不重复下发，避免打断已建立的 PDP 上下文。
+
+  实测结果：`up: true`、`autostart: true`、地址 `10.6.45.224/8`、
+  默认路由 `via 10.0.0.1 dev eth2`，`ping 223.5.5.5` 与 `119.29.29.29` 均 0% 丢包（约 22ms），
+  DNS 正常解析。
+
+- **三、自动拨号需默认开启（P1）**
+
+  UCI 新增 `autodial_enable`（默认 `1`）与 `autodial_mode`（默认 `1` = USB 网络接口）。
+  Rust 侧 `AtConfig` 增加对应字段，`load_config()` 读取并在 `init_modem()` 末尾调用
+  `ensure_autodial()`。「拨号设置」页读取模组状态后会同步复选框，并在与 UCI 期望值不一致时
+  回写持久化（仅在值变化时写盘），使该偏好跨重启生效。
+
+- **四、AT 调试终端不可用（P1）**
+
+  后端链路经实测完全正常（`nc 127.0.0.1 8765` 直发 `ATI` 成功；
+  `ubus call mt5700 at` 成功；`AT^HCSQ?` / `AT+CGSN` 均有正常应答），
+  故问题在前端。逐页面实测 12 个视图渲染状态，**当前固件上终端页已正常工作**
+  （实测填入 `ATI` 返回 `Manufacturer: TD Tech Ltd. / Model: MT5700M-CN ... OK`），
+  第一轮修复（服务未运行）已解除其阻塞。
+
+  排查中额外定位到一个**上游 LuCI 加载时序缺陷**并加了防御：本机 `luci.js`（26.246.30574）
+  在构造函数（`luci.js:144`）中同步调用 `this.require('ui')`，而 `require()` 内部使用
+  `'%s/%s.js%s'.format(...)`；`String.prototype.format` 的定义却在 `cbi.js` 里，
+  `cbi.js` 由 `L.require` 之后才加载 —— 于是构造期首次 `require` 必然抛
+  `TypeError: "%s/%s.js%s".format is not a function`，被 `Promise.all(...).catch(this.error)`
+  吞掉。该缺陷在当前固件上被 `cbi.js` 后续补上定义所掩盖（LuCI 最终自行恢复），
+  但会污染控制台并可能在其它构建上让 `setupDOM()` 永不执行。
+
+  新增 `htdocs/luci-static/resources/at-webserver/compat.js`：幂等补齐
+  `String.prototype.format`（`%s`/`%d`/`%j`/`%%`，参数不足保留占位符，多余实参追加），
+  由 `rpc.js` 与 `ui.js` 最先 `require`，不覆盖上游已有实现。
+
+- **五、菜单 `modem` 汉化（P2）**
+
+  `root/usr/share/luci/menu.d/luci-app-mt5700.json` 中 `admin/modem.title`
+  由 `"modem"` 改为**「移动网络」**；`admin/modem/5g.title` 由「5G模组管理」
+  规范为「5G 模组管理」（数字与中文之间加空格）。侧边栏实测显示「移动网络 → 5G 模组管理」。
+
+### 新增
+
+- `htdocs/luci-static/resources/at-webserver/compat.js` —— LuCI core 兼容垫片。
+- `rpc.js` 中 `AtWs.uci` 保存/应用编排层。
+- Rust 单测 `parse_autodial_enable` 四例（完整形态 / 短形态与空白 / 非布尔与缺失 / 混杂行），
+  连同既有 PDU 与读循环测试共 9 例通过。
+
+### 说明
+
+- **未改动任何 IMEI 相关命令与逻辑**（含 `AT+CGSN`、`查询 IMEI` 常用命令项）。
+- 版本号 1.2.4 → 1.3.0（新增配置项与用户可见行为变更，按语义化版本升 minor）。
+- 同步更新 `Makefile`（`PKG_VERSION`）、`src/rust/Cargo.toml`、
+  `htdocs/.../ui.js`（`AT_CSS_VERSION`，样式缓存随包版本递增）。
+
+### 验证
+
+- Rust：`cargo check` 通过；`cargo test` 9 passed / 0 failed。
+- JS：6 个改动文件经 `node --check` 语法校验通过。
+- 实机渲染：12 个视图页全部渲染成功（`网络状态`/`网络设置`/`拨号设置`/`全网扫频`/
+  `定时锁频`/`模组设置`/`模组升级`/`短信中心`/`短信设置`/`AT 调试终端`/`通知日志`/`服务配置`）。
+- 实机网络：`MT5700M` `up=true` / `autostart=true` / `10.6.45.224`，
+  `ping 223.5.5.5`、`119.29.29.29` 0% 丢包，DNS 正常。
+- 服务配置页实测显示「运行中 · PID 10254」与「保存并应用」按钮。
+
 ## [1.2.4] - 2026-09-12
 
 实机（ImmortalWrt aarch64 · H5000M）「服务配置」页把 5G 调制解调器服务状态错误显示为

@@ -45,6 +45,30 @@ impl AtResponse {
     }
 }
 
+/// 从 `AT^SETAUTODIAL?` 的应答里取出「自动拨号是否开启」。
+///
+/// 手册回显形如 `^SETAUTODIAL: 1,1,"IP","cmnet",...`，第一个字段即开关；
+/// 部分固件只回 `^SETAUTODIAL: 1`。解析失败返回 None（调用方据此决定是否直接下发）。
+fn parse_autodial_enable(text: &str) -> Option<bool> {
+    for line in text.replace('\r', "").lines() {
+        let line = line.trim();
+        if !line.starts_with("^SETAUTODIAL:") {
+            continue;
+        }
+        let payload = line[line.find(':')? + 1..].trim();
+        let first = payload.split(',').next()?.trim().trim_matches('"');
+        if first.is_empty() {
+            return None;
+        }
+        return match first {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        };
+    }
+    None
+}
+
 /// 一条模组主动上报。broadcast 为真表示需要作为 raw_data 推给前端。
 #[derive(Debug)]
 pub struct Unsolicited {
@@ -209,7 +233,67 @@ impl AtClient {
         if let Err(e) = self.send_command(ctx, "AT+CLIP=1", COMMAND_TIMEOUT, None).await {
             log_warn!("开启来电号码显示失败: {}", e);
         }
+
+        // 自动拨号默认开启（UCI autodial_enable 默认 1）。
+        // 放在最后：前面的设置类命令失败不应阻止拨号，否则设备会一直没有 IP。
+        self.ensure_autodial(ctx).await;
     }
+
+    /// 确保自动拨号处于期望状态。
+    ///
+    /// 「模块显示在线但接口拿不到 IP」的根因链：
+    ///   模组已注册网络（AT 通、有信号）→ 但 ^SETAUTODIAL 未开启 →
+    ///   模组不向 USB 网口下发 DHCP → eth2 一直是 NO-CARRIER/DHCP 无应答 →
+    ///   netifd 的 MT5700M 接口没有 IP → 无法联网。
+    /// 因此每次连上模组后都要对齐一次自动拨号状态。
+    ///
+    /// 幂等：先查询，已是目标值则不重复下发（避免每次重连都打断已建立的 PDP 上下文）。
+    async fn ensure_autodial(self: &Arc<Self>, ctx: &tokio::sync::watch::Receiver<bool>) {
+        let desired = self.cfg.autodial_enable;
+        let mode = self.cfg.autodial_mode.clamp(1, 2);
+
+        // 1) 查询当前状态；查询失败也继续尝试下发，避免模组刚连上超时导致不拨号。
+        let current = match self.send_command(ctx, "AT^SETAUTODIAL?", COMMAND_TIMEOUT, None).await {
+            Ok(resp) => parse_autodial_enable(&resp.text()),
+            Err(e) => {
+                log_warn!("查询自动拨号状态失败，将直接下发设置: {}", e);
+                None
+            }
+        };
+
+        if current == Some(desired) {
+            log_info!("自动拨号已处于期望状态（enable={}），不重复下发", desired as i32);
+            return;
+        }
+
+        // 2) 下发。开启时带上拨号方式；关闭时不带参数（与手册及前端 dial.js 一致）。
+        let cmd = if desired {
+            format!("AT^SETAUTODIAL=1,{}", mode)
+        } else {
+            "AT^SETAUTODIAL=0".to_string()
+        };
+        match self.send_command(ctx, &cmd, COMMAND_TIMEOUT, None).await {
+            Ok(resp) if resp.ok() => {
+                log_info!("已{}自动拨号（{}）", if desired { "开启" } else { "关闭" }, cmd);
+            }
+            Ok(resp) => {
+                log_warn!("自动拨号设置未返回 OK: {}", resp.text());
+            }
+            Err(e) => {
+                log_warn!("自动拨号设置失败: {}（命令 {}）", e, cmd);
+            }
+        }
+
+        // 3) 复核，便于日志里直接看出是否真的生效。
+        if let Ok(resp) = self.send_command(ctx, "AT^SETAUTODIAL?", COMMAND_TIMEOUT, None).await {
+            match parse_autodial_enable(&resp.text()) {
+                Some(v) if v == desired => log_info!("自动拨号状态复核通过"),
+                Some(v) => log_warn!("自动拨号状态复核不一致：期望 {}，实际 {}", desired as i32, v as i32),
+                None => log_warn!("自动拨号状态复核无法解析: {}", resp.text()),
+            }
+        }
+    }
+
 
     /// 串行发送一条 AT 命令并等待结束码。
     pub async fn send_command(
@@ -592,5 +676,44 @@ mod tests {
         assert_eq!(urc.line, "^HCSQ: 1,2,3,4");
         assert!(urc.broadcast);
         handle.abort();
+    }
+
+    /* ---------- 自动拨号状态解析（对应「接口拿不到 IP」修复） ---------- */
+
+    #[test]
+    fn parse_autodial_enable_reads_first_field() {
+        // 实测回显：带拨号方式的完整形态
+        assert_eq!(
+            parse_autodial_enable("^SETAUTODIAL: 1,1,\"IP\",\"cmnet\",\"\",\"\",0\r\nOK"),
+            Some(true)
+        );
+        assert_eq!(
+            parse_autodial_enable("^SETAUTODIAL: 0,1,\"IP\",\"cmnet\"\r\nOK"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn parse_autodial_enable_handles_short_and_padded_forms() {
+        // 部分固件只回一个字段
+        assert_eq!(parse_autodial_enable("^SETAUTODIAL: 1\r\nOK"), Some(true));
+        // 前导空白 / 单引号风格
+        assert_eq!(parse_autodial_enable("  ^SETAUTODIAL:  0  \r\nOK"), Some(false));
+    }
+
+    #[test]
+    fn parse_autodial_enable_rejects_non_boolean_and_missing() {
+        // 非 0/1 视为不可判定，调用方据此改为直接下发命令
+        assert_eq!(parse_autodial_enable("^SETAUTODIAL: \r\nOK"), None);
+        assert_eq!(parse_autodial_enable("^SETAUTODIAL: abc\r\nOK"), None);
+        assert_eq!(parse_autodial_enable("OK\r\nERROR"), None);
+        assert_eq!(parse_autodial_enable(""), None);
+    }
+
+    #[test]
+    fn parse_autodial_enable_picks_the_setautodial_line() {
+        // 应答里混有其它行时，只认 ^SETAUTODIAL
+        let mixed = "^HCSQ: \"NR\",72,201,30\r\n^SETAUTODIAL: 1,2\r\nOK";
+        assert_eq!(parse_autodial_enable(mixed), Some(true));
     }
 }

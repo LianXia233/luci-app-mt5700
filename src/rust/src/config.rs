@@ -38,6 +38,11 @@ pub struct AtConfig {
     pub type_: String,
     pub network: NetworkConfig,
     pub serial: SerialConfig,
+    /// 模组连上后是否确保自动拨号开启（默认 true）。
+    /// 关闭后模组不会向 USB 网口下发 DHCP，接口将拿不到 IP。
+    pub autodial_enable: bool,
+    /// 自动拨号方式：1=USB网络接口，2=转网口模式
+    pub autodial_mode: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +116,9 @@ pub fn default_config() -> Config {
                 baudrate: 115200,
                 timeout: Duration::from_secs(10),
             },
+            // 自动拨号默认开启：模组不拨号则 USB 网口不会有 DHCP，接口拿不到 IP
+            autodial_enable: true,
+            autodial_mode: 1,
         },
         notification: NotificationConfig {
             wechat_webhook: String::new(),
@@ -270,6 +278,10 @@ pub async fn load_config() -> Config {
     cfg.at.serial.port = serial_port;
     cfg.at.serial.baudrate = values.int("serial_baudrate", 115200).clamp(0, 4000000) as u32;
     cfg.at.serial.timeout = values.seconds("serial_timeout", cfg.at.serial.timeout, Duration::from_secs(1));
+
+    // 自动拨号：默认开启。模组不拨号则不会给 USB 网口下发 DHCP，接口拿不到 IP。
+    cfg.at.autodial_enable = values.bool("autodial_enable", true);
+    cfg.at.autodial_mode = values.int("autodial_mode", 1).clamp(1, 2);
 
     cfg.websocket.port = values.int("websocket_port", 8765).clamp(1, 65535) as u16;
     cfg.websocket.auth_key = values.str("websocket_auth_key", "");
