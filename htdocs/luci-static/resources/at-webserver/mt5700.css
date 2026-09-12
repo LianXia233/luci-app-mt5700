@@ -1236,3 +1236,167 @@
 .mt5700-gap-sm { gap: var(--mt5700-space-sm); }
 .mt5700-gap-md { gap: var(--mt5700-space-md); }
 .mt5700-gap-lg { gap: var(--mt5700-space-lg); }
+
+/* ============================================================
+ * 补充样式（v1.4.1 功能恢复）
+ * 沿用 mt5700 设计语言：半透明底 + 细边框 + 圆角
+ * 用于步骤条、进度条、终端回显、等宽文本、条款列表
+ * ============================================================ */
+
+.mt5700-steps {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 12px 0;
+	flex-wrap: wrap;
+}
+
+.mt5700-step {
+	flex: 1 1 auto;
+	min-width: 72px;
+	padding: 8px 12px;
+	border-radius: 10px;
+	font-size: 13px;
+	text-align: center;
+	background: rgba(255, 255, 255, 0.55);
+	border: 1px solid rgba(255, 255, 255, 0.6);
+	color: rgba(0, 0, 0, 0.55);
+}
+
+.mt5700-step-done {
+	background: rgba(46, 125, 50, 0.16);
+	border-color: rgba(46, 125, 50, 0.35);
+	color: #2e7d32;
+}
+
+.mt5700-step-current {
+	background: rgba(26, 94, 171, 0.16);
+	border-color: rgba(26, 94, 171, 0.4);
+	color: #1a5eab;
+	font-weight: 600;
+}
+
+.mt5700-progress {
+	margin: 12px 0;
+}
+
+.mt5700-progress-bar {
+	width: 100%;
+	height: 10px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.5);
+	border: 1px solid rgba(255, 255, 255, 0.6);
+	overflow: hidden;
+}
+
+.mt5700-progress-fill {
+	height: 100%;
+	border-radius: 999px;
+	background: linear-gradient(90deg, #1a5eab, #4b8fd6);
+	transition: width 0.4s ease;
+}
+
+.mt5700-agree-list {
+	margin: 8px 0 0;
+	padding-left: 20px;
+	line-height: 1.9;
+	font-size: 13px;
+}
+
+.mt5700-modal-title {
+	font-size: 15px;
+	font-weight: 600;
+	margin-bottom: 6px;
+}
+
+.mt5700-mono {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 13px;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.mt5700-terminal-log {
+	max-height: 420px;
+	min-height: 160px;
+	overflow-y: auto;
+	background: rgba(0, 0, 0, 0.04);
+	border-radius: 10px;
+	padding: 12px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 13px;
+	line-height: 1.7;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.mt5700-terminal-input {
+	width: 100%;
+	margin-top: 10px;
+}
+
+.mt5700-inline {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.mt5700-grow {
+	flex: 1 1 240px;
+}
+
+.mt5700-log-ok {
+	color: #2e7d32;
+}
+
+.mt5700-log-err {
+	color: #c62828;
+}
+
+.mt5700-log-cmd {
+	color: #1a5eab;
+	font-weight: 600;
+}
+
+/* 指标栅格（多指标并排容器） */
+.mt5700-metrics {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 12px;
+}
+
+/* 锁频编辑器 */
+.mt5700-lock-editor {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.mt5700-lock-items {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.mt5700-lock-item {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	padding: 10px;
+	border-radius: 10px;
+	background: rgba(127, 127, 127, 0.07);
+}
+
+.mt5700-lock-item .mt5700-input {
+	flex: 1 1 110px;
+	min-width: 96px;
+	width: auto;
+}
+
+/* 单元格内操作按钮紧凑化 */
+.mt5700-table .mt5700-btn {
+	padding: 4px 10px;
+	font-size: 12px;
+}

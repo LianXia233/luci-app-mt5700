@@ -1,8 +1,8 @@
 /* use strict */
-/* require baseclass */
-/* require at-webserver/compat */
-/* require at-webserver/rpc */
-/* require at-webserver/parse */
+'require baseclass';
+'require at-webserver/compat';
+'require at-webserver/rpc';
+'require at-webserver/parse';
 /* global L, AtWs, Parse, baseclass */
 
 /**
