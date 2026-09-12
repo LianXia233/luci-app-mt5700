@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.3.3**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.3.4**
 
 | | |
 |:--|:--|
