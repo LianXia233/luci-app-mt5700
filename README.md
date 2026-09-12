@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.2.0**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.3.0**
 
 | | |
 |:--|:--|
@@ -60,10 +60,50 @@ service at-webserver restart
 ls -l /usr/bin/at-webserver-rust
 ```
 
-浏览器登录 LuCI → **modem → 5G模组管理**（路径 `admin/modem/5g`），即可看到 12 个页面。
+浏览器登录 LuCI → **移动网络 → 5G 模组管理**（路径 `admin/modem/5g`），即可看到 12 个页面。
 
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
+
+### 保存配置
+
+「服务配置」页底部按钮为**「保存并应用」**，走与 LuCI 原生 CBI 一致的流程：
+
+1. 修改任一控件即标记「未保存更改」，此时离开页面浏览器会拦截提醒；
+2. 点击按钮后依次执行 `uci.changes()` → `uci.save()` → `uci.apply()`；
+3. 若本来就没有待应用的变更（rpcd 返回 ubus 状态码 5 / NO_DATA），视为已生效，
+   提示「无待处理的变更」而不是误报失败；
+4. 应用成功后自动重载 at-webserver 服务并回查真实进程状态。
+
+### 网络接口没有 IP / 无法联网
+
+模组显示在线但「网络 → 接口」里 `MT5700M` 拿不到地址，通常是下面两处之一：
+
+```sh
+# 1) 接口是否开机自启？autostart 必须为 true
+ifstatus MT5700M | grep -E '"up"|"autostart"'
+uci show network.MT5700M | grep auto      # 期望 auto='1'
+
+# 2) 模组是否开了自动拨号？不开则网口不会下发 DHCP，接口必然没有地址
+printf 'AT^SETAUTODIAL?\r\n' | nc 127.0.0.1 8765
+```
+
+自 v1.3.0 起，`/etc/init.d/at-webserver` 的 `ensure_modem_interface()` 会幂等地把接口
+`auto` 置 1 并在等待 `eth2` 就绪后 `ifup`；后端每次连上模组后也会调用
+`ensure_autodial()` 对齐拨号状态（已在目标状态则不重复下发）。两项默认值：
+
+| UCI 键 | 默认 | 含义 |
+|:--|:--|:--|
+| `network.MT5700M.auto` | `1` | 开机自启接口 |
+| `at-webserver.config.autodial_enable` | `1` | 连上模组后确保自动拨号开启 |
+| `at-webserver.config.autodial_mode` | `1` | 1=USB 网络接口，2=转网口模式 |
+
+手动触发一次对齐：
+
+```sh
+/etc/init.d/at-webserver start      # 走完整 start_service + ensure_modem_interface
+logread -e at-webserver | tail -20
+```
 
 ### 服务状态怎么看
 
@@ -245,6 +285,8 @@ find htdocs -name '*.js' -exec node --check {} \;
 | `connection_type` | `SERIAL` | `SERIAL`=PCUI 串口；`NETWORK`=TCP 备用 |
 | `serial_port` | `auto` | `auto` 优先探测 ttyUSB1；可填 `/dev/ttyUSB1` |
 | `serial_baudrate` | `115200` | 波特率 |
+| `autodial_enable` | `1` | 连上模组后确保自动拨号开启（关掉则接口拿不到 IP） |
+| `autodial_mode` | `1` | `1`=USB 网络接口，`2`=转网口模式 |
 | `network_host` / `network_port` | `192.168.8.1` / `20249` | 网络通道 |
 | `websocket_port` | `8765` | 后端 RPC 端口（仅回环） |
 | `websocket_auth_key` | 空 | 由 ucode 自动附带；空则不校验密钥 |
@@ -256,7 +298,7 @@ find htdocs -name '*.js' -exec node --check {} \;
 ```sh
 uci commit at-webserver
 service at-webserver restart
-# 或在 LuCI「服务配置」页保存（会自动 reload）
+# 或在 LuCI「服务配置」页点「保存并应用」（会自动 reload）
 ```
 
 ---
@@ -267,7 +309,7 @@ service at-webserver restart
 |:--|:--|
 | `main.rs` | 装配与优雅退出 |
 | `rpcserver.rs` | TCP RPC、伪命令、事件总线、扫频 |
-| `atclient.rs` | 命令串行、超时、URC 分流 |
+| `atclient.rs` | 命令串行、超时、URC 分流、连上模组后对齐自动拨号 |
 | `transport.rs` / `serial_*.rs` | TCP / 串口通道 |
 | `pdu.rs` | SMS PDU 编解码 |
 | `urc.rs` | 来电/短信/信号等上报 |

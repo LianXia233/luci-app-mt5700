@@ -60,6 +60,9 @@ start_service() {
 at_webserver_post_start() {
 	config_load at-webserver
 
+	# 网络接口 MT5700M 的启动对齐（见下方 ensure_modem_interface 注释）
+	ensure_modem_interface
+
 	# 串口模式下尝试绑定 MT5700 USB 串口
 	local conn_type
 	config_get conn_type config connection_type 'SERIAL'
@@ -149,6 +152,74 @@ at_webserver_post_start() {
 	# 后台 reload，避免阻塞；失败不致命
 	timeout 8 /etc/init.d/firewall reload >/dev/null 2>&1 || true
 	logger -t at-webserver "后台防火墙/串口初始化完成"
+}
+
+# 确保 MT5700M / MT5700Mv6 接口处于「开机自启」状态并在等待模组网口就绪后拉起。
+#
+# 症状（问题二）：LuCI 上模组显示在线，但「网络 → 接口」里 MT5700M 没有 IP，
+# 因此上不了网。取证结果：
+#   ifstatus MT5700M → "up": false, "autostart": false
+# UCI 里该接口只有 device/ifname/proto/metric/defaultroute/norelease，
+# 既没有 auto='1'，也没人主动 ifup，于是 netifd 从不启动它 ——
+# 即使模组拨号成功、eth2 已经能 DHCP，接口也不会去要地址。
+#
+# 处理策略（幂等，可重复执行）：
+#   1) 打开 auto='1'（开机自启），让 ifup 在模组网口就绪后自然生效；
+#   2) 若接口尚未 up，调用 `ifup` 主动拉起一次；
+#   3) 等待 dhcp 客户端拿到地址（最多 ~20s），拿到即结束，避免无谓等待。
+# 注意：不写入 IP/网关等具体地址，全部交给 dhcp proto 协商，
+# 也不改动 eth2 的设备名与 metric，保持机型定制包的定义。
+ensure_modem_interface() {
+	local ifname_4g='MT5700M'
+	local ifname_6g='MT5700Mv6'
+	local i auto_val need_commit=0
+
+	for i in "$ifname_4g" "$ifname_6g"; do
+		# 接口不存在则跳过（机型未定制该接口时不能凭空创建）
+		if ! uci -q get "network.$i" >/dev/null 2>&1; then
+			continue
+		fi
+		auto_val=$(uci -q get "network.$i.auto")
+		if [ "$auto_val" != "1" ]; then
+			uci -q set "network.$i.auto=1"
+			need_commit=1
+		fi
+	done
+
+	[ "$need_commit" -eq 1 ] && {
+		uci -q commit network
+		logger -t at-webserver "已将 $ifname_4g/$ifname_6g 设置为开机自启（auto=1）"
+	}
+
+	# 已经在跑就不用重复 ifup
+	if ifstatus "$ifname_4g" 2>/dev/null | grep -q '"up": true'; then
+		return 0
+	fi
+
+	# 模组网口可能还没枚举完成，先等设备出现（最多 15s）
+	local waited=0
+	while [ "$waited" -lt 15 ]; do
+		[ -e "/sys/class/net/eth2" ] && break
+		sleep 1
+		waited=$((waited + 1))
+	done
+
+	ifup "$ifname_4g" >/dev/null 2>&1 || true
+	ifup "$ifname_6g" >/dev/null 2>&1 || true
+
+	# 等 DHCP 拿到地址，最多再等 20s
+	waited=0
+	while [ "$waited" -lt 20 ]; do
+		if ifstatus "$ifname_4g" 2>/dev/null | grep -q '"up": true'; then
+			logger -t at-webserver "$ifname_4g 已就绪（等待 ${waited}s 后拿到地址）"
+			return 0
+		fi
+		sleep 2
+		waited=$((waited + 2))
+	done
+
+	logger -t at-webserver "警告：$ifname_4g 仍未 up，模组网口或自动拨号可能未就绪（详见 logread -e at-webserver）"
+	return 0
 }
 
 stop_service() {

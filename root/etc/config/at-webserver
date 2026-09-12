@@ -13,6 +13,11 @@ config at-webserver 'config'
 	option serial_port_custom '/dev/ttyUSB1'  # 自定义串口路径（当 serial_port='custom' 时使用）
 	option serial_baudrate '115200'
 	option serial_timeout '10'
+	# 自动拨号：默认开启。模组不拨号则不会向 USB 网口下发 DHCP，
+	# 网络接口 MT5700M 将一直拿不到 IP，表现为「模组在线但无法联网」。
+	# 服务每次连上模组后会按此配置对齐一次（已在目标状态则不重复下发）。
+	option autodial_enable '1'                 # 1=开启自动拨号（默认），0=关闭
+	option autodial_mode '1'                   # 1=USB网络接口，2=转网口模式
 	option websocket_port '8765'           # LuCI RPC 监听端口
 	option websocket_allow_wan '0'          # 1=RPC 监听 0.0.0.0 可被外部访问（建议同时设置 auth_key）
 	option websocket_bind ''               # 可选：覆盖监听地址，如 0.0.0.0 或 192.168.10.1
