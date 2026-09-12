@@ -5,6 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 优化 - 短信中心长短信合并显示
+
+- `sms_center.js`：新增 `mergeConcatenated()`，按「发件人号码 + 拼接引用号（UDH reference）」
+  将同一条长短信的各段合并为**一条完整消息**，会话气泡不再分段显示「片段 X/Y」。
+- 合并按 `concatenatedSeq` 顺序拼接正文；合并后消息以最后一段时间为排序时间，
+  联系人预览显示完整内容。
+- 删除逻辑同步：`deleteMessage` 与批量删除均按 `partIndices` 一并清除该长短信在模组中的
+  全部分段（`AT+CMGD` 逐段删除）。
+- `mt5700.css`：`.mt5700-sms-bubble` 增加 `white-space: pre-wrap`，保留短信内换行与长文本折行。
+- 边界：若部分分段丢失，仍尽量合并已收到的分段，并在气泡内提示
+  「长短信已合并 N/M 段（部分缺失）」；文本模式（无 UDH）短信不受影响。
+- 单测覆盖：正常拼接、乱序到达、缺段、跨发件人分组、文本/已发消息原样保留、
+  长短信间穿插单条等 6 类场景，全部通过。
+
 ## [1.5.0] - 2026-09-12
 
 本版为 UI 与解析层的较大更新：全站视觉升级为「Modern Dimensional Layering」v2，

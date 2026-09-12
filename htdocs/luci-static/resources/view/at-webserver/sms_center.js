@@ -94,6 +94,47 @@ return L.view.extend({
 
 		function normalizeNumber(n) { return Parse.normalizePhoneNumber(n); }
 
+		// 长短信拼接：把同一发件人、同一拼接引用号的各段合并为一条完整消息
+		function mergeConcatenated(list) {
+			var groups = {};
+			var result = [];
+			for (var i = 0; i < list.length; i++) {
+				var m = list[i];
+				if (m && m.type === 'received' && m.isConcatenated && m.concatenatedRef != null && m.concatenatedSeq != null) {
+					var key = (m.number || '') + '|' + m.concatenatedRef;
+					if (!groups[key]) groups[key] = [];
+					groups[key].push(m);
+				} else {
+					result.push(m);
+				}
+			}
+			for (var k in groups) {
+				var parts = groups[k];
+				parts.sort(function (a, b) { return (a.concatenatedSeq || 0) - (b.concatenatedSeq || 0); });
+				var full = '';
+				for (var j = 0; j < parts.length; j++) full += (parts[j].content || '');
+				var first = parts[0];
+				var last = parts[parts.length - 1];
+				var idxs = [];
+				for (var p = 0; p < parts.length; p++) if (parts[p].index != null) idxs.push(parts[p].index);
+				result.push({
+					index: first.index,
+					partIndices: idxs,
+					content: full,
+					number: first.number,
+					time: last.time,
+					type: 'received',
+					isConcatenated: false,
+					concatenatedRef: first.concatenatedRef,
+					concatenatedTotal: undefined,
+					concatenatedSeq: undefined,
+					partsCount: parts.length,
+					partsExpected: first.concatenatedTotal
+				});
+			}
+			return result;
+		}
+
 		function renderStorage() {
 			storageEl.textContent = '存储：' + state.storage.used + ' / ' + state.storage.total;
 		}
@@ -132,9 +173,9 @@ return L.view.extend({
 				var bubble = E('div', { 'class': 'mt5700-sms-bubble ' + (isSent ? 'mt5700-sms-bubble-sent' : 'mt5700-sms-bubble-recv') });
 				bubble.appendChild(E('div', {}, m.content || '(空消息)'));
 				bubble.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' }, m.time || ''));
-				if (m.isConcatenated && m.concatenatedTotal > 1) {
+				if (m.partsExpected != null && m.partsCount != null && m.partsCount < m.partsExpected) {
 					bubble.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' },
-						'片段 ' + m.concatenatedSeq + '/' + m.concatenatedTotal));
+						'长短信已合并 ' + m.partsCount + '/' + m.partsExpected + ' 段（部分缺失）'));
 				}
 				var del = Mt5700.button('删除', function (mm) {
 					return function () {
@@ -191,6 +232,7 @@ return L.view.extend({
 		}
 
 		function buildContacts(list) {
+			list = mergeConcatenated(list);
 			var map = {};
 			for (var i = 0; i < list.length; i++) {
 				var msg = list[i];
@@ -310,11 +352,18 @@ return L.view.extend({
 		/* ---------- 删除 ---------- */
 
 		function deleteMessage(msg) {
-			if (msg.index >= 0) {
-				AtWs.client.sendCommand('AT+CMGD=' + msg.index).then(function (res) {
-					if (res.success) { Mt5700.success('删除成功'); refresh(); }
-					else { Mt5700.error('删除失败'); }
-				}).catch(function () { Mt5700.error('删除失败'); });
+			var storedIndices = (msg.partIndices && msg.partIndices.length)
+				? msg.partIndices
+				: (msg.index != null && msg.index >= 0 ? [msg.index] : []);
+			if (storedIndices.length) {
+				var chain = Promise.resolve();
+				storedIndices.forEach(function (ix) {
+					if (ix != null && ix >= 0) {
+						chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGD=' + ix); });
+					}
+				});
+				chain.then(function () { Mt5700.success('删除成功'); refresh(); })
+					.catch(function () { Mt5700.error('删除失败'); });
 			} else {
 				// 缓存中的已发消息
 				var updated = Parse.getCachedSentMessages().filter(function (m) { return m.index !== msg.index; });
@@ -356,9 +405,13 @@ return L.view.extend({
 				if (!checked.length) { Mt5700.warning('请先选择要删除的短信'); return; }
 				var chain = Promise.resolve();
 				checked.forEach(function (m) {
-					chain = chain.then(function () {
-						if (m.index >= 0) return AtWs.client.sendCommand('AT+CMGD=' + m.index);
-						return Promise.resolve({ success: true });
+					var idxs = (m.partIndices && m.partIndices.length)
+						? m.partIndices
+						: (m.index != null && m.index >= 0 ? [m.index] : []);
+					idxs.forEach(function (ix) {
+						if (ix != null && ix >= 0) {
+							chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGD=' + ix); });
+						}
 					});
 				});
 				chain.then(function () {
