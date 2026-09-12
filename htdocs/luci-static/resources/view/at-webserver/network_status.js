@@ -42,7 +42,7 @@ return L.view.extend({
 		diagPanel._body.appendChild(diagBox);
 		body.appendChild(diagPanel);
 
-		var speedPanel = Ui.panel('实时速率', 'PDCP 层上下行速率，约 0.75 秒刷新一次');
+		var speedPanel = Ui.panel('实时速率', '接口实时上下行速率，每秒采样一次');
 		var speedRow = E('div', { 'class': 'at-speed-row' });
 		speedPanel._body.appendChild(speedRow);
 		var historyPanel = Ui.panel('速率曲线', '最近 60 个采样点');
@@ -76,8 +76,12 @@ return L.view.extend({
 		var operator = E('span', {}, '未知运营商');
 		var apn = E('span', {}, '未知');
 		var qci = E('span', {}, '未知');
-		var downSpeed = { value: '0.00', unit: 'Mbps' };
-		var upSpeed = { value: '0.00', unit: 'Mbps' };
+		/* 连接状态面板的「下行/上行速率」= 签约速率（AT^DSAMBR），单位 kbps */
+		var ambrDown = { value: '0.00', unit: 'Mbps' };
+		var ambrUp = { value: '0.00', unit: 'Mbps' };
+		/* 实时速率面板 = 接口实时速率（OpenWrt 接口统计），单位字节/秒 */
+		var rtDown = { value: '0.00', unit: 'Mbps' };
+		var rtUp = { value: '0.00', unit: 'Mbps' };
 
 		var state = {
 			cell: {
@@ -92,9 +96,14 @@ return L.view.extend({
 			dhcpv4: null, dhcpv6: null, ipv6Cap: null,
 			uplinkMCS: null, downlinkMCS: null,
 			activeCid: null,
-			downSpeed: 0, upSpeed: 0,
-			/* 'bytes' = PDCP 实时速率（字节/秒）；'kbps' = AT^DSAMBR 签约速率。 */
-			speedUnit: 'bytes'
+			/*
+			 * 两个面板的数据源与单位都不同，必须各自独立存放，不可共用：
+			 *   - ambrDown / ambrUp：签约速率，AT^DSAMBR，单位 kbps（本身即比特）
+			 *   - rtDown  / rtUp  ：实时速率，OpenWrt 接口统计采样差分，单位字节/秒
+			 * 共用同一组变量会导致两面板互相覆盖、数值与语义双双错乱。
+			 */
+			ambrDown: 0, ambrUp: 0,
+			rtDown: 0, rtUp: 0
 		};
 		var history = [];
 		var HISTORY_POINTS = 60;
@@ -112,8 +121,9 @@ return L.view.extend({
 				{ label: '信号强度', value: cells.signalPercent || '—' },
 				{ label: 'APN', value: apn },
 				{ label: 'QCI', value: qci },
-				{ label: '下行速率', value: E('span', { 'class': 'at-speed-num' }, downSpeed.value + ' ' + downSpeed.unit) },
-				{ label: '上行速率', value: E('span', { 'class': 'at-speed-num' }, upSpeed.value + ' ' + upSpeed.unit) }
+				/* 连接状态面板展示的是签约速率（AT^DSAMBR），不是瞬时速率 */
+				{ label: '下行速率', value: E('span', { 'class': 'at-speed-num' }, ambrDown.value + ' ' + ambrDown.unit) },
+				{ label: '上行速率', value: E('span', { 'class': 'at-speed-num' }, ambrUp.value + ' ' + ambrUp.unit) }
 			];
 			for (var i = 0; i < rows.length; i++) {
 				var tr = E('tr');
@@ -321,16 +331,23 @@ return L.view.extend({
 		}
 
 		/*
-		 * 速率来源有两种，单位语义不同，必须显式区分，不能共用同一个换算：
-		 *   - PDCP 实时速率（第 707/708 行）：字节/秒，需 ×8 换成比特；
-		 *   - 签约速率（AT^DSAMBR，第 512/513 行）：kbps，本身就是比特单位，不得再 ×8。
-		 * state.speedUnit 记录当前值属于哪种，splitSpeedUI 据此选择换算路径。
+		 * 两个面板的渲染互相独立，各自只认自己的数据源：
+		 *   - renderAmbr()  连「连接状态」面板，取签约速率（kbps）
+		 *   - renderSpeed() 连「实时速率」面板，取接口实时速率（字节/秒）
+		 * 早期版本两者共用一组变量，导致签约速率会盖掉实时速率、反之亦然。
 		 */
+		function renderAmbr() {
+			ambrDown = splitSpeedUI(state.ambrDown, 'kbps');
+			ambrUp = splitSpeedUI(state.ambrUp, 'kbps');
+			renderKv();
+		}
+
+		/* 只渲染「实时速率」面板与曲线；单位口径固定为字节/秒 */
 		function renderSpeed() {
 			speedRow.innerHTML = '';
-			var d = splitSpeedUI(state.downSpeed, state.speedUnit);
-			var u = splitSpeedUI(state.upSpeed, state.speedUnit);
-			downSpeed = d; upSpeed = u;
+			var d = splitSpeedUI(state.rtDown, 'bytes');
+			var u = splitSpeedUI(state.rtUp, 'bytes');
+			rtDown = d; rtUp = u;
 			var box = E('div', { 'class': 'at-speed-box' });
 			var dEl = E('div', { 'class': 'at-speed-dir' });
 			dEl.appendChild(E('div', { 'class': 'at-speed-label' }, '↓ 下行'));
@@ -341,15 +358,14 @@ return L.view.extend({
 			box.appendChild(dEl);
 			box.appendChild(uEl);
 			speedRow.appendChild(box);
-			renderKv();
 			renderChart();
 		}
 
 		/*
 		 * 把速率值格式化为 {value, unit}。
 		 * unitMode：
-		 *   'kbps'  —— 输入单位是 kbps（比特），直接乘 1000 得 bps；
-		 *   'bytes' —— 输入单位是字节/秒，乘 8 得 bps（PDCP 实时速率的默认口径）。
+		 *   'kbps'  —— 输入单位是 kbps（比特），直接乘 1000 得 bps（签约速率）；
+		 *   'bytes' —— 输入单位是字节/秒，乘 8 得 bps（接口实时速率）。
 		 */
 		function splitSpeedUI(value, unitMode) {
 			var bits = (unitMode === 'kbps') ? (value * 1000) : (value * 8);
@@ -530,9 +546,8 @@ return L.view.extend({
 							 * 绝不能再走字节口径的 ×8（那会把 102.4 Mbps 显示成 819 bps）。
 							 */
 							if (parts.length >= 3) {
-								state.downSpeed = parseInt(parts[1], 10) || 0;
-								state.upSpeed = parseInt(parts[2], 10) || 0;
-								state.speedUnit = 'kbps';
+								state.ambrDown = parseInt(parts[1], 10) || 0;
+								state.ambrUp = parseInt(parts[2], 10) || 0;
 							}
 							/*
 							 * 第 4 个字段（索引 3）在手册标准格式中并不存在，
@@ -556,7 +571,7 @@ return L.view.extend({
 				return chain.catch(function (e) {
 					if (e === 'break') { /* 已找到 */ }
 					state.activeCid = null;
-				}).then(renderSpeed);
+				}).then(renderAmbr);
 			});
 		}
 
@@ -732,22 +747,64 @@ return L.view.extend({
 			});
 		}
 
-		/* ---------- PDCP 实时订阅 ---------- */
+		/* ---------- 实时速率（OpenWrt 接口统计采样） ---------- */
 
-		var pdcpHandler = function (resp) {
-			if (!resp || resp.type !== 'pdcp_data' || !resp.data) return;
-			var d = resp.data;
-			/* PDCP 上报单位为字节/秒，除以 1024 归一为 KiB/s，按 'bytes' 口径 ×8 显示。 */
-			state.downSpeed = (d.rx_rate || 0) / 1024;
-			state.upSpeed = (d.tx_rate || 0) / 1024;
-			state.speedUnit = 'bytes';
-			history.push({ down: state.downSpeed, up: state.upSpeed });
-			if (history.length > HISTORY_POINTS) history = history.slice(history.length - HISTORY_POINTS);
-			renderSpeed();
-		};
-		AtWs.client.subscribe(pdcpHandler);
+		/*
+		 * 实时速率取自承载 5G 流量的网络接口累计字节数，按「两次采样差 ÷ 时间差」计算。
+		 *
+		 * 为什么不再用 PDCP：
+		 *   PDCP 方案需要后端持续向模组下发 AT 命令订阅上报，既独占 AT 通道，
+		 *   又会在用户手动发 AT 命令时产生干扰，直接影响模组工作。
+		 *   接口统计是内核维护的计数器，读它不产生任何 AT 流量。
+		 *
+		 * 采样时序：用本机 Date.now() 做时间基准（与 RPC 往返无关），
+		 * 避免 rpcd 与浏览器时钟不同源引入抖动。
+		 */
+		var rateSample = null;
+		var rateTimer = null;
+
+		function sampleRate() {
+			return AtWs.netRate('').then(function (r) {
+				if (!r.success) {
+					/* 失败时清空基准，下次采样重新起算，避免用过期基准算出离谱速率 */
+					rateSample = null;
+					state.rtDown = 0;
+					state.rtUp = 0;
+					renderSpeed();
+					return;
+				}
+				var now = Date.now();
+				if (rateSample && rateSample.device === r.device) {
+					var dt = (now - rateSample.t) / 1000;
+					/* 间隔过短（<0.2s）时差分噪声大，跳过本次并保留原基准 */
+					if (dt >= 0.2) {
+						var drx = r.rx_bytes - rateSample.rx;
+						var dtx = r.tx_bytes - rateSample.tx;
+						/*
+						 * 计数器回绕或接口重置会产生负差，此时不能输出负值，
+						 * 直接以 0 处理并重置基准，下一拍即可恢复。
+						 */
+						state.rtDown = drx >= 0 ? drx / dt : 0;
+						state.rtUp = dtx >= 0 ? dtx / dt : 0;
+						history.push({ down: state.rtDown, up: state.rtUp });
+						if (history.length > HISTORY_POINTS) history = history.slice(history.length - HISTORY_POINTS);
+						rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+						renderSpeed();
+						return;
+					}
+					return;
+				}
+				/* 首拍或设备变更：只记基准，不产生速率 */
+				rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+			});
+		}
+
+		rateTimer = Ui.interval(1000, sampleRate);
 		self._unsubs = self._unsubs || [];
-		self._unsubs.push(function () { AtWs.client.unsubscribe(pdcpHandler); });
+		self._unsubs.push(function () {
+			if (rateTimer) { clearInterval(rateTimer); rateTimer = null; }
+		});
+		sampleRate();
 
 		/* ---------- 刷新 ---------- */
 

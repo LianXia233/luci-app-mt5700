@@ -35,6 +35,19 @@ var rpcEvents = L.rpc.declare({
 	expect: {}
 });
 
+/*
+ * 接口累计字节数（实时速率数据源）。
+ * 由 mt5700.uc 的 netrate 方法直接读 /sys/class/net/<dev>/statistics/，
+ * 全程不下发任何 AT 命令，不占用 AT 通道、不干扰模组。
+ * 返回 {success, device, rx_bytes, tx_bytes}，速率由调用方按采样差计算。
+ */
+var rpcNetRate = L.rpc.declare({
+	object: 'mt5700',
+	method: 'netrate',
+	params: ['device'],
+	expect: {}
+});
+
 function withTimeout(p, ms, msg) {
 	return Promise.race([
 		p,
@@ -694,8 +707,37 @@ var atClient = (function () {
 	};
 })();
 
+/*
+ * 取承载 5G 流量的网络接口累计字节数。
+ *
+ * 与 PDCP 方案的本质区别：此路径完全不下发 AT 命令，只经 rpcd 读
+ * /sys/class/net/<dev>/statistics/，因此不占用 AT 通道、不会影响模组工作。
+ *
+ * 返回 Promise<{success, device, rx_bytes, tx_bytes}>。
+ * 速率（字节/秒）需由调用方按「两次采样差 ÷ 时间差」计算，
+ * 因为单次计数是累计值，本身不含速率语义。
+ */
+function fetchNetRate(device) {
+	return withTimeout(rpcNetRate(device || ''), 5000, '接口统计读取超时')
+		.then(function (resp) {
+			if (!resp || resp.success === false) {
+				return { success: false, error: (resp && resp.error) || '读不到接口计数器' };
+			}
+			return {
+				success: true,
+				device: resp.device,
+				rx_bytes: Number(resp.rx_bytes) || 0,
+				tx_bytes: Number(resp.tx_bytes) || 0
+			};
+		})
+		.catch(function (err) {
+			return { success: false, error: (err && err.message) || '接口统计读取失败' };
+		});
+}
+
 var AtWs = {
 	client: atClient(),
+	netRate: fetchNetRate,
 	extractATData: extractATData,
 	extractATDataMultiline: extractATDataMultiline,
 	convertRsrp: convertRsrp,
