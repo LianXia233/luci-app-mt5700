@@ -23,17 +23,17 @@ return L.view.extend({
 		body.appendChild(connBar);
 		Mt5700.renderConnectionBar(connBar);
 
-		/* ---------- 面板骨架 ---------- */
+		/* ---------- 面板骨架（信号质量置顶） ---------- */
+
+		var signalCard = Mt5700.card('信号质量', '主小区 RSRP/RSRQ/SINR 与信号百分比');
+		var sigGrid = E('div', { 'class': 'mt5700-metrics' });
+		signalCard._body.appendChild(sigGrid);
+		body.appendChild(signalCard);
 
 		var connCard = Mt5700.card('连接状态', '当前网络注册与运营商信息');
 		var connBody = E('div');
 		connCard._body.appendChild(connBody);
 		body.appendChild(connCard);
-
-		var signalCard = Mt5700.card('信号质量', '主小区 RSRP/RSRQ/SINR');
-		var sigGrid = E('div', { 'class': 'mt5700-metrics' });
-		signalCard._body.appendChild(sigGrid);
-		body.appendChild(signalCard);
 
 		var carrierCard = Mt5700.card('载波聚合', '当前所有激活载波');
 		var carrierBox = E('div');
@@ -143,18 +143,29 @@ return L.view.extend({
 			));
 		}
 
+		/* 环形仪表实例只创建一次，之后每次刷新仅更新数值与弧线 */
+		var sigGauges = null;
+
 		function renderSignal() {
-			sigGrid.innerHTML = '';
 			var c = state.cell;
-			var items = [
-				{ label: 'RSRP', value: c.rsrp != null ? c.rsrp + ' dBm' : '—', color: c.rsrp != null ? (c.rsrp >= -90 ? 'success' : c.rsrp >= -105 ? 'warning' : 'danger') : null },
-				{ label: 'RSRQ', value: c.rsrq != null ? c.rsrq + ' dB' : '—' },
-				{ label: 'SINR', value: c.sinr != null ? c.sinr + ' dB' : '—' },
-				{ label: '信号百分比', value: c.signalPercent || '—' }
-			];
-			items.forEach(function (it) {
-				sigGrid.appendChild(Mt5700.metric(it.label, it.value, it.color));
-			});
+			if (!sigGauges) {
+				sigGrid.innerHTML = '';
+				sigGauges = {
+					rsrp: Mt5700.gauge('RSRP', 'dBm', 'rsrp'),
+					rsrq: Mt5700.gauge('RSRQ', 'dB', 'rsrq'),
+					sinr: Mt5700.gauge('SINR', 'dB', 'sinr'),
+					pct: Mt5700.gauge('信号百分比', '%', 'pct')
+				};
+				sigGrid.appendChild(sigGauges.rsrp.el);
+				sigGrid.appendChild(sigGauges.rsrq.el);
+				sigGrid.appendChild(sigGauges.sinr.el);
+				sigGrid.appendChild(sigGauges.pct.el);
+			}
+			sigGauges.rsrp.set(c.rsrp);
+			sigGauges.rsrq.set(c.rsrq);
+			sigGauges.sinr.set(c.sinr);
+			var pct = parseInt(c.signalPercent, 10);
+			sigGauges.pct.set(isNaN(pct) ? null : pct);
 		}
 
 		function renderCarriers() {
@@ -318,7 +329,15 @@ return L.view.extend({
 				chart.appendChild(Mt5700.empty('等待数据…'));
 				return;
 			}
-			chart.appendChild(Mt5700.lineChart(history, { width: chart.clientWidth || 600, height: 140 }));
+			chart.appendChild(Mt5700.lineChart(history, {
+				width: chart.clientWidth || 600,
+				height: 140,
+				tipFormat: function (p) {
+					var d = splitSpeedUI(p.down || 0, 'bytes');
+					var u = splitSpeedUI(p.up || 0, 'bytes');
+					return '↓ ' + d.value + ' ' + d.unit + ' · ↑ ' + u.value + ' ' + u.unit;
+				}
+			}));
 		}
 
 		function renderFlow() {
@@ -371,12 +390,21 @@ return L.view.extend({
 			dhcpBox.appendChild(Mt5700.table(['项目', '值'], rows, { striped: true }));
 		}
 
+		/* 调制方式展示：256QAM MCS 27 · 1 层（大小写与格式固定） */
+		function mcsDisplay(m) {
+			if (!m || m.mcs == null) return '—';
+			var mod = Parse.mcsModulation(m.mcs);
+			var txt = (mod ? mod + ' ' : '') + 'MCS ' + m.mcs;
+			if (m.rank) txt += ' · ' + m.rank + ' 层';
+			return txt;
+		}
+
 		function renderMCS() {
 			mcsGrid.innerHTML = '';
 			var dl = state.downlinkMCS, ul = state.uplinkMCS;
 			[
-				{ label: '下行 MCS', value: dl ? (dl.mcs != null ? 'MCS ' + dl.mcs + (dl.rank ? ' · ' + dl.rank + ' 层' : '') : '—') : '—' },
-				{ label: '上行 MCS', value: ul ? (ul.mcs != null ? 'MCS ' + ul.mcs + (ul.rank ? ' · ' + ul.rank + ' 层' : '') : '—') : '—' }
+				{ label: '下行调制', value: mcsDisplay(dl) },
+				{ label: '上行调制', value: mcsDisplay(ul) }
 			].forEach(function (it) {
 				mcsGrid.appendChild(Mt5700.metric(it.label, it.value));
 			});

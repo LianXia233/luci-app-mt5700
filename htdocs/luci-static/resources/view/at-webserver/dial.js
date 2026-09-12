@@ -27,6 +27,17 @@ return L.view.extend({
 		body.appendChild(connBar);
 		Mt5700.renderConnectionBar(connBar);
 
+		/*
+		 * 未保存更改暂存器（OpenWrt 保存并应用语义）：
+		 * 所有配置修改先暂存，由底部悬浮条统一「保存并应用 / 撤销更改」，
+		 * 应用或撤销后重新拉取全部配置刷新界面。
+		 */
+		var staged = Mt5700.staged({ onChanged: function () { loadAll(); } });
+
+		function stageHint() {
+			Mt5700.info('更改已暂存，点击页面下方「保存并应用」后生效');
+		}
+
 		/* ---------- 常量 ---------- */
 		var DIAL_MODE_OPTIONS = [
 			{ label: 'USB网络接口', value: 1 }, { label: '转网口模式', value: 2 }
@@ -164,7 +175,7 @@ return L.view.extend({
 
 		var authCurrent = E('span', { 'class': 'mt5700-hint' }, '当前认证：无鉴权');
 		dialCard._body.appendChild(Mt5700.panelActions(
-			Mt5700.primaryButton('保存 APN 设置', function () { handleApnSettingChange(); }),
+			Mt5700.primaryButton('暂存 APN 更改', function () { handleApnSettingChange(); }),
 			authCurrent
 		));
 
@@ -215,12 +226,10 @@ return L.view.extend({
 		infCard._body.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('设置 DMZ', function () {
 				if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(dmzInput.value.trim())) { Mt5700.error('请输入有效的 IP 地址'); return; }
-				Mt5700.confirm('确定将 DMZ 主机设置为 ' + dmzInput.value.trim() + '？', function () {
-					handleDMZ('enable', dmzInput.value.trim());
-				}, '确认设置');
+				handleDMZ('enable', dmzInput.value.trim());
 			}),
 			Mt5700.dangerButton('关闭 DMZ', function () {
-				Mt5700.confirm('确定关闭 DMZ？', function () { handleDMZ('disable'); }, '确认关闭');
+				handleDMZ('disable');
 			})
 		));
 		infCard._body.appendChild(dmzStatus);
@@ -333,61 +342,49 @@ return L.view.extend({
 		}
 
 		function handleAutoDialChange(checked) {
-			var cmd = checked ? 'AT^SETAUTODIAL=1,' + (settings.dialMode || 1) : 'AT^SETAUTODIAL=0';
-			Ui.sendCmd(cmd).then(function (res) {
-				if (res.success) {
-					Mt5700.success(checked ? '已开启自动拨号' : '已关闭自动拨号');
+			/* 暂存而非立即下发，应用时才发送 AT 命令 */
+			staged.set('autodial', '自动拨号：' + (checked ? '开启' : '关闭'), function () {
+				var cmd = checked ? 'AT^SETAUTODIAL=1,' + (settings.dialMode || 1) : 'AT^SETAUTODIAL=0';
+				return Ui.sendCmd(cmd).then(function (res) {
+					if (!res.success) throw new Error('设置自动拨号失败');
 					settings.enable = checked ? 1 : 0;
-					renderDialStatus();
-				} else {
-					Mt5700.error('设置失败');
-				}
-				return fetchDialSettings();
-			}).catch(function () { Mt5700.error('操作失败，请重试'); });
+				});
+			});
+			stageHint();
 		}
 
 		function handleApnSettingChange() {
-			var cmd = 'AT^SETAUTODIAL=' + settings.enable + ',' + settings.dialMode + ',"' + settings.protocol + '","' +
-				apnForm.apn + '","' + apnForm.username + '","' + apnForm.password + '",' + apnForm.authType;
-			Ui.sendCmd(cmd).then(function (res) {
-				if (res.success) {
-					Mt5700.success('APN 设置已更新');
+			staged.set('apn', 'APN 设置更新', function () {
+				var cmd = 'AT^SETAUTODIAL=' + settings.enable + ',' + settings.dialMode + ',"' + settings.protocol + '","' +
+					apnForm.apn + '","' + apnForm.username + '","' + apnForm.password + '",' + apnForm.authType;
+				return Ui.sendCmd(cmd).then(function (res) {
+					if (!res.success) throw new Error('APN 设置失败');
 					settings.apn = apnForm.apn; settings.username = apnForm.username;
 					settings.password = apnForm.password; settings.authType = apnForm.authType;
-					return fetchDialSettings();
-				}
-				Mt5700.error('设置失败');
-			}).catch(function () { Mt5700.error('设置失败，请重试'); });
+				});
+			});
+			stageHint();
 		}
 
 		function handleDialModeChange(mode) {
 			if (settings.enable === 1) { Mt5700.warning('请先关闭自动拨号后再修改拨号方式'); renderDialStatus(); return; }
-			Mt5700.confirm('确定将拨号方式改为「' + getDialModeText(mode) +
-				'」？修改后需重新开启自动拨号才能生效，过程中网络可能临时中断。', function () {
-				Ui.sendCmd('AT^SETAUTODIAL=1,' + mode).then(function (res) {
-					if (res.success) {
-						Mt5700.success('拨号方式修改成功并已开启自动拨号');
-						settings.dialMode = mode; settings.enable = 1;
-					} else {
-						Mt5700.error('设置失败');
-					}
-					return fetchDialSettings();
-				}).catch(function () { Mt5700.error('设置失败，请重试'); });
-			}, '确认修改');
+			staged.set('dialmode', '拨号方式：' + getDialModeText(mode), function () {
+				return Ui.sendCmd('AT^SETAUTODIAL=1,' + mode).then(function (res) {
+					if (!res.success) throw new Error('拨号方式设置失败');
+					settings.dialMode = mode; settings.enable = 1;
+				});
+			});
+			stageHint();
 		}
 
 		function handleUSBModeChange(mode) {
-			Mt5700.confirm('修改 USB 端口模式后，设备将会自动重启以应用新的配置。确定继续？', function () {
-				Ui.sendCmd('AT^SETMODE=' + mode).then(function (res) {
-					if (res.success) {
-						Mt5700.success('USB端口模式设置成功，设备即将重启');
-						settings.usbMode = mode;
-					} else {
-						Mt5700.error('设置失败');
-					}
-					return fetchUSBMode();
-				}).catch(function () { Mt5700.error('设置失败，请重试'); });
-			}, '确认修改');
+			staged.set('usbmode', 'USB 端口模式：' + getUSBModeText(mode), function () {
+				return Ui.sendCmd('AT^SETMODE=' + mode).then(function (res) {
+					if (!res.success) throw new Error('USB 端口模式设置失败');
+					settings.usbMode = mode;
+				});
+			});
+			Mt5700.info('已暂存。应用后设备将自动重启以生效');
 		}
 
 		function fetchUSBMode() {
@@ -412,56 +409,47 @@ return L.view.extend({
 		}
 
 		function handleInfcfgModeChange(mode) {
-			Mt5700.confirm('网口模式设置成功，设备需要重启生效。确定将网口模式改为「' + getInfcfgModeText(mode) + '」？', function () {
-				Ui.sendCmd('AT^TDCFG="infcfg","mode",' + mode).then(function (res) {
-					if (res.success) {
-						Mt5700.success('网口模式设置成功，设备需要重启生效');
-						settings.infcfgMode = mode;
-						renderDialStatus();
-					} else { Mt5700.error('设置失败'); }
-				}).catch(function () { Mt5700.error('设置失败，请重试'); });
-			}, '确认修改');
+			staged.set('infcfg', '网口模式：' + getInfcfgModeText(mode), function () {
+				return Ui.sendCmd('AT^TDCFG="infcfg","mode",' + mode).then(function (res) {
+					if (!res.success) throw new Error('网口模式设置失败');
+					settings.infcfgMode = mode;
+				});
+			});
+			Mt5700.info('已暂存。应用后设备需重启生效');
 		}
 
 		function handlePostRouteChange(value) {
-			if (value === 1) {
-				Ui.sendCmd('AT^IPFILTERSWITCH=0').then(function (ipFilter) {
-					if (!ipFilter.success) throw new Error('关闭IP过滤失败');
-					return Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",' + value);
-				}).then(function (res) {
-					if (res.success) {
-						Mt5700.success('已开启后路由');
+			staged.set('postroute', value === 1 ? '后路由：开启' : '后路由：关闭', function () {
+				if (value === 1) {
+					return Ui.sendCmd('AT^IPFILTERSWITCH=0').then(function (ipFilter) {
+						if (!ipFilter.success) throw new Error('关闭IP过滤失败');
+						return Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",' + value);
+					}).then(function (res) {
+						if (!res.success) throw new Error('设置后路由失败');
 						settings.postRoute = value;
-						renderDialStatus();
-					} else { Mt5700.error('设置失败'); }
-				}).catch(function (err) { Mt5700.error(err && err.message ? err.message : '设置后路由失败'); });
-			} else {
-				Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",0').then(function (res) {
-					if (res.success) {
-						Mt5700.success('已关闭后路由');
-						settings.postRoute = 0;
-						renderDialStatus();
-					} else { Mt5700.error('设置失败'); }
-				}).catch(function () { Mt5700.error('设置后路由失败'); });
-			}
+					});
+				}
+				return Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",0').then(function (res) {
+					if (!res.success) throw new Error('设置后路由失败');
+					settings.postRoute = 0;
+				});
+			});
+			stageHint();
 		}
 
 		function handleDMZ(action, ip) {
-			var cmd = action === 'enable' ? 'AT^TDCFG="infcfg","dmz","' + ip + '"' : 'AT^TDCFG="infcfg","dmz","0"';
-			Ui.sendCmd(cmd).then(function (res) {
-				if (res.success) {
+			staged.set('dmz', action === 'enable' ? 'DMZ 主机：' + ip : '关闭 DMZ', function () {
+				var cmd = action === 'enable' ? 'AT^TDCFG="infcfg","dmz","' + ip + '"' : 'AT^TDCFG="infcfg","dmz","0"';
+				return Ui.sendCmd(cmd).then(function (res) {
+					if (!res.success) throw new Error(action === 'enable' ? 'DMZ配置失败' : '关闭DMZ失败');
 					if (action === 'enable') {
-						Mt5700.success('DMZ配置成功，建议重新拨号以确保生效');
 						dmzConfig = { enabled: true, host: ip };
 					} else {
-						Mt5700.success('DMZ已关闭');
 						dmzConfig = { enabled: false, host: '' };
 					}
-					renderDialStatus();
-				} else {
-					Mt5700.error(action === 'enable' ? 'DMZ配置失败' : '关闭DMZ失败');
-				}
-			}).catch(function () { Mt5700.error(action === 'enable' ? 'DMZ配置失败' : '关闭DMZ失败'); });
+				});
+			});
+			stageHint();
 		}
 
 		/* ---------- PDP 上下文 ---------- */
@@ -509,28 +497,31 @@ return L.view.extend({
 				}
 				var cmd = 'AT+CGDCONT=' + cid + ',"' + values.type + '","' + (values.apn || '') + '",' +
 					(values.pdp_addr || '') + ',0,0';
-				Ui.sendCmd(cmd).then(function (res) {
-					if (res.success) { Mt5700.success('保存成功'); return fetchPDPContexts(); }
-					Mt5700.error('保存失败');
-				}).catch(function () { Mt5700.error('保存失败，请重试'); });
+				staged.set('pdp-' + cid, 'PDP 上下文 CID ' + cid, function () {
+					return Ui.sendCmd(cmd).then(function (res) {
+						if (!res.success) throw new Error('PDP 上下文保存失败');
+					});
+				});
+				stageHint();
 			});
 		}
 
 		function handleDeletePdp(cid) {
-			Ui.sendCmd('AT+CGDCONT=' + cid).then(function (res) {
-				if (res.success) { Mt5700.success('删除成功'); return fetchPDPContexts(); }
-				Mt5700.error('删除失败');
-			}).catch(function () { Mt5700.error('删除失败，请重试'); });
+			staged.set('pdp-del-' + cid, '删除 PDP 上下文 CID ' + cid, function () {
+				return Ui.sendCmd('AT+CGDCONT=' + cid).then(function (res) {
+					if (!res.success) throw new Error('PDP 上下文删除失败');
+				});
+			});
+			stageHint();
 		}
 
 		function handleActivePdp(cid, active) {
-			Ui.sendCmd('AT+CGACT=' + (active ? 1 : 0) + ',' + cid).then(function (res) {
-				if (res.success) {
-					Mt5700.success(active ? '激活成功' : '去激活成功');
-					return Ui.sleep(2000).then(fetchPDPContexts);
-				}
-				Mt5700.error('操作失败');
-			}).catch(function () { Mt5700.error('操作失败，请重试'); });
+			staged.set('pdp-act-' + cid, (active ? '激活' : '去激活') + ' PDP CID ' + cid, function () {
+				return Ui.sendCmd('AT+CGACT=' + (active ? 1 : 0) + ',' + cid).then(function (res) {
+					if (!res.success) throw new Error('PDP 激活状态切换失败');
+				});
+			});
+			stageHint();
 		}
 
 		/* ---------- 初始化 ---------- */
@@ -556,6 +547,9 @@ return L.view.extend({
 		}).then(function () {
 			loadAll();
 		});
+
+		/* 暂存应用条固定在页面底部 */
+		body.appendChild(staged.el);
 
 		return page;
 	}
