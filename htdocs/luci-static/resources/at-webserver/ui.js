@@ -14,7 +14,7 @@
 // uhttpd 给静态资源的 Last-Modified 为 1970，浏览器会长期复用缓存；LuCI 主题同样
 // 采用「css?v=版本」的做法（aurora: main.css?v=1.3.1）。样式版本随包版本递增，
 // 保证升级/修复样式后用户刷新即可生效。
-var AT_CSS_VERSION = '1.3.3';
+var AT_CSS_VERSION = '1.3.4';
 
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION;
@@ -32,7 +32,8 @@ var Ui = (function () {
 	var api = {};
 
 	api.panel = function (title, hint, extra) {
-		var cbi = E('div', { 'class': 'cbi-section' });
+		// 容器使用本项目自有的 at-panel 类：外观完全由 at.css 控制，与任意 LuCI 主题解耦。
+		var cbi = E('div', { 'class': 'at-panel' });
 		var head = E('div', { 'class': 'at-panel-head' });
 		var h = E('h3', { 'class': 'at-panel-title' }, title || '');
 		head.appendChild(h);
@@ -92,8 +93,17 @@ var Ui = (function () {
 		return tag;
 	};
 
+	// 所有按钮都经由此卡口创建。cls 接收视图传入的 cbi-button-* 变体，
+	// 通过映射附加 at-btn-* 系列类：外观完全由 at.css 决定，不受 LuCI 主题影响。
 	api.button = function (label, cls, onClick) {
-		var btn = E('button', { 'class': 'cbi-button cbi-button-action ' + (cls || '') }, label);
+		var map = {
+			'cbi-button-positive': 'at-btn-primary',
+			'cbi-button-negative': 'at-btn-danger',
+			'cbi-button-neutral': 'at-btn-neutral',
+			'cbi-button-action': 'at-btn-action'
+		};
+		var extra = (cls || '').split(/\s+/).map(function (c) { return map[c] || ''; }).join(' ');
+		var btn = E('button', { 'class': 'at-btn ' + extra + ' ' + (cls || '') }, label);
 		btn.addEventListener('click', onClick);
 		return btn;
 	};
