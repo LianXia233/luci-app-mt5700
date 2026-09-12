@@ -713,8 +713,10 @@
   position: relative;
   width: 44px;
   height: 24px;
+  margin: 0;
   appearance: none;
   background: var(--mt5700-border-subtle);
+  border: none;
   border-radius: var(--mt5700-radius-full);
   cursor: pointer;
   transition: background var(--mt5700-transition-fast);
@@ -732,6 +734,7 @@
   width: 20px;
   height: 20px;
   background: white;
+  border: none;
   border-radius: 50%;
   transition: transform var(--mt5700-transition-fast);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -739,6 +742,29 @@
 
 .mt5700-switch input[type="checkbox"]:checked::before {
   transform: translateX(20px);
+}
+
+/* 屏蔽 LuCI 主题（如 Aurora）对复选框伪元素的串扰绘制：
+   主题用 :is(input[type=checkbox])::after 叠加对勾 mask，会画在本开关之上。
+   旋钮由 ::before 绘制，:checked 态主题还会给 ::before 追加描边色，
+   已在旋钮规则里用 border:none 压制，这里只需处理 ::after */
+.mt5700-switch input[type="checkbox"]::after,
+.mt5700-switch input[type="checkbox"]:checked::after {
+  content: none;
+}
+
+/* 普通复选框（.mt5700-checkbox / .mt5700-autorefresh）按原生渲染 + 主题色，
+   屏蔽主题的自定义盒与对勾 */
+.mt5700-checkbox input[type="checkbox"],
+.mt5700-autorefresh input[type="checkbox"] {
+  appearance: auto;
+}
+
+.mt5700-checkbox input[type="checkbox"]::before,
+.mt5700-checkbox input[type="checkbox"]::after,
+.mt5700-autorefresh input[type="checkbox"]::before,
+.mt5700-autorefresh input[type="checkbox"]::after {
+  content: none;
 }
 
 /* 开关状态打磨：hover 反馈 / 键盘焦点环 / 禁用态 */

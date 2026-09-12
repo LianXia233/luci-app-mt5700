@@ -7,6 +7,23 @@
 
 ## [未发布]
 
+### 修复 - 所有页面开关样式异常（Aurora 主题伪元素串扰）
+
+- **现象**：开关选中态在旋钮旁多出一个白色对勾（见用户截图「SIM 卡热插拔」），
+  旋钮带 1px 杂色描边，全页面所有 `.mt5700-switch` 开关均受影响。
+- **根因**（实机取证）：Aurora 主题 `main.css` 用
+  `:is(input[type=radio], input[type=checkbox])::after { mask: var(--icon-check) }`
+  给**全站所有复选框**叠加对勾 mask（选中态 `opacity: 1`），并用 `::before` 给复选框
+  画 1px 描边盒子。插件开关只用 `::before` 画旋钮，未处理 `::after`，主题对勾直接
+  叠画在开关轨道上。
+- **修复**：`.mt5700-switch input::after / :checked::after` 显式 `content: none` 屏蔽主题
+  对勾；旋钮与开关本体补 `border: none`、输入框补 `margin: 0` 压制主题描边与外边距；
+  `.mt5700-checkbox` / `.mt5700-autorefresh` 普通复选框恢复 `appearance: auto` 原生渲染
+  并屏蔽主题伪元素，保持「原生复选框 + 主题色」的本插件设计意图。
+  注意 `:checked::before` 不能加入 `content: none` 屏蔽组（特异性 0,3,2 高于旋钮
+  基础规则 0,2,2，会导致选中态旋钮整体消失）。
+- 样式版本 `MT5700_CSS_VERSION 2.0.1 → 2.0.2`。
+
 ### 变更 - 「AT 服务连接状态条」重做为独立状态卡片
 
 - 原 `.mt5700-conn-bar` 文本条（「AT 服务已连接 · 本机 RPC :8765」）整体替换为
