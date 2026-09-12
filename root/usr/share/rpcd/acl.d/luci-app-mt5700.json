@@ -53,6 +53,11 @@
 					"read",
 					"stat"
 				],
+				"/usr/bin/at-webserver-rust": [
+					"list",
+					"read",
+					"stat"
+				],
 				"/tmp/at-notifications.log": [
 					"read",
 					"stat"
