@@ -5,6 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 变更 - 「AT 服务连接状态条」重做为独立状态卡片
+
+- 原 `.mt5700-conn-bar` 文本条（「AT 服务已连接 · 本机 RPC :8765」）整体替换为
+  自包含的 `at-status-card` 卡片：SVG 状态图标（在线/连接中旋转，离线/未知静止）、
+  呼吸状态点、主信息区与 RPC 地址芯片，样式独立命名空间、不依赖 LuCI 主题。
+- 四态映射：`connected → online`（绿）、`connecting/authenticating/idle/reconnecting →
+  connecting`（琥珀）、`error/disconnected → offline`（红，error 时描述显示具体原因）、
+  其余 → `unknown`（灰）；在线时 RPC 芯片显示 `host:port`，其余状态显示「未连接」。
+- 响应式：≤600px 紧凑布局、隐藏 RPC 标签；≤430px 隐藏 RPC 芯片；
+  深色模式跟随 `prefers-color-scheme`；`prefers-reduced-motion` 下停用旋转/呼吸动画。
+- 涉及文件：`mt5700.js`（`renderConnectionBar` 重写）、`mt5700.css`（卡片样式替换旧
+  conn-bar 段）、样式版本 `MT5700_CSS_VERSION 2.0.0 → 2.0.1`。
+- 所有 12 个视图页共用该卡片（均经 `Mt5700.renderConnectionBar` 渲染），无需逐页改动。
+
 ## [1.4.1] - 2026-09-12
 
 ### 修复 - LuCI 依赖指令被压缩器剥离（12 页白屏）

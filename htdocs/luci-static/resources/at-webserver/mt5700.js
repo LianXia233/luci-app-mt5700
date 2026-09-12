@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.0.0';
+var MT5700_CSS_VERSION = '2.0.1';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -253,41 +253,75 @@ var Mt5700 = (function () {
 		return E('span', { 'class': 'mt5700-badge mt5700-badge-' + variant }, text);
 	};
 
-	/* ================= 连接状态条 ================= */
+	/* ================= 连接状态卡片 ================= */
+	// 独立 at-status-* 命名空间，样式自包含于 mt5700.css，不依赖 LuCI 主题
 
 	api.renderConnectionBar = function (container) {
-		var bar = E('div', { 'class': 'mt5700-conn-bar mt5700-conn-disconnected' });
-		var dot = E('span', { 'class': 'mt5700-conn-dot' });
-		var text = E('span', { 'class': 'mt5700-conn-text' }, '正在连接 AT 服务…');
-		bar.appendChild(dot);
-		bar.appendChild(text);
-		container.appendChild(bar);
-
 		var cl = AtWs.client;
-		function labelConnected() {
+
+		var card = E('div', { 'class': 'at-status-card is-connecting', 'id': 'at-service-status' });
+
+		// SVG 状态图标（在线/连接中旋转，离线/未知静止）
+		var icon = E('div', { 'class': 'at-status-icon' });
+		var svg = svgEl('svg', { viewBox: '0 0 32 32', 'aria-hidden': 'true' });
+		svg.appendChild(svgEl('circle', { cx: 16, cy: 16, r: 11, 'stroke-dasharray': '5 3' }));
+		svg.appendChild(svgEl('circle', { cx: 16, cy: 16, r: 4 }));
+		svg.appendChild(svgEl('path', { d: 'M16 5V2' }));
+		svg.appendChild(svgEl('path', { d: 'M16 30V27' }));
+		icon.appendChild(svg);
+
+		// 主信息：标题（状态点 + 文本）与描述
+		var main = E('div', { 'class': 'at-status-main' });
+		var title = E('div', { 'class': 'at-status-title' });
+		var dot = E('span', { 'class': 'at-status-dot' });
+		var text = E('span', { 'class': 'at-status-text' }, '正在连接 AT 服务');
+		title.appendChild(dot);
+		title.appendChild(text);
+		var desc = E('div', { 'class': 'at-status-description' }, '正在建立 AT 服务连接');
+		main.appendChild(title);
+		main.appendChild(desc);
+
+		// RPC 地址芯片
+		var rpcBox = E('div', { 'class': 'at-status-rpc' });
+		rpcBox.appendChild(E('span', { 'class': 'at-status-rpc-label' }, 'RPC'));
+		var rpcValue = E('span', { 'class': 'at-status-rpc-value' }, '未连接');
+		rpcBox.appendChild(rpcValue);
+
+		card.appendChild(icon);
+		card.appendChild(main);
+		card.appendChild(rpcBox);
+		container.appendChild(card);
+
+		function rpcLabel() {
 			var port = cl.port || 8765;
 			var host = cl.bind || cl.host || '127.0.0.1';
-			var where = (host === '127.0.0.1' || host === 'localhost') ? '本机 RPC' : 'RPC ' + host;
-			return 'AT 服务已连接 · ' + where + ' :' + port;
+			if (host === '0.0.0.0' || host === 'localhost') host = '127.0.0.1';
+			return host + ':' + port;
 		}
-		cl.onConnectionStateChange(function (state, err) {
-			bar.className = 'mt5700-conn-bar mt5700-conn-' + state;
-			if (state === 'connected') {
-				text.textContent = labelConnected();
-			} else if (state === 'error') {
-				text.textContent = err || '连接失败';
-			} else {
-				var texts = {
-					connecting: '正在连接 AT 服务…',
-					authenticating: '正在验证访问密钥…',
-					reconnecting: '连接中断，正在重连…',
-					disconnected: '未连接 AT 服务',
-					idle: '正在连接 AT 服务…'
-				};
-				text.textContent = texts[state] || state;
-			}
-		});
-		return bar;
+
+		// 后端连接状态 → 卡片四态映射
+		var STATES = {
+			connected:      { status: 'online',     text: 'AT 服务在线',      desc: 'AT 通信服务运行正常' },
+			connecting:     { status: 'connecting', text: '正在连接 AT 服务', desc: '正在建立 AT 服务连接' },
+			authenticating: { status: 'connecting', text: '正在连接 AT 服务', desc: '正在验证访问密钥' },
+			idle:           { status: 'connecting', text: '正在连接 AT 服务', desc: '正在建立 AT 服务连接' },
+			reconnecting:   { status: 'connecting', text: '正在连接 AT 服务', desc: '连接中断，正在重连' },
+			disconnected:   { status: 'offline',    text: 'AT 服务离线',      desc: '无法连接 AT 通信服务' },
+			error:          { status: 'offline',    text: 'AT 服务离线',      desc: null }
+		};
+
+		function apply(state, err) {
+			var cfg = STATES[state] || { status: 'unknown', text: 'AT 服务状态未知', desc: '暂时无法获取服务状态' };
+			card.classList.remove('is-online', 'is-connecting', 'is-offline', 'is-unknown');
+			card.classList.add('is-' + cfg.status);
+			text.textContent = cfg.text;
+			desc.textContent = (cfg.status === 'offline' && err) ? err : (cfg.desc || '暂时无法获取服务状态');
+			rpcValue.textContent = cfg.status === 'online' ? rpcLabel() : '未连接';
+		}
+
+		apply('connecting');
+		cl.onConnectionStateChange(apply);
+		return card;
 	};
 
 	/* ================= 模态框 ================= */
