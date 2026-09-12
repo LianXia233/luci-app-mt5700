@@ -278,9 +278,35 @@ return L.view.extend({
 					if (parsed.username != null) apnForm.username = parsed.username;
 					if (parsed.password != null) apnForm.password = parsed.password;
 					if (parsed.authType != null) apnForm.authType = parsed.authType;
+
+					// 同步复选框，避免界面上显示的开关状态与模组实际状态不一致。
+					dialSwitch.checked = parsed.enable === 1;
+
+					// 模组实际状态与 UCI 期望值不一致时，把「默认开启」持久化下来，
+					// 让服务重启后依然按此配置对齐（见后端 ensure_autodial）。
+					syncAutodialDefault(parsed.enable === 1, parsed.dialMode);
 				}
 				renderDialStatus();
 			}).catch(function () { Ui.error('获取拨号配置失败'); });
+		}
+
+		// 把自动拨号期望状态写入 UCI，供后端在每次连上模组后对齐。
+		// 仅在值发生变化时写盘，避免每次进页面都产生一次无谓的 commit。
+		function syncAutodialDefault(enabled, mode) {
+			var wantEnable = enabled ? '1' : '0';
+			var wantMode = String(mode != null ? mode : 1);
+			if (wantMode !== '1' && wantMode !== '2') wantMode = '1';
+
+			var curEnable = L.uci.get('at-webserver', 'config', 'autodial_enable');
+			var curMode = L.uci.get('at-webserver', 'config', 'autodial_mode');
+			if (curEnable === wantEnable && curMode === wantMode) return;
+			if (curEnable == null && wantEnable === '1' && curMode == null) return;
+
+			L.uci.set('at-webserver', 'config', 'autodial_enable', wantEnable);
+			L.uci.set('at-webserver', 'config', 'autodial_mode', wantMode);
+			AtWs.uci.uciCommit('at-webserver').catch(function () {
+				/* 持久化失败不阻断页面，后端仍按当前 UCI 值工作 */
+			});
 		}
 
 		function handleAutoDialChange(checked) {

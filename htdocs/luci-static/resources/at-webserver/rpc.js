@@ -1,5 +1,6 @@
 'use strict';
 'require baseclass';
+'require at-webserver/compat';
 'require at-webserver/parse';
 'require rpc';
 /* global L, baseclass */
@@ -256,6 +257,139 @@ ATClient.prototype.setConnection = function (host, port) {
 		localStorage.setItem('atPort', String(this.port));
 	} catch (e) { /* ignore */ }
 	return Promise.resolve();
+};
+
+/* ================= UCI 保存/应用编排 =================
+ *
+ * 背景（问题一）：本应用原先在页面里直接连续调用
+ *     L.uci.set(...) → L.uci.save() → L.uci.apply()
+ * 这条链路存在三个与 OpenWrt 标准「保存及应用」流程不一致的地方：
+ *
+ *   1) 缺少「未保存更改的确认」。OpenWrt 的 CBI 表单在离开页面时会提示
+ *      「有未保存的更改」，本应用的自定义 E() 表单没有挂到该机制上，
+ *      用户改完不点保存直接切页，改动静默丢失，表现为「保存了但没生效」。
+ *
+ *   2) set/save/apply 三段各自独立，任何一段失败都只是整体 reject，
+ *      无法区分「写内存失败」「落盘失败」「reload 失败」，用户看到的是
+ *      一句笼统的「保存失败」。
+ *
+ *   3) reload 触发依赖 apply() 内部生成的配置 hash。当 at-webserver 的
+ *      UCI 变更 hash 与上一次相同（例如只改了 service.js 里不写盘的派生
+ *      项），rpcd 的 apply 会因为「无待应用变更」直接返回 ubus 状态码 5
+ *      (NO_DATA)，前端把它当成失败——实际上配置已经生效。
+ *
+ * 本模块把上述流程收敛为一处，对外只暴露 uciSave(section) 与
+ * uciHasChanges(section)，语义与 LuCI 的「保存并应用」按钮一致。
+ */
+var AtUci = {
+	// 已注册「未保存更改」提示的页面数
+	_dirty: false,
+	_beforeUnload: null,
+	_dirtyFlush: [],
+
+	// 标记当前页面存在未保存更改，并在离开时提示（等价 LuCI 自带行为）
+	markDirty: function () {
+		if (this._dirty) return;
+		this._dirty = true;
+		this._beforeUnload = function (ev) {
+			if (!AtUci._dirty) return undefined;
+			ev.preventDefault();
+			ev.returnValue = '';
+			return '';
+		};
+		window.addEventListener('beforeunload', this._beforeUnload);
+	},
+
+	// 清除未保存标记（保存/应用成功、或用户主动放弃时调用）
+	clearDirty: function () {
+		this._dirty = false;
+		if (this._beforeUnload) {
+			window.removeEventListener('beforeunload', this._beforeUnload);
+			this._beforeUnload = null;
+		}
+	},
+
+	isDirty: function () { return this._dirty; },
+
+	// 查询该配置是否存在待应用变更（rpcd uci.changes）
+	uciHasChanges: function (section) {
+		return L.uci.changes(section).then(function (changes) {
+			return Array.isArray(changes) ? changes.length > 0 : !!changes;
+		}).catch(function () {
+			// changes 不可用时不阻断主流程，按「有变更」处理
+			return true;
+		});
+	},
+
+	/**
+	 * 保存并应用（等价 CBI 底部「保存并应用」按钮）。
+	 * 返回 { applied: bool, saved: bool, appliedSkipped: bool }
+	 */
+	uciSave: function (section, opts) {
+		var options = opts || {};
+		var result = { saved: false, applied: false, appliedSkipped: false, changes: null };
+
+		return this.uciHasChanges(section).then(function (has) {
+			result.changes = has;
+			if (!has && options.skipWhenClean !== false) {
+				// 无待应用变更：不需要 save/apply，直接视为已生效
+				result.saved = true;
+				result.appliedSkipped = true;
+				return result;
+			}
+			return L.uci.save(section).then(function () {
+				result.saved = true;
+				return L.uci.apply(false, true);
+			}).then(function () {
+				result.applied = true;
+				return result;
+			}, function (err) {
+				// ubus 状态码 5 = NO_DATA：rpcd 未收到待应用数据，通常表示
+				// 变更已在上一轮 commit，配置实际已生效，不视为失败。
+				var code = err && err.code;
+				var msg = (err && err.message) || '';
+				if (code === 5 || /未收到数据|No data|NO_DATA/i.test(msg)) {
+					result.applied = true;
+					result.appliedSkipped = true;
+					return result;
+				}
+				throw err;
+			});
+		});
+	},
+
+	/**
+	 * commit 型保存：仅落盘，不触发服务 reload。
+	 * 用于「服务配置」这类自身不作为 reload 触发源、而由页面显式重载的场景。
+	 */
+	uciCommit: function (section) {
+		var result = { saved: false, applied: false, appliedSkipped: false };
+		return this.uciHasChanges(section).then(function (has) {
+			if (!has) {
+				result.saved = true;
+				result.appliedSkipped = true;
+				return result;
+			}
+			return L.uci.save(section).then(function () {
+				result.saved = true;
+				// append=true 表示「保存并应用」，会走 rpcd 的 commit+apply 全流程，
+				// 从而正确记录 config hash 并触发 procd reload。
+				return L.uci.apply(false, true);
+			}).then(function () {
+				result.applied = true;
+				return result;
+			}, function (err) {
+				var code = err && err.code;
+				var msg = (err && err.message) || '';
+				if (code === 5 || /未收到数据|No data|NO_DATA/i.test(msg)) {
+					result.applied = true;
+					result.appliedSkipped = true;
+					return result;
+				}
+				throw err;
+			});
+		});
+	}
 };
 
 /* ================= 解析工具 ================= */
@@ -578,7 +712,8 @@ var AtWs = {
 	operatorFromCode: operatorFromCode,
 	qciLabel: qciLabel,
 	bandName: bandName,
-	isUnsolicitedText: isUnsolicitedText
+	isUnsolicitedText: isUnsolicitedText,
+	uci: AtUci
 };
 
 /* LuCI factory 必须返回 Class 子类；挂 window.AtWs 供页面使用 */

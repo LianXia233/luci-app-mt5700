@@ -1,6 +1,6 @@
 {
 	"admin/modem": {
-		"title": "modem",
+		"title": "移动网络",
 		"order": 55,
 		"action": {
 			"type": "firstchild",
@@ -13,7 +13,7 @@
 		}
 	},
 	"admin/modem/5g": {
-		"title": "5G模组管理",
+		"title": "5G 模组管理",
 		"order": 10,
 		"action": {
 			"type": "firstchild",
