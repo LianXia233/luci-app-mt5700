@@ -5,6 +5,61 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.3.3] - 2026-09-12
+
+按面板语义分离「连接状态 / 实时速率」两组速率，并把「实时速率」的数据源从 AT
+改为 OpenWrt 接口统计。
+
+### 变更背景
+
+`v1.3.2` 修正了单位换算，但两个面板仍共用同一组状态变量
+（`state.downSpeed` / `state.upSpeed`），语义混用：「连接状态」本应展示
+**签约速率**（`AT^DSAMBR`，单位 kbps），「实时速率」本应展示
+**接口当前吞吐**（单位字节/秒）。共用变量时任一来源刷新都会覆盖另一方，
+面板语义失真。
+
+同时「实时速率」原先依赖 PDCP 速率订阅，会持续向模组下发 AT 命令，
+占用 AT 通道并干扰正常业务。
+
+### 改动内容
+
+| 层 | 改动 |
+|:--|:--|
+| ubus | `mt5700.uc` 新增方法 `netrate`：读 `/sys/class/net/<dev>/statistics/{rx,tx}_bytes`；设备名由 `uci get network.MT5700M.device` 探测（实机 `eth2`），取不到回退 `eth2` |
+| ACL | `/usr/share/rpcd/acl.d/luci-app-mt5700.json` 的 `read.ubus.mt5700` 增列 `netrate` |
+| 前端 RPC | `rpc.js` 新增 `rpcNetRate` 声明与 `AtWs.netRate()` 封装（5 秒超时） |
+| 状态拆分 | `network_status.js`：`ambrDown` / `ambrUp`（签约）与 `rtDown` / `rtUp`（实时）四字段独立 |
+| 渲染拆分 | `renderAmbr()` 只刷「连接状态」；`renderSpeed()` 只刷「实时速率」+ 曲线，不再连锁调用 `renderKv()` |
+| 采样 | 删除 PDCP 订阅，改每秒一次接口计数器差分；首拍只记基准不产速率；设备变更自动重设基准 |
+| 文案 | 「实时速率」面板副标题改为「接口实时上下行速率，每秒采样一次」 |
+
+### 实测结果（H5000M · MT5700M-CN）
+
+| 面板 | 显示 |
+|:--|:--|
+| 连接状态 · 下行 / 上行速率 | `102.40 Mbps`（签约速率，来自 `^DSAMBR`） |
+| 实时速率 · ↓ 下行 | `319.35 Kbps` |
+| 实时速率 · ↑ 上行 | `238.04 Kbps` |
+
+实时速率随流量波动，与签约速率互不串扰。
+
+### 部署注意
+
+`mt5700.uc` 新增 ubus 方法后，rpcd 需要**完全重启**才会重新枚举插件方法；
+仅 `reload_service`（`procd_send_signal`）不保证重载 ucode 插件。
+升级后若 `ubus call mt5700 netrate` 报 `Method not found`，执行：
+
+```sh
+killall rpcd; sleep 3; /etc/init.d/rpcd restart
+```
+
+另：`/usr/share/rpcd/ucode/` 下不要遗留 `.bak` 等备份文件，避免被 rpcd 枚举。
+
+### 兼容性
+
+- 未改动任何 IMEI 相关命令与逻辑。
+- 「实时速率」不再依赖 AT 通道，模组侧无额外 AT 负载。
+
 ## [1.3.2] - 2026-09-12
 
 修复「连接状态」与「实时速率」面板中签约速率显示为 `819 bps` 的问题。
@@ -17,7 +72,7 @@
 |:--|:--|:--|
 | 连接状态 · 下行速率 | `819 bps` | `102.40 Mbps` |
 | 连接状态 · 上行速率 | `819 bps` | `102.40 Mbps` |
-| 实时速率 · ↓ / ↑ | `819 bps` | `102.40 Mbps` |
+| 实时速率 · ↓ / ↑ | `819 bps` | `102.40 Mbps`（`v1.3.3` 起此面板改为接口实时速率，见上） |
 
 ### 定位过程与根因
 

@@ -9,7 +9,7 @@ LUCI_DEPENDS:=
 LUCI_PKGARCH:=
 
 PKG_NAME:=luci-app-mt5700
-PKG_VERSION:=1.3.2
+PKG_VERSION:=1.3.3
 PKG_RELEASE:=1
 
 # 兼容旧版：已安装 at-webserver-rust 的系统升级到单包后，声明提供同名能力，

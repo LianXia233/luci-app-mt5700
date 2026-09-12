@@ -145,6 +145,81 @@ function jsonParse(s) {
 	return parseVal();
 }
 
+/*
+ * 解析承载 5G 流量的网络设备名。
+ * 优先 UCI network.MT5700M.device，其次 ifname，都拿不到才退回 eth2。
+ * 不硬编码单一设备名，避免不同机型/接口命名下取不到计数。
+ */
+function detectModemDevice() {
+	let dev = null;
+	try {
+		const cursor = uci.cursor();
+		dev = cursor.get('network', 'MT5700M', 'device');
+		if (dev == null || dev == '') {
+			dev = cursor.get('network', 'MT5700M', 'ifname');
+		}
+	} catch (e) {
+		dev = null;
+	}
+	if (dev == null || dev == '') {
+		dev = 'eth2';
+	}
+	return dev;
+}
+
+/* 读取单个字节计数器；失败返回 null（不做静默补 0，避免算出假速率） */
+function readCounter(path) {
+	let f;
+	try {
+		f = fs.open(path, 'r');
+	} catch (e) {
+		return null;
+	}
+	if (!f) {
+		return null;
+	}
+	let s = f.read('line');
+	f.close();
+	if (s == null) {
+		return null;
+	}
+	let v = int(s);
+	if (v == null) {
+		return null;
+	}
+	return v;
+}
+
+/*
+ * 取网络接口累计字节数。
+ * 实时速率由前端按「两次采样差 / 时间差」计算，这里只返回原始计数与本机时钟，
+ * 由前端统一时间基准，规避 rpcd 与浏览器时钟不同源的抖动。
+ *
+ * 关键：全程不向模组下发任何 AT 命令，避免占用 AT 通道、干扰模组工作。
+ */
+function netrateCall(req) {
+	let a = req.args;
+	let dev = getStr(a, 'device');
+	if (dev == null || dev == '') {
+		dev = detectModemDevice();
+	}
+
+	const base = '/sys/class/net/' + dev;
+	const rx = readCounter(base + '/statistics/rx_bytes');
+	const tx = readCounter(base + '/statistics/tx_bytes');
+
+	if (rx == null && tx == null) {
+		return { success: false, device: dev, error: '读不到接口计数器，设备可能不存在或未 up' };
+	}
+
+	return {
+		success: true,
+		device: dev,
+		rx_bytes: rx == null ? 0 : rx,
+		tx_bytes: tx == null ? 0 : tx
+	};
+}
+
 function rpcCall(method, params) {
 	const rpcCfg = readRpcConfig();
 	const port = rpcCfg.port;
@@ -231,6 +306,12 @@ return {
 					since = 0;
 				}
 				return rpcCall('events', { since: since });
+			}
+		},
+		netrate: {
+			args: { device: '' },
+			call: function (req) {
+				return netrateCall(req);
 			}
 		}
 	}
