@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.11.1**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.12.0**
 
 | | |
 |:--|:--|
@@ -35,14 +35,14 @@
 ```sh
 # 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.11.1-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.12.0-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.11.1_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.0_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -64,7 +64,7 @@ ls -l /usr/bin/at-webserver-rust
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
-> **v1.11.1 说明**：本版只改「网络能力」指示器的排版与字体，**不改任何评估逻辑与阈值**，
+> **v1.12.0 说明**：本版只改「网络能力」指示器的排版与字体，**不改任何评估逻辑与阈值**，
 > 四张环形仪表盘（RSRP / RSRQ / SINR / 综合百分比）**样式完全未动**。
 > 能力项（制式 / 频段 / 带宽）原来与信号项共用同一种 chip 徽标、混在同一条横向流里，
 > 容易被读成同一个指标池，且 11px 徽标在宽屏下被大段空白撑开。
@@ -269,6 +269,67 @@ logread -e at-webserver | tail -30
 
 ---
 
+## 移动端适配
+
+手机上（<=768px）做了四件事，桌面端（>=769px）分毫不动——
+所有移动规则都包在 `@media (max-width: ...)` 里，并集中追加在
+`mt5700.css` 末尾，不改动任何既有规则。
+
+### 1. 四张环形仪表盘：4 屏 -> 1 屏
+
+原来每行只放 1 张，单卡约 350px 高，四个信号指标要滑 4 屏。
+现改为 **2x2 网格**：圆环 120px -> 78px（320px 极窄屏 68px）、
+卡片内边距与外间距同步收紧、档位胶囊与描述行降档。
+「信号质量」卡片高度 **1425px -> 767px（-46%）**。
+
+### 2. 宽表格：横向拖动 -> 卡片式堆叠
+
+载波聚合表有 9 列，桌面宽 610px，而手机容器只有 288px，
+右侧 RSRP / RSRQ / SINR 三列**完全看不到**，必须横向拖动。
+
+现在 <=600px 时表格转为**卡片式堆叠**：隐藏表头，每行成为一张小卡，
+每个单元格用 `::before` 显示自己的列名（列名由 JS 写入 `data-label`）。
+9 列全部可见，**表宽 610px -> 294px，零横向溢出**。
+
+> 只有两列的「键值表」（IP 与 DNS / 连接诊断）**不堆叠**——
+> 堆叠会把每项拆成上下两行，项数一多反而更高（实测「IP 与 DNS」
+> 一度从 871px 涨到 1023px）。这类表改走 `.mt5700-table-kv`
+> 的「标签左 / 值右」紧凑分栏行，实测回落到 **599px**。
+
+### 3. 文案与数值不再截断
+
+- `.mt5700-metric-value` 原为 `white-space:nowrap` + `ellipsis`，
+  窄屏下长值被裁（实测「64QAM MCS 20 · 1 层」填充率 **1.46**、
+  「2500 MHz (TDD)」**1.34**）。手机端改为允许换行，并进一步压低
+  `len-md/len-lg/len-xl` 的降字号档位。
+- 「网络能力」指示器的指标名与描述原为 **8px**，低于移动端可读下限，
+  统一提到 **11px**，并让描述正常换行。
+- 指标区在手机上改为 **2x2**，避免 4 列挤成 8px 小字。
+
+### 4. 触屏可用性
+
+- 去掉触屏上无意义的 `:hover` 抬升（按下时不再抖动）。
+- 按钮最小高度提到 32px，满足触控热区建议。
+
+### 实测数据（390x844 / 360x800 / 320x720）
+
+| 指标 | 优化前 | 优化后 |
+|:--|--:|--:|
+| 整页高度 | 7501px（约 9 屏） | **5631px（约 7 屏）** |
+| 信号质量卡 | 1425px | **767px** |
+| 连接状态卡 | 1110px | **655px** |
+| 模组温度卡 | 742px | **434px** |
+| 流量统计卡 | 630px | **333px** |
+| IP 与 DNS 卡 | 871px | **599px** |
+| 载波聚合表宽 | 610px（溢出 2.1 倍） | **294px（不溢出）** |
+| 横向溢出 | 0px | **0px** |
+| 内容截断 | 5 处 | **0 处** |
+| JS 报错 | 无 | **无** |
+
+PC 端同一套断言在 1920 / 1600 / 1440 / 1280 / 1200 五档全部通过，
+四张圆环严格保持在**同一行**（垂直中心偏差 <= 3px），
+`viewBox 0 0 100 100`、每张 `2` 个 `circle`、数值与档位齐备。
+
 ## 功能一览
 
 | 分组 | 页面 |
@@ -449,7 +510,7 @@ LTE 单载波物理带宽上限就是 20MHz（3GPP 36.101：1.4/3/5/10/15/20MHz�
 
 ### 布局自适应：页面宽度、指标网格与卡片高度
 
-v1.11.1 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
+v1.12.0 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
 
 #### 页面容器
 
@@ -690,7 +751,7 @@ api.TEMP_LEVELS = [
 
 ```text
 luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.11.1
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.12.0
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
 ├── htdocs/luci-static/resources/
@@ -716,8 +777,8 @@ workflow：`.github/workflows/build-openwrt.yml`
 
 | 目标系统 | 包格式 | 架构 | 产物示例 |
 |:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.11.1-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.11.1_x86_64.ipk` |
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.12.0-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.12.0_x86_64.ipk` |
 
 **触发方式**
 
@@ -728,7 +789,7 @@ workflow：`.github/workflows/build-openwrt.yml`
 **每次编译成功后自动发布 Release**
 
 - 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.11.1`）  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.12.0`）  
 - 同名 Release 先删后建；资产带架构前缀，避免同名冲突
 
 交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。
