@@ -568,125 +568,217 @@
 .mt5700-gauge-poor { border-color: rgba(249, 115, 22, 0.42); }
 .mt5700-gauge-bad  { border-color: rgba(200, 61, 85, 0.42); }
 
-/* ---------- 信号总评横幅 ---------- */
+/* ---------- 网络能力总评横幅（单行横向布局，参考设计稿） ---------- */
+/*
+ * PC 上整条一行放全：[状态图标] [摘要] [四指标卡] [能力详情]
+ * 窄屏按 1180 / 900 / 520 三档回流。
+ */
 .mt5700-verdict {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: start;
-  /* row-gap 加大到 md：标题块 / chip 组 / 能力组 / 提示条之间都有明确分隔 */
-  gap: var(--mt5700-space-md) var(--mt5700-space-md);
-  padding: var(--mt5700-space-md) var(--mt5700-space-lg);
+  display: flex;
+  align-items: center;
+  /* wrap 必须有：capnote 用 flex-basis:100% 落到独立一行，否则会叠在指标区上 */
+  flex-wrap: wrap;
+  gap: 15px;
+  min-height: 86px;
+  padding: 10px 15px;
   margin-bottom: var(--mt5700-space-md);
   background: var(--mt5700-glass-bg);
   backdrop-filter: var(--mt5700-glass);
   -webkit-backdrop-filter: var(--mt5700-glass);
   border: 1px solid var(--mt5700-border);
-  border-left-width: 3px;
-  border-radius: var(--mt5700-radius-md);
+  border-left: 3px solid var(--mt5700-verdict-accent, #10a56a);
+  border-radius: 13px;
   box-shadow: var(--mt5700-sh-1);
 }
 
-.mt5700-verdict-dot {
-  width: 10px;
-  height: 10px;
-  margin-top: 5px;
-  border-radius: var(--mt5700-radius-full);
-  background: var(--mt5700-text-muted);
+/* 1) 最左：总状态图标 */
+.mt5700-verdict-status {
+  flex: 0 0 31px;
+  width: 31px;
+  color: var(--mt5700-verdict-accent, #10a56a);
 }
 
-.mt5700-verdict-text { min-width: 0; }
+.mt5700-verdict-status svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+/* 外圈淡环 + 内实心圆（呼吸） */
+.mt5700-verdict-status .mt5700-status-halo { opacity: 0.16; }
+.mt5700-verdict-status .mt5700-verdict-tower { fill: currentColor; stroke: none; }
+
+/* 2) 摘要块：标题 + 描述 */
+/*
+ * 参考稿写死 width:205px，但那是按英文/短句的短描述设计的。
+ * 中文描述实测需 221px，套 205px 会被截尾（「…适合看高清视频及大文件下…」）。
+ * 实机卡片宽 1596px、指标区之外仍有富余，因此给描述**按可用宽度自适应**：
+ *   宽屏（>=1400px）放足 340px，中文整句完整可读；
+ *   中等宽度（>=1100px）退到 240px，容得下 10px 中文整句；
+ *   更窄时才逐级收紧，由浏览器省略号收尾（布局不破）。
+ */
+.mt5700-verdict-summary {
+  flex: 0 1 auto;
+  width: 205px;
+  min-width: 165px;
+  max-width: 340px;
+}
 
 .mt5700-verdict-title {
-  font-size: var(--mt5700-font-size-base);
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--mt5700-text);
-  line-height: 1.5;
+  line-height: 1.35;
   margin: 0;
 }
 
-/*
- * 说明文字与标题拉开明确间距，避免两者视觉粘连成一坨。
- * 原 margin-top:3px 过小，长标题换行后与说明几乎贴在一起。
- */
 .mt5700-verdict-advice {
-  margin-top: var(--mt5700-space-sm);
-  font-size: var(--mt5700-font-size-xs);
-  line-height: 1.7;
-  color: var(--mt5700-text-secondary);
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--mt5700-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/*
- * chip 组与上方文字块之间留出呼吸空间。
- * 原来 detail 直接接在 text 下方，gap 只有 8px，且 chip 紧贴描述行。
- */
-.mt5700-verdict-detail {
-  grid-column: 1 / -1;
+/* 宽屏（>=1400px）允许描述铺到 340px，让中文句子完整可读 */
+@media (min-width: 1400px) {
+  .mt5700-verdict-summary { width: 340px; max-width: 340px; }
+}
+
+/* 中等宽度（1100-1399px）：退到 240px，刚好容下 10px 中文整句（实测 221px） */
+@media (min-width: 1100px) and (max-width: 1399px) {
+  .mt5700-verdict-summary { width: 240px; max-width: 240px; }
+}
+
+/* 中窄屏（901-1099px）：160px 起省略号收尾，此时指标区仍需保证 4×75px */
+@media (min-width: 901px) and (max-width: 1099px) {
+  .mt5700-verdict-summary { width: 168px; min-width: 168px; max-width: 168px; }
+}
+
+/* 3) 四项信号指标：带边框小卡，四列等宽 */
+.mt5700-verdict-metrics {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(75px, 1fr));
+  gap: 6px;
+}
+
+.mt5700-verdict-metric {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--mt5700-space-sm);
-  margin-top: 2px;
-}
-
-.mt5700-verdict-chip {
-  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 9px;
-  font-size: 11px;
-  border-radius: var(--mt5700-radius-full);
-  background: rgba(127, 127, 127, 0.09);
-  color: var(--mt5700-text-secondary);
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--mt5700-verdict-line, #e1e9ee);
+  border-radius: 9px;
+  background: var(--mt5700-verdict-metric-bg, #fbfdfe);
 }
 
-.mt5700-verdict-chip-name { color: var(--mt5700-text-muted); }
-.mt5700-verdict-chip-level { font-weight: 600; }
-
-.mt5700-verdict-chip-worst {
-  box-shadow: inset 0 0 0 1px currentColor;
+.mt5700-verdict-metricicon {
+  flex: 0 0 23px;
+  width: 23px;
+  height: 23px;
+  display: inline-flex;
 }
 
-/* 档位配色（左侧色条 + 圆点 + 徽标） */
-.mt5700-verdict-exc  { border-left-color: #0f9d63; }
-.mt5700-verdict-exc  .mt5700-verdict-dot { background: #0f9d63; }
-.mt5700-verdict-exc  .mt5700-verdict-chip-exc .mt5700-verdict-chip-level { color: #0d9e6e; }
+.mt5700-verdict-metricicon svg {
+  display: block;
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: var(--mt5700-verdict-accent, #10a56a);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
-.mt5700-verdict-good { border-left-color: #06b6d4; }
-.mt5700-verdict-good .mt5700-verdict-dot { background: #06b6d4; }
-.mt5700-verdict-good .mt5700-verdict-chip-good .mt5700-verdict-chip-level { color: #0891b2; }
+.mt5700-verdict-metricbox {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 
-.mt5700-verdict-fair { border-left-color: #f59e0b; }
-.mt5700-verdict-fair .mt5700-verdict-dot { background: #f59e0b; }
-.mt5700-verdict-fair .mt5700-verdict-chip-fair .mt5700-verdict-chip-level { color: #b45309; }
+.mt5700-verdict-metricname {
+  font-size: 9px;
+  color: var(--mt5700-verdict-label, #93a3af);
+  white-space: nowrap;
+  line-height: 1.3;
+}
 
-.mt5700-verdict-poor { border-left-color: #f97316; }
-.mt5700-verdict-poor .mt5700-verdict-dot { background: #f97316; }
-.mt5700-verdict-poor .mt5700-verdict-chip-poor .mt5700-verdict-chip-level { color: #c2410c; }
+.mt5700-verdict-metricval {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mt5700-verdict-accent, #10a56a);
+  white-space: nowrap;
+  line-height: 1.3;
+}
 
-.mt5700-verdict-bad  { border-left-color: #c83d55; }
-.mt5700-verdict-bad  .mt5700-verdict-dot { background: #c83d55; }
-.mt5700-verdict-bad  .mt5700-verdict-chip-bad .mt5700-verdict-chip-level { color: #b02b45; }
+/* 被拉低总评的那一项：描边强调 */
+.mt5700-verdict-metric-worst {
+  border-color: var(--mt5700-verdict-accent, #10a56a);
+  box-shadow: inset 0 0 0 1px var(--mt5700-verdict-accent, #10a56a);
+}
 
-.mt5700-verdict-empty { border-left-color: var(--mt5700-border); }
-
-.mt5700-verdict-chip-exc .mt5700-verdict-chip-level,
-.mt5700-verdict-chip-good .mt5700-verdict-chip-level,
-.mt5700-verdict-chip-fair .mt5700-verdict-chip-level,
-.mt5700-verdict-chip-poor .mt5700-verdict-chip-level,
-.mt5700-verdict-chip-bad .mt5700-verdict-chip-level { font-weight: 600; }
-
-/* ---------- 承载能力项（制式 / 频段 / 带宽） ---------- */
-/* 与信号项分区：信号回答「稳不稳」，能力回答「快不快」。
-   用一条细分隔线把两组 chip 区分开，避免用户把它们混成一个指标池 */
+/* 4) 右侧能力详情：竖线分隔的三列 */
 .mt5700-verdict-cap {
-  padding-top: var(--mt5700-space-sm);
-  border-top: 1px dashed var(--mt5700-border);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
+.mt5700-verdict-capitem {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 3px 9px;
+  border-left: 1px solid var(--mt5700-verdict-divider, #e7edf1);
+}
+
+.mt5700-verdict-capitem:first-child { border-left: 0; }
+
+.mt5700-verdict-capname {
+  display: block;
+  font-size: 9px;
+  color: var(--mt5700-verdict-label, #93a3af);
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.mt5700-verdict-capval {
+  display: block;
+  margin-top: 2px;
+  max-width: 115px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mt5700-verdict-accent, #10a56a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+/* 唯一短板：淡底色强调 */
+.mt5700-verdict-capitem-worst {
+  background: var(--mt5700-verdict-worst-bg, rgba(16, 165, 106, 0.08));
+  border-radius: 7px;
+}
+
+/* 5) 关键说明条：被能力维度拉低时显示，靠 flex-basis:100% 独占一行 */
 .mt5700-verdict-capnote {
-  grid-column: 1 / -1;
+  flex: 0 0 100%;
+  width: 100%;
   display: none;
-  margin-top: var(--mt5700-space-sm);
+  order: 99;
+  margin-top: 0;
   padding: var(--mt5700-space-sm) var(--mt5700-space-md);
   font-size: var(--mt5700-font-size-xs);
   line-height: 1.6;
@@ -694,10 +786,109 @@
   background: rgba(245, 158, 11, 0.08);
   border-left: 2px solid rgba(245, 158, 11, 0.55);
   border-radius: var(--mt5700-radius-sm);
+  /* 换行后不再受 align-items:center 影响，自身左对齐 */
+  align-self: stretch;
 }
 
 /* 仅当结论被能力维度拉低时才显示，否则不占版面 */
 .mt5700-verdict-capnote-on { display: block; }
+
+/*
+ * 档位色盘：整条横幅的强调色由档位驱动，图标/数值/左边条同步取色。
+ * 一个变量管全部，避免每个子元素各写一套颜色。
+ */
+.mt5700-verdict-exc  { --mt5700-verdict-accent: #10a56a; --mt5700-verdict-worst-bg: rgba(16, 165, 106, 0.09); }
+.mt5700-verdict-good { --mt5700-verdict-accent: #5c9e35; --mt5700-verdict-worst-bg: rgba(92, 158, 53, 0.09); }
+.mt5700-verdict-fair { --mt5700-verdict-accent: #d39425; --mt5700-verdict-worst-bg: rgba(211, 148, 37, 0.11); }
+.mt5700-verdict-poor { --mt5700-verdict-accent: #d95b51; --mt5700-verdict-worst-bg: rgba(217, 91, 81, 0.1); }
+.mt5700-verdict-bad  { --mt5700-verdict-accent: #b02b45; --mt5700-verdict-worst-bg: rgba(176, 43, 69, 0.1); }
+.mt5700-verdict-empty { --mt5700-verdict-accent: #8ba3b6; }
+
+/* ---------- 图标动效（与参考稿一致，全部由 CSS 驱动） ---------- */
+.mt5700-verdict-metricicon .mt5700-bar {
+  transform-origin: center bottom;
+  transition: opacity 0.35s, transform 0.35s;
+  fill: currentColor;
+  stroke: none;
+  animation: mt5700-bar-pulse 1.5s ease-in-out infinite;
+}
+
+.mt5700-verdict-metricicon .mt5700-bar:nth-child(2) { animation-delay: 0.12s; }
+.mt5700-verdict-metricicon .mt5700-bar:nth-child(3) { animation-delay: 0.24s; }
+.mt5700-verdict-metricicon .mt5700-bar:nth-child(4) { animation-delay: 0.36s; }
+
+/* 按档位点亮柱数：4 档 4 根，最差 1 根 */
+.mt5700-verdict-metric[data-bars="1"] .mt5700-bar:nth-child(n+2),
+.mt5700-verdict-metric[data-bars="2"] .mt5700-bar:nth-child(n+3),
+.mt5700-verdict-metric[data-bars="3"] .mt5700-bar:nth-child(4) { opacity: 0.14; }
+
+.mt5700-verdict-metricicon .mt5700-wave {
+  stroke-dasharray: 5 3;
+  animation: mt5700-wave 1.4s linear infinite;
+}
+
+.mt5700-verdict-metricicon .mt5700-ring {
+  transform-origin: 12px 12px;
+  animation: mt5700-ring 2.1s ease-out infinite;
+}
+
+.mt5700-verdict-metricicon .mt5700-ring-r2 { animation-delay: 0.45s; }
+
+.mt5700-verdict-metricicon .mt5700-dot { fill: currentColor; stroke: none; }
+
+.mt5700-verdict-metricicon .mt5700-sweep {
+  transform-origin: 12px 12px;
+  animation: mt5700-sweep 2s linear infinite;
+}
+
+.mt5700-verdict-metricicon .mt5700-check { animation: mt5700-check 1.4s ease-in-out infinite; }
+.mt5700-verdict-status .mt5700-verdict-tower { animation: mt5700-tower 1.7s ease-in-out infinite; }
+.mt5700-verdict-capicon .mt5700-band-pulse { animation: mt5700-pulse 1.2s ease-in-out infinite; }
+
+@keyframes mt5700-bar-pulse { 50% { transform: scaleY(1.08); } }
+@keyframes mt5700-wave { to { stroke-dashoffset: -8; } }
+@keyframes mt5700-ring {
+  0% { opacity: 0.55; transform: scale(0.72); }
+  75%, 100% { opacity: 0; transform: scale(1.25); }
+}
+@keyframes mt5700-sweep { to { transform: rotate(360deg); } }
+@keyframes mt5700-check { 50% { opacity: 0.35; } }
+@keyframes mt5700-tower { 50% { transform: translateY(-1px); } }
+@keyframes mt5700-pulse { 50% { opacity: 0.35; } }
+
+/* ---------- 响应式回流 ---------- */
+@media (max-width: 1180px) {
+  .mt5700-verdict-cap { display: none; }
+}
+
+@media (max-width: 900px) {
+  .mt5700-verdict { gap: 9px; padding: 9px 11px; }
+  .mt5700-verdict-summary { flex-basis: 155px; width: 155px; min-width: 125px; }
+  .mt5700-verdict-metrics { grid-template-columns: repeat(2, minmax(70px, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .mt5700-verdict { gap: 7px; padding: 8px; min-height: 78px; }
+  .mt5700-verdict-status { flex-basis: 25px; width: 25px; }
+  .mt5700-verdict-summary { flex-basis: 100px; width: 100px; min-width: 100px; }
+  .mt5700-verdict-title { font-size: 12px; }
+  .mt5700-verdict-advice {
+    font-size: 8px;
+    white-space: normal;
+    line-height: 1.3;
+    max-height: 22px;
+  }
+  .mt5700-verdict-metric { padding: 4px 5px; gap: 5px; }
+  .mt5700-verdict-metricicon,
+  .mt5700-verdict-metricicon svg { flex-basis: 18px; width: 18px; height: 18px; }
+  .mt5700-verdict-metricname { font-size: 8px; }
+  .mt5700-verdict-metricval { font-size: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt5700-verdict-metricicon *,
+  .mt5700-verdict-status * { animation: none !important; transition: none !important; }
+}
 
 .mt5700-gauge-caption.exc { background: rgba(15, 157, 99, 0.14); color: #0d9e6e; }
 .mt5700-gauge-caption.good { background: rgba(6, 182, 212, 0.14); color: #0891b2; }
@@ -712,13 +903,16 @@
   .mt5700-gauge-caption.poor { color: #fb923c; }
   .mt5700-gauge-caption.bad { color: #f87171; }
 
-  .mt5700-verdict-exc  .mt5700-verdict-chip-exc .mt5700-verdict-chip-level { color: #34d399; }
-  .mt5700-verdict-good .mt5700-verdict-chip-good .mt5700-verdict-chip-level { color: #22d3ee; }
-  .mt5700-verdict-fair .mt5700-verdict-chip-fair .mt5700-verdict-chip-level { color: #fbbf24; }
-  .mt5700-verdict-poor .mt5700-verdict-chip-poor .mt5700-verdict-chip-level { color: #fb923c; }
-  .mt5700-verdict-bad  .mt5700-verdict-chip-bad .mt5700-verdict-chip-level { color: #f87171; }
+  .mt5700-verdict-exc  { --mt5700-verdict-accent: #34d399; --mt5700-verdict-worst-bg: rgba(52, 211, 153, 0.12); }
+  .mt5700-verdict-good { --mt5700-verdict-accent: #a3d977; --mt5700-verdict-worst-bg: rgba(163, 217, 119, 0.12); }
+  .mt5700-verdict-fair { --mt5700-verdict-accent: #fbbf24; --mt5700-verdict-worst-bg: rgba(251, 191, 36, 0.13); }
+  .mt5700-verdict-poor { --mt5700-verdict-accent: #fb923c; --mt5700-verdict-worst-bg: rgba(251, 146, 60, 0.13); }
+  .mt5700-verdict-bad  { --mt5700-verdict-accent: #f87171; --mt5700-verdict-worst-bg: rgba(248, 113, 113, 0.13); }
 
-  .mt5700-verdict-chip { background: rgba(224, 237, 247, 0.08); }
+  .mt5700-verdict { --mt5700-verdict-line: #263d52; --mt5700-verdict-divider: #263d52;
+                    --mt5700-verdict-metric-bg: rgba(224, 237, 247, 0.04);
+                    --mt5700-verdict-label: #8ba3b6; }
+
   .mt5700-gauge-exc  { border-color: rgba(52, 211, 153, 0.38); }
   .mt5700-gauge-good { border-color: rgba(34, 211, 238, 0.38); }
   .mt5700-gauge-fair { border-color: rgba(251, 191, 36, 0.42); }
