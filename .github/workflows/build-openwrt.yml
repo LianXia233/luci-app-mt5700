@@ -18,6 +18,14 @@ on:
 permissions:
   contents: write
 
+# 一次发布会同时触发两个 run（main 分支 push + tag push），两者 sha 相同。
+# 并发会导致：① ci-logs-* 分支 force push 撞 ref CAS；
+#            ② release job 对同一 tag 并发 delete+create 互相踩踏。
+# 按 sha 归入同一并发组并排队（不取消），两个 run 串行执行即可消除竞争。
+concurrency:
+  group: build-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -75,6 +83,10 @@ jobs:
       # 把日志提交到 ci-logs-<fmt>-<arch> 分支，便于离线取回。
       - name: Publish build log branch
         if: always()
+        # 日志归档是辅助能力：多个 run 并发向同一 ci-logs-* 分支 force push
+        # 时会被 git ref CAS 拒绝（cannot lock ref ... is at X but expected Y），
+        # 失败不应阻断已生成的产物交付，否则会连带跳过 Release。
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
