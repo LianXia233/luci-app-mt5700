@@ -667,6 +667,9 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(75px, 1fr));
   gap: 6px;
+  /* 与卡片同级居中对齐；参考稿指标区高 53px（23px 图标 + 上下 12px padding + 边框） */
+  align-items: stretch;
+  align-self: center;
 }
 
 .mt5700-verdict-metric {
@@ -674,6 +677,9 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
+  /* 参考稿实测 53px 高：图标 23px 之外由 label+value 两行撑起（9+12+2+行高） */
+  min-height: 53px;
+  box-sizing: border-box;
   padding: 6px 8px;
   border: 1px solid var(--mt5700-verdict-line, #e1e9ee);
   border-radius: 9px;
@@ -804,12 +810,16 @@
 .mt5700-verdict-bad  { --mt5700-verdict-accent: #b02b45; --mt5700-verdict-worst-bg: rgba(176, 43, 69, 0.1); }
 .mt5700-verdict-empty { --mt5700-verdict-accent: #8ba3b6; }
 
-/* ---------- 图标动效（与参考稿一致，全部由 CSS 驱动） ---------- */
+/* ---------- 图标动效（与参考稿逐条对齐，全部由 CSS 驱动） ---------- */
+/*
+ * 参考稿的柱状图是「闭合路径 + stroke 描边」呈现（.metric svg 统一 fill:none），
+ * 不是实心填充块。此处必须保持 fill:none + stroke 继承，
+ * 否则会渲染成实心矩形，与参考稿的细线格栅观感不符。
+ */
 .mt5700-verdict-metricicon .mt5700-bar {
   transform-origin: center bottom;
   transition: opacity 0.35s, transform 0.35s;
-  fill: currentColor;
-  stroke: none;
+  fill: none;
   animation: mt5700-bar-pulse 1.5s ease-in-out infinite;
 }
 
@@ -817,22 +827,22 @@
 .mt5700-verdict-metricicon .mt5700-bar:nth-child(3) { animation-delay: 0.24s; }
 .mt5700-verdict-metricicon .mt5700-bar:nth-child(4) { animation-delay: 0.36s; }
 
-/* 按档位点亮柱数：4 档 4 根，最差 1 根 */
+/* 按档位点亮柱数：4 档 4 根，最差 1 根（与参考稿 data-bars 规则一致） */
 .mt5700-verdict-metric[data-bars="1"] .mt5700-bar:nth-child(n+2),
 .mt5700-verdict-metric[data-bars="2"] .mt5700-bar:nth-child(n+3),
 .mt5700-verdict-metric[data-bars="3"] .mt5700-bar:nth-child(4) { opacity: 0.14; }
 
-.mt5700-verdict-metricicon .mt5700-wave {
+.mt5700-verdict-metricicon .mt5700-wave-path {
   stroke-dasharray: 5 3;
   animation: mt5700-wave 1.4s linear infinite;
 }
 
-.mt5700-verdict-metricicon .mt5700-ring {
+.mt5700-verdict-metricicon .mt5700-radar-ring {
   transform-origin: 12px 12px;
   animation: mt5700-ring 2.1s ease-out infinite;
 }
 
-.mt5700-verdict-metricicon .mt5700-ring-r2 { animation-delay: 0.45s; }
+.mt5700-verdict-metricicon .mt5700-radar-ring-r2 { animation-delay: 0.45s; }
 
 .mt5700-verdict-metricicon .mt5700-dot { fill: currentColor; stroke: none; }
 
