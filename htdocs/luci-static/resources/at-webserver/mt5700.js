@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.0.2';
+var MT5700_CSS_VERSION = '2.1.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -103,13 +103,41 @@ var Mt5700 = (function () {
 
 	/* ================= 指标卡片 ================= */
 
-	api.metric = function (label, value, color) {
+	api.metric = function (label, value, color, status) {
 		var m = E('div', { 'class': 'mt5700-metric' });
 		m.appendChild(E('div', { 'class': 'mt5700-metric-label' }, label));
 		var v = E('div', { 'class': 'mt5700-metric-value' }, value || '—');
 		if (color) v.classList.add(color);
 		m.appendChild(v);
+		/* status 为可选状态类（如温度 temp-normal），用于整卡背景着色；
+		 * 不传时行为与旧版完全一致，不影响既有调用。 */
+		if (status) m.classList.add(status);
 		return m;
+	};
+
+	/* ================= 温度状态判定 ================= */
+
+	/*
+	 * 模组温度分级（单位 ℃）—— 各芯片独立判定，互不平均：
+	 *   < 70          normal  正常（绿色背景）
+	 *   70 - 84.9     warn    偏高（黄色背景）
+	 *   >= 85         high    过高（红色背景）
+	 * 无效值（null / NaN / 0）返回 null，表示暂无数据，不参与着色。
+	 */
+	api.TEMP_WARN_C = 70;
+	api.TEMP_HIGH_C = 85;
+
+	api.tempLevel = function (value) {
+		if (value == null || isNaN(value) || value <= 0) return null;
+		if (value >= api.TEMP_HIGH_C) return 'high';
+		if (value >= api.TEMP_WARN_C) return 'warn';
+		return 'normal';
+	};
+
+	/* 温度等级 → CSS 状态类名 */
+	api.tempClass = function (value) {
+		var lv = api.tempLevel(value);
+		return lv ? 'temp-' + lv : '';
 	};
 
 	/* ================= 环形仪表 (Circular Gauge) ================= */
