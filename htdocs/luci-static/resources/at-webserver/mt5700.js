@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.7.0';
+var MT5700_CSS_VERSION = '2.8.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -581,25 +581,35 @@ var Mt5700 = (function () {
 	api.levelCaption = function (level) { return GAUGE_CAPTIONS[level] || ''; };
 
 	/*
-	 * 状态图标（描边式，24 视口内绘制）+ 圆形底环。
-	 * 用于横幅最左侧的「总状态」指示，与四项指标的图标区分开。
+	 * 状态图标：外圈淡描边 + 内实心圆（实心圆带脉冲动画）。
+	 * 与参考稿 status svg 完全一致：
+	 *   <circle cx=12 cy=12 r=8 fill=none stroke=currentColor opacity=.16/>
+	 *   <circle class=tower cx=12 cy=12 r=4.5 fill=currentColor/>
 	 */
 	function statusIcon() {
 		var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
-		svg.appendChild(svgEl('circle', { 'class': 'mt5700-status-halo', cx: 12, cy: 12, r: 8, fill: 'none' }));
-		svg.appendChild(svgEl('circle', { 'class': 'mt5700-verdict-tower', cx: 12, cy: 12, r: 4.5 }));
+		svg.appendChild(svgEl('circle', {
+			'class': 'mt5700-status-halo',
+			cx: 12, cy: 12, r: 8, fill: 'none', stroke: 'currentColor', opacity: '0.16'
+		}));
+		svg.appendChild(svgEl('circle', {
+			'class': 'mt5700-verdict-tower',
+			cx: 12, cy: 12, r: 4.5, fill: 'currentColor'
+		}));
 		return svg;
 	}
 
 	/*
-	 * 四项信号指标的图标（描边式），与参考稿一一对应：
-	 *   rsrp → 柱状信号格   rsrq → 虚线波形
-	 *   sinr → 雷达同心环   pct  → 圆圈对勾
-	 * 每项都带各自的动效类，由 CSS 驱动。
+	 * 四项信号指标的图标，与参考稿 mt5700_dynamic_svg_all_states_preview.html 逐条对齐。
+	 * 绘制约定（参照稿 .metric svg）：
+	 *   svg 级：fill:none + stroke:var(--accent) + stroke-width:1.8 + linecap/linejoin:round
+	 *   个别元素自带 fill:currentColor（雷达内点）或 fill:none（描边路径）覆盖
+	 *   rsrp → 4 根闭合柱（闭合路径由 stroke 描出轮廓，实机呈现为实心格）
+	 *   rsrq → 虚线波形   sinr → 雷达同心环 + 内点 + 扫描线   pct → 圆圈对勾
 	 */
 	var SIGNAL_ICONS = {
 		rsrp: function () {
-			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true', 'class': 'mt5700-signal' });
 			[
 				'M4 19h3v-5H4z',
 				'M9 19h3V10H9z',
@@ -612,21 +622,24 @@ var Mt5700 = (function () {
 		},
 		rsrq: function () {
 			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
-			svg.appendChild(svgEl('path', { 'class': 'mt5700-wave', d: 'M3 13c3-7 5 7 9 0s6 7 9 0', fill: 'none' }));
+			svg.appendChild(svgEl('path', {
+				'class': 'mt5700-wave-path',
+				d: 'M3 13c3-7 5 7 9 0s6 7 9 0', fill: 'none'
+			}));
 			return svg;
 		},
 		sinr: function () {
 			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
-			svg.appendChild(svgEl('circle', { 'class': 'mt5700-ring', cx: 12, cy: 12, r: 7, fill: 'none' }));
-			svg.appendChild(svgEl('circle', { 'class': 'mt5700-ring mt5700-ring-r2', cx: 12, cy: 12, r: 4, fill: 'none' }));
-			svg.appendChild(svgEl('circle', { 'class': 'mt5700-dot', cx: 12, cy: 12, r: 2 }));
-			svg.appendChild(svgEl('path', { 'class': 'mt5700-sweep', d: 'M12 12l6-6', fill: 'none' }));
+			svg.appendChild(svgEl('circle', { 'class': 'mt5700-radar-ring', cx: 12, cy: 12, r: 7 }));
+			svg.appendChild(svgEl('circle', { 'class': 'mt5700-radar-ring mt5700-radar-ring-r2', cx: 12, cy: 12, r: 4 }));
+			svg.appendChild(svgEl('circle', { 'class': 'mt5700-dot', cx: 12, cy: 12, r: 2, fill: 'currentColor' }));
+			svg.appendChild(svgEl('path', { 'class': 'mt5700-sweep', d: 'M12 12l6-6' }));
 			return svg;
 		},
 		pct: function () {
 			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
-			svg.appendChild(svgEl('circle', { cx: 12, cy: 12, r: 8, fill: 'none' }));
-			svg.appendChild(svgEl('path', { 'class': 'mt5700-check', d: 'm8 12 3 3 5-6', fill: 'none' }));
+			svg.appendChild(svgEl('circle', { cx: 12, cy: 12, r: 8 }));
+			svg.appendChild(svgEl('path', { 'class': 'mt5700-check', d: 'm8 12 3 3 5-6' }));
 			return svg;
 		}
 	};

@@ -5,6 +5,74 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.11.1] - 2026-09-13
+
+本版**只修指标图标的绘制方式与指标卡几何**，不改任何评估逻辑与阈值。
+四张环形仪表盘（RSRP / RSRQ / SINR / 综合百分比）**仍完全未动**，
+已用 7/7 硬断言复核（4 张 / `viewBox 0 0 100 100` / 每张 2 个 `circle` /
+数值 `-63dBm, -10dB, 29dB, 100%` / 单位 / 档位说明 全部在）。
+
+### 修复 - 柱状信号图标被渲染成实心块（核心问题）
+
+设计稿 `.metric svg` 统一 `fill:none` + `stroke:var(--accent)`，
+柱状图是「闭合路径 + stroke 描边」呈现的**细线格栅**。
+但原 CSS 给 `.mt5700-bar` 写了 `fill:currentColor; stroke:none`，
+把它变成了**实心矩形块**，与设计稿观感完全不同。
+
+修复：改回 `fill:none`，描边继承 `svg` 级 `stroke` 与 `stroke-width:1.8`。
+
+同视口同探针实测对拍：
+
+| | 尺寸 | `svg.fill` | `bar.fill` | `bar.stroke` |
+|:--|:--|:--|:--|:--|
+| 设计稿 | 153×53 | `none` | `none` | `rgb(16,165,106)` |
+| 实机改前 | — | `none` | `currentColor` | `none` |
+| 实机改后 | 223×53 | `none` | `none` | `rgb(16,165,106)` |
+
+### 改进 - 图标类名与设计稿对齐，消除语义歧义
+
+| 原类名 | 新类名 | 对应设计稿 |
+|:--|:--|:--|
+| `.mt5700-wave` | `.mt5700-wave-path` | `.wave-path` |
+| `.mt5700-ring` | `.mt5700-radar-ring` | `.radar-ring` |
+
+避免与全局令牌 `--mt5700-ring`（焦点环变量）在语义上混淆。
+JS 侧 SVG 类名与 CSS 侧选择器同步更新，两侧严格一致。
+
+### 修复 - 状态图标与雷达内点补全 fill 语义
+
+`status` 外圈补 `stroke` + `opacity=0.16`（原仅靠 CSS `opacity`），
+内圆补 `fill=currentColor`；雷达内点补 `fill=currentColor`。
+使 DOM 层面即自洽，不依赖 CSS 兜底也能正确渲染。
+
+### 修复 - 指标卡高度对齐设计稿 53px
+
+设计稿实测指标卡 **53px** 高（23px 图标之外由 label `9px` + value `12px`
+两行撑起），实机改前仅 **43px**，视觉上比设计稿矮一截、与左侧摘要块不协调。
+
+修复：`.mt5700-verdict-metric` 加 `min-height:53px` + `box-sizing:border-box`，
+网格加 `align-items:stretch` + `align-self:center`。实测改后 `223×53`。
+
+### 改进 - 校验断言改用「垂直中心对齐」判据
+
+`align-items:center` 下各段高度天然不同（status 24 / summary 38 / metrics 53），
+`top` 必然有差异（实测 `[460, 452, 445, 454]`，跨度 15px）。
+原判据用 `top` 跨度 < 12px，会在卡片变高后**误报**。
+改为比较各段**垂直中心**，容差 3px，语义更准确。
+
+### 验证
+
+- 描述性对拍（同视口同探针，设计稿 vs 实机）逐项一致：
+  指标卡高度 `53 vs 53`、柱状 `fill` `none vs none`、
+  柱状 `stroke` `rgb(16,165,106) vs rgb(16,165,106)`、
+  雷达环 `fill/stroke` `none/绿 vs none/绿`、
+  四指标动画数 `[4,1,3,1] vs [4,1,3,1]`、能力竖线 `[0,1,1] vs [0,1,1]`
+- 单行布局断言 **18/18 通过**（1920 / 1440 / 1200 / 1024 / 900 / 768 / 520 / 390）
+- 八档视口横向溢出：**全部 0**
+- 四圆环硬复核 **7/7 通过**
+- 全站 12 页回归通过（零 JS 报错、零 4xx/5xx）
+- 实机 SHA256 与本地逐字节一致（4 个前端文件）
+
 ## [1.11.0] - 2026-09-13
 
 本版**只改「网络能力」指示器的排版、字体与文档**，不改任何评估逻辑与阈值。

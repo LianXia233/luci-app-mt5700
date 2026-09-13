@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.11.0**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.11.1**
 
 | | |
 |:--|:--|
@@ -35,14 +35,14 @@
 ```sh
 # 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.11.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.11.1-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.11.0_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.11.1_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -64,7 +64,7 @@ ls -l /usr/bin/at-webserver-rust
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
-> **v1.11.0 说明**：本版只改「网络能力」指示器的排版与字体，**不改任何评估逻辑与阈值**，
+> **v1.11.1 说明**：本版只改「网络能力」指示器的排版与字体，**不改任何评估逻辑与阈值**，
 > 四张环形仪表盘（RSRP / RSRQ / SINR / 综合百分比）**样式完全未动**。
 > 能力项（制式 / 频段 / 带宽）原来与信号项共用同一种 chip 徽标、混在同一条横向流里，
 > 容易被读成同一个指标池，且 11px 徽标在宽屏下被大段空白撑开。
@@ -425,7 +425,7 @@ LTE 单载波物理带宽上限就是 20MHz（3GPP 36.101：1.4/3/5/10/15/20MHz�
 
 ### 布局自适应：页面宽度、指标网格与卡片高度
 
-v1.11.0 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
+v1.11.1 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
 
 #### 页面容器
 
@@ -508,12 +508,20 @@ v1.9.0 及以前的实际故障：
 | 指标 | 图标 | 几何 |
 |:--|:--|:--|
 | 信号强度 | 四根信号柱 | `.mt5700-bar` × 4，按 `data-bars` 点亮 |
-| 信号质量 | 虚线波形 | `.mt5700-wave`，`stroke-dashoffset` 流动 |
-| 信噪比 | 雷达同心环 | 两圈 `.mt5700-ring` 扩散 + `.mt5700-sweep` 扫描 |
+| 信号质量 | 虚线波形 | `.mt5700-wave-path`，`stroke-dashoffset` 流动 |
+| 信噪比 | 雷达同心环 | 两圈 `.mt5700-radar-ring` 扩散 + `.mt5700-sweep` 扫描 |
 | 综合 | 圆圈对勾 | `.mt5700-check` 描边勾勒 |
 
 图标统一 `viewBox="0 0 24 24"`、`fill:none`、`stroke-width:1.8`，
 取色走 `currentColor` 继承档位色，**不需要为每个档位准备单独图标**。
+
+> **绘制约定（易踩坑）**：柱状图是「闭合路径 + `stroke` 描边」呈现的**细线格栅**，
+> 因此 `.mt5700-bar` 必须保持 `fill:none`。若误设 `fill:currentColor; stroke:none`，
+> 四根柱会渲染成**实心矩形块**，与设计稿观感明显不同。
+> 仅雷达内点 `.mt5700-dot` 例外，它是实心圆（`fill:currentColor; stroke:none`）。
+
+指标卡高度固定 `53px`（`min-height:53px` + `box-sizing:border-box`），
+与设计稿一致：23px 图标之外由 label `9px` + value `12px` 两行撑起。
 
 #### 能力项：三列细分隔
 
@@ -658,7 +666,7 @@ api.TEMP_LEVELS = [
 
 ```text
 luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.11.0
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.11.1
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
 ├── htdocs/luci-static/resources/
@@ -684,8 +692,8 @@ workflow：`.github/workflows/build-openwrt.yml`
 
 | 目标系统 | 包格式 | 架构 | 产物示例 |
 |:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.11.0-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.11.0_x86_64.ipk` |
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.11.1-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.11.1_x86_64.ipk` |
 
 **触发方式**
 
@@ -696,7 +704,7 @@ workflow：`.github/workflows/build-openwrt.yml`
 **每次编译成功后自动发布 Release**
 
 - 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.11.0`）  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.11.1`）  
 - 同名 Release 先删后建；资产带架构前缀，避免同名冲突
 
 交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。
