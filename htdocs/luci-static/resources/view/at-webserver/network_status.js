@@ -65,7 +65,8 @@ return L.view.extend({
 		flowCard._body.appendChild(flowGrid);
 		body.appendChild(flowCard);
 
-		var tempCard = Mt5700.card('模组温度', '各芯片温度，单位 ℃');
+		var tempBadge = E('span');
+		var tempCard = Mt5700.card('模组温度', '各芯片温度，单位 ℃', tempBadge);
 		var tempGrid = E('div', { 'class': 'mt5700-metrics' });
 		tempCard._body.appendChild(tempGrid);
 		body.appendChild(tempCard);
@@ -136,6 +137,7 @@ return L.view.extend({
 				grid.appendChild(Mt5700.metric(it.label, it.value, it.color));
 			});
 			connBody.appendChild(grid);
+			Mt5700.syncMetrics(grid);
 
 			connBody.appendChild(Mt5700.table(
 				['PLMN', 'LAC / 小区', 'PCI / 频点'],
@@ -160,6 +162,7 @@ return L.view.extend({
 				sigGrid.appendChild(sigGauges.rsrq.el);
 				sigGrid.appendChild(sigGauges.sinr.el);
 				sigGrid.appendChild(sigGauges.pct.el);
+				/* 4 个仪表恰好 4 列满行，无需 data-count 调整 */
 			}
 			sigGauges.rsrp.set(c.rsrp);
 			sigGauges.rsrq.set(c.rsrq);
@@ -353,13 +356,18 @@ return L.view.extend({
 			].forEach(function (it) {
 				flowGrid.appendChild(Mt5700.metric(it.label, it.value));
 			});
+			Mt5700.syncMetrics(flowGrid);
 		}
 
 		/*
-		 * 模组温度：逐项独立着色。
-		 * 每颗芯片按自身温度落在 正常(<70℃,绿) / 偏高(70-85℃,黄) / 过高(>=85℃,红) 三档，
-		 * 卡片边框再按「最严重」的一项汇总强调，便于一眼定位过热源。
+		 * 模组温度：逐项独立着色（6 档）。
+		 * 每颗芯片按自身温度落在 偏低/温和/正常/偏暖/偏高/过高 之一（深蓝→蓝→绿→黄→橙→红），
+		 * 卡片边框与右上角徽标再按「最严重」的一项汇总，便于一眼定位过热源。
 		 */
+		var TEMP_SEVERITY = { cold: 0, cool: 1, normal: 2, warm: 3, hot: 4, high: 5 };
+		/* 需在卡片级提示的档位（偏暖及以上才算异常信号） */
+		var TEMP_CARD_LEVELS = { warm: 1, hot: 1, high: 1 };
+
 		function renderTemp() {
 			tempGrid.innerHTML = '';
 			var t = state.temps;
@@ -368,11 +376,15 @@ return L.view.extend({
 				{ label: 'MIMO PA', value: t.mimoPa }, { label: 'TCXO', value: t.tcxo },
 				{ label: 'AP1', value: t.ap1 }, { label: 'AP2', value: t.ap2 }, { label: 'Modem1', value: t.modem1 }
 			];
+
 			var worst = null;
+			var worstSev = -1;
+			var maxC = null;
 			items.forEach(function (it) {
 				var lv = Mt5700.tempLevel(it.value);
-				if (lv === 'high') worst = 'high';
-				else if (lv === 'warn' && worst !== 'high') worst = 'warn';
+				var sev = TEMP_SEVERITY[lv];
+				if (sev != null && sev > worstSev) { worstSev = sev; worst = lv; }
+				if (it.value > 0 && (maxC == null || it.value > maxC)) maxC = it.value;
 				tempGrid.appendChild(Mt5700.metric(
 					it.label,
 					it.value ? it.value + ' ℃' : '—',
@@ -380,10 +392,25 @@ return L.view.extend({
 					lv ? 'temp-' + lv : ''
 				));
 			});
-			/* 汇总状态挂到卡片上：temp-has-high / temp-has-warn，无异常则清除 */
-			tempCard.classList.remove('temp-has-high', 'temp-has-warn');
-			if (worst === 'high') tempCard.classList.add('temp-has-high');
-			else if (worst === 'warn') tempCard.classList.add('temp-has-warn');
+
+			/* 卡片级汇总：边框按最严重档位强调（仅偏暖及以上）；低于常温则不提示 */
+			var cardLv = (worst && TEMP_CARD_LEVELS[worst]) ? worst : null;
+			var allCls = Object.keys(TEMP_SEVERITY).map(function (k) { return 'temp-has-' + k; });
+			tempCard.classList.remove.apply(tempCard.classList, allCls);
+			if (cardLv) tempCard.classList.add('temp-has-' + cardLv);
+
+			Mt5700.syncMetrics(tempGrid);
+
+			/* 右上角徽标：显示最高温与对应状态，无数据时不显示 */
+			if (tempBadge) {
+				tempBadge.innerHTML = '';
+				if (maxC != null) {
+					tempBadge.appendChild(Mt5700.badge(
+						'最高 ' + maxC.toFixed(1) + ' ℃ · ' + (Mt5700.tempLabel(maxC) || '—'),
+						'info'
+					));
+				}
+			}
 		}
 
 		function renderDHCP() {
@@ -427,6 +454,7 @@ return L.view.extend({
 			].forEach(function (it) {
 				mcsGrid.appendChild(Mt5700.metric(it.label, it.value));
 			});
+			Mt5700.syncMetrics(mcsGrid);
 		}
 
 		/* ---------- 数据获取 ---------- */
