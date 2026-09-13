@@ -231,13 +231,24 @@ return L.view.extend({
 
 		function renderCarriers() {
 			carrierBox.innerHTML = '';
-			var rows = (state.carriers || []).map(function (c) {
+			var list = state.carriers || [];
+			if (!list.length) {
+				carrierBox.appendChild(E('div', { 'class': 'mt5700-hint' },
+					'未查询到激活载波（^HFREQINFO 无返回）'));
+				renderSecondary();
+				return;
+			}
+			var rows = list.map(function (c, idx) {
 				var kind = c.sysMode || c.kind || '—';
 				var bw = c.bandwidth ? (c.bandwidth / 1000) + ' MHz' : '—';
+				/* 下行中心频率：优先用 ^HFREQINFO 直接给的 dlFreqKHz */
+				var freq = c.dlFreqKHz ? (c.dlFreqKHz / 1000) + ' MHz' : '—';
 				return [
+					idx === 0 ? '主载波' : '辅载波 ' + idx,
 					kind,
 					c.band != null ? AtWs.bandName(kind, c.band) : '—',
 					c.channel || '—',
+					freq,
 					bw,
 					c.rsrp != null ? c.rsrp + ' dBm' : '—',
 					c.rsrq != null ? c.rsrq + ' dB' : '—',
@@ -245,10 +256,18 @@ return L.view.extend({
 				];
 			});
 			carrierBox.appendChild(Mt5700.table(
-				['制式', '频段', '频点', '带宽', 'RSRP', 'RSRQ', 'SINR'],
+				['角色', '制式', '频段', '频点', '下行频率', '带宽', 'RSRP', 'RSRQ', 'SINR'],
 				rows,
 				{ striped: true }
 			));
+			/*
+			 * ^HFREQINFO 只有 1 条记录 = 未做载波聚合，但信号三项仍来自 ^MONSC。
+			 * 此时补一行说明，避免用户把「单载波」误读成「读取失败」。
+			 */
+			if (list.length === 1) {
+				carrierBox.appendChild(E('div', { 'class': 'mt5700-hint' },
+					'当前仅 1 个激活载波（未做载波聚合）。信号三项取自 ^MONSC 主小区，与上方仪表盘同源。'));
+			}
 			renderSecondary();
 		}
 
@@ -732,7 +751,27 @@ return L.view.extend({
 						state.cell.sysMode = serving.sysMode || state.cell.sysMode;
 						state.cell.signalPercent = serving.signalPercent || '';
 					}
-					state.carriers = carriers.map(function (c) {
+					/*
+					 * ^HFREQINFO 只给载波的频点 / 频率 / 带宽，**不含任何信号字段**；
+					 * 信号（RSRP/RSRQ/SINR）来自 ^MONSC 的 serving cell。
+					 * 因此主载波（index 0）的信号三项必须从 serving 回填，
+					 * 否则「载波聚合」表格的 RSRP/RSRQ/SINR 三列恒为「—」，
+					 * 用户看到的就是"信息读取不全"。
+					 *
+					 * 为何不用频点做同小区校验：
+					 *   ^MONSC 的 channel 与 ^HFREQINFO 的 dlFcn 属**不同频点体系**
+					 *   （实测 MONSC=149002、HFREQINFO dlFcn=513000，后者才是
+					 *   2565 MHz 对应的 NR-ARFCN，5kHz 栅格段），直接相等比较必然失败。
+					 * 改用更可靠的守卫：^HFREQINFO 的 n=0 协议上即主载波，
+					 *   仅要求两侧制式一致（NR↔NR 或 LTE↔LTE）即可回填。
+					 */
+					var primaryMode = carriers.length ? String(carriers[0].sysMode || '').toUpperCase() : '';
+					var servingMode = serving && serving.sysMode ? String(serving.sysMode).toUpperCase() : '';
+					var sameRat = !!serving && (!primaryMode || !servingMode || primaryMode === servingMode);
+
+					state.carriers = carriers.map(function (c, idx) {
+						var isPrimary = idx === 0;
+						var canFill = isPrimary && sameRat;
 						return {
 							sysMode: c.sysMode || c.kind || '',
 							band: c.band ? Number(c.band) : null,
@@ -740,7 +779,10 @@ return L.view.extend({
 							bandwidth: c.dlBwKHz || 0,
 							dlFreqKHz: c.dlFreqKHz || 0,
 							ulBwKHz: c.ulBwKHz || 0,
-							pci: null, rsrp: null, rsrq: null, sinr: null
+							pci: canFill && serving.pci != null ? serving.pci : null,
+							rsrp: canFill && serving.rsrp != null ? serving.rsrp : null,
+							rsrq: canFill && serving.rsrq != null ? serving.rsrq : null,
+							sinr: canFill && serving.sinr != null ? serving.sinr : null
 						};
 					});
 					renderSignal();
