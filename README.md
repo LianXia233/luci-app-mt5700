@@ -1,906 +1,142 @@
-# AT WebServer · MT5700M 5G 模组管理
+# luci-app-mt5700
 
-> **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.12.2**
+移远 MT5700M 5G 模组的 OpenWrt LuCI 管理插件。插件包含 LuCI 前端和 Rust
+后端，安装一个软件包即可使用。
 
-| | |
-|:--|:--|
-| **架构** | LuCI → rpcd ucode → Rust (tokio) → 模组 AT |
-| **默认连接** | PCUI 串口 `/dev/ttyUSB1`（网络 TCP 备用） |
-| **打包** | 单包内含页面 + `/usr/bin/at-webserver-rust` |
-| **云编译** | GitHub Actions · x86_64 / aarch64 · apk + ipk |
-| **发布** | 每次编译成功自动上传 [Release](https://github.com/LianXia233/luci-app-mt5700/releases) |
+## 功能
 
----
+插件入口：**移动网络 → 5G 模组管理**。
 
-## 目录
+- 网络状态、网络设置和拨号
+- 全网扫频、定时锁频
+- 模组参数设置和固件升级
+- 短信、USSD、来电和通知
+- AT 调试终端
+- 服务状态和配置管理
 
-- [快速安装](#快速安装)
-- [功能一览](#功能一览)
-- [架构](#架构)
-- [项目结构](#项目结构)
-- [云编译与发布](#云编译与发布)
-- [本地开发与测试](#本地开发与测试)
-- [UCI 配置](#uci-配置)
-- [Rust 后端](#rust-后端)
+后端默认通过 PCUI 串口连接模组（通常为 `/dev/ttyUSB1`），也支持 TCP 连接。
 
----
+## 安装
 
-## 快速安装
+从 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载与设备架构
+匹配的 `luci-app-mt5700` 主包和对应的中文语言包。
 
-从 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载**与目标架构匹配**的主包（约 1.2MB，已含后端）。
-
-### OpenWrt 24.10+（apk）
+### OpenWrt 24.10 及更新版本
 
 ```sh
-# 以 aarch64_cortex-a53 为例
-apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.12.2-r1.apk \
-  ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
+apk add --allow-untrusted ./<arch>-luci-app-mt5700-<version>.apk
+apk add --allow-untrusted ./<arch>-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
-### OpenWrt 23.05（opkg / ipk）
+### OpenWrt 23.05
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.2_aarch64_cortex-a53.ipk
-opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
+opkg install ./<arch>-luci-app-mt5700_<version>_<arch>.ipk
+opkg install ./<arch>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
-### 启动与确认
+安装后在 LuCI 中打开「服务配置」，确认服务已启用并选择正确的连接方式，
+然后点击「保存并应用」。
+
+也可以使用命令行：
 
 ```sh
-uci set at-webserver.config.enabled=1
-uci set at-webserver.config.connection_type=SERIAL   # 默认 PCUI
-uci set at-webserver.config.serial_port=auto         # 优先探测 ttyUSB1
+uci set at-webserver.config.enabled='1'
+uci set at-webserver.config.connection_type='SERIAL'
+uci set at-webserver.config.serial_port='auto'
 uci commit at-webserver
-service at-webserver restart
-
-# 单包自检：后端二进制应存在
-ls -l /usr/bin/at-webserver-rust
+/etc/init.d/at-webserver restart
 ```
 
-浏览器登录 LuCI → **移动网络 → 5G 模组管理**（路径 `admin/modem/5g`），即可看到 12 个页面。
+主包已包含 `/usr/bin/at-webserver-rust`，不需要另行安装后端包。
 
-> **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
-> 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
+## 配置
 
-> 各版本的详细变更记录见 [CHANGELOG](CHANGELOG.md)。
+配置文件为 `/etc/config/at-webserver`，默认配置见
+[`root/etc/config/at-webserver`](root/etc/config/at-webserver)。
 
-### 保存配置
+常用选项：
 
-配置修改采用**暂存式「保存并应用」**，与 LuCI 原生行为一致：
+| 选项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `1` | 是否启用服务 |
+| `connection_type` | `SERIAL` | `SERIAL` 使用串口，`NETWORK` 使用 TCP |
+| `serial_port` | `auto` | 自动探测 AT 串口，也可填写设备路径 |
+| `serial_baudrate` | `115200` | 串口波特率 |
+| `network_host` | `192.168.8.1` | TCP 模组地址 |
+| `network_port` | `20249` | TCP 模组端口 |
+| `autodial_enable` | `1` | 是否启用自动拨号 |
+| `autodial_mode` | `1` | `1` 为 USB 网络接口，`2` 为转网口模式 |
+| `websocket_port` | `8765` | 本地 RPC 端口 |
+| `websocket_auth_key` | 空 | RPC 密钥；留空则不校验 |
 
-- 「服务配置」页：修改任一控件即标记「未保存更改」，点击「保存并应用」后依次执行
-  `uci.changes()` → `uci.save()` → `uci.apply()`；若本来就没有待应用的变更
-  （rpcd 返回 ubus 状态码 5 / NO_DATA），视为已生效，提示「无待处理的变更」
-  而不是误报失败；应用成功后自动重载 at-webserver 服务并回查真实进程状态。
-- 「拨号设置」页：所有写操作（自动拨号、APN、拨号方式、USB 端口模式、网口模式、
-  后置路由、DMZ、PDP 上下文）先暂存，页面底部粘性条提供「撤销更改 / 应用更改」，
-  仅在确认应用后配置才真正写入并生效。
-
-### 网络接口没有 IP / 无法联网
-
-模组显示在线但「网络 → 接口」里 `MT5700M` 拿不到地址，通常是下面两处之一：
+修改配置后执行：
 
 ```sh
-# 1) 接口是否开机自启？autostart 必须为 true
-ifstatus MT5700M | grep -E '"up"|"autostart"'
-uci show network.MT5700M | grep auto      # 期望 auto='1'
-
-# 2) 模组是否开了自动拨号？不开则网口不会下发 DHCP，接口必然没有地址
-printf 'AT^SETAUTODIAL?\r\n' | nc 127.0.0.1 8765
+uci commit at-webserver
+/etc/init.d/at-webserver restart
 ```
 
-自 v1.3.0 起，`/etc/init.d/at-webserver` 的 `ensure_modem_interface()` 会幂等地把接口
-`auto` 置 1 并在等待 `eth2` 就绪后 `ifup`；后端每次连上模组后也会调用
-`ensure_autodial()` 对齐拨号状态（已在目标状态则不重复下发）。两项默认值：
-
-| UCI 键 | 默认 | 含义 |
-|:--|:--|:--|
-| `network.MT5700M.auto` | `1` | 开机自启接口 |
-| `at-webserver.config.autodial_enable` | `1` | 连上模组后确保自动拨号开启 |
-| `at-webserver.config.autodial_mode` | `1` | 1=USB 网络接口，2=转网口模式 |
-
-手动触发一次对齐：
-
-```sh
-/etc/init.d/at-webserver start      # 走完整 start_service + ensure_modem_interface
-logread -e at-webserver | tail -20
-```
-
-### 服务状态怎么看
-
-「服务配置」页顶部的状态标签按以下优先级判定，并附带原因提示：
-
-| 状态 | 颜色 | 含义与处理 |
-|:--|:--|:--|
-| 运行中 | 绿 | procd 实例存活，标签旁附带 PID |
-| 已禁用 | 灰 | UCI `enabled=0`，服务被刻意关闭 |
-| 未安装 | 红 | 找不到 `/usr/bin/at-webserver-rust`，需重装软件包 |
-| 不可执行 | 红 | 二进制缺少执行位，执行 `chmod 0755` |
-| 未注册 | 橙 | 已启用且二进制正常，但 procd 无实例——通常是 `/etc/init.d/at-webserver` 缺失或被 overlay 白化 |
-| 已停止 | 红 | 实例已注册但进程未运行，查日志后重载 |
-
-排查命令：
-
-```sh
-# 服务脚本是否还在？（ROM 里应有，overlay 不得有白化设备）
-ls -l /etc/init.d/at-webserver /rom/etc/init.d/at-webserver
-ls -l /overlay/upper/etc/init.d/at-webserver   # c--------- 0,0 即为白化，需删除该白化节点
-
-# procd 注册状态与进程
-ubus call service list '{"name":"at-webserver"}'
-ps w | grep at-webserver-rust | grep -v grep
-
-# 不经 init 脚本，直接用 ubus 拉起（init 脚本缺失时的应急路径，页面「重载服务」按钮即走此路）
-ubus call service set '{"name":"at-webserver","instances":{"instance1":{
-  "command":["/usr/bin/at-webserver-rust"],"respawn":["3600","5","5"],
-  "stdout":true,"stderr":true}}}'
-
-# 日志
-logread -e at-webserver | tail -30
-```
-
-### AT 终端「命令无响应」
-
-现象：AT 调试终端里 `ATI` 能正常返回，其余命令全部无任何回复（既无结果也无报错）。
-
-根因：后端的命令应答超时（2s）**从进入发送函数就开始计时**，而函数内部要先「等命令通道空闲」→「等 100ms 命令间隔」→「才写入命令等应答」。服务刚启动或模组重连时，`init_modem()` 会连续下发 8 条初始化命令（`AT+CMEE=2`、`AT+CNMI?/=`、`AT+CMGF?/=`、`AT+CLIP=1`、`AT^SETAUTODIAL?/=`）并全程持有通道锁，用户命令的 2 秒预算被排队耗尽，命令根本没写进模组。因此只在该时间窗内的命令会集体静默失败。
-
-`v1.3.1` 起，排队等待改用独立预算（8s），不再挤占应答超时；两类失败也给出不同文案：
-
-| 返回文案 | 含义 | 处理 |
-|:--|:--|:--|
-| 等待空闲通道超时（8s）：模组正忙或正在重连，请稍后重试 | 命令尚未发出，通道被占用 | 等待数秒后重试 |
-| 模组无响应（已等待 2000ms）：`<命令>` | 命令已写入，模组未按时终结 | 检查命令语法与模组状态 |
-| 模组未返回内容：`<命令>` | 模组直接回空行 | 确认模组是否已就绪 |
-
-若仍偶发失败，先确认最近是否有服务重启：
-
-```sh
-logread -e at-webserver | tail -30
-# 观察是否有 init_modem 初始化序列紧随其后
-```
-
-### 签约速率显示异常
-
-现象：「网络状态」页「连接状态」面板与「实时速率」面板的下行/上行速率显示为极小的数值
-（如 `819 bps`），与实际签约带宽（如 100 Mbps 档）明显不符。
-
-根因：同一组速率状态变量被**两种物理单位不同的数据源**共用，而格式化函数只实现了其中一种口径。
-
-| 数据源 | 来源字段 | 物理单位 | 正确换算 |
-|:--|:--|:--|:--|
-| PDCP 实时速率 | `d.rx_rate` / `d.tx_rate` | 字节/秒（÷1024 后为 KiB/s） | ×8 得 bps |
-| 签约速率 | `AT^DSAMBR` 第 2/3 字段 | kbps（本身即比特单位） | ×1000 得 bps |
-
-`AT^DSAMBR` 按手册 16.17 节定义为 `^DSAMBR: <cid>,<DlApnAmbr>,<UlApnAmbr>`，
-`DlApnAmbr` / `UlApnAmbr` 单位均为 **kbps**。实机返回示例：
-
-```
-^DSAMBR: 1,102400,102400,"cmiot5g",5
-```
-
-即下行签约速率 = 102400 kbps = **102.40 Mbps**。原实现先对 kbps 值做了一次 `/1000`
-（把 kbps 误当 bps 降了一档），随后又无条件 `×8`（按字节口径换算），两次错误叠加：
-
-```
-102400 kbps  --(/1000)-->  102.4  --(×8)-->  819.2  -->  显示 "819 bps"
-```
-
-`v1.3.2` 起，速率状态引入显式单位口径字段 `speedUnit`（`'bytes'` / `'kbps'`），
-由赋值方声明单位、格式化函数据此选择换算路径，不再隐式假设；`v1.3.3` 起进一步
-按**面板语义**拆成两组彼此独立的变量，杜绝不同来源共用同一组状态：
-
-| 面板（`h3.at-panel-title`） | 状态变量 | 数据来源 | 单位口径 |
-|:--|:--|:--|:--|
-| 连接状态 | `ambrDown` / `ambrUp` | `AT^DSAMBR` 签约速率 | `kbps`（`×1000`） |
-| 实时速率 | `rtDown` / `rtUp` | OpenWrt 接口统计差分 | `bytes`（`×8`） |
-
-其中「实时速率」自 `v1.3.3` 起**不再下发任何 AT 命令**：原先依赖的 PDCP 速率订阅
-（`^DSFLOW`/PDCP 上报）会持续占用模组 AT 通道、干扰正常业务，改为直接读取
-`/sys/class/net/<dev>/statistics/{rx,tx}_bytes` 做两次采样差分（每秒一次），
-设备名由 `uci get network.MT5700M.device` 自动探测（实机为 `eth2`），取不到时回退
-`eth2`。该读取经新增的 ubus 方法 `mt5700 netrate` 暴露，前端无需 AT 通道。
-
-修复后「连接状态」显示签约速率 `102.40 Mbps`、「实时速率」显示接口实际吞吐
-（实测 `319.35 Kbps` / `238.04 Kbps`，随流量波动），两者互不串扰。
-若后续新增速率来源（如 QoS 协商速率），只需在赋值处声明一次单位归属即可。
-
-> 注：`^DSAMBR` 的第 4 字段（如 `"cmiot5g"`）在手册标准格式中并不存在，属部分固件版本的
-> 扩展字段。前端已加护栏：仅当该字段确实是**带引号的字符串**时才采信为 APN 显示，
-> 若为纯数字则忽略，避免把计数值误显示成 APN。
-
----
-
-## 移动端适配
-
-手机上（<=768px）做了四件事，桌面端（>=769px）分毫不动——
-所有移动规则都包在 `@media (max-width: ...)` 里，并集中追加在
-`mt5700.css` 末尾，不改动任何既有规则。
-
-### 1. 四张环形仪表盘：4 屏 -> 1 屏
-
-原来每行只放 1 张，单卡约 350px 高，四个信号指标要滑 4 屏。
-现改为 **2x2 网格**：圆环 120px -> 78px（320px 极窄屏 68px）、
-卡片内边距与外间距同步收紧、档位胶囊与描述行降档。
-「信号质量」卡片高度 **1425px -> 767px（-46%）**。
-
-### 2. 宽表格：横向拖动 -> 卡片式堆叠
-
-载波聚合表有 9 列，桌面宽 610px，而手机容器只有 288px，
-右侧 RSRP / RSRQ / SINR 三列**完全看不到**，必须横向拖动。
-
-现在 <=600px 时表格转为**卡片式堆叠**：隐藏表头，每行成为一张小卡，
-每个单元格用 `::before` 显示自己的列名（列名由 JS 写入 `data-label`）。
-9 列全部可见，**表宽 610px -> 294px，零横向溢出**。
-
-> 只有两列的「键值表」（IP 与 DNS / 连接诊断）**不堆叠**——
-> 堆叠会把每项拆成上下两行，项数一多反而更高（实测「IP 与 DNS」
-> 一度从 871px 涨到 1023px）。这类表改走 `.mt5700-table-kv`
-> 的「标签左 / 值右」紧凑分栏行，实测回落到 **599px**。
-
-### 3. 文案与数值不再截断
-
-- `.mt5700-metric-value` 原为 `white-space:nowrap` + `ellipsis`，
-  窄屏下长值被裁（实测「64QAM MCS 20 · 1 层」填充率 **1.46**、
-  「2500 MHz (TDD)」**1.34**）。手机端改为允许换行，并进一步压低
-  `len-md/len-lg/len-xl` 的降字号档位。
-- 「网络能力」指示器的指标名与描述原为 **8px**，低于移动端可读下限，
-  统一提到 **11px**，并让描述正常换行。
-- 指标区在手机上改为 **2x2**，避免 4 列挤成 8px 小字。
-
-### 4. 触屏可用性
-
-- 去掉触屏上无意义的 `:hover` 抬升（按下时不再抖动）。
-- 按钮最小高度提到 32px，满足触控热区建议。
-
-### 实测数据（390x844 / 360x800 / 320x720）
-
-| 指标 | 优化前 | 优化后 |
-|:--|--:|--:|
-| 整页高度 | 7501px（约 9 屏） | **5631px（约 7 屏）** |
-| 信号质量卡 | 1425px | **767px** |
-| 连接状态卡 | 1110px | **655px** |
-| 模组温度卡 | 742px | **434px** |
-| 流量统计卡 | 630px | **333px** |
-| IP 与 DNS 卡 | 871px | **599px** |
-| 载波聚合表宽 | 610px（溢出 2.1 倍） | **294px（不溢出）** |
-| 横向溢出 | 0px | **0px** |
-| 内容截断 | 5 处 | **0 处** |
-| JS 报错 | 无 | **无** |
-
-PC 端同一套断言在 1920 / 1600 / 1440 / 1280 / 1200 五档全部通过，
-四张圆环严格保持在**同一行**（垂直中心偏差 <= 3px），
-`viewBox 0 0 100 100`、每张 `2` 个 `circle`、数值与档位齐备。
-
-## 与其他仓库的区别
-
-本项目与 [LianXia233/luci-app-mt5700m](https://github.com/LianXia233/luci-app-mt5700m)
-是**两个彼此独立、互不兼容**的项目。两者虽然都面向移远 MT5700M 系列 5G 模组，
-但包名、配置段、后台进程、安装路径与依赖都不同，**不能互相升级，也不能同时安装**。
-
-> 简单记：包名带 **`m`** 后缀的是 `mt5700m`（UCI 段 `mt5700m`）；
-> 不带后缀的是**本项目**（UCI 段 `at-webserver`）。
-
-### 核心差异一览
-
-| 项目 | **luci-app-mt5700（本项目）** | luci-app-mt5700m |
-|:--|:--|:--|
-| 仓库 | `LianXia233/luci-app-mt5700` | `LianXia233/luci-app-mt5700m` |
-| 包名 | `luci-app-mt5700` | `luci-app-mt5700m` |
-| UCI 配置段 | `/etc/config/at-webserver` | `/etc/config/mt5700m` |
-| 服务 / init.d | `at-webserver` | `mt5700m` 系列 |
-| 主要语言 | JavaScript（LuCI JS + Rust 后端） | TypeScript（React + Semi Design 前端） |
-| 版本号 | `1.12.2`（当前） | `2.4.8-r1` |
-| 许可证 | MIT | Apache-2.0（含 MPL-2.0 的上游组件） |
-| 外部依赖 | 基本无（`LUCI_DEPENDS` 置空） | `ubus-at-daemon`、`sms-tool_q` |
-| 包架构 | 板级架构（内含二进制） | `all` |
-| 前端形态 | LuCI 原生页面（12 页） | LuCI 页面 + `www/5700` 独立 React SPA |
-| 附加路径 | — | `/etc/mt5700m/traffic-history` |
-
-### 为什么互不兼容
-
-1. **包名与配置段不同**：`luci-app-mt5700` / `at-webserver` 与
-   `luci-app-mt5700m` / `mt5700m` 完全是两套命名空间，
-   配置文件、init.d 脚本、uci-defaults 互不认识。
-   从其中一个「升级」到另一个，**已有配置不会迁移，需要重新配置**。
-2. **AT 通道与依赖不同**：本项目自带 Rust 后端、几乎不依赖外部包；
-   `mt5700m` 依赖 `ubus-at-daemon` 与 `sms-tool_q` 提供底层 AT / 短信传输。
-   两者的 AT 通道归属不同，同时安装会**争抢同一个 PCUI 串口**。
-3. **服务进程不同**：一个是 `at-webserver`，另一个是 `mt5700m` 系列服务，
-   监听端口与 ubus 对象均不同。
-4. **流量历史存储位置不同**：`mt5700m` 使用
-   `/etc/mt5700m/traffic-history`，本项目不使用该路径。
-
-### 如何确认自己装的是哪个
-
-```sh
-# 看已安装的包
-opkg list-installed | grep -i mt5700     # ipk（23.05 及更早）
-apk list --installed | grep -i mt5700    # apk（24.10+）
-
-# 看配置段
-ls /etc/config/ | grep -E 'at-webserver|mt5700m'
-
-# 看后台进程
-ps | grep -E 'at-webserver|mt5700m'
-```
-
-若输出含 `at-webserver` → **本项目**；若含 `mt5700m` → **另一个项目**。
-
-### 切换注意事项
-
-- 两个项目**不支持平滑迁移**，切换需先卸载旧包再安装新包。
-- 卸载前建议备份配置：
-  - 本项目：`/etc/config/at-webserver`
-  - mt5700m：`/etc/config/mt5700m`、`/etc/mt5700m/traffic-history`
-- 拨号 / APN / 锁频等参数需要**按新项目的字段重新设置**，
-  配置项名称并不一一对应。
-
-## 功能一览
-
-| 分组 | 页面 |
-|:--|:--|
-| 网络 | 网络状态 · 网络设置 · 拨号设置 · 全网扫频 · 定时锁频 |
-| 模组 | 模组设置 · 模组升级 |
-| 短信 | 短信中心 · 短信设置（含 USSD） |
-| 工具 | AT 调试终端 · 通知日志 · 服务配置 |
-
-原 WebUI 的深层能力均已保留，例如：
-
-- 服务小区 / 辅载波聚合（`^MONSSC` · `^CASCELLINFO`）
-- 网络拒绝原因（`^REJINFO`）实时面板
-- SIM 卡状态（`^SIMSQ`）、温度保护、PDCP 实时速率
-- 定时锁频（夜间/日间）、全网扫频、企业微信通知
-
-短信中心优化：收到的长短信（UDH 拼接短信）按「发件人 + 拼接引用号」自动合并为一条完整消息，
-会话气泡不再拆成多条「片段 X/Y」，并保留原始换行；删除时一并清除所有分段。
-若部分分段丢失，会尽量合并已收到的部分并提示「长短信已合并 N/M 段（部分缺失）」。
-
-### 载波聚合卡片：字段来源与已知限制
-
-5G 页「载波聚合」卡片展示 9 列：**角色 / 制式 / 频段 / 频点 / 下行频率 / 带宽 /
-RSRP / RSRQ / SINR**。其中前 6 列来自 `AT^HFREQINFO`，后 3 列来自 `AT^MONSC`，
-两者的职责边界必须清楚：
-
-| 列 | 来源 | 说明 |
-|:--|:--|:--|
-| 制式 / 频段 / 频点 / 下行频率 / 带宽 | `^HFREQINFO` | 手册 13.16.1；**该指令不返回任何信号字段** |
-| RSRP / RSRQ / SINR | `^MONSC` | 手册 13.9.3；只有主小区（serving）的工程值 |
-
-由此产生两个**设计上的取舍**，不是缺陷：
-
-1. **只有「主载波」行回填信号三项**。辅载波的 RSRP/RSRQ/SINR 显示 `—`，
-   因为 `^MONSC` 不提供辅小区信号（`^MONSSC` / `^CASCELLINFO` 才是辅小区来源，
-   且多数固件下返回受限）。把主小区数值复制到辅载波会造成误导，因此留空。
-2. **同小区判据用「同制式」，不能用「频点相等」**。`^HFREQINFO` 的
-   `dlFcn=513000` 是 NR-ARFCN（5 kHz 栅格，对应 2565 MHz），而 `^MONSC` 的
-   `channel=149002` 属于另一套编号（按 15 kHz 栅格反推为 -3765 MHz，不合理），
-   两者**无法比较**。改用 `sysMode` 相同 + `^HFREQINFO` 第 0 个载波即主载波来判定。
-
-只有 1 个激活载波时，卡片下方会提示「当前仅 1 个激活载波（未做载波聚合）。
-信号三项取自 ^MONSC 主小区，与上方仪表盘同源。」
-
-### 网络接入顺序：从「手拼码串」到「按影响面选择」
-
-模组设置页的「网络系统配置」卡片中，**网络接入顺序**不再要求用户手拼 `080302` 这类制式码串，
-而是提供 7 个卡片式选项，每项都写清对网络连接的实际影响，并附带原始码串角标供排障对照。
-
-| 选项 | 下发码 | 实际影响 |
-|:--|:--|:--|
-| 5G 优先，逐级回落（默认） | `080302` | 有 5G 用 5G；无则自动落 4G，再落 3G |
-| 仅 5G | `08` | 只搜索 5G 网络，搜不到持续重搜 |
-| 4G 优先，可回落 3G | `0302` | 优先驻留 4G；无 4G 落 3G |
-| 仅 4G | `03` | 只搜索 4G 网络，耗电较低 |
-| 3G 优先，可回落 4G | `0203` | 优先驻留 3G；无 3G 落 4G |
-| 仅 3G | `02` | 只搜索 WCDMA |
-| 保持当前设置 | `99` | 不修改接入顺序，只保存本页其它项 |
-
-取值严格限定在 `AT^SYSCFGEX=?` 自描述查询返回的合法制式码
-（`01` GSM / `02` WCDMA / `03` LTE / `08` NR）组合之内 —— 以模组自身报告的取值表为准，
-而非依赖文档或经验猜测。若模组当前值不在预设范围内（历史手工写入的遗留值），
-界面**不会静默改写**，而是显示提示条告知实际值，由用户决定是否修改。
-
-同时明确：`AT^SYSCFGEX` 的 `<acqorder>` 是**多制式组合**，拼接顺序即优先级顺序
-（如 `080302` = NR → LTE → WCDMA），最多支持 6 个制式；`99` 表示「不修改」且**不与其他值组合**。
-
-### 其余字段的通俗化与档位补齐
-
-| 字段 | 说明 | 现界面 |
-|:--|:--|:--|
-| 2G / 3G 频段 | 模组在 2G/3G 下可用的频段范围 | 预设下拉：不修改 / 自动 / 全部频段 / 当前组合 |
-| 漫游 | 是否允许接入非本地运营商网络 | 3 档：允许漫游 / 禁止漫游 / 不修改 |
-| 服务域 | 注册到语音域、数据域还是两者 | 5 档：语音+数据 / 仅数据 / 仅语音 / 不限 / 不修改 |
-| 4G / LTE 频段 | 模组在 4G 下可用的频段范围 | 预设下拉：不修改 / 常用频段 / 全部 LTE 频段 |
-
-频段与 LTE 频段原为十六进制位图手写输入（如 `2000000680380`），
-手写极易出错且前端无法校验，故改为预设档位，避免下发非法值；
-需要查看原始值时，卡片底部「显示原始参数」可展开只读面板。
-
-**服务域互斥约束已显性化**：官方手册规定「设置的模式里含有 L 或 NR，服务域不允许设置为 0 或 3」，
-界面按当前接入顺序**动态禁用**这两项并给出说明，切换接入顺序时实时重算。
-
-### 信号质量：从「四个数字」到「能不能用」
-
-网络状态页的「信号质量」卡片在 4 个环形仪表之上增加三层解读：
-
-- **总评横幅**：把「无线信号」与「承载能力」两类证据汇总成一句结论 + 可执行建议。
-  横幅下方**分两行**列出各维度档位，并**高亮标出是哪一项拖后腿**。
-- **中文主标签 + 英文副标签**：信号强度`RSRP` / 信号质量`RSRQ` / 信噪比`SINR` / 综合信号。
-  普通用户看中文即可理解，专业用户仍能对照 AT 手册。
-- **每档通俗描述**：如「信号很强，网速跑得动」「干扰严重，容易出现卡顿」。
-  另有可折叠的「指标说明」解释各指标含义与参考区间。
-
-#### 综合评估：信号好 ≠ 网速快
-
-只凭信号强弱下结论会明显乐观——**700MHz 上的 LTE 信号满格，与 2.6GHz 上的 5G 信号满格，
-实际吞吐差好几倍**，但四项信号指标可以完全相同。因此评估分两层，**最终结论取更差者**：
-
-```
-第一层（信号档，木桶原理）：RSRP / RSRQ / SINR / 信号百分比
-第二层（能力档，木桶原理）：网络制式 / 频段特性 / 载波带宽
-最终档位 = max(信号档, 能力档)      ← 档位序：exc < good < fair < poor < bad
-```
-
-信号决定「稳不稳」，能力决定「快不快」，任一短板都约束真实体验。
-
-**网络制式档位**（决定代际峰值量级）：
-
-| 制式 | 档位 | 说明 |
-|:--|:--|:--|
-| NR (5G) | 优秀 | Sub-6 单载波 100MHz 可跑数百 Mbps |
-| LTE (4G) | 良好 | 20MHz 典型 100~150Mbps |
-| WCDMA (3G) | 较差 | 仅够轻量上网 |
-| GSM (2G) | 极差 | 无法承载数据业务 |
-
-**频段特性档位**（按**实测下行频率**划分，而非频段号——频段号到频率的映射随 3GPP 版本扩展，
-用频率更稳）：
-
-| 频率区间 | 档位 | 说明 |
-|:--|:--|:--|
-| `< 1000 MHz` | 良好 | 低频：穿透与覆盖好，但频谱窄、带宽受限 |
-| `1000 ~ 6000 MHz` | 优秀 | Sub-6 主力区：n41(2.6G) / n78(3.5G) / n79(4.9G)，覆盖与带宽均衡 |
-| `> 6000 MHz` | 一般 | 毫米波：带宽大但穿透差、覆盖半径小（国内未商用） |
-
-> n78(3.5GHz) 是联通/电信/广电的 5G 核心频段，100MHz 带宽的实际速率**优于**低频段，
-> 因此归入「中频 / 优秀」，不因「频率高」而降档。
-
-**载波带宽档位**（按制式分表，避免用 NR 的尺子量 LTE）：
-
-| 制式 | 带宽 | 档位 |
-|:--|:--|:--|
-| NR | `≥ 80 MHz` | 优秀（接近单载波满配） |
-| NR | `24 ~ 79 MHz` | 良好 |
-| NR | `19 ~ 23 MHz` | 一般 |
-| NR | `< 19 MHz` | 较差 |
-| LTE | `≥ 19 MHz` | 良好（已达 4G 单载波上限） |
-| LTE | `14 ~ 18 MHz` | 一般 |
-| LTE | `< 14 MHz` | 较差 |
-
-LTE 单载波物理带宽上限就是 20MHz（3GPP 36.101：1.4/3/5/10/15/20MHz），
-若沿用 NR 表会把「4G 满配」误判为「带宽不足」。
-
-当结论被能力维度拉低时，横幅下方会出现一条提示，明确指出限制来源：
-
-> 注意：无线信号本身优秀，但「载波带宽」为较差（带宽偏窄，峰值明显受限），实际网速会受此限制。
-
-评估器对**缺失维度自动跳过**（如某制式无带宽上报时不参与汇总），不会因数据不全而误判。
-
-#### 各指标档位阈值
-
-使用**独立阈值**，不共用一套百分比算法：
-
-| 指标 | 优秀 | 良好 | 一般 | 较差 | 极差 |
-|:--|:--|:--|:--|:--|:--|
-| 信号强度 RSRP | `≥ -80` | `≥ -90` | `≥ -100` | `≥ -110` | `< -110` |
-| 信号质量 RSRQ | `≥ -10` | `≥ -15` | `≥ -20` | — | `< -20` |
-| 信噪比 SINR | `≥ 20` | `≥ 13` | `≥ 5` | — | `< 5` |
-| 综合信号 | `≥ 75` | `≥ 50` | `≥ 25` | — | `< 25` |
-
-环形仪表的**弧长量程**按各指标物理可达范围标定（RSRP `-140 ~ -44`、SINR `-10 ~ 30`），
-仅用于视觉刻度；档位判定只看上表阈值。若量程过窄，稍好的信号会一律顶到满圈，
-导致「优秀」与「更优秀」在视觉上无法区分。
-
-四项仪表等高对齐（`.mt5700-gauge` 取 `height: 100%`，标签区与描述行各设固定高度），
-避免文案长短不一导致卡片参差。
-
-#### 数据来源
-
-| 展示内容 | 来源命令 | 备注 |
-|:--|:--|:--|
-| RSRP / RSRQ / SINR / 综合信号 | `AT^MONSC` | 手册 13.9.3；NR 为 11 字段，直接给工程值 |
-| 制式、频段、频点、下行带宽 | `AT^HFREQINFO?` | 手册 13.16.1；**不返回信号字段**，勿混用 |
-| 信号百分比 | 由 RSRP 换算 | `(rsrp+110)/40`，映射到 `-110 ~ -70 dBm` |
-
-> `^HFREQINFO` 的 `<sysmode>` 编码为 `6`=LTE / `7`=NR（手册 13.16.3），
-> 与 `^SYSINFOEX` 的 `6`=LTE / `11`=NR-5GC **不同**，两套编码不可混用。
-
-### 布局自适应：页面宽度、指标网格与卡片高度
-
-v1.12.1 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
-
-#### 页面容器
-
-`.mt5700-page` 采用「铺满 + 超宽收口」策略：
-
-| 条件 | 行为 |
-|:--|:--|
-| `< 1680px` | `width: 100%`，铺满父容器可用宽度 |
-| `>= 1680px` | `max-width: 1760px` + 居中，避免超宽屏行宽过大 |
-
-原实现固定 `max-width: 1400px`，在 1920 视口下先被 `1400px` 限制、再被外层主题
-的 `1280px` 收一道，内容区只剩 1248px，**两侧各空 336px**。
-
-#### 指标网格（`.mt5700-metrics`）
-
-```css
-display: grid;
-grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-grid-auto-rows: 1fr;          /* 同行等高 */
-align-items: stretch;
-```
-
-列数由 `auto-fit` 按容器宽度自动计算，实测各视口：
-
-| 视口 | 列数 × 行数 | 单项宽度 |
-|:--|:--|:--|
-| 1920 | 4 × 1 | 390px |
-| 1440 | 4 × 1 | 270px |
-| 1280 | 4 × 1 | 235px |
-| 1024 | 3 × 2 | 235px |
-| 900 | 2 × 2 | 296px |
-| 768 | 3 × 2 | 216px |
-| 480 | 2 × 2 | 194px |
-| 390 | 1 × 4 | 318px |
-
-仅保留两档小屏兜底（`<=719px` 两列、`<=419px` 单列）与 `2/3` 项时的防拉伸规则。
-
-#### 仪表卡高度
-
-`.mt5700-gauge` 使用 `min-height: 100%` + `box-sizing: border-box`，
-**不用** `height: 100%`。原因：网格行高由 `grid-auto-rows: 1fr` 统一，
-若卡片用 `height: 100%` 而内容高于行高，卡片会溢出网格、压住下方元素。
-
-v1.9.0 及以前的实际故障：
-
-```
-外层容器 1280px → 内容区 1116px → 强制 4 列 → 每列 270px
-仪表卡内容需要 328px 高，网格行高只有 294px  ← 溢出 34px
-→ 溢出的卡片盖住「查看指标说明」按钮
-```
-
-修复后：溢出 `0px`，按钮间隙稳定 `16px`，`elementFromPoint` 命中测试 `CLICKABLE`。
-
-### 网络能力指示器的排版结构
-
-信号质量卡片顶部的总评横幅是一条**单行横向流**，PC 上从左到右依次是：
-
-```
-┌─┬──────────────────┬──────────────────────────────────────────────┬──────────────┐
-│◉│ 网络能力优秀      │ [▮信号强度 优秀][∿信号质量 优秀]              │ 网络制式 5G   │
-│ │ 信号与频段带宽俱佳│ [◎信噪比 优秀]  [✓综合 优秀]                  │ 频段特性 ...  │
-└─┴──────────────────┴──────────────────────────────────────────────┴──────────────┘
-  31px     205~340px                 flex:1（四列网格）                    三列细分隔
-```
-
-| 段 | 类名 | 宽度策略 |
-|:--|:--|:--|
-| 状态图标 | `.mt5700-verdict-status` | 固定 `31px`（外圈淡环 + 内实心圆） |
-| 摘要块 | `.mt5700-verdict-summary` | `205px` 起，随视口放宽至 `340px` |
-| 四指标网格 | `.mt5700-verdict-metrics` | `flex:1`，`repeat(4, minmax(75px,1fr))` |
-| 能力三列 | `.mt5700-verdict-cap` | `flex:0 0 auto`，列间 `border-left` 细竖线 |
-| 底部说明条 | `.mt5700-verdict-capnote` | `flex: 0 0 100%`，独占一行，默认隐藏 |
-
-容器为 `display:flex; flex-wrap:wrap; align-items:center`，
-`--mt5700-verdict-accent` 由档位类统一设置，图标 / 数值 / 左边条全部继承，
-**一个变量管全部取色**。
-
-#### 四项信号指标：23px 描边图标 + 竖排标签值
-
-| 指标 | 图标 | 几何 |
-|:--|:--|:--|
-| 信号强度 | 四根信号柱 | `.mt5700-bar` × 4，按 `data-bars` 点亮 |
-| 信号质量 | 虚线波形 | `.mt5700-wave-path`，`stroke-dashoffset` 流动 |
-| 信噪比 | 雷达同心环 | 两圈 `.mt5700-radar-ring` 扩散 + `.mt5700-sweep` 扫描 |
-| 综合 | 圆圈对勾 | `.mt5700-check` 描边勾勒 |
-
-图标统一 `viewBox="0 0 24 24"`、`fill:none`、`stroke-width:1.8`，
-取色走 `currentColor` 继承档位色，**不需要为每个档位准备单独图标**。
-
-> **绘制约定（易踩坑）**：柱状图是「闭合路径 + `stroke` 描边」呈现的**细线格栅**，
-> 因此 `.mt5700-bar` 必须保持 `fill:none`。若误设 `fill:currentColor; stroke:none`，
-> 四根柱会渲染成**实心矩形块**，与设计稿观感明显不同。
-> 仅雷达内点 `.mt5700-dot` 例外，它是实心圆（`fill:currentColor; stroke:none`）。
-
-指标卡高度固定 `53px`（`min-height:53px` + `box-sizing:border-box`），
-与设计稿一致：23px 图标之外由 label `9px` + value `12px` 两行撑起。
-
-#### 能力项：三列细分隔
-
-| 能力项 | 图标 | 几何 |
-|:--|:--|:--|
-| 网络制式 | 信号塔 | 竖杆 + 两道弧 + 顶点（含 `mt5700-tower` 脉冲动画） |
-| 频段特性 | 频率波形 | 折线尖峰 |
-| 载波带宽 | 双向箭头 | 横线 + 左右箭头 |
-
-标签 `9px` 中性色，值 `12px/700` 继承档位色 + `ellipsis`。
-
-#### 短板高亮：只在唯一短板时点亮
-
-```js
-if (cappedBy && capWorstCount === 1 && LEVEL_ORDER[it.level] === capWorstLevel) {
-    item.classList.add('mt5700-verdict-capitem-worst');
-}
-```
-
-信号指标与能力项同一策略：**总评确实被拉低** 且 **最差档只有一项** 才加高亮，
-四项同为 `exc` 时不会全亮，保留指向性。
-
-#### 悬停可查阈值依据
-
-`note`（如「接近 5G 单载波满配」）写入元素 `title`，不占版面但可查：
-
-```
-title="载波带宽：接近 5G 单载波满配"
-```
-
-#### 底部说明条：两种来源
-
-`flex: 0 0 100%` 让它永远独占一行，默认 `display:none`，仅在两种情况出现：
-
-1. **结论被能力维度拉低** → 点明「信号好 ≠ 网速快」及具体短板
-   （`注意：无线信号本身优秀，但「载波带宽」为一般（…），实际网速会受此限制。`）
-2. **信号本身偏弱** → 给出可操作的排查建议（`VERDICT_TEXT[level].hint`）
-
-#### 描述文案不换行、不截断
-
-摘要区宽度按视口分级，让 10px 中文整句放得下：
-
-| 视口 | 摘要宽度 | 实测填充率 | 是否截断 |
-|:--|:--|:--|:--|
-| `>= 1400px` | `340px` | **1.00** | 否 |
-| `1100–1399px` | `240px` | **1.00** | 否 |
-| `901–1099px` | `168px` | 1.32 | 是（省略号收尾） |
-| `<= 900px` | `155px` | 1.43 | 是（省略号收尾） |
-| `<= 520px` | `100px` | **1.00** | 否（`white-space:normal` 换两行） |
-
-> 作为对比，参考稿在 **1920 / 1440 / 1280 / 1200 / 1024px 全部截断**
-> （固定 205px、填充率恒为 1.073）。本实现把这些宽度的填充率压到 1.00，
-> 整句完整可读；仅在 901–1099px 与 <=900px 这两个真正拥挤的区间
-> 才交给省略号，并由窄屏的 2×2 指标网格让出空间。移动端（<=520px）
-> 改为两行换行显示全部文案。
-
-#### 窄屏回流
-
-| 视口 | 排布 |
-|:--|:--|
-| `>= 1180px` | 单行完整（状态 + 摘要 + 四指标 + 能力三列） |
-| `<= 1180px` | 隐藏能力三列，保信号指标 |
-| `<= 900px` | 四指标转 2×2 网格 |
-| `<= 520px` | 全面紧凑，标题 12px、描述 8px 换行、图标 18px |
-
-实测十档视口（1920 / 1600 / 1440 / 1280 / 1200 / 1024 / 900 / 768 / 520 / 390）
-均无横向溢出，`prefers-reduced-motion` 下全部动画关闭。
-
-### 模组温度按状态动态着色
-
-网络状态页的「模组温度」卡片中，各芯片（Sub3G PA / Sub6G PA / MIMO PA / TCXO /
-AP1 / AP2 / Modem1）按自身温度**逐项独立着色**，共 6 档：
-
-| 温度区间 | 状态 | 背景色 | 含义 |
-|:--|:--|:--|:--|
-| `< 35 ℃` | 偏低 | 深蓝 | 刚上电 / 低温环境 |
-| `35 ~ 52.9 ℃` | 温和 | 蓝色 | 温度适中 |
-| `53 ~ 60.9 ℃` | 正常 | 绿色 | 长期工作舒适区 |
-| `61 ~ 68.9 ℃` | 偏暖 | 黄色 | 需关注 |
-| `69 ~ 76.9 ℃` | 偏高 | 橙色 | 需散热 |
-| `≥ 77 ℃` | 过高 | 红色 | 告警（呼吸光晕） |
-
-阈值按 MT5700 实测区间（各芯片常态 40–50 ℃）校准，使常驻温度落在「温和 / 正常」档，
-异常升温能逐级显现。
-
-判定为逐项独立而非取平均值 —— 平均值会被正常项拉低、掩盖单点过热。
-同时卡片边框按「最严重的一项」汇总强调（`temp-has-warm` / `temp-has-hot` / `temp-has-high`），
-右上角徽标显示「最高 X ℃ · 状态」，便于快速定位过热源。
-无数据（`—`）的芯片保持中性底色，不参与着色。
-
-阈值以阈值表为准，如需调整可改 `mt5700.js` 中的 `api.TEMP_LEVELS`（按 `min` 从高到低匹配）：
-
-```js
-api.TEMP_LEVELS = [
-	{ level: 'high',   min: 77 },   // 过高下限
-	{ level: 'hot',    min: 69 },   // 偏高下限
-	{ level: 'warm',   min: 61 },   // 偏暖下限
-	{ level: 'normal', min: 53 },   // 正常下限
-	{ level: 'cool',   min: 35 },   // 温和下限
-	{ level: 'cold',   min: -Infinity }
-];
-```
-
----
-
-## 架构
+## 工作方式
 
 ```text
-                    ┌─────────────────────────────────────┐
-                    │                LuCI                 │
-                    │   12 个页面 · L.rpc.declare('mt5700')│
-                    └──────────────────┬──────────────────┘
-                                       │  ubus / rpcd 会话 + ACL
-                    ┌──────────────────▼──────────────────┐
-                    │         rpcd + ucode 插件           │
-                    │   mt5700.uc（读 UCI，附 auth_key）   │
-                    └──────────────────┬──────────────────┘
-                                       │  TCP newline-JSON
-                                       │  仅 127.0.0.1:8765
-                    ┌──────────────────▼──────────────────┐
-                    │        Rust at-webserver-rust       │
-                    │  RpcServer · AtClient · Scheduler   │
-                    │  URC 分发 · PDU · 扫频 · 通知       │
-                    └──────────────────┬──────────────────┘
-                                       │
-              ┌────────────────────────┼────────────────────────┐
-              │                        │                        │
-         /dev/ttyUSB1              192.168.8.1:20249            UCI
-            (PCUI)                    (TCP 备用)           at-webserver
+LuCI 页面
+   │ rpcd / ucode
+   ▼
+mt5700.uc
+   │ 本地 TCP newline-JSON
+   ▼
+at-webserver-rust
+   │
+   ├─ PCUI 串口（默认 /dev/ttyUSB1）
+   └─ TCP 模组（默认 192.168.8.1:20249）
 ```
 
-要点：
+后端仅监听回环地址，LuCI 请求通过 rpcd 和 ACL 转发。服务由
+`/etc/init.d/at-webserver` 使用 procd 管理。
 
-- **无 WebSocket 对外端口**：后端只监听回环；页面经 rpcd 代理，依赖 LuCI 登录态 + ACL。
-- **事件**：后端维护事件总线（`raw_data` / `new_sms` / `incoming_call` / `pdcp_data` / `cellscan` / `memory_full` / `urc_data`），前端约 1.5s 轮询 `events(since)`。
-- **命令**：`mt5700.at` 返回 `{success,data,error}`，前端仍串行发送，避免串号。
-- **默认 PCUI**：`connection_type=SERIAL`，串口优先 `/dev/ttyUSB1`；`serial_port=auto` 时自动探测。
+## 开发与测试
 
----
+### Rust 后端
+
+```sh
+cd src/rust
+cargo test
+cargo build --release
+```
+
+### 无硬件测试
+
+```sh
+cd tests/mock-modem
+npm install
+sh run-e2e.sh
+node parse-extra-test.js
+node temp-level-test.js
+```
+
+### JavaScript 语法检查
+
+```sh
+find htdocs -name '*.js' -exec node --check {} \;
+```
+
+完整的 OpenWrt 交叉编译由
+[`.github/workflows/build-openwrt.yml`](.github/workflows/build-openwrt.yml) 执行。
+工作流会构建 apk 和 ipk，并在构建成功后发布 Release。
 
 ## 项目结构
 
 ```text
-luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.12.2
-├── .github/workflows/build-openwrt.yml
-├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
-├── htdocs/luci-static/resources/
-│   ├── at-webserver/                # rpc.js · parse.js · ui.js · mt5700.js/.css · smsEncode.js · at.css
-│   └── view/at-webserver/           # 12 个页面
-├── po/                              # 中文翻译
-├── root/
-│   ├── etc/config/at-webserver      # UCI 默认（SERIAL / ttyUSB1）
-│   ├── etc/init.d/at-webserver      # procd
-│   └── usr/share/rpcd/ucode/mt5700.uc
-├── src/
-│   ├── Makefile                     # 编译并安装 at-webserver-rust 到本包
-│   └── rust/                        # tokio 后端（约 13 个源文件）
-└── tests/mock-modem/                # 无硬件 e2e（mock AT 模组）+ 温度分级单测
+htdocs/                         LuCI 页面、公共 JS 和 CSS
+po/                             翻译文件
+root/etc/config/                UCI 默认配置
+root/etc/init.d/                procd 服务脚本
+root/usr/share/rpcd/            rpcd ACL 和 ucode 接口
+src/rust/                       Rust 后端
+tests/mock-modem/               模拟模组测试
 ```
-
----
-
-## 云编译与发布
-
-workflow：`.github/workflows/build-openwrt.yml`  
-镜像：官方 `openwrt/sdk`
-
-| 目标系统 | 包格式 | 架构 | 产物示例 |
-|:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.12.2-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.12.2_x86_64.ipk` |
-
-**触发方式**
-
-1. push 到 `main`
-2. 打 `v*` 标签（如 `v1.2.0`）
-3. Actions 手动 `Run workflow`
-
-**每次编译成功后自动发布 Release**
-
-- 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.12.2`）  
-- 同名 Release 先删后建；资产带架构前缀，避免同名冲突
-
-交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。
-
----
-
-## 本地开发与测试
-
-### Rust
-
-```sh
-cd src/rust
-cargo test              # PDU 单测 7/7
-cargo build --release
-```
-
-> Windows 上路径若含中文，可能影响 dlltool；建议用纯 ASCII 路径编译。
-
-### 无硬件端到端
-
-```sh
-cd tests/mock-modem
-npm install ws          # 仅测试依赖
-sh run-e2e.sh           # mock 模组 + 真实 Rust + RPC 客户端
-node parse-extra-test.js
-node temp-level-test.js # 模组温度分级（14 条断言）
-```
-
-### 页面语法
-
-```sh
-# 仓库根
-find htdocs -name '*.js' -exec node --check {} \;
-```
-
-### 实机端到端（需可访问模组）
-
-以下脚本位于工作区 `.analysis/`，通过 Playwright 无头浏览器登录实机 LuCI 后跑断言
-（凭据与目标地址写在脚本顶部常量里，不入库）：
-
-| 脚本 | 覆盖面 | 断言数 |
-|:--|:--|:--|
-| `deploy_v19.py` | SFTP 部署 4 个前端文件并 SHA256 回读校验 | 4 项哈希 |
-| `e2e_v19.py` | 字段解析正确性、能力评估、载波表渲染、排版几何对齐、无 JS 错误 | 38 |
-| `e2e_verdict.py` | 「信号好 ≠ 网速快」核心回归：同一份优秀信号配 7 种制式/频段/带宽组合 | 19 |
-| `regress_v19.py` | 全站 12 页零 JS 错误、零 4xx/5xx、页面骨架存在 | 12 页 |
-
-排版对齐全用 `getBoundingClientRect()` 回读真实几何值判定（如要求四卡
-`top/bottom/height` 偏差 `≤ 2px`），不依赖截图目视。
-
----
-
-## UCI 配置
-
-配置文件：`/etc/config/at-webserver`，**单 section `config` + 扁平键**（与 Rust / ucode / 服务配置页一致）。
-
-| 键 | 默认 | 说明 |
-|:--|:--|:--|
-| `enabled` | `1` | 总开关 |
-| `connection_type` | `SERIAL` | `SERIAL`=PCUI 串口；`NETWORK`=TCP 备用 |
-| `serial_port` | `auto` | `auto` 优先探测 ttyUSB1；可填 `/dev/ttyUSB1` |
-| `serial_baudrate` | `115200` | 波特率 |
-| `autodial_enable` | `1` | 连上模组后确保自动拨号开启（关掉则接口拿不到 IP） |
-| `autodial_mode` | `1` | `1`=USB 网络接口，`2`=转网口模式 |
-| `network_host` / `network_port` | `192.168.8.1` / `20249` | 网络通道 |
-| `websocket_port` | `8765` | 后端 RPC 端口（仅回环） |
-| `websocket_auth_key` | 空 | 由 ucode 自动附带；空则不校验密钥 |
-| `notify_*` / `wechat_webhook` | 见默认文件 | 通知 |
-| `schedule_*` | 见默认文件 | 定时锁频 |
-
-改配置后：
-
-```sh
-uci commit at-webserver
-service at-webserver restart
-# 或在 LuCI「服务配置」页点「保存并应用」（会自动 reload）
-```
-
----
-
-## Rust 后端
-
-| 模块 | 职责 |
-|:--|:--|
-| `main.rs` | 装配与优雅退出 |
-| `rpcserver.rs` | TCP RPC、伪命令、事件总线、扫频 |
-| `atclient.rs` | 命令串行、超时、URC 分流、连上模组后对齐自动拨号 |
-| `transport.rs` / `serial_*.rs` | TCP / 串口通道 |
-| `pdu.rs` | SMS PDU 编解码 |
-| `urc.rs` | 来电/短信/信号等上报 |
-| `schedule.rs` / `schedconfig.rs` | 定时锁频 |
-| `notify.rs` | 日志与 WebHook |
-| `config.rs` | UCI 读取 |
-
-依赖：`tokio` · `serde` · `chrono` · `ureq` · `libc` 等。  
-Release：`opt-level=s` + LTO + strip，musl 静态链接，适合嵌入式。
-
----
 
 ## 许可
 
-本项目以 **[MIT License](LICENSE)** 发布，Copyright (c) 2026 LianXia233。
-
-Rust 后端（`src/rust/`）在 `Cargo.toml` 中同样声明 `license = "MIT"`，两层一致。
-
-**MT5700M** 相关 AT 行为以厂商手册为准；本项目在无官方 OpenWrt 包源的前提下提供管理界面与后端。
+[MIT License](LICENSE)
