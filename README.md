@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.9.0**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.10.0**
 
 | | |
 |:--|:--|
@@ -35,14 +35,14 @@
 ```sh
 # 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.9.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.10.0-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.9.0_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.10.0_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -64,6 +64,9 @@ ls -l /usr/bin/at-webserver-rust
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
+> **v1.10.0 说明**：本版只改布局不改功能。修掉指标网格高度溢出压住底部按钮、
+> 大屏两侧留白过大、列数写死不自适应三处缺陷，并理顺信号总评横幅的文字层次。
+>
 > **v1.9.0 说明**：修掉一个**把载波信息整体读错位**的解析缺陷，并重做网络质量评估逻辑。
 > **① 解析修复**：`^HFREQINFO` 是 9 字段（`n,sysmode,band,dl_fcn,dl_freq,dl_bw,ul_fcn,ul_freq,ul_bw`），
 > 旧代码按 8 字段解析导致每列错位一格——载波表「制式」列显示 `0`、「频段」显示 `Band 7`、
@@ -413,6 +416,62 @@ LTE 单载波物理带宽上限就是 20MHz（3GPP 36.101：1.4/3/5/10/15/20MHz�
 > `^HFREQINFO` 的 `<sysmode>` 编码为 `6`=LTE / `7`=NR（手册 13.16.3），
 > 与 `^SYSINFOEX` 的 `6`=LTE / `11`=NR-5GC **不同**，两套编码不可混用。
 
+### 布局自适应：页面宽度、指标网格与卡片高度
+
+v1.10.0 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
+
+#### 页面容器
+
+`.mt5700-page` 采用「铺满 + 超宽收口」策略：
+
+| 条件 | 行为 |
+|:--|:--|
+| `< 1680px` | `width: 100%`，铺满父容器可用宽度 |
+| `>= 1680px` | `max-width: 1760px` + 居中，避免超宽屏行宽过大 |
+
+原实现固定 `max-width: 1400px`，在 1920 视口下先被 `1400px` 限制、再被外层主题
+的 `1280px` 收一道，内容区只剩 1248px，**两侧各空 336px**。
+
+#### 指标网格（`.mt5700-metrics`）
+
+```css
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+grid-auto-rows: 1fr;          /* 同行等高 */
+align-items: stretch;
+```
+
+列数由 `auto-fit` 按容器宽度自动计算，实测各视口：
+
+| 视口 | 列数 × 行数 | 单项宽度 |
+|:--|:--|:--|
+| 1920 | 4 × 1 | 390px |
+| 1440 | 4 × 1 | 270px |
+| 1280 | 4 × 1 | 235px |
+| 1024 | 3 × 2 | 235px |
+| 900 | 2 × 2 | 296px |
+| 768 | 3 × 2 | 216px |
+| 480 | 2 × 2 | 194px |
+| 390 | 1 × 4 | 318px |
+
+仅保留两档小屏兜底（`<=719px` 两列、`<=419px` 单列）与 `2/3` 项时的防拉伸规则。
+
+#### 仪表卡高度
+
+`.mt5700-gauge` 使用 `min-height: 100%` + `box-sizing: border-box`，
+**不用** `height: 100%`。原因：网格行高由 `grid-auto-rows: 1fr` 统一，
+若卡片用 `height: 100%` 而内容高于行高，卡片会溢出网格、压住下方元素。
+
+v1.9.0 及以前的实际故障：
+
+```
+外层容器 1280px → 内容区 1116px → 强制 4 列 → 每列 270px
+仪表卡内容需要 328px 高，网格行高只有 294px  ← 溢出 34px
+→ 溢出的卡片盖住「查看指标说明」按钮
+```
+
+修复后：溢出 `0px`，按钮间隙稳定 `16px`，`elementFromPoint` 命中测试 `CLICKABLE`。
+
 ### 模组温度按状态动态着色
 
 网络状态页的「模组温度」卡片中，各芯片（Sub3G PA / Sub6G PA / MIMO PA / TCXO /
@@ -489,7 +548,7 @@ api.TEMP_LEVELS = [
 
 ```text
 luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.9.0
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.10.0
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
 ├── htdocs/luci-static/resources/
@@ -515,8 +574,8 @@ workflow：`.github/workflows/build-openwrt.yml`
 
 | 目标系统 | 包格式 | 架构 | 产物示例 |
 |:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.9.0-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.9.0_x86_64.ipk` |
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.10.0-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.10.0_x86_64.ipk` |
 
 **触发方式**
 
@@ -527,7 +586,7 @@ workflow：`.github/workflows/build-openwrt.yml`
 **每次编译成功后自动发布 Release**
 
 - 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.9.0`）  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.10.0`）  
 - 同名 Release 先删后建；资产带架构前缀，避免同名冲突
 
 交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。

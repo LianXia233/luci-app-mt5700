@@ -178,10 +178,27 @@
   }
 }
 
-/* ---------- 页面容器 ---------- */
+/*
+ * ---------- 页面容器 ----------
+ * 自适应策略：默认铺满父容器可用宽度（width:100%），
+ * 仅在超宽屏（>=1680px）才用 max-width 收口，避免读长文时行宽过大。
+ * 原实现固定 max-width:1400px，在 1920 视口下被外层主题的 1280px
+ * 容器再约束，导致内容区只有 1248px、两侧各留白 336px。
+ */
 .mt5700-page {
-  max-width: 1400px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* 超宽屏才收口，且上限放宽到 1760px（约 4 列仪表 * 400px + 间距） */
+@media (min-width: 1680px) {
+  .mt5700-page {
+    max-width: 1760px;
+    margin: 0 auto;
+  }
 }
 
 /* 页面主体：纵向弹性布局，统一卡片间距（修复卡片贴叠问题） */
@@ -190,6 +207,7 @@
   flex-direction: column;
   gap: var(--mt5700-space-lg);
   min-width: 0;
+  width: 100%;
 }
 
 .mt5700-page-header {
@@ -363,62 +381,54 @@
 .mt5700-metric-value.warning { color: var(--mt5700-warning); }
 .mt5700-metric-value.danger { color: var(--mt5700-danger); }
 
+/*
+ * 列数自适应：
+ *  - 基础规则用 auto-fit + minmax，列数随容器宽度自动增减，无需 JS 参与。
+ *  - 行高用 grid-auto-rows: 1fr 让同一行内所有网格项等高，
+ *    网格项用 align-items:stretch 撑满行高；仪表卡自身改 min-height 而非
+ *    height:100%，避免「内容高于行高时溢出压住下方元素」。
+ *  - data-count 规则仅在「项数已知且需要精确控制尾行」时兜底。
+ */
 .mt5700-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
   gap: 12px;
 }
 
+/* 网格项一律等高拉伸，禁止子元素把行高撑破 */
+.mt5700-metrics > * {
+  min-width: 0;
+  align-self: stretch;
+}
+
 /*
- * 列数自适应：由 JS 在渲染时写入 data-count（指标项数）。
- * 目标是让尾行尽量填满，避免出现「一行 5 个 + 尾行 2 个」的大片留白。
- * 项数 -> 列数映射取「能整除或余数最大」的方案。
+ * 列数自适应：完全交给 auto-fit + minmax，不再按视口宽度写死列数。
+ *
+ * 原实现按 min-width 媒体查询写死列数（960px 强制 4 列、1500px 强制 5 列），
+ * 后果是列数只与「视口」挂钩、与「容器实际可用宽度」脱钩：
+ * 当外层主题容器只有 1248px 时仍强制 4 列，每列被压到 270px，
+ * 而仪表卡内容更高，行高被撑破 → 溢出压住下方按钮。
+ *
+ * 现在只保留两档小屏兜底（保证手机可用性），其余宽度全部由 auto-fit 计算。
  */
-@media (min-width: 960px) {
-  .mt5700-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  /* 2 项 -> 2 列（半行即可，避免右侧大片空白） */
-  .mt5700-metrics[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  /* 3 项 -> 3 列（满行） */
-  .mt5700-metrics[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* 6 项 -> 3 列 x2 行（最均衡） */
-  .mt5700-metrics[data-count="6"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* 7 项 -> 4 列，尾行 3 个 */
-  .mt5700-metrics[data-count="7"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  /* 8 项 -> 4 列 x2 行（满行） */
-  .mt5700-metrics[data-count="8"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  /* 9 项 -> 3 列 x3 行（满行） */
-  .mt5700-metrics[data-count="9"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* 10 项 -> 5 列 x2 行（满行） */
-  .mt5700-metrics[data-count="10"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  /* 12 项 -> 4 列 x3 行（满行） */
-  .mt5700-metrics[data-count="12"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-
-@media (min-width: 1500px) {
-  .mt5700-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  /* 2 项 -> 2 列 */
-  .mt5700-metrics[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  /* 3 项 -> 3 列（满行） */
-  .mt5700-metrics[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* 6 项 -> 3 列（比 5+1 更均衡） */
-  .mt5700-metrics[data-count="6"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* 7 项 -> 4 列 */
-  .mt5700-metrics[data-count="7"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  /* 8 项 -> 4 列 x2 行（满行） */
-  .mt5700-metrics[data-count="8"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  /* 9 项 -> 3 列 x3 行（满行） */
-  .mt5700-metrics[data-count="9"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* 10 项 -> 5 列 x2 行（满行） */
-  .mt5700-metrics[data-count="10"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-}
-
-/* 窄屏：两列，仍保证可用宽度 */
 @media (max-width: 719px) {
-  .mt5700-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .mt5700-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 419px) {
-  .mt5700-metrics { grid-template-columns: 1fr !important; }
+  .mt5700-metrics { grid-template-columns: 1fr; }
+}
+
+/*
+ * data-count 仅用于「项数少时避免拉伸过宽」这一种情况：
+ * 2 项时若铺满整行，单卡会宽到不协调，限制为最多 2 列即可（本就 2 列）。
+ * 其余项数一律交给 auto-fit，让列数随容器宽度自然增减。
+ */
+@media (min-width: 720px) {
+  .mt5700-metrics[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mt5700-metrics[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* ==========================================================================
@@ -438,8 +448,14 @@
   border-radius: var(--mt5700-radius-lg);
   box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
   transition: transform var(--mt5700-transition-base), box-shadow var(--mt5700-transition-base);
-  /* 四项仪表等高对齐：让标签行、仪表行、档位行、描述行各自处在同一条基线上 */
-  height: 100%;
+  /*
+   * 四项仪表等高对齐：让标签行、仪表行、档位行、描述行各自处在同一条基线上。
+   * 用 min-height 而非 height:100% —— 网格行高由 grid-auto-rows:1fr 统一，
+   * 此处只保证不矮于基准高度；内容多时允许卡片自身撑开，
+   * 由网格的 align-self:stretch 保证同行等高，不会溢出压住下方元素。
+   */
+  min-height: 100%;
+  box-sizing: border-box;
 }
 
 .mt5700-gauge:hover {
@@ -558,8 +574,9 @@
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: start;
-  gap: var(--mt5700-space-sm) var(--mt5700-space-md);
-  padding: var(--mt5700-space-md);
+  /* row-gap 加大到 md：标题块 / chip 组 / 能力组 / 提示条之间都有明确分隔 */
+  gap: var(--mt5700-space-md) var(--mt5700-space-md);
+  padding: var(--mt5700-space-md) var(--mt5700-space-lg);
   margin-bottom: var(--mt5700-space-md);
   background: var(--mt5700-glass-bg);
   backdrop-filter: var(--mt5700-glass);
@@ -584,21 +601,31 @@
   font-size: var(--mt5700-font-size-base);
   font-weight: 600;
   color: var(--mt5700-text);
-  line-height: 1.4;
+  line-height: 1.5;
+  margin: 0;
 }
 
+/*
+ * 说明文字与标题拉开明确间距，避免两者视觉粘连成一坨。
+ * 原 margin-top:3px 过小，长标题换行后与说明几乎贴在一起。
+ */
 .mt5700-verdict-advice {
-  margin-top: 3px;
+  margin-top: var(--mt5700-space-sm);
   font-size: var(--mt5700-font-size-xs);
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--mt5700-text-secondary);
 }
 
+/*
+ * chip 组与上方文字块之间留出呼吸空间。
+ * 原来 detail 直接接在 text 下方，gap 只有 8px，且 chip 紧贴描述行。
+ */
 .mt5700-verdict-detail {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: var(--mt5700-space-sm);
+  margin-top: 2px;
 }
 
 .mt5700-verdict-chip {
