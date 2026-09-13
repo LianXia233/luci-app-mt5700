@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.12.0**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.12.1**
 
 | | |
 |:--|:--|
@@ -35,14 +35,14 @@
 ```sh
 # 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.12.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.12.1-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.0_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.1_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -64,7 +64,7 @@ ls -l /usr/bin/at-webserver-rust
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
-> **v1.12.0 说明**：本版只改「网络能力」指示器的排版与字体，**不改任何评估逻辑与阈值**，
+> **v1.12.1 说明**：本版只改「网络能力」指示器的排版与字体，**不改任何评估逻辑与阈值**，
 > 四张环形仪表盘（RSRP / RSRQ / SINR / 综合百分比）**样式完全未动**。
 > 能力项（制式 / 频段 / 带宽）原来与信号项共用同一种 chip 徽标、混在同一条横向流里，
 > 容易被读成同一个指标池，且 11px 徽标在宽屏下被大段空白撑开。
@@ -330,6 +330,70 @@ PC 端同一套断言在 1920 / 1600 / 1440 / 1280 / 1200 五档全部通过，
 四张圆环严格保持在**同一行**（垂直中心偏差 <= 3px），
 `viewBox 0 0 100 100`、每张 `2` 个 `circle`、数值与档位齐备。
 
+## 与其他仓库的区别
+
+本项目与 [LianXia233/luci-app-mt5700m](https://github.com/LianXia233/luci-app-mt5700m)
+是**两个彼此独立、互不兼容**的项目。两者虽然都面向移远 MT5700M 系列 5G 模组，
+但包名、配置段、后台进程、安装路径与依赖都不同，**不能互相升级，也不能同时安装**。
+
+> 简单记：包名带 **`m`** 后缀的是 `mt5700m`（UCI 段 `mt5700m`）；
+> 不带后缀的是**本项目**（UCI 段 `at-webserver`）。
+
+### 核心差异一览
+
+| 项目 | **luci-app-mt5700（本项目）** | luci-app-mt5700m |
+|:--|:--|:--|
+| 仓库 | `LianXia233/luci-app-mt5700` | `LianXia233/luci-app-mt5700m` |
+| 包名 | `luci-app-mt5700` | `luci-app-mt5700m` |
+| UCI 配置段 | `/etc/config/at-webserver` | `/etc/config/mt5700m` |
+| 服务 / init.d | `at-webserver` | `mt5700m` 系列 |
+| 主要语言 | JavaScript（LuCI JS + Rust 后端） | TypeScript（React + Semi Design 前端） |
+| 版本号 | `1.12.1`（当前） | `2.4.8-r1` |
+| 许可证 | MIT | Apache-2.0（含 MPL-2.0 的上游组件） |
+| 外部依赖 | 基本无（`LUCI_DEPENDS` 置空） | `ubus-at-daemon`、`sms-tool_q` |
+| 包架构 | 板级架构（内含二进制） | `all` |
+| 前端形态 | LuCI 原生页面（12 页） | LuCI 页面 + `www/5700` 独立 React SPA |
+| 附加路径 | — | `/etc/mt5700m/traffic-history` |
+
+### 为什么互不兼容
+
+1. **包名与配置段不同**：`luci-app-mt5700` / `at-webserver` 与
+   `luci-app-mt5700m` / `mt5700m` 完全是两套命名空间，
+   配置文件、init.d 脚本、uci-defaults 互不认识。
+   从其中一个「升级」到另一个，**已有配置不会迁移，需要重新配置**。
+2. **AT 通道与依赖不同**：本项目自带 Rust 后端、几乎不依赖外部包；
+   `mt5700m` 依赖 `ubus-at-daemon` 与 `sms-tool_q` 提供底层 AT / 短信传输。
+   两者的 AT 通道归属不同，同时安装会**争抢同一个 PCUI 串口**。
+3. **服务进程不同**：一个是 `at-webserver`，另一个是 `mt5700m` 系列服务，
+   监听端口与 ubus 对象均不同。
+4. **流量历史存储位置不同**：`mt5700m` 使用
+   `/etc/mt5700m/traffic-history`，本项目不使用该路径。
+
+### 如何确认自己装的是哪个
+
+```sh
+# 看已安装的包
+opkg list-installed | grep -i mt5700     # ipk（23.05 及更早）
+apk list --installed | grep -i mt5700    # apk（24.10+）
+
+# 看配置段
+ls /etc/config/ | grep -E 'at-webserver|mt5700m'
+
+# 看后台进程
+ps | grep -E 'at-webserver|mt5700m'
+```
+
+若输出含 `at-webserver` → **本项目**；若含 `mt5700m` → **另一个项目**。
+
+### 切换注意事项
+
+- 两个项目**不支持平滑迁移**，切换需先卸载旧包再安装新包。
+- 卸载前建议备份配置：
+  - 本项目：`/etc/config/at-webserver`
+  - mt5700m：`/etc/config/mt5700m`、`/etc/mt5700m/traffic-history`
+- 拨号 / APN / 锁频等参数需要**按新项目的字段重新设置**，
+  配置项名称并不一一对应。
+
 ## 功能一览
 
 | 分组 | 页面 |
@@ -510,7 +574,7 @@ LTE 单载波物理带宽上限就是 20MHz（3GPP 36.101：1.4/3/5/10/15/20MHz�
 
 ### 布局自适应：页面宽度、指标网格与卡片高度
 
-v1.12.0 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
+v1.12.1 起，页面布局完全由**容器实际可用宽度**驱动，不再依赖视口宽度写死。
 
 #### 页面容器
 
@@ -751,7 +815,7 @@ api.TEMP_LEVELS = [
 
 ```text
 luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.12.0
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.12.1
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
 ├── htdocs/luci-static/resources/
@@ -777,8 +841,8 @@ workflow：`.github/workflows/build-openwrt.yml`
 
 | 目标系统 | 包格式 | 架构 | 产物示例 |
 |:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.12.0-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.12.0_x86_64.ipk` |
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.12.1-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.12.1_x86_64.ipk` |
 
 **触发方式**
 
@@ -789,7 +853,7 @@ workflow：`.github/workflows/build-openwrt.yml`
 **每次编译成功后自动发布 Release**
 
 - 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.12.0`）  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.12.1`）  
 - 同名 Release 先删后建；资产带架构前缀，避免同名冲突
 
 交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。
