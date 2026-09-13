@@ -355,16 +355,35 @@ return L.view.extend({
 			});
 		}
 
+		/*
+		 * 模组温度：逐项独立着色。
+		 * 每颗芯片按自身温度落在 正常(<70℃,绿) / 偏高(70-85℃,黄) / 过高(>=85℃,红) 三档，
+		 * 卡片边框再按「最严重」的一项汇总强调，便于一眼定位过热源。
+		 */
 		function renderTemp() {
 			tempGrid.innerHTML = '';
 			var t = state.temps;
-			[
+			var items = [
 				{ label: 'Sub3G PA', value: t.sub3GPA }, { label: 'Sub6G PA', value: t.sub6GPA },
 				{ label: 'MIMO PA', value: t.mimoPa }, { label: 'TCXO', value: t.tcxo },
 				{ label: 'AP1', value: t.ap1 }, { label: 'AP2', value: t.ap2 }, { label: 'Modem1', value: t.modem1 }
-			].forEach(function (it) {
-				tempGrid.appendChild(Mt5700.metric(it.label, it.value ? it.value + ' ℃' : '—'));
+			];
+			var worst = null;
+			items.forEach(function (it) {
+				var lv = Mt5700.tempLevel(it.value);
+				if (lv === 'high') worst = 'high';
+				else if (lv === 'warn' && worst !== 'high') worst = 'warn';
+				tempGrid.appendChild(Mt5700.metric(
+					it.label,
+					it.value ? it.value + ' ℃' : '—',
+					null,
+					lv ? 'temp-' + lv : ''
+				));
 			});
+			/* 汇总状态挂到卡片上：temp-has-high / temp-has-warn，无异常则清除 */
+			tempCard.classList.remove('temp-has-high', 'temp-has-warn');
+			if (worst === 'high') tempCard.classList.add('temp-has-high');
+			else if (worst === 'warn') tempCard.classList.add('temp-has-warn');
 		}
 
 		function renderDHCP() {

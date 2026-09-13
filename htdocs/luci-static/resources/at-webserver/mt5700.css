@@ -6,41 +6,43 @@
 
 /* ---------- CSS Variables ---------- */
 :root {
-  /* 颜色 */
-  --mt5700-bg: rgba(245, 247, 252, 0.66);
-  --mt5700-card-bg: rgba(255, 255, 255, 0.82);
-  --mt5700-card-bg-hover: rgba(255, 255, 255, 0.92);
-  --mt5700-glass-bg: rgba(255, 255, 255, 0.58);
-  --mt5700-float-bg: rgba(255, 255, 255, 0.9);
-  --mt5700-text: #1a1a2e;
-  --mt5700-text-secondary: #475569;
-  --mt5700-text-muted: #94a3b8;
-  --mt5700-border: rgba(255, 255, 255, 0.75);
-  --mt5700-border-subtle: rgba(203, 213, 225, 0.55);
-  --mt5700-divider: rgba(0, 0, 0, 0.06);
+  /* 颜色 —— 对齐参考站点 (PaperGrid) 冷调浅色体系 */
+  --mt5700-bg: rgba(242, 247, 251, 0.72);
+  --mt5700-card-bg: rgba(255, 255, 255, 0.88);
+  --mt5700-card-bg-hover: rgba(255, 255, 255, 0.96);
+  --mt5700-glass-bg: rgba(255, 255, 255, 0.62);
+  --mt5700-float-bg: rgba(255, 255, 255, 0.94);
+  --mt5700-text: #17324b;
+  --mt5700-text-secondary: #60798d;
+  --mt5700-text-muted: #8ba3b6;
+  --mt5700-border: rgba(220, 232, 241, 0.95);
+  --mt5700-border-subtle: rgba(211, 226, 237, 0.9);
+  --mt5700-divider: rgba(23, 50, 75, 0.07);
 
   /* 玻璃效果 */
   --mt5700-blur: 18px;
   --mt5700-saturate: 150%;
   --mt5700-glass: blur(var(--mt5700-blur)) saturate(var(--mt5700-saturate));
 
-  /* 多层阴影 (Z 轴深度) */
-  --mt5700-sh-1: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
-  --mt5700-sh-2: 0 2px 4px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06);
-  --mt5700-sh-3: 0 4px 8px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.08), 0 16px 48px rgba(15, 23, 42, 0.05);
-  --mt5700-sh-float: 0 4px 10px rgba(15, 23, 42, 0.06), 0 12px 32px rgba(15, 23, 42, 0.1), 0 24px 64px rgba(15, 23, 42, 0.06);
-  --mt5700-sh-inset: inset 0 1px 0 rgba(255, 255, 255, 0.7), inset 0 -1px 0 rgba(15, 23, 42, 0.03);
+  /* 多层阴影 (Z 轴深度) —— 冷调、低透明度，贴近参考站点纸感层次 */
+  --mt5700-sh-1: 0 1px 2px rgba(21, 54, 83, 0.04), 0 1px 3px rgba(21, 54, 83, 0.05);
+  --mt5700-sh-2: 0 2px 6px rgba(21, 54, 83, 0.05), 0 5px 20px rgba(21, 54, 83, 0.06);
+  --mt5700-sh-3: 0 4px 10px rgba(21, 54, 83, 0.05), 0 12px 32px rgba(16, 45, 89, 0.08), 0 24px 64px rgba(16, 45, 89, 0.05);
+  --mt5700-sh-float: 0 4px 12px rgba(21, 54, 83, 0.07), 0 12px 36px rgba(16, 45, 89, 0.1), 0 24px 80px rgba(16, 45, 89, 0.08);
+  --mt5700-sh-inset: inset 0 1px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 0 rgba(21, 54, 83, 0.03);
+  /* 焦点环 —— 对齐参考站点 --ring */
+  --mt5700-ring: 0 0 0 3px rgba(41, 169, 225, 0.22);
   /* 兼容旧变量名 */
   --mt5700-shadow-sm: var(--mt5700-sh-1);
   --mt5700-shadow-md: var(--mt5700-sh-2);
   --mt5700-shadow-lg: var(--mt5700-sh-3);
   --mt5700-shadow-xl: var(--mt5700-sh-float);
 
-  /* 圆角 */
-  --mt5700-radius-sm: 8px;
-  --mt5700-radius-md: 12px;
-  --mt5700-radius-lg: 16px;
-  --mt5700-radius-xl: 20px;
+  /* 圆角 —— 基准对齐参考站点 --radius: .85rem */
+  --mt5700-radius-sm: 7px;
+  --mt5700-radius-md: 10px;
+  --mt5700-radius-lg: 14px;
+  --mt5700-radius-xl: 18px;
   --mt5700-radius-full: 9999px;
 
   /* 间距 */
@@ -50,23 +52,32 @@
   --mt5700-space-lg: 24px;
   --mt5700-space-xl: 32px;
 
-  /* 状态色 */
-  --mt5700-accent: #3b82f6;
-  --mt5700-accent-light: #60a5fa;
-  --mt5700-success: #10b981;
+  /* 圆角与动效 —— 对齐参考站点 --radius / --motion-* */
+  --mt5700-ease: cubic-bezier(0.22, 0.8, 0.25, 1);
+  --mt5700-dur-control: 0.22s;
+  --mt5700-dur-panel: 0.34s;
+
+  /* 状态色 —— 主色改为参考站点青色系，语义色保持高辨识度 */
+  --mt5700-accent: #087cba;
+  --mt5700-accent-light: #29a9e1;
+  --mt5700-success: #0f9d63;
   --mt5700-success-light: #34d399;
-  --mt5700-warning: #f59e0b;
+  --mt5700-warning: #d98b06;
   --mt5700-warning-light: #fbbf24;
-  --mt5700-danger: #ef4444;
-  --mt5700-danger-light: #f87171;
-  --mt5700-info: #3b82f6;
-  --mt5700-info-light: #60a5fa;
+  --mt5700-danger: #c83d55;
+  --mt5700-danger-light: #e47988;
+  --mt5700-info: #087cba;
+  --mt5700-info-light: #29a9e1;
   /* 信号等级色 (绿→青→黄→橙→红 平滑映射) */
-  --mt5700-sig-exc: #10b981;
-  --mt5700-sig-good: #06b6d4;
-  --mt5700-sig-fair: #f59e0b;
-  --mt5700-sig-poor: #f97316;
-  --mt5700-sig-bad: #ef4444;
+  --mt5700-sig-exc: #0f9d63;
+  --mt5700-sig-good: #0e9dbd;
+  --mt5700-sig-fair: #d98b06;
+  --mt5700-sig-poor: #dd6b1f;
+  --mt5700-sig-bad: #c83d55;
+  /* 温度状态色（逐项独立着色用，见 .mt5700-metric.temp-*） */
+  --mt5700-temp-normal: #0f9d63;
+  --mt5700-temp-warn: #d98b06;
+  --mt5700-temp-high: #c83d55;
 
   /* 字体 */
   --mt5700-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
@@ -79,31 +90,48 @@
   --mt5700-font-size-2xl: 22px;
   --mt5700-font-size-3xl: 28px;
 
-  /* 动画 */
-  --mt5700-transition-fast: 150ms ease;
-  --mt5700-transition-base: 220ms cubic-bezier(0.4, 0, 0.2, 1);
-  --mt5700-transition-slow: 300ms ease;
+  /* 动画 —— 统一参考站点动效曲线 --motion-ease */
+  --mt5700-transition-fast: 0.15s var(--mt5700-ease);
+  --mt5700-transition-base: var(--mt5700-dur-control) var(--mt5700-ease);
+  --mt5700-transition-slow: var(--mt5700-dur-panel) var(--mt5700-ease);
 }
 
 /* 暗色模式 */
 @media (prefers-color-scheme: dark) {
   :root {
-    --mt5700-bg: rgba(16, 20, 32, 0.72);
-    --mt5700-card-bg: rgba(32, 38, 54, 0.82);
-    --mt5700-card-bg-hover: rgba(42, 48, 66, 0.92);
-    --mt5700-glass-bg: rgba(38, 44, 62, 0.6);
-    --mt5700-float-bg: rgba(40, 46, 64, 0.94);
-    --mt5700-text: #eef0f7;
-    --mt5700-text-secondary: #a4adc2;
-    --mt5700-text-muted: #646e85;
-    --mt5700-border: rgba(255, 255, 255, 0.1);
-    --mt5700-border-subtle: rgba(255, 255, 255, 0.08);
-    --mt5700-divider: rgba(255, 255, 255, 0.06);
-    --mt5700-sh-1: 0 1px 2px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.3);
-    --mt5700-sh-2: 0 2px 4px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.32);
-    --mt5700-sh-3: 0 4px 8px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(0, 0, 0, 0.38), 0 16px 48px rgba(0, 0, 0, 0.24);
-    --mt5700-sh-float: 0 4px 10px rgba(0, 0, 0, 0.32), 0 12px 32px rgba(0, 0, 0, 0.42), 0 24px 64px rgba(0, 0, 0, 0.3);
-    --mt5700-sh-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+    --mt5700-bg: rgba(13, 25, 41, 0.78);
+    --mt5700-card-bg: rgba(19, 35, 55, 0.88);
+    --mt5700-card-bg-hover: rgba(26, 53, 77, 0.94);
+    --mt5700-glass-bg: rgba(24, 43, 64, 0.68);
+    --mt5700-float-bg: rgba(22, 40, 60, 0.96);
+    --mt5700-text: #e0edf7;
+    --mt5700-text-secondary: #97b1c5;
+    --mt5700-text-muted: #6b87a0;
+    --mt5700-border: rgba(38, 61, 82, 0.95);
+    --mt5700-border-subtle: rgba(52, 80, 104, 0.85);
+    --mt5700-divider: rgba(224, 237, 247, 0.07);
+    --mt5700-sh-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.34);
+    --mt5700-sh-2: 0 2px 6px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.36);
+    --mt5700-sh-3: 0 4px 10px rgba(0, 0, 0, 0.32), 0 8px 26px rgba(0, 0, 0, 0.42), 0 16px 48px rgba(0, 0, 0, 0.28);
+    --mt5700-sh-float: 0 4px 12px rgba(0, 0, 0, 0.36), 0 12px 36px rgba(0, 0, 0, 0.46), 0 24px 64px rgba(0, 0, 0, 0.34);
+    --mt5700-sh-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+    --mt5700-ring: 0 0 0 3px rgba(97, 201, 244, 0.26);
+    /* 暗色下主色翻转为参考站点亮青 #61c9f4 */
+    --mt5700-accent: #61c9f4;
+    --mt5700-accent-light: #8edbf9;
+    --mt5700-info: #61c9f4;
+    --mt5700-info-light: #8edbf9;
+    --mt5700-success: #34d399;
+    --mt5700-warning: #fbbf24;
+    --mt5700-danger: #e47988;
+    --mt5700-sig-exc: #34d399;
+    --mt5700-sig-good: #22d3ee;
+    --mt5700-sig-fair: #fbbf24;
+    --mt5700-sig-poor: #fb923c;
+    --mt5700-sig-bad: #f87171;
+    --mt5700-temp-normal: #34d399;
+    --mt5700-temp-warn: #fbbf24;
+    --mt5700-temp-high: #e47988;
   }
 }
 
@@ -126,9 +154,9 @@
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(ellipse 60% 45% at 15% 8%, rgba(59, 130, 246, 0.09), transparent 62%),
-    radial-gradient(ellipse 50% 40% at 85% 12%, rgba(16, 185, 129, 0.07), transparent 60%),
-    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(99, 102, 241, 0.07), transparent 65%),
+    radial-gradient(ellipse 60% 45% at 15% 8%, rgba(8, 124, 186, 0.1), transparent 62%),
+    radial-gradient(ellipse 50% 40% at 85% 12%, rgba(41, 169, 225, 0.08), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(14, 157, 189, 0.07), transparent 65%),
     var(--mt5700-bg);
   backdrop-filter: blur(var(--mt5700-blur)) saturate(var(--mt5700-saturate));
   -webkit-backdrop-filter: blur(var(--mt5700-blur)) saturate(var(--mt5700-saturate));
@@ -137,9 +165,9 @@
 @media (prefers-color-scheme: dark) {
   .mt5700-app::before {
     background:
-      radial-gradient(ellipse 60% 45% at 15% 8%, rgba(59, 130, 246, 0.12), transparent 62%),
-      radial-gradient(ellipse 50% 40% at 85% 12%, rgba(16, 185, 129, 0.08), transparent 60%),
-      radial-gradient(ellipse 55% 45% at 50% 100%, rgba(99, 102, 241, 0.1), transparent 65%),
+      radial-gradient(ellipse 60% 45% at 15% 8%, rgba(97, 201, 244, 0.13), transparent 62%),
+      radial-gradient(ellipse 50% 40% at 85% 12%, rgba(41, 169, 225, 0.1), transparent 60%),
+      radial-gradient(ellipse 55% 45% at 50% 100%, rgba(14, 157, 189, 0.1), transparent 65%),
       var(--mt5700-bg);
   }
 }
@@ -356,7 +384,7 @@
   fill: none;
   stroke-linecap: round;
   transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.4s ease;
-  filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.35));
+  filter: drop-shadow(0 0 5px rgba(8, 124, 186, 0.32));
 }
 
 .mt5700-gauge-center {
@@ -397,11 +425,11 @@
   border-radius: var(--mt5700-radius-full);
 }
 
-.mt5700-gauge-caption.exc { background: rgba(16, 185, 129, 0.14); color: #0d9e6e; }
+.mt5700-gauge-caption.exc { background: rgba(15, 157, 99, 0.14); color: #0d9e6e; }
 .mt5700-gauge-caption.good { background: rgba(6, 182, 212, 0.14); color: #0891b2; }
 .mt5700-gauge-caption.fair { background: rgba(245, 158, 11, 0.16); color: #b45309; }
 .mt5700-gauge-caption.poor { background: rgba(249, 115, 22, 0.16); color: #c2410c; }
-.mt5700-gauge-caption.bad { background: rgba(239, 68, 68, 0.14); color: #dc2626; }
+.mt5700-gauge-caption.bad { background: rgba(200, 61, 85, 0.14); color: #b02b45; }
 
 @media (prefers-color-scheme: dark) {
   .mt5700-gauge-caption.exc { color: #34d399; }
@@ -497,7 +525,7 @@
 }
 
 .mt5700-btn:focus-visible {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+  box-shadow: var(--mt5700-ring);
 }
 
 .mt5700-btn:disabled {
@@ -521,10 +549,10 @@
 }
 
 .mt5700-btn-primary:hover:not(:disabled) {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: #0a6ba3;
+  border-color: #0a6ba3;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35), var(--mt5700-sh-1);
+  box-shadow: 0 4px 12px rgba(8, 124, 186, 0.32), var(--mt5700-sh-1);
 }
 
 .mt5700-btn-primary:active:not(:disabled) {
@@ -551,10 +579,10 @@
 }
 
 .mt5700-btn-success:hover:not(:disabled) {
-  background: #059669;
-  border-color: #059669;
+  background: #0c8152;
+  border-color: #0c8152;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35), var(--mt5700-sh-1);
+  box-shadow: 0 4px 12px rgba(15, 157, 99, 0.32), var(--mt5700-sh-1);
 }
 
 .mt5700-btn-danger {
@@ -565,10 +593,10 @@
 }
 
 .mt5700-btn-danger:hover:not(:disabled) {
-  background: #dc2626;
-  border-color: #dc2626;
+  background: #b02b45;
+  border-color: #b02b45;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35), var(--mt5700-sh-1);
+  box-shadow: 0 4px 12px rgba(200, 61, 85, 0.32), var(--mt5700-sh-1);
 }
 
 .mt5700-btn-ghost {
@@ -649,7 +677,7 @@
 
 .mt5700-input:focus {
   border-color: var(--mt5700-accent);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  box-shadow: var(--mt5700-ring);
 }
 
 .mt5700-input::placeholder {
@@ -665,7 +693,7 @@
 .mt5700-input-error { border-color: var(--mt5700-danger); }
 
 .mt5700-input-error:focus {
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+  box-shadow: 0 0 0 3px rgba(200, 61, 85, 0.18);
 }
 
 .mt5700-hint {
@@ -773,12 +801,12 @@
 }
 
 .mt5700-switch input[type="checkbox"]:hover:not(:disabled):checked {
-  background: #2563eb;
+  background: #087cba;
 }
 
 .mt5700-switch input[type="checkbox"]:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+  box-shadow: var(--mt5700-ring);
 }
 
 .mt5700-switch input[type="checkbox"]:disabled {
@@ -788,7 +816,7 @@
 }
 
 .mt5700-checkbox input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline: 2px solid rgba(41, 169, 225, 0.5);
   outline-offset: 2px;
 }
 
@@ -831,7 +859,7 @@
 .mt5700-table tbody tr:last-child td { border-bottom: none; }
 
 .mt5700-table tbody tr:hover {
-  background: rgba(59, 130, 246, 0.04);
+  background: rgba(8, 124, 186, 0.05);
 }
 
 .mt5700-table-striped tbody tr:nth-child(even) {
@@ -839,7 +867,7 @@
 }
 
 .mt5700-table-striped tbody tr:nth-child(even):hover {
-  background: rgba(59, 130, 246, 0.04);
+  background: rgba(8, 124, 186, 0.05);
 }
 
 /* ---------- 状态标签 ---------- */
@@ -861,10 +889,10 @@
   background: currentColor;
 }
 
-.mt5700-badge-success { background: rgba(16, 185, 129, 0.12); color: var(--mt5700-success); }
+.mt5700-badge-success { background: rgba(15, 157, 99, 0.12); color: var(--mt5700-success); }
 .mt5700-badge-warning { background: rgba(245, 158, 11, 0.12); color: var(--mt5700-warning); }
-.mt5700-badge-danger { background: rgba(239, 68, 68, 0.12); color: var(--mt5700-danger); }
-.mt5700-badge-info { background: rgba(59, 130, 246, 0.12); color: var(--mt5700-accent); }
+.mt5700-badge-danger { background: rgba(200, 61, 85, 0.12); color: var(--mt5700-danger); }
+.mt5700-badge-info { background: rgba(8, 124, 186, 0.12); color: var(--mt5700-accent); }
 .mt5700-badge-neutral { background: rgba(0, 0, 0, 0.05); color: var(--mt5700-text-secondary); }
 
 /* ---------- AT 服务状态卡片 (L2，独立命名空间，不依赖 LuCI 主题) ---------- */
@@ -1517,9 +1545,9 @@
   transition: background var(--mt5700-transition-fast);
 }
 
-.mt5700-sms-item:hover { background: rgba(59, 130, 246, 0.04); }
+.mt5700-sms-item:hover { background: rgba(8, 124, 186, 0.05); }
 
-.mt5700-sms-item.active { background: rgba(59, 130, 246, 0.08); }
+.mt5700-sms-item.active { background: rgba(8, 124, 186, 0.09); }
 
 .mt5700-sms-item-number {
   font-weight: 600;
@@ -1634,7 +1662,7 @@
   word-break: break-word;
 }
 
-.mt5700-terminal-prompt { color: #60a5fa; }
+.mt5700-terminal-prompt { color: #087cba; }
 
 .mt5700-terminal-input {
   width: 100%;
@@ -1678,14 +1706,14 @@
 }
 
 .mt5700-step-done {
-  background: rgba(16, 185, 129, 0.14);
-  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(15, 157, 99, 0.14);
+  border-color: rgba(15, 157, 99, 0.35);
   color: #0d9e6e;
 }
 
 .mt5700-step-current {
-  background: rgba(59, 130, 246, 0.14);
-  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(8, 124, 186, 0.14);
+  border-color: rgba(8, 124, 186, 0.4);
   color: #1a5eab;
   font-weight: 600;
   box-shadow: var(--mt5700-sh-1);
@@ -1693,7 +1721,7 @@
 
 @media (prefers-color-scheme: dark) {
   .mt5700-step-done { color: #34d399; }
-  .mt5700-step-current { color: #60a5fa; }
+  .mt5700-step-current { color: #29a9e1; }
 }
 
 .mt5700-progress { margin: 12px 0; }
@@ -1756,13 +1784,13 @@
 .mt5700-grow { flex: 1 1 240px; }
 
 .mt5700-log-ok { color: #0d9e6e; }
-.mt5700-log-err { color: #dc2626; }
+.mt5700-log-err { color: #c83d55; }
 .mt5700-log-cmd { color: #1a5eab; font-weight: 600; }
 
 @media (prefers-color-scheme: dark) {
   .mt5700-log-ok { color: #34d399; }
   .mt5700-log-err { color: #f87171; }
-  .mt5700-log-cmd { color: #60a5fa; }
+  .mt5700-log-cmd { color: #29a9e1; }
 }
 
 /* ---------- 锁频编辑器 ---------- */
@@ -1850,6 +1878,85 @@
 .mt5700-gap-lg { gap: var(--mt5700-space-lg); }
 
 /* 减少动态效果偏好 */
+/* ==========================================================================
+   模组温度状态（逐项独立着色）
+   规则：< 70 ℃ 正常(绿) / 70-85 ℃ 偏高(黄) / >= 85 ℃ 过高(红)
+   由 network_status.js renderTemp() 写入 .temp-normal / .temp-warn / .temp-high
+   ========================================================================== */
+.mt5700-metric.temp-normal {
+  background: linear-gradient(160deg, rgba(15, 157, 99, 0.16), rgba(15, 157, 99, 0.06));
+  border-color: rgba(15, 157, 99, 0.42);
+  box-shadow: 0 1px 2px rgba(15, 157, 99, 0.1), var(--mt5700-sh-inset);
+}
+
+.mt5700-metric.temp-warn {
+  background: linear-gradient(160deg, rgba(217, 139, 6, 0.2), rgba(217, 139, 6, 0.08));
+  border-color: rgba(217, 139, 6, 0.5);
+  box-shadow: 0 1px 2px rgba(217, 139, 6, 0.12), var(--mt5700-sh-inset);
+}
+
+.mt5700-metric.temp-high {
+  background: linear-gradient(160deg, rgba(200, 61, 85, 0.22), rgba(200, 61, 85, 0.09));
+  border-color: rgba(200, 61, 85, 0.55);
+  box-shadow: 0 1px 2px rgba(200, 61, 85, 0.14), var(--mt5700-sh-inset);
+}
+
+/* 数值同色描边，强化状态可读性 */
+.mt5700-metric.temp-normal .mt5700-metric-value { color: #0b7a4d; }
+.mt5700-metric.temp-warn .mt5700-metric-value { color: #a86a04; }
+.mt5700-metric.temp-high .mt5700-metric-value { color: #a8283f; }
+
+/* 过高告警：呼吸光晕，提示需立即关注 */
+.mt5700-metric.temp-high {
+  animation: mt5700-temp-alert 2s ease-in-out infinite;
+}
+
+@keyframes mt5700-temp-alert {
+  0%, 100% { box-shadow: 0 1px 2px rgba(200, 61, 85, 0.14), 0 0 0 0 rgba(200, 61, 85, 0.32), var(--mt5700-sh-inset); }
+  50%      { box-shadow: 0 1px 2px rgba(200, 61, 85, 0.14), 0 0 0 6px rgba(200, 61, 85, 0), var(--mt5700-sh-inset); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .mt5700-metric.temp-normal {
+    background: linear-gradient(160deg, rgba(52, 211, 153, 0.18), rgba(52, 211, 153, 0.05));
+    border-color: rgba(52, 211, 153, 0.42);
+  }
+  .mt5700-metric.temp-warn {
+    background: linear-gradient(160deg, rgba(251, 191, 36, 0.2), rgba(251, 191, 36, 0.06));
+    border-color: rgba(251, 191, 36, 0.46);
+  }
+  .mt5700-metric.temp-high {
+    background: linear-gradient(160deg, rgba(228, 121, 136, 0.24), rgba(228, 121, 136, 0.08));
+    border-color: rgba(228, 121, 136, 0.52);
+  }
+  .mt5700-metric.temp-normal .mt5700-metric-value { color: #34d399; }
+  .mt5700-metric.temp-warn .mt5700-metric-value { color: #fbbf24; }
+  .mt5700-metric.temp-high .mt5700-metric-value { color: #e47988; }
+
+  @keyframes mt5700-temp-alert {
+    0%, 100% { box-shadow: 0 1px 2px rgba(228, 121, 136, 0.16), 0 0 0 0 rgba(228, 121, 136, 0.34), var(--mt5700-sh-inset); }
+    50%      { box-shadow: 0 1px 2px rgba(228, 121, 136, 0.16), 0 0 0 6px rgba(228, 121, 136, 0), var(--mt5700-sh-inset); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt5700-metric.temp-high { animation: none; }
+}
+
+/* 卡片级温度告警：整卡左侧强调条，用于「卡片内存在过高芯片」时提示 */
+.mt5700-card.temp-has-high {
+  border-color: rgba(200, 61, 85, 0.4);
+}
+
+.mt5700-card.temp-has-warn {
+  border-color: rgba(217, 139, 6, 0.38);
+}
+
+@media (prefers-color-scheme: dark) {
+  .mt5700-card.temp-has-high { border-color: rgba(228, 121, 136, 0.44); }
+  .mt5700-card.temp-has-warn { border-color: rgba(251, 191, 36, 0.4); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mt5700-card, .mt5700-metric, .mt5700-gauge, .mt5700-speed-box,
   .mt5700-btn {
