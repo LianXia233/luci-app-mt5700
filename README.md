@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.6.0**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.7.0**
 
 | | |
 |:--|:--|
@@ -35,14 +35,14 @@
 ```sh
 # 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.6.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.7.0-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.6.0_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.7.0_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -63,6 +63,13 @@ ls -l /usr/bin/at-webserver-rust
 
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
+
+> **v1.7.0 说明**：模组温度分级由 3 档细化为 **6 档**（偏低深蓝 / 温和蓝 / 正常绿 /
+> 偏暖黄 / 偏高橙 / 过高红），阈值整体下调（偏暖起点 61 ℃、告警起点 77 ℃），
+> 使常驻温度即可反映状态、异常升温逐级显现；卡片新增右上角「最高温 · 状态」徽标。
+> 同时修复指标卡数值异常换行（`102.40 Mbps` 被拆行、中文长值截断），
+> 并按项数自适应列数消除尾行留白。功能行为不变。
+> 详见 [CHANGELOG](CHANGELOG.md) 的 `[1.7.0]` 段。
 
 > **v1.6.0 说明**：全站设计令牌对齐 PaperGrid 冷调青色体系（主色蓝 → 青 `#087cba`，
 > 暗色亮青 `#61c9f4`，统一动效曲线与焦点环，圆角基准 `.85rem`），
@@ -248,23 +255,36 @@ logread -e at-webserver | tail -30
 ### 模组温度按状态动态着色
 
 网络状态页的「模组温度」卡片中，各芯片（Sub3G PA / Sub6G PA / MIMO PA / TCXO /
-AP1 / AP2 / Modem1）按自身温度**逐项独立着色**：
+AP1 / AP2 / Modem1）按自身温度**逐项独立着色**，共 6 档：
 
-| 温度区间 | 状态 | 背景色 |
-|:--|:--|:--|
-| `< 70 ℃` | 正常 | 绿色 |
-| `70 ℃ ~ 84.9 ℃` | 偏高 | 黄色 |
-| `≥ 85 ℃` | 过高 | 红色 |
+| 温度区间 | 状态 | 背景色 | 含义 |
+|:--|:--|:--|:--|
+| `< 35 ℃` | 偏低 | 深蓝 | 刚上电 / 低温环境 |
+| `35 ~ 52.9 ℃` | 温和 | 蓝色 | 温度适中 |
+| `53 ~ 60.9 ℃` | 正常 | 绿色 | 长期工作舒适区 |
+| `61 ~ 68.9 ℃` | 偏暖 | 黄色 | 需关注 |
+| `69 ~ 76.9 ℃` | 偏高 | 橙色 | 需散热 |
+| `≥ 77 ℃` | 过高 | 红色 | 告警（呼吸光晕） |
+
+阈值按 MT5700 实测区间（各芯片常态 40–50 ℃）校准，使常驻温度落在「温和 / 正常」档，
+异常升温能逐级显现。
 
 判定为逐项独立而非取平均值 —— 平均值会被正常项拉低、掩盖单点过热。
-同时卡片边框按「最严重的一项」汇总强调（`temp-has-high` / `temp-has-warn`），便于快速定位过热源。
+同时卡片边框按「最严重的一项」汇总强调（`temp-has-warm` / `temp-has-hot` / `temp-has-high`），
+右上角徽标显示「最高 X ℃ · 状态」，便于快速定位过热源。
 无数据（`—`）的芯片保持中性底色，不参与着色。
 
-阈值以常量为准，如需调整可改 `mt5700.js` 顶部：
+阈值以阈值表为准，如需调整可改 `mt5700.js` 中的 `api.TEMP_LEVELS`（按 `min` 从高到低匹配）：
 
 ```js
-api.TEMP_WARN_C = 70;   // 偏高下限
-api.TEMP_HIGH_C = 85;   // 过高下限
+api.TEMP_LEVELS = [
+	{ level: 'high',   min: 77 },   // 过高下限
+	{ level: 'hot',    min: 69 },   // 偏高下限
+	{ level: 'warm',   min: 61 },   // 偏暖下限
+	{ level: 'normal', min: 53 },   // 正常下限
+	{ level: 'cool',   min: 35 },   // 温和下限
+	{ level: 'cold',   min: -Infinity }
+];
 ```
 
 ---
@@ -308,7 +328,7 @@ api.TEMP_HIGH_C = 85;   // 过高下限
 
 ```text
 luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.6.0
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.7.0
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
 ├── htdocs/luci-static/resources/
@@ -334,8 +354,8 @@ workflow：`.github/workflows/build-openwrt.yml`
 
 | 目标系统 | 包格式 | 架构 | 产物示例 |
 |:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.6.0-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.6.0_x86_64.ipk` |
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.7.0-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.7.0_x86_64.ipk` |
 
 **触发方式**
 
@@ -346,7 +366,7 @@ workflow：`.github/workflows/build-openwrt.yml`
 **每次编译成功后自动发布 Release**
 
 - 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.6.0`）  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.7.0`）  
 - 同名 Release 先删后建；资产带架构前缀，避免同名冲突
 
 交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。

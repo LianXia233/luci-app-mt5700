@@ -74,9 +74,12 @@
   --mt5700-sig-fair: #d98b06;
   --mt5700-sig-poor: #dd6b1f;
   --mt5700-sig-bad: #c83d55;
-  /* 温度状态色（逐项独立着色用，见 .mt5700-metric.temp-*） */
+  /* 温度状态色（6 档，逐项独立着色用，见 .mt5700-metric.temp-*） */
+  --mt5700-temp-cold: #1d508f;
+  --mt5700-temp-cool: #0a7c96;
   --mt5700-temp-normal: #0f9d63;
-  --mt5700-temp-warn: #d98b06;
+  --mt5700-temp-warm: #8f7506;
+  --mt5700-temp-hot: #b04f13;
   --mt5700-temp-high: #c83d55;
 
   /* 字体 */
@@ -129,8 +132,11 @@
     --mt5700-sig-fair: #fbbf24;
     --mt5700-sig-poor: #fb923c;
     --mt5700-sig-bad: #f87171;
+    --mt5700-temp-cold: #60a5fa;
+    --mt5700-temp-cool: #22d3ee;
     --mt5700-temp-normal: #34d399;
-    --mt5700-temp-warn: #fbbf24;
+    --mt5700-temp-warm: #fad64a;
+    --mt5700-temp-hot: #fb923c;
     --mt5700-temp-high: #e47988;
   }
 }
@@ -314,16 +320,42 @@
 .mt5700-metric-label {
   font-size: var(--mt5700-font-size-xs);
   color: var(--mt5700-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.02em;
   margin-bottom: var(--mt5700-space-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mt5700-metric-value {
-  font-size: var(--mt5700-font-size-2xl);
+  font-size: var(--mt5700-font-size-xl);
   font-weight: 700;
   color: var(--mt5700-text);
-  word-break: break-all;
+  line-height: 1.25;
+  /* 数值与单位之间不断行 */
+  word-break: normal;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 长文本值（中文短语、长英文）自适应降字号，尽量单行完整显示。
+ * 用容器查询不可用时按字符长度分级；配合 white-space: nowrap 防止断行。
+ */
+.mt5700-metric-value.len-md { font-size: calc(var(--mt5700-font-size-xl) * 0.85); letter-spacing: -0.01em; }
+.mt5700-metric-value.len-lg { font-size: calc(var(--mt5700-font-size-xl) * 0.72); letter-spacing: -0.01em; }
+.mt5700-metric-value.len-xl { font-size: calc(var(--mt5700-font-size-xl) * 0.62); letter-spacing: -0.015em; }
+
+/* 值「数字 + 单位」的排版：数字主色、单位弱化，整体同行 */
+.mt5700-metric-value .unit {
+  font-size: 0.62em;
+  font-weight: 600;
+  color: var(--mt5700-text-muted);
+  margin-left: 0.28em;
+  letter-spacing: 0.01em;
 }
 
 .mt5700-metric-value.accent { color: var(--mt5700-accent); }
@@ -333,8 +365,60 @@
 
 .mt5700-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
   gap: 12px;
+}
+
+/*
+ * 列数自适应：由 JS 在渲染时写入 data-count（指标项数）。
+ * 目标是让尾行尽量填满，避免出现「一行 5 个 + 尾行 2 个」的大片留白。
+ * 项数 -> 列数映射取「能整除或余数最大」的方案。
+ */
+@media (min-width: 960px) {
+  .mt5700-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* 2 项 -> 2 列（半行即可，避免右侧大片空白） */
+  .mt5700-metrics[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 3 项 -> 3 列（满行） */
+  .mt5700-metrics[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* 6 项 -> 3 列 x2 行（最均衡） */
+  .mt5700-metrics[data-count="6"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* 7 项 -> 4 列，尾行 3 个 */
+  .mt5700-metrics[data-count="7"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* 8 项 -> 4 列 x2 行（满行） */
+  .mt5700-metrics[data-count="8"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* 9 项 -> 3 列 x3 行（满行） */
+  .mt5700-metrics[data-count="9"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* 10 项 -> 5 列 x2 行（满行） */
+  .mt5700-metrics[data-count="10"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  /* 12 项 -> 4 列 x3 行（满行） */
+  .mt5700-metrics[data-count="12"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1500px) {
+  .mt5700-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  /* 2 项 -> 2 列 */
+  .mt5700-metrics[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 3 项 -> 3 列（满行） */
+  .mt5700-metrics[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* 6 项 -> 3 列（比 5+1 更均衡） */
+  .mt5700-metrics[data-count="6"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* 7 项 -> 4 列 */
+  .mt5700-metrics[data-count="7"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* 8 项 -> 4 列 x2 行（满行） */
+  .mt5700-metrics[data-count="8"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* 9 项 -> 3 列 x3 行（满行） */
+  .mt5700-metrics[data-count="9"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* 10 项 -> 5 列 x2 行（满行） */
+  .mt5700-metrics[data-count="10"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+/* 窄屏：两列，仍保证可用宽度 */
+@media (max-width: 719px) {
+  .mt5700-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+
+@media (max-width: 419px) {
+  .mt5700-metrics { grid-template-columns: 1fr !important; }
 }
 
 /* ==========================================================================
@@ -1879,31 +1963,57 @@
 
 /* 减少动态效果偏好 */
 /* ==========================================================================
-   模组温度状态（逐项独立着色）
-   规则：< 70 ℃ 正常(绿) / 70-85 ℃ 偏高(黄) / >= 85 ℃ 过高(红)
-   由 network_status.js renderTemp() 写入 .temp-normal / .temp-warn / .temp-high
+   模组温度状态（逐项独立着色 · 6 档）
+   档位由 network_status.js renderTemp() 经 Mt5700.tempLevel() 判定后写入：
+     temp-cold   深蓝   < 35 ℃         偏低
+     temp-cool   蓝     35 - 52.9 ℃    温和
+     temp-normal 绿     53 - 60.9 ℃    正常
+     temp-warm   黄     61 - 68.9 ℃    偏暖
+     temp-hot    橙     69 - 76.9 ℃    偏高
+     temp-high   红     >= 77 ℃        过高
    ========================================================================== */
+.mt5700-metric.temp-cold {
+  background: linear-gradient(160deg, rgba(37, 99, 178, 0.18), rgba(37, 99, 178, 0.07));
+  border-color: rgba(37, 99, 178, 0.44);
+  box-shadow: 0 1px 2px rgba(37, 99, 178, 0.1), var(--mt5700-sh-inset);
+}
+
+.mt5700-metric.temp-cool {
+  background: linear-gradient(160deg, rgba(14, 157, 189, 0.17), rgba(14, 157, 189, 0.06));
+  border-color: rgba(14, 157, 189, 0.42);
+  box-shadow: 0 1px 2px rgba(14, 157, 189, 0.1), var(--mt5700-sh-inset);
+}
+
 .mt5700-metric.temp-normal {
   background: linear-gradient(160deg, rgba(15, 157, 99, 0.16), rgba(15, 157, 99, 0.06));
   border-color: rgba(15, 157, 99, 0.42);
   box-shadow: 0 1px 2px rgba(15, 157, 99, 0.1), var(--mt5700-sh-inset);
 }
 
-.mt5700-metric.temp-warn {
-  background: linear-gradient(160deg, rgba(217, 139, 6, 0.2), rgba(217, 139, 6, 0.08));
-  border-color: rgba(217, 139, 6, 0.5);
-  box-shadow: 0 1px 2px rgba(217, 139, 6, 0.12), var(--mt5700-sh-inset);
+.mt5700-metric.temp-warm {
+  background: linear-gradient(160deg, rgba(190, 159, 12, 0.2), rgba(190, 159, 12, 0.07));
+  border-color: rgba(190, 159, 12, 0.48);
+  box-shadow: 0 1px 2px rgba(190, 159, 12, 0.12), var(--mt5700-sh-inset);
+}
+
+.mt5700-metric.temp-hot {
+  background: linear-gradient(160deg, rgba(221, 107, 31, 0.21), rgba(221, 107, 31, 0.08));
+  border-color: rgba(221, 107, 31, 0.52);
+  box-shadow: 0 1px 2px rgba(221, 107, 31, 0.13), var(--mt5700-sh-inset);
 }
 
 .mt5700-metric.temp-high {
-  background: linear-gradient(160deg, rgba(200, 61, 85, 0.22), rgba(200, 61, 85, 0.09));
-  border-color: rgba(200, 61, 85, 0.55);
-  box-shadow: 0 1px 2px rgba(200, 61, 85, 0.14), var(--mt5700-sh-inset);
+  background: linear-gradient(160deg, rgba(200, 61, 85, 0.23), rgba(200, 61, 85, 0.09));
+  border-color: rgba(200, 61, 85, 0.56);
+  box-shadow: 0 1px 2px rgba(200, 61, 85, 0.15), var(--mt5700-sh-inset);
 }
 
 /* 数值同色描边，强化状态可读性 */
+.mt5700-metric.temp-cold .mt5700-metric-value { color: #1d508f; }
+.mt5700-metric.temp-cool .mt5700-metric-value { color: #0a7c96; }
 .mt5700-metric.temp-normal .mt5700-metric-value { color: #0b7a4d; }
-.mt5700-metric.temp-warn .mt5700-metric-value { color: #a86a04; }
+.mt5700-metric.temp-warm .mt5700-metric-value { color: #8f7506; }
+.mt5700-metric.temp-hot .mt5700-metric-value { color: #b04f13; }
 .mt5700-metric.temp-high .mt5700-metric-value { color: #a8283f; }
 
 /* 过高告警：呼吸光晕，提示需立即关注 */
@@ -1912,25 +2022,40 @@
 }
 
 @keyframes mt5700-temp-alert {
-  0%, 100% { box-shadow: 0 1px 2px rgba(200, 61, 85, 0.14), 0 0 0 0 rgba(200, 61, 85, 0.32), var(--mt5700-sh-inset); }
-  50%      { box-shadow: 0 1px 2px rgba(200, 61, 85, 0.14), 0 0 0 6px rgba(200, 61, 85, 0), var(--mt5700-sh-inset); }
+  0%, 100% { box-shadow: 0 1px 2px rgba(200, 61, 85, 0.15), 0 0 0 0 rgba(200, 61, 85, 0.32), var(--mt5700-sh-inset); }
+  50%      { box-shadow: 0 1px 2px rgba(200, 61, 85, 0.15), 0 0 0 6px rgba(200, 61, 85, 0), var(--mt5700-sh-inset); }
 }
 
 @media (prefers-color-scheme: dark) {
+  .mt5700-metric.temp-cold {
+    background: linear-gradient(160deg, rgba(96, 165, 250, 0.2), rgba(96, 165, 250, 0.06));
+    border-color: rgba(96, 165, 250, 0.46);
+  }
+  .mt5700-metric.temp-cool {
+    background: linear-gradient(160deg, rgba(34, 211, 238, 0.19), rgba(34, 211, 238, 0.05));
+    border-color: rgba(34, 211, 238, 0.44);
+  }
   .mt5700-metric.temp-normal {
     background: linear-gradient(160deg, rgba(52, 211, 153, 0.18), rgba(52, 211, 153, 0.05));
     border-color: rgba(52, 211, 153, 0.42);
   }
-  .mt5700-metric.temp-warn {
-    background: linear-gradient(160deg, rgba(251, 191, 36, 0.2), rgba(251, 191, 36, 0.06));
-    border-color: rgba(251, 191, 36, 0.46);
+  .mt5700-metric.temp-warm {
+    background: linear-gradient(160deg, rgba(250, 214, 74, 0.2), rgba(250, 214, 74, 0.06));
+    border-color: rgba(250, 214, 74, 0.46);
+  }
+  .mt5700-metric.temp-hot {
+    background: linear-gradient(160deg, rgba(251, 146, 60, 0.22), rgba(251, 146, 60, 0.07));
+    border-color: rgba(251, 146, 60, 0.5);
   }
   .mt5700-metric.temp-high {
     background: linear-gradient(160deg, rgba(228, 121, 136, 0.24), rgba(228, 121, 136, 0.08));
-    border-color: rgba(228, 121, 136, 0.52);
+    border-color: rgba(228, 121, 136, 0.54);
   }
+  .mt5700-metric.temp-cold .mt5700-metric-value { color: #60a5fa; }
+  .mt5700-metric.temp-cool .mt5700-metric-value { color: #22d3ee; }
   .mt5700-metric.temp-normal .mt5700-metric-value { color: #34d399; }
-  .mt5700-metric.temp-warn .mt5700-metric-value { color: #fbbf24; }
+  .mt5700-metric.temp-warm .mt5700-metric-value { color: #fad64a; }
+  .mt5700-metric.temp-hot .mt5700-metric-value { color: #fb923c; }
   .mt5700-metric.temp-high .mt5700-metric-value { color: #e47988; }
 
   @keyframes mt5700-temp-alert {
@@ -1939,22 +2064,25 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .mt5700-metric.temp-high { animation: none; }
-}
-
-/* 卡片级温度告警：整卡左侧强调条，用于「卡片内存在过高芯片」时提示 */
+/* 卡片级汇总：按最严重档位强调边框（仅偏暖及以上触发） */
+.mt5700-card.temp-has-warm { border-color: rgba(190, 159, 12, 0.4); }
+.mt5700-card.temp-has-hot  { border-color: rgba(221, 107, 31, 0.44); }
 .mt5700-card.temp-has-high {
-  border-color: rgba(200, 61, 85, 0.4);
-}
-
-.mt5700-card.temp-has-warn {
-  border-color: rgba(217, 139, 6, 0.38);
+  border-color: rgba(200, 61, 85, 0.46);
+  box-shadow: var(--mt5700-sh-2), 0 0 0 1px rgba(200, 61, 85, 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
-  .mt5700-card.temp-has-high { border-color: rgba(228, 121, 136, 0.44); }
-  .mt5700-card.temp-has-warn { border-color: rgba(251, 191, 36, 0.4); }
+  .mt5700-card.temp-has-warm { border-color: rgba(250, 214, 74, 0.42); }
+  .mt5700-card.temp-has-hot  { border-color: rgba(251, 146, 60, 0.46); }
+  .mt5700-card.temp-has-high {
+    border-color: rgba(228, 121, 136, 0.5);
+    box-shadow: var(--mt5700-sh-2), 0 0 0 1px rgba(228, 121, 136, 0.14);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt5700-metric.temp-high { animation: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

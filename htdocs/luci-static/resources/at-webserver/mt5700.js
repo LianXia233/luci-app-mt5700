@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.1.0';
+var MT5700_CSS_VERSION = '2.3.2';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -103,10 +103,52 @@ var Mt5700 = (function () {
 
 	/* ================= 指标卡片 ================= */
 
+	/*
+	 * 单位白名单：显式枚举，避免把「5G」「100%」这类纯文本误拆。
+	 * 只有命中白名单才做「数字 + 单位」分段渲染，否则整段原样输出。
+	 */
+	var METRIC_UNITS = [
+		'Mbps', 'Gbps', 'kbps', 'Kbps', 'Bps',
+		'dBm', 'dB', 'MHz', 'GHz', 'kHz', 'Hz',
+		'ms', 'us', 'ns', 's',
+		'℃', '°C', '%',
+		'MB', 'GB', 'KB', 'TB', 'B',
+		'次', '个', '台'
+	];
+
+	api.metricValue = function (el, value) {
+		var text = (value == null || value === '') ? '—' : String(value);
+		/* 形如「102.40 Mbps」：数字 + 空格 + 白名单单位 */
+		var m = /^([-+]?[\d.,]+)\s*(\S+)$/.exec(text);
+		if (m && METRIC_UNITS.indexOf(m[2]) >= 0) {
+			el.appendChild(document.createTextNode(m[1]));
+			el.appendChild(E('span', { 'class': 'unit' }, m[2]));
+			/* 数字位数多时同步降字号，避免超出卡片 */
+			if (m[1].replace(/[.,]/g, '').length >= 7) el.classList.add('len-md');
+			return el;
+		}
+
+		el.appendChild(document.createTextNode(text));
+
+		/*
+		 * 纯文本值的宽度分级：按「显示宽度」估算（CJK 记 1，ASCII 记 0.55）。
+		 * 分档阈值经 176px 卡宽实测校准：≤6 全尺寸，>6 逐级降到 0.62em。
+		 */
+		var w = 0;
+		for (var i = 0; i < text.length; i++) {
+			w += /[\u2e80-\u9fff\uff00-\uffef]/.test(text.charAt(i)) ? 1 : 0.55;
+		}
+		if (w > 6 && w <= 9) el.classList.add('len-md');
+		else if (w > 9 && w <= 12) el.classList.add('len-lg');
+		else if (w > 12) el.classList.add('len-xl');
+		return el;
+	};
+
 	api.metric = function (label, value, color, status) {
 		var m = E('div', { 'class': 'mt5700-metric' });
-		m.appendChild(E('div', { 'class': 'mt5700-metric-label' }, label));
-		var v = E('div', { 'class': 'mt5700-metric-value' }, value || '—');
+		m.appendChild(E('div', { 'class': 'mt5700-metric-label', title: label || '' }, label));
+		var v = E('div', { 'class': 'mt5700-metric-value', title: (value == null ? '' : String(value)) });
+		api.metricValue(v, value);
 		if (color) v.classList.add(color);
 		m.appendChild(v);
 		/* status 为可选状态类（如温度 temp-normal），用于整卡背景着色；
@@ -115,29 +157,73 @@ var Mt5700 = (function () {
 		return m;
 	};
 
+	/*
+	 * 把网格内实际项数写入 data-count，供 CSS 选择最均衡的列数（尾行不留大片空白）。
+	 * 调用时机：向 .mt5700-metrics 追加完所有 .mt5700-metric 之后。
+	 * 幂等，可重复调用。
+	 */
+	api.syncMetrics = function (grid) {
+		if (!grid) return grid;
+		var n = grid.querySelectorAll('.mt5700-metric').length;
+		if (n > 0) grid.setAttribute('data-count', String(n));
+		else grid.removeAttribute('data-count');
+		return grid;
+	};
+
 	/* ================= 温度状态判定 ================= */
 
 	/*
-	 * 模组温度分级（单位 ℃）—— 各芯片独立判定，互不平均：
-	 *   < 70          normal  正常（绿色背景）
-	 *   70 - 84.9     warn    偏高（黄色背景）
-	 *   >= 85         high    过高（红色背景）
-	 * 无效值（null / NaN / 0）返回 null，表示暂无数据，不参与着色。
+	 * 模组温度分级（单位 ℃）—— 各芯片独立判定，互不平均。
+	 *
+	 * 阈值表驱动：按 min 从高到低匹配，首个满足 value >= min 的档位即结果。
+	 * 档位由低到高（6 档）：
+	 *   cold    深蓝    < 35        偏低（芯片刚上电/低温环境）
+	 *   cool    蓝      35 - 52.9   温和
+	 *   normal  绿      53 - 60.9   正常（长期工作舒适区）
+	 *   warm    黄      61 - 68.9   偏暖（关注）
+	 *   hot     橙      69 - 76.9   偏高（需散热）
+	 *   high    红      >= 77       过高（告警）
+	 *
+	 * 阈值按 MT5700 实测区间（各芯片常态 40-50℃）校准，
+	 * 使常驻温度落在 cool/normal 档，异常升温能逐级显现。
+	 * 无效值（null / NaN / <= 0）返回 null，表示暂无数据，不参与着色。
 	 */
-	api.TEMP_WARN_C = 70;
-	api.TEMP_HIGH_C = 85;
+	api.TEMP_LEVELS = [
+		{ level: 'high',   min: 77 },
+		{ level: 'hot',    min: 69 },
+		{ level: 'warm',   min: 61 },
+		{ level: 'normal', min: 53 },
+		{ level: 'cool',   min: 35 },
+		{ level: 'cold',   min: -Infinity }
+	];
+
+	/* 兼容旧字段：高危/告警阈值（供外部按单值判断时复用） */
+	api.TEMP_WARN_C = 61;
+	api.TEMP_HIGH_C = 77;
 
 	api.tempLevel = function (value) {
 		if (value == null || isNaN(value) || value <= 0) return null;
-		if (value >= api.TEMP_HIGH_C) return 'high';
-		if (value >= api.TEMP_WARN_C) return 'warn';
-		return 'normal';
+		for (var i = 0; i < api.TEMP_LEVELS.length; i++) {
+			if (value >= api.TEMP_LEVELS[i].min) return api.TEMP_LEVELS[i].level;
+		}
+		return 'cold';
 	};
 
 	/* 温度等级 → CSS 状态类名 */
 	api.tempClass = function (value) {
 		var lv = api.tempLevel(value);
 		return lv ? 'temp-' + lv : '';
+	};
+
+	/* 温度等级 → 中文标签（供汇总提示/无障碍属性使用） */
+	api.TEMP_LABELS = {
+		cold: '偏低', cool: '温和', normal: '正常',
+		warm: '偏暖', hot: '偏高', high: '过高'
+	};
+
+	api.tempLabel = function (value) {
+		var lv = api.tempLevel(value);
+		return lv ? (api.TEMP_LABELS[lv] || '') : '';
 	};
 
 	/* ================= 环形仪表 (Circular Gauge) ================= */
