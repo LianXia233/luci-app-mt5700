@@ -20,6 +20,20 @@ LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP 
 
 网络状态 · 网络设置 · 拨号设置 · 全网扫频 · 定时锁频 · 模组设置 · 模组升级 · 短信中心 · 短信设置 · AT 调试终端 · 通知日志 · 服务配置
 
+## 与 luci-app-mt5700m 的区别
+
+本仓库与同系列的 [`luci-app-mt5700m`](https://github.com/LianXia233/luci-app-mt5700m) 都面向 MT5700M-CN 5G 模组，但技术路线不同，按场景选用：
+
+| 维度 | luci-app-mt5700（本仓库） | luci-app-mt5700m |
+|:--|:--|:--|
+| 后端实现 | Rust 后端 `at-webserver-rust` 随包内置，单包交付 | 纯 LuCI（JS），依赖外部 `ubus-at-daemon` 守护进程与 `sms-tool_q` |
+| 通信架构 | LuCI → rpcd（ucode 代理 `mt5700.uc`）→ Rust → 模组 AT | LuCI → ubus（at-daemon / sms-tool_q）→ 模组 |
+| 拨号方式 | PCUI 串口 AT（`SERIAL`，默认 `/dev/ttyUSB1`，TCP 备用） | NCM 拨号（依赖 `kmod-usb-net-cdc-ncm` 等内核模块） |
+| 功能侧重 | 扫频、定时锁频、企业微信推送、通知日志（含 12 页全功能管理） | 概览、移动数据、网络与小区、短信、系统维护、流量历史 |
+| 版本 / 许可 | v1.12.2 / MIT | 2.x / Apache-2.0 |
+
+选型：需要扫频 / 锁频 / 常驻后端管控时选本仓库；偏好纯 LuCI、NCM 拨号、配套原版 WebUI 的选 `luci-app-mt5700m`。
+
 ## 安装
 
 从 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载与目标架构匹配的包（前端与后端必须成对安装）。
