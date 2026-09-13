@@ -5,6 +5,33 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.12.1] - 2026-09-13
+
+纯文档变更，无代码改动。
+
+### 文档 - 说明与 luci-app-mt5700m 的区别（两者互不兼容）
+
+近期有用户把本项目与 [LianXia233/luci-app-mt5700m](https://github.com/LianXia233/luci-app-mt5700m)
+混淆。两者都面向移远 MT5700M 系列 5G 模组，但**是彼此独立、互不兼容的两个项目**，
+包名、UCI 配置段、服务进程、安装路径与依赖均不同。
+
+在 README 新增「与其他仓库的区别」章节，含：
+
+- **核心差异一览表**：包名（`luci-app-mt5700` vs `luci-app-mt5700m`）、
+  UCI 段（`at-webserver` vs `mt5700m`）、服务名、主要语言
+  （JavaScript vs TypeScript/React）、版本号、许可证（MIT vs Apache-2.0）、
+  外部依赖（本项目基本无依赖 vs `ubus-at-daemon` + `sms-tool_q`）、
+  包架构（板级架构 vs `all`）、前端形态（LuCI 原生 12 页 vs LuCI + `www/5700` SPA）。
+- **为什么互不兼容**（4 条）：命名空间不同导致配置不迁移、
+  AT 通道归属不同会争抢 PCUI 串口、服务进程与 ubus 对象不同、
+  流量历史路径不同（`/etc/mt5700m/traffic-history`）。
+- **如何确认自己装的是哪个**：给出 `opkg/apk list-installed`、
+  `ls /etc/config/`、`ps` 三组判别命令（看是否含 `at-webserver`）。
+- **切换注意事项**：不支持平滑迁移，需先卸载旧包再装新包，
+  并列出需要备份的配置路径。
+
+所有对比项均取自两仓库实际的 `Makefile`、`README.md` 与目录结构核对，未做推测。
+
 ## [1.12.0] - 2026-09-13
 
 本版**只做移动端（<=768px）布局适配**，不改任何评估逻辑、阈值与 AT 指令。
