@@ -152,13 +152,21 @@ return L.view.extend({
 			var ambrD = splitSpeedUI(state.ambrDown, 'kbps');
 			var ambrU = splitSpeedUI(state.ambrUp, 'kbps');
 			var grid = E('div', { 'class': 'mt5700-metrics' });
+			/* 主载波承载信息：制式 / 频段 / 带宽，与「连接状态」互为补充 */
+			var prim = (state.carriers && state.carriers[0]) || {};
+			var primRat = AtWs.ratLabel ? AtWs.ratLabel(c.sysMode || prim.sysMode) : (c.sysMode || '—');
+			var primBand = prim.band != null
+				? AtWs.bandName(prim.sysMode === 'NR' ? 'NR' : 'LTE', prim.band) : '—';
+			var primBw = prim.bandwidth ? (prim.bandwidth / 1000) + ' MHz' : '—';
 			[
 				{ label: '网络状态', value: state.networkStatus, color: 'info' },
 				{ label: '运营商', value: state.operator },
-				{ label: '网络模式', value: c.sysMode || '未知' },
+				{ label: '网络模式', value: primRat },
 				{ label: '信号强度', value: c.signalPercent || '—' },
 				{ label: 'APN', value: state.apn },
 				{ label: 'QCI', value: state.qci },
+				{ label: '主载波频段', value: primBand },
+				{ label: '主载波带宽', value: primBw },
 				/* 连接状态面板展示的是签约速率（AT^DSAMBR），不是瞬时速率 */
 				{ label: '下行速率（签约）', value: ambrD.value + ' ' + ambrD.unit },
 				{ label: '上行速率（签约）', value: ambrU.value + ' ' + ambrU.unit }
@@ -203,32 +211,41 @@ return L.view.extend({
 			var pct = parseInt(c.signalPercent, 10);
 			sigGauges.pct.set(isNaN(pct) ? null : pct);
 
-			/* 总评按四项档位实时汇总 */
+			/* 总评汇总：无线信号四项 + 承载能力三项（制式 / 频段 / 带宽）
+			 *
+			 * 只喂信号四项会让结论过于乐观——700MHz 上的 LTE 满格信号同样会被判
+			 * "优秀"，但它的带宽天花板远低于 2.6GHz 的 5G。这里把主载波的制式、
+			 * 下行频率、下行带宽一并交给评估器，由它取信号档与能力档中更差者。
+			 */
+			var primary = (state.carriers && state.carriers[0]) || {};
 			verdict.set({
 				rsrp: c.rsrp,
 				rsrq: c.rsrq,
 				sinr: c.sinr,
-				pct: isNaN(pct) ? null : pct
+				pct: isNaN(pct) ? null : pct,
+				sysMode: primary.sysMode || c.sysMode,
+				dlFreqKHz: primary.dlFreqKHz,
+				dlBwKHz: primary.bandwidth
 			});
 		}
 
 		function renderCarriers() {
 			carrierBox.innerHTML = '';
 			var rows = (state.carriers || []).map(function (c) {
-				var kind = c.kind || c.sysMode || '—';
+				var kind = c.sysMode || c.kind || '—';
+				var bw = c.bandwidth ? (c.bandwidth / 1000) + ' MHz' : '—';
 				return [
 					kind,
 					c.band != null ? AtWs.bandName(kind, c.band) : '—',
 					c.channel || '—',
-					c.bandwidth || '—',
-					c.pci != null ? String(c.pci) : '—',
+					bw,
 					c.rsrp != null ? c.rsrp + ' dBm' : '—',
 					c.rsrq != null ? c.rsrq + ' dB' : '—',
 					c.sinr != null ? c.sinr + ' dB' : '—'
 				];
 			});
 			carrierBox.appendChild(Mt5700.table(
-				['制式', '频段', '频点', '带宽', 'PCI', 'RSRP', 'RSRQ', 'SINR'],
+				['制式', '频段', '频点', '带宽', 'RSRP', 'RSRQ', 'SINR'],
 				rows,
 				{ striped: true }
 			));
@@ -246,13 +263,13 @@ return L.view.extend({
 					'未查询到辅载波（非 NSA / 未配置 CA 时 ^MONSSC 与 ^CASCELLINFO 正常失败，属预期情况）'));
 				return;
 			}
-			// 按下行频点把信号质量对到 ^HFREQINFO 载波上
+			// 按下行频点把信号质量对到 ^MONSC 主载波上
 			var merged = [];
 			state.carriers.forEach(function (c, i) {
 				var sig = Parse.carrierSignalFor({ sysMode: c.sysMode === 'NR' ? 'NR' : 'LTE', dlFcn: String(c.channel) }, nr, lte);
 				merged.push({
 					title: i === 0 ? '主载波' : '辅载波 ' + i,
-					kind: c.kind || c.sysMode, band: c.band, channel: c.channel, bandwidth: c.bandwidth,
+					kind: c.sysMode || c.kind, band: c.band, channel: c.channel, bandwidth: c.bandwidth,
 					sig: sig
 				});
 			});
@@ -261,13 +278,14 @@ return L.view.extend({
 				nr, lte
 			);
 			var rows = merged.map(function (m) {
-				if (!m.sig) return [m.title, m.kind || '—', '—', m.channel || '—', m.bandwidth || '—', '—', '—', '—', '—', '—'];
+				var mBw = m.bandwidth ? (m.bandwidth / 1000) + ' MHz' : '—';
+				if (!m.sig) return [m.title, m.kind || '—', '—', m.channel || '—', mBw, '—', '—', '—', '—', '—'];
 				return [
 					m.title,
 					m.kind || '—',
 					m.band != null ? AtWs.bandName(m.kind, m.band) : '—',
 					m.channel || '—',
-					m.bandwidth || '—',
+					mBw,
 					String(m.sig.pci),
 					dash(m.sig.rsrp, ' dBm'),
 					dash(m.sig.rsrq, ' dB'),
@@ -716,9 +734,13 @@ return L.view.extend({
 					}
 					state.carriers = carriers.map(function (c) {
 						return {
-							kind: c.kind, band: c.band ? Number(c.band) : null, channel: c.channel,
-							bandwidth: c.bandwidth, pci: c.pci, rsrp: c.rsrp, rsrq: c.rsrq, sinr: c.sinr,
-							sysMode: c.sysMode || c.kind || ''
+							sysMode: c.sysMode || c.kind || '',
+							band: c.band ? Number(c.band) : null,
+							channel: c.dlFcn || '',
+							bandwidth: c.dlBwKHz || 0,
+							dlFreqKHz: c.dlFreqKHz || 0,
+							ulBwKHz: c.ulBwKHz || 0,
+							pci: null, rsrp: null, rsrq: null, sinr: null
 						};
 					});
 					renderSignal();

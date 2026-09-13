@@ -696,23 +696,52 @@ function parseMONSC(data) {
 
 /* ---- HFREQINFO 载波 ---- */
 
+/*
+ * ^HFREQINFO:<n>,<sysmode>,<band_classN>,<dl_fcnN>,<dl_freqN>,<dl_bwN>,
+ *            <ul_fcnN>,<ul_freqN>,<ul_bwN>   （N 为载波号，NR 最多 4 个）
+ *
+ * 手册 13.16.3 权威字段顺序（实测 NR n41）：
+ *   0,7,41,513000,2565000,100000,513000,2565000,100000
+ *   -> n=0  sysmode=7(NR)  band=41  dl_fcn=513000
+ *      dl_freq=2565000kHz(2565MHz)  dl_bw=100000kHz(100MHz)
+ *      ul_fcn=513000  ul_freq=2565000kHz  ul_bw=100000kHz
+ *
+ * 注意：本命令只上报频率/带宽，不返回 RSRP/RSRQ/SINR。信号质量一律取自
+ * ^MONSC（13.9.3），不要在此处解析信号字段。
+ */
 function parseHFREQINFO(data) {
 	var out = [];
 	var lines = extractATDataMultiline(data, '^HFREQINFO');
 	for (var i = 0; i < lines.length; i++) {
-		var p = lines[i].split(',');
+		var p = lines[i].split(',').map(function (s) { return s.trim(); });
+		if (!p.length) continue;
+		var syscode = p[1] ? p[1].replace(/"/g, '').trim() : '';
 		out.push({
-			kind: p[0] ? p[0].replace(/"/g, '').trim() : '',
-			band: p[1] ? p[1].trim() : '',
-			channel: p[2] ? p[2].trim() : '',
-			bandwidth: p[3] ? p[3].trim() : '',
-			pci: p[4] ? parseInt(p[4], 10) : 0,
-			rsrp: p[5] !== undefined ? convertRsrp(parseInt(p[5], 10)) : null,
-			rsrq: p[6] !== undefined ? convertRsrq(parseInt(p[6], 10)) : null,
-			sinr: p[7] !== undefined ? convertSinr(parseInt(p[7], 10)) : null
+			n: p[0] !== undefined ? parseInt(p[0], 10) : 0,
+			sysModeCode: syscode,
+			sysMode: sysModeName(syscode),
+			band: p[2] ? p[2].trim() : '',
+			dlFcn: p[3] ? p[3].trim() : '',
+			dlFreqKHz: p[4] ? parseInt(p[4], 10) : 0,
+			dlBwKHz: p[5] ? parseInt(p[5], 10) : 0,
+			ulFcn: p[6] ? p[6].trim() : '',
+			ulFreqKHz: p[7] ? parseInt(p[7], 10) : 0,
+			ulBwKHz: p[8] ? parseInt(p[8], 10) : 0
 		});
 	}
 	return out;
+}
+
+/*
+ * <sysmode> 制式编码（手册 13.16.3，^HFREQINFO 专用）：
+ *   1 GSM（不支持）  3 WCDMA（不支持）  6 LTE  7 NR
+ * 与 ^SYSINFOEX 的 <sysmode>（6=LTE、11=NR-5GC）不同，勿混用。
+ */
+function sysModeName(code) {
+	if (code === '' || code == null) return '';
+	var table = { '1': 'GSM', '3': 'WCDMA', '6': 'LTE', '7': 'NR' };
+	var key = String(code).trim();
+	return table[key] || String(code);
 }
 
 function operatorFromCode(code) {
@@ -789,6 +818,7 @@ var AtWs = {
 	parseHCSQ: parseHCSQ,
 	parseMONSC: parseMONSC,
 	parseHFREQINFO: parseHFREQINFO,
+	sysModeName: sysModeName,
 	parsePDCP: parsePDCP,
 	parseRawData: parseRawData,
 	PDCP_FIELDS: PDCP_FIELDS,

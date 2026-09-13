@@ -13,3 +13,4 @@ tests/mock-modem/node_modules/
 # IDE
 .idea/
 .vscode/
+.cmsg.txt
