@@ -5,6 +5,31 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.12.2] - 2026-09-13
+
+文档与 CI 修复，无功能/逻辑改动。
+
+### 文档 - README 不再内嵌更新日志
+
+README 的「快速安装」章节原有 v1.4.1 ~ v1.12.1 共 7 段版本变更说明，与
+本文件重复维护。现已移除，改为一行指向 CHANGELOG 的链接，
+变更记录统一以 CHANGELOG 为唯一来源。
+
+### 修复 - CI 双触发并发导致 run 误报失败
+
+一次发布同时 push `main` 与 tag，会触发两个 sha 相同的并发 run；两者的
+`x86_64/ipk` job 同时向 `ci-logs-ipk-x86_64` force push（git ref CAS 拒绝
+`cannot lock ref ... is at X but expected Y`），以及两个 `release` job 对同一 tag
+并发 `gh release delete → create` 互相踩踏。历史上 v1.11.0 ~ v1.12.1 每次发布
+都因此有一个 run 报红、Release 被跳过。
+
+两步修复：
+
+- **A 止血**：`Publish build log branch` 步骤加 `continue-on-error: true`，
+  日志归档失败不再阻断构建与发布。
+- **B 根治**：workflow 顶层加 `concurrency.group=build-${{ github.sha }}` +
+  `cancel-in-progress: false`，同一发布的两次 run 串行执行，消除两种竞争。
+
 ## [1.12.1] - 2026-09-13
 
 纯文档变更，无代码改动。
