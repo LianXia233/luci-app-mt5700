@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.3.2';
+var MT5700_CSS_VERSION = '2.4.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -409,46 +409,180 @@ var Mt5700 = (function () {
 	 * 信号总评横幅
 	 *
 	 * 四个仪表各说各的，用户看完仍不知道该得出什么结论。
-	 * 这里把四项档位汇总成「综合档位 + 一句话建议」，直接回答「现在这信号能不能用」。
+	 * 这里把「无线信号」与「网络承载能力」两类证据汇总成一句可执行结论。
 	 *
-	 * 汇总规则：取四项中最差档位作为综合档位（木桶原理）——
-	 * 任何一项拖后腿都会实际影响体验，取最差比取平均更贴近真实感受。
-	 * 但若只是 RSRQ/SINR 略差而 RSRP 尚可，会在建议文案里区分说明。
+	 * 汇总规则分两层：
+	 *   第一层 信号档（LEVEL_ORDER 木桶原理）：取 rsrp/rsrq/sinr/pct 四项中最差者。
+	 *          任何一项拖后腿都会实际影响体验，取最差比取平均更贴近真实感受。
+	 *   第二层 能力档（CAP_ORDER 木桶原理）：取「制式代际」「频段传播特性」「载波带宽」
+	 *          三项中最差者。这一层回答的是「这条链路最快能跑多少」。
+	 *
+	 * 最终结论 = 两层取更差者。理由：信号好只说明「链路质量好」，不等于「网速快」。
+	 * 例如 700MHz(n28) 上的 LTE 信号满格，RSRP -70 属"优秀"，但 20MHz 带宽 + 4G 制式
+	 * 决定了它的峰值吞吐远不如 2.6GHz(n41) 的 5G 100MHz。旧版只看信号档就下
+	 * 「适合看高清视频、下载大文件」的结论，属于典型的乐观误判。
 	 */
 	var LEVEL_ORDER = { exc: 0, good: 1, fair: 2, poor: 3, bad: 4 };
 
+	/*
+	 * 制式代际档位。代际决定的是「理论峰值与调度效率」的量级差异，
+	 * 与当前信号强弱无关。
+	 *   NR   5G：Sub-6 单载波 100MHz 可跑数百 Mbps
+	 *   LTE  4G：20MHz 典型 100~150Mbps，Cat 等级决定上限
+	 *   WCDMA 3G：个位数到十余 Mbps
+	 */
+	var RAT_CAP = {
+		'NR': { level: 'exc', label: '5G', note: '5G 制式，单载波带宽上限最高' },
+		'LTE': { level: 'good', label: '4G', note: '4G 制式，理论峰值明显低于 5G' },
+		'WCDMA': { level: 'poor', label: '3G', note: '3G 制式，仅够轻量上网' },
+		'GSM': { level: 'bad', label: '2G', note: '2G 制式，无法承载数据业务' }
+	};
+
+	/*
+	 * 频段传播特性：按中心频率分三档。
+	 *
+	 * 低频（<1GHz）绕射强、穿透好、覆盖远，但频谱窄、带宽天生受限；
+	 * Sub-6 中频（1~6GHz）是 5G 主力区，覆盖与容量均衡——中国现网 n41(2.6GHz)、
+	 *   n78(3.5GHz)、n79(4.9GHz) 全在此区间，n78 更是联通/电信/广电的 5G 核心频段，
+	 *   其 100MHz 带宽的实际速率优于低频，不应因"频率高"被降档；
+	 * 毫米波（>6GHz）带宽极大但穿透极差、覆盖半径小，国内尚未商用。
+	 *
+	 * 判据用实测频率（^HFREQINFO 的 dlFreqKHz），而非频段号——
+	 * 频段号到频率的映射随 3GPP 版本扩展，用频率更稳。
+	 */
+	var BAND_PROP = [
+		{ maxMHz: 1000, level: 'good', label: '低频', note: '穿透与覆盖好，但频谱窄、带宽受限' },
+		{ maxMHz: 6000, level: 'exc', label: '中频', note: 'Sub-6 主力频段，覆盖与带宽均衡' },
+		{ maxMHz: Infinity, level: 'fair', label: '毫米波', note: '带宽大但穿透差，覆盖半径小' }
+	];
+
+	/*
+	 * 单载波下行带宽档位。
+	 *
+	 * 带宽直接决定峰值吞吐，是最贴近「网速」的硬指标。但阈值必须按制式区分——
+	 * LTE 单载波物理带宽上限就是 20MHz（3GPP 36.101：1.4/3/5/10/15/20MHz），
+	 * 拿 NR 的尺子去量 LTE 会把「4G 满配」误判成「带宽不足」；
+	 * 反之 NR 的 25/30/40MHz 已能跑数百 Mbps，不该与 20MHz 同档。
+	 *
+	 * 因此按制式给出各自的档位表，缺制式信息时退到 NR 表（更保守的宽容度）。
+	 */
+	var BW_CAP_NR = [
+		{ minKHz: 80000, level: 'exc', note: '接近 5G 单载波满配' },
+		{ minKHz: 45000, level: 'good', note: '带宽充裕' },
+		{ minKHz: 24000, level: 'good', note: '带宽够用，峰值可观' },
+		{ minKHz: 19000, level: 'fair', note: '带宽一般，峰值受限' },
+		{ minKHz: 0, level: 'poor', note: '带宽偏窄，峰值明显受限' }
+	];
+	var BW_CAP_LTE = [
+		{ minKHz: 19000, level: 'good', note: '已达 4G 单载波带宽上限' },
+		{ minKHz: 14000, level: 'fair', note: '带宽尚可，峰值中等' },
+		{ minKHz: 0, level: 'poor', note: '带宽偏窄，峰值明显受限' }
+	];
+
 	var VERDICT_TEXT = {
 		exc: {
-			title: '信号很好',
-			advice: '当前网络质量优秀，适合看高清视频、下载大文件等对带宽要求高的场景。'
+			title: '网络能力优秀',
+			advice: '信号与频段带宽俱佳，适合看高清视频、下载大文件等对带宽要求高的场景。'
 		},
 		good: {
-			title: '信号良好',
-			advice: '可以正常上网、看视频和语音通话，体验流畅。'
+			title: '网络能力良好',
+			advice: '日常上网、看视频和语音通话都没问题，体验流畅。'
 		},
 		fair: {
-			title: '信号一般',
-			advice: '轻量使用没问题，看高清视频可能偶尔缓冲。可尝试移动到窗边或高处。'
+			title: '网络能力一般',
+			advice: '轻量使用（网页、消息、音乐）没问题；高清视频可能缓冲，大文件下载偏慢。'
 		},
 		poor: {
-			title: '信号偏弱',
-			advice: '容易出现卡顿和掉线。建议调整设备位置、加装外置天线，或检查所在区域覆盖。'
+			title: '网络能力偏弱',
+			advice: '容易出现卡顿和掉线。建议调整设备位置、加装外置天线，或联系运营商确认覆盖。'
 		},
 		bad: {
-			title: '信号很差',
+			title: '网络能力很差',
 			advice: '基本无法正常上网。请检查天线连接、SIM 卡状态，或联系运营商确认基站覆盖。'
 		}
 	};
 
+	/* 制式名归一：^HFREQINFO 返回 6/7，^MONSC 返回 LTE/NR，页面 state 可能给任意形式 */
+	function normRat(v) {
+		if (v == null || v === '') return null;
+		var s = String(v).trim().toUpperCase();
+		if (s === '6' || s.indexOf('LTE') === 0) return 'LTE';
+		if (s === '7' || s === '11' || s.indexOf('NR') === 0) return 'NR';
+		if (s.indexOf('WCDMA') === 0 || s === '3') return 'WCDMA';
+		if (s.indexOf('GSM') === 0 || s === '1') return 'GSM';
+		return null;
+	}
+
+	function bandPropFor(freqKHz) {
+		if (!freqKHz || freqKHz <= 0) return null;
+		var mhz = freqKHz / 1000;
+		for (var i = 0; i < BAND_PROP.length; i++) {
+			if (mhz < BAND_PROP[i].maxMHz) return BAND_PROP[i];
+		}
+		return BAND_PROP[BAND_PROP.length - 1];
+	}
+
+	function bwCapFor(bwKHz, rat) {
+		if (!bwKHz || bwKHz <= 0) return null;
+		/* LTE 用 LTE 的尺子量，其余（含制式未知）用 NR 表 */
+		var table = (rat === 'LTE') ? BW_CAP_LTE : BW_CAP_NR;
+		for (var i = 0; i < table.length; i++) {
+			if (bwKHz >= table[i].minKHz) return table[i];
+		}
+		return table[table.length - 1];
+	}
+
+	/* 暴露给页面与测试使用 */
+	api.ratLabel = function (v) {
+		var r = normRat(v);
+		return r && RAT_CAP[r] ? RAT_CAP[r].label : (v ? String(v) : '—');
+	};
+
+	/*
+	 * 评估网络承载能力（不依赖信号强弱）。
+	 * opts: { sysMode, dlFreqKHz, dlBwKHz }
+	 * 返回 { level, items:[{key,level,label,value,note}] } 或 null（数据不足）
+	 */
+	api.capabilityAssess = function (opts) {
+		opts = opts || {};
+		var items = [];
+		var rat = normRat(opts.sysMode);
+		if (rat && RAT_CAP[rat]) {
+			items.push({
+				key: 'rat', level: RAT_CAP[rat].level,
+				label: '网络制式', value: RAT_CAP[rat].label, note: RAT_CAP[rat].note
+			});
+		}
+		var bp = bandPropFor(opts.dlFreqKHz);
+		if (bp) {
+			var mhzTxt = (opts.dlFreqKHz / 1000).toFixed(0) + ' MHz';
+			items.push({ key: 'band', level: bp.level, label: '频段特性', value: bp.label + ' ' + mhzTxt, note: bp.note });
+		}
+		var bw = bwCapFor(opts.dlBwKHz, rat);
+		if (bw) {
+			var bwTxt = (opts.dlBwKHz / 1000) + ' MHz';
+			items.push({ key: 'bw', level: bw.level, label: '载波带宽', value: bwTxt, note: bw.note });
+		}
+		if (!items.length) return null;
+		var worst = items.reduce(function (a, b) {
+			return LEVEL_ORDER[b.level] > LEVEL_ORDER[a.level] ? b : a;
+		});
+		return { level: worst.level, items: items };
+	};
+
+	/* 档位中文名，供能力项复用 */
+	api.levelCaption = function (level) { return GAUGE_CAPTIONS[level] || ''; };
+
 	/**
 	 * 创建信号总评横幅。
-	 * 返回 { el, set({rsrp, rsrq, sinr, pct}) }，任一指标为空则该项不参与汇总。
+	 * 返回 { el, set({rsrp, rsrq, sinr, pct, sysMode, dlFreqKHz, dlBwKHz}) }
+	 * 任一指标为空则该项不参与汇总。
 	 */
 	api.signalVerdict = function () {
 		var root = E('div', { 'class': 'mt5700-verdict' });
 		var dot = E('div', { 'class': 'mt5700-verdict-dot' });
 		var text = E('div', { 'class': 'mt5700-verdict-text' });
-		var title = E('div', { 'class': 'mt5700-verdict-title' }, '正在评估信号…');
+		var title = E('div', { 'class': 'mt5700-verdict-title' }, '正在评估网络…');
 		var advice = E('div', { 'class': 'mt5700-verdict-advice' });
 		text.appendChild(title);
 		text.appendChild(advice);
@@ -458,27 +592,58 @@ var Mt5700 = (function () {
 		var detailBar = E('div', { 'class': 'mt5700-verdict-detail' });
 		root.appendChild(detailBar);
 
+		var capBar = E('div', { 'class': 'mt5700-verdict-detail mt5700-verdict-cap' });
+		root.appendChild(capBar);
+
+		var capNote = E('div', { 'class': 'mt5700-verdict-capnote' });
+		root.appendChild(capNote);
+
 		return {
 			el: root,
 			set: function (vals) {
+				vals = vals || {};
 				var levels = [];
 				['rsrp', 'rsrq', 'sinr', 'pct'].forEach(function (k) {
 					var lv = api.signalLevel(k, vals[k]);
 					if (lv) levels.push({ key: k, level: lv });
 				});
 				detailBar.innerHTML = '';
+				capBar.innerHTML = '';
+				capNote.textContent = '';
 				if (!levels.length) {
 					root.className = 'mt5700-verdict mt5700-verdict-empty';
 					title.textContent = '暂无信号数据';
 					advice.textContent = '等待模组上报信号质量…';
 					return;
 				}
-				/* 综合档位 = 最差项（木桶原理） */
+				/* 第一层：信号档 = 最差项（木桶原理） */
 				var worst = levels.reduce(function (a, b) {
 					return LEVEL_ORDER[b.level] > LEVEL_ORDER[a.level] ? b : a;
 				});
-				var v = VERDICT_TEXT[worst.level] || VERDICT_TEXT.fair;
-				root.className = 'mt5700-verdict mt5700-verdict-' + worst.level;
+
+				/* 第二层：能力档（制式 / 频段 / 带宽） */
+				var cap = api.capabilityAssess({
+					sysMode: vals.sysMode,
+					dlFreqKHz: vals.dlFreqKHz,
+					dlBwKHz: vals.dlBwKHz
+				});
+
+				/*
+				 * 合成最终档位。信号与能力取更差者——信号决定「稳不稳」，
+				 * 能力决定「快不快」，任一短板都约束真实体验。
+				 */
+				var finalLevel = worst.level;
+				var cappedBy = null;
+				if (cap && LEVEL_ORDER[cap.level] > LEVEL_ORDER[worst.level]) {
+					finalLevel = cap.level;
+					var capWorst = cap.items.reduce(function (a, b) {
+						return LEVEL_ORDER[b.level] > LEVEL_ORDER[a.level] ? b : a;
+					});
+					cappedBy = capWorst;
+				}
+
+				var v = VERDICT_TEXT[finalLevel] || VERDICT_TEXT.fair;
+				root.className = 'mt5700-verdict mt5700-verdict-' + finalLevel;
 				title.textContent = v.title;
 				advice.textContent = v.advice;
 
@@ -494,6 +659,29 @@ var Mt5700 = (function () {
 					}
 					detailBar.appendChild(chip);
 				});
+
+				/* 能力项 chip：制式 / 频段 / 带宽 */
+				if (cap) {
+					cap.items.forEach(function (it) {
+						var chip = E('span', { 'class': 'mt5700-verdict-chip mt5700-verdict-chip-' + it.level });
+						chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-name' }, it.label));
+						chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-level' }, it.value));
+						if (LEVEL_ORDER[it.level] === LEVEL_ORDER[cap.level]) {
+							chip.classList.add('mt5700-verdict-chip-worst');
+						}
+						capBar.appendChild(chip);
+					});
+				}
+
+				/* 关键说明：当结论被能力维度拉低时，明确指出「信号好≠网速快」 */
+				if (cappedBy) {
+					capNote.textContent = '注意：无线信号本身' + (api.signalCaption ? api.signalCaption(worst.level) : '') +
+						'，但「' + cappedBy.label + '」为' + (api.levelCaption ? api.levelCaption(cappedBy.level) : '') +
+						'（' + cappedBy.note + '），实际网速会受此限制。';
+					capNote.classList.add('mt5700-verdict-capnote-on');
+				} else {
+					capNote.classList.remove('mt5700-verdict-capnote-on');
+				}
 			}
 		};
 	};

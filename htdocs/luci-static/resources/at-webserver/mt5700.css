@@ -438,11 +438,40 @@
   border-radius: var(--mt5700-radius-lg);
   box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
   transition: transform var(--mt5700-transition-base), box-shadow var(--mt5700-transition-base);
+  /* 四项仪表等高对齐：让标签行、仪表行、档位行、描述行各自处在同一条基线上 */
+  height: 100%;
 }
 
 .mt5700-gauge:hover {
   transform: translateY(-3px);
   box-shadow: var(--mt5700-sh-3), var(--mt5700-sh-inset);
+}
+
+/* 标签区固定高度：中英文两行在所有卡片里都占同样的垂直空间，
+   避免"信号强度 SRSRP" 这类长短不一的文案把下方仪表推得高低不齐 */
+.mt5700-gauge-labelbox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  text-align: center;
+  min-height: 2.6em;
+}
+
+/* 描述行固定高度 + 垂直居中：不同档位文案长度不同，若随内容伸缩会让
+   四张卡的下边缘参差。固定 3 行高度后四卡底边严格对齐 */
+.mt5700-gauge-plain {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 4.5em;
+  min-height: 4.5em;
+  font-size: var(--mt5700-font-size-xs);
+  line-height: 1.5;
+  color: var(--mt5700-text-muted);
+  text-align: center;
+  padding: 0 2px;
 }
 
 .mt5700-gauge-dial {
@@ -494,14 +523,6 @@
   color: var(--mt5700-text-muted);
 }
 
-.mt5700-gauge-labelbox {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  text-align: center;
-}
-
 .mt5700-gauge-label {
   font-size: var(--mt5700-font-size-sm);
   font-weight: 600;
@@ -522,15 +543,6 @@
   font-weight: 600;
   padding: 2px 10px;
   border-radius: var(--mt5700-radius-full);
-}
-
-.mt5700-gauge-plain {
-  min-height: 2.6em;
-  font-size: var(--mt5700-font-size-xs);
-  line-height: 1.5;
-  color: var(--mt5700-text-muted);
-  text-align: center;
-  padding: 0 2px;
 }
 
 /* 仪表档位态：给整张卡加一层极淡的档位底色，便于一眼扫过 */
@@ -635,6 +647,30 @@
 .mt5700-verdict-chip-fair .mt5700-verdict-chip-level,
 .mt5700-verdict-chip-poor .mt5700-verdict-chip-level,
 .mt5700-verdict-chip-bad .mt5700-verdict-chip-level { font-weight: 600; }
+
+/* ---------- 承载能力项（制式 / 频段 / 带宽） ---------- */
+/* 与信号项分区：信号回答「稳不稳」，能力回答「快不快」。
+   用一条细分隔线把两组 chip 区分开，避免用户把它们混成一个指标池 */
+.mt5700-verdict-cap {
+  padding-top: var(--mt5700-space-sm);
+  border-top: 1px dashed var(--mt5700-border);
+}
+
+.mt5700-verdict-capnote {
+  grid-column: 1 / -1;
+  display: none;
+  margin-top: var(--mt5700-space-sm);
+  padding: var(--mt5700-space-sm) var(--mt5700-space-md);
+  font-size: var(--mt5700-font-size-xs);
+  line-height: 1.6;
+  color: var(--mt5700-text-secondary);
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 2px solid rgba(245, 158, 11, 0.55);
+  border-radius: var(--mt5700-radius-sm);
+}
+
+/* 仅当结论被能力维度拉低时才显示，否则不占版面 */
+.mt5700-verdict-capnote-on { display: block; }
 
 .mt5700-gauge-caption.exc { background: rgba(15, 157, 99, 0.14); color: #0d9e6e; }
 .mt5700-gauge-caption.good { background: rgba(6, 182, 212, 0.14); color: #0891b2; }
