@@ -233,6 +233,39 @@ var Mt5700 = (function () {
 	var GAUGE_CAPTIONS = { exc: '优秀', good: '良好', fair: '一般', poor: '较差', bad: '极差' };
 
 	/*
+	 * 各指标在每一档位该说的人话。
+	 * 仪表本身的数值（-64 dBm）只有专业用户看得懂，这里补一层「这意味着什么」，
+	 * 让普通用户也能判断当前信号够不够用。
+	 */
+	var GAUGE_PLAIN = {
+		rsrp: {
+			exc: '信号很强，网速跑得动',
+			good: '信号够用，日常使用顺畅',
+			fair: '信号一般，速度可能偏慢',
+			poor: '信号偏弱，容易卡顿掉线',
+			bad: '信号极弱，基本无法上网'
+		},
+		rsrq: {
+			exc: '信号纯净，干扰很小',
+			good: '信号质量不错',
+			fair: '有一定干扰，速度受影响',
+			bad: '干扰严重，上网体验差'
+		},
+		sinr: {
+			exc: '干扰极小，网速接近峰值',
+			good: '干扰较小，网速稳定',
+			fair: '干扰明显，速度会打折',
+			bad: '干扰严重，容易出现卡顿'
+		},
+		pct: {
+			exc: '综合信号非常好',
+			good: '综合信号良好',
+			fair: '综合信号一般',
+			bad: '综合信号较差'
+		}
+	};
+
+	/*
 	 * 各信号指标使用独立阈值与量程，绝不共用一套 0-100% 算法：
 	 *   RSRP (dBm): >=-80 优秀 / >=-90 良好 / >=-100 一般 / >=-110 较差 / 更低 极差
 	 *   RSRQ (dB) : >=-10 优秀 / >=-15 良好 / >=-20 一般 / 更低 极差
@@ -241,7 +274,7 @@ var Mt5700 = (function () {
 	 */
 	var SIGNAL_SPECS = {
 		rsrp: {
-			min: -120, max: -70,
+			min: -140, max: -44,
 			level: function (v) {
 				return v >= -80 ? 'exc' : v >= -90 ? 'good' : v >= -100 ? 'fair' : v >= -110 ? 'poor' : 'bad';
 			}
@@ -253,7 +286,7 @@ var Mt5700 = (function () {
 			}
 		},
 		sinr: {
-			min: 0, max: 30,
+			min: -10, max: 30,
 			level: function (v) {
 				return v >= 20 ? 'exc' : v >= 13 ? 'good' : v >= 5 ? 'fair' : 'bad';
 			}
@@ -267,23 +300,45 @@ var Mt5700 = (function () {
 		}
 	};
 
-	// 判定信号等级（kind: rsrp | rsrq | sinr），无法判定时返回 null
+	// 判定信号等级（kind: rsrp | rsrq | sinr | pct），无法判定时返回 null
 	api.signalLevel = function (kind, value) {
 		var spec = SIGNAL_SPECS[kind];
 		if (!spec || value == null || isNaN(value)) return null;
 		return spec.level(value);
 	};
 
+	api.signalCaption = function (level) {
+		return GAUGE_CAPTIONS[level] || '';
+	};
+
+	api.signalPlain = function (kind, level) {
+		var m = GAUGE_PLAIN[kind];
+		return (m && m[level]) || '';
+	};
+
 	/**
 	 * 创建环形仪表。SVG viewBox 缩放自适应容器，DOM 开销固定（1 svg + 2 circle）。
-	 * 返回 { el, set(value) }：set(null) 显示占位符并隐藏弧线与等级。
+	 * 返回 { el, set(value), setSub(text), setPlain(text) }。
+	 *
+	 * opts:
+	 *   sub   —— 英文缩写（如 RSRP），显示在中文标签下方，保留给专业用户对照手册
+	 *   plain —— 是否启用「人话描述」行（默认启用）
+	 *
+	 * 关于弧长的两点修正：
+	 *   1. 量程按各指标物理可达范围设定（RSRP -140~-44 而非 -120~-70），
+	 *      否则稍好的信号一律顶到满圈，用户无法分辨 -64 与 -80 的差别。
+	 *   2. 弧长只是视觉刻度，档位判定仍只看阈值，两者不混淆。
 	 */
-	api.gauge = function (label, unit, kind) {
+	api.gauge = function (label, unit, kind, opts) {
+		opts = opts || {};
 		var C = (2 * Math.PI * 42).toFixed(2);
+		var plainOn = opts.plain !== false;
 
 		var root = E('div', { 'class': 'mt5700-gauge' });
 		var dial = E('div', { 'class': 'mt5700-gauge-dial' });
 		var svg = svgEl('svg', { viewBox: '0 0 100 100', role: 'img' });
+
+		// 刻度环：把「量程」可视化，让弧长百分比有参照
 		svg.appendChild(svgEl('circle', {
 			'class': 'mt5700-gauge-track', cx: 50, cy: 50, r: 42, 'stroke-width': 8
 		}));
@@ -303,9 +358,19 @@ var Mt5700 = (function () {
 		dial.appendChild(center);
 		root.appendChild(dial);
 
-		root.appendChild(E('div', { 'class': 'mt5700-gauge-label' }, label || ''));
+		var labelBox = E('div', { 'class': 'mt5700-gauge-labelbox' });
+		labelBox.appendChild(E('div', { 'class': 'mt5700-gauge-label' }, label || ''));
+		if (opts.sub) labelBox.appendChild(E('div', { 'class': 'mt5700-gauge-sub' }, opts.sub));
+		root.appendChild(labelBox);
+
 		var caption = E('div', { 'class': 'mt5700-gauge-caption' });
 		root.appendChild(caption);
+
+		var plainEl = null;
+		if (plainOn) {
+			plainEl = E('div', { 'class': 'mt5700-gauge-plain' });
+			root.appendChild(plainEl);
+		}
 
 		return {
 			el: root,
@@ -317,6 +382,8 @@ var Mt5700 = (function () {
 					bar.removeAttribute('stroke');
 					caption.textContent = '';
 					caption.className = 'mt5700-gauge-caption';
+					if (plainEl) plainEl.textContent = '暂无数据';
+					root.classList.remove('mt5700-gauge-empty');
 					return;
 				}
 				valueEl.textContent = String(value);
@@ -331,6 +398,102 @@ var Mt5700 = (function () {
 				bar.setAttribute('stroke-dashoffset', (C * (1 - pct)).toFixed(2));
 				caption.textContent = GAUGE_CAPTIONS[level] || '';
 				caption.className = 'mt5700-gauge-caption ' + level;
+				if (plainEl) plainEl.textContent = (GAUGE_PLAIN[kind] || {})[level] || '';
+				/* 档位同时挂到根节点，便于卡片级汇总与测试读取 */
+				root.className = 'mt5700-gauge mt5700-gauge-' + level;
+			}
+		};
+	};
+
+	/*
+	 * 信号总评横幅
+	 *
+	 * 四个仪表各说各的，用户看完仍不知道该得出什么结论。
+	 * 这里把四项档位汇总成「综合档位 + 一句话建议」，直接回答「现在这信号能不能用」。
+	 *
+	 * 汇总规则：取四项中最差档位作为综合档位（木桶原理）——
+	 * 任何一项拖后腿都会实际影响体验，取最差比取平均更贴近真实感受。
+	 * 但若只是 RSRQ/SINR 略差而 RSRP 尚可，会在建议文案里区分说明。
+	 */
+	var LEVEL_ORDER = { exc: 0, good: 1, fair: 2, poor: 3, bad: 4 };
+
+	var VERDICT_TEXT = {
+		exc: {
+			title: '信号很好',
+			advice: '当前网络质量优秀，适合看高清视频、下载大文件等对带宽要求高的场景。'
+		},
+		good: {
+			title: '信号良好',
+			advice: '可以正常上网、看视频和语音通话，体验流畅。'
+		},
+		fair: {
+			title: '信号一般',
+			advice: '轻量使用没问题，看高清视频可能偶尔缓冲。可尝试移动到窗边或高处。'
+		},
+		poor: {
+			title: '信号偏弱',
+			advice: '容易出现卡顿和掉线。建议调整设备位置、加装外置天线，或检查所在区域覆盖。'
+		},
+		bad: {
+			title: '信号很差',
+			advice: '基本无法正常上网。请检查天线连接、SIM 卡状态，或联系运营商确认基站覆盖。'
+		}
+	};
+
+	/**
+	 * 创建信号总评横幅。
+	 * 返回 { el, set({rsrp, rsrq, sinr, pct}) }，任一指标为空则该项不参与汇总。
+	 */
+	api.signalVerdict = function () {
+		var root = E('div', { 'class': 'mt5700-verdict' });
+		var dot = E('div', { 'class': 'mt5700-verdict-dot' });
+		var text = E('div', { 'class': 'mt5700-verdict-text' });
+		var title = E('div', { 'class': 'mt5700-verdict-title' }, '正在评估信号…');
+		var advice = E('div', { 'class': 'mt5700-verdict-advice' });
+		text.appendChild(title);
+		text.appendChild(advice);
+		root.appendChild(dot);
+		root.appendChild(text);
+
+		var detailBar = E('div', { 'class': 'mt5700-verdict-detail' });
+		root.appendChild(detailBar);
+
+		return {
+			el: root,
+			set: function (vals) {
+				var levels = [];
+				['rsrp', 'rsrq', 'sinr', 'pct'].forEach(function (k) {
+					var lv = api.signalLevel(k, vals[k]);
+					if (lv) levels.push({ key: k, level: lv });
+				});
+				detailBar.innerHTML = '';
+				if (!levels.length) {
+					root.className = 'mt5700-verdict mt5700-verdict-empty';
+					title.textContent = '暂无信号数据';
+					advice.textContent = '等待模组上报信号质量…';
+					return;
+				}
+				/* 综合档位 = 最差项（木桶原理） */
+				var worst = levels.reduce(function (a, b) {
+					return LEVEL_ORDER[b.level] > LEVEL_ORDER[a.level] ? b : a;
+				});
+				var v = VERDICT_TEXT[worst.level] || VERDICT_TEXT.fair;
+				root.className = 'mt5700-verdict mt5700-verdict-' + worst.level;
+				title.textContent = v.title;
+				advice.textContent = v.advice;
+
+				/* 逐项列出各指标档位，让用户知道是「哪一项」拖后腿 */
+				var LABELS = { rsrp: '信号强度', rsrq: '信号质量', sinr: '信噪比', pct: '综合' };
+				levels.forEach(function (it) {
+					var chip = E('span', { 'class': 'mt5700-verdict-chip mt5700-verdict-chip-' + it.level });
+					chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-name' }, LABELS[it.key] || it.key));
+					chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-level' },
+						(api.signalCaption ? api.signalCaption(it.level) : '')));
+					if (LEVEL_ORDER[it.level] === LEVEL_ORDER[worst.level]) {
+						chip.classList.add('mt5700-verdict-chip-worst');
+					}
+					detailBar.appendChild(chip);
+				});
 			}
 		};
 	};
@@ -764,6 +927,129 @@ var Mt5700 = (function () {
 			el.appendChild(arguments[i]);
 		}
 		return el;
+	};
+
+	/* ================= 高级控件 ================= */
+
+	/*
+	 * 卡片式单选组
+	 *
+	 * 用途：把「用户看不懂的编码」变成「用户可以按影响面直接选」的选项。
+	 * 与原生 <select> 的区别：每个选项都有独立标题与说明文案，说明始终可见，
+	 * 不需要展开下拉才能比较。适合选项数量少（<=8）且每项都需要解释的场景。
+	 *
+	 * options: [{ value, label, desc, badge }]
+	 *   value —— 真实下发值（如 "080302"），onChange 收到它
+	 *   label —— 选项主标题（通俗中文）
+	 *   desc  —— 选项说明，讲清「选了会怎样」
+	 *   badge —— 可选角标，如「推荐」「仅搜索」
+	 *
+	 * 返回值为容器元素，额外挂载：
+	 *   el.getValue()         取当前值
+	 *   el.setValue(v, silent) 设当前值（silent=true 时不触发 onChange）
+	 *   el.setDisabled(v, off) 单项禁用（用于「含 LTE 时不允许 CS_ONLY」这类互斥约束）
+	 */
+	api.radioCards = function (name, options, value, onChange) {
+		var wrap = E('div', { 'class': 'mt5700-radio-cards' });
+		var items = [];
+
+		options.forEach(function (opt, idx) {
+			var id = 'mt5700-rc-' + name + '-' + idx;
+			var label = E('label', { 'class': 'mt5700-radio-card', 'for': id });
+			var input = E('input', { type: 'radio', name: 'mt5700-rc-' + name, id: id, value: opt.value });
+			var body = E('div', { 'class': 'mt5700-radio-card-body' });
+			var head = E('div', { 'class': 'mt5700-radio-card-head' });
+			head.appendChild(E('span', { 'class': 'mt5700-radio-card-title' }, opt.label));
+			if (opt.badge) head.appendChild(E('span', { 'class': 'mt5700-radio-card-badge' }, opt.badge));
+			body.appendChild(head);
+			if (opt.desc) body.appendChild(E('div', { 'class': 'mt5700-radio-card-desc' }, opt.desc));
+			if (opt.code) body.appendChild(E('code', { 'class': 'mt5700-radio-card-code' }, opt.code));
+			label.appendChild(input);
+			label.appendChild(E('span', { 'class': 'mt5700-radio-card-dot' }));
+			label.appendChild(body);
+			wrap.appendChild(label);
+			items.push({ input: input, label: label, option: opt });
+			input.addEventListener('change', function () {
+				if (input.checked && typeof onChange === 'function') onChange(opt.value, opt);
+			});
+		});
+
+		function apply(v) {
+			items.forEach(function (it) { it.input.checked = (it.option.value === v); });
+		}
+		apply(value);
+
+		wrap.getValue = function () {
+			for (var i = 0; i < items.length; i++) if (items[i].input.checked) return items[i].option.value;
+			return '';
+		};
+		wrap.setValue = function (v, silent) {
+			apply(v);
+			if (!silent && typeof onChange === 'function') {
+				var hit = items.filter(function (it) { return it.option.value === v; })[0];
+				if (hit) onChange(v, hit.option);
+			}
+		};
+		/* 单项禁用：用于官方约束（如 srvdomain 含 LTE/NR 时不允许 0 或 3） */
+		wrap.setDisabled = function (v, off) {
+			items.forEach(function (it) {
+				if (it.option.value !== v) return;
+				it.input.disabled = !!off;
+				it.label.classList.toggle('mt5700-radio-card-disabled', !!off);
+				if (off && it.input.checked) it.input.checked = false;
+			});
+		};
+		wrap.setAllDisabled = function (off) {
+			items.forEach(function (it) {
+				it.input.disabled = !!off;
+				it.label.classList.toggle('mt5700-radio-card-disabled', !!off);
+			});
+		};
+		return wrap;
+	};
+
+	/*
+	 * 原始参数展示行
+	 *
+	 * 用途：界面用通俗文案，但底层编码仍要可见可审计（便于排障与对标 AT 手册）。
+	 * 用等宽灰底呈现原始值，不参与编辑，用户不会误改。
+	 */
+	api.rawValue = function (label, value) {
+		var row = E('div', { 'class': 'mt5700-raw-row' });
+		row.appendChild(E('span', { 'class': 'mt5700-raw-label' }, label));
+		var val = E('code', { 'class': 'mt5700-raw-value' }, (value === '' || value == null) ? '—' : String(value));
+		row.appendChild(val);
+		row.setValue = function (v) { val.textContent = (v === '' || v == null) ? '—' : String(v); };
+		return row;
+	};
+
+	/*
+	 * 字段说明块
+	 *
+	 * 比 formGroup 的 hint 更结构化：支持一个主说明 + 若干条要点。
+	 * 用于把一个技术字段的作用、影响面、注意事项讲清楚。
+	 */
+	api.fieldNote = function (summary, points) {
+		var box = E('div', { 'class': 'mt5700-field-note' });
+		if (summary) box.appendChild(E('div', { 'class': 'mt5700-field-note-summary' }, summary));
+		if (points && points.length) {
+			var ul = E('ul', { 'class': 'mt5700-field-note-list' });
+			points.forEach(function (p) { ul.appendChild(E('li', {}, p)); });
+			box.appendChild(ul);
+		}
+		return box;
+	};
+
+	/*
+	 * 只读状态行（用于展示「当前实际值」这类不需要编辑的信息）
+	 */
+	api.readonlyField = function (label, value, hint) {
+		var group = E('div', { 'class': 'mt5700-form-group' });
+		group.appendChild(E('label', { 'class': 'mt5700-label' }, label));
+		var box = E('div', { 'class': 'mt5700-readonly' }, (value === '' || value == null) ? '—' : String(value));
+		group.appendChild(box);
+		if (hint) group.appendChild(E('div', { 'class': 'mt5700-hint' }, hint));
+		return group;
 	};
 
 	/* ================= 未保存更改（暂存 / 保存并应用 / 撤销） ================= */
