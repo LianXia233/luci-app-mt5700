@@ -25,10 +25,39 @@ return L.view.extend({
 
 		/* ---------- 面板骨架（信号质量置顶） ---------- */
 
-		var signalCard = Mt5700.card('信号质量', '主小区 RSRP/RSRQ/SINR 与信号百分比');
-		var sigGrid = E('div', { 'class': 'mt5700-metrics' });
-		signalCard._body.appendChild(sigGrid);
+		var signalCard = Mt5700.card('信号质量', '当前网络信号的强弱、纯度与干扰程度');
+		var signalBody = E('div');
+		signalCard._body.appendChild(signalBody);
 		body.appendChild(signalCard);
+
+		/* 总评横幅：把四项指标汇总成一句结论，回答「这信号能不能用」 */
+		var verdict = Mt5700.signalVerdict();
+		signalBody.appendChild(verdict.el);
+
+		var sigGrid = E('div', { 'class': 'mt5700-metrics' });
+		signalBody.appendChild(sigGrid);
+
+		/* 参考说明（可折叠）：给愿意深究的用户看阈值依据 */
+		var sigRefPanel = E('div', { 'class': 'mt5700-field-note' });
+		sigRefPanel.appendChild(E('div', { 'class': 'mt5700-field-note-summary' },
+			'各指标含义与参考区间'));
+		var sigRefUl = E('ul', { 'class': 'mt5700-field-note-list' });
+		[
+			'信号强度（RSRP）：接收到的信号功率，是判断覆盖好坏的首要指标。-80 dBm 以上为优秀，-100 dBm 以下偏弱。',
+			'信号质量（RSRQ）：信号中有效成分的占比，反映小区负载与干扰。-10 dB 以上为优秀。',
+			'信噪比（SINR）：有用信号比噪声强多少，直接决定实际网速上限。20 dB 以上为优秀，5 dB 以下会明显卡顿。',
+			'综合信号：模组上报的信号百分比，供快速判断使用。'
+		].forEach(function (t) { sigRefUl.appendChild(E('li', {}, t)); });
+		sigRefPanel.appendChild(sigRefUl);
+		sigRefPanel.style.display = 'none';
+
+		var sigRefToggle = Mt5700.ghostButton('查看指标说明', function () {
+			var shown = sigRefPanel.style.display !== 'none';
+			sigRefPanel.style.display = shown ? 'none' : '';
+			sigRefToggle.textContent = shown ? '查看指标说明' : '收起指标说明';
+		});
+		signalBody.appendChild(sigRefPanel);
+		signalBody.appendChild(Mt5700.panelActions(sigRefToggle));
 
 		var connCard = Mt5700.card('连接状态', '当前网络注册与运营商信息');
 		var connBody = E('div');
@@ -152,11 +181,15 @@ return L.view.extend({
 			var c = state.cell;
 			if (!sigGauges) {
 				sigGrid.innerHTML = '';
+				/*
+				 * 中文主标签 + 英文缩写副标签：
+				 * 普通用户看中文就知道这项是什么，专业用户仍能对照 AT 手册的 RSRP/RSRQ/SINR。
+				 */
 				sigGauges = {
-					rsrp: Mt5700.gauge('RSRP', 'dBm', 'rsrp'),
-					rsrq: Mt5700.gauge('RSRQ', 'dB', 'rsrq'),
-					sinr: Mt5700.gauge('SINR', 'dB', 'sinr'),
-					pct: Mt5700.gauge('信号百分比', '%', 'pct')
+					rsrp: Mt5700.gauge('信号强度', 'dBm', 'rsrp', { sub: 'RSRP' }),
+					rsrq: Mt5700.gauge('信号质量', 'dB', 'rsrq', { sub: 'RSRQ' }),
+					sinr: Mt5700.gauge('信噪比', 'dB', 'sinr', { sub: 'SINR' }),
+					pct: Mt5700.gauge('综合信号', '%', 'pct', { sub: 'SIGNAL' })
 				};
 				sigGrid.appendChild(sigGauges.rsrp.el);
 				sigGrid.appendChild(sigGauges.rsrq.el);
@@ -169,6 +202,14 @@ return L.view.extend({
 			sigGauges.sinr.set(c.sinr);
 			var pct = parseInt(c.signalPercent, 10);
 			sigGauges.pct.set(isNaN(pct) ? null : pct);
+
+			/* 总评按四项档位实时汇总 */
+			verdict.set({
+				rsrp: c.rsrp,
+				rsrq: c.rsrq,
+				sinr: c.sinr,
+				pct: isNaN(pct) ? null : pct
+			});
 		}
 
 		function renderCarriers() {

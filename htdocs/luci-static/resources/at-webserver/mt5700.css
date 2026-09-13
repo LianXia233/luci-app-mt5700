@@ -494,11 +494,26 @@
   color: var(--mt5700-text-muted);
 }
 
+.mt5700-gauge-labelbox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  text-align: center;
+}
+
 .mt5700-gauge-label {
-  font-size: var(--mt5700-font-size-xs);
+  font-size: var(--mt5700-font-size-sm);
+  font-weight: 600;
+  color: var(--mt5700-text);
+  letter-spacing: 0.02em;
+}
+
+.mt5700-gauge-sub {
+  font-size: 10px;
   font-weight: 500;
-  color: var(--mt5700-text-secondary);
-  letter-spacing: 0.04em;
+  color: var(--mt5700-text-muted);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -508,6 +523,118 @@
   padding: 2px 10px;
   border-radius: var(--mt5700-radius-full);
 }
+
+.mt5700-gauge-plain {
+  min-height: 2.6em;
+  font-size: var(--mt5700-font-size-xs);
+  line-height: 1.5;
+  color: var(--mt5700-text-muted);
+  text-align: center;
+  padding: 0 2px;
+}
+
+/* 仪表档位态：给整张卡加一层极淡的档位底色，便于一眼扫过 */
+.mt5700-gauge-exc  { border-color: rgba(15, 157, 99, 0.35); }
+.mt5700-gauge-good { border-color: rgba(6, 182, 212, 0.35); }
+.mt5700-gauge-fair { border-color: rgba(245, 158, 11, 0.4); }
+.mt5700-gauge-poor { border-color: rgba(249, 115, 22, 0.42); }
+.mt5700-gauge-bad  { border-color: rgba(200, 61, 85, 0.42); }
+
+/* ---------- 信号总评横幅 ---------- */
+.mt5700-verdict {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: var(--mt5700-space-sm) var(--mt5700-space-md);
+  padding: var(--mt5700-space-md);
+  margin-bottom: var(--mt5700-space-md);
+  background: var(--mt5700-glass-bg);
+  backdrop-filter: var(--mt5700-glass);
+  -webkit-backdrop-filter: var(--mt5700-glass);
+  border: 1px solid var(--mt5700-border);
+  border-left-width: 3px;
+  border-radius: var(--mt5700-radius-md);
+  box-shadow: var(--mt5700-sh-1);
+}
+
+.mt5700-verdict-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: var(--mt5700-radius-full);
+  background: var(--mt5700-text-muted);
+}
+
+.mt5700-verdict-text { min-width: 0; }
+
+.mt5700-verdict-title {
+  font-size: var(--mt5700-font-size-base);
+  font-weight: 600;
+  color: var(--mt5700-text);
+  line-height: 1.4;
+}
+
+.mt5700-verdict-advice {
+  margin-top: 3px;
+  font-size: var(--mt5700-font-size-xs);
+  line-height: 1.6;
+  color: var(--mt5700-text-secondary);
+}
+
+.mt5700-verdict-detail {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mt5700-space-sm);
+}
+
+.mt5700-verdict-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  font-size: 11px;
+  border-radius: var(--mt5700-radius-full);
+  background: rgba(127, 127, 127, 0.09);
+  color: var(--mt5700-text-secondary);
+}
+
+.mt5700-verdict-chip-name { color: var(--mt5700-text-muted); }
+.mt5700-verdict-chip-level { font-weight: 600; }
+
+.mt5700-verdict-chip-worst {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+/* 档位配色（左侧色条 + 圆点 + 徽标） */
+.mt5700-verdict-exc  { border-left-color: #0f9d63; }
+.mt5700-verdict-exc  .mt5700-verdict-dot { background: #0f9d63; }
+.mt5700-verdict-exc  .mt5700-verdict-chip-exc .mt5700-verdict-chip-level { color: #0d9e6e; }
+
+.mt5700-verdict-good { border-left-color: #06b6d4; }
+.mt5700-verdict-good .mt5700-verdict-dot { background: #06b6d4; }
+.mt5700-verdict-good .mt5700-verdict-chip-good .mt5700-verdict-chip-level { color: #0891b2; }
+
+.mt5700-verdict-fair { border-left-color: #f59e0b; }
+.mt5700-verdict-fair .mt5700-verdict-dot { background: #f59e0b; }
+.mt5700-verdict-fair .mt5700-verdict-chip-fair .mt5700-verdict-chip-level { color: #b45309; }
+
+.mt5700-verdict-poor { border-left-color: #f97316; }
+.mt5700-verdict-poor .mt5700-verdict-dot { background: #f97316; }
+.mt5700-verdict-poor .mt5700-verdict-chip-poor .mt5700-verdict-chip-level { color: #c2410c; }
+
+.mt5700-verdict-bad  { border-left-color: #c83d55; }
+.mt5700-verdict-bad  .mt5700-verdict-dot { background: #c83d55; }
+.mt5700-verdict-bad  .mt5700-verdict-chip-bad .mt5700-verdict-chip-level { color: #b02b45; }
+
+.mt5700-verdict-empty { border-left-color: var(--mt5700-border); }
+
+.mt5700-verdict-chip-exc .mt5700-verdict-chip-level,
+.mt5700-verdict-chip-good .mt5700-verdict-chip-level,
+.mt5700-verdict-chip-fair .mt5700-verdict-chip-level,
+.mt5700-verdict-chip-poor .mt5700-verdict-chip-level,
+.mt5700-verdict-chip-bad .mt5700-verdict-chip-level { font-weight: 600; }
 
 .mt5700-gauge-caption.exc { background: rgba(15, 157, 99, 0.14); color: #0d9e6e; }
 .mt5700-gauge-caption.good { background: rgba(6, 182, 212, 0.14); color: #0891b2; }
@@ -521,6 +648,19 @@
   .mt5700-gauge-caption.fair { color: #fbbf24; }
   .mt5700-gauge-caption.poor { color: #fb923c; }
   .mt5700-gauge-caption.bad { color: #f87171; }
+
+  .mt5700-verdict-exc  .mt5700-verdict-chip-exc .mt5700-verdict-chip-level { color: #34d399; }
+  .mt5700-verdict-good .mt5700-verdict-chip-good .mt5700-verdict-chip-level { color: #22d3ee; }
+  .mt5700-verdict-fair .mt5700-verdict-chip-fair .mt5700-verdict-chip-level { color: #fbbf24; }
+  .mt5700-verdict-poor .mt5700-verdict-chip-poor .mt5700-verdict-chip-level { color: #fb923c; }
+  .mt5700-verdict-bad  .mt5700-verdict-chip-bad .mt5700-verdict-chip-level { color: #f87171; }
+
+  .mt5700-verdict-chip { background: rgba(224, 237, 247, 0.08); }
+  .mt5700-gauge-exc  { border-color: rgba(52, 211, 153, 0.38); }
+  .mt5700-gauge-good { border-color: rgba(34, 211, 238, 0.38); }
+  .mt5700-gauge-fair { border-color: rgba(251, 191, 36, 0.42); }
+  .mt5700-gauge-poor { border-color: rgba(251, 146, 60, 0.44); }
+  .mt5700-gauge-bad  { border-color: rgba(248, 113, 113, 0.44); }
 }
 
 /* ==========================================================================
@@ -798,6 +938,246 @@
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 40px;
+}
+
+/* ---------- 卡片式单选组 ---------- */
+.mt5700-radio-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--mt5700-space-sm);
+}
+
+.mt5700-radio-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  background: var(--mt5700-card-bg);
+  border: 1px solid var(--mt5700-border-subtle);
+  border-radius: var(--mt5700-radius-md);
+  cursor: pointer;
+  transition: border-color var(--mt5700-transition-fast),
+              background var(--mt5700-transition-fast),
+              box-shadow var(--mt5700-transition-fast);
+}
+
+.mt5700-radio-card:hover {
+  background: var(--mt5700-card-bg-hover);
+  border-color: var(--mt5700-accent-light);
+}
+
+.mt5700-radio-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.mt5700-radio-card-dot {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border: 1.5px solid var(--mt5700-border-subtle);
+  border-radius: var(--mt5700-radius-full);
+  background: transparent;
+  transition: border-color var(--mt5700-transition-fast),
+              box-shadow var(--mt5700-transition-fast);
+}
+
+.mt5700-radio-card-dot::after {
+  content: "";
+  display: block;
+  width: 7px;
+  height: 7px;
+  margin: 2.5px auto 0;
+  border-radius: var(--mt5700-radius-full);
+  background: transparent;
+  transition: background var(--mt5700-transition-fast);
+}
+
+.mt5700-radio-card input[type="radio"]:checked ~ .mt5700-radio-card-dot {
+  border-color: var(--mt5700-accent);
+}
+
+.mt5700-radio-card input[type="radio"]:checked ~ .mt5700-radio-card-dot::after {
+  background: var(--mt5700-accent);
+}
+
+.mt5700-radio-card:has(input[type="radio"]:checked) {
+  border-color: var(--mt5700-accent);
+  box-shadow: var(--mt5700-ring);
+}
+
+.mt5700-radio-card input[type="radio"]:focus-visible ~ .mt5700-radio-card-dot {
+  box-shadow: var(--mt5700-ring);
+}
+
+.mt5700-radio-card-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mt5700-radio-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--mt5700-space-sm);
+  flex-wrap: wrap;
+}
+
+.mt5700-radio-card-title {
+  font-size: var(--mt5700-font-size-sm);
+  font-weight: 600;
+  color: var(--mt5700-text);
+  line-height: 1.4;
+}
+
+.mt5700-radio-card-badge {
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--mt5700-accent);
+  background: rgba(8, 124, 186, 0.1);
+  border-radius: var(--mt5700-radius-full);
+  white-space: nowrap;
+}
+
+.mt5700-radio-card-desc {
+  margin-top: 3px;
+  font-size: var(--mt5700-font-size-xs);
+  color: var(--mt5700-text-muted);
+  line-height: 1.55;
+}
+
+.mt5700-radio-card-code {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 1px 6px;
+  font-family: var(--mt5700-font-mono);
+  font-size: 11px;
+  color: var(--mt5700-text-secondary);
+  background: rgba(23, 50, 75, 0.05);
+  border-radius: var(--mt5700-radius-sm);
+}
+
+.mt5700-radio-card-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mt5700-radio-card-disabled:hover {
+  background: var(--mt5700-card-bg);
+  border-color: var(--mt5700-border-subtle);
+}
+
+/* ---------- 原始参数展示 ---------- */
+.mt5700-raw-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mt5700-space-sm);
+  padding: 6px 0;
+  border-top: 1px dashed var(--mt5700-divider);
+}
+
+.mt5700-raw-row:first-child {
+  border-top: none;
+}
+
+.mt5700-raw-label {
+  flex: 0 0 auto;
+  min-width: 84px;
+  font-size: var(--mt5700-font-size-xs);
+  color: var(--mt5700-text-muted);
+}
+
+.mt5700-raw-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mt5700-font-mono);
+  font-size: var(--mt5700-font-size-xs);
+  color: var(--mt5700-text-secondary);
+  word-break: break-all;
+}
+
+.mt5700-raw-panel {
+  margin-top: var(--mt5700-space-md);
+  padding: var(--mt5700-space-sm) var(--mt5700-space-md);
+  background: rgba(23, 50, 75, 0.03);
+  border: 1px solid var(--mt5700-divider);
+  border-radius: var(--mt5700-radius-md);
+}
+
+.mt5700-raw-panel-title {
+  font-size: var(--mt5700-font-size-xs);
+  font-weight: 500;
+  color: var(--mt5700-text-muted);
+  margin-bottom: var(--mt5700-space-xs);
+}
+
+/* ---------- 字段说明块 ---------- */
+.mt5700-field-note {
+  margin-top: var(--mt5700-space-xs);
+  padding: 9px 12px;
+  font-size: var(--mt5700-font-size-xs);
+  line-height: 1.65;
+  color: var(--mt5700-text-muted);
+  background: rgba(8, 124, 186, 0.045);
+  border-left: 2px solid rgba(8, 124, 186, 0.35);
+  border-radius: 0 var(--mt5700-radius-sm) var(--mt5700-radius-sm) 0;
+}
+
+.mt5700-field-note-summary {
+  color: var(--mt5700-text-secondary);
+}
+
+.mt5700-field-note-list {
+  margin: 5px 0 0;
+  padding-left: 17px;
+  list-style: disc;
+}
+
+.mt5700-field-note-list li {
+  margin-bottom: 2px;
+}
+
+.mt5700-field-note-list li:last-child {
+  margin-bottom: 0;
+}
+
+.mt5700-field-note strong {
+  color: var(--mt5700-text-secondary);
+  font-weight: 600;
+}
+
+/* ---------- 只读字段 ---------- */
+.mt5700-readonly {
+  padding: 10px 14px;
+  font-family: var(--mt5700-font-mono);
+  font-size: var(--mt5700-font-size-sm);
+  color: var(--mt5700-text-secondary);
+  background: rgba(23, 50, 75, 0.035);
+  border: 1px solid var(--mt5700-divider);
+  border-radius: var(--mt5700-radius-md);
+  word-break: break-all;
+}
+
+/* 暗色模式下 codem 底色的对比度补偿 */
+@media (prefers-color-scheme: dark) {
+  .mt5700-radio-card-badge {
+    background: rgba(97, 201, 244, 0.14);
+  }
+  .mt5700-radio-card-code,
+  .mt5700-raw-panel,
+  .mt5700-readonly {
+    background: rgba(224, 237, 247, 0.06);
+  }
+  .mt5700-field-note {
+    background: rgba(97, 201, 244, 0.07);
+    border-left-color: rgba(97, 201, 244, 0.4);
+  }
 }
 
 .mt5700-checkbox {

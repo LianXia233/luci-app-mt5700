@@ -340,68 +340,291 @@ return L.view.extend({
 
 		/* ================= 网络系统配置 SYSCFGEX ================= */
 
-		var sysCard = Mt5700.card('网络系统配置', '接入方式、频段、漫游与服务域（SYSCFGEX）');
+		var sysCard = Mt5700.card('网络系统配置', '选择模组搜索和驻留网络的方式');
 		var sysBody = E('div');
 		sysCard._body.appendChild(sysBody);
 		body.appendChild(sysCard);
 
+		sysBody.appendChild(Mt5700.fieldNote(
+			'这一组设置决定模组用哪些制式、哪些频段去搜索网络。改错可能导致无法注册上网络，建议逐项修改后保存。',
+			[
+				'所有设置保存在模组侧，掉电不丢失。',
+				'保存后模组会重新搜索网络，约需 10~30 秒恢复。',
+				'如需在基站覆盖变差时保持通话可用，优先使用「优先」类选项而非「锁定」类。'
+			]
+		));
+
 		var sysCfg = { acqorder: '', band: '', roam: 1, srvdomain: 2, lteband: '' };
 
-		var acqInput = Mt5700.input('text', '如 0504030200（5G→4G→3G→2G）', '');
-		acqInput.addEventListener('input', function () { sysCfg.acqorder = acqInput.value; });
-		sysBody.appendChild(Mt5700.formGroup('接入顺序', acqInput));
+		/*
+		 * 接入顺序：原始参数是制式代码拼接的字符串（如 "080302" = NR → LTE → WCDMA）。
+		 * 用户无法从码串理解含义，也无法自行组合，因此改为「按实际影响面选择」的卡片组，
+		 * 每个选项都写清「选了会怎样」。取值严格限定在 AT^SYSCFGEX=? 支持的制式代码
+		 * （01 GSM / 02 WCDMA / 03 LTE / 08 NR）之内，不会下发非法组合。
+		 */
+		var ACQ_OPTIONS = [
+			{
+				value: '080302', code: '08 → 03 → 02', label: '5G 优先，逐级回落', badge: '推荐',
+				desc: '有 5G 信号就用 5G；没有则自动落到 4G，再没有落到 3G。速度与覆盖兼顾。'
+			},
+			{
+				value: '08', code: '08', label: '仅 5G',
+				desc: '只搜索 5G 网络，搜不到会持续重搜。5G 覆盖不稳时会出现无服务。'
+			},
+			{
+				value: '0302', code: '03 → 02', label: '4G 优先，可回落 3G',
+				desc: '优先驻留 4G；无 4G 时落到 3G。适合 5G 覆盖差、又希望保速率的场景。'
+			},
+			{
+				value: '03', code: '03', label: '仅 4G',
+				desc: '只搜索 4G 网络。信号稳定、耗电较低，但离开 4G 覆盖会无服务。'
+			},
+			{
+				value: '0203', code: '02 → 03', label: '3G 优先，可回落 4G',
+				desc: '优先驻留 3G；无 3G 时落到 4G。适合 3G 覆盖优于 4G 的地区。'
+			},
+			{
+				value: '02', code: '02', label: '仅 3G',
+				desc: '只搜索 3G 网络。速率较低，仅在特殊排查场景使用。'
+			},
+			{
+				value: '99', code: '99', label: '保持当前设置',
+				desc: '不修改接入顺序，只保存本页其它项。'
+			}
+		];
 
-		var bandInput = Mt5700.input('text', '频段位图，留空为全部', '');
-		bandInput.addEventListener('input', function () { sysCfg.band = bandInput.value; });
-		sysBody.appendChild(Mt5700.formGroup('频段', bandInput));
+		var acqCards = Mt5700.radioCards('acq', ACQ_OPTIONS, '080302', function (v) {
+			sysCfg.acqorder = v;
+			sysRawAcq.setValue(v);
+			/* 接入顺序变了，服务域的可选范围随之变化，立即重算 */
+			applySrvConstraint();
+		});
+		/* 兜底：当前值不在预设选项内（用户曾手工写入过），补一个只读提示项，避免静默丢值 */
+		var acqCustomEl = E('div', { 'class': 'mt5700-hint', 'style': 'display:none' });
 
-		var roamSel = Mt5700.select([
-			{ label: '仅本网', value: '1' },
-			{ label: '自动漫游', value: '2' }
-		], '1');
-		roamSel.addEventListener('change', function () { sysCfg.roam = parseInt(roamSel.value, 10); });
-		sysBody.appendChild(Mt5700.formGroup('漫游', roamSel));
+		sysBody.appendChild(Mt5700.formGroup('网络接入顺序', acqCards,
+			'决定模组按什么先后顺序搜索网络制式。默认「5G 优先，逐级回落」适用于绝大多数场景。'));
+		sysBody.appendChild(acqCustomEl);
 
-		var srvSel = Mt5700.select([
-			{ label: '仅电路域', value: '0' },
-			{ label: '仅分组域', value: '1' },
-			{ label: '电路+分组域', value: '2' }
-		], '2');
-		srvSel.addEventListener('change', function () { sysCfg.srvdomain = parseInt(srvSel.value, 10); });
-		sysBody.appendChild(Mt5700.formGroup('服务域', srvSel));
+		/*
+		 * 频段：原始值是十六进制位图（如 2000000680380），手写极易出错。
+		 * 常规用户只需要「自动」或「全部」，因此改为预设档位；原始值单独只读展示，便于排障时对标。
+		 */
+		var BAND_PRESETS = [
+			{ value: '', label: '不修改（保持模组当前设置）' },
+			{ value: '00680380', label: '自动（由模组按运营商选择）' },
+			{ value: '3FFFFFFF', label: '全部频段（GSM / WCDMA 全频段）' },
+			{ value: '2000000680380', label: 'WCDMA 900 + WCDMA 1700 + 自动' }
+		];
 
-		var lteBandInput = Mt5700.input('text', 'LTE 频段位图，留空为全部', '');
-		lteBandInput.addEventListener('input', function () { sysCfg.lteband = lteBandInput.value; });
-		sysBody.appendChild(Mt5700.formGroup('LTE 频段', lteBandInput));
+		var bandSel = Mt5700.select(BAND_PRESETS, '');
+		bandSel.addEventListener('change', function () {
+			sysCfg.band = bandSel.value;
+			sysRawBand.setValue(bandSel.value);
+		});
+		sysBody.appendChild(Mt5700.formGroup('2G / 3G 频段', bandSel,
+			'模组在 2G / 3G 制式下允许使用的频段范围。一般保持「自动」即可。'));
+
+		/*
+		 * 漫游：0 不支持 / 1 支持 / 2 无变化（官方手册 13.2.3）。
+		 * 原界面缺 0 档，且文案「仅本网」与「自动漫游」没讲清「本网」指什么。
+		 */
+		var ROAM_OPTIONS = [
+			{
+				value: '1', label: '允许漫游', badge: '推荐',
+				desc: '离开本地运营商网络后，可以使用合作运营商的网络，保持联网。'
+			},
+			{
+				value: '0', label: '禁止漫游',
+				desc: '只使用本地运营商网络。离开覆盖范围后不接入其它运营商，可避免漫游费用。'
+			},
+			{
+				value: '2', label: '不修改',
+				desc: '保持模组当前漫游设置不变。'
+			}
+		];
+
+		var roamCards = Mt5700.radioCards('roam', ROAM_OPTIONS, '1', function (v) {
+			sysCfg.roam = parseInt(v, 10);
+		});
+		sysBody.appendChild(Mt5700.formGroup('漫游', roamCards,
+			'控制模组是否允许接入非本地运营商的网络。'));
+
+		/*
+		 * 服务域：0 CS_ONLY / 1 PS_ONLY / 2 CS_PS / 3 ANY / 4 无变化。
+		 * 官方约束（手册 13.2.3 注 2）：接入制式含 LTE 或 NR 时，不允许设置为 0 或 3。
+		 * 界面按此动态禁用，把原本只存在于文档里的约束显性化。
+		 */
+		var SRV_OPTIONS = [
+			{
+				value: '2', label: '语音 + 数据', badge: '推荐',
+				desc: '同时注册语音（打电话）和数据（上网）网络，功能最完整。'
+			},
+			{
+				value: '1', label: '仅数据',
+				desc: '只注册数据网络，无法接打电话和收发短信。适合纯上网设备。'
+			},
+			{
+				value: '0', label: '仅语音',
+				desc: '只注册语音网络，无法上网。当前接入制式含 4G / 5G 时不可选。'
+			},
+			{
+				value: '3', label: '不限（由网络决定）',
+				desc: '由网络侧决定注册方式。当前接入制式含 4G / 5G 时不可选。'
+			},
+			{
+				value: '4', label: '不修改',
+				desc: '保持模组当前服务域设置不变。'
+			}
+		];
+
+		var srvNote = E('div', { 'class': 'mt5700-hint', 'style': 'display:none; margin-top: 0; margin-bottom: var(--mt5700-space-md);' },
+			'当前接入顺序包含 4G 或 5G，模组不允许使用「仅语音」和「不限」，已自动禁用。');
+
+		var srvCards = Mt5700.radioCards('srv', SRV_OPTIONS, '2', function (v) {
+			sysCfg.srvdomain = parseInt(v, 10);
+		});
+		sysBody.appendChild(Mt5700.formGroup('服务域', srvCards,
+			'控制模组注册到语音域、数据域还是两者。'));
+		sysBody.appendChild(srvNote);
+
+		/* 依当前接入顺序动态施加官方约束：含 LTE(03) 或 NR(08) 时禁用 CS_ONLY / ANY */
+		function applySrvConstraint() {
+			var acq = sysCfg.acqorder || '';
+			var hasLteOrNr = acq.indexOf('03') >= 0 || acq.indexOf('08') >= 0;
+			srvCards.setDisabled('0', hasLteOrNr);
+			srvCards.setDisabled('3', hasLteOrNr);
+			if (hasLteOrNr && (sysCfg.srvdomain === 0 || sysCfg.srvdomain === 3)) {
+				srvCards.setValue('2', true);
+				sysCfg.srvdomain = 2;
+			}
+			srvNote.style.display = hasLteOrNr ? '' : 'none';
+		}
+
+		/*
+		 * LTE 频段：同样是十六进制位图。实机值 1E200000095 = BC1+BC3+BC5+BC8+
+		 * BC34+BC38+BC39+BC40+BC41 叠加，用户在文本框里根本无从判断。
+		 */
+		var LTE_PRESETS = [
+			{ value: '', label: '不修改（保持模组当前设置）' },
+			{ value: '1E200000095', label: '常用频段（BC1/3/5/8/34/38/39/40/41）' },
+			{ value: '7FFFFFFFFFFFFFFF', label: '全部 LTE 频段' }
+		];
+
+		var lteBandSel = Mt5700.select(LTE_PRESETS, '');
+		lteBandSel.addEventListener('change', function () {
+			sysCfg.lteband = lteBandSel.value;
+			sysRawLte.setValue(lteBandSel.value);
+		});
+		sysBody.appendChild(Mt5700.formGroup('4G / LTE 频段', lteBandSel,
+			'模组在 4G 制式下允许使用的频段范围。更改为「全部」会增加搜网时间。'));
+
+		/* ---------- 原始参数（只读，供排障对标 AT 手册） ---------- */
+
+		var rawPanel = E('div', { 'class': 'mt5700-raw-panel' });
+		rawPanel.appendChild(E('div', { 'class': 'mt5700-raw-panel-title' }, '当前原始参数（只读，来自模组）'));
+		var sysRawAcq = Mt5700.rawValue('接入顺序', '');
+		var sysRawBand = Mt5700.rawValue('2G/3G 频段', '');
+		var sysRawRoam = Mt5700.rawValue('漫游', '');
+		var sysRawSrv = Mt5700.rawValue('服务域', '');
+		var sysRawLte = Mt5700.rawValue('LTE 频段', '');
+		rawPanel.appendChild(sysRawAcq);
+		rawPanel.appendChild(sysRawBand);
+		rawPanel.appendChild(sysRawRoam);
+		rawPanel.appendChild(sysRawSrv);
+		rawPanel.appendChild(sysRawLte);
+
+		var rawToggle = Mt5700.ghostButton('显示原始参数', function () {
+			var shown = rawPanel.style.display !== 'none';
+			rawPanel.style.display = shown ? 'none' : '';
+			rawToggle.textContent = shown ? '显示原始参数' : '隐藏原始参数';
+		});
+		rawPanel.style.display = 'none';
+
+		/* 先挂载面板，再挂操作按钮——否则面板是游离节点，开关点了也没反应 */
+		sysBody.appendChild(rawPanel);
 
 		sysBody.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('保存网络配置', function () {
+				/* 命令格式与后端契约保持不变：AT^SYSCFGEX="acq",band,roam,srv,lte,, */
 				var cmd = 'AT^SYSCFGEX="' + sysCfg.acqorder + '",' + sysCfg.band + ',' + sysCfg.roam + ',' + sysCfg.srvdomain + ',' + sysCfg.lteband + ',,';
 				send(cmd).then(function (res) {
-					if (res.success) Mt5700.success('网络系统配置已更新');
-					else Mt5700.error('网络系统配置更新失败');
+					if (res.success) {
+						Mt5700.success('网络系统配置已更新');
+						return fetchSysCfg();
+					}
+					Mt5700.error('网络系统配置更新失败');
 				}).catch(function () { Mt5700.error('网络系统配置更新失败'); });
-			})
+			}),
+			rawToggle
 		));
 
 		function fetchSysCfg() {
 			return send('AT^SYSCFGEX?').then(function (res) {
 				if (res.success && res.data) {
-					var m = atText(res).match(/\^SYSCFGEX:\s*"([^"]*)",([^,]*),(\d+),(\d+),([^,]*)/);
+					/* 先剥离 "OK" 回显，否则正则的 ([^,]*) 会把尾部 OK 一起吃进 LTE 频段值 */
+					var txt = atText(res).replace(/\bOK\b/g, '').replace(/\r/g, '').replace(/\n/g, '');
+					var m = txt.match(/\^SYSCFGEX:\s*"?([^",]*)"?\s*,\s*([^,]*?)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9A-Fa-f]*(?:\s|$))/);
 					if (m) {
 						sysCfg.acqorder = m[1];
 						sysCfg.band = m[2].trim();
 						sysCfg.roam = Number(m[3]);
 						sysCfg.srvdomain = Number(m[4]);
 						sysCfg.lteband = m[5].trim();
-						acqInput.value = sysCfg.acqorder;
-						bandInput.value = sysCfg.band;
-						roamSel.value = String(sysCfg.roam);
-						srvSel.value = String(sysCfg.srvdomain);
-						lteBandInput.value = sysCfg.lteband;
+
+						/* 回填控件；若当前值不在预设内，保留原值并提示，绝不静默改写 */
+						applyAcqValue(sysCfg.acqorder);
+						applyPreset(bandSel, sysCfg.band);
+						applyPreset(lteBandSel, sysCfg.lteband);
+						applyCards(roamCards, String(sysCfg.roam));
+						applyCards(srvCards, String(sysCfg.srvdomain));
+
+						sysRawAcq.setValue(sysCfg.acqorder);
+						sysRawBand.setValue(sysCfg.band);
+						sysRawRoam.setValue(sysCfg.roam);
+						sysRawSrv.setValue(sysCfg.srvdomain);
+						sysRawLte.setValue(sysCfg.lteband);
+
+						applySrvConstraint();
 					}
 				}
 			}).catch(function () {});
+		}
+
+		/* 下拉回填：命中预设则选中；未命中则注入一条「当前值」临时项，避免用户看到错误档位 */
+		function applyPreset(sel, val) {
+			var hit = false;
+			for (var i = 0; i < sel.options.length; i++) {
+				if (sel.options[i].value === val) { hit = true; break; }
+			}
+			if (!hit) {
+				var stale = sel.querySelector('option[data-dynamic="1"]');
+				if (stale) stale.remove();
+				if (val !== '') {
+					var o = E('option', { value: val, 'data-dynamic': '1' }, '当前值：' + val);
+					sel.insertBefore(o, sel.firstChild);
+				}
+			}
+			sel.value = val;
+		}
+
+		/* 卡片组回填：命中则选中；未命中则清空选中（不擅自替用户改值） */
+		function applyCards(cards, val) {
+			cards.setValue(val, true);
+		}
+
+		function applyAcqValue(val) {
+			var known = ACQ_OPTIONS.some(function (o) { return o.value === val; });
+			acqCards.setValue(val, true);
+			if (known) {
+				acqCustomEl.style.display = 'none';
+				acqCards.setAllDisabled(false);
+			} else {
+				acqCustomEl.style.display = '';
+				acqCustomEl.textContent = '模组当前接入顺序为「' + val + '」，不在本页预设选项内。如需更改，请从上方选择一个新值；不作改动则保持原值不变。';
+				acqCards.setAllDisabled(false);
+			}
+			sysRawAcq.setValue(val);
 		}
 
 		/* ================= 温度保护 ================= */
