@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.5.0';
+var MT5700_CSS_VERSION = '2.7.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -479,26 +479,33 @@ var Mt5700 = (function () {
 		{ minKHz: 0, level: 'poor', note: '带宽偏窄，峰值明显受限' }
 	];
 
+	/*
+	 * 结论文案。
+	 * advice 是横幅里的一行摘要（单行显示、超长省略），因此刻意写得短，
+	 * 保证在 205~340px 的摘要区里基本能完整显示；详细解释放在下方提示条。
+	 */
 	var VERDICT_TEXT = {
 		exc: {
 			title: '网络能力优秀',
-			advice: '信号与频段带宽俱佳，适合看高清视频、下载大文件等对带宽要求高的场景。'
+			advice: '信号与频段带宽俱佳，适合高清视频及大文件下载'
 		},
 		good: {
 			title: '网络能力良好',
-			advice: '日常上网、看视频和语音通话都没问题，体验流畅。'
+			advice: '日常上网、视频与通话流畅无压力'
 		},
 		fair: {
 			title: '网络能力一般',
-			advice: '轻量使用（网页、消息、音乐）没问题；高清视频可能缓冲，大文件下载偏慢。'
+			advice: '轻量使用够用，高清视频可能缓冲'
 		},
 		poor: {
 			title: '网络能力偏弱',
-			advice: '容易出现卡顿和掉线。建议调整设备位置、加装外置天线，或联系运营商确认覆盖。'
+			advice: '易卡顿掉线，建议调整位置或加天线',
+			hint: '建议把设备移到靠窗或高处、加装外置天线，或联系运营商确认基站覆盖。'
 		},
 		bad: {
 			title: '网络能力很差',
-			advice: '基本无法正常上网。请检查天线连接、SIM 卡状态，或联系运营商确认基站覆盖。'
+			advice: '基本无法上网，请检查天线与 SIM 卡',
+			hint: '请依次检查天线是否接紧、SIM 卡是否插好并已激活，或联系运营商确认基站覆盖。'
 		}
 	};
 
@@ -573,30 +580,148 @@ var Mt5700 = (function () {
 	/* 档位中文名，供能力项复用 */
 	api.levelCaption = function (level) { return GAUGE_CAPTIONS[level] || ''; };
 
+	/*
+	 * 状态图标（描边式，24 视口内绘制）+ 圆形底环。
+	 * 用于横幅最左侧的「总状态」指示，与四项指标的图标区分开。
+	 */
+	function statusIcon() {
+		var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+		svg.appendChild(svgEl('circle', { 'class': 'mt5700-status-halo', cx: 12, cy: 12, r: 8, fill: 'none' }));
+		svg.appendChild(svgEl('circle', { 'class': 'mt5700-verdict-tower', cx: 12, cy: 12, r: 4.5 }));
+		return svg;
+	}
+
+	/*
+	 * 四项信号指标的图标（描边式），与参考稿一一对应：
+	 *   rsrp → 柱状信号格   rsrq → 虚线波形
+	 *   sinr → 雷达同心环   pct  → 圆圈对勾
+	 * 每项都带各自的动效类，由 CSS 驱动。
+	 */
+	var SIGNAL_ICONS = {
+		rsrp: function () {
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			[
+				'M4 19h3v-5H4z',
+				'M9 19h3V10H9z',
+				'M14 19h3V7h-3z',
+				'M19 19h1V4h-1z'
+			].forEach(function (d) {
+				svg.appendChild(svgEl('path', { 'class': 'mt5700-bar', d: d }));
+			});
+			return svg;
+		},
+		rsrq: function () {
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			svg.appendChild(svgEl('path', { 'class': 'mt5700-wave', d: 'M3 13c3-7 5 7 9 0s6 7 9 0', fill: 'none' }));
+			return svg;
+		},
+		sinr: function () {
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			svg.appendChild(svgEl('circle', { 'class': 'mt5700-ring', cx: 12, cy: 12, r: 7, fill: 'none' }));
+			svg.appendChild(svgEl('circle', { 'class': 'mt5700-ring mt5700-ring-r2', cx: 12, cy: 12, r: 4, fill: 'none' }));
+			svg.appendChild(svgEl('circle', { 'class': 'mt5700-dot', cx: 12, cy: 12, r: 2 }));
+			svg.appendChild(svgEl('path', { 'class': 'mt5700-sweep', d: 'M12 12l6-6', fill: 'none' }));
+			return svg;
+		},
+		pct: function () {
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			svg.appendChild(svgEl('circle', { cx: 12, cy: 12, r: 8, fill: 'none' }));
+			svg.appendChild(svgEl('path', { 'class': 'mt5700-check', d: 'm8 12 3 3 5-6', fill: 'none' }));
+			return svg;
+		}
+	};
+
+	/*
+	 * 能力项图标（描边式，24 视口内绘制）。
+	 * 按能力类型区分语义：制式=信号塔、频段=频率波形、带宽=双向带宽箭头。
+	 * 统一 stroke:currentColor + fill:none，由外层档位色驱动着色。
+	 */
+	var CAP_ICONS = {
+		rat: function () {
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			[
+				'M12 21v-8',
+				'M8.2 15.6a5 5 0 0 1 7.6 0',
+				'M5.4 12.4a9 9 0 0 1 13.2 0',
+				'M12 5.5v.01'
+			].forEach(function (d) {
+				svg.appendChild(svgEl('path', { d: d, fill: 'none' }));
+			});
+			return svg;
+		},
+		band: function () {
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			svg.appendChild(svgEl('path', { 'class': 'mt5700-band-pulse', d: 'M2 12h3.5l2-6 3 13 3-16 2.5 9H22', fill: 'none' }));
+			return svg;
+		},
+		bw: function () {
+			var svg = svgEl('svg', { viewBox: '0 0 24 24', role: 'img', 'aria-hidden': 'true' });
+			[
+				'M4 12h16',
+				'M8 8l-4 4 4 4',
+				'M16 8l4 4-4 4'
+			].forEach(function (d) {
+				svg.appendChild(svgEl('path', { d: d, fill: 'none' }));
+			});
+			return svg;
+		}
+	};
+
+	/* 能力项键 → 图标；未知键退到带宽图标，保证不出现空位 */
+	function capIconFor(key) {
+		return (CAP_ICONS[key] || CAP_ICONS.bw)();
+	}
+
+	/* 信号项键 → 图标 */
+	function signalIconFor(key) {
+		return (SIGNAL_ICONS[key] || SIGNAL_ICONS.pct)();
+	}
+
+	/*
+	 * 档位 → 柱状信号格点亮根数。
+	 * exc(4) / good(3) / fair(2) / poor(1) / bad(1)，
+	 * 与参考稿 data-bars 的 4/3/2/1 四档对齐。
+	 */
+	var BAR_COUNT = { exc: 4, good: 3, fair: 2, poor: 1, bad: 1 };
+
 	/**
-	 * 创建信号总评横幅。
+	 * 创建网络能力总评横幅。
 	 * 返回 { el, set({rsrp, rsrq, sinr, pct, sysMode, dlFreqKHz, dlBwKHz}) }
 	 * 任一指标为空则该项不参与汇总。
+	 *
+	 * 布局为**单行横向 flex**（PC 上一行放全，参考设计稿）：
+	 *   [总状态图标] [标题+描述] [四指标卡片 × 4] [能力详情 × 3]
+	 * 窄屏按 900 / 520 两档回流。
 	 */
 	api.signalVerdict = function () {
 		var root = E('div', { 'class': 'mt5700-verdict' });
-		var dot = E('div', { 'class': 'mt5700-verdict-dot' });
-		var text = E('div', { 'class': 'mt5700-verdict-text' });
+
+		/* 1) 最左：总状态图标 */
+		var status = E('div', { 'class': 'mt5700-verdict-status' });
+		status.appendChild(statusIcon());
+		root.appendChild(status);
+
+		/* 2) 摘要块：标题 + 一行描述（超长省略） */
+		var summary = E('div', { 'class': 'mt5700-verdict-summary' });
 		var title = E('div', { 'class': 'mt5700-verdict-title' }, '正在评估网络…');
 		var advice = E('div', { 'class': 'mt5700-verdict-advice' });
-		text.appendChild(title);
-		text.appendChild(advice);
-		root.appendChild(dot);
-		root.appendChild(text);
+		summary.appendChild(title);
+		summary.appendChild(advice);
+		root.appendChild(summary);
 
-		var detailBar = E('div', { 'class': 'mt5700-verdict-detail' });
-		root.appendChild(detailBar);
+		/* 3) 四项信号指标：带边框的指标卡，横向网格 */
+		var metrics = E('div', { 'class': 'mt5700-verdict-metrics' });
+		root.appendChild(metrics);
 
-		var capBar = E('div', { 'class': 'mt5700-verdict-detail mt5700-verdict-cap' });
+		/* 4) 右侧能力详情：制式 / 频段 / 带宽，竖线分隔 */
+		var capBar = E('div', { 'class': 'mt5700-verdict-cap' });
 		root.appendChild(capBar);
 
+		/* 5) 关键说明：被能力维度拉低时显示，独占一行 */
 		var capNote = E('div', { 'class': 'mt5700-verdict-capnote' });
 		root.appendChild(capNote);
+
+		var LABELS = { rsrp: '信号强度', rsrq: '信号质量', sinr: '信噪比', pct: '综合' };
 
 		return {
 			el: root,
@@ -607,7 +732,7 @@ var Mt5700 = (function () {
 					var lv = api.signalLevel(k, vals[k]);
 					if (lv) levels.push({ key: k, level: lv });
 				});
-				detailBar.innerHTML = '';
+				metrics.innerHTML = '';
 				capBar.innerHTML = '';
 				capNote.textContent = '';
 				if (!levels.length) {
@@ -647,37 +772,81 @@ var Mt5700 = (function () {
 				title.textContent = v.title;
 				advice.textContent = v.advice;
 
-				/* 逐项列出各指标档位，让用户知道是「哪一项」拖后腿 */
-				var LABELS = { rsrp: '信号强度', rsrq: '信号质量', sinr: '信噪比', pct: '综合' };
+				/*
+				 * 四项信号指标：每项一张带边框的小卡（图标 + 标签/值竖排）。
+				 * 与能力项同理，只有「唯一短板」才加高亮描边——四项同为最差档时
+				 * 全部点亮反而看不出重点，此时仅靠档位配色区分即可。
+				 */
+				var worstLevel = LEVEL_ORDER[worst.level];
+				var worstCount = levels.filter(function (x) {
+					return LEVEL_ORDER[x.level] === worstLevel;
+				}).length;
 				levels.forEach(function (it) {
-					var chip = E('span', { 'class': 'mt5700-verdict-chip mt5700-verdict-chip-' + it.level });
-					chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-name' }, LABELS[it.key] || it.key));
-					chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-level' },
-						(api.signalCaption ? api.signalCaption(it.level) : '')));
-					if (LEVEL_ORDER[it.level] === LEVEL_ORDER[worst.level]) {
-						chip.classList.add('mt5700-verdict-chip-worst');
+					var card = E('div', {
+						'class': 'mt5700-verdict-metric mt5700-verdict-metric-' + it.level
+					});
+					var icon = E('span', { 'class': 'mt5700-verdict-metricicon' });
+					/*
+					 * 柱状信号格按档位映射点亮根数，让图标形态跟着信号强弱走
+					 * （参考稿用 data-bars 控制，这里在 JS 侧直接决定）。
+					 */
+					if (it.key === 'rsrp') {
+						card.setAttribute('data-bars', BAR_COUNT[it.level] || 4);
 					}
-					detailBar.appendChild(chip);
+					icon.appendChild(signalIconFor(it.key));
+					card.appendChild(icon);
+
+					var box = E('div', { 'class': 'mt5700-verdict-metricbox' });
+					box.appendChild(E('span', { 'class': 'mt5700-verdict-metricname' }, LABELS[it.key] || it.key));
+					box.appendChild(E('span', { 'class': 'mt5700-verdict-metricval' },
+						(api.signalCaption ? api.signalCaption(it.level) : '')));
+					card.appendChild(box);
+
+					if (worstCount === 1 && LEVEL_ORDER[it.level] === worstLevel) {
+						card.classList.add('mt5700-verdict-metric-worst');
+					}
+					metrics.appendChild(card);
 				});
 
-				/* 能力项 chip：制式 / 频段 / 带宽 */
+				/*
+				 * 能力项：图标 + 标签/值竖排，竖线分隔，排在指标区右侧。
+				 * 仅当总评是被能力维度拉低、且该项是唯一短板时才加底色高亮——
+				 * 若多项同为最差档（如制式/频段/带宽均为 exc），高亮就失去指向性。
+				 */
 				if (cap) {
+					var capWorstLevel = LEVEL_ORDER[cap.level];
+					var capWorstCount = cap.items.filter(function (x) {
+						return LEVEL_ORDER[x.level] === capWorstLevel;
+					}).length;
 					cap.items.forEach(function (it) {
-						var chip = E('span', { 'class': 'mt5700-verdict-chip mt5700-verdict-chip-' + it.level });
-						chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-name' }, it.label));
-						chip.appendChild(E('span', { 'class': 'mt5700-verdict-chip-level' }, it.value));
-						if (LEVEL_ORDER[it.level] === LEVEL_ORDER[cap.level]) {
-							chip.classList.add('mt5700-verdict-chip-worst');
+						var item = E('div', {
+							'class': 'mt5700-verdict-capitem mt5700-verdict-capitem-' + it.level
+						});
+						/* 阈值依据放进 title：不占版面，悬停可查 */
+						if (it.note) item.setAttribute('title', it.label + '：' + it.note);
+						item.appendChild(E('span', { 'class': 'mt5700-verdict-capname' }, it.label));
+						item.appendChild(E('span', { 'class': 'mt5700-verdict-capval' }, it.value));
+
+						if (cappedBy && capWorstCount === 1 && LEVEL_ORDER[it.level] === capWorstLevel) {
+							item.classList.add('mt5700-verdict-capitem-worst');
 						}
-						capBar.appendChild(chip);
+						capBar.appendChild(item);
 					});
 				}
 
-				/* 关键说明：当结论被能力维度拉低时，明确指出「信号好≠网速快」 */
+				/*
+				 * 底部说明条，两种来源（能力受限优先，其次弱信号处理建议）：
+				 *   1) 结论被能力维度拉低 → 点明「信号好≠网速快」及具体短板
+				 *   2) 信号本身偏弱 → 给出可操作的排查建议
+				 * 两者都不触发时整条隐藏，不占版面。
+				 */
 				if (cappedBy) {
 					capNote.textContent = '注意：无线信号本身' + (api.signalCaption ? api.signalCaption(worst.level) : '') +
 						'，但「' + cappedBy.label + '」为' + (api.levelCaption ? api.levelCaption(cappedBy.level) : '') +
 						'（' + cappedBy.note + '），实际网速会受此限制。';
+					capNote.classList.add('mt5700-verdict-capnote-on');
+				} else if (v.hint) {
+					capNote.textContent = v.hint;
 					capNote.classList.add('mt5700-verdict-capnote-on');
 				} else {
 					capNote.classList.remove('mt5700-verdict-capnote-on');
