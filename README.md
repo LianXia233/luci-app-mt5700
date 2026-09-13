@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.5.0**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.6.0**
 
 | | |
 |:--|:--|
@@ -35,14 +35,14 @@
 ```sh
 # 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.2.0-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.6.0-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.2.0_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.6.0_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -64,10 +64,15 @@ ls -l /usr/bin/at-webserver-rust
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
+> **v1.6.0 说明**：全站设计令牌对齐 PaperGrid 冷调青色体系（主色蓝 → 青 `#087cba`，
+> 暗色亮青 `#61c9f4`，统一动效曲线与焦点环，圆角基准 `.85rem`），
+> 并为「模组温度」卡片新增**按温度状态动态着色**（正常绿 / 偏高黄 / 过高红，逐项独立判定）。
+> 功能行为不变，仅视觉与呈现增强。
+> 详见 [CHANGELOG](CHANGELOG.md) 的 `[1.6.0]` 段。
+
 > **v1.5.0 说明**：UI 全面升级为「Modern Dimensional Layering」v2（圆形信号仪表、
 > 卡片分层、统一按钮/开关样式），拨号设置页接入暂存式「保存并应用」，
 > 并修复短信乱码、SINR / MCS 数据源错误与 Aurora 主题开关串扰。
-> 详见 [CHANGELOG](CHANGELOG.md) 的 `[1.5.0]` 段。
 
 > **v1.4.1 说明**：v1.4.0 的 UI 重构把多个页面降级为骨架、且 LuCI 依赖指令被压缩器剥离
 > （运行时 `Mt5700 is not defined`）。v1.4.1 以 v1.3.4（`971008ca`）为基准逐页恢复功能，
@@ -240,6 +245,28 @@ logread -e at-webserver | tail -30
 会话气泡不再拆成多条「片段 X/Y」，并保留原始换行；删除时一并清除所有分段。
 若部分分段丢失，会尽量合并已收到的部分并提示「长短信已合并 N/M 段（部分缺失）」。
 
+### 模组温度按状态动态着色
+
+网络状态页的「模组温度」卡片中，各芯片（Sub3G PA / Sub6G PA / MIMO PA / TCXO /
+AP1 / AP2 / Modem1）按自身温度**逐项独立着色**：
+
+| 温度区间 | 状态 | 背景色 |
+|:--|:--|:--|
+| `< 70 ℃` | 正常 | 绿色 |
+| `70 ℃ ~ 84.9 ℃` | 偏高 | 黄色 |
+| `≥ 85 ℃` | 过高 | 红色 |
+
+判定为逐项独立而非取平均值 —— 平均值会被正常项拉低、掩盖单点过热。
+同时卡片边框按「最严重的一项」汇总强调（`temp-has-high` / `temp-has-warn`），便于快速定位过热源。
+无数据（`—`）的芯片保持中性底色，不参与着色。
+
+阈值以常量为准，如需调整可改 `mt5700.js` 顶部：
+
+```js
+api.TEMP_WARN_C = 70;   // 偏高下限
+api.TEMP_HIGH_C = 85;   // 过高下限
+```
+
 ---
 
 ## 架构
@@ -281,11 +308,11 @@ logread -e at-webserver | tail -30
 
 ```text
 luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.2.0
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.6.0
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
 ├── htdocs/luci-static/resources/
-│   ├── at-webserver/                # rpc.js · parse.js · ui.js · smsEncode.js · at.css
+│   ├── at-webserver/                # rpc.js · parse.js · ui.js · mt5700.js/.css · smsEncode.js · at.css
 │   └── view/at-webserver/           # 12 个页面
 ├── po/                              # 中文翻译
 ├── root/
@@ -295,7 +322,7 @@ luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
 ├── src/
 │   ├── Makefile                     # 编译并安装 at-webserver-rust 到本包
 │   └── rust/                        # tokio 后端（约 13 个源文件）
-└── tests/mock-modem/                # 无硬件 e2e（mock AT 模组）
+└── tests/mock-modem/                # 无硬件 e2e（mock AT 模组）+ 温度分级单测
 ```
 
 ---
@@ -307,8 +334,8 @@ workflow：`.github/workflows/build-openwrt.yml`
 
 | 目标系统 | 包格式 | 架构 | 产物示例 |
 |:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.2.0-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.2.0_x86_64.ipk` |
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.6.0-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.6.0_x86_64.ipk` |
 
 **触发方式**
 
@@ -319,7 +346,7 @@ workflow：`.github/workflows/build-openwrt.yml`
 **每次编译成功后自动发布 Release**
 
 - 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.2.0`）  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.6.0`）  
 - 同名 Release 先删后建；资产带架构前缀，避免同名冲突
 
 交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。
@@ -345,6 +372,7 @@ cd tests/mock-modem
 npm install ws          # 仅测试依赖
 sh run-e2e.sh           # mock 模组 + 真实 Rust + RPC 客户端
 node parse-extra-test.js
+node temp-level-test.js # 模组温度分级（14 条断言）
 ```
 
 ### 页面语法
