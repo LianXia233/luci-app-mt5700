@@ -1,7 +1,7 @@
 # AT WebServer · MT5700M 5G 模组管理
 
 > **OpenWrt LuCI 插件** · 前端 12 页 + Rust 后端 **单包交付**  
-> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.12.1**
+> 包名 `luci-app-mt5700` · 服务/UCI 段 `at-webserver` · 当前版本 **v1.12.2**
 
 | | |
 |:--|:--|
@@ -35,14 +35,14 @@
 ```sh
 # 以 aarch64_cortex-a53 为例
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.12.1-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.12.2-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.1_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.2_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -64,63 +64,7 @@ ls -l /usr/bin/at-webserver-rust
 > **为何必须有后端进程？** 串口/`AT` 通道、定时锁频、扫频、企业微信推送都必须常驻，浏览器无法完成。  
 > 「一个安装包」= 前后端合一（v1.1.0+）；不是「一个静态 HTML」。
 
-> **v1.12.1 说明**：本版只改「网络能力」指示器的排版与字体，**不改任何评估逻辑与阈值**，
-> 四张环形仪表盘（RSRP / RSRQ / SINR / 综合百分比）**样式完全未动**。
-> 能力项（制式 / 频段 / 带宽）原来与信号项共用同一种 chip 徽标、混在同一条横向流里，
-> 容易被读成同一个指标池，且 11px 徽标在宽屏下被大段空白撑开。
-> 现改为与四项指标一致的**「描边图标 + 标签/值竖排」**结构，列间加竖分隔线，
-> 短板高亮只在唯一短板时点亮，阈值依据挂到悬停提示。窄屏自动回流为两列 / 单列。
->
-> **v1.10.0 说明**：只改布局不改功能。修掉指标网格高度溢出压住底部按钮、
-> 大屏两侧留白过大、列数写死不自适应三处缺陷，并理顺信号总评横幅的文字层次。
->
-> **v1.9.0 说明**：修掉一个**把载波信息整体读错位**的解析缺陷，并重做网络质量评估逻辑。
-> **① 解析修复**：`^HFREQINFO` 是 9 字段（`n,sysmode,band,dl_fcn,dl_freq,dl_bw,ul_fcn,ul_freq,ul_bw`），
-> 旧代码按 8 字段解析导致每列错位一格——载波表「制式」列显示 `0`、「频段」显示 `Band 7`、
-> 「频点」显示 `41`、「带宽」显示 `513000`。更严重的是该命令**根本不返回信号字段**，
-> 旧代码却从它解析出 `-44 dBm / -3 dB / 30 dB` 这种「完美但虚假」的信号读数。
-> 现已按手册 13.16.1 重写，信号质量统一取自 `^MONSC`，并用 `sysModeName()` 正确映射制式码
-> （`6`=LTE、`7`=NR）。
-> **② 评估逻辑多维化**：原逻辑只看信号四项中最差档位，导致「700MHz 上的 LTE 信号满格」
-> 同样被判"优秀"并建议"适合看高清视频、下载大文件"——而 20MHz LTE 单载波远达不到该要求。
-> 现改为**信号档 × 承载能力档（网络制式 / 频段特性 / 载波带宽）取更差者**，
-> 结论文案改为"网络能力"口径，并在结论被能力维度拉低时给出明确提示条，
-> 说明是哪个维度在限制实际网速。频段按**实测频率**分档而非频段号，带宽按制式分表
-> （LTE 单载波上限 20MHz，不能用 NR 的尺子量）。
-> **③ 排版修复**：信号质量卡片四项指标等高对齐、标签/档位/描述各行基线齐平。
-> 详见 [CHANGELOG](CHANGELOG.md) 的 `[1.9.0]` 段。
-
-> **v1.8.0 说明**：把两处「只有专业用户看得懂」的界面翻译成普通用户能自主操作的形式。
-> **① 网络接入顺序**由裸文本框改为**卡片式单选组**（7 个预设：5G 优先逐级回落 / 仅 5G /
-> 4G 优先 / 仅 4G / 3G 优先 / 仅 3G / 保持当前），每项写清对网络连接的实际影响，
-> 取值严格限定在 `AT^SYSCFGEX=?` 返回的合法制式码之内；顺带修掉原占位符 `0504030200`
-> 这个错误示例（`05` 在 MT5700 上不存在）。漫游补齐官方 `0` 档（禁止漫游），
-> 服务域补齐 `3`（不限）/ `4`（不修改），并按官方约束在含 4G/5G 时**自动禁用**不合法档位。
-> **② 信号质量**卡片增加总评横幅、中文主标签 + 英文副标签、每档人话描述；
-> 并修正环形仪表弧长量程过窄导致的视觉失真。
-> 另修复 LTE 频段值被 `OK` 回显污染（`1E200000095OK`）。后端参数与配置功能完全不变。
-> 详见 [CHANGELOG](CHANGELOG.md) 的 `[1.8.0]` 段。
-
-> **v1.7.0 说明**：模组温度分级由 3 档细化为 **6 档**（偏低深蓝 / 温和蓝 / 正常绿 /
-> 偏暖黄 / 偏高橙 / 过高红），阈值整体下调（偏暖起点 61 ℃、告警起点 77 ℃），
-> 使常驻温度即可反映状态、异常升温逐级显现；卡片新增右上角「最高温 · 状态」徽标。
-> 同时修复指标卡数值异常换行（`102.40 Mbps` 被拆行、中文长值截断），
-> 并按项数自适应列数消除尾行留白。功能行为不变。
-> 详见 [CHANGELOG](CHANGELOG.md) 的 `[1.7.0]` 段。
-
-> **v1.6.0 说明**：全站设计令牌对齐 PaperGrid 冷调青色体系（主色蓝 → 青 `#087cba`，
-> 暗色亮青 `#61c9f4`，统一动效曲线与焦点环，圆角基准 `.85rem`），
-> 并为「模组温度」卡片新增**按温度状态动态着色**（正常绿 / 偏高黄 / 过高红，逐项独立判定）。
-> 功能行为不变，仅视觉与呈现增强。
-> 详见 [CHANGELOG](CHANGELOG.md) 的 `[1.6.0]` 段。
-
-> **v1.5.0 说明**：UI 全面升级为「Modern Dimensional Layering」v2（圆形信号仪表、
-> 卡片分层、统一按钮/开关样式），拨号设置页接入暂存式「保存并应用」，
-> 并修复短信乱码、SINR / MCS 数据源错误与 Aurora 主题开关串扰。
-
-> **v1.4.1 说明**：v1.4.0 的 UI 重构把多个页面降级为骨架、且 LuCI 依赖指令被压缩器剥离
-> （运行时 `Mt5700 is not defined`）。v1.4.1 以 v1.3.4（`971008ca`）为基准逐页恢复功能，
-> 同时保留 v1.4.x 的新 UI 视觉。详见 [CHANGELOG](CHANGELOG.md) 的 `[1.4.1]` 段。
+> 各版本的详细变更记录见 [CHANGELOG](CHANGELOG.md)。
 
 ### 保存配置
 
@@ -348,7 +292,7 @@ PC 端同一套断言在 1920 / 1600 / 1440 / 1280 / 1200 五档全部通过，
 | UCI 配置段 | `/etc/config/at-webserver` | `/etc/config/mt5700m` |
 | 服务 / init.d | `at-webserver` | `mt5700m` 系列 |
 | 主要语言 | JavaScript（LuCI JS + Rust 后端） | TypeScript（React + Semi Design 前端） |
-| 版本号 | `1.12.1`（当前） | `2.4.8-r1` |
+| 版本号 | `1.12.2`（当前） | `2.4.8-r1` |
 | 许可证 | MIT | Apache-2.0（含 MPL-2.0 的上游组件） |
 | 外部依赖 | 基本无（`LUCI_DEPENDS` 置空） | `ubus-at-daemon`、`sms-tool_q` |
 | 包架构 | 板级架构（内含二进制） | `all` |
@@ -815,7 +759,7 @@ api.TEMP_LEVELS = [
 
 ```text
 luci-app-mt5700/                     # 仓库根 = OpenWrt 单包
-├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.12.1
+├── Makefile                         # PKG_NAME=luci-app-mt5700 · PKG_VERSION=1.12.2
 ├── .github/workflows/build-openwrt.yml
 ├── scripts/sdk-build.sh             # Actions 容器内：SDK + zig + cargo + 校验
 ├── htdocs/luci-static/resources/
@@ -841,8 +785,8 @@ workflow：`.github/workflows/build-openwrt.yml`
 
 | 目标系统 | 包格式 | 架构 | 产物示例 |
 |:--|:--|:--|:--|
-| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.12.1-r1.apk` |
-| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.12.1_x86_64.ipk` |
+| 主线 snapshot | `.apk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700-1.12.2-r1.apk` |
+| 23.05.5 | `.ipk` | x86_64 · aarch64_cortex-a53 | `x86_64-luci-app-mt5700_1.12.2_x86_64.ipk` |
 
 **触发方式**
 
@@ -853,7 +797,7 @@ workflow：`.github/workflows/build-openwrt.yml`
 **每次编译成功后自动发布 Release**
 
 - 标签推送 → Release tag = 标签名  
-- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.12.1`）  
+- `main` 推送 → Release tag = `Makefile` 中的 `PKG_VERSION`（当前 `v1.12.2`）  
 - 同名 Release 先删后建；资产带架构前缀，避免同名冲突
 
 交叉编译：容器内 rustup + **zig** 作 musl 链接器；`src/Makefile` 在包编译时 `cargo build --release` 并装入 `usr/bin/at-webserver-rust`。CI 会校验主包体积（>500KB，排除「只有前端」）。
