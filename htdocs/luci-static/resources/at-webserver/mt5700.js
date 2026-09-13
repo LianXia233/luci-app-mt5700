@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.8.0';
+var MT5700_CSS_VERSION = '2.9.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -1226,6 +1226,24 @@ var Mt5700 = (function () {
 		var table = E('table', { 'class': 'mt5700-table' });
 		if (options.striped) table.classList.add('mt5700-table-striped');
 
+		/*
+		 * 手机端（<=600px）表格改为「卡片式堆叠」：隐藏表头，每个单元格
+		 * 用 ::before 显示自己的列名。因此这里把表头文案写进每个 td 的
+		 * data-label，CSS 侧用 content: attr(data-label) 读取。
+		 * 桌面端 data-label 不显示，对既有布局零影响。
+		 */
+		var labelOf = function (i) {
+			var h = headers[i];
+			return (h == null) ? '' : String(h);
+		};
+
+		/*
+		 * 只有两列的键值表：手机端不适用「一行一卡」的堆叠（会把每项
+		 * 拆成上下两行，项数多时反而更高），改由 .mt5700-table-kv
+		 * 走「标签左 / 值右」的紧凑分栏行。
+		 */
+		if (headers.length === 2) table.classList.add('mt5700-table-kv');
+
 		// 表头
 		var thead = E('thead');
 		var tr = E('tr');
@@ -1244,14 +1262,17 @@ var Mt5700 = (function () {
 		} else {
 			rows.forEach(function (row) {
 				var tr = E('tr');
-				row.forEach(function (cell) {
+				row.forEach(function (cell, ci) {
+					var td;
 					if (typeof cell === 'object' && cell.nodeType) {
-						var td = E('td');
+						td = E('td');
 						td.appendChild(cell);
-						tr.appendChild(td);
 					} else {
-						tr.appendChild(E('td', {}, cell || '—'));
+						td = E('td', {}, cell || '—');
 					}
+					var lbl = labelOf(ci);
+					if (lbl) td.setAttribute('data-label', lbl);
+					tr.appendChild(td);
 				});
 				tbody.appendChild(tr);
 			});
