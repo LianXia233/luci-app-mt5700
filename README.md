@@ -4,7 +4,7 @@ OpenWrt / ImmortalWrt 的 LuCI 插件，用于管理 MT5700M 5G 模组的拨号�
 
 - 包名：`luci-app-mt5700`
 - 配置段 / 服务：`at-webserver`
-- 版本：v1.12.2
+- 版本：v1.12.3
 - 入口：LuCI 侧边栏「移动网络 → 5G 模组管理」（`admin/modem/5g`）
 
 ## 架构
@@ -30,7 +30,7 @@ LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP 
 | 通信架构 | LuCI → rpcd（ucode 代理 `mt5700.uc`）→ Rust → 模组 AT | LuCI → ubus（at-daemon / sms-tool_q）→ 模组 |
 | 拨号方式 | PCUI 串口 AT（`SERIAL`，默认 `/dev/ttyUSB1`，TCP 备用） | NCM 拨号（依赖 `kmod-usb-net-cdc-ncm` 等内核模块） |
 | 功能侧重 | 扫频、定时锁频、企业微信推送、通知日志（含 12 页全功能管理） | 概览、移动数据、网络与小区、短信、系统维护、流量历史 |
-| 版本 / 许可 | v1.12.2 / GPLv3 | 2.x / Apache-2.0 |
+| 版本 / 许可 | v1.12.3 / GPLv3 | 2.x / Apache-2.0 |
 
 > **两个插件互不兼容：** 二者都直接接管同一 MT5700M 模组的控制通道（AT/串口）与数据接口，同一台设备上同时安装会争用通道、造成配置冲突，因此管理同一模组时只能二选一，不可同时启用。
 
@@ -44,14 +44,14 @@ LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP 
 
 ```sh
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.12.2-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.12.3-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.2_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.3_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -69,6 +69,16 @@ ls -l /usr/bin/at-webserver-rust
 ```
 
 登录 LuCI 后进入「移动网络 → 5G 模组管理」即可使用 12 个页面。
+
+## 开机自启
+
+前端与后端均随系统开机自动就绪，无需手动配置：
+
+- **后端（Rust 服务）**：安装时 OpenWrt `default_postinst` 自动执行 `/etc/init.d/at-webserver enable`，创建开机软链接 `/etc/rc.d/S99at-webserver`；开机后按 `START=99` 经 procd 拉起 `/usr/bin/at-webserver-rust`（带 respawn 守护）。是否真正启动由 UCI `at-webserver.config.enabled` 控制（默认 `1`）。
+- **前端（LuCI 页面）**：页面与菜单（`menu.d`）、权限（`acl.d`）随 rpcd / uhttpd 系统服务自动加载；RPC 代理 `mt5700.uc` 由 rpcd 启动时扫描 `/usr/share/rpcd/ucode/` 自动注册，无独立进程需要管理。
+- **网络接口**：服务启动时会将 `MT5700M` / `MT5700Mv6` 接口置为 `auto=1` 并在模组网口就绪后主动 `ifup`，保证拨号接口开机自启。
+
+排查命令：`ls -l /etc/rc.d/ | grep at-webserver`（应有 `S99at-webserver`）；`logread -e at-webserver` 查看启动日志。
 
 ## UCI 配置
 
@@ -88,7 +98,7 @@ ls -l /usr/bin/at-webserver-rust
 
 ```
 luci-app-mt5700/
-├── Makefile                   # 包定义（PKG_VERSION=1.12.2）
+├── Makefile                   # 包定义（PKG_VERSION=1.12.3）
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/     # 12 个页面 JS
 │   └── at-webserver/          # rpc.js / ui.js / at.css 等前端资源
