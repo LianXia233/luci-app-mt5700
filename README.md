@@ -30,7 +30,7 @@ LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP 
 | 通信架构 | LuCI → rpcd（ucode 代理 `mt5700.uc`）→ Rust → 模组 AT | LuCI → ubus（at-daemon / sms-tool_q）→ 模组 |
 | 拨号方式 | PCUI 串口 AT（`SERIAL`，默认 `/dev/ttyUSB1`，TCP 备用） | NCM 拨号（依赖 `kmod-usb-net-cdc-ncm` 等内核模块） |
 | 功能侧重 | 扫频、定时锁频、企业微信推送、通知日志（含 12 页全功能管理） | 概览、移动数据、网络与小区、短信、系统维护、流量历史 |
-| 版本 / 许可 | v1.12.2 / MIT | 2.x / Apache-2.0 |
+| 版本 / 许可 | v1.12.2 / GPLv3 | 2.x / Apache-2.0 |
 
 > **两个插件互不兼容：** 二者都直接接管同一 MT5700M 模组的控制通道（AT/串口）与数据接口，同一台设备上同时安装会争用通道、造成配置冲突，因此管理同一模组时只能二选一，不可同时启用。
 
@@ -115,4 +115,4 @@ GitHub Actions（`.github/workflows/build-openwrt.yml`）对每个推送做云�
 
 ## 许可证
 
-[MIT](LICENSE)
+[GNU General Public License v3.0](LICENSE)
