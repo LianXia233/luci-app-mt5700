@@ -229,8 +229,9 @@ stop_service() {
 	killall -q "$PROG_NAME" 2>/dev/null
 	rm -f /var/run/at-webserver-rust.pid
 
-	# 清理防火墙规则（幂等）
-	for rule_name in at_webserver_wan_block at_webserver_wan_allow at_module_restrict at_module_wan_block at_module_wan_allow; do
+	# 清理防火墙规则（幂等；列表必须与 start_service/at_webserver_post_start 创建的 7 条一致，
+	# 否则 rpc_allow_wan=1 时 at_rpc_wan_allow 会在停服后残留，WAN 到 RPC 端口仍被放行）
+	for rule_name in at_webserver_wan_block at_webserver_wan_allow at_module_restrict at_module_wan_block at_module_wan_allow at_rpc_wan_allow at_rpc_wan_block; do
 		local rule_idx=$(uci show firewall | grep "\.name='$rule_name'" | cut -d'[' -f2 | cut -d']' -f1 | head -n1)
 		if [ -n "$rule_idx" ]; then
 			uci delete firewall.@rule[$rule_idx] 2>/dev/null
