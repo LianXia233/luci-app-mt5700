@@ -9,4 +9,27 @@ uci -q get at-webserver.config >/dev/null || {
 # 确保日志目录存在
 mkdir -p /tmp
 
+# ---------------------------------------------------------------------------
+# 注册开机自启（关键，缺失会导致服务永远不启动）
+#
+# 症状：LuCI「服务配置」页显示「未注册」，进程未运行，procd 中不存在
+#       at-webserver 实例；手动 /etc/init.d/at-webserver start 可以起来，
+#       但路由器一重启就又没了。
+#
+# 根因：v1.12.2 及更早版本的 root/etc/init.d/at-webserver 执行位曾被静默
+#       回退为 100644，包安装阶段（post-install）的 enable 以
+#       Permission denied 失败，/etc/rc.d/S99at-webserver 从未被创建。
+#       enable 只在安装那一刻执行一次，错过之后即使执行位修好也不会重试，
+#       于是服务永久处于「未注册」状态。
+#
+# 修复：这里显式补一次 enable。chmod 兜底是为了覆盖执行位在打包/刷机
+#       过程中再次丢失的情况——先补权限再 enable，保证一定成功。
+# ---------------------------------------------------------------------------
+if [ -x /etc/init.d/at-webserver ]; then
+	/etc/init.d/at-webserver enable
+else
+	chmod 0755 /etc/init.d/at-webserver 2>/dev/null
+	/etc/init.d/at-webserver enable
+fi
+
 exit 0

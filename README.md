@@ -4,7 +4,7 @@ OpenWrt / ImmortalWrt 的 LuCI 插件，用于管理 MT5700M 5G 模组的拨号�
 
 - 包名：`luci-app-mt5700`
 - 配置段 / 服务：`at-webserver`
-- 版本：v1.12.3
+- 版本：v1.12.4
 - 入口：LuCI 侧边栏「移动网络 → 5G 模组管理」（`admin/modem/5g`）
 
 ## 架构
@@ -30,7 +30,7 @@ LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP 
 | 通信架构 | LuCI → rpcd（ucode 代理 `mt5700.uc`）→ Rust → 模组 AT | LuCI → ubus（at-daemon / sms-tool_q）→ 模组 |
 | 拨号方式 | PCUI 串口 AT（`SERIAL`，默认 `/dev/ttyUSB1`，TCP 备用） | NCM 拨号（依赖 `kmod-usb-net-cdc-ncm` 等内核模块） |
 | 功能侧重 | 扫频、定时锁频、企业微信推送、通知日志（含 12 页全功能管理） | 概览、移动数据、网络与小区、短信、系统维护、流量历史 |
-| 版本 / 许可 | v1.12.3 / GPLv3 | 2.x / Apache-2.0 |
+| 版本 / 许可 | v1.12.4 / GPLv3 | 2.x / Apache-2.0 |
 
 > **两个插件互不兼容：** 二者都直接接管同一 MT5700M 模组的控制通道（AT/串口）与数据接口，同一台设备上同时安装会争用通道、造成配置冲突，因此管理同一模组时只能二选一，不可同时启用。
 
@@ -44,14 +44,14 @@ LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP 
 
 ```sh
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.12.3-r1.apk \
+  ./aarch64_cortex-a53-luci-app-mt5700-1.12.4-r1.apk \
   ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 23.05（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.3_aarch64_cortex-a53.ipk
+opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.4_aarch64_cortex-a53.ipk
 opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -74,11 +74,29 @@ ls -l /usr/bin/at-webserver-rust
 
 前端与后端均随系统开机自动就绪，无需手动配置：
 
-- **后端（Rust 服务）**：安装时 OpenWrt `default_postinst` 自动执行 `/etc/init.d/at-webserver enable`，创建开机软链接 `/etc/rc.d/S99at-webserver`；开机后按 `START=99` 经 procd 拉起 `/usr/bin/at-webserver-rust`（带 respawn 守护）。是否真正启动由 UCI `at-webserver.config.enabled` 控制（默认 `1`）。
+- **后端（Rust 服务）**：服务由本包自带的 `root/etc/uci-defaults/at-webserver`（首次启动执行）与 Makefile `postinst`（安装/升级执行）**显式** `enable`，创建开机软链接 `/etc/rc.d/S99at-webserver`；开机后按 `START=99` 经 procd 拉起 `/usr/bin/at-webserver-rust`（带 respawn 守护）。是否真正启动由 UCI `at-webserver.config.enabled` 控制（默认 `1`）。
+
+  > 注意：OpenWrt **不会**替包自动 enable init 服务，必须显式执行 `enable`。
+  > 早期版本曾因 `root/etc/init.d/at-webserver` 执行位回退（100755 → 100644）
+  > 导致安装期 enable 以 `Permission denied` 失败；而 enable 只在安装那一刻执行
+  > 一次、失败不重试，于是存量设备永久停留在「未注册」状态——重启后服务再也不起来。
+  > 为此 `start_service` 内置自愈：每次 start 若发现 `/etc/rc.d` 链接缺失就自动补 `enable`，
+  > 存量设备执行一次 `/etc/init.d/at-webserver start` 即永久修好。
+
 - **前端（LuCI 页面）**：页面与菜单（`menu.d`）、权限（`acl.d`）随 rpcd / uhttpd 系统服务自动加载；RPC 代理 `mt5700.uc` 由 rpcd 启动时扫描 `/usr/share/rpcd/ucode/` 自动注册，无独立进程需要管理。
 - **网络接口**：服务启动时会将 `MT5700M` / `MT5700Mv6` 接口置为 `auto=1` 并在模组网口就绪后主动 `ifup`，保证拨号接口开机自启。
 
-排查命令：`ls -l /etc/rc.d/ | grep at-webserver`（应有 `S99at-webserver`）；`logread -e at-webserver` 查看启动日志。
+排查命令：
+
+| 检查项 | 命令 | 预期 |
+|:--|:--|:--|
+| 开机自启注册 | `ls -l /etc/rc.d/ \| grep at-webserver` | 存在 `S99at-webserver` |
+| 注册状态 | `/etc/init.d/at-webserver enabled && echo yes` | 输出 `yes` |
+| 运行状态 | `service at-webserver status` | `running` |
+| procd 实例 | `ubus call service list '{"name":"at-webserver"}'` | `instance1.running = true` |
+| 启动日志 | `logread -e at-webserver` | 无 `Permission denied` / `enable 失败` |
+
+页面显示「未注册」时的手动修复：`/etc/init.d/at-webserver enable && /etc/init.d/at-webserver start`。
 
 ## UCI 配置
 
@@ -98,7 +116,7 @@ ls -l /usr/bin/at-webserver-rust
 
 ```
 luci-app-mt5700/
-├── Makefile                   # 包定义（PKG_VERSION=1.12.3）
+├── Makefile                   # 包定义（PKG_VERSION=1.12.4）
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/     # 12 个页面 JS
 │   └── at-webserver/          # rpc.js / ui.js / at.css 等前端资源
