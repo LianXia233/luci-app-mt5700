@@ -63,9 +63,10 @@ function resolveStatus(state) {
 	if (!registered) {
 		return {
 			label: '未注册', variant: 'warning', pid: null,
-			hint: '进程未运行，且 procd 中不存在 at-webserver 实例——通常是 /etc/init.d/at-webserver ' +
-				'缺失或被 overlay 覆盖（例如存在白化字符设备），导致服务从未被拉起。' +
-				'请检查该脚本是否存在，然后点击「重载服务」或执行 /etc/init.d/at-webserver start。'
+			hint: '进程未运行，且 procd 中不存在 at-webserver 实例。最常见原因是服务没有注册开机自启' +
+				'（/etc/rc.d/S99at-webserver 软链接缺失，历史上由 init.d 执行位回退导致安装期 enable 失败），' +
+				'其次才是 /etc/init.d/at-webserver 缺失或被 overlay 覆盖（例如存在白化字符设备）。' +
+				'点击「重载服务」会自动补注册；也可手动执行 /etc/init.d/at-webserver enable && /etc/init.d/at-webserver start。'
 		};
 	}
 	return {
@@ -425,8 +426,18 @@ return L.view.extend({
 			expect: { '': {} }
 		});
 
+		// 经 rpcd 的 rc 对象调用 init.d（等价 /etc/init.d/at-webserver <action>）。
+		// 这是首选路径：init.d 里内置了开机自启注册自愈，顺带把
+		// /etc/rc.d/S99at-webserver 补上，服务重启后仍在。
+		var rpcRcInit = L.rpc.declare({
+			object: 'rc',
+			method: 'init',
+			params: ['name', 'action']
+		});
+
 		// 直接经 ubus 注册并拉起实例。即使 /etc/init.d/at-webserver 缺失
-		// （overlay 白化等），这条路径依然能把服务跑起来。
+		// （overlay 白化等）或 rc 调用被拒绝，这条路径依然能把服务跑起来；
+		// 但它只做临时实例注册，不补 /etc/rc.d 开机自启链接，仅作兜底。
 		function startViaUbus() {
 			return rpcServiceSet({
 				name: SERVICE,
@@ -495,7 +506,11 @@ return L.view.extend({
 			return rpcServiceDelete({ name: SERVICE }).catch(function () {
 				/* 实例可能不存在，删除失败不致命 */
 			}).then(function () {
-				return startViaUbus();
+				// 首选 init.d 路径：能顺带补建 /etc/rc.d 开机自启链接，避免重启后复发。
+				return rpcRcInit({ name: SERVICE, action: 'start' }).catch(function () {
+					// init.d 不可用（脚本缺失/异常，或 rpcd rc 未被授权）时回退到 ubus 直连
+					return startViaUbus();
+				});
 			}).then(function () {
 				// 等 procd 完成拉起，再复核一次真实状态
 				return new Promise(function (resolve) { window.setTimeout(resolve, 1200); });

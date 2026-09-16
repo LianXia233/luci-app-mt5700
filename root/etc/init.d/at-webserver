@@ -10,10 +10,37 @@ PROG_NAME="at-webserver-rust"
 # 加载 UCI 函数库
 . /lib/functions.sh
 
+# 开机自启注册自愈。
+#
+# 现象：手动 /etc/init.d/at-webserver start 能起来，但路由器重启后服务又消失，
+#       LuCI 显示「未注册 / 进程未运行 / procd 无实例」。
+# 根因：/etc/rc.d/S${START}at-webserver 软链接缺失，即服务从未被 enable。
+#       （历史上是 init.d 执行位回退导致安装期 enable 失败，详见 uci-defaults 注释。
+#         enable 只在安装那一刻执行一次，错过之后不会自动补。）
+# 处理：每次 start 都检查一次，缺失就补 enable。这样即便存量设备错过了
+#       安装期注册，只要有人（或开机、或点一下「重载服务」）执行一次 start，
+#       注册状态就被永久修好，不会再随重启复发。幂等，可重复执行。
+ensure_enabled() {
+	[ -e "/etc/rc.d/S${START}at-webserver" ] && return 0
+
+	# 执行位可能在打包/刷机过程中再次丢失，先补权限再 enable
+	[ -x "/etc/init.d/at-webserver" ] || chmod 0755 /etc/init.d/at-webserver 2>/dev/null
+	/etc/init.d/at-webserver enable 2>/dev/null
+
+	if [ -e "/etc/rc.d/S${START}at-webserver" ]; then
+		logger -t at-webserver "检测到服务未注册开机自启，已自动补建 S${START}at-webserver"
+	else
+		logger -t at-webserver "警告：服务未注册开机自启且自动 enable 失败，重启后需手动 start"
+	fi
+	return 0
+}
+
 start_service() {
 	local enabled
 
 	logger -t at-webserver "开始启动服务..."
+
+	ensure_enabled
 
 	uci -q commit at-webserver
 
