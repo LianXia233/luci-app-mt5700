@@ -59,6 +59,12 @@ define Package/luci-app-mt5700/postinst
 	chmod 0755 /etc/init.d/at-webserver 2>/dev/null
 	/etc/init.d/at-webserver enable
 	/etc/init.d/at-webserver restart 2>/dev/null || /etc/init.d/at-webserver start
+	# 安装/升级后立即核对一次模组接口：不存在就创建（V4 必建并取址，V6 也建、
+	# 按实际网络状况取址），并尝试拉起。服务里的同类检查是在后台跑的，
+	# 装完这一刻还没跑到，所以这里同步做一遍，避免用户装完看到「没有接口」。
+	# 此时模组可能尚未就绪，失败无妨：init.d 的重试、hotplug 与后端拨号就绪
+	# 通知会继续处理。
+	/etc/init.d/at-webserver ensure_interfaces 2>/dev/null || true
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
 	/etc/init.d/rpcd reload 2>/dev/null
