@@ -150,15 +150,26 @@ return L.view.extend({
 		};
 
 		/* ---------------- 数据通道 ---------------- */
+		/* 每次调用带一个唯一 rid：ucode 侧用它做临时文件名，
+		 * 否则并发多个 RPC 会写同一个文件互相覆盖（见 mt5700.uc 的注释）。 */
+		var ridSeq = 0;
+		function newRid() {
+			ridSeq++;
+			return String(Date.now()) + '-' + ridSeq + '-' + Math.floor(Math.random() * 1e6);
+		}
+		/* 注意：LuCI 的 expect 不是"声明要哪些字段"。
+		 * 实测 `expect: {seq: 0, entries: []}` 只会把 seq 的**值**返回回来（页面拿到一个数字），
+		 * 表现为「ubus 直连明明有日志、页面却显示 0 条」这种极难查的现象。
+		 * 统一用 `expect: {}` 取完整结果，再自己取字段。 */
 		var rpcLogs = L.rpc.declare({
 			object: 'mt5700', method: 'logs',
-			params: ['since', 'limit'], expect: { seq: 0, entries: [] }
+			params: ['since', 'limit', '_rid'], expect: {}
 		});
 		var rpcSyslog = L.rpc.declare({
 			object: 'log', method: 'read',
-			params: ['lines', 'stream', 'oneshot'], expect: { log: [] }
+			params: ['lines', 'stream', 'oneshot'], expect: {}
 		});
-		var fileRead = L.rpc.declare({ object: 'file', method: 'read', params: ['path'], expect: { data: '' } });
+		var fileRead = L.rpc.declare({ object: 'file', method: 'read', params: ['path'], expect: {} });
 		var fileWrite = L.rpc.declare({ object: 'file', method: 'write', params: ['path', 'data'], expect: {} });
 
 		function readFile(p) {
@@ -178,7 +189,9 @@ return L.view.extend({
 			{ id: 'notify', label: '通知记录' }
 		];
 		TAB_DEFS.forEach(function (t) {
-			var b = E('button', { 'class': 'mt5700-logtab', 'data-tab': t.id, type: 'button' }, t.label);
+			/* 用 div 而非 button：主题对原生 button 有较强的全局样式（白底、方框、阴影），
+			 * 会被继承进来破坏分段控件的观感 —— 实测就是这个问题。div 完全可控。 */
+			var b = E('div', { 'class': 'mt5700-logtab', 'data-tab': t.id, role: 'tab', tabindex: '0' }, t.label);
 			b.addEventListener('click', function () { state.tab = t.id; renderAll(); });
 			tabs.appendChild(b);
 		});
@@ -202,31 +215,45 @@ return L.view.extend({
 			if (state.auto) schedule();
 		});
 
+		/* 自写按钮：不依赖主题的 button / ghostButton，避免被全局样式改变观感 */
+		function logButton(label, onClick, variant) {
+			var cls = 'mt5700-logbtn' + (variant ? ' mt5700-logbtn-' + variant : '');
+			var b = E('div', { 'class': cls, role: 'button', tabindex: '0', title: label }, label);
+			b.addEventListener('click', onClick);
+			b.addEventListener('keydown', function (ev) {
+				if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onClick(ev); }
+			});
+			return b;
+		}
+
 		var toolbar = E('div', { 'class': 'mt5700-logtoolbar' });
-		toolbar.appendChild(E('div', { 'class': 'mt5700-logtool-item' }, [levelSel]));
-		toolbar.appendChild(E('div', { 'class': 'mt5700-logtool-item mt5700-logtool-grow' }, [searchInput]));
-		var autoWrap = E('label', { 'class': 'mt5700-logtool-item mt5700-logauto' }, [autoChk, E('span', {}, '自动刷新')]);
+		toolbar.appendChild(E('div', { 'class': 'mt5700-logselect' }, [levelSel]));
+		toolbar.appendChild(E('div', { 'class': 'mt5700-logsearch' }, [searchInput]));
+		var autoWrap = E('label', { 'class': 'mt5700-logauto' }, [autoChk, E('span', {}, '自动刷新')]);
 		toolbar.appendChild(autoWrap);
-		toolbar.appendChild(Mt5700.ghostButton('立即刷新', function () { refresh(true); }));
-		toolbar.appendChild(Mt5700.ghostButton('导出', function () { exportLog(); }));
+		toolbar.appendChild(logButton('刷新', function () { refresh(true); }));
+		toolbar.appendChild(logButton('导出', function () { exportLog(); }));
 		body.appendChild(toolbar);
 
 		/* ---------------- 日志主体 ---------------- */
-		var card = Mt5700.card('日志', '');
-		var cardBody = card._body;
-		body.appendChild(card);
+		/* 不再用 Mt5700.card：页头已有大标题，卡片再套一个「日志」标题属于重复，
+		 * 且卡片自带的内边距与日志列表需要的紧凑排版不搭。 */
+		var panel = E('div', { 'class': 'mt5700-logpanel' });
+		body.appendChild(panel);
 
-		var hint = E('div', { 'class': 'mt5700-hint' }, '');
-		cardBody.appendChild(hint);
+		var hint = E('div', { 'class': 'mt5700-logpanel-hint' }, '');
+		panel.appendChild(hint);
 
 		var listEl = E('div', { 'class': 'mt5700-loglist' });
-		cardBody.appendChild(listEl);
+		panel.appendChild(listEl);
 
 		var footer = E('div', { 'class': 'mt5700-logfooter' }, '');
-		cardBody.appendChild(footer);
+		panel.appendChild(footer);
 
-		var clearBtn = Mt5700.dangerButton('清空通知日志', function () { clearNotify(); });
-		cardBody.appendChild(Mt5700.panelActions(clearBtn));
+		var clearRow = E('div', { 'class': 'mt5700-logactions' });
+		var clearBtn = logButton('清空通知日志', function () { clearNotify(); }, 'danger');
+		clearRow.appendChild(clearBtn);
+		panel.appendChild(clearRow);
 
 		/* ---------------- 渲染 ---------------- */
 		function currentEntries() {
@@ -250,20 +277,26 @@ return L.view.extend({
 			return out;
 		}
 
+		/* 必须始终返回 Node：早期实现里"没有搜索词就 return text（字符串）"，
+		 * 而调用方是 appendChild —— 一旦有日志行要渲染就抛
+		 * "parameter 1 is not of type 'Node'"，整个列表渲染中断，
+		 * 表现为「RPC 有数据、页面却连空状态都没有」。 */
 		function highlight(text) {
-			if (!state.query) return text;
-			var idx = text.toLowerCase().indexOf(state.query.toLowerCase());
-			if (idx < 0) return text;
+			var s = String(text);
+			if (!state.query) return document.createTextNode(s);
+			var q = state.query.toLowerCase();
+			var idx = s.toLowerCase().indexOf(q);
+			if (idx < 0) return document.createTextNode(s);
 			var frag = document.createDocumentFragment();
-			var rest = text, pos = 0;
+			var rest = s;
 			while (true) {
-				idx = rest.toLowerCase().indexOf(state.query.toLowerCase());
+				idx = rest.toLowerCase().indexOf(q);
 				if (idx < 0) { frag.appendChild(document.createTextNode(rest)); break; }
 				if (idx > 0) frag.appendChild(document.createTextNode(rest.slice(0, idx)));
 				var mk = document.createElement('mark');
-				mk.textContent = rest.slice(idx, idx + state.query.length);
+				mk.textContent = rest.slice(idx, idx + q.length);
 				frag.appendChild(mk);
-				rest = rest.slice(idx + state.query.length);
+				rest = rest.slice(idx + q.length);
 			}
 			return frag;
 		}
@@ -278,11 +311,13 @@ return L.view.extend({
 			var list = applyFilters(all);
 
 			if (!all.length) {
-				listEl.appendChild(Mt5700.empty(state.tab === 'dial'
-					? '暂无拨号日志。后端会记录自动拨号对齐、串口探测与 PDP 状态。'
-					: '暂无接口日志。接口拉起、hotplug 与取址结果会出现在这里。'));
+				listEl.appendChild(emptyBox(
+					state.tab === 'dial' ? '暂无拨号日志' : '暂无接口日志',
+					state.tab === 'dial'
+						? '服务连上模组后会记录自动拨号对齐、数据承载与 USB 网卡状态、串口探测与选口过程。'
+						: '接口拉起与重试、热插拔钩子、动态地址与 IPv6 取址结果都会出现在这里。'));
 			} else if (!list.length) {
-				listEl.appendChild(Mt5700.empty('当前过滤条件下没有匹配的日志'));
+				listEl.appendChild(emptyBox('没有匹配的日志', '试试清空关键词，或把级别切回「全部级别」。'));
 			} else {
 				var frag = document.createDocumentFragment();
 				/* 只渲染最后 400 行，避免一次插入过多节点导致滚动卡顿 */
@@ -296,6 +331,13 @@ return L.view.extend({
 			if (list.length > 400) text += '，仅显示最新 400 条';
 			if (state.tab === 'iface' && !state.syslogOk) text += ' · syslog 不可读（仅显示后端日志）';
 			footer.textContent = text;
+		}
+
+		function emptyBox(title, desc) {
+			var box = E('div', { 'class': 'mt5700-logempty' });
+			box.appendChild(E('div', { 'class': 'mt5700-logempty-title' }, title));
+			box.appendChild(E('div', { 'class': 'mt5700-logempty-desc' }, desc));
+			return box;
 		}
 
 		function renderRow(e) {
@@ -315,7 +357,7 @@ return L.view.extend({
 			var content = state.notify || '';
 			var lines = content.replace(/\s+$/, '').split('\n').filter(function (l) { return l.trim() !== ''; });
 			if (!lines.length) {
-				listEl.appendChild(Mt5700.empty('暂无通知记录。短信、来电、信号变化与存储告警会写入此文件。'));
+				listEl.appendChild(emptyBox('暂无通知记录', '短信、来电、信号变化与存储告警会写入此文件。'));
 				footer.textContent = '文件：' + notifyPath;
 				return;
 			}
@@ -345,7 +387,7 @@ return L.view.extend({
 			levelSel.value = state.level;
 			levelSel.disabled = (state.tab === 'notify');
 			searchInput.disabled = (state.tab === 'notify');
-			clearBtn.style.display = (state.tab === 'notify') ? '' : 'none';
+			clearRow.style.display = (state.tab === 'notify') ? '' : 'none';
 			hint.textContent = state.tab === 'dial'
 				? '后端内存日志（不受日志级别限制）：自动拨号对齐、数据承载与 USB 网卡状态、串口探测、主动上报分发。进程重启后从零开始；常见术语已做中文映射，搜索仍按原文匹配。'
 				: (state.tab === 'iface'
@@ -361,7 +403,9 @@ return L.view.extend({
 
 			var tasks = [];
 			/* 后端内存日志：一次取全量（上限 1200），前端按视图分类 */
-			tasks.push(rpcLogs(0, 1200).then(function (r) {
+			/* 三路取数**串行**执行：ucode 转发用的是临时文件，并发会互相覆盖。
+			 * 新版 ucode 已用唯一文件名解决，这里串行是为了兼容存量设备，双保险。 */
+			tasks.push(rpcLogs(0, 1200, newRid()).then(function (r) {
 				var entries = entriesFromBackend((r && r.entries) || []);
 				state.dial = [];
 				state.iface = [];
@@ -391,7 +435,8 @@ return L.view.extend({
 				state.notify = '';
 			}));
 
-			return Promise.all(tasks).then(function () {
+			/* 串行执行（见上） */
+			return tasks.reduce(function (p, t) { return p.then(function () { return t; }); }, Promise.resolve()).then(function () {
 				state.loading = false;
 				renderAll();
 				if (manual) Mt5700.success('日志已刷新');
