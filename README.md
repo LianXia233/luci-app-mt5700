@@ -4,7 +4,7 @@ OpenWrt / ImmortalWrt 的 LuCI 插件，用于管理 MT5700M 5G 模组的拨号�
 
 - 包名：`luci-app-mt5700`
 - 配置段 / 服务：`at-webserver`
-- 版本：v1.12.5
+- 版本：v1.12.7
 - 入口：LuCI 侧边栏「移动网络 → 5G 模组管理」（`admin/modem/5g`）
 
 ## 预览
@@ -68,7 +68,7 @@ grep OPENWRT_ARCH /etc/openwrt_release
 apk add --simulate --allow-untrusted ./<ARCH>-luci-app-mt5700-*.apk
 ```
 
-输出形如 `(1/1) Installing luci-app-mt5700 (1.12.5-r1)` 即表示架构与依赖都已通过；
+输出形如 `(1/1) Installing luci-app-mt5700 (1.12.7-r1)` 即表示架构与依赖都已通过；
 若报 `uninstallable arch` 则说明选错了架构。Release 中附带的 `ARCH-GUIDE.txt` 是同一份说明，可离线对照。
 
 ## 安装
@@ -80,14 +80,14 @@ apk add --simulate --allow-untrusted ./<ARCH>-luci-app-mt5700-*.apk
 ```sh
 # 按 cat /etc/apk/arch 的结果替换 <ARCH>
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.12.5-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.12.7-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 24.10 及更早（opkg / ipk）
 
 ```sh
-opkg install ./<ARCH>-luci-app-mt5700_1.12.5_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.12.7_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -198,7 +198,7 @@ USB 枚举 → AT 口就绪 → 模组驻网 → 开启自动拨号(^SETAUTODIAL
 
 ```
 luci-app-mt5700/
-├── Makefile                   # 包定义（PKG_VERSION=1.12.5）
+├── Makefile                   # 包定义（PKG_VERSION=1.12.7）
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/     # 12 个页面 JS
 │   └── at-webserver/          # rpc.js / ui.js / at.css 等前端资源
