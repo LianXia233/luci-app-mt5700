@@ -3430,3 +3430,99 @@
 	border-color: #17a67f !important;
 	box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.20) !important;
 }
+
+/* 方向徽章：请求（灰）/ 发送（蓝）/ 接收（绿），与级别徽章并排 */
+.mt5700-logdir {
+	flex: 0 0 auto;
+	min-width: 30px;
+	text-align: center;
+	font-size: 10.5px;
+	font-weight: 500;
+	padding: 0 6px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+}
+.mt5700-logdir-tx {
+	color: #2f88d8;
+	border-color: rgba(47, 136, 216, 0.45);
+	background: rgba(47, 136, 216, 0.13);
+}
+.mt5700-logdir-rx {
+	color: #14906d;
+	border-color: rgba(23, 166, 127, 0.45);
+	background: rgba(23, 166, 127, 0.13);
+}
+.mt5700-logdir-req {
+	color: rgba(128, 128, 128, 1);
+	border-color: rgba(128, 128, 128, 0.40);
+	background: rgba(128, 128, 128, 0.12);
+}
+/* 发送行淡蓝、接收行淡绿，扫一眼就能看出方向 */
+.mt5700-logrow:has(.mt5700-logdir-tx) { background: rgba(47, 136, 216, 0.055); }
+.mt5700-logrow:has(.mt5700-logdir-rx) { background: rgba(23, 166, 127, 0.055); }
+
+/* ---------- 与主题融合（修正「和主题割裂」） ----------
+ * 之前的胶囊式分段控件自带灰底容器 + 绿色实心激活块，视觉上像嵌了一个别的组件；
+ * 面板又叠了一层半灰底，和主题的卡片风格不一致。
+ * 改为最常见的「下划线式」页签：容器无底色、只在激活项下方留一条主色线，
+ * 其余全部跟随主题文字色；面板与列表底色透明，只留淡边框。
+ * 这样放到任何主题里都不会突兀。 */
+.mt5700-logtabs {
+	display: flex !important;
+	flex-wrap: wrap;
+	gap: 2px;
+	margin: 0 0 14px !important;
+	padding: 0 !important;
+	background: transparent !important;
+	border: none !important;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.22) !important;
+	border-radius: 0 !important;
+	max-width: none !important;
+}
+.mt5700-logtab {
+	display: inline-flex !important;
+	align-items: center;
+	justify-content: center;
+	min-width: 88px;
+	padding: 9px 16px !important;
+	margin: 0 0 -1px 0 !important;
+	font-size: 13.5px !important;
+	font-weight: 400 !important;
+	line-height: 1.4 !important;
+	color: inherit !important;
+	background: transparent !important;
+	border: none !important;
+	border-bottom: 2px solid transparent !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
+	text-shadow: none !important;
+	opacity: 0.6;
+	transition: opacity .15s ease, border-color .15s ease;
+}
+.mt5700-logtab:hover {
+	opacity: 0.92;
+	background: transparent !important;
+}
+.mt5700-logtab.active {
+	opacity: 1 !important;
+	font-weight: 500 !important;
+	color: inherit !important;
+	background: transparent !important;
+	border-bottom-color: #17a67f !important;
+	box-shadow: none !important;
+}
+
+/* 面板 / 列表 / 说明条 / 页脚：底色全部透明，只保留一道淡边框 */
+.mt5700-logpanel {
+	background: transparent !important;
+	border: 1px solid rgba(128, 128, 128, 0.20) !important;
+}
+.mt5700-logpanel-hint {
+	background: transparent !important;
+	opacity: 0.68;
+}
+.mt5700-loglist { background: transparent !important; }
+.mt5700-logfooter { background: transparent !important; }
+/* 斑马纹降到极淡，仍有层次但不抢眼 */
+.mt5700-logrow:nth-child(even) { background: rgba(128, 128, 128, 0.035); }
+.mt5700-logrow:hover { background: rgba(23, 166, 127, 0.07); }

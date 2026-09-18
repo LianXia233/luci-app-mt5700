@@ -7,7 +7,7 @@
 //! - 有命令等待时，只把「绝不可能是查询结果」的行（^REJINFO/+CUSD 等）截出来；
 //! - `abcd` 打断绕过命令锁直接写入（供扫频使用）。
 
-use crate::{log_info, log_warn};
+use crate::{log_debug, log_info, log_warn};
 use crate::config::AtConfig;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -688,6 +688,9 @@ impl AtClient {
             }
         }
         *self.last_cmd_at.lock().await = Instant::now();
+        // 方向标记：这里是**唯一**真正写串口的地方，内部命令（初始化、自动拨号对齐）
+        // 也走这条路径，所以在这一层记录才能完整反映"我们发给模组什么"。
+        log_debug!("发送 → 模组: {}", cmd.trim());
 
         let mut ctx_c = ctx.clone();
         let mut answered = true;
@@ -704,6 +707,13 @@ impl AtClient {
         let lines = pending.map(|p| p.lines).unwrap_or_default();
 
         if !lines.is_empty() {
+            // 应答可能很多行，只记「末行（结束码）+ 行数」，避免日志被刷爆；
+            // 需要看全文时用 AT 终端页。
+            log_debug!(
+                "接收 ← 模组: {}（共 {} 行）",
+                lines.last().map(|s| s.as_str()).unwrap_or(""),
+                lines.len()
+            );
             return Ok(AtResponse { lines });
         }
         if answered {

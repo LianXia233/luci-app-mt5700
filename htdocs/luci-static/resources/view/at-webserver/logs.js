@@ -94,6 +94,25 @@ var AT_PURPOSE = [
 	[/AT\+CPIN\b/i, '查询 SIM 卡状态']
 ];
 
+/* 方向识别：把「谁发给谁」单独提出来做徽章，避免只靠文案里的一两个字去猜。
+ * 顺序即优先级：先请求、再发送、最后接收。 */
+var DIR_RULES = [
+	[/^前端请求[:：]\s*/, '请求', 'req'],
+	[/^发送\s*(?:→|->)\s*模组[:：]\s*/, '发送', 'tx'],
+	[/^接收\s*(?:←|<-)\s*模组[:：]\s*/, '接收', 'rx']
+];
+
+function detectDirection(text) {
+	var s = String(text);
+	for (var i = 0; i < DIR_RULES.length; i++) {
+		var m = s.match(DIR_RULES[i][0]);
+		if (m) {
+			return { label: DIR_RULES[i][1], kind: DIR_RULES[i][2], rest: s.slice(m[0].length) };
+		}
+	}
+	return null;
+}
+
 /* 显示前装饰：先做术语中文化，再为消息里的 AT 命令补一句用途 */
 function displayText(text) {
 	var s = String(text);
@@ -428,8 +447,14 @@ return L.view.extend({
 			var row = E('div', { 'class': 'mt5700-logrow mt5700-logrow-' + cls });
 			row.appendChild(E('span', { 'class': 'mt5700-logtime', title: fmtFull(e.ts) }, fmtClock(e.ts)));
 			row.appendChild(E('span', { 'class': 'mt5700-loglv', title: lv }, LEVEL_LABEL[lv] || lv));
+
+			var dir = detectDirection(e.msg);
+			if (dir) {
+				row.appendChild(E('span', { 'class': 'mt5700-logdir mt5700-logdir-' + dir.kind, title: dir.kind === 'tx' ? '本机发给模组' : (dir.kind === 'rx' ? '模组回给本机' : '页面发给后端') }, dir.label));
+			}
+
 			var msg = E('span', { 'class': 'mt5700-logmsg' });
-			msg.appendChild(highlight(displayText(e.msg)));
+			msg.appendChild(highlight(displayText(dir ? dir.rest : e.msg)));
 			row.appendChild(msg);
 			if (e.src === 'syslog') row.appendChild(E('span', { 'class': 'mt5700-logsrc', title: '来自 syslog（init.d / 内核）' }, '系统'));
 			return row;
@@ -471,7 +496,7 @@ return L.view.extend({
 			searchInput.disabled = (state.tab === 'notify');
 			clearRow.style.display = (state.tab === 'notify') ? '' : 'none';
 			hint.textContent = state.tab === 'dial'
-				? '后端内存日志（不受日志级别限制）：自动拨号对齐、数据承载与 USB 网卡状态、串口探测、主动上报分发。进程重启后从零开始；AT 命令保留原文并附用途说明，搜索按原文匹配。'
+				? '后端内存日志（不受日志级别限制）：自动拨号对齐、数据承载与 USB 网卡状态、串口探测、主动上报分发。AT 命令按「请求 / 发送 / 接收」标出方向并保留原文；进程重启后从零开始，搜索按原文匹配。'
 				: (state.tab === 'iface'
 					? 'init.d 的 logger 输出（取自 syslog）与后端日志中与接口/网络相关的部分：接口拉起、hotplug、DHCP / IPv6 取址结果。'
 					: '通知文件内容（短信、来电、信号变化、存储告警）。');
