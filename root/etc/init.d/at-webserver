@@ -10,6 +10,20 @@ PROG_NAME="at-webserver-rust"
 # 加载 UCI 函数库
 . /lib/functions.sh
 
+# 模组接口名（与机型定制包保持一致）
+IFACE_4G='MT5700M'
+IFACE_6G='MT5700Mv6'
+
+# 拉起接口的重试预算。
+#
+# 背景：模组冷启动链路是「USB 枚举 → AT 就绪 → 驻网 → 开启自动拨号 → 向 USB 网口
+# 下发 DHCP → netifd 取址」，整条链常见耗时 30~60s。旧实现是「等设备 15s +
+# ifup 一次 + 等 up 20s」，共 35s 后只打一条警告就永久放弃，之后没有任何机制补
+# ifup（仓库里也没有 hotplug 脚本），于是接口长期没有 IP——模组明明在线。
+# 现在改为带间隔的多次 ifup，覆盖整条冷启动链路。
+IFUP_RETRY_TIMES=18
+IFUP_RETRY_INTERVAL=10
+
 # 开机自启注册自愈。
 #
 # 现象：手动 /etc/init.d/at-webserver start 能起来，但路由器重启后服务又消失，
@@ -80,40 +94,242 @@ start_service() {
 	logger -t at-webserver "服务启动配置完成"
 	echo "AT WebServer started successfully"
 
-	# 串口探测与防火墙放到后台，避免 /etc/init.d/firewall reload 阻塞 start
+	# 串口绑定、接口拉起与防火墙放到后台，避免 /etc/init.d/firewall reload 阻塞 start
 	( at_webserver_post_start ) >/dev/null 2>&1 &
 }
 
 at_webserver_post_start() {
 	config_load at-webserver
 
-	# 网络接口 MT5700M 的启动对齐（见下方 ensure_modem_interface 注释）
-	ensure_modem_interface
-
-	# 串口模式下尝试绑定 MT5700 USB 串口
+	# 1) 串口模式：先确保 MT5700 的 USB 串口被绑定出来（后端要靠它发 AT）
 	local conn_type
 	config_get conn_type config connection_type 'SERIAL'
-	if [ "$conn_type" = "SERIAL" ] && ! ls /dev/ttyUSB* >/dev/null 2>&1; then
-		if command -v lsusb >/dev/null 2>&1 && lsusb -d 3466:3301 >/dev/null 2>&1; then
-			modprobe usbserial 2>/dev/null || true
-			modprobe option 2>/dev/null || true
-			local drv new_id
-			for drv in option option1 generic; do
-				new_id="/sys/bus/usb-serial/drivers/$drv/new_id"
-				[ -w "$new_id" ] || continue
-				echo "3466 3301" > "$new_id" 2>/dev/null || continue
-				sleep 1
-				ls /dev/ttyUSB* >/dev/null 2>&1 && {
-					logger -t at-webserver "已通过 $drv 绑定 3466:3301"
-					break
-				}
-			done
-		fi
+	if [ "$conn_type" = "SERIAL" ] && ! ls /dev/ttyUSB* /dev/ttyACM* >/dev/null 2>&1; then
+		bind_modem_serial
 	fi
 
-	# 防火墙规则（RPC + 模块 AT 端口）
+	# 2) 模组接口的启动对齐（见下方 ensure_modem_interface 注释）
+	ensure_modem_interface
+
+	# 3) 防火墙规则（RPC + 模块 AT 端口）
+	apply_firewall_rules
+
+	logger -t at-webserver "后台串口/接口/防火墙初始化完成"
+}
+
+# ---------------------------------------------------------------------------
+# 串口绑定：把 MT5700 的 USB 串口挂到 usb-serial 驱动上。
+#
+# 旧实现依赖 lsusb 且把 VID:PID 写死为 3466:3301，两个问题：
+#   1) lsusb 属于 usbutils，而本包刻意不在 LUCI_DEPENDS 声明它（避免拖 libusb），
+#      未装 usbutils 的固件上 command -v lsusb 为假 → 整段静默跳过，日志里
+#      看不出任何原因，现象是「没有任何 ttyUSB 设备、后端反复报找不到串口」。
+#   2) PID 会随 AT^SETMODE 切换 USB 组合而变化，写死 PID 在切换后必然失效。
+# 现在直接读 sysfs（不需要任何外部工具），按 VID 匹配、PID 透传。
+# ---------------------------------------------------------------------------
+bind_modem_serial() {
+	local dev vid pid drv new_id
+
+	for dev in /sys/bus/usb/devices/*/idVendor; do
+		[ -f "$dev" ] || continue
+		vid=$(cat "$dev" 2>/dev/null)
+		pid=$(cat "$(dirname "$dev")/idProduct" 2>/dev/null)
+		[ -n "$vid" ] && [ -n "$pid" ] || continue
+		# 3466 为 MT5700 的 vendor id；只固定 VID，PID 随 USB 模式变化
+		[ "$vid" = "3466" ] || continue
+
+		logger -t at-webserver "检测到模组 USB 设备 $vid:$pid，尝试绑定串口驱动"
+		modprobe usbserial 2>/dev/null || true
+		modprobe option 2>/dev/null || true
+
+		for drv in option option1 generic; do
+			new_id="/sys/bus/usb-serial/drivers/$drv/new_id"
+			[ -w "$new_id" ] || continue
+			echo "$vid $pid" > "$new_id" 2>/dev/null || continue
+			sleep 1
+			if ls /dev/ttyUSB* /dev/ttyACM* >/dev/null 2>&1; then
+				logger -t at-webserver "已通过 $drv 绑定 $vid:$pid"
+				return 0
+			fi
+			logger -t at-webserver "通过 $drv 绑定 $vid:$pid 后仍未出现串口节点，继续尝试"
+		done
+	done
+
+	logger -t at-webserver "未发现可绑定的 MT5700 USB 设备（3466:*），或串口已由内核自动绑定"
+	return 1
+}
+
+# ---------------------------------------------------------------------------
+# 模组网口的设备名（统一来源，避免各处硬编码 eth2）
+#
+# 优先取 UCI network.<iface>.device，其次兼容旧的 ifname；
+# 都拿不到时在 /sys/class/net 里探测挂在 USB 总线上的网卡
+# （cdc_ncm / cdc_ether / rndis_host / cdc_mbim 都会出现在 usb 设备路径下）。
+# 硬编码 eth2 在不同机型上可能不成立；仓库里 ucode 侧早就改成「不硬编码」，
+# 这里统一到同一套规则。
+# ---------------------------------------------------------------------------
+detect_usb_netdev() {
+	local d link
+	for d in /sys/class/net/*; do
+		[ -e "$d" ] || continue
+		case "$(basename "$d")" in
+			lo|br-*|eth0|eth1) continue ;;
+		esac
+		link=$(readlink -f "$d/device" 2>/dev/null)
+		case "$link" in
+			*usb*) echo "$(basename "$d")"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+iface_device_name() {
+	local iface dev
+	iface="$1"
+	dev=$(uci -q get "network.$iface.device")
+	[ -n "$dev" ] || dev=$(uci -q get "network.$iface.ifname")
+	[ -n "$dev" ] || dev=$(detect_usb_netdev 2>/dev/null)
+	echo "$dev"
+}
+
+# 接口是否已经拿到地址。
+# 不能用 ifstatus 的 "up": true 当作「已拿到地址」：dhcp 在请求中或失败重试时
+# 接口同样是 up，此时日志却会写「已就绪（已拿到地址）」，把排障方向带偏。
+iface_has_address() {
+	ifstatus "$1" 2>/dev/null | grep -qE '"(ipv4-address|ipv6-address)"[[:space:]]*:[[:space:]]*\[[^]]'
+}
+
+# ---------------------------------------------------------------------------
+# 机型未预置接口时自动创建（用户诉求：自动新建接口）
+#
+# 旧行为是「接口不存在则 continue」——在非定制机型上等于什么都不做，
+# 也没有任何日志。用户看到的是「模组 AT 在线、接口列表里没有 MT5700M、无法联网」，
+# 且完全不知道插件跳过了。
+# 现在：检测到模组 USB 网口就按 proto=dhcp 自动建接口；
+#       检测不到（模组未插/未枚举）则明确记一条日志，说明「暂不创建」的原因。
+# 只自动创建 IPv4 接口：IPv6 接口涉及上游网络策略，仅在已存在时处理。
+# ---------------------------------------------------------------------------
+ensure_iface_created() {
+	local iface proto device
+
+	iface="$1"
+	if uci -q get "network.$iface" >/dev/null 2>&1; then
+		return 0
+	fi
+
+	device=$(detect_usb_netdev)
+	if [ -z "$device" ]; then
+		logger -t at-webserver "未检测到模组 USB 网口，暂不创建 $iface 接口（模组可能未插入或未枚举完成）"
+		return 1
+	fi
+
+	logger -t at-webserver "机型未预置 $iface 接口，按检测到的 USB 网口 $device 自动创建（proto=dhcp）"
+	uci -q set "network.$iface=interface"
+	uci -q set "network.$iface.proto=dhcp"
+	uci -q set "network.$iface.device=$device"
+	uci -q set "network.$iface.auto=1"
+	uci -q commit network
+
+	proto=$(uci -q get "network.$iface.proto")
+	[ "$proto" = "dhcp" ] || logger -t at-webserver "警告：$iface 自动创建后 proto=$proto，非预期"
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# 模组接口的启动对齐（幂等，可重复执行）
+#
+# 症状：LuCI 上模组显示在线，但「网络 → 接口」里 MT5700M 没有 IP，因此上不了网。
+# 取证结果：ifstatus MT5700M → "up": false, "autostart": false。
+# UCI 里该接口只有 device/ifname/proto/metric/defaultroute/norelease，
+# 既没有 auto='1'，也没人主动 ifup，于是 netifd 从不启动它 ——
+# 即使模组拨号成功、USB 网口已经能 DHCP，接口也不会去要地址。
+#
+# 处理策略：
+#   1) 接口不存在且能定位到模组 USB 网口 → 自动创建；
+#   2) 打开 auto='1'（开机自启）；
+#   3) 校验 proto（机型把接口定成 none/static 时开自动拨号也拿不到地址，需明确告警）；
+#   4) 以「已取到地址」为达成条件，带间隔多次 ifup（覆盖 30~60s 的冷启动链路）。
+# 注意：不写入 IP/网关等具体地址，全部交给 dhcp proto 协商，
+# 也不改动设备名与 metric，保持机型定制包的定义。
+# ---------------------------------------------------------------------------
+ensure_modem_interface() {
+	local i iface_4g iface_6g auto_val need_commit=0 p n
+
+	iface_4g="$IFACE_4G"
+	iface_6g="$IFACE_6G"
+
+	ensure_iface_created "$iface_4g" || true
+
+	for i in "$iface_4g" "$iface_6g"; do
+		uci -q get "network.$i" >/dev/null 2>&1 || continue
+		auto_val=$(uci -q get "network.$i.auto")
+		if [ "$auto_val" != "1" ]; then
+			uci -q set "network.$i.auto=1"
+			need_commit=1
+		fi
+		# proto 校验：none/static 时自动拨号成功也取不到地址，必须让人看得见
+		p=$(uci -q get "network.$i.proto")
+		case "$p" in
+			dhcp|dhcpv6|static|none) ;;
+			*) logger -t at-webserver "警告：$i 的 proto=$p 非 dhcp 系，自动拨号后可能取不到地址" ;;
+		esac
+	done
+
+	if [ "$need_commit" -eq 1 ]; then
+		uci -q commit network
+		logger -t at-webserver "已将 $iface_4g/$iface_6g 设置为开机自启（auto=1）"
+	fi
+
+	if ! uci -q get "network.$iface_4g" >/dev/null 2>&1; then
+		logger -t at-webserver "接口 $iface_4g 不存在，跳过拉起（见上方「暂不创建」原因）"
+		return 0
+	fi
+
+	# 后端拨号达成后会调用 on-uplink 钩子；这里做启动期的兜底重试。
+	n=0
+	while [ "$n" -lt "$IFUP_RETRY_TIMES" ]; do
+		if iface_has_address "$iface_4g"; then
+			logger -t at-webserver "$iface_4g 已取到地址（第 $((n + 1)) 次检查，设备 $(iface_device_name "$iface_4g")）"
+			return 0
+		fi
+		# ifup 是幂等的：接口已 up 但仍在等 DHCP 时重复调用不会破坏状态
+		ifup "$iface_4g" 2>&1 | logger -t at-webserver || true
+		if uci -q get "network.$iface_6g" >/dev/null 2>&1; then
+			ifup "$iface_6g" 2>&1 | logger -t at-webserver || true
+		fi
+		n=$((n + 1))
+		sleep "$IFUP_RETRY_INTERVAL"
+	done
+
+	logger -t at-webserver "警告：$iface_4g 在 $((IFUP_RETRY_TIMES * IFUP_RETRY_INTERVAL))s 内未取到地址。\
+已尝试 $(iface_device_name "$iface_4g")；请检查 logread -e at-webserver 与「模组是否已驻网」；\
+hotplug 钩子与后端周期对账会继续处理"
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# 防火墙规则
+#
+# 清理列表里有一部分是历史名字（at_webserver_wan_block / at_webserver_wan_allow /
+# at_rpc_wan_block 当前版本不再创建），保留它们是为了把旧版本留下的残留一并清掉；
+# 实际会创建的只有下面 apply_firewall_rules 里出现的四个。
+# ---------------------------------------------------------------------------
+FW_RULE_NAMES="at_webserver_wan_block at_webserver_wan_allow at_module_restrict \
+at_module_wan_block at_module_wan_allow at_rpc_wan_allow at_rpc_wan_block"
+
+fw_clean_rules() {
+	local rule_name rule_idx
+	for rule_name in $FW_RULE_NAMES; do
+		rule_idx=$(uci show firewall 2>/dev/null | grep "\.name='$rule_name'" | cut -d'[' -f2 | cut -d']' -f1 | head -n1)
+		[ -n "$rule_idx" ] && uci delete firewall.@rule[$rule_idx] 2>/dev/null
+	done
+	uci commit firewall 2>/dev/null
+}
+
+apply_firewall_rules() {
 	local module_allow_wan restrict_module module_host module_port
 	local rpc_allow_wan rpc_port
+
 	config_get_bool module_allow_wan config network_allow_wan 0
 	config_get_bool restrict_module config network_restrict_access 0
 	config_get module_host config network_host '192.168.8.1'
@@ -121,12 +337,7 @@ at_webserver_post_start() {
 	config_get_bool rpc_allow_wan config websocket_allow_wan 0
 	config_get rpc_port config websocket_port 8765
 
-	local rule_name rule_idx
-	for rule_name in at_webserver_wan_block at_webserver_wan_allow at_module_restrict at_module_wan_block at_module_wan_allow at_rpc_wan_allow at_rpc_wan_block; do
-		rule_idx=$(uci show firewall 2>/dev/null | grep "\.name='$rule_name'" | cut -d'[' -f2 | cut -d']' -f1 | head -n1)
-		[ -n "$rule_idx" ] && uci delete firewall.@rule[$rule_idx] 2>/dev/null
-	done
-	uci commit firewall 2>/dev/null
+	fw_clean_rules
 
 	# RPC 对外监听时放行端口；否则保持无 WAN 规则（仅回环）
 	if [ "$rpc_allow_wan" -eq 1 ]; then
@@ -178,75 +389,7 @@ at_webserver_post_start() {
 	uci commit firewall 2>/dev/null
 	# 后台 reload，避免阻塞；失败不致命
 	timeout 8 /etc/init.d/firewall reload >/dev/null 2>&1 || true
-	logger -t at-webserver "后台防火墙/串口初始化完成"
-}
-
-# 确保 MT5700M / MT5700Mv6 接口处于「开机自启」状态并在等待模组网口就绪后拉起。
-#
-# 症状（问题二）：LuCI 上模组显示在线，但「网络 → 接口」里 MT5700M 没有 IP，
-# 因此上不了网。取证结果：
-#   ifstatus MT5700M → "up": false, "autostart": false
-# UCI 里该接口只有 device/ifname/proto/metric/defaultroute/norelease，
-# 既没有 auto='1'，也没人主动 ifup，于是 netifd 从不启动它 ——
-# 即使模组拨号成功、eth2 已经能 DHCP，接口也不会去要地址。
-#
-# 处理策略（幂等，可重复执行）：
-#   1) 打开 auto='1'（开机自启），让 ifup 在模组网口就绪后自然生效；
-#   2) 若接口尚未 up，调用 `ifup` 主动拉起一次；
-#   3) 等待 dhcp 客户端拿到地址（最多 ~20s），拿到即结束，避免无谓等待。
-# 注意：不写入 IP/网关等具体地址，全部交给 dhcp proto 协商，
-# 也不改动 eth2 的设备名与 metric，保持机型定制包的定义。
-ensure_modem_interface() {
-	local ifname_4g='MT5700M'
-	local ifname_6g='MT5700Mv6'
-	local i auto_val need_commit=0
-
-	for i in "$ifname_4g" "$ifname_6g"; do
-		# 接口不存在则跳过（机型未定制该接口时不能凭空创建）
-		if ! uci -q get "network.$i" >/dev/null 2>&1; then
-			continue
-		fi
-		auto_val=$(uci -q get "network.$i.auto")
-		if [ "$auto_val" != "1" ]; then
-			uci -q set "network.$i.auto=1"
-			need_commit=1
-		fi
-	done
-
-	[ "$need_commit" -eq 1 ] && {
-		uci -q commit network
-		logger -t at-webserver "已将 $ifname_4g/$ifname_6g 设置为开机自启（auto=1）"
-	}
-
-	# 已经在跑就不用重复 ifup
-	if ifstatus "$ifname_4g" 2>/dev/null | grep -q '"up": true'; then
-		return 0
-	fi
-
-	# 模组网口可能还没枚举完成，先等设备出现（最多 15s）
-	local waited=0
-	while [ "$waited" -lt 15 ]; do
-		[ -e "/sys/class/net/eth2" ] && break
-		sleep 1
-		waited=$((waited + 1))
-	done
-
-	ifup "$ifname_4g" >/dev/null 2>&1 || true
-	ifup "$ifname_6g" >/dev/null 2>&1 || true
-
-	# 等 DHCP 拿到地址，最多再等 20s
-	waited=0
-	while [ "$waited" -lt 20 ]; do
-		if ifstatus "$ifname_4g" 2>/dev/null | grep -q '"up": true'; then
-			logger -t at-webserver "$ifname_4g 已就绪（等待 ${waited}s 后拿到地址）"
-			return 0
-		fi
-		sleep 2
-		waited=$((waited + 2))
-	done
-
-	logger -t at-webserver "警告：$ifname_4g 仍未 up，模组网口或自动拨号可能未就绪（详见 logread -e at-webserver）"
-	return 0
+	logger -t at-webserver "防火墙规则已应用"
 }
 
 stop_service() {
@@ -256,15 +399,8 @@ stop_service() {
 	killall -q "$PROG_NAME" 2>/dev/null
 	rm -f /var/run/at-webserver-rust.pid
 
-	# 清理防火墙规则（幂等；列表必须与 start_service/at_webserver_post_start 创建的 7 条一致，
-	# 否则 rpc_allow_wan=1 时 at_rpc_wan_allow 会在停服后残留，WAN 到 RPC 端口仍被放行）
-	for rule_name in at_webserver_wan_block at_webserver_wan_allow at_module_restrict at_module_wan_block at_module_wan_allow at_rpc_wan_allow at_rpc_wan_block; do
-		local rule_idx=$(uci show firewall | grep "\.name='$rule_name'" | cut -d'[' -f2 | cut -d']' -f1 | head -n1)
-		if [ -n "$rule_idx" ]; then
-			uci delete firewall.@rule[$rule_idx] 2>/dev/null
-		fi
-	done
-	uci commit firewall 2>/dev/null
+	# 清理防火墙规则（幂等，列表与 apply_firewall_rules 一致）
+	fw_clean_rules
 	timeout 8 /etc/init.d/firewall reload >/dev/null 2>&1 || true
 	logger -t at-webserver "已清理所有防火墙规则"
 
@@ -292,6 +428,23 @@ reload_service() {
 	start_service
 
 	logger -t at-webserver "配置重新加载完成"
+}
+
+# 由后端在「自动拨号达成」时调用（on-uplink 钩子），也可手动执行：
+#   /etc/init.d/at-webserver on_uplink
+# 只做一件事：把模组接口 ifup 一次。让「拨号成功」与「网卡要地址」这两件事
+# 有明确先后关系，而不是靠 init.d 在后端拨号之前抢跑 + 猜时间。
+on_uplink() {
+	local i
+	ensure_iface_created "$IFACE_4G" || return 1
+	for i in "$IFACE_4G" "$IFACE_6G"; do
+		uci -q get "network.$i" >/dev/null 2>&1 || continue
+		if iface_has_address "$i"; then
+			continue
+		fi
+		ifup "$i" 2>&1 | logger -t at-webserver || true
+	done
+	return 0
 }
 
 service_triggers() {

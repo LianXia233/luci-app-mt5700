@@ -203,6 +203,40 @@ async function main() {
 		check('AT^CELLSCAN=STATE 伪命令', d.indexOf('^CELLSCAN') >= 0 && d.indexOf('OK') >= 0, d.replace(/\r/g, '\\r').slice(0, 40));
 	}
 
+	/* 10. 自动拨号对齐回归（开关 + 拨号方式必须同时对齐）
+	 *
+	 * mock 的初始状态是 autodial=1, autodialMode=2（转网口模式）。
+	 * 只比较开关的实现会判定「已对齐」直接跳过下发，模组停在转网口模式，
+	 * USB 网口永远收不到 DHCP —— 这正是「模组在线但接口拿不到 IP」的一条成因。
+	 * 正确行为：后端连上模组后把方式纠正为 1（USB 网络接口）。
+	 * 该对齐在服务启动时执行，这里轮询等待其完成。
+	 */
+	{
+		let data = '';
+		const deadline = Date.now() + 20000;
+		while (Date.now() < deadline) {
+			const r = atResult(await at('AT^SETAUTODIAL?'));
+			if (r.success && r.data) {
+				data = String(r.data).replace(/\r/g, '');
+				if (/\^SETAUTODIAL:\s*1\s*,\s*1/.test(data)) break;
+			}
+			await sleep(500);
+		}
+		check('后端把自动拨号对齐为 1,1（开关 + USB 网络接口方式）',
+			/\^SETAUTODIAL:\s*1\s*,\s*1/.test(data),
+			(data.split('\n').filter(Boolean)[0]) || '无应答');
+	}
+
+	/* 11. 关闭自动拨号后回读为 0（确认开关可被外部改写、回读链路正常） */
+	{
+		const r1 = atResult(await at('AT^SETAUTODIAL=0'));
+		await sleep(300);
+		const r2 = atResult(await at('AT^SETAUTODIAL?'));
+		const d = String(r2.data || '').replace(/\r/g, '');
+		check('关闭自动拨号后回读为 0', r1.success && /\^SETAUTODIAL:\s*0/.test(d),
+			d.split('\n').filter(Boolean)[0] || '无应答');
+	}
+
 	sock.end();
 	check('测试套件完成', true);
 

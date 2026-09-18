@@ -6,9 +6,6 @@ uci -q get at-webserver.config >/dev/null || {
 	uci -q commit at-webserver
 }
 
-# 确保日志目录存在
-mkdir -p /tmp
-
 # ---------------------------------------------------------------------------
 # 注册开机自启（关键，缺失会导致服务永远不启动）
 #
@@ -23,13 +20,34 @@ mkdir -p /tmp
 #       于是服务永久处于「未注册」状态。
 #
 # 修复：这里显式补一次 enable。chmod 兜底是为了覆盖执行位在打包/刷机
-#       过程中再次丢失的情况——先补权限再 enable，保证一定成功。
+#       过程中再次丢失的情况——先补权限再 enable。
 # ---------------------------------------------------------------------------
-if [ -x /etc/init.d/at-webserver ]; then
-	/etc/init.d/at-webserver enable
-else
+if [ ! -x /etc/init.d/at-webserver ]; then
 	chmod 0755 /etc/init.d/at-webserver 2>/dev/null
-	/etc/init.d/at-webserver enable
+fi
+
+if [ -x /etc/init.d/at-webserver ]; then
+	/etc/init.d/at-webserver enable 2>/dev/null
+else
+	logger -t at-webserver "警告：/etc/init.d/at-webserver 缺失或不可执行，无法注册开机自启"
+	exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 结果断言：enable 必须真的产出 rc.d 软链接，否则保留本脚本待下次启动重试。
+#
+# OpenWrt 的 uci-defaults 机制是「退出码为 0 → 删除脚本；非 0 → 保留并在下次
+# 启动重新执行」。因此这里**绝不能无条件 exit 0**：一旦 enable 因任何原因
+# （执行位、overlay 只读、磁盘满）失败而脚本仍返回 0，故障就被永久静默吞掉，
+# 服务再也不会开机自启，且没有任何重试机会。
+# 之前版本写了「保证一定成功」却仍 exit 0，属于典型的伪保证。
+# ---------------------------------------------------------------------------
+START=$(sed -n 's/^START=\([0-9][0-9]*\).*/\1/p' /etc/init.d/at-webserver 2>/dev/null | head -n1)
+[ -n "$START" ] || START=99
+
+if [ ! -e "/etc/rc.d/S${START}at-webserver" ]; then
+	logger -t at-webserver "警告：开机自启注册失败（缺少 /etc/rc.d/S${START}at-webserver），保留脚本待下次启动重试"
+	exit 1
 fi
 
 exit 0

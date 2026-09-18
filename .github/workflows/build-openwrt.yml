@@ -1,13 +1,27 @@
 name: Build OpenWrt packages (apk + ipk)
 
 # 云编译 OpenWrt 软件包：
-#   - 最新主线（main snapshot，OpenWrt 24.10+ 包管理器 apk）→ 产出 .apk
-#   - 老版本 23.05（opkg 包管理器）→ 产出 .ipk
-# 架构矩阵：x86_64 / aarch64_cortex-a53（主线 apk + 老版 23.05 ipk）
+#   - 25.12.x（当前稳定版，包管理器 apk）  → 产出 .apk
+#   - 24.10.x（长期支持，opkg 包管理器）    → 产出 .ipk
+#
+# 架构矩阵（三档，覆盖两类 aarch64 命名）：
+#   x86_64               x86/64           （软路由 / 虚拟机）
+#   aarch64_cortex-a53   mediatek/filogic （MT798x；ARCH_PACKAGES 由 CPU_TYPE=cortex-a53 得出）
+#   aarch64_generic      armsr/armv8      （CPU_TYPE 未定义；iStoreOS 25.x、Arm SystemReady 及
+#                                          其它把 aarch64 命名为 generic 的固件）
+#
+# 为什么必须同时出 cortex-a53 与 generic：
+#   apk 的架构是 <base>[_<variant>] 模型，variant 参与严格匹配。同一颗 Cortex-A53，
+#   OpenWrt 目标里 CPU_TYPE=cortex-a53 时 ARCH_PACKAGES=aarch64_cortex-a53，
+#   而 CPU_TYPE 未定义（如 armsr/armv8）时 ARCH_PACKAGES=aarch64_generic。
+#   aarch64_cortex-a53 的包装到声明 aarch64_generic 的固件上会被 apk 拒绝：
+#     error: uninstallable arch: aarch64_cortex-a53
+#   反之亦然。这不是 CPU 不兼容（两者都是 ARMv8-A 指令集），而是元数据不匹配。
+#
 # 触发：push 到 main、打 v* 标签、或手动 workflow_dispatch
-# 产物：**每次编译成功后自动发布 GitHub Release**
-#   - 标签推送 → 使用该标签名（如 v1.2.0）
-#   - main 推送 → 使用 Makefile 的 PKG_VERSION（如 v1.2.0），同名则覆盖更新
+# 产物：每次编译成功后自动发布 GitHub Release
+#   - 标签推送 → 使用该标签名（如 v1.12.5）
+#   - main 推送 → 使用 Makefile 的 PKG_VERSION（如 v1.12.5），同名则覆盖更新
 
 on:
   push:
@@ -33,32 +47,43 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ---- 最新主线 → .apk ----
-          # 镜像 tag 格式：openwrt/sdk:<架构>-<版本>（已用 Docker Hub API 核实）
-          - image: x86_64-main
+          # ---- 25.12.x（apk，当前稳定版）----
+          - image: x86_64-25.12.5
             arch: x86_64
             rust: x86_64-unknown-linux-musl
-            ver: main
+            ver: '25.12.5'
             target: x86/64
             fmt: apk
-          - image: aarch64_cortex-a53-main
+          - image: aarch64_cortex-a53-25.12.5
             arch: aarch64_cortex-a53
             rust: aarch64-unknown-linux-musl
-            ver: main
-            target: qualcommax/ipq50xx
+            ver: '25.12.5'
+            target: mediatek/filogic
             fmt: apk
-          # ---- 老版本 23.05 → .ipk ----
-          - image: x86_64-23.05.5
+          - image: aarch64_generic-25.12.5
+            arch: aarch64_generic
+            rust: aarch64-unknown-linux-musl
+            ver: '25.12.5'
+            target: armsr/armv8
+            fmt: apk
+          # ---- 24.10.x（opkg/ipk，长期支持）----
+          - image: x86_64-24.10.8
             arch: x86_64
             rust: x86_64-unknown-linux-musl
-            ver: 23.05.5
+            ver: '24.10.8'
             target: x86/64
             fmt: ipk
-          - image: aarch64_cortex-a53-23.05.5
+          - image: aarch64_cortex-a53-24.10.8
             arch: aarch64_cortex-a53
             rust: aarch64-unknown-linux-musl
-            ver: 23.05.5
+            ver: '24.10.8'
             target: mediatek/filogic
+            fmt: ipk
+          - image: aarch64_generic-24.10.8
+            arch: aarch64_generic
+            rust: aarch64-unknown-linux-musl
+            ver: '24.10.8'
+            target: armsr/armv8
             fmt: ipk
 
     steps:
@@ -79,6 +104,24 @@ jobs:
           echo "==> docker run 退出码: $rc"
           exit $rc
 
+      # 架构一致性闸门：脚本按 SDK 实际报告的 ARCH_PACKAGES 输出到 out/<真实架构>/，
+      # 因此若 out/<矩阵期望架构>/ 不存在，说明镜像 tag 与矩阵登记不符。
+      # 这一步把「发错架构的包」从「用户装不上」提前到「CI 直接失败」。
+      - name: Verify SDK-reported arch matches matrix
+        run: |
+          set -e
+          echo "==> out 目录实际结构："
+          find out -maxdepth 2 -type f | sort || true
+          if [ ! -f "out/${{ matrix.arch }}/ARCH.txt" ]; then
+            echo "::error::SDK 实际架构与矩阵期望（${{ matrix.arch }}）不一致，拒绝继续"
+            find out -mindepth 2 -name 'ARCH.txt' | while read -r f; do
+              echo "  $(dirname "$f") -> $(cat "$f")"
+            done
+            exit 1
+          fi
+          echo "==> 架构核对通过："
+          cat "out/${{ matrix.arch }}/ARCH.txt"
+
       # 构建日志对排查至关重要：Actions 日志下载受网络策略限制时，
       # 把日志提交到 ci-logs-<fmt>-<arch> 分支，便于离线取回。
       - name: Publish build log branch
@@ -97,6 +140,7 @@ jobs:
           git rm -rf --cached . >/dev/null 2>&1 || true
           mkdir -p logs
           cp build.log "logs/build.log" 2>/dev/null || true
+          cp "out/${{ matrix.arch }}/ARCH.txt" "logs/ARCH.txt" 2>/dev/null || true
           find out -type f | sort > logs/artifacts.txt 2>/dev/null || true
           git add -f logs
           git commit -m "ci log ${{ matrix.fmt }}-${{ matrix.arch }} run ${{ github.run_id }}"
@@ -131,7 +175,7 @@ jobs:
           if-no-files-found: error
 
   # ---- 统一发布：每次编译成功后运行一次，汇总全部架构产物并上传 Release ----
-  # 不能放在 build job 内：4 个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
+  # 不能放在 build job 内：多个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
   # 导致 Release 创建失败或资产互相覆盖。这里由 release job 串行汇总后再发布。
   # 资产统一加 <架构>- 前缀：不同架构的依赖包 basename 相同（如 libc-1.2.6-r5.apk），
   # 同名文件在同一 Release 内必然冲突。用 gh CLI 替代 softprops 避免元数据更新 404 竞态。
@@ -174,24 +218,88 @@ jobs:
           echo "==> 待发布文件："
           find dist -type f | sort
 
+      # 发布一份架构选择指南：让用户可自行核对设备架构再选包，
+      # 避免「架构看起来一致但装不上」这类问题反复出现。
+      - name: Generate arch guide
+        run: |
+          cat > dist/ARCH-GUIDE.txt <<'EOF'
+          luci-app-mt5700 架构选择指南
+          ================================
+
+          一、先确认设备声明的有效架构（不是 CPU 型号，也不是 apk --print-arch）
+
+            apk 系统（OpenWrt 25.x / ImmortalWrt SNAPSHOT / iStoreOS 25.x 等）:
+                cat /etc/apk/arch
+
+            opkg 系统（OpenWrt 24.10 及更早）:
+                cat /etc/openwrt_release | grep OPENWRT_ARCH
+                opkg print-architecture
+
+          注意：apk --print-arch 输出的是 apk 二进制自带的默认架构（常见为 aarch64），
+          与 /etc/apk/arch 里用于安装校验的架构列表不是一回事。以 /etc/apk/arch 为准。
+
+          二、按 /etc/apk/arch 的第一行选包
+
+            aarch64_cortex-a53  ->  aarch64_cortex-a53-luci-app-mt5700-*.apk
+            aarch64_generic     ->  aarch64_generic-luci-app-mt5700-*.apk
+            x86_64              ->  x86_64-luci-app-mt5700-*.apk
+
+          两者都是 ARMv8-A 指令集，二进制互相兼容；装不上只是元数据里的
+          <variant> 不匹配，不是 CPU 不支持。
+
+          三、常见报错对照
+
+            error: uninstallable arch: aarch64_cortex-a53
+              -> 设备声明的是 aarch64_generic，请改下 aarch64_generic 的包。
+                 临时方案：把这行加进 /etc/apk/arch 后再安装（sysupgrade 后失效）：
+                     echo aarch64_cortex-a53 >> /etc/apk/arch
+
+            error: uninstallable arch: all
+              -> 语言包等 PKGARCH=all 的包需要 /etc/apk/arch 里存在 all 这一行：
+                     echo all >> /etc/apk/arch
+
+            error: uninstallable arch: aarch64_generic
+              -> 设备声明的是 aarch64_cortex-a53（如 ImmortalWrt 的 mediatek/filogic），
+                 请改下 aarch64_cortex-a53 的包。
+
+          四、安装命令
+
+            apk:
+                apk add --allow-untrusted ./<arch>-luci-app-mt5700-*.apk
+                apk add --allow-untrusted ./<arch>-luci-i18n-mt5700-zh-cn-*.apk
+
+            opkg:
+                opkg install ./<arch>-luci-app-mt5700_*.ipk
+                opkg install ./<arch>-luci-i18n-mt5700-zh-cn_*.ipk
+          EOF
+          # 去掉 heredoc 缩进，保持文本左对齐
+          sed -i 's/^          //' dist/ARCH-GUIDE.txt
+          cat dist/ARCH-GUIDE.txt
+
       - name: Verify dist completeness
         run: |
           set -e
-          # 主包（前端+后端合一）必须覆盖全部 4 个构建组合（x86_64/aarch64_cortex-a53 × apk/ipk）
+          ARCHES="x86_64 aarch64_cortex-a53 aarch64_generic"
+          # 主包（前端+后端合一）必须覆盖全部 6 个构建组合（3 架构 × apk/ipk）
           count=$(find dist -type f -name '*-luci-app-mt5700*' -not -name '*luci-i18n*' | wc -l)
           echo "==> luci-app-mt5700 主包: ${count} 个"
-          if [ "$count" -lt 4 ]; then
-            echo "::error::主包仅有 ${count} 个（期望 4 个：2 架构 × apk/ipk），拒绝发布不完整的 Release"
+          if [ "$count" -lt 6 ]; then
+            echo "::error::主包仅有 ${count} 个（期望 6 个：3 架构 × apk/ipk），拒绝发布不完整的 Release"
             find dist -type f | sort
             exit 1
           fi
-          # 架构覆盖：单包内含二进制，必须每个架构都有
-          for arch in x86_64 aarch64_cortex-a53; do
+          # 架构覆盖：单包内含二进制，必须每个架构都有；apk 与 ipk 都要有
+          for arch in $ARCHES; do
             for fmt in apk ipk; do
               f=$(find dist -type f -name "${arch}-luci-app-mt5700*.${fmt}" -not -name '*luci-i18n*' -print -quit)
               [ -n "$f" ] || { echo "::error::缺少 ${arch}-${fmt} 主包"; exit 1; }
               echo "==> 已覆盖 ${arch}/${fmt}: $(basename "$f")"
             done
+          done
+          # 语言包（PKGARCH=all）也应三架构齐备
+          for arch in $ARCHES; do
+            f=$(find dist -type f -name "${arch}-luci-i18n-mt5700-*.apk" -print -quit)
+            [ -n "$f" ] || echo "::warning::缺少 ${arch} 的 apk 语言包"
           done
 
       - name: Clean up previous release (same tag)

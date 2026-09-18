@@ -157,6 +157,12 @@ pub async fn open_serial(cfg: &SerialConfig) -> Result<Box<dyn Transport>, Strin
         return Err(format!("配置串口 {} 失败: {e}", cfg.port));
     }
 
+    // 丢弃打开瞬间残留在驱动缓冲里的数据。
+    // 自动探测会依次打开多个端口各发一条 AT，上一次探测留下的半截应答
+    // （例如只有 "OK" 而没有对应命令）会被下一次探测当成本端口的应答，
+    // 从而误选端口。正式连接复用同一函数，清空输入也符合「重连从干净状态开始」的语义。
+    unsafe { libc::tcflush(fd, libc::TCIOFLUSH) };
+
     let write_fd = unsafe { libc::dup(fd) };
     if write_fd < 0 {
         unsafe { libc::close(fd) };

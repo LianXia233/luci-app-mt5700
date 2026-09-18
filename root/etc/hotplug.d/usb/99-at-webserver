@@ -1,0 +1,27 @@
+#!/bin/sh
+# USB hotplug 钩子：模组被插入或重新枚举时，补一次接口拉起。
+#
+# 覆盖场景：模组后插、USB 供电抖动导致重新枚举、AT^SETMODE 切换后设备重新出现。
+# 这些情况下 netifd 的 boot 阶段早已过去，若无人补 ifup，接口会一直没有地址。
+#
+# PRODUCT 形如 "3466/3301/100"（VID/PID/修订）。只固定 VID（MT5700 = 3466），
+# 因为 PID 会随 AT^SETMODE 切换的 USB 组合变化，写死 PID 在切换后必然失效。
+
+[ "$ACTION" = "add" ] || exit 0
+[ -n "$PRODUCT" ] || exit 0
+
+case "$PRODUCT" in
+	3466/*) ;;
+	*) exit 0 ;;
+esac
+
+logger -t at-webserver "hotplug: 检测到 MT5700 USB 设备（PRODUCT=$PRODUCT），延后拉起模组接口"
+
+# 延后执行：等 USB 枚举、option/cdc 驱动绑定、DHCP 客户端就绪。
+# 后端此时也在重连并重新对齐自动拨号，两边最终都会收敛（操作幂等）。
+(
+	sleep 10
+	[ -x /etc/init.d/at-webserver ] && /etc/init.d/at-webserver on_uplink
+) >/dev/null 2>&1 &
+
+exit 0
