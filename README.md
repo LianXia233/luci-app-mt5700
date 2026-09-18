@@ -7,6 +7,12 @@ OpenWrt / ImmortalWrt 的 LuCI 插件，用于管理 MT5700M 5G 模组的拨号�
 - 版本：v1.12.5
 - 入口：LuCI 侧边栏「移动网络 → 5G 模组管理」（`admin/modem/5g`）
 
+## 预览
+
+![网络状态页面](docs/images/network-status.png)
+
+网络状态页：AT 通道状态、信号质量（RSRP / RSRQ / SINR / 综合评分）与驻网信息（5G 中频 2565 MHz / 100 MHz）。
+
 ## 架构
 
 LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP newline-JSON，仅回环 127.0.0.1）→ 模组 AT 命令。
