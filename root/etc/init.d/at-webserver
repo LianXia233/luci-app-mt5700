@@ -205,12 +205,19 @@ iface_has_address() {
 # 旧行为是「接口不存在则 continue」——在非定制机型上等于什么都不做，也没有任何日志。
 # 用户看到的是「模组 AT 在线、接口列表里没有 MT5700M、无法联网」，且完全不知道插件跳过了。
 #
-# 现在的策略按可用性分档：
-#   V4（MT5700M，proto=dhcp）：**必须拿到地址**，拿不到等于没网，所以由下面的重试
-#       循环 + hotplug + 后端拨号就绪通知三路兜底；
+# 核心原则：**接口先建好，地址再谈**。
+#   地址能不能拿到取决于运营商与模组状态（尤其 IPv6），但接口本身不应该因为
+#   「此刻还没拿到地址」或「缺少某个客户端」就不存在 —— 那会让模组在线却没有接口可管。
+#
+# 取址策略按可用性分档：
+#   V4（MT5700M，proto=dhcp）：**必须拿到地址**，拿不到等于没网，由带间隔的重试循环
+#       + hotplug(iface/usb) + 后端 on-uplink 通知三路兜底；
 #   V6（MT5700Mv6，proto=dhcpv6）：**按实际网络状况获取** —— 运营商下发就取到，
-#       不下发也不影响使用，因此用 reqaddress=try / reqprefix=auto 不做强制，
-#       避免在纯 IPv4 网络下留下一个反复重试、不断写日志的接口。
+#       不下发也不影响 IPv4 使用，所以用 reqaddress=try / reqprefix=auto 不做强制。
+#
+# 因此以下情况都不会阻止创建（只记录提示）：
+#   - 缺少 odhcp6c：V6 接口照建，安装 odhcp6c 后即生效；
+#   - 模组网口尚未枚举：接口照建，之后由 on_uplink / hotplug 补齐 device。
 #
 # 两者共用模组的同一 USB 网口（OpenWrt 默认配置里的 wan / wan6 也是这么写的，
 # netifd 允许同一 device 被 v4 与 v6 两个 interface 同时使用）。
@@ -218,32 +225,30 @@ iface_has_address() {
 # 参数：$1=接口名  $2=proto（dhcp / dhcpv6）
 # ---------------------------------------------------------------------------
 ensure_iface_created() {
-	local iface proto device cur_proto
+	local iface proto device cur_dev cur_proto
 
 	iface="$1"
 	proto="$2"
 
+	# 设备名优先复用 V4 接口上已确定的 device，其次按 sysfs 探测模组 USB 网口
+	device=$(uci -q get "network.${IFACE_4G}.device")
+	[ -n "$device" ] || device=$(iface_device_name "$IFACE_4G")
+
 	if uci -q get "network.$iface" >/dev/null 2>&1; then
+		# 已存在：只在缺 device 且此刻能确定时补上，不改动其它配置
+		cur_dev=$(uci -q get "network.$iface.device")
+		if [ -z "$cur_dev" ] && [ -n "$device" ]; then
+			uci -q set "network.$iface.device=$device"
+			uci -q commit network
+			logger -t at-webserver "$iface 已补上 device=$device"
+		fi
 		return 0
 	fi
 
-	# 设备名优先复用 V4 接口上已确定的 device，确保 v4/v6 落在同一网口
-	device=$(uci -q get "network.${IFACE_4G}.device")
-	[ -n "$device" ] || device=$(iface_device_name "$IFACE_4G")
-	if [ -z "$device" ]; then
-		logger -t at-webserver "未检测到模组 USB 网口，暂不创建 $iface 接口（模组可能未插入或未枚举完成）"
-		return 1
-	fi
-
-	if [ "$proto" = "dhcpv6" ] && ! command -v odhcp6c >/dev/null 2>&1; then
-		logger -t at-webserver "系统缺少 odhcp6c，跳过创建 $iface（IPv6 客户端不可用；需要 IPv6 请先安装 odhcp6c）"
-		return 1
-	fi
-
-	logger -t at-webserver "机型未预置 $iface 接口，按 proto=$proto 自动创建（device=$device）"
+	logger -t at-webserver "机型未预置 $iface 接口，自动创建（proto=$proto${device:+, device=$device}）"
 	uci -q set "network.$iface=interface"
 	uci -q set "network.$iface.proto=$proto"
-	uci -q set "network.$iface.device=$device"
+	[ -n "$device" ] && uci -q set "network.$iface.device=$device"
 	uci -q set "network.$iface.auto=1"
 	if [ "$proto" = "dhcpv6" ]; then
 		# 按实际网络状况获取：有地址/前缀就取，没有也不判失败
@@ -251,6 +256,14 @@ ensure_iface_created() {
 		uci -q set "network.$iface.reqprefix=auto"
 	fi
 	uci -q commit network
+
+	# 创建后的两条提示（不影响接口存在）
+	if [ "$proto" = "dhcpv6" ] && ! command -v odhcp6c >/dev/null 2>&1; then
+		logger -t at-webserver "提示：$iface 已创建，但系统缺少 odhcp6c，暂时无法获取 IPv6 地址（安装 odhcp6c 后生效）"
+	fi
+	if [ -z "$device" ]; then
+		logger -t at-webserver "提示：$iface 已创建，但暂未确定模组网口，网口枚举后会自动补上 device"
+	fi
 
 	cur_proto=$(uci -q get "network.$iface.proto")
 	[ "$cur_proto" = "$proto" ] || logger -t at-webserver "警告：$iface 自动创建后 proto=$cur_proto，非预期（期望 $proto）"
@@ -305,7 +318,7 @@ ensure_modem_interface() {
 	fi
 
 	if ! uci -q get "network.$iface_4g" >/dev/null 2>&1; then
-		logger -t at-webserver "接口 $iface_4g 不存在，跳过拉起（见上方「暂不创建」原因）"
+		logger -t at-webserver "警告：$iface_4g 创建失败（uci 未生效），跳过拉起"
 		return 0
 	fi
 
