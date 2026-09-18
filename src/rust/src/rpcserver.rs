@@ -275,6 +275,19 @@ impl RpcServer {
                 let (seq, events) = self.hub.bus.since(since);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "events": events } })
             }
+            // 后端运行日志（含被级别过滤掉的 info）：拨号对齐、串口探测、接口拉起协作、
+            // URC 分发等过程都在这里，是 syslog 看不到的部分（稳态级别是 Warn）。
+            "logs" => {
+                let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
+                let limit = req
+                    .params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(300)
+                    .min(1200) as usize;
+                let (seq, entries) = crate::logger::snapshot(since, limit);
+                serde_json::json!({ "id": id, "result": { "seq": seq, "entries": entries } })
+            }
             _ => serde_json::json!({ "id": id, "error": { "code": -32601, "message": format!("未知方法: {}", req.method) } }),
         }
     }

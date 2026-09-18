@@ -341,6 +341,21 @@ return {
 			call: function (req) {
 				return netrateCall(req);
 			}
+		},
+		logs: {
+			args: { since: 0, limit: 300 },
+			call: function (req) {
+				let a = req.args;
+				let since = int(getStr(a, 'since')) || 0;
+				let limit = int(getStr(a, 'limit')) || 300;
+				if (since < 0) {
+					since = 0;
+				}
+				if (limit <= 0 || limit > 1200) {
+					limit = 300;
+				}
+				return rpcCall('logs', { since: since, limit: limit });
+			}
 		}
 	}
 };
