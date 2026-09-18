@@ -3081,3 +3081,125 @@
     line-height: 1.3;
   }
 }
+
+
+/* ===================== 运行日志页 ===================== */
+
+/* 视图切换（三个 Tab） */
+.mt5700-logtabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 0 0 14px;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.22);
+}
+.mt5700-logtab {
+	appearance: none;
+	background: transparent;
+	border: 1px solid transparent;
+	border-bottom: 2px solid transparent;
+	color: inherit;
+	opacity: 0.62;
+	font-size: 13px;
+	padding: 8px 14px;
+	border-radius: 8px 8px 0 0;
+	cursor: pointer;
+	transition: opacity .15s, background .15s;
+}
+.mt5700-logtab:hover { opacity: 0.92; background: rgba(128, 128, 128, 0.10); }
+.mt5700-logtab.active {
+	opacity: 1;
+	font-weight: 500;
+	border-bottom-color: #4a9edb;
+	background: rgba(74, 158, 219, 0.12);
+}
+
+/* 工具栏：级别筛选 / 搜索 / 自动刷新 / 刷新 / 导出 */
+.mt5700-logtoolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin: 0 0 12px;
+}
+.mt5700-logtool-item { display: flex; align-items: center; }
+.mt5700-logtool-grow { flex: 1 1 220px; min-width: 180px; }
+.mt5700-logtool-grow input { width: 100%; }
+.mt5700-logauto { gap: 6px; font-size: 12px; opacity: 0.85; cursor: pointer; user-select: none; }
+
+/* 日志列表：等宽、可滚动、极淡底纹 */
+.mt5700-loglist {
+	max-height: 62vh;
+	overflow: auto;
+	border-radius: 10px;
+	border: 1px solid rgba(128, 128, 128, 0.20);
+	background: rgba(128, 128, 128, 0.06);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+	font-size: 12.5px;
+	line-height: 1.65;
+}
+.mt5700-logrow {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	padding: 5px 12px 5px 9px;
+	border-left: 3px solid transparent;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.10);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.mt5700-logrow:last-child { border-bottom: none; }
+.mt5700-logrow:nth-child(even) { background: rgba(128, 128, 128, 0.05); }
+.mt5700-logrow:hover { background: rgba(74, 158, 219, 0.10); }
+
+/* 级别配色：左色条 + 徽章。全部用半透明，亮/暗主题都成立 */
+.mt5700-logrow-info { border-left-color: #4a9edb; }
+.mt5700-logrow-warn { border-left-color: #e0a03a; background: rgba(224, 160, 58, 0.07); }
+.mt5700-logrow-err  { border-left-color: #e05a5a; background: rgba(224, 90, 90, 0.09); }
+.mt5700-logrow-dbg  { border-left-color: rgba(128, 128, 128, 0.5); opacity: 0.72; }
+
+.mt5700-logtime {
+	flex: 0 0 auto;
+	opacity: 0.55;
+	font-size: 11.5px;
+	letter-spacing: -0.2px;
+}
+.mt5700-loglv {
+	flex: 0 0 auto;
+	min-width: 34px;
+	text-align: center;
+	font-size: 11px;
+	font-weight: 500;
+	padding: 1px 6px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+}
+.mt5700-logrow-info .mt5700-loglv { color: #4a9edb; border-color: rgba(74, 158, 219, 0.45); background: rgba(74, 158, 219, 0.14); }
+.mt5700-logrow-warn .mt5700-loglv { color: #d9932f; border-color: rgba(224, 160, 58, 0.50); background: rgba(224, 160, 58, 0.16); }
+.mt5700-logrow-err  .mt5700-loglv { color: #e05a5a; border-color: rgba(224, 90, 90, 0.50); background: rgba(224, 90, 90, 0.16); }
+.mt5700-logrow-dbg  .mt5700-loglv { color: rgba(140, 140, 140, 1); border-color: rgba(128, 128, 128, 0.40); }
+
+.mt5700-logmsg { flex: 1 1 auto; }
+.mt5700-logsrc {
+	flex: 0 0 auto;
+	font-size: 10.5px;
+	opacity: 0.5;
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	border-radius: 999px;
+	padding: 0 6px;
+}
+
+/* 搜索高亮 */
+.mt5700-loglist mark {
+	background: rgba(224, 160, 58, 0.35);
+	color: inherit;
+	border-radius: 3px;
+	padding: 0 1px;
+}
+
+.mt5700-logfooter {
+	margin-top: 8px;
+	font-size: 12px;
+	opacity: 0.6;
+	text-align: right;
+}

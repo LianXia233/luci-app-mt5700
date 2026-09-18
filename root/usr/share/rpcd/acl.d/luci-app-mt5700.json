@@ -19,7 +19,11 @@
 				"mt5700": [
 					"at",
 					"events",
-					"netrate"
+					"netrate",
+					"logs"
+				],
+				"log": [
+					"read"
 				],
 				"rc": [
 					"list"

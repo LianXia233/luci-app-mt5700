@@ -7,115 +7,451 @@
 /* global L, AtWs, Parse, Mt5700 */
 
 /**
- * 通知日志 - 新 UI 视觉 + 基准 v1.3.4 功能
+ * 运行日志页
  *
- * - 读取 UCI log_file（默认 /tmp/at-notifications.log，回退 /var/log/at-notifications.log）
- * - 显示最近 300 行，单色文本风格
- * - 清空日志（L.fs.write，失败降级 ubus file.write）
- * - 10 秒自动刷新
+ * 三个视图（互不重复，来源不同）：
+ *   1) 模组拨号：后端内存日志里的拨号过程 —— 自动拨号对齐、PDP/NDIS 状态、AT 初始化、
+ *      串口探测、URC 分发。**这些是 syslog 看不到的**：稳态下后端日志级别是 Warn，
+ *      info 级过程日志不会写 syslog，但它们对排障最关键。
+ *   2) 接口与网络：init.d 的 logger 输出（取自 syslog，含 hotplug、接口拉起、取址结果）
+ *      + 后端日志里与接口/网络相关的行。
+ *   3) 通知记录：原有的通知文件（短信/来电/信号/存储）。
+ *
+ * 展示要点：等宽字体、级别配色与左色条、毫秒级时间列、关键词高亮、斑马纹、
+ * 底部统计、可导出为文本。
  */
+
+/* 分类规则：先拨号，再接口，其余归入接口与网络（系统类）。
+ * 规则写成常量，改动只需动这一处。 */
+var DIAL_RE = /自动拨号|拨号|SETAUTODIAL|APN|PDP|CGACT|CGDCONT|NDIS|驻网|注册|CREG|CGREG|C5GREG|COPS|SETMODE|串口|ttyUSB|ttyACM|AT通道|CMEE|CNMI|CMGF|CLIP|模组/i;
+var IFACE_RE = /接口|网口|ifup|ifdown|DHCP|地址|device|hotplug|MT5700M|eth\d|IPv4|IPv6|网关|路由|metric|防火墙|服务|procd|防火墙|network/i;
+
+/* 级别中文化：徽章显示中文，原始标识放 title 便于对照 */
+var LEVEL_LABEL = { DBG: '调试', INF: '信息', WRN: '警告', ERR: '错误' };
+
+/* 术语中文化：只做「键名与状态词」的安全映射，AT 命令名等保持原文以免影响排障。
+ * 顺序有讲究：长模式在前，避免被子串先命中。
+ * 搜索过滤仍按**原文**匹配（见 applyFilters），显示才用映射后的文本 ——
+ * 这样既能搜 dhcp / PDP 这类原文关键词，界面又是中文。 */
+var TEXT_MAP = [
+	[/Some\(([^)]*)\)/g, '$1'],
+	[/\bNone\b/g, '未设置'],
+	[/enable=/g, '开关='],
+	[/mode=/g, '方式='],
+	[/seq=/g, '序号='],
+	[/\bpid\b/g, '进程号'],
+	[/\bSETAUTODIAL\b/g, '自动拨号'],
+	[/\bNDISSTATQRY\b/g, 'USB 网卡状态'],
+	[/\bCGACT\b/g, '数据承载激活'],
+	[/\bCGDCONT\b/g, '数据承载定义'],
+	[/\bURC\b/g, '主动上报'],
+	[/\bhotplug\b/gi, '热插拔'],
+	[/\bifup\b/g, '拉起接口'],
+	[/\bifdown\b/g, '关闭接口'],
+	[/\bmodem\b/gi, '模组'],
+	[/\bdriver\b/gi, '驱动'],
+	[/\btimeout\b/gi, '超时'],
+	[/\bretry\b/gi, '重试'],
+	[/\bmetric\b/g, '路由优先级'],
+	[/\bDHCP\b/g, '动态地址分配'],
+	[/\bPDP\b/g, '数据承载'],
+	[/\bdevice\b/g, '设备'],
+	[/\bprocd\b/g, '进程管理']
+];
+
+function displayText(text) {
+	var s = String(text);
+	for (var i = 0; i < TEXT_MAP.length; i++) s = s.replace(TEXT_MAP[i][0], TEXT_MAP[i][1]);
+	return s;
+}
+
+function classify(msg) {
+	if (DIAL_RE.test(msg)) return 'dial';
+	if (IFACE_RE.test(msg)) return 'iface';
+	return 'iface';
+}
+
+function pad(n, w) {
+	var s = String(n);
+	while (s.length < w) s = '0' + s;
+	return s;
+}
+
+function fmtClock(ms) {
+	var d = new Date(ms);
+	return pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2) + '.' + pad(d.getMilliseconds(), 3);
+}
+
+function fmtFull(ms) {
+	var d = new Date(ms);
+	return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2) + ' ' + fmtClock(ms);
+}
+
+/* 后端日志：msg 里已经带了业务信息；级别来自宏 */
+function entriesFromBackend(list) {
+	var out = [];
+	for (var i = 0; i < list.length; i++) {
+		var e = list[i];
+		out.push({ ts: Number(e.ts) || 0, level: String(e.level || 'INF'), msg: String(e.msg || ''), src: 'backend', seq: Number(e.seq) || 0 });
+	}
+	return out;
+}
+
+/* syslog 行：两种形态
+ *   at-webserver-rust[pid]: 2026-09-18 08:14:35.326 [INF] 消息      （后端 stdout）
+ *   at-webserver: 消息                                             （init.d 的 logger）
+ * 后端那类已由内存日志提供，这里只取 init.d 那类，避免重复。 */
+function entriesFromSyslog(rawList) {
+	var out = [];
+	for (var i = 0; i < rawList.length; i++) {
+		var r = rawList[i] || {};
+		var msg = String(r.msg || '');
+		if (msg.indexOf('at-webserver') < 0) continue;
+		if (msg.indexOf('at-webserver-rust') >= 0) continue;
+
+		var m = msg.match(/^at-webserver(?:\[\d+\])?:\s*([\s\S]*)$/);
+		if (!m) continue;
+		var text = m[1].trim();
+		if (!text) continue;
+
+		var lv = 'INF';
+		if (/警告|失败|错误|warn|error/i.test(text)) lv = /错误|失败|error/i.test(text) ? 'ERR' : 'WRN';
+		out.push({ ts: Number(r.time) || Date.now(), level: lv, msg: text, src: 'syslog', seq: 0 });
+	}
+	return out;
+}
 
 return L.view.extend({
 	load: function () {
 		return L.uci.load('at-webserver').then(function () {
 			var logFile = L.uci.get('at-webserver', 'config', 'log_file') || '';
-			return { path: logFile || '/tmp/at-notifications.log', content: '', status: 'loading' };
+			return { path: logFile || '/tmp/at-notifications.log' };
 		}).catch(function () {
-			return { path: '/tmp/at-notifications.log', content: '', status: 'loading' };
+			return { path: '/tmp/at-notifications.log' };
 		});
 	},
 
 	render: function (data) {
 		var self = this;
-		var page = Mt5700.page('通知日志', '短信、来电、信号变化等通知记录');
+		var page = Mt5700.page('运行日志', '模组拨号 · 接口拉起 · 通知记录');
 		var body = page._body;
+		var notifyPath = (data && data.path) || '/tmp/at-notifications.log';
 
-		var path = (data && data.path) || '/tmp/at-notifications.log';
+		var state = {
+			tab: 'dial',
+			level: 'all',        /* all | INF | WRN | ERR */
+			query: '',
+			auto: true,
+			dial: [],
+			iface: [],
+			notify: '',
+			syslogOk: true,
+			loading: false
+		};
 
-		var logCard = Mt5700.card('通知日志', '文件：' + path);
-		var logBody = E('div');
-		logCard._body.appendChild(logBody);
-		body.appendChild(logCard);
-
-		var consoleEl = E('pre', { 'class': 'mt5700-terminal-log' }, '加载中…');
-		logBody.appendChild(consoleEl);
-
-		var fileRead = L.rpc.declare({
-			object: 'file',
-			method: 'read',
-			params: ['path'],
-			expect: { data: '' }
+		/* ---------------- 数据通道 ---------------- */
+		var rpcLogs = L.rpc.declare({
+			object: 'mt5700', method: 'logs',
+			params: ['since', 'limit'], expect: { seq: 0, entries: [] }
 		});
-		var fileWrite = L.rpc.declare({
-			object: 'file',
-			method: 'write',
-			params: ['path', 'data'],
-			expect: {}
+		var rpcSyslog = L.rpc.declare({
+			object: 'log', method: 'read',
+			params: ['lines', 'stream', 'oneshot'], expect: { log: [] }
 		});
+		var fileRead = L.rpc.declare({ object: 'file', method: 'read', params: ['path'], expect: { data: '' } });
+		var fileWrite = L.rpc.declare({ object: 'file', method: 'write', params: ['path', 'data'], expect: {} });
 
-		// L.fs 在部分 LuCI 版本被移除，缺失时降级到 rpcd 的 file 插件
 		function readFile(p) {
 			if (L.fs && typeof L.fs.read === 'function') return L.fs.read(p);
 			return fileRead(p).then(function (r) { return (r && r.data != null) ? r.data : ''; });
 		}
-
 		function writeFile(p, content) {
 			if (L.fs && typeof L.fs.write === 'function') return L.fs.write(p, content);
 			return fileWrite(p, content);
 		}
 
-		var actions = Mt5700.panelActions(
-			Mt5700.primaryButton('刷新', function () { refreshLog(); }),
-			Mt5700.dangerButton('清空日志', function () { clearLog(); })
-		);
-		logBody.appendChild(actions);
+		/* ---------------- 顶部：视图切换 + 工具栏 ---------------- */
+		var tabs = E('div', { 'class': 'mt5700-logtabs' });
+		var TAB_DEFS = [
+			{ id: 'dial', label: '模组拨号' },
+			{ id: 'iface', label: '接口与网络' },
+			{ id: 'notify', label: '通知记录' }
+		];
+		TAB_DEFS.forEach(function (t) {
+			var b = E('button', { 'class': 'mt5700-logtab', 'data-tab': t.id, type: 'button' }, t.label);
+			b.addEventListener('click', function () { state.tab = t.id; renderAll(); });
+			tabs.appendChild(b);
+		});
+		body.appendChild(tabs);
 
-		function renderLog(content, status) {
-			if (status === 'error') {
-				consoleEl.textContent = '读取日志失败：' + (content || '文件不可用');
-				return;
-			}
-			var lines = (content || '').trim().split('\n');
-			if (lines.length > 300) lines = lines.slice(lines.length - 300);
-			consoleEl.textContent = lines.join('\n') || '（暂无日志）';
+		var levelSel = Mt5700.select([
+			{ label: '全部级别', value: 'all' },
+			{ label: '仅信息 INF', value: 'INF' },
+			{ label: '仅警告 WRN', value: 'WRN' },
+			{ label: '仅错误 ERR', value: 'ERR' }
+		], 'all');
+		levelSel.addEventListener('change', function () { state.level = levelSel.value; renderList(); });
+
+		var searchInput = Mt5700.input('text', '按关键词过滤，如 拨号 / eth2 / 警告', '');
+		searchInput.addEventListener('input', function () { state.query = searchInput.value.trim(); renderList(); });
+
+		var autoChk = E('input', { type: 'checkbox' });
+		autoChk.checked = true;
+		autoChk.addEventListener('change', function () {
+			state.auto = autoChk.checked;
+			if (state.auto) schedule();
+		});
+
+		var toolbar = E('div', { 'class': 'mt5700-logtoolbar' });
+		toolbar.appendChild(E('div', { 'class': 'mt5700-logtool-item' }, [levelSel]));
+		toolbar.appendChild(E('div', { 'class': 'mt5700-logtool-item mt5700-logtool-grow' }, [searchInput]));
+		var autoWrap = E('label', { 'class': 'mt5700-logtool-item mt5700-logauto' }, [autoChk, E('span', {}, '自动刷新')]);
+		toolbar.appendChild(autoWrap);
+		toolbar.appendChild(Mt5700.ghostButton('立即刷新', function () { refresh(true); }));
+		toolbar.appendChild(Mt5700.ghostButton('导出', function () { exportLog(); }));
+		body.appendChild(toolbar);
+
+		/* ---------------- 日志主体 ---------------- */
+		var card = Mt5700.card('日志', '');
+		var cardBody = card._body;
+		body.appendChild(card);
+
+		var hint = E('div', { 'class': 'mt5700-hint' }, '');
+		cardBody.appendChild(hint);
+
+		var listEl = E('div', { 'class': 'mt5700-loglist' });
+		cardBody.appendChild(listEl);
+
+		var footer = E('div', { 'class': 'mt5700-logfooter' }, '');
+		cardBody.appendChild(footer);
+
+		var clearBtn = Mt5700.dangerButton('清空通知日志', function () { clearNotify(); });
+		cardBody.appendChild(Mt5700.panelActions(clearBtn));
+
+		/* ---------------- 渲染 ---------------- */
+		function currentEntries() {
+			if (state.tab === 'dial') return state.dial;
+			if (state.tab === 'iface') return state.iface;
+			return [];
 		}
 
-		function refreshLog() {
-			return readFile(path).then(function (content) {
-				renderLog(content, 'ok');
-			}).catch(function (err) {
-				var msg = (err && err.message) || 'failed';
-				// 后端尚未写入过通知时日志文件不存在，这不算错误，按空日志展示
-				if (/未找到资源|Not found|No such file|ENOENT/.test(msg)) {
-					renderLog('', 'ok');
-					return;
+		function applyFilters(list) {
+			var q = state.query.toLowerCase();
+			var out = [];
+			for (var i = 0; i < list.length; i++) {
+				var e = list[i];
+				if (state.level !== 'all') {
+					if (state.level === 'ERR') { if (e.level !== 'ERR') continue; }
+					else if (e.level !== state.level) continue;
 				}
-				renderLog(msg, 'error');
+				if (q && e.msg.toLowerCase().indexOf(q) < 0) continue;
+				out.push(e);
+			}
+			return out;
+		}
+
+		function highlight(text) {
+			if (!state.query) return text;
+			var idx = text.toLowerCase().indexOf(state.query.toLowerCase());
+			if (idx < 0) return text;
+			var frag = document.createDocumentFragment();
+			var rest = text, pos = 0;
+			while (true) {
+				idx = rest.toLowerCase().indexOf(state.query.toLowerCase());
+				if (idx < 0) { frag.appendChild(document.createTextNode(rest)); break; }
+				if (idx > 0) frag.appendChild(document.createTextNode(rest.slice(0, idx)));
+				var mk = document.createElement('mark');
+				mk.textContent = rest.slice(idx, idx + state.query.length);
+				frag.appendChild(mk);
+				rest = rest.slice(idx + state.query.length);
+			}
+			return frag;
+		}
+
+		function renderList() {
+			listEl.innerHTML = '';
+			footer.textContent = '';
+
+			if (state.tab === 'notify') { renderNotify(); return; }
+
+			var all = currentEntries();
+			var list = applyFilters(all);
+
+			if (!all.length) {
+				listEl.appendChild(Mt5700.empty(state.tab === 'dial'
+					? '暂无拨号日志。后端会记录自动拨号对齐、串口探测与 PDP 状态。'
+					: '暂无接口日志。接口拉起、hotplug 与取址结果会出现在这里。'));
+			} else if (!list.length) {
+				listEl.appendChild(Mt5700.empty('当前过滤条件下没有匹配的日志'));
+			} else {
+				var frag = document.createDocumentFragment();
+				/* 只渲染最后 400 行，避免一次插入过多节点导致滚动卡顿 */
+				var shown = list.length > 400 ? list.slice(list.length - 400) : list;
+				for (var i = 0; i < shown.length; i++) frag.appendChild(renderRow(shown[i]));
+				listEl.appendChild(frag);
+			}
+
+			var text = '共 ' + all.length + ' 条';
+			if (list.length !== all.length) text += '（过滤后 ' + list.length + ' 条）';
+			if (list.length > 400) text += '，仅显示最新 400 条';
+			if (state.tab === 'iface' && !state.syslogOk) text += ' · syslog 不可读（仅显示后端日志）';
+			footer.textContent = text;
+		}
+
+		function renderRow(e) {
+			var lv = e.level || 'INF';
+			var cls = lv === 'ERR' ? 'err' : (lv === 'WRN' ? 'warn' : (lv === 'DBG' ? 'dbg' : 'info'));
+			var row = E('div', { 'class': 'mt5700-logrow mt5700-logrow-' + cls });
+			row.appendChild(E('span', { 'class': 'mt5700-logtime', title: fmtFull(e.ts) }, fmtClock(e.ts)));
+			row.appendChild(E('span', { 'class': 'mt5700-loglv', title: lv }, LEVEL_LABEL[lv] || lv));
+			var msg = E('span', { 'class': 'mt5700-logmsg' });
+			msg.appendChild(highlight(displayText(e.msg)));
+			row.appendChild(msg);
+			if (e.src === 'syslog') row.appendChild(E('span', { 'class': 'mt5700-logsrc', title: '来自 syslog（init.d / 内核）' }, '系统'));
+			return row;
+		}
+
+		function renderNotify() {
+			var content = state.notify || '';
+			var lines = content.replace(/\s+$/, '').split('\n').filter(function (l) { return l.trim() !== ''; });
+			if (!lines.length) {
+				listEl.appendChild(Mt5700.empty('暂无通知记录。短信、来电、信号变化与存储告警会写入此文件。'));
+				footer.textContent = '文件：' + notifyPath;
+				return;
+			}
+			var frag = document.createDocumentFragment();
+			var shown = lines.length > 400 ? lines.slice(lines.length - 400) : lines;
+			for (var i = 0; i < shown.length; i++) {
+				var line = shown[i];
+				var lv = /错误|失败|error/i.test(line) ? 'ERR' : (/警告|warn/i.test(line) ? 'WRN' : 'INF');
+				var cls = lv === 'ERR' ? 'err' : (lv === 'WRN' ? 'warn' : 'info');
+				var row = E('div', { 'class': 'mt5700-logrow mt5700-logrow-' + cls });
+				row.appendChild(E('span', { 'class': 'mt5700-loglv', title: lv }, LEVEL_LABEL[lv] || lv));
+				var msg = E('span', { 'class': 'mt5700-logmsg' });
+				msg.appendChild(highlight(displayText(line)));
+				row.appendChild(msg);
+				frag.appendChild(row);
+			}
+			listEl.appendChild(frag);
+			footer.textContent = '共 ' + lines.length + ' 条 · 文件：' + notifyPath;
+		}
+
+		function renderAll() {
+			var btns = tabs.querySelectorAll('.mt5700-logtab');
+			for (var i = 0; i < btns.length; i++) {
+				var on = btns[i].getAttribute('data-tab') === state.tab;
+				btns[i].className = 'mt5700-logtab' + (on ? ' active' : '');
+			}
+			levelSel.value = state.level;
+			levelSel.disabled = (state.tab === 'notify');
+			searchInput.disabled = (state.tab === 'notify');
+			clearBtn.style.display = (state.tab === 'notify') ? '' : 'none';
+			hint.textContent = state.tab === 'dial'
+				? '后端内存日志（不受日志级别限制）：自动拨号对齐、数据承载与 USB 网卡状态、串口探测、主动上报分发。进程重启后从零开始；常见术语已做中文映射，搜索仍按原文匹配。'
+				: (state.tab === 'iface'
+					? 'init.d 的 logger 输出（取自 syslog）与后端日志中与接口/网络相关的部分：接口拉起、hotplug、DHCP / IPv6 取址结果。'
+					: '通知文件内容（短信、来电、信号变化、存储告警）。');
+			renderList();
+		}
+
+		/* ---------------- 取数 ---------------- */
+		function refresh(manual) {
+			if (state.loading) return Promise.resolve();
+			state.loading = true;
+
+			var tasks = [];
+			/* 后端内存日志：一次取全量（上限 1200），前端按视图分类 */
+			tasks.push(rpcLogs(0, 1200).then(function (r) {
+				var entries = entriesFromBackend((r && r.entries) || []);
+				state.dial = [];
+				state.iface = [];
+				for (var i = 0; i < entries.length; i++) {
+					if (classify(entries[i].msg) === 'dial') state.dial.push(entries[i]);
+					else state.iface.push(entries[i]);
+				}
+			}).catch(function (err) {
+				state.dial = [{ ts: Date.now(), level: 'ERR', msg: '读取后端日志失败：' + ((err && err.message) || '未知错误') }];
+				state.iface = [];
+			}));
+
+			/* init.d 日志：走 syslog；无权限或不可用时降级，不影响其它视图 */
+			tasks.push(rpcSyslog(1500, false, true).then(function (r) {
+				var extra = entriesFromSyslog((r && r.log) || []);
+				state.iface = state.iface.concat(extra);
+				state.iface.sort(function (a, b) { return a.ts - b.ts; });
+				state.syslogOk = true;
+			}).catch(function () {
+				state.syslogOk = false;
+			}));
+
+			/* 通知文件 */
+			tasks.push(readFile(notifyPath).then(function (c) {
+				state.notify = c || '';
+			}).catch(function () {
+				state.notify = '';
+			}));
+
+			return Promise.all(tasks).then(function () {
+				state.loading = false;
+				renderAll();
+				if (manual) Mt5700.success('日志已刷新');
+			}, function () {
+				state.loading = false;
 			});
 		}
 
-		function clearLog() {
+		function exportLog() {
+			var list = (state.tab === 'notify')
+				? [{ ts: Date.now(), level: 'INF', msg: state.notify || '' }]
+				: applyFilters(currentEntries());
+			var lines = [];
+			lines.push('# luci-app-mt5700 运行日志导出');
+			lines.push('# 视图: ' + state.tab + '  导出时间: ' + fmtFull(Date.now()));
+			lines.push('');
+			for (var i = 0; i < list.length; i++) {
+				lines.push(fmtFull(list[i].ts) + ' [' + list[i].level + '] ' + list[i].msg);
+			}
+			var blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+			var url = URL.createObjectURL(blob);
+			var a = document.createElement('a');
+			a.href = url;
+			a.download = 'mt5700-log-' + state.tab + '-' + Date.now() + '.txt';
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+		}
+
+		function clearNotify() {
 			Mt5700.confirm('确定清空通知日志？', function () {
-				return writeFile(path, '').then(function () {
+				return writeFile(notifyPath, '').then(function () {
 					Mt5700.success('通知日志已清空');
-					refreshLog();
-				}).catch(function (err) {
-					// 两条通道都试过仍失败才报错
-					return fileWrite(path, '').then(function () {
+					state.notify = '';
+					renderList();
+				}).catch(function () {
+					return fileWrite(notifyPath, '').then(function () {
 						Mt5700.success('通知日志已清空');
-						refreshLog();
-					}).catch(function (err2) {
-						Mt5700.error('清空失败：' + ((err2 && err2.message) || (err && err.message) || '未知错误'));
+						state.notify = '';
+						renderList();
+					}).catch(function (e2) {
+						Mt5700.error('清空失败：' + ((e2 && e2.message) || '未知错误'));
 					});
 				});
 			});
 		}
 
-		refreshLog();
+		/* ---------------- 自动刷新 ---------------- */
+		var timer = null;
+		function schedule() {
+			if (timer) { clearInterval(timer); timer = null; }
+			if (state.auto) timer = setInterval(function () {
+				if (document.hidden) return;   /* 页面不可见时不刷，省设备资源 */
+				refresh(false);
+			}, 5000);
+		}
 
-		// 自动刷新（10 秒）
-		var timer = setInterval(refreshLog, 10000);
-		self._dispose = function () { clearInterval(timer); };
+		refresh(false).then(schedule);
+		self._dispose = function () { if (timer) clearInterval(timer); };
 
 		return page;
 	}

@@ -101,7 +101,7 @@
 		}
 	},
 	"admin/modem/5g/logs": {
-		"title": "通知日志",
+		"title": "运行日志",
 		"order": 110,
 		"action": {
 			"type": "view",
