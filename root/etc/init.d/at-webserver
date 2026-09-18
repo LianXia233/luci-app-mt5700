@@ -230,38 +230,57 @@ ensure_iface_created() {
 	iface="$1"
 	proto="$2"
 
-	# 设备名优先复用 V4 接口上已确定的 device，其次按 sysfs 探测模组 USB 网口
+	# V4 的设备名按 sysfs 探测模组 USB 网口（V6 不直接用设备名，见下）
 	device=$(uci -q get "network.${IFACE_4G}.device")
 	[ -n "$device" ] || device=$(iface_device_name "$IFACE_4G")
 
 	if uci -q get "network.$iface" >/dev/null 2>&1; then
-		# 已存在：只在缺 device 且此刻能确定时补上，不改动其它配置
+		# 已存在：只在缺 device 时补齐，不改动其它配置
 		cur_dev=$(uci -q get "network.$iface.device")
-		if [ -z "$cur_dev" ] && [ -n "$device" ]; then
-			uci -q set "network.$iface.device=$device"
-			uci -q commit network
-			logger -t at-webserver "$iface 已补上 device=$device"
+		if [ -z "$cur_dev" ]; then
+			if [ "$proto" = "dhcpv6" ]; then
+				uci -q set "network.$iface.device=@${IFACE_4G}"
+				uci -q set "network.$iface.ifname=@${IFACE_4G}"
+				uci -q commit network
+				logger -t at-webserver "$iface 已补上 device=@${IFACE_4G}"
+			elif [ -n "$device" ]; then
+				uci -q set "network.$iface.device=$device"
+				uci -q commit network
+				logger -t at-webserver "$iface 已补上 device=$device"
+			fi
 		fi
 		return 0
 	fi
 
-	logger -t at-webserver "机型未预置 $iface 接口，自动创建（proto=$proto${device:+, device=$device}）"
+	logger -t at-webserver "机型未预置 $iface 接口，自动创建（proto=$proto）"
 	uci -q set "network.$iface=interface"
 	uci -q set "network.$iface.proto=$proto"
-	[ -n "$device" ] && uci -q set "network.$iface.device=$device"
-	uci -q set "network.$iface.auto=1"
+
 	if [ "$proto" = "dhcpv6" ]; then
-		# 按实际网络状况获取：有地址/前缀就取，没有也不判失败
+		# 用 @<V4 接口> 引用上层设备，与机型定制包写法一致
+		# （实测 H5000M 上 MT5700Mv6 的 device/ifname 就是 '@MT5700M'）。
+		# 好处：V4 若换了网口名（eth2 → 其它），V6 自动跟随，不需要两处同步。
+		uci -q set "network.$iface.device=@${IFACE_4G}"
+		uci -q set "network.$iface.ifname=@${IFACE_4G}"
+		# 按实际网络状况获取：运营商下发就取到，不下发也不判失败
 		uci -q set "network.$iface.reqaddress=try"
 		uci -q set "network.$iface.reqprefix=auto"
+		# 允许把上游前缀扩展分发给下游接口（LAN）——不加这一项，
+		# 即使拿到 IPv6 前缀也不会下发到内网，等于白拿。
+		uci -q set "network.$iface.extendprefix=1"
+		uci -q set "network.$iface.defaultroute=1"
+	else
+		[ -n "$device" ] && uci -q set "network.$iface.device=$device"
 	fi
+
+	uci -q set "network.$iface.auto=1"
 	uci -q commit network
 
-	# 创建后的两条提示（不影响接口存在）
+	# 创建后的提示（不影响接口存在）
 	if [ "$proto" = "dhcpv6" ] && ! command -v odhcp6c >/dev/null 2>&1; then
 		logger -t at-webserver "提示：$iface 已创建，但系统缺少 odhcp6c，暂时无法获取 IPv6 地址（安装 odhcp6c 后生效）"
 	fi
-	if [ -z "$device" ]; then
+	if [ "$proto" != "dhcpv6" ] && [ -z "$device" ]; then
 		logger -t at-webserver "提示：$iface 已创建，但暂未确定模组网口，网口枚举后会自动补上 device"
 	fi
 
