@@ -29,10 +29,10 @@ var IFACE_RE = /接口|网口|ifup|ifdown|DHCP|地址|device|hotplug|MT5700M|eth
 /* 级别中文化：徽章显示中文，原始标识放 title 便于对照 */
 var LEVEL_LABEL = { DBG: '调试', INF: '信息', WRN: '警告', ERR: '错误' };
 
-/* 术语中文化：只做「键名与状态词」的安全映射，AT 命令名等保持原文以免影响排障。
+/* 术语中文化：只处理「键名与状态词」，**不含 AT 命令名**。
+ * AT 命令一律保留英文原文 —— 换成中文就没法对着 AT 手册排障了。
  * 顺序有讲究：长模式在前，避免被子串先命中。
- * 搜索过滤仍按**原文**匹配（见 applyFilters），显示才用映射后的文本 ——
- * 这样既能搜 dhcp / PDP 这类原文关键词，界面又是中文。 */
+ * 搜索过滤仍按**原文**匹配（见 applyFilters），显示才做装饰。 */
 var TEXT_MAP = [
 	[/Some\(([^)]*)\)/g, '$1'],
 	[/\bNone\b/g, '未设置'],
@@ -40,10 +40,6 @@ var TEXT_MAP = [
 	[/mode=/g, '方式='],
 	[/seq=/g, '序号='],
 	[/\bpid\b/g, '进程号'],
-	[/\bSETAUTODIAL\b/g, '自动拨号'],
-	[/\bNDISSTATQRY\b/g, 'USB 网卡状态'],
-	[/\bCGACT\b/g, '数据承载激活'],
-	[/\bCGDCONT\b/g, '数据承载定义'],
 	[/\bURC\b/g, '主动上报'],
 	[/\bhotplug\b/gi, '热插拔'],
 	[/\bifup\b/g, '拉起接口'],
@@ -59,9 +55,55 @@ var TEXT_MAP = [
 	[/\bprocd\b/g, '进程管理']
 ];
 
+/* AT 命令用途表：命令原文照常显示，只在整条消息末尾附一句"它干什么用"。
+ * 命中一条即停（避免一条日志里出现多个命令时尾巴过长）。 */
+var AT_PURPOSE = [
+	[/AT\^?SETAUTODIAL\b/i, '设置自动拨号：开关与拨号方式'],
+	[/AT\^?NDISSTATQRY\b/i, '查询 USB 网卡数据面状态'],
+	[/AT\+CGACT\b/i, '查询/切换数据承载(PDP)激活状态'],
+	[/AT\+CGDCONT\b/i, '查询/设置数据承载定义(APN)'],
+	[/AT\+CFUN\b/i, '飞行模式(射频开关)'],
+	[/AT\+CNMI\b/i, '新短信上报配置'],
+	[/AT\+CMGF\b/i, '短信格式(PDU / 文本)'],
+	[/AT\+CMEE\b/i, '错误码详细程度'],
+	[/AT\+CLIP\b/i, '来电号码显示'],
+	[/AT\+CMGS\b/i, '发送短信'],
+	[/AT\+CMGL\b/i, '列出短信'],
+	[/AT\+CMGR\b/i, '读取短信'],
+	[/AT\+CSCA\b/i, '短信中心号码'],
+	[/AT\+CSQ\b/i, '查询信号质量'],
+	[/AT\^HCSQ\b/i, '查询信号质量(扩展)'],
+	[/AT\+COPS\b/i, '运营商选择'],
+	[/AT\+CREG\b/i, '查询网络注册状态'],
+	[/AT\+CGREG\b/i, '查询分组域注册状态'],
+	[/AT\+C5GREG\b/i, '查询 5G 注册状态'],
+	[/AT\+CGSN\b/i, '查询 IMEI'],
+	[/AT\+CGMR\b/i, '查询固件版本'],
+	[/AT\+CGPADDR\b/i, '查询已分配的 IP 地址'],
+	[/ATI\b/, '查询模组型号信息'],
+	[/AT\^CELLSCAN\b/i, '小区扫频'],
+	[/AT\^SETMODE\b/i, 'USB 端口模式'],
+	[/AT\^TDCFG\b/i, '网口模式 / 后路由 / DMZ'],
+	[/AT\^MONSC\b/i, '服务小区信息'],
+	[/AT\^MONNC\b/i, '邻区信息'],
+	[/AT\^MCS\b/i, '多载波开关'],
+	[/AT\^SIMSQ\b/i, 'SIM 卡信号质量'],
+	[/AT\^CHIPTEMP\b/i, '模组温度'],
+	[/AT\^FOTA\b/i, '模组固件升级'],
+	[/AT\^TDSIMHP\b/i, 'SIM 热插拔开关'],
+	[/AT\+CPIN\b/i, '查询 SIM 卡状态']
+];
+
+/* 显示前装饰：先做术语中文化，再为消息里的 AT 命令补一句用途 */
 function displayText(text) {
 	var s = String(text);
 	for (var i = 0; i < TEXT_MAP.length; i++) s = s.replace(TEXT_MAP[i][0], TEXT_MAP[i][1]);
+	for (var j = 0; j < AT_PURPOSE.length; j++) {
+		if (AT_PURPOSE[j][0].test(s)) {
+			s += '　（' + AT_PURPOSE[j][1] + '）';
+			break;
+		}
+	}
 	return s;
 }
 
@@ -389,7 +431,7 @@ return L.view.extend({
 			searchInput.disabled = (state.tab === 'notify');
 			clearRow.style.display = (state.tab === 'notify') ? '' : 'none';
 			hint.textContent = state.tab === 'dial'
-				? '后端内存日志（不受日志级别限制）：自动拨号对齐、数据承载与 USB 网卡状态、串口探测、主动上报分发。进程重启后从零开始；常见术语已做中文映射，搜索仍按原文匹配。'
+				? '后端内存日志（不受日志级别限制）：自动拨号对齐、数据承载与 USB 网卡状态、串口探测、主动上报分发。进程重启后从零开始；AT 命令保留原文并附用途说明，搜索按原文匹配。'
 				: (state.tab === 'iface'
 					? 'init.d 的 logger 输出（取自 syslog）与后端日志中与接口/网络相关的部分：接口拉起、hotplug、DHCP / IPv6 取址结果。'
 					: '通知文件内容（短信、来电、信号变化、存储告警）。');
