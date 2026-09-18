@@ -11,24 +11,55 @@
 
 RUST_DIR := rust
 
-# ---- OpenWrt ARCH → Rust musl target 映射（RUST_TRIPLE 由构建脚本传入时优先）----
-# 注意大小端：mips*_24kc 是 big-endian（mips），mipsel* 是 little-endian。
+# ---- OpenWrt 架构 → Rust musl 目标三元组映射 ----
+#
+# 三种取值的优先级：调用方传入的 RUST_TRIPLE > ARCH_PACKAGES 精确匹配 > ARCH 基础名匹配。
+# 全部落空时**直接报错**，不做任何兜底推断。
+#
+# 为什么不允许兜底：本文件在 SDK/交叉编译环境里执行，宿主架构（容器恒为 x86_64）
+# 与目标架构无关。此前按 `uname -m` 兜底，在 ARCH 未命中映射表时会静默编出 x86_64
+# 二进制并打进 mipsel/aarch64 的包里——包能装、运行报 Exec format error，
+# 而构建阶段零告警（体积闸门反而更容易通过）。宁可让构建失败。
+#
+# ARCH 与 ARCH_PACKAGES 的区别：
+#   ARCH           = 基础 CPU 架构名（arm / mipsel / mips / aarch64 / x86_64）
+#   ARCH_PACKAGES  = ARCH + CPU_TYPE 细分（aarch64_cortex-a53 / arm_cortex-a7_neon-vfpv4）
+# 大端小端：mips* 是 big-endian，mipsel* 是 little-endian，两者不可混用。
+#
+# aarch64_cortex-a53 与 aarch64_generic 都是 ARMv8-A 指令集，Rust 侧统一用
+# aarch64-unknown-linux-musl（默认 target-cpu=generic）即可，无需区分。
 RUST_TARGET_x86_64         := x86_64-unknown-linux-musl
 RUST_TARGET_aarch64        := aarch64-unknown-linux-musl
 RUST_TARGET_mipsel         := mipsel-unknown-linux-musl
 RUST_TARGET_mips           := mips-unknown-linux-musl
-RUST_TARGET_mips_24kc      := mips-unknown-linux-musl
-RUST_TARGET_mipsel_24kc    := mipsel-unknown-linux-musl
+RUST_TARGET_riscv64        := riscv64-unknown-linux-musl
 RUST_TARGET_arm            := armv7-unknown-linux-musleabihf
 
-RUST_TARGET := $(if $(RUST_TRIPLE),$(RUST_TRIPLE),$(RUST_TARGET_$(ARCH)))
+# ARCH 可能带 CPU 优化后缀（部分构建系统把 ARCH_PACKAGES 当 ARCH 用），补齐常见组合
+RUST_TARGET_mipsel_24kc    := mipsel-unknown-linux-musl
+RUST_TARGET_mips_24kc      := mips-unknown-linux-musl
+RUST_TARGET_mips_74kc      := mips-unknown-linux-musl
+RUST_TARGET_mips_24kec     := mips-unknown-linux-musl
+RUST_TARGET_aarch64_cortex-a53  := aarch64-unknown-linux-musl
+RUST_TARGET_aarch64_cortex-a72  := aarch64-unknown-linux-musl
+RUST_TARGET_aarch64_cortex-a76  := aarch64-unknown-linux-musl
+RUST_TARGET_aarch64_generic     := aarch64-unknown-linux-musl
+
+# arm 细分类：OpenWrt 里 ARCH=arm 覆盖 armv5/v6/v7 三档 ABI。
+# 一律映射 armv7 会让 armv5（AR7/IXP 等）与 armv6（BCM2835 等）目标板
+# 装上就打 Illegal instruction，因此按 ARCH_PACKAGES 细分。
+RUST_TARGET_arm_arm926ej-s       := armv5-unknown-linux-musleabi
+RUST_TARGET_arm_xscale           := armv5-unknown-linux-musleabi
+RUST_TARGET_arm_fa526            := armv5-unknown-linux-musleabi
+RUST_TARGET_arm_arm1176jzf-s_vfp := armv6-unknown-linux-musleabihf
+RUST_TARGET_arm_arm1176jzf-s     := armv6-unknown-linux-musleabihf
+
+# 先试 ARCH_PACKAGES 精确匹配，再退回 ARCH 基础名
+RUST_LOOKUP_KEY := $(if $(RUST_TARGET_$(ARCH_PACKAGES)),$(ARCH_PACKAGES),$(ARCH))
+RUST_TARGET := $(if $(RUST_TRIPLE),$(RUST_TRIPLE),$(RUST_TARGET_$(RUST_LOOKUP_KEY)))
+
 ifeq ($(strip $(RUST_TARGET)),)
-# 兜底：按宿主架构推断，仅用于本地验证
-UNAME_M := $(shell uname -m)
-RUST_TARGET := $(if $(filter x86_64,$(UNAME_M)),x86_64-unknown-linux-musl,$(if $(filter aarch64 arm64,$(UNAME_M)),aarch64-unknown-linux-musl,))
-endif
-ifeq ($(strip $(RUST_TARGET)),)
-$(error 无法推断 Rust 目标三元组，请通过 RUST_TRIPLE= 环境变量指定)
+$(error 无法推断 Rust 目标三元组（ARCH=$(ARCH) ARCH_PACKAGES=$(ARCH_PACKAGES) RUST_TRIPLE=$(RUST_TRIPLE)）。请显式传入 RUST_TRIPLE=<triple>；本构建禁止按宿主架构兜底，否则会产出错误架构的二进制)
 endif
 
 CARGO_TARGET_DIR := $(CURDIR)/target
@@ -39,7 +70,7 @@ BIN := $(CARGO_TARGET_DIR)/$(RUST_TARGET)/release/at-webserver
 all: compile
 
 compile:
-	@echo "==> [mt5700] cargo build: ARCH=$(ARCH) RUST_TARGET=$(RUST_TARGET)"
+	@echo "==> [mt5700] cargo build: ARCH=$(ARCH) ARCH_PACKAGES=$(ARCH_PACKAGES) RUST_TARGET=$(RUST_TARGET)"
 	cd $(RUST_DIR) && \
 		CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" \
 		cargo build $(CARGO_BUILD_STD_FLAGS) --release --target $(RUST_TARGET)

@@ -58,21 +58,55 @@ impl AtResponse {
     }
 }
 
-/// 从 `AT^SETAUTODIAL?` 的应答里取出「自动拨号是否开启」。
+/// 从 `AT^SETAUTODIAL?` 的应答里取出「开关」与「拨号方式」。
 ///
-/// 手册回显形如 `^SETAUTODIAL: 1,1,"IP","cmnet",...`，第一个字段即开关；
-/// 部分固件只回 `^SETAUTODIAL: 1`。解析失败返回 None（调用方据此决定是否直接下发）。
-fn parse_autodial_enable(text: &str) -> Option<bool> {
+/// 手册回显形如 `^SETAUTODIAL: 1,1,"IP","cmnet","","",0`：
+///   字段 1 = 开关（0=关 / 1=开）
+///   字段 2 = 拨号方式（1=USB 网络接口 / 2=转网口模式）
+/// 部分固件只回 `^SETAUTODIAL: 1`，此时方式为 None（表示「无法判定」，不是「不匹配」）。
+/// 解析失败返回 None，调用方据此决定是否直接下发设置。
+///
+/// 为什么必须把方式一起解析出来：只看开关会造成
+/// 「开关已是 1、但方式停在 2（转网口模式）」时直接跳过下发，
+/// 而期望是 1（USB 网络接口）——USB 网口永远收不到模组下发的 DHCP，
+/// MT5700M 接口长期没有 IP。这是「模组在线却上不了网」的一条独立成因。
+fn parse_autodial_state(text: &str) -> Option<(bool, Option<i64>)> {
     for line in text.replace('\r', "").lines() {
         let line = line.trim();
         if !line.starts_with("^SETAUTODIAL:") {
             continue;
         }
         let payload = line[line.find(':')? + 1..].trim();
-        let first = payload.split(',').next()?.trim().trim_matches('"');
+        let mut parts = payload.split(',');
+        let first = parts.next()?.trim().trim_matches('"');
         if first.is_empty() {
             return None;
         }
+        let enable = match first {
+            "0" => false,
+            "1" => true,
+            _ => return None,
+        };
+        let mode = parts
+            .next()
+            .map(|s| s.trim().trim_matches('"'))
+            .and_then(|s| s.parse::<i64>().ok())
+            .filter(|m| *m == 1 || *m == 2);
+        return Some((enable, mode));
+    }
+    None
+}
+
+/// 从 `AT^NDISSTATQRY?` 应答取 USB 数据面状态（首字段 1=就绪）。
+/// 拿不到可判定字段时返回 None（表示无法判定，而不是「未就绪」）。
+fn parse_ndis_state(text: &str) -> Option<bool> {
+    for line in text.replace('\r', "").lines() {
+        let line = line.trim();
+        if !line.starts_with("^NDISSTATQRY:") {
+            continue;
+        }
+        let payload = line[line.find(':')? + 1..].trim();
+        let first = payload.split(',').next()?.trim().trim_matches('"');
         return match first {
             "0" => Some(false),
             "1" => Some(true),
@@ -80,6 +114,33 @@ fn parse_autodial_enable(text: &str) -> Option<bool> {
         };
     }
     None
+}
+
+/// 从 `AT+CGACT?` 应答判断是否存在任一已激活的 PDP 上下文。
+/// 拿不到 `+CGACT:` 行时返回 None（无法判定）。
+fn parse_cgact_active(text: &str) -> Option<bool> {
+    let mut saw = false;
+    let mut any_active = false;
+    for line in text.replace('\r', "").lines() {
+        let line = line.trim();
+        if !line.starts_with("+CGACT:") {
+            continue;
+        }
+        saw = true;
+        let payload = line[line.find(':')? + 1..].trim();
+        let mut it = payload.split(',');
+        let _cid = it.next();
+        if let Some(state) = it.next() {
+            if state.trim() == "1" {
+                any_active = true;
+            }
+        }
+    }
+    if saw {
+        Some(any_active)
+    } else {
+        None
+    }
 }
 
 /// 一条模组主动上报。broadcast 为真表示需要作为 raw_data 推给前端。
@@ -148,6 +209,14 @@ impl AtClient {
     pub async fn run(self: Arc<Self>, ctx: tokio::sync::watch::Receiver<bool>) {
         let mut backoff = Duration::from_secs(5);
         let max_backoff = Duration::from_secs(60);
+
+        // 拨号守护只起一次，跨重连存活：按 connected_flag 判断是否工作，
+        // 断开时自动跳过。若改为每次重连都 spawn，会随重连次数叠加任务。
+        {
+            let client = self.clone();
+            let ctx_w = ctx.clone();
+            tokio::spawn(async move { client.autodial_watchdog(ctx_w).await });
+        }
 
         while !*ctx.borrow() {
             let tp = match crate::transport::open_transport(&self.cfg).await {
@@ -221,62 +290,131 @@ impl AtClient {
     }
 
     async fn init_modem(self: Arc<Self>, ctx: &tokio::sync::watch::Receiver<bool>) {
-        // 手册 3.14：置 2 后错误返回描述字符串，界面上能显示具体原因。
-        if let Err(e) = self.send_command(ctx, "AT+CMEE=2", COMMAND_TIMEOUT, None).await {
-            log_warn!("开启详细错误码失败: {}", e);
+        // 错误判定说明：send_command 只在「链路层」失败（未连接、写失败、超时）返回 Err；
+        // 模组回 ERROR / +CME ERROR 时它返回的是 Ok(resp)（lines 里含错误行）。
+        // 因此每条设置命令都必须显式检查 resp.ok()，否则「模组拒绝该命令」会被静默吞掉，
+        // 排障时只看到后续功能不正常而没有任何线索。
+        match self.send_command(ctx, "AT+CMEE=2", COMMAND_TIMEOUT, None).await {
+            Ok(resp) if resp.ok() => {}
+            Ok(resp) => log_warn!("开启详细错误码未返回 OK: {}", resp.text()),
+            Err(e) => log_warn!("开启详细错误码失败: {}", e),
         }
         // 短信走 PDU 模式并开启新短信主动上报，来电开启号码显示。
         // 与 Go 一致：查询失败或不含目标值时都要 SET，避免模组刚连上超时导致模式未启用。
         match self.send_command(ctx, "AT+CNMI?", COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.contains("+CNMI: 2,1,0,2,0") => {}
-            _ => {
-                if let Err(e) = self.send_command(ctx, "AT+CNMI=2,1,0,2,0", COMMAND_TIMEOUT, None).await {
-                    log_warn!("设置短信上报模式失败: {}", e);
-                }
-            }
+            _ => match self.send_command(ctx, "AT+CNMI=2,1,0,2,0", COMMAND_TIMEOUT, None).await {
+                Ok(resp) if resp.ok() => {}
+                Ok(resp) => log_warn!("设置短信上报模式未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!("设置短信上报模式失败: {}", e),
+            },
         }
         match self.send_command(ctx, "AT+CMGF?", COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.contains("+CMGF: 0") => {}
-            _ => {
-                if let Err(e) = self.send_command(ctx, "AT+CMGF=0", COMMAND_TIMEOUT, None).await {
-                    log_warn!("设置短信 PDU 模式失败: {}", e);
-                }
-            }
+            _ => match self.send_command(ctx, "AT+CMGF=0", COMMAND_TIMEOUT, None).await {
+                Ok(resp) if resp.ok() => {}
+                Ok(resp) => log_warn!("设置短信 PDU 模式未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!("设置短信 PDU 模式失败: {}", e),
+            },
         }
-        if let Err(e) = self.send_command(ctx, "AT+CLIP=1", COMMAND_TIMEOUT, None).await {
-            log_warn!("开启来电号码显示失败: {}", e);
+        match self.send_command(ctx, "AT+CLIP=1", COMMAND_TIMEOUT, None).await {
+            Ok(resp) if resp.ok() => {}
+            Ok(resp) => log_warn!("开启来电号码显示未返回 OK: {}", resp.text()),
+            Err(e) => log_warn!("开启来电号码显示失败: {}", e),
         }
 
         // 自动拨号默认开启（UCI autodial_enable 默认 1）。
         // 放在最后：前面的设置类命令失败不应阻止拨号，否则设备会一直没有 IP。
+        // 内部含退避重试，覆盖「AT 已通但驻网/PDP 尚未完成」的冷启动窗口。
         self.ensure_autodial(ctx).await;
     }
 
-    /// 确保自动拨号处于期望状态。
+    /// 确保自动拨号处于期望状态（开关 + 拨号方式）。
     ///
     /// 「模块显示在线但接口拿不到 IP」的根因链：
     ///   模组已注册网络（AT 通、有信号）→ 但 ^SETAUTODIAL 未开启 →
     ///   模组不向 USB 网口下发 DHCP → eth2 一直是 NO-CARRIER/DHCP 无应答 →
     ///   netifd 的 MT5700M 接口没有 IP → 无法联网。
-    /// 因此每次连上模组后都要对齐一次自动拨号状态。
     ///
-    /// 幂等：先查询，已是目标值则不重复下发（避免每次重连都打断已建立的 PDP 上下文）。
+    /// 两个容易踩的坑（此前各造成一类「长期无 IP」）：
+    ///   1) 只比开关不比方式：模组停在方式 2（转网口）而期望方式 1（USB 网口）时会直接跳过；
+    ///   2) 只对齐一次且失败只记日志：冷启动时 AT 通道往往早于驻网可用，
+    ///      第一次下发失败后不再重试，链路一直稳定的话永远等不到自愈。
+    /// 因此这里做**带退避的重试**（最长约 4 分钟），并在复核阶段确认数据面。
     async fn ensure_autodial(self: &Arc<Self>, ctx: &tokio::sync::watch::Receiver<bool>) {
         let desired = self.cfg.autodial_enable;
         let mode = self.cfg.autodial_mode.clamp(1, 2);
 
+        // 退避序列覆盖冷启动窗口：0s / 5s / 15s / 30s / 60s / 120s。
+        // 单次尝试内部不持有命令锁（只在真正收发时持有），不会阻塞用户命令。
+        let delays = [
+            Duration::from_secs(0),
+            Duration::from_secs(5),
+            Duration::from_secs(15),
+            Duration::from_secs(30),
+            Duration::from_secs(60),
+            Duration::from_secs(120),
+        ];
+        let total = delays.len();
+        for (attempt, delay) in delays.iter().enumerate() {
+            if !delay.is_zero() && !sleep_ctx(ctx, *delay).await {
+                return;
+            }
+            if self.align_autodial_once(ctx, desired, mode).await {
+                if attempt > 0 {
+                    log_info!("自动拨号在第 {} 次尝试后达成期望状态", attempt + 1);
+                }
+                return;
+            }
+            if attempt + 1 < total {
+                log_warn!("自动拨号尚未达成期望状态（第 {} 次尝试），稍后重试", attempt + 1);
+            }
+        }
+        log_warn!(
+            "自动拨号连续 {} 次未能达成期望状态（enable={} mode={}），\
+             交由周期对账或下一次链路重连继续处理；请检查模组是否已驻网",
+            total,
+            desired as i32,
+            mode
+        );
+    }
+
+    /// 单次对齐：查询 → 必要时下发 → 复核 + 数据面确认。返回是否已达成期望状态。
+    async fn align_autodial_once(
+        self: &Arc<Self>,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        desired: bool,
+        mode: i64,
+    ) -> bool {
         // 1) 查询当前状态；查询失败也继续尝试下发，避免模组刚连上超时导致不拨号。
         let current = match self.send_command(ctx, "AT^SETAUTODIAL?", COMMAND_TIMEOUT, None).await {
-            Ok(resp) => parse_autodial_enable(&resp.text()),
+            Ok(resp) => parse_autodial_state(&resp.text()),
             Err(e) => {
                 log_warn!("查询自动拨号状态失败，将直接下发设置: {}", e);
                 None
             }
         };
 
-        if current == Some(desired) {
-            log_info!("自动拨号已处于期望状态（enable={}），不重复下发", desired as i32);
-            return;
+        // 开关必须一致；方式只在「模组明确回了方式」且与期望不符时才算未达成。
+        // 模组未回方式字段（None）视为无法判定，不据此反复下发打断已建立的上下文。
+        if let Some((enable, cur_mode)) = current {
+            let mode_ok = !desired || cur_mode.is_none() || cur_mode == Some(mode);
+            if enable == desired && mode_ok {
+                log_info!(
+                    "自动拨号已处于期望状态（enable={}, mode={:?}），不重复下发",
+                    desired as i32,
+                    cur_mode
+                );
+                notify_uplink_ready().await;
+                return true;
+            }
+            if enable == desired && !mode_ok {
+                log_warn!(
+                    "自动拨号开关已开但拨号方式不符（实际 {:?}，期望 {}），将重新下发",
+                    cur_mode,
+                    mode
+                );
+            }
         }
 
         // 2) 下发。开启时带上拨号方式；关闭时不带参数（与手册及前端 dial.js 一致）。
@@ -297,13 +435,106 @@ impl AtClient {
             }
         }
 
-        // 3) 复核，便于日志里直接看出是否真的生效。
-        if let Ok(resp) = self.send_command(ctx, "AT^SETAUTODIAL?", COMMAND_TIMEOUT, None).await {
-            match parse_autodial_enable(&resp.text()) {
-                Some(v) if v == desired => log_info!("自动拨号状态复核通过"),
-                Some(v) => log_warn!("自动拨号状态复核不一致：期望 {}，实际 {}", desired as i32, v as i32),
-                None => log_warn!("自动拨号状态复核无法解析: {}", resp.text()),
+        // 3) 复核：确认设置真的生效。
+        let verified = match self.send_command(ctx, "AT^SETAUTODIAL?", COMMAND_TIMEOUT, None).await {
+            Ok(resp) => match parse_autodial_state(&resp.text()) {
+                Some((enable, cur_mode)) => {
+                    let mode_ok = !desired || cur_mode.is_none() || cur_mode == Some(mode);
+                    if enable == desired && mode_ok {
+                        log_info!("自动拨号状态复核通过（enable={}, mode={:?}）", enable as i32, cur_mode);
+                        true
+                    } else {
+                        log_warn!(
+                            "自动拨号状态复核不一致：期望 enable={} mode={}，实际 enable={} mode={:?}",
+                            desired as i32,
+                            mode,
+                            enable as i32,
+                            cur_mode
+                        );
+                        false
+                    }
+                }
+                None => {
+                    log_warn!("自动拨号状态复核无法解析: {}", resp.text());
+                    false
+                }
+            },
+            Err(e) => {
+                log_warn!("自动拨号状态复核失败: {}", e);
+                false
             }
+        };
+        if !verified {
+            return false;
+        }
+
+        // 4) 数据面确认：开关为 1 不等于已经拨上。
+        //    仅 USB 网口模式（mode=1）才用数据面判定——转网口模式的数据面在以太网口侧，
+        //    模组的 NDIS/PDP 状态不能代表有网，不做强判定以免误报。
+        if desired && mode == 1 && !self.pdp_ready(ctx).await {
+            log_warn!("自动拨号已开启但数据面尚未就绪（PDP 未激活），将继续重试");
+            return false;
+        }
+        notify_uplink_ready().await;
+        true
+    }
+
+    /// 数据面是否就绪。先看 USB 网口状态，再回退看 PDP 激活位；
+    /// 两条命令都给不出可判定信息时返回 true（宁可放过，也不要因判定工具缺失而反复下发）。
+    async fn pdp_ready(self: &Arc<Self>, ctx: &tokio::sync::watch::Receiver<bool>) -> bool {
+        if let Ok(resp) = self.send_command(ctx, "AT^NDISSTATQRY?", COMMAND_TIMEOUT, None).await {
+            if let Some(state) = parse_ndis_state(&resp.text()) {
+                if state {
+                    return true;
+                }
+            }
+        }
+        if let Ok(resp) = self.send_command(ctx, "AT+CGACT?", COMMAND_TIMEOUT, None).await {
+            if let Some(active) = parse_cgact_active(&resp.text()) {
+                return active;
+            }
+        }
+        true
+    }
+
+    /// 拨号守护：链路存活期间周期性对账，覆盖「首次对齐时模组尚未驻网」与
+    /// 「运行中 PDP 被网络侧或模组释放」两类自愈场景。
+    ///
+    /// 设计要点：
+    ///   - 整个进程只起一个守护（在 run() 里 spawn 一次，跨重连存活），
+    ///     不会因为频繁重连而叠加任务；
+    ///   - 仅在已连接时工作，断开则跳过，不产生无效 AT 命令；
+    ///   - 每次先探数据面，就绪就什么都不做（稳态下每 5 分钟只发 1~2 条 AT），
+    ///     避免「方式字段无法判定」时反复下发打断已建立的 PDP 上下文；
+    ///   - 转网口模式（mode=2）的数据面不在 USB 网口上，不做该判定，直接跳过。
+    async fn autodial_watchdog(self: Arc<Self>, ctx: tokio::sync::watch::Receiver<bool>) {
+        const TICK: Duration = Duration::from_secs(60);
+        const TICKS_PER_CHECK: u32 = 5;
+        let mut ticks: u32 = 0;
+        loop {
+            if !sleep_ctx(&ctx, TICK).await {
+                return;
+            }
+            if !self.connected() {
+                ticks = 0;
+                continue;
+            }
+            ticks += 1;
+            if ticks < TICKS_PER_CHECK {
+                continue;
+            }
+            ticks = 0;
+            if !self.cfg.autodial_enable {
+                continue;
+            }
+            if self.cfg.autodial_mode.clamp(1, 2) != 1 {
+                continue;
+            }
+            if self.pdp_ready(&ctx).await {
+                continue;
+            }
+            log_warn!("周期对账发现自动拨号数据面未就绪，重新对齐");
+            self.ensure_autodial(&ctx).await;
         }
     }
 
@@ -508,9 +739,13 @@ impl AtClient {
             };
 
             if n == 0 {
-                // 不能立刻当 EOF：串口在 VMIN=0/VTIME=0 下「暂无数据」时 read 返回 0
-                // 而不是 EAGAIN，直接退出会让读循环刚连上就结束，此后所有 AT 命令都
-                // 超时（实机表现为「模组无响应」+ 每十几秒反复重连）。
+                // 0 字节读的含义按通道区分：
+                //   串口：serial_linux.rs 设 VMIN=1，无数据时 read 返回 EAGAIN（不会给 0），
+                //         所以这里的 0 只可能是真 EOF（例如 USB 串口被拔出）；
+                //   TCP ：0 表示对端已关闭连接。
+                // 两种情况都按「链路断开」处理，但用连续多次重试兜住驱动的偶发行为：
+                // 直接退出会让读循环刚连上就结束，此后所有 AT 命令都超时
+                // （实机曾表现为「模组无响应」+ 每十几秒反复重连）。
                 zero_reads += 1;
                 if zero_reads >= ZERO_READ_RETRY_LIMIT {
                     return Ok(()); // 持续为 0：判定链路已断开，交给上层重连
@@ -649,6 +884,27 @@ pub fn is_passthrough_urc(line: &str) -> bool {
     line.starts_with("+CUSD:") && line.contains(',')
 }
 
+/// 通知系统侧「拨号已就绪」，由本包提供的钩子脚本拉起承载接口。
+///
+/// 时序意义：接口侧（init.d / hotplug）无法知道模组何时真正拨号成功，
+/// 只能靠开机时抢跑 + 猜时间窗口，冷启动很容易错过（实测整条链路
+/// USB 枚举→驻网→下发 DHCP 常见 30~60s，而旧实现 35s 后即放弃）。
+/// 这个通知让「拨号完成 → ifup 要地址」变成确定顺序。
+///
+/// 脚本不存在或执行失败都静默跳过：它是补充手段，兜底路径在 init.d 的重试
+/// 与 hotplug 钩子里，缺了它功能仍然可用。
+async fn notify_uplink_ready() {
+    const HOOK: &str = "/usr/libexec/at-webserver/on-uplink.sh";
+    if !std::path::Path::new(HOOK).exists() {
+        return;
+    }
+    match tokio::process::Command::new(HOOK).status().await {
+        Ok(st) if st.success() => log_info!("已通知系统侧拉起模组接口（{}）", HOOK),
+        Ok(st) => log_warn!("拉起模组接口的钩子返回非零退出码: {:?}", st.code()),
+        Err(e) => log_warn!("执行拉起模组接口的钩子失败: {}", e),
+    }
+}
+
 async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
     let mut ctx_c = ctx.clone();
     tokio::select! {
@@ -717,40 +973,80 @@ mod tests {
     /* ---------- 自动拨号状态解析（对应「接口拿不到 IP」修复） ---------- */
 
     #[test]
-    fn parse_autodial_enable_reads_first_field() {
+    fn parse_autodial_state_reads_switch_and_mode() {
         // 实测回显：带拨号方式的完整形态
         assert_eq!(
-            parse_autodial_enable("^SETAUTODIAL: 1,1,\"IP\",\"cmnet\",\"\",\"\",0\r\nOK"),
-            Some(true)
+            parse_autodial_state("^SETAUTODIAL: 1,1,\"IP\",\"cmnet\",\"\",\"\",0\r\nOK"),
+            Some((true, Some(1)))
         );
         assert_eq!(
-            parse_autodial_enable("^SETAUTODIAL: 0,1,\"IP\",\"cmnet\"\r\nOK"),
-            Some(false)
+            parse_autodial_state("^SETAUTODIAL: 0,2,\"IP\",\"cmnet\"\r\nOK"),
+            Some((false, Some(2)))
         );
     }
 
     #[test]
-    fn parse_autodial_enable_handles_short_and_padded_forms() {
-        // 部分固件只回一个字段
-        assert_eq!(parse_autodial_enable("^SETAUTODIAL: 1\r\nOK"), Some(true));
-        // 前导空白 / 单引号风格
-        assert_eq!(parse_autodial_enable("  ^SETAUTODIAL:  0  \r\nOK"), Some(false));
+    fn parse_autodial_state_handles_short_and_padded_forms() {
+        // 部分固件只回一个字段：方式为 None（表示无法判定，不是不匹配）
+        assert_eq!(parse_autodial_state("^SETAUTODIAL: 1\r\nOK"), Some((true, None)));
+        // 前导空白 / 多空格
+        assert_eq!(parse_autodial_state("  ^SETAUTODIAL:  0  \r\nOK"), Some((false, None)));
     }
 
     #[test]
-    fn parse_autodial_enable_rejects_non_boolean_and_missing() {
+    fn parse_autodial_state_rejects_non_boolean_and_missing() {
         // 非 0/1 视为不可判定，调用方据此改为直接下发命令
-        assert_eq!(parse_autodial_enable("^SETAUTODIAL: \r\nOK"), None);
-        assert_eq!(parse_autodial_enable("^SETAUTODIAL: abc\r\nOK"), None);
-        assert_eq!(parse_autodial_enable("OK\r\nERROR"), None);
-        assert_eq!(parse_autodial_enable(""), None);
+        assert_eq!(parse_autodial_state("^SETAUTODIAL: \r\nOK"), None);
+        assert_eq!(parse_autodial_state("^SETAUTODIAL: abc\r\nOK"), None);
+        assert_eq!(parse_autodial_state("OK\r\nERROR"), None);
+        assert_eq!(parse_autodial_state(""), None);
     }
 
     #[test]
-    fn parse_autodial_enable_picks_the_setautodial_line() {
+    fn parse_autodial_state_picks_the_setautodial_line() {
         // 应答里混有其它行时，只认 ^SETAUTODIAL
         let mixed = "^HCSQ: \"NR\",72,201,30\r\n^SETAUTODIAL: 1,2\r\nOK";
-        assert_eq!(parse_autodial_enable(mixed), Some(true));
+        assert_eq!(parse_autodial_state(mixed), Some((true, Some(2))));
+    }
+
+    #[test]
+    fn parse_autodial_state_ignores_out_of_range_mode() {
+        // 第 2 字段不是拨号方式（或取值非法）时，只保留开关，方式记为无法判定，
+        // 避免据此反复下发设置。
+        assert_eq!(parse_autodial_state("^SETAUTODIAL: 1,9\r\nOK"), Some((true, None)));
+        assert_eq!(parse_autodial_state("^SETAUTODIAL: 1,x\r\nOK"), Some((true, None)));
+    }
+
+    /// 回归：开关一致但方式不符时必须视为「未达成」，
+    /// 否则模组会一直停在转网口模式，USB 网口拿不到 DHCP。
+    #[test]
+    fn autodial_mode_mismatch_is_not_satisfied() {
+        let current = parse_autodial_state("^SETAUTODIAL: 1,2\r\nOK").unwrap();
+        let desired_mode = 1;
+        let mode_ok = current.1.is_none() || current.1 == Some(desired_mode);
+        assert!(
+            !(current.0 && mode_ok),
+            "开关一致但方式不符时不能判定为已对齐"
+        );
+
+        // 方式字段缺失时不应据此反复下发
+        let unknown = parse_autodial_state("^SETAUTODIAL: 1\r\nOK").unwrap();
+        assert!(unknown.0 && (unknown.1.is_none() || unknown.1 == Some(desired_mode)));
+    }
+
+    #[test]
+    fn parse_ndis_state_reads_first_field() {
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1,1,0,0,0,0,0\r\nOK"), Some(true));
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 0,1,0,0,0,0,0\r\nOK"), Some(false));
+        assert_eq!(parse_ndis_state("OK"), None);
+    }
+
+    #[test]
+    fn parse_cgact_active_detects_any_active_context() {
+        assert_eq!(parse_cgact_active("+CGACT: 1,1\r\nOK"), Some(true));
+        assert_eq!(parse_cgact_active("+CGACT: 1,0\r\n+CGACT: 2,0\r\nOK"), Some(false));
+        assert_eq!(parse_cgact_active("+CGACT: 1,0\r\n+CGACT: 2,1\r\nOK"), Some(true));
+        assert_eq!(parse_cgact_active("OK"), None);
     }
 
     /* ---------- 排队超时与应答超时分离（对应「终端只有 ATI 有回复」修复） ---------- */

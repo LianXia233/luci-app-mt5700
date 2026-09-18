@@ -6,6 +6,15 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 pub const AUTO_SERIAL_PORT: &str = "auto";
+
+/// 常见 PCUI 口编号偏好，**仅用于同优先级时的排序**，不是事实判断。
+///
+/// MT5700M-CN 在典型内核/驱动下把 PCUI 枚举为 ttyUSB1，但枚举顺序取决于
+/// USB 接口描述符与 option 驱动绑定顺序，会随内核与固件版本变化。
+/// 真正的判定依据是 sysfs 的接口名（见 serialdetect::port_rank），
+/// 只有在拿不到该信息时才会用到这个编号偏好。
+/// 另有一个更隐蔽的风险：若某机型上 ttyUSB1 恰是 GPS 口且其数据里出现整行 OK，
+/// 硬编码编号会把它排到最前；按接口名打分可避免。
 pub const PREFERRED_AT_PORT: &str = "/dev/ttyUSB1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -1,0 +1,32 @@
+#!/bin/sh
+# 模组网口 hotplug 钩子（网络接口事件）。
+#
+# 存在的理由：netifd 只在 boot 阶段按 auto=1 尝试拉起接口一次；一旦这一次
+# 落在「模组还没拨号成功」的时间窗前，接口就会长期停在无 IP 状态。
+# V1.12.4 之前的 init.d 是「开机后台等 35s 后放弃」，仓库里也没有任何 hotplug
+# 脚本，于是模组后插、USB 重新枚举、拨号晚于开机窗口完成等情况下都无人补 ifup。
+#
+# 本钩子覆盖：模组网口被挂上某接口（ACTION=add/update）时，补一次 ifup。
+
+[ "$ACTION" = "add" ] || [ "$ACTION" = "update" ] || exit 0
+[ -n "$DEVICE" ] || exit 0
+
+# 只关心挂在 USB 总线上的网卡：按 sysfs 设备路径判定，不硬编码设备名
+link=$(readlink -f "/sys/class/net/$DEVICE/device" 2>/dev/null)
+case "$link" in
+	*usb*) ;;
+	*) exit 0 ;;
+esac
+
+logger -t at-webserver "hotplug: 模组网口 $DEVICE（ACTION=$ACTION, INTERFACE=${INTERFACE:-none}）"
+
+# 若该设备已被某个接口接管，只拉起这个接口
+if [ -n "$INTERFACE" ]; then
+	ifstatus "$INTERFACE" 2>/dev/null | grep -qE '"(ipv4-address|ipv6-address)"[[:space:]]*:[[:space:]]*\[[^]]' && exit 0
+	/sbin/ifup "$INTERFACE" 2>&1 | logger -t at-webserver || true
+	exit 0
+fi
+
+# 没有归属接口时，交由 init.d 侧统一处理（它会按 UCI 与 sysfs 决定拉谁）
+[ -x /etc/init.d/at-webserver ] && /etc/init.d/at-webserver on_uplink >/dev/null 2>&1
+exit 0
