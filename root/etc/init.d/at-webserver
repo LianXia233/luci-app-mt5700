@@ -517,6 +517,15 @@ on_uplink() {
 	return 0
 }
 
+# 语义化别名：确保模组接口存在（V4 必建、V6 也建）并尝试拉起一次。
+# 供安装/升级流程（Makefile 的 postinst、uci-defaults）以及手动排查使用：
+#   /etc/init.d/at-webserver ensure_interfaces
+# 说明：安装时模组往往还没就绪，这里只做「接口先在」这件事；
+# 取址由 init.d 的后台重试、hotplug 钩子与后端拨号就绪通知继续负责。
+ensure_interfaces() {
+	on_uplink
+}
+
 service_triggers() {
 	procd_add_reload_trigger "at-webserver"
 }
