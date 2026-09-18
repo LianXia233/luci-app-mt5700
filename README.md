@@ -172,6 +172,8 @@ USB 枚举 → AT 口就绪 → 模组驻网 → 开启自动拨号(^SETAUTODIAL
 | 运行状态 | `service at-webserver status` | `running` |
 | procd 实例 | `ubus call service list '{"name":"at-webserver"}'` | `instance1.running = true` |
 | rpcd 插件注册 | `ubus -v list mt5700` | 列出 `at` / `events` / `netrate` |
+| 升级后脚本是否生效 | `ls /etc/init.d/at-webserver*` | 无 `at-webserver.apk-new` 残留（apk 的受保护路径机制会把新版留在该文件里，本版 postinst 已自动合并） |
+| 接口是否齐全 | `/etc/init.d/at-webserver ensure_interfaces` 后 `uci show network \| grep MT5700M` | 存在 `MT5700M` 与 `MT5700Mv6` 两段 |
 | 启动日志 | `logread -e at-webserver` | 无 `Permission denied` / `enable 失败` |
 
 页面显示「未注册」时的手动修复：`/etc/init.d/at-webserver enable && /etc/init.d/at-webserver start`。
