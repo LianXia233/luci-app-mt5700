@@ -6,6 +6,7 @@ OpenWrt / ImmortalWrt 的 LuCI 插件，用于管理 MT5700M 5G 模组的拨号�
 - 配置段 / 服务：`at-webserver`
 - 版本：v1.12.7
 - 入口：LuCI 侧边栏「移动网络 → 5G 模组管理」（`admin/modem/5g`）
+- 在线演示：[GitHub Pages](https://lianxia233.github.io/luci-app-mt5700/)（静态示例数据，非真实模组读数）
 
 ## 预览
 
