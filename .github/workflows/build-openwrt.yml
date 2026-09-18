@@ -383,6 +383,18 @@ jobs:
               echo ""
               echo '先确认设备架构：`cat /etc/apk/arch`；opkg 系统用 `grep OPENWRT_ARCH /etc/openwrt_release`。'
               echo ""
+              # 同一架构给出两套完整命令：国内加速版与直连版，按网络情况任选一条
+              emit_cmd() {
+                cbase="$1"; cmain="$2"; ci18n="$3"
+                if [ -n "$ci18n" ]; then
+                  echo "wget -O /tmp/mt5700.apk \"${cbase}/${cmain##*/}\" \\"
+                  echo "  && wget -O /tmp/mt5700-i18n.apk \"${cbase}/${ci18n##*/}\" \\"
+                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk /tmp/mt5700-i18n.apk"
+                else
+                  echo "wget -O /tmp/mt5700.apk \"${cbase}/${cmain##*/}\" \\"
+                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk"
+                fi
+              }
               for a in x86_64 aarch64_cortex-a53 aarch64_generic; do
                 MAIN=$(find dist -maxdepth 1 -type f -name "${a}-luci-app-mt5700-*.apk" -print -quit)
                 [ -n "$MAIN" ] || continue
@@ -393,21 +405,22 @@ jobs:
                   aarch64_generic) NOTE="iStoreOS 25.x、Arm SystemReady 等" ;;
                   *) NOTE="" ;;
                 esac
-                echo "**${a}**（${NOTE}）"
+                echo "### ${a}（${NOTE}）"
+                echo ""
+                echo "**国内加速（推荐，前缀 \`${MIRROR}/\`）**"
                 echo ""
                 echo '```sh'
-                if [ -n "$I18N" ]; then
-                  echo "wget -O /tmp/mt5700.apk \"${MIRRORED}/${MAIN##*/}\" \\"
-                  echo "  && wget -O /tmp/mt5700-i18n.apk \"${MIRRORED}/${I18N##*/}\" \\"
-                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk /tmp/mt5700-i18n.apk"
-                else
-                  echo "wget -O /tmp/mt5700.apk \"${MIRRORED}/${MAIN##*/}\" \\"
-                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk"
-                fi
+                emit_cmd "$MIRRORED" "$MAIN" "$I18N"
+                echo '```'
+                echo ""
+                echo "**直连（不带前缀）**"
+                echo ""
+                echo '```sh'
+                emit_cmd "$RELEASE_URL" "$MAIN" "$I18N"
                 echo '```'
                 echo ""
               done
-              echo "> 以上 URL 已带国内加速前缀 \`${MIRROR}/\`，直连请去掉该前缀。"
+              echo "> 以上两套命令效果相同，按网络情况任选一条；加速版只是把 GitHub 原始 URL 前置了 \`${MIRROR}/\`。"
               echo "> opkg 系统（OpenWrt 24.10 及更早）：把 \`.apk\` 换成 \`.ipk\`，命令改为 \`opkg install\`。"
               echo "> 只想先验证不安装：在 \`apk add\` 后加 \`--simulate\`。报错对照见资产 \`ARCH-GUIDE.txt\`。"
             } >> "$NOTES"
