@@ -421,6 +421,28 @@ jobs:
                 echo ""
               done
               echo "> 以上两套命令效果相同，按网络情况任选一条；加速版只是把 GitHub 原始 URL 前置了 \`${MIRROR}/\`。"
+              echo ""
+              echo "### 全部软件包下载链接"
+              echo ""
+              echo "每个架构都有 4 个包（主包 / 语言包 × apk / ipk），全部列出："
+              echo ""
+              echo "| 架构 | 包 | apk（加速 / 直连） | ipk（加速 / 直连） |"
+              echo "|:--|:--|:--|:--|"
+              for a in x86_64 aarch64_cortex-a53 aarch64_generic; do
+                for pair in "luci-app-mt5700:主包" "luci-i18n-mt5700:语言包"; do
+                  p="${pair%%:*}"
+                  label="${pair##*:}"
+                  APK=$(find dist -maxdepth 1 -type f -name "${a}-${p}*.apk" -print -quit)
+                  IPK=$(find dist -maxdepth 1 -type f -name "${a}-${p}*.ipk" -print -quit)
+                  acell="-"
+                  icell="-"
+                  [ -n "$APK" ] && acell="[加速](${MIRRORED}/${APK##*/}) · [直连](${RELEASE_URL}/${APK##*/})"
+                  [ -n "$IPK" ] && icell="[加速](${MIRRORED}/${IPK##*/}) · [直连](${RELEASE_URL}/${IPK##*/})"
+                  echo "| ${a} | ${label} | ${acell} | ${icell} |"
+                done
+              done
+              echo ""
+              echo "另有 \`ARCH-GUIDE.txt\`（架构选择与报错对照）。"
               echo "> opkg 系统（OpenWrt 24.10 及更早）：把 \`.apk\` 换成 \`.ipk\`，命令改为 \`opkg install\`。"
               echo "> 只想先验证不安装：在 \`apk add\` 后加 \`--simulate\`。报错对照见资产 \`ARCH-GUIDE.txt\`。"
             } >> "$NOTES"
