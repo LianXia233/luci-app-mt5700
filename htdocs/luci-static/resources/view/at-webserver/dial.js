@@ -270,6 +270,11 @@ return L.view.extend({
 
 		function renderPDP() {
 			pdpBody.innerHTML = '';
+			if (settings.enable === 1) {
+				pdpBody.appendChild(E('div', { 'class': 'mt5700-hint' },
+					'自动拨号已开启：PDP 上下文由模组自动维护，手工「激活 / 去激活」已禁用，' +
+					'避免与自动拨号争用同一 CID 导致联网中断。如需手工管理，请先关闭自动拨号。'));
+			}
 			if (!pdpList.length) {
 				pdpBody.appendChild(Mt5700.empty('暂无 PDP 上下文'));
 				return;
@@ -282,9 +287,19 @@ return L.view.extend({
 						handleDeletePdp(ctx.cid);
 					}, '确认删除');
 				}));
-				opWrap.appendChild(Mt5700.button(ctx.active ? '去激活' : '激活', function () {
+				var autodialOn = settings.enable === 1;
+				var actBtn = Mt5700.button(ctx.active ? '去激活' : '激活', function () {
+					if (autodialOn) {
+						Mt5700.warning('自动拨号开启时 PDP 由模组维护，手工激活/去激活会与之冲突，请先关闭自动拨号');
+						return;
+					}
 					handleActivePdp(ctx.cid, !ctx.active);
-				}, 'secondary'));
+				}, 'secondary');
+				if (autodialOn) {
+					actBtn.disabled = true;
+					actBtn.title = '自动拨号开启时由模组维护 PDP，禁止手工切换';
+				}
+				opWrap.appendChild(actBtn);
 				return [
 					String(ctx.cid),
 					getPdpTypeText(ctx.type),
@@ -325,20 +340,42 @@ return L.view.extend({
 			}).catch(function () { Mt5700.error('获取拨号配置失败'); });
 		}
 
-		// 把自动拨号期望状态写入 UCI，供后端在每次连上模组后对齐
+		/* 自动拨号期望值同步 —— 方向修正。
+		 *
+		 * 旧实现把「模组当前的观测状态」直接写成 UCI 期望值并立即 commit：
+		 * 只要打开一次本页，模组那一刻回 enable=0（上次手工关闭、未插卡被模组
+		 * 自行关闭、或应答被截断）就会把配置里的 autodial_enable 改成 0 并落盘，
+		 * 后端从此主动关闭自动拨号，且配置持久化、重启也不恢复 ——
+		 * 与「默认开启 + 断线自愈」的设计目标正好相反。
+		 * 另外它绕过了本页的「保存并应用」暂存机制，用户无法撤销。
+		 *
+		 * 现在的规则：
+		 *   1) UCI 里已有该键（绝大多数设备）→ 一律以配置为准，只做提示，
+		 *      是否改写由用户点「保存并应用」决定；
+		 *   2) UCI 里完全没有该键（首次安装 / 从旧版本升级）→ 写一次初值并标脏，
+		 *      由用户确认保存；
+		 *   3) 任何情况下都不静默 commit。
+		 */
 		function syncAutodialDefault(enabled, mode) {
-			var wantEnable = enabled ? '1' : '0';
-			var wantMode = String(mode != null ? mode : 1);
-			if (wantMode !== '1' && wantMode !== '2') wantMode = '1';
-
 			var curEnable = L.uci.get('at-webserver', 'config', 'autodial_enable');
 			var curMode = L.uci.get('at-webserver', 'config', 'autodial_mode');
-			if (curEnable === wantEnable && curMode === wantMode) return;
-			if (curEnable == null && wantEnable === '1' && curMode == null) return;
 
-			L.uci.set('at-webserver', 'config', 'autodial_enable', wantEnable);
+			if (curEnable != null || curMode != null) {
+				var cfgOn = String(curEnable) === '1';
+				if (curEnable != null && enabled !== cfgOn) {
+					Mt5700.warning('模组当前自动拨号状态与配置期望不一致：配置=' +
+						(cfgOn ? '开启' : '关闭') + '，模组=' + (enabled ? '开启' : '关闭') +
+						'。后端会按配置继续对齐；如需以模组状态为准，请点击页面下方「保存并应用」。');
+				}
+				return;
+			}
+
+			// 首次安装：写入一次初值，标记为「未保存更改」，由用户确认
+			var wantMode = String(mode != null ? mode : 1);
+			if (wantMode !== '1' && wantMode !== '2') wantMode = '1';
+			L.uci.set('at-webserver', 'config', 'autodial_enable', enabled ? '1' : '0');
 			L.uci.set('at-webserver', 'config', 'autodial_mode', wantMode);
-			AtWs.uci.uciCommit('at-webserver').catch(function () { /* 不阻断页面 */ });
+			AtWs.uci.markDirty();
 		}
 
 		function handleAutoDialChange(checked) {

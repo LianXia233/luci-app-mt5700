@@ -4,14 +4,14 @@ OpenWrt / ImmortalWrt 的 LuCI 插件，用于管理 MT5700M 5G 模组的拨号�
 
 - 包名：`luci-app-mt5700`
 - 配置段 / 服务：`at-webserver`
-- 版本：v1.12.4
+- 版本：v1.12.5
 - 入口：LuCI 侧边栏「移动网络 → 5G 模组管理」（`admin/modem/5g`）
 
 ## 架构
 
 LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP newline-JSON，仅回环 127.0.0.1）→ 模组 AT 命令。
 
-- 默认连接 PCUI 串口 `/dev/ttyUSB1`，网络 TCP 为备用。
+- 默认连接 PCUI 串口（`SERIAL`，`serial_port=auto` 自动探测），网络 TCP 为备用。
 - 串口 / AT、定时锁频、小区扫频、企业微信推送等能力需常驻后端进程，故安装包内含后端二进制。
 
 ## 功能
@@ -20,47 +20,67 @@ LuCI 页面 → rpcd（ucode 代理 `mt5700.uc`）→ Rust 后端（tokio，TCP 
 
 网络状态 · 网络设置 · 拨号设置 · 全网扫频 · 定时锁频 · 模组设置 · 模组升级 · 短信中心 · 短信设置 · AT 调试终端 · 通知日志 · 服务配置
 
-## 与 luci-app-mt5700m 的区别
+## 架构与安装包选择
 
-本仓库与同系列的 [`luci-app-mt5700m`](https://github.com/LianXia233/luci-app-mt5700m) 都面向 MT5700M-CN 5G 模组，但技术路线不同，按场景选用：
+OpenWrt 的包架构名是 `<base>[_<variant>]` 形式，**variant 参与严格匹配**。同样一颗 Cortex-A53，在不同固件上可能是不同的架构名：
 
-| 维度 | luci-app-mt5700（本仓库） | luci-app-mt5700m |
+| 设备声明的架构 | 典型来源 | 应下载的包 |
 |:--|:--|:--|
-| 后端实现 | Rust 后端 `at-webserver-rust` 随包内置，单包交付 | 纯 LuCI（JS），依赖外部 `ubus-at-daemon` 守护进程与 `sms-tool_q` |
-| 通信架构 | LuCI → rpcd（ucode 代理 `mt5700.uc`）→ Rust → 模组 AT | LuCI → ubus（at-daemon / sms-tool_q）→ 模组 |
-| 拨号方式 | PCUI 串口 AT（`SERIAL`，默认 `/dev/ttyUSB1`，TCP 备用） | NCM 拨号（依赖 `kmod-usb-net-cdc-ncm` 等内核模块） |
-| 功能侧重 | 扫频、定时锁频、企业微信推送、通知日志（含 12 页全功能管理） | 概览、移动数据、网络与小区、短信、系统维护、流量历史 |
-| 版本 / 许可 | v1.12.4 / GPLv3 | 2.x / Apache-2.0 |
+| `aarch64_cortex-a53` | ImmortalWrt / OpenWrt 的 `mediatek/filogic`、`qualcommax`（`CPU_TYPE:=cortex-a53`） | `aarch64_cortex-a53-luci-app-mt5700-*` |
+| `aarch64_generic` | `armsr/armv8`（未定义 `CPU_TYPE`）、iStoreOS 25.x，以及其它把 aarch64 统一为 generic 的固件 | `aarch64_generic-luci-app-mt5700-*` |
+| `x86_64` | x86 软路由 / 虚拟机 | `x86_64-luci-app-mt5700-*` |
 
-> **两个插件互不兼容：** 二者都直接接管同一 MT5700M 模组的控制通道（AT/串口）与数据接口，同一台设备上同时安装会争用通道、造成配置冲突，因此管理同一模组时只能二选一，不可同时启用。
+> 两者都是 ARMv8-A 指令集，**二进制互相兼容**。装不上只是元数据里的 variant 不匹配，不是 CPU 不支持 —— 这是「固件和包的架构看起来都是 aarch64 却装不上」的唯一原因。
 
-选型：需要扫频 / 锁频 / 常驻后端管控时选本仓库；偏好纯 LuCI、NCM 拨号、配套原版 WebUI 的选 `luci-app-mt5700m`。
+### 先确认设备声明的有效架构
+
+```sh
+# apk 系统（OpenWrt 25.x / ImmortalWrt SNAPSHOT / iStoreOS 25.x）
+cat /etc/apk/arch
+
+# opkg 系统（OpenWrt 24.10 及更早）
+grep OPENWRT_ARCH /etc/openwrt_release
+```
+
+**不要用 `apk --print-arch` 判断**：它输出的是 apk 二进制编译时的默认架构（实测在 `aarch64_cortex-a53` 设备上输出 `aarch64`），与安装校验实际使用的 `/etc/apk/arch` 列表不是一回事。以 `/etc/apk/arch` 第一行为准。
+
+### 常见报错对照
+
+| 报错 | 含义 | 处理 |
+|:--|:--|:--|
+| `error: uninstallable arch: aarch64_cortex-a53` | 设备声明的是 `aarch64_generic` | 改下 `aarch64_generic` 的包；或临时 `echo aarch64_cortex-a53 >> /etc/apk/arch`（sysupgrade 后失效） |
+| `error: uninstallable arch: aarch64_generic` | 设备声明的是 `aarch64_cortex-a53` | 改下 `aarch64_cortex-a53` 的包 |
+| `error: uninstallable arch: all` | 语言包等 `PKGARCH=all` 的包需要 `/etc/apk/arch` 中有 `all` 行 | `echo all >> /etc/apk/arch` |
+| 报错后跟随 `satisfies: world[...]` | 只是依赖求解的上下文，不是另一个问题 | 按上面的 arch 处理 |
+
+Release 中附带的 `ARCH-GUIDE.txt` 是同一份说明，可离线对照。
 
 ## 安装
 
-从 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载与目标架构匹配的包（前端与后端必须成对安装）。
+从 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载与设备架构匹配的包（前端与后端同在一个包内，语言包另装）。
 
-### OpenWrt 24.10+（apk）
+### OpenWrt 25.x / ImmortalWrt SNAPSHOT（apk）
 
 ```sh
+# 按 cat /etc/apk/arch 的结果替换 <ARCH>
 apk add --allow-untrusted \
-  ./aarch64_cortex-a53-luci-app-mt5700-1.12.4-r1.apk \
-  ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn-*.apk
+  ./<ARCH>-luci-app-mt5700-1.12.5-r1.apk \
+  ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
-### OpenWrt 23.05（opkg / ipk）
+### OpenWrt 24.10 及更早（opkg / ipk）
 
 ```sh
-opkg install ./aarch64_cortex-a53-luci-app-mt5700_1.12.4_aarch64_cortex-a53.ipk
-opkg install ./aarch64_cortex-a53-luci-i18n-mt5700-zh-cn_*.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.12.5_<ARCH>.ipk
+opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
 ## 快速开始
 
 ```sh
 uci set at-webserver.config.enabled=1
-uci set at-webserver.config.connection_type=SERIAL   # 默认 PCUI
-uci set at-webserver.config.serial_port=auto         # 优先探测 ttyUSB1
+uci set at-webserver.config.connection_type=SERIAL   # 默认 PCUI 串口
+uci set at-webserver.config.serial_port=auto         # 自动探测 AT 口
 uci commit at-webserver
 service at-webserver restart
 
@@ -69,6 +89,36 @@ ls -l /usr/bin/at-webserver-rust
 ```
 
 登录 LuCI 后进入「移动网络 → 5G 模组管理」即可使用 12 个页面。
+
+## 自动拨号与接口拉起
+
+这是本插件最容易被误解的一环：**模组 AT 在线不等于路由器能上网**。完整链路是
+
+```
+USB 枚举 → AT 口就绪 → 模组驻网 → 开启自动拨号(^SETAUTODIAL)
+        → 模组向 USB 网口下发 DHCP → netifd 在承载接口上取到地址 → 可上网
+```
+
+各环节由谁负责：
+
+| 环节 | 负责方 | 实现位置 |
+|:--|:--|:--|
+| 对齐自动拨号开关与方式 | Rust 后端 | 每次连上模组后对齐；未达成则退避重试（0/5/15/30/60/120s），并有每 5 分钟的周期对账守护 |
+| 确认拨号真的可用 | Rust 后端 | `AT^NDISSTATQRY?` / `AT+CGACT?` 双判据，不只看开关位 |
+| 拉起承载接口 | init.d + hotplug + 后端通知 | 三处协同：init.d 带间隔重试 18 次 × 10s；`hotplug.d/iface`、`hotplug.d/usb` 在网口出现时补 `ifup`；后端确认拨号就绪后调用 `/usr/libexec/at-webserver/on-uplink.sh` |
+| 接口不存在时创建 | init.d | 检测到模组 USB 网口即按 `proto=dhcp` 创建；检测不到则明确记录原因 |
+| 转网口模式（`autodial_mode=2`） | 模组 | 数据面在以太网口侧，路由器不做 NDIS 判定 |
+
+排查命令：
+
+| 检查项 | 命令 | 预期 |
+|:--|:--|:--|
+| 串口是否就绪 | `ls /dev/ttyUSB* /dev/ttyACM*` | 至少一个 AT 口 |
+| 自动拨号状态 | `logread -e at-webserver \| grep 自动拨号` | 出现「已处于期望状态」或「复核通过」 |
+| 接口是否有地址 | `ifstatus MT5700M \| grep -A2 ipv4-address` | 有 `address` 字段 |
+| 接口设备名 | `uci get network.MT5700M.device` | 与 `ls /sys/class/net` 中模组网口一致 |
+| 手动补一次拉起 | `/etc/init.d/at-webserver on_uplink` | 日志出现 ifup 相关输出 |
+| 数据面状态 | AT 终端执行 `AT^NDISSTATQRY?` | 首字段为 `1` |
 
 ## 开机自启
 
@@ -81,10 +131,12 @@ ls -l /usr/bin/at-webserver-rust
   > 导致安装期 enable 以 `Permission denied` 失败；而 enable 只在安装那一刻执行
   > 一次、失败不重试，于是存量设备永久停留在「未注册」状态——重启后服务再也不起来。
   > 为此 `start_service` 内置自愈：每次 start 若发现 `/etc/rc.d` 链接缺失就自动补 `enable`，
-  > 存量设备执行一次 `/etc/init.d/at-webserver start` 即永久修好。
+  > 存量设备执行一次 `/etc/init.d/at-webserver start` 即永久修好；
+  > `uci-defaults` 也会断言注册结果，失败则非零退出以触发系统自带的重试。
 
-- **前端（LuCI 页面）**：页面与菜单（`menu.d`）、权限（`acl.d`）随 rpcd / uhttpd 系统服务自动加载；RPC 代理 `mt5700.uc` 由 rpcd 启动时扫描 `/usr/share/rpcd/ucode/` 自动注册，无独立进程需要管理。
-- **网络接口**：服务启动时会将 `MT5700M` / `MT5700Mv6` 接口置为 `auto=1` 并在模组网口就绪后主动 `ifup`，保证拨号接口开机自启。
+- **前端（LuCI 页面）**：页面与菜单（`menu.d`）、权限（`acl.d`）随 rpcd / uhttpd 系统服务自动加载；RPC 代理 `mt5700.uc` 由 rpcd 启动时扫描 `/usr/share/rpcd/ucode/` 自动注册，无独立进程需要管理。安装/升级的 `postinst` 会执行 `/etc/init.d/rpcd reload`，保证新装的 ucode 插件与 ACL 立即生效（**这是「装完即可用」与「重启后才可用」的分界**）。
+
+- **网络接口**：服务启动时会把承载接口置为 `auto=1`，并在模组网口就绪后多次尝试 `ifup`（带间隔重试，覆盖 30~60s 的冷启动链路）；接口不存在时按检测到的 USB 网口自动创建。另有 hotplug 钩子与后端拨号就绪通知作为补充触发。
 
 排查命令：
 
@@ -94,6 +146,7 @@ ls -l /usr/bin/at-webserver-rust
 | 注册状态 | `/etc/init.d/at-webserver enabled && echo yes` | 输出 `yes` |
 | 运行状态 | `service at-webserver status` | `running` |
 | procd 实例 | `ubus call service list '{"name":"at-webserver"}'` | `instance1.running = true` |
+| rpcd 插件注册 | `ubus -v list mt5700` | 列出 `at` / `events` / `netrate` |
 | 启动日志 | `logread -e at-webserver` | 无 `Permission denied` / `enable 失败` |
 
 页面显示「未注册」时的手动修复：`/etc/init.d/at-webserver enable && /etc/init.d/at-webserver start`。
@@ -106,40 +159,48 @@ ls -l /usr/bin/at-webserver-rust
 |:--|:--|:--|
 | `config.enabled` | `1` | 启用服务 |
 | `config.connection_type` | `SERIAL` | 连接类型，默认 PCUI 串口 |
-| `config.serial_port` | `auto` | 串口设备，自动探测优先 `ttyUSB1` |
+| `config.serial_port` | `auto` | 串口设备；`auto` 按 sysfs 接口名自动探测 AT 口（优先 PCUI） |
+| `config.serial_port_custom` | `/dev/ttyUSB1` | `serial_port=custom` 时使用 |
 | `config.autodial_enable` | `1` | 连上模组后确保开启自动拨号 |
 | `config.autodial_mode` | `1` | 1=USB 网络接口，2=转网口模式 |
+| `config.cellscan_timeout` | `180` | 单次扫频允许运行秒数（下限 10） |
 
-页面修改采用暂存式「保存并应用」：改动控件后点击「保存并应用」才写入并生效（`uci changes → save → apply`；无待应用变更时视为已生效）。
+页面修改采用暂存式「保存并应用」：改动控件后点击「保存并应用」才写入并生效（`uci changes → save → apply`；无待应用变更时视为已生效）。拨号页**不会**再把模组的观测状态静默写成配置。
 
 ## 项目结构
 
 ```
 luci-app-mt5700/
-├── Makefile                   # 包定义（PKG_VERSION=1.12.4）
+├── Makefile                   # 包定义（PKG_VERSION=1.12.5）
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/     # 12 个页面 JS
 │   └── at-webserver/          # rpc.js / ui.js / at.css 等前端资源
 ├── root/
 │   ├── etc/config/at-webserver
-│   ├── etc/init.d/at-webserver
-│   ├── etc/uci-defaults/at-webserver
-│   └── usr/share/
-│       ├── luci/menu.d/luci-app-mt5700.json
-│       └── rpcd/acl.d/luci-app-mt5700.json
-├── src/Makefile               # 顺带 cargo build 后端
+│   ├── etc/init.d/at-webserver          # 服务、串口绑定、接口拉起（含 on_uplink 动作）
+│   ├── etc/uci-defaults/at-webserver    # 首次安装初始化 + 开机自启注册断言
+│   ├── etc/hotplug.d/iface/99-at-webserver   # 接口事件 → 补 ifup
+│   ├── etc/hotplug.d/usb/99-at-webserver     # 模组插拔/重枚举 → 补拉起
+│   └── usr/
+│       ├── libexec/at-webserver/on-uplink.sh # 后端拨号就绪通知入口
+│       └── share/
+│           ├── luci/menu.d/luci-app-mt5700.json
+│           └── rpcd/acl.d/luci-app-mt5700.json
+├── src/Makefile               # 顺带 cargo build 后端（含架构映射与硬失败校验）
 ├── src/rust/                  # Rust 后端（Cargo 版本 1.5.0）
 ├── po/                        # 翻译模板与 zh_Hans
-└── tests/mock-modem/          # 测试用 mock 模组
+├── scripts/sdk-build.sh       # SDK 内构建与架构元数据输出
+└── tests/mock-modem/          # 测试用 mock 模组 + e2e
 ```
 
 ## 云编译与发布
 
 GitHub Actions（`.github/workflows/build-openwrt.yml`）对每个推送做云编译：
 
-- 主线（snapshot）→ apk；23.05 → ipk
-- 架构矩阵：x86_64 / aarch64_cortex-a53 / mips_24kc
-- 编译成功自动发布 [Release](https://github.com/LianXia233/luci-app-mt5700/releases)
+- `25.12.5` → apk；`24.10.8` → ipk
+- 架构矩阵：`x86_64` / `aarch64_cortex-a53` / `aarch64_generic`（共 6 个组合）
+- 构建期强制核对：SDK 实际上报的 `CONFIG_TARGET_ARCH_PACKAGES` 必须等于矩阵登记的架构，否则构建失败（防止把错架构的包发出去）
+- 编译成功自动发布 [Release](https://github.com/LianXia233/luci-app-mt5700/releases)，并附带 `ARCH-GUIDE.txt`
 
 ## 许可证
 

@@ -1,19 +1,28 @@
 #!/bin/sh
 # 在 openwrt/sdk 容器内构建 luci-app-mt5700 + at-webserver-rust（Rust 后端）
-# 用法: sdk-build.sh <ARCH> <RUST_TRIPLE> <VER> [TARGET_DIR]
-#   ARCH        OpenWrt 架构名（x86_64 / aarch64_cortex-a53 / mips_24kc ...）
-#   RUST_TRIPLE Rust musl 目标三元组（x86_64-unknown-linux-musl ...）
-#   VER         OpenWrt 版本（main / 23.05.5 ...，决定 SDK 下载路径）
-# 说明: SDK 由脚本下载到 /builder 并解压；Rust 交叉编译使用 zig 作为链接器；
-#       cargo/rust/zig 只装进容器 /opt 与 /builder，不写入仓库。
+#
+# 用法: sdk-build.sh <EXPECTED_ARCH> <RUST_TRIPLE> <VER> [TARGET_DIR]
+#   EXPECTED_ARCH  矩阵登记的 ARCH_PACKAGES（如 aarch64_cortex-a53 / aarch64_generic）
+#                  仅用于核对与日志；真实架构从 SDK 的 .config 读取，并据此命名输出目录
+#   RUST_TRIPLE    Rust musl 目标三元组（x86_64-unknown-linux-musl ...）
+#   VER            OpenWrt 版本（25.12.5 / 24.10.8 ...），仅决定 SDK 回退下载路径
+#   TARGET_DIR     OpenWrt target/subtarget（x86/64、mediatek/filogic、armsr/armv8 ...），仅用于回退下载
+#
+# 架构由谁决定：ARCH_PACKAGES = <ARCH>[_<CPU_TYPE>]，未定义 CPU_TYPE 时为 <ARCH>_generic。
+# 同一颗 Cortex-A53，在 CPU_TYPE=cortex-a53 的 target 上是 aarch64_cortex-a53，
+# 在未定义 CPU_TYPE 的 target（如 armsr/armv8）上是 aarch64_generic。
+# apk 对 <base>_<variant> 做严格匹配，两者不可互换，因此本脚本以 SDK 实际报告的
+# ARCH_PACKAGES 为准命名 out/<arch>/，从根上消除「文件名说 A、包内是 B」的错配。
+#
+# 说明: Rust 交叉编译使用 zig 作为链接器；cargo/rust/zig 只装进容器 /opt，不写入仓库。
 set -e
 
-ARCH="$1"
+EXPECTED_ARCH="$1"
 RUST_TRIPLE="$2"
 VER="$3"
-[ -n "$ARCH" ] && [ -n "$RUST_TRIPLE" ] && [ -n "$VER" ] || { echo "usage: sdk-build.sh <ARCH> <RUST_TRIPLE> <VER>"; exit 1; }
+[ -n "$EXPECTED_ARCH" ] && [ -n "$RUST_TRIPLE" ] && [ -n "$VER" ] || { echo "usage: sdk-build.sh <EXPECTED_ARCH> <RUST_TRIPLE> <VER> [TARGET_DIR]"; exit 1; }
 
-echo "==> 仓库挂载: /work / out:/out（构建开始, arch=$ARCH ver=$VER）"
+echo "==> 仓库挂载: /work / out:/out（构建开始, 期望架构=$EXPECTED_ARCH ver=$VER）"
 
 # ---------- 0) 基础工具（SDK 容器已内置 curl/tar/gosu；xz/zst 压缩包解压需要对应工具） ----------
 SUDO=''
@@ -29,21 +38,41 @@ fi
 command -v curl >/dev/null 2>&1 || { echo "ERROR: 容器缺少 curl"; exit 1; }
 command -v zstd >/dev/null 2>&1 || echo "WARN: 容器缺少 zstd（snapshot SDK 为 .tar.zst 时需要）"
 
-# ---------- 1) 下载并解压 OpenWrt SDK（/builder，不落盘到仓库） ----------
-case "$VER" in
-  main|snapshots) BASE_URL="https://downloads.openwrt.org/snapshots" ;;
-  *) BASE_URL="https://downloads.openwrt.org/releases/$VER" ;;
-esac
+# ---------- 1) 定位 OpenWrt SDK（优先镜像自带的 /builder，不落盘到仓库） ----------
+# 关键：绝不使用 `find ... | head -1` 在多个 SDK 目录间挑一个——readdir 顺序不确定，
+# 可能选中镜像自带但与矩阵 target 不符的那一份，导致产物与目标平台错配且无任何提示。
 TARGET_DIR="${4:-${TARGET:-x86/64}}"
-echo "==> 定位 SDK: $BASE_URL/targets/$TARGET_DIR/"
-LISTING=$(curl -sL "$BASE_URL/targets/$TARGET_DIR/")
-SDK_FILE=$(echo "$LISTING" | grep -oE 'openwrt-sdk-[^"< ]+\.tar\.(xz|zst)' | grep -v '\.asc' | head -1)
-[ -n "$SDK_FILE" ] || { echo "ERROR: 未找到 SDK 下载文件（$BASE_URL/targets/$TARGET_DIR/）"; exit 1; }
-echo "==> 下载 SDK: $SDK_FILE"
-curl -sSL "$BASE_URL/targets/$TARGET_DIR/$SDK_FILE" -o /builder/sdk.tar
-tar -xf /builder/sdk.tar -C /builder
-rm -f /builder/sdk.tar
-SDK_DIR=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -1)
+SDK_DIR=""
+
+if [ -f /builder/feeds.conf.default ] && [ -f /builder/Makefile ]; then
+  # 官方 openwrt/sdk 镜像把 SDK 直接解压在 /builder
+  SDK_DIR=/builder
+  echo "==> 使用镜像自带 SDK: $SDK_DIR"
+else
+  CANDIDATES=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' 2>/dev/null || true)
+  N=$(printf '%s\n' "$CANDIDATES" | grep -c . || true)
+  if [ "$N" -eq 1 ] && [ -f "$CANDIDATES/feeds.conf.default" ]; then
+    SDK_DIR="$CANDIDATES"
+    echo "==> 使用镜像自带 SDK: $SDK_DIR"
+  else
+    [ "$N" -gt 1 ] && echo "WARN: /builder 下有 $N 个 SDK 目录，全部清理后重新下载以消除歧义"
+    rm -rf /builder/openwrt-sdk-*
+    case "$VER" in
+      main|snapshots) BASE_URL="https://downloads.openwrt.org/snapshots" ;;
+      *) BASE_URL="https://downloads.openwrt.org/releases/$VER" ;;
+    esac
+    echo "==> 定位 SDK: $BASE_URL/targets/$TARGET_DIR/"
+    LISTING=$(curl -sL "$BASE_URL/targets/$TARGET_DIR/")
+    SDK_FILE=$(echo "$LISTING" | grep -oE 'openwrt-sdk-[^"< ]+\.tar\.(xz|zst)' | grep -v '\.asc' | head -1)
+    [ -n "$SDK_FILE" ] || { echo "ERROR: 未找到 SDK 下载文件（$BASE_URL/targets/$TARGET_DIR/）"; exit 1; }
+    echo "==> 下载 SDK: $SDK_FILE"
+    curl -sSL "$BASE_URL/targets/$TARGET_DIR/$SDK_FILE" -o /builder/sdk.tar
+    tar -xf /builder/sdk.tar -C /builder
+    rm -f /builder/sdk.tar
+    SDK_DIR=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -1)
+  fi
+fi
+
 [ -n "$SDK_DIR" ] && [ -f "$SDK_DIR/feeds.conf.default" ] || { echo "ERROR: SDK 解压异常"; ls -la /builder; exit 1; }
 cd "$SDK_DIR"
 echo "==> SDK 根目录: $SDK_DIR"
@@ -119,11 +148,15 @@ echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 # ---------- 4) 把仓库包放入 buildroot package/ ----------
 # 单包结构：src/Makefile 让 luci.mk 在编译 LuCI 包时顺带编译 Rust 后端，
 # 并把 at-webserver-rust 二进制装进同一个包，不再有独立的 at-webserver-rust 包。
+rm -rf package/luci-app-mt5700
 mkdir -p package/luci-app-mt5700
 cp -r /work/Makefile /work/htdocs /work/po /work/root /work/src package/luci-app-mt5700/
-# 确保 init.d / uci-defaults 可执行（cp -r 在部分环境可能丢 +x）
+# 确保 init.d / uci-defaults / hotplug / libexec 可执行（cp -r 在部分环境可能丢 +x）
 chmod 0755 package/luci-app-mt5700/root/etc/init.d/at-webserver
 chmod 0755 package/luci-app-mt5700/root/etc/uci-defaults/at-webserver
+chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/iface/99-at-webserver
+chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/usb/99-at-webserver
+chmod 0755 package/luci-app-mt5700/root/usr/libexec/at-webserver/on-uplink.sh
 
 # ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
@@ -149,6 +182,20 @@ for p in luci-app-mt5700; do
 done
 
 make defconfig >/dev/null
+
+# ---------- 6.1) 读取 SDK 真实架构（决定输出目录，杜绝架构错配） ----------
+ARCH_PKGS=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"$/\1/p' .config | head -1)
+[ -n "$ARCH_PKGS" ] || ARCH_PKGS="$EXPECTED_ARCH"
+TGT_BOARD=$(sed -n 's/^CONFIG_TARGET_BOARD="\(.*\)"$/\1/p' .config | head -1)
+TGT_SUB=$(sed -n 's/^CONFIG_TARGET_SUBTARGET="\(.*\)"$/\1/p' .config | head -1)
+
+echo "==> SDK 实际架构: ARCH_PACKAGES=$ARCH_PKGS (board=${TGT_BOARD:-?}/${TGT_SUB:-?})"
+echo "==> 矩阵期望架构: $EXPECTED_ARCH"
+if [ "$ARCH_PKGS" != "$EXPECTED_ARCH" ]; then
+  echo "WARN: SDK 实际架构与矩阵期望不一致——输出目录将使用实际架构 $ARCH_PKGS，"
+  echo "WARN: workflow 的架构闸门会据此判定失败，请在矩阵里把 image/arch 配对修正。"
+fi
+
 echo "==> package 目录："
 ls -d package/* 2>/dev/null || true
 echo "==> 选中状态："
@@ -162,7 +209,7 @@ grep -qE '^CONFIG_PACKAGE_luci-app-mt5700=[my]$' .config \
 # RUST_TRIPLE 传给 src/Makefile（子 make 拿不到顶层 ARCH 映射时用得上）
 export RUST_TRIPLE
 
-echo "==> 编译单包（LuCI 前端 + Rust 后端，target=$RUST_TRIPLE）"
+echo "==> 编译单包（LuCI 前端 + Rust 后端，target=$RUST_TRIPLE arch=$ARCH_PKGS）"
 make package/luci-app-mt5700/compile V=s
 
 # 校验后端二进制确实被打包进主包（.pkgdir 是最终进包目录）。
@@ -181,22 +228,59 @@ BIN_PATH=$(find build_dir -type f -name 'at-webserver-rust' -print -quit 2>/dev/
 }
 echo "==> 后端产物: $BIN_PATH"
 
-# ---------- 7) 收集产物到 /out（白名单：只收本项目包，排除 SDK 顺带编译的系统库）----------
+# 二进制架构自检：确保 Rust 产物确实是对目标架构（防宿主架构兜底混入）
+if command -v file >/dev/null 2>&1; then
+	echo "==> 后端二进制信息: $(file -b "$BIN_PATH")"
+fi
+case "$RUST_TRIPLE" in
+	aarch64-*) EXPECT_ELF="aarch64" ;;
+	x86_64-*)  EXPECT_ELF="x86-64" ;;
+	mipsel-*)  EXPECT_ELF="MIPS" ;;
+	mips-*)    EXPECT_ELF="MIPS" ;;
+	armv7-*)   EXPECT_ELF="ARM" ;;
+	*)         EXPECT_ELF="" ;;
+esac
+if [ -n "$EXPECT_ELF" ] && command -v file >/dev/null 2>&1; then
+	if file -b "$BIN_PATH" | grep -qi "$EXPECT_ELF"; then
+		echo "==> ELF 架构核对通过（期望含 $EXPECT_ELF）"
+	else
+		echo "ERROR: 后端二进制架构与目标 $RUST_TRIPLE 不符，疑似宿主架构兜底产物"
+		file -b "$BIN_PATH"
+		exit 1
+	fi
+fi
+
+# ---------- 7) 收集产物到 /out/<真实架构>/（白名单：只收本项目包）----------
 # 系统库（libc/libgcc1/libstdcpp6/libatomic1/libquadmath1/libpthread/librt 等）由 opkg/apk
 # 在安装时按依赖自动解决，不应出现在 Release 资产里。
-mkdir -p "/out/${ARCH}"
+mkdir -p "/out/${ARCH_PKGS}"
 find bin -type f \( -name '*.apk' -o -name '*.ipk' \) \
 	\( -name 'luci-app-mt5700*' -o -name 'luci-i18n-mt5700*' \) \
-	-exec cp {} "/out/${ARCH}/" \;
+	-exec cp {} "/out/${ARCH_PKGS}/" \;
 echo "==> 产物（仅本项目包）："
-ls -la "/out/${ARCH}/"
+ls -la "/out/${ARCH_PKGS}/"
 echo "==> bin 下全部包（排查用）："
 find bin -type f \( -name '*.apk' -o -name '*.ipk' \) 2>/dev/null | sort | head -50
 
+# 架构元数据：workflow 用它核对「矩阵期望架构 == SDK 实际架构」，
+# 也随 artifact 保留，便于事后追溯某个包究竟是哪个架构编出来的。
+APK_VER=$(apk --version 2>/dev/null | head -1 || true)
+cat > "/out/${ARCH_PKGS}/ARCH.txt" <<EOF
+ARCH_PACKAGES=${ARCH_PKGS}
+EXPECTED_ARCH=${EXPECTED_ARCH}
+MATCH=$([ "$ARCH_PKGS" = "$EXPECTED_ARCH" ] && echo yes || echo no)
+TARGET_BOARD=${TGT_BOARD:-unknown}
+TARGET_SUBTARGET=${TGT_SUB:-unknown}
+OPENWRT_VER=${VER}
+RUST_TRIPLE=${RUST_TRIPLE}
+APK_TOOLS=${APK_VER:-none}
+EOF
+cat "/out/${ARCH_PKGS}/ARCH.txt"
+
 # 产物完整性闸门：缺任一必需包就让构建失败，避免再次发布不可安装的 Release
 for p in luci-app-mt5700; do
-	if [ -z "$(find "/out/${ARCH}" -type f -name "${p}*" -print -quit)" ]; then
-		echo "ERROR: /out/${ARCH} 缺少 ${p} 包产物（arch=${ARCH}）"
+	if [ -z "$(find "/out/${ARCH_PKGS}" -type f -name "${p}*" -print -quit)" ]; then
+		echo "ERROR: /out/${ARCH_PKGS} 缺少 ${p} 包产物（arch=${ARCH_PKGS}）"
 		exit 1
 	fi
 done
@@ -204,7 +288,7 @@ done
 # 单包必须内含后端二进制。
 # OpenWrt 24.10+ .apk 不是标准 tar.gz（file 显示 data），不能用 tar 列目录。
 # 校验策略：ipk 用 tar 列文件；apk 用「安装树 + 包体体积」判定。
-PKG_FILE=$(find "/out/${ARCH}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
+PKG_FILE=$(find "/out/${ARCH_PKGS}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
 [ -n "$PKG_FILE" ] || { echo "ERROR: 未找到 luci-app-mt5700 主包"; exit 1; }
 PKG_SZ=$(wc -c < "$PKG_FILE")
 echo "==> 校验主包: $(basename "$PKG_FILE") (${PKG_SZ} bytes)"
@@ -237,4 +321,4 @@ case "$PKG_FILE" in
 		fi
 		;;
 esac
-echo "==> SDK 构建完成"
+echo "==> SDK 构建完成（arch=${ARCH_PKGS}）"

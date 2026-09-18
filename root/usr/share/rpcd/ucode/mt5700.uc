@@ -230,7 +230,32 @@ function rpcCall(method, params) {
 		payload.params.auth_key = authKey;
 	}
 
-	/* 本固件 ucode fs 无 connect，经 busybox nc 管道访问回环 RPC */
+	/* 本固件 ucode fs 无 connect，经 busybox nc 管道访问回环 RPC。
+	 * 各固件的 busybox 未必编译 nc applet，因此先定位可执行文件：
+	 * 找不到时必须给出可诊断的报错，而不是笼统的「后端无应答」——
+	 * 后者会让人误判成服务没起来，实际是装了插件却缺 nc。 */
+	let ncBin = '';
+	const ncCands = ['/usr/bin/nc', '/bin/nc', '/usr/sbin/nc', '/sbin/nc'];
+	for (let i = 0; i < length(ncCands); i++) {
+		let probe;
+		try {
+			probe = fs.open(ncCands[i], 'r');
+		} catch (e) {
+			probe = null;
+		}
+		if (probe) {
+			probe.close();
+			ncBin = ncCands[i];
+			break;
+		}
+	}
+	if (ncBin == '') {
+		return {
+			success: false,
+			error: '系统缺少 nc（busybox 未编译 nc applet），无法连接后端：请安装 netcat 后重试'
+		};
+	}
+
 	const body = sprintf('%J', payload);
 	const tmp = '/tmp/mt5700-rpc.json';
 	let f;
@@ -247,9 +272,9 @@ function rpcCall(method, params) {
 
 	let p;
 	try {
-		p = fs.popen('nc 127.0.0.1 ' + port + ' < ' + tmp, 'r');
+		p = fs.popen(ncBin + ' 127.0.0.1 ' + port + ' < ' + tmp, 'r');
 	} catch (e) {
-		return { success: false, error: '无法连接 Rust 后端' };
+		return { success: false, error: '无法连接 Rust 后端: ' + e.message };
 	}
 	if (!p) {
 		return { success: false, error: '无法连接 Rust 后端' };
@@ -259,7 +284,10 @@ function rpcCall(method, params) {
 	p.close();
 
 	if (!line) {
-		return { success: false, error: 'Rust 后端无应答' };
+		return { success: false, error: 'Rust 后端无应答（服务未运行或端口 ' + port + ' 未监听）' };
+	}
+	if (substr(line, 0, 1) != '{') {
+		return { success: false, error: 'Rust 后端应答异常: ' + substr(line, 0, 160) };
 	}
 
 	try {

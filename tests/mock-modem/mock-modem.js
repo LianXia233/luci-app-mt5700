@@ -26,7 +26,14 @@ const state = {
 	imei: '862234051234567',
 	rsrp: -95,      // 动态变化用于信号 URC
 	ims: '1,1,1',
-	smsSeq: 0
+	smsSeq: 0,
+	// 自动拨号：刻意从「开关已开、但方式为 2（转网口模式）」起步。
+	// 只比开关不比方式的实现会判定已对齐而跳过下发，模组停在转网口模式，
+	// USB 网口永远拿不到 DHCP —— e2e 用它做回归（见 e2e-test.js 第 10 项）。
+	autodial: 1,
+	autodialMode: 2,
+	// USB 数据面状态：1=就绪。置 0 会让后端进入重试与周期对账路径。
+	ndis: 1
 };
 
 /* ---------- 应答表 ---------- */
@@ -91,10 +98,22 @@ function replyFor(cmd) {
 	if (c === 'AT+CGDCONT?') return '+CGDCONT: 1,"IP","ims","",0,0,0,0,1,1,1\r\nOK';
 	if (c.startsWith('AT+CGDCONT=')) return 'OK';
 	if (c.startsWith('AT+CGACT=')) return 'OK';
-	if (c.startsWith('AT^NDISSTATQRY')) return '^NDISSTATQRY: 1,1,0,0,0,0,0\r\nOK';
+	if (c.startsWith('AT^NDISSTATQRY')) return '^NDISSTATQRY: ' + state.ndis + ',1,0,0,0,0,0\r\nOK';
 	if (c === 'AT+CGACT?') return '+CGACT: 1,1\r\nOK';
-	if (c === 'AT+SETAUTODIAL?') return '+SETAUTODIAL: 1\r\nOK';
-	if (c.startsWith('AT+SETAUTODIAL=')) return 'OK';
+	// 注意前缀：MT5700M 的私有命令带 '^'，与此处其它私有命令
+	// （AT^NDISSTATQRY / AT^SETMODE / AT^TDCFG）一致。此前这里少写了一个 '^'，
+	// 基于 mock 的联调永远看不到自动拨号成功，把真实缺陷掩盖成夹具缺陷。
+	if (c === 'AT^SETAUTODIAL?') {
+		return '^SETAUTODIAL: ' + state.autodial + ',' + state.autodialMode + ',"IP","","","",0\r\nOK';
+	}
+	if (c.startsWith('AT^SETAUTODIAL=')) {
+		const m = c.match(/AT\^SETAUTODIAL=(\d+)(?:,(\d+))?/);
+		if (m) {
+			state.autodial = parseInt(m[1], 10);
+			if (m[2] !== undefined) state.autodialMode = parseInt(m[2], 10);
+		}
+		return 'OK';
+	}
 	if (c === 'AT^SETMODE?') return '^SETMODE: 2,0,3\r\nOK';
 	if (c.startsWith('AT^SETMODE=')) return 'OK';
 	if (c === 'AT^TDCFG?') return '^TDCFG: 1,1,1,1\r\nOK';
