@@ -370,14 +370,46 @@ jobs:
           fi
 
           if [ -s "$NOTES" ]; then
+            # 自动生成「当前版本 + 当前架构」的完整安装命令，URL 已经拼好可直接执行。
+            # 默认给国内加速地址（前缀 https://gh.acg2.mom/），并说明如何还原为直连。
+            RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+            MIRROR="https://gh.acg2.mom"
+            MIRRORED="${MIRROR}/${RELEASE_URL}"
             {
               echo ""
               echo "---"
               echo ""
-              echo '**安装**：先 `cat /etc/apk/arch` 确认设备架构，选同前缀的包'
-              echo '（`aarch64_cortex-a53` / `aarch64_generic` / `x86_64`）；'
-              echo '主包与语言包需放在同一条 `apk add` / `opkg install` 里。'
-              echo '报错对照与零风险预演方法见资产 `ARCH-GUIDE.txt`。'
+              echo "## 安装（复制即用，${TAG}）"
+              echo ""
+              echo '先确认设备架构：`cat /etc/apk/arch`；opkg 系统用 `grep OPENWRT_ARCH /etc/openwrt_release`。'
+              echo ""
+              for a in x86_64 aarch64_cortex-a53 aarch64_generic; do
+                MAIN=$(find dist -maxdepth 1 -type f -name "${a}-luci-app-mt5700-*.apk" -print -quit)
+                [ -n "$MAIN" ] || continue
+                I18N=$(find dist -maxdepth 1 -type f -name "${a}-luci-i18n-mt5700-*.apk" -print -quit)
+                case "$a" in
+                  x86_64) NOTE="x86 软路由 / 虚拟机" ;;
+                  aarch64_cortex-a53) NOTE="ImmortalWrt、OpenWrt mediatek-filogic" ;;
+                  aarch64_generic) NOTE="iStoreOS 25.x、Arm SystemReady 等" ;;
+                  *) NOTE="" ;;
+                esac
+                echo "**${a}**（${NOTE}）"
+                echo ""
+                echo '```sh'
+                if [ -n "$I18N" ]; then
+                  echo "wget -O /tmp/mt5700.apk \"${MIRRORED}/${MAIN##*/}\" \\"
+                  echo "  && wget -O /tmp/mt5700-i18n.apk \"${MIRRORED}/${I18N##*/}\" \\"
+                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk /tmp/mt5700-i18n.apk"
+                else
+                  echo "wget -O /tmp/mt5700.apk \"${MIRRORED}/${MAIN##*/}\" \\"
+                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk"
+                fi
+                echo '```'
+                echo ""
+              done
+              echo "> 以上 URL 已带国内加速前缀 \`${MIRROR}/\`，直连请去掉该前缀。"
+              echo "> opkg 系统（OpenWrt 24.10 及更早）：把 \`.apk\` 换成 \`.ipk\`，命令改为 \`opkg install\`。"
+              echo "> 只想先验证不安装：在 \`apk add\` 后加 \`--simulate\`。报错对照见资产 \`ARCH-GUIDE.txt\`。"
             } >> "$NOTES"
             echo "body_file=$NOTES" >> "$GITHUB_OUTPUT"
             echo "==> Release 简介（$(wc -l < "$NOTES") 行）："
