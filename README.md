@@ -4,7 +4,7 @@ OpenWrt / ImmortalWrt 的 LuCI 插件，用于管理 MT5700M 5G 模组的拨号�
 
 - 包名：`luci-app-mt5700`
 - 配置段 / 服务：`at-webserver`
-- 版本：v1.12.7
+- 版本：v1.12.8
 - 入口：LuCI 侧边栏「移动网络 → 5G 模组管理」（`admin/modem/5g`）
 - 在线演示：[GitHub Pages](https://lianxia233.github.io/luci-app-mt5700/)（静态示例数据，非真实模组读数）
 
@@ -69,7 +69,7 @@ grep OPENWRT_ARCH /etc/openwrt_release
 apk add --simulate --allow-untrusted ./<ARCH>-luci-app-mt5700-*.apk
 ```
 
-输出形如 `(1/1) Installing luci-app-mt5700 (1.12.7-r1)` 即表示架构与依赖都已通过；
+输出形如 `(1/1) Installing luci-app-mt5700 (1.12.8-r1)` 即表示架构与依赖都已通过；
 若报 `uninstallable arch` 则说明选错了架构。Release 中附带的 `ARCH-GUIDE.txt` 是同一份说明，可离线对照。
 
 ## 安装
@@ -81,14 +81,14 @@ apk add --simulate --allow-untrusted ./<ARCH>-luci-app-mt5700-*.apk
 ```sh
 # 按 cat /etc/apk/arch 的结果替换 <ARCH>
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.12.7-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.12.8-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 ```
 
 ### OpenWrt 24.10 及更早（opkg / ipk）
 
 ```sh
-opkg install ./<ARCH>-luci-app-mt5700_1.12.7_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.12.8_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -124,6 +124,7 @@ USB 枚举 → AT 口就绪 → 模组驻网 → 开启自动拨号(^SETAUTODIAL
 | 确认拨号真的可用 | Rust 后端 | `AT^NDISSTATQRY?` / `AT+CGACT?` 双判据，不只看开关位 |
 | 拉起承载接口 | init.d + hotplug + 后端通知 | 三处协同：init.d 带间隔重试 18 次 × 10s；`hotplug.d/iface`、`hotplug.d/usb` 在网口出现时补 `ifup`；后端确认拨号就绪后调用 `/usr/libexec/at-webserver/on-uplink.sh` |
 | 接口不存在时创建 | init.d | 检测到模组 USB 网口即按 `proto=dhcp` 创建；检测不到则明确记录原因 |
+| 接口登记到防火墙区域 | init.d | 创建/核对接口时一并登记进承载 NAT 的上行区域（`wan`），并重载防火墙 |
 | 转网口模式（`autodial_mode=2`） | 模组 | 数据面在以太网口侧，路由器不做 NDIS 判定 |
 
 排查命令：
@@ -134,6 +135,9 @@ USB 枚举 → AT 口就绪 → 模组驻网 → 开启自动拨号(^SETAUTODIAL
 | 自动拨号状态 | `logread -e at-webserver \| grep 自动拨号` | 出现「已处于期望状态」或「复核通过」 |
 | 接口是否有地址 | `ifstatus MT5700M \| grep -A2 ipv4-address` | 有 `address` 字段 |
 | 接口设备名 | `uci get network.MT5700M.device` | 与 `ls /sys/class/net` 中模组网口一致 |
+| 接口是否在上行区域 | `uci show firewall \| grep 'network=.*MT5700M'` | 有输出（**不在区域内的接口没有 NAT，会「有 IP 却上不了网」**） |
+| NAT 是否对该网口生效 | `nft list chain inet fw4 srcnat` | 跳转条目里含模组网口（如 `oifname { "eth1", "eth2" }`） |
+| 有 IP 但上不了网时修复 | `/etc/init.d/at-webserver ensure_interfaces` | 日志出现「已将 MT5700M 登记到防火墙区域 wan」 |
 | 手动补一次拉起 | `/etc/init.d/at-webserver on_uplink` | 日志出现 ifup 相关输出 |
 | 数据面状态 | AT 终端执行 `AT^NDISSTATQRY?` | 首字段为 `1` |
 
@@ -163,6 +167,8 @@ USB 枚举 → AT 口就绪 → 模组驻网 → 开启自动拨号(^SETAUTODIAL
   两个接口都是**先创建、再取址**：地址能否拿到取决于运营商与模组状态（IPv6 尤其如此），但接口本身不会因为「此刻还没地址」或「缺少某个客户端」就不存在。创建后置 `auto=1`，并在模组网口就绪后带间隔重试 `ifup`（覆盖 30~60s 的冷启动链路）。两种边界情况都只记录提示、不阻止创建：系统缺少 `odhcp6c` 时 V6 接口仍会创建（装好 `odhcp6c` 即生效）；创建时模组网口尚未枚举时接口先建好，网口出现后自动补上 `device`。
 
   **安装与升级时**也会同步核对一次接口（`/etc/init.d/at-webserver ensure_interfaces`，由 `postinst` 与 `uci-defaults` 调用）——服务自身的同类检查是在后台跑的，装完那一刻可能还没轮到，所以装完就能在「网络 → 接口」里看到 V4/V6 接口。
+
+  **接口建好之后必须登记进防火墙区域**，否则会出现「模组拨号正常、接口也拿到了 IP、却上不了网」：fw4 只为**区域内的接口**下发源地址转换与 `lan → 上行区域` 的转发放行，接口不在任何区域时内网源地址不会被改写，上游无法回程。本版在创建/核对接口时一并把它登记进承载 NAT 的上行区域（优先名为 `wan` 的区域；没有就找带 `masq` 的区域；都没有则新建一个标准 `wan` 区域并补上 `lan → wan` 转发）。已经装过旧版、此刻正卡在这个状态的设备，执行一次 `/etc/init.d/at-webserver ensure_interfaces` 即可修好。
 
 排查命令：
 
@@ -199,7 +205,7 @@ USB 枚举 → AT 口就绪 → 模组驻网 → 开启自动拨号(^SETAUTODIAL
 
 ```
 luci-app-mt5700/
-├── Makefile                   # 包定义（PKG_VERSION=1.12.7）
+├── Makefile                   # 包定义（PKG_VERSION=1.12.8）
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/     # 12 个页面 JS
 │   └── at-webserver/          # rpc.js / ui.js / at.css 等前端资源

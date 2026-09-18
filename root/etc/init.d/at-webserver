@@ -9,7 +9,7 @@ USE_PROCD=1
 #   ensure_interfaces  确保 V4/V6 模组接口存在（安装/升级后 postinst 也会调用）
 #   on_uplink          拉起模组接口（后端确认拨号就绪时调用）
 EXTRA_COMMANDS="ensure_interfaces on_uplink"
-EXTRA_HELP="	ensure_interfaces	确保 V4/V6 模组接口存在（安装/升级后自动调用）
+EXTRA_HELP="	ensure_interfaces	确保 V4/V6 模组接口存在并登记到上行防火墙区域（安装/升级后自动调用）
 	on_uplink		拉起模组接口（后端确认拨号就绪时调用）"
 
 PROG=/usr/bin/at-webserver-rust
@@ -336,6 +336,10 @@ ensure_modem_interface() {
 	ensure_iface_created "$iface_4g" dhcp || true
 	ensure_iface_created "$iface_6g" dhcpv6 || true
 
+	# 登记到承载 NAT 的上行区域。必须独立于"新建"分支执行：接口若早已存在，
+	# ensure_iface_created 会直接返回，只在新建分支里做登记就会漏掉存量设备。
+	ensure_firewall_zone
+
 	for i in "$iface_4g" "$iface_6g"; do
 		uci -q get "network.$i" >/dev/null 2>&1 || continue
 		auto_val=$(uci -q get "network.$i.auto")
@@ -415,6 +419,186 @@ fw_clean_rules() {
 	uci commit firewall 2>/dev/null
 }
 
+# ---------------------------------------------------------------------------
+# 把模组接口登记到承载 NAT 的上行防火墙区域（自动修复「有 IP 但上不了网」）
+#
+# 症状：模组拨号成功、接口也正常取到 IPv4 地址（ifstatus 有 ipv4-address、默认路由
+#       已建立），但路由器背后与内网都打不开网页。
+#
+# 根因：自动创建的接口只写了 network 配置，**从未登记到任何防火墙区域**。
+#       fw4 只为「区域内的接口」下发源地址转换与 lan→上行区域的转发放行；接口不在
+#       区域内时，内网源地址不会被改写，上游无法回程 —— 于是出现「有 IP 却不通网」。
+#       机型定制包预置的接口之所以正常，只是因为它同时把 MT5700M/MT5700Mv6 写进了
+#       wan 区域的 network 列表。同一个接口，差的就只有这一处登记。
+#
+# 实测（H5000M / ImmortalWrt SNAPSHOT / fw4）：
+#   登记在区域内 → nft: oifname { "eth1", "eth2" } jump srcnat_wan
+#                  以 LAN 地址为源 ping 223.5.5.5 → 2/2 通（~26ms）
+#   摘掉登记     → 该 jump 只剩 eth1，同一个 ping → 2/2 全丢（100% loss）
+#
+# 目标区域判定（不写死区域索引，索引顺序随固件而异）：
+#   1) 存在名为 wan 的区域 → 用它（与 OpenWrt 默认配置和用户预期一致）；
+#   2) 否则用带 masq='1' 的区域，优先其中已登记现成上行口（wan/wwan/pppoe…）的那个；
+#   3) 都没有 → 自行新建一个标准 wan 区域，并补齐 lan 区域与 lan→wan 转发
+#      （否则新建的区域形同虚设）。
+#
+# 只做「登记」：不改动既有区域的 masq / 转发等既有定义。若目标区域没有开 masq，
+# 只打警告、不擅自开启 —— 避免破坏「公网地址直路由」这类刻意配置。
+# ---------------------------------------------------------------------------
+FW_ZONE_DIRTY=0
+
+fw_zone_list() {
+	uci show firewall 2>/dev/null | sed -n 's/^\(firewall\.@zone\[[0-9]*\]\)=zone$/\1/p'
+}
+
+# 找出承载 NAT 的上行区域，输出其 uci 路径（如 firewall.@zone[1]）；找不到返回 1
+fw_find_uplink_zone() {
+	local z name masq nets n
+
+	# 1) 名字就叫 wan 的区域优先
+	for z in $(fw_zone_list); do
+		name=$(uci -q get "$z.name")
+		[ "$name" = "wan" ] && { echo "$z"; return 0; }
+	done
+
+	# 2) 带 masq 且已登记现成上行口
+	for z in $(fw_zone_list); do
+		[ "$(uci -q get "$z.masq")" = "1" ] || continue
+		nets=$(uci -q get "$z.network")
+		for n in $nets; do
+			case "$n" in
+				wan|wan6|wwan|wwan6|pppoe*|lte*|rmnet*|usb*)
+					echo "$z"; return 0 ;;
+			esac
+		done
+	done
+
+	# 3) 任意带 masq 的区域
+	for z in $(fw_zone_list); do
+		[ "$(uci -q get "$z.masq")" = "1" ] && { echo "$z"; return 0; }
+	done
+
+	return 1
+}
+
+# 是否存在名为 name 的区域（fw4 不允许同名区域，创建前必须先查）
+fw_has_zone() {
+	local z
+	for z in $(fw_zone_list); do
+		[ "$(uci -q get "$z.name")" = "$1" ] && return 0
+	done
+	return 1
+}
+
+# 把 iface 追加进区域 z 的 network 列表。
+# 返回 0=有改动，1=无需改动（已在列表 / 接口不存在 / 写入失败）。
+fw_zone_add_iface() {
+	local z iface nets n
+
+	z="$1"; iface="$2"
+
+	# 接口不在 UCI 里就不要往区域塞名字：fw4 会把解析不到的名字当噪声
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 1
+
+	nets=$(uci -q get "$z.network")
+	for n in $nets; do
+		[ "$n" = "$iface" ] && return 1
+	done
+
+	uci -q add_list "$z.network=$iface" 2>/dev/null || return 1
+	return 0
+}
+
+# 是否已存在 dest=<zone_name> 的 forwarding；返回 0=已有，1=刚补上，2=无法写入
+fw_ensure_forwarding() {
+	local dest f
+	dest="$1"
+
+	for f in $(uci show firewall 2>/dev/null | sed -n 's/^\(firewall\.@forwarding\[[0-9]*\]\)=forwarding$/\1/p'); do
+		[ "$(uci -q get "$f.dest")" = "$dest" ] && return 0
+	done
+
+	uci -q add firewall forwarding || return 2
+	uci -q set firewall.@forwarding[-1].src='lan'
+	uci -q set firewall.@forwarding[-1].dest="$dest"
+	return 1
+}
+
+ensure_firewall_zone() {
+	local z zname created=0 changed=0
+
+	z=$(fw_find_uplink_zone)
+
+	if [ -z "$z" ]; then
+		logger -t at-webserver "未找到带 NAT 的上行防火墙区域，正在创建 wan 区域（masq=1）"
+
+		# lan 区域不存在时一并补上：只有 wan 区域而没有 lan，内网无从转发
+		if ! fw_has_zone lan; then
+			uci -q add firewall zone
+			uci -q set firewall.@zone[-1].name='lan'
+			uci -q set firewall.@zone[-1].input='ACCEPT'
+			uci -q set firewall.@zone[-1].output='ACCEPT'
+			uci -q set firewall.@zone[-1].forward='ACCEPT'
+			uci -q get network.lan >/dev/null 2>&1 && uci -q set firewall.@zone[-1].network='lan'
+			logger -t at-webserver "已补建 lan 防火墙区域（此前不存在）"
+		fi
+
+		uci -q add firewall zone
+		uci -q set firewall.@zone[-1].name='wan'
+		uci -q set firewall.@zone[-1].input='REJECT'
+		uci -q set firewall.@zone[-1].output='ACCEPT'
+		uci -q set firewall.@zone[-1].forward='DROP'
+		uci -q set firewall.@zone[-1].masq='1'
+		uci -q set firewall.@zone[-1].mtu_fix='1'
+
+		# 先落盘，后续 add_list 才有一个稳定的区域索引可引用
+		uci -q commit firewall 2>/dev/null
+		z='firewall.@zone[-1]'
+		created=1
+		changed=1
+	fi
+
+	zname=$(uci -q get "$z.name")
+	[ -n "$zname" ] || zname='(未命名)'
+
+	if [ "$created" -eq 1 ]; then
+		fw_ensure_forwarding "$zname"
+		case "$?" in
+			1) logger -t at-webserver "已补上 lan → $zname 转发" ;;
+			2) logger -t at-webserver "警告：lan → $zname 转发补建失败，内网可能仍无法上网" ;;
+		esac
+	elif [ "$(uci -q get "$z.masq")" != "1" ]; then
+		# 不擅自改别人的防火墙：只提醒，不动手
+		logger -t at-webserver "注意：上行区域 $zname 未开启 masq；若内网无法上网，请确认是否需要源地址转换"
+	fi
+
+	if fw_zone_add_iface "$z" "$IFACE_4G"; then
+		logger -t at-webserver "已将 $IFACE_4G 登记到防火墙区域 $zname（此前不在区域内，会导致有 IP 却无法上网）"
+		changed=1
+	fi
+	if fw_zone_add_iface "$z" "$IFACE_6G"; then
+		logger -t at-webserver "已将 $IFACE_6G 登记到防火墙区域 $zname"
+		changed=1
+	fi
+
+	if [ "$changed" -eq 1 ]; then
+		uci -q commit firewall 2>/dev/null
+		FW_ZONE_DIRTY=1
+	fi
+	return 0
+}
+
+# 区域有改动时重载防火墙。刻意不在 ensure_firewall_zone 里直接重载：
+# post_start 流程随后会调用 apply_firewall_rules，它本来就要重载一次，
+# 由它清掉脏标记即可，避免一次启动重载两遍。
+fw_reload_if_dirty() {
+	[ "$FW_ZONE_DIRTY" -eq 1 ] || return 0
+	timeout 10 /etc/init.d/firewall reload >/dev/null 2>&1 || true
+	FW_ZONE_DIRTY=0
+	logger -t at-webserver "防火墙已重载（模组接口的区域登记已生效）"
+	return 0
+}
+
 apply_firewall_rules() {
 	local module_allow_wan restrict_module module_host module_port
 	local rpc_allow_wan rpc_port
@@ -476,6 +660,9 @@ apply_firewall_rules() {
 	fi
 
 	uci commit firewall 2>/dev/null
+	# 这次重载同时覆盖 ensure_firewall_zone 登记的区域改动，故清掉脏标记，
+	# 避免调用方（post_start → 本函数）之后再重载一遍。
+	FW_ZONE_DIRTY=0
 	# 后台 reload，避免阻塞；失败不致命
 	timeout 8 /etc/init.d/firewall reload >/dev/null 2>&1 || true
 	logger -t at-webserver "防火墙规则已应用"
@@ -527,6 +714,7 @@ on_uplink() {
 	local i
 	ensure_iface_created "$IFACE_4G" dhcp || return 1
 	ensure_iface_created "$IFACE_6G" dhcpv6 || true
+	ensure_firewall_zone
 	for i in "$IFACE_4G" "$IFACE_6G"; do
 		uci -q get "network.$i" >/dev/null 2>&1 || continue
 		if iface_has_address "$i"; then
@@ -534,6 +722,7 @@ on_uplink() {
 		fi
 		ifup "$i" 2>&1 | logger -t at-webserver || true
 	done
+	fw_reload_if_dirty
 	return 0
 }
 
@@ -561,6 +750,12 @@ ensure_interfaces() {
 			logger -t at-webserver "$i 已设为 auto=1"
 		fi
 	done
+
+	# 安装/升级路径也要登记区域：存量设备往往接口早已存在（只剩这一处没配），
+	# 这正是「拨号正常、有 IP、却上不了网」最常见的成因。
+	ensure_firewall_zone
+	fw_reload_if_dirty
+
 	return 0
 }
 
