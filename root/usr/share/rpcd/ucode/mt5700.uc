@@ -9,6 +9,9 @@
 const fs = require('fs');
 const uci = require('uci');
 
+/* 调用方没传 _rid 时的兜底自增号（同一秒内多次调用也能区分） */
+let rpcFallbackSeq = 0;
+
 function readRpcConfig() {
 	const cursor = uci.cursor();
 	const port = int(cursor.get('at-webserver', 'config', 'websocket_port')) || 8765;
@@ -257,7 +260,23 @@ function rpcCall(method, params) {
 	}
 
 	const body = sprintf('%J', payload);
-	const tmp = '/tmp/mt5700-rpc.json';
+
+	/*
+	 * 临时文件名必须唯一。
+	 *
+	 * 实测问题：原先固定为 /tmp/mt5700-rpc.json，而页面会**并发**发起多个 RPC
+	 * （日志页一次就发 3 个：后端日志 + syslog + 通知文件），多个请求写同一个
+	 * 文件、再各自读同一个文件，互相覆盖，表现为「RPC 返回空对象」这种极难排查的
+	 * 间歇性故障 —— 单独手动调用却完全正常。
+	 *
+	 * 唯一性由调用方传入的 _rid 提供；没传时退化为「时间戳 + 自增」，
+	 * 同一秒内的多次调用也能区分（ucode 的 time() 只有秒级）。
+	 */
+	let rid = getStr(params, '_rid');
+	if (rid == null || rid == '') {
+		rid = sprintf('%d-%d', time(), rpcFallbackSeq++);
+	}
+	const tmp = '/tmp/mt5700-rpc-' + rid + '.json';
 	let f;
 	try {
 		f = fs.open(tmp, 'w');
@@ -282,6 +301,12 @@ function rpcCall(method, params) {
 
 	let line = p.read('line');
 	p.close();
+	/* 用完即删，避免每次 RPC 都在 /tmp 留一个文件 */
+	try {
+		fs.unlink(tmp);
+	} catch (e) {
+		/* 删不掉不影响主流程 */
+	}
 
 	if (!line) {
 		return { success: false, error: 'Rust 后端无应答（服务未运行或端口 ' + port + ' 未监听）' };
@@ -311,18 +336,18 @@ function rpcCall(method, params) {
 return {
 	mt5700: {
 		at: {
-			args: { cmd: '' },
+			args: { cmd: '', _rid: '' },
 			call: function (req) {
 				let a = req.args;
 				let cmd = getStr(a, 'cmd');
 				if (cmd == null || cmd == '') {
 					return { success: false, error: '缺少参数 cmd' };
 				}
-				return rpcCall('at', { cmd: cmd });
+				return rpcCall('at', { cmd: cmd, _rid: getStr(a, '_rid') });
 			}
 		},
 		events: {
-			args: { since: 0 },
+			args: { since: 0, _rid: '' },
 			call: function (req) {
 				let a = req.args;
 				let since = 0;
@@ -333,7 +358,7 @@ return {
 				if (since < 0) {
 					since = 0;
 				}
-				return rpcCall('events', { since: since });
+				return rpcCall('events', { since: since, _rid: getStr(a, '_rid') });
 			}
 		},
 		netrate: {
@@ -343,7 +368,7 @@ return {
 			}
 		},
 		logs: {
-			args: { since: 0, limit: 300 },
+			args: { since: 0, limit: 300, _rid: '' },
 			call: function (req) {
 				let a = req.args;
 				let since = int(getStr(a, 'since')) || 0;
@@ -354,7 +379,7 @@ return {
 				if (limit <= 0 || limit > 1200) {
 					limit = 300;
 				}
-				return rpcCall('logs', { since: since, limit: limit });
+				return rpcCall('logs', { since: since, limit: limit, _rid: getStr(a, '_rid') });
 			}
 		}
 	}
