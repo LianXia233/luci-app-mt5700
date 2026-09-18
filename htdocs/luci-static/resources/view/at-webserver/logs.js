@@ -241,10 +241,50 @@ return L.view.extend({
 
 		var levelSel = Mt5700.select([
 			{ label: '全部级别', value: 'all' },
-			{ label: '仅信息 INF', value: 'INF' },
-			{ label: '仅警告 WRN', value: 'WRN' },
-			{ label: '仅错误 ERR', value: 'ERR' }
+			{ label: '仅信息', value: 'INF' },
+			{ label: '仅警告', value: 'WRN' },
+			{ label: '仅错误', value: 'ERR' }
 		], 'all');
+
+		/* 下拉的外观用**内联样式**设置。
+		 * 原因：主题对原生 select 的规则特异性很高且在其样式表之后加载，
+		 * 外链 CSS 即使加 !important 也会被它吃掉（实测背景变白、自绘箭头消失）。
+		 * 内联 + important 是除用户样式表外优先级最高的，稳定生效。 */
+		(function styleSelect(el) {
+			if (!el) return;
+			var ARROW = "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' "
+				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' "
+				+ "stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
+			var BG_CLOSED = 'rgba(23,166,127,0.10)';
+			var BG_HOVER = 'rgba(23,166,127,0.19)';
+			var base = {
+				'-webkit-appearance': 'none', '-moz-appearance': 'none', 'appearance': 'none',
+				'background': BG_CLOSED + ' ' + ARROW + ' no-repeat right 10px center',
+				'background-size': '12px 12px',
+				'padding': '0 32px 0 12px',
+				'border': '1px solid rgba(23,166,127,0.38)',
+				'border-radius': '8px',
+				'color': '#17a67f',
+				'font-weight': '500',
+				'font-size': '13px',
+				'height': '32px',
+				'line-height': '32px',
+				'box-shadow': 'none',
+				'text-shadow': 'none',
+				'cursor': 'pointer'
+			};
+			Object.keys(base).forEach(function (k) { el.style.setProperty(k, base[k], 'important'); });
+			el.addEventListener('mouseenter', function () { el.style.setProperty('background-color', BG_HOVER, 'important'); });
+			el.addEventListener('mouseleave', function () { el.style.setProperty('background-color', BG_CLOSED, 'important'); });
+			el.addEventListener('focus', function () {
+				el.style.setProperty('border-color', '#17a67f', 'important');
+				el.style.setProperty('box-shadow', '0 0 0 3px rgba(23,166,127,0.20)', 'important');
+			});
+			el.addEventListener('blur', function () {
+				el.style.setProperty('border-color', 'rgba(23,166,127,0.38)', 'important');
+				el.style.setProperty('box-shadow', 'none', 'important');
+			});
+		})(levelSel);
 		levelSel.addEventListener('change', function () { state.level = levelSel.value; renderList(); });
 
 		var searchInput = Mt5700.input('text', '按关键词过滤，如 拨号 / eth2 / 警告', '');
@@ -273,8 +313,8 @@ return L.view.extend({
 		toolbar.appendChild(E('div', { 'class': 'mt5700-logsearch' }, [searchInput]));
 		var autoWrap = E('label', { 'class': 'mt5700-logauto' }, [autoChk, E('span', {}, '自动刷新')]);
 		toolbar.appendChild(autoWrap);
-		toolbar.appendChild(logButton('刷新', function () { refresh(true); }));
-		toolbar.appendChild(logButton('导出', function () { exportLog(); }));
+		toolbar.appendChild(logButton('刷新', function () { refresh(true); }, 'primary'));
+		toolbar.appendChild(logButton('导出', function () { exportLog(); }, 'accent'));
 		body.appendChild(toolbar);
 
 		/* ---------------- 日志主体 ---------------- */
