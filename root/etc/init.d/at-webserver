@@ -200,38 +200,60 @@ iface_has_address() {
 }
 
 # ---------------------------------------------------------------------------
-# 机型未预置接口时自动创建（用户诉求：自动新建接口）
+# 机型未预置接口时自动创建（V4 与 V6 都要创建）
 #
-# 旧行为是「接口不存在则 continue」——在非定制机型上等于什么都不做，
-# 也没有任何日志。用户看到的是「模组 AT 在线、接口列表里没有 MT5700M、无法联网」，
-# 且完全不知道插件跳过了。
-# 现在：检测到模组 USB 网口就按 proto=dhcp 自动建接口；
-#       检测不到（模组未插/未枚举）则明确记一条日志，说明「暂不创建」的原因。
-# 只自动创建 IPv4 接口：IPv6 接口涉及上游网络策略，仅在已存在时处理。
+# 旧行为是「接口不存在则 continue」——在非定制机型上等于什么都不做，也没有任何日志。
+# 用户看到的是「模组 AT 在线、接口列表里没有 MT5700M、无法联网」，且完全不知道插件跳过了。
+#
+# 现在的策略按可用性分档：
+#   V4（MT5700M，proto=dhcp）：**必须拿到地址**，拿不到等于没网，所以由下面的重试
+#       循环 + hotplug + 后端拨号就绪通知三路兜底；
+#   V6（MT5700Mv6，proto=dhcpv6）：**按实际网络状况获取** —— 运营商下发就取到，
+#       不下发也不影响使用，因此用 reqaddress=try / reqprefix=auto 不做强制，
+#       避免在纯 IPv4 网络下留下一个反复重试、不断写日志的接口。
+#
+# 两者共用模组的同一 USB 网口（OpenWrt 默认配置里的 wan / wan6 也是这么写的，
+# netifd 允许同一 device 被 v4 与 v6 两个 interface 同时使用）。
+#
+# 参数：$1=接口名  $2=proto（dhcp / dhcpv6）
 # ---------------------------------------------------------------------------
 ensure_iface_created() {
-	local iface proto device
+	local iface proto device cur_proto
 
 	iface="$1"
+	proto="$2"
+
 	if uci -q get "network.$iface" >/dev/null 2>&1; then
 		return 0
 	fi
 
-	device=$(detect_usb_netdev)
+	# 设备名优先复用 V4 接口上已确定的 device，确保 v4/v6 落在同一网口
+	device=$(uci -q get "network.${IFACE_4G}.device")
+	[ -n "$device" ] || device=$(iface_device_name "$IFACE_4G")
 	if [ -z "$device" ]; then
 		logger -t at-webserver "未检测到模组 USB 网口，暂不创建 $iface 接口（模组可能未插入或未枚举完成）"
 		return 1
 	fi
 
-	logger -t at-webserver "机型未预置 $iface 接口，按检测到的 USB 网口 $device 自动创建（proto=dhcp）"
+	if [ "$proto" = "dhcpv6" ] && ! command -v odhcp6c >/dev/null 2>&1; then
+		logger -t at-webserver "系统缺少 odhcp6c，跳过创建 $iface（IPv6 客户端不可用；需要 IPv6 请先安装 odhcp6c）"
+		return 1
+	fi
+
+	logger -t at-webserver "机型未预置 $iface 接口，按 proto=$proto 自动创建（device=$device）"
 	uci -q set "network.$iface=interface"
-	uci -q set "network.$iface.proto=dhcp"
+	uci -q set "network.$iface.proto=$proto"
 	uci -q set "network.$iface.device=$device"
 	uci -q set "network.$iface.auto=1"
+	if [ "$proto" = "dhcpv6" ]; then
+		# 按实际网络状况获取：有地址/前缀就取，没有也不判失败
+		uci -q set "network.$iface.reqaddress=try"
+		uci -q set "network.$iface.reqprefix=auto"
+	fi
 	uci -q commit network
 
-	proto=$(uci -q get "network.$iface.proto")
-	[ "$proto" = "dhcp" ] || logger -t at-webserver "警告：$iface 自动创建后 proto=$proto，非预期"
+	cur_proto=$(uci -q get "network.$iface.proto")
+	[ "$cur_proto" = "$proto" ] || logger -t at-webserver "警告：$iface 自动创建后 proto=$cur_proto，非预期（期望 $proto）"
 	return 0
 }
 
@@ -258,7 +280,9 @@ ensure_modem_interface() {
 	iface_4g="$IFACE_4G"
 	iface_6g="$IFACE_6G"
 
-	ensure_iface_created "$iface_4g" || true
+	# V4 与 V6 都自动创建：V4 必须拿到地址，V6 按实际网络状况获取
+	ensure_iface_created "$iface_4g" dhcp || true
+	ensure_iface_created "$iface_6g" dhcpv6 || true
 
 	for i in "$iface_4g" "$iface_6g"; do
 		uci -q get "network.$i" >/dev/null 2>&1 || continue
@@ -287,10 +311,12 @@ ensure_modem_interface() {
 
 	# 后端拨号达成后会调用 on-uplink 钩子；这里做启动期的兜底重试。
 	n=0
+	got4=0
 	while [ "$n" -lt "$IFUP_RETRY_TIMES" ]; do
 		if iface_has_address "$iface_4g"; then
 			logger -t at-webserver "$iface_4g 已取到地址（第 $((n + 1)) 次检查，设备 $(iface_device_name "$iface_4g")）"
-			return 0
+			got4=1
+			break
 		fi
 		# ifup 是幂等的：接口已 up 但仍在等 DHCP 时重复调用不会破坏状态
 		ifup "$iface_4g" 2>&1 | logger -t at-webserver || true
@@ -301,9 +327,20 @@ ensure_modem_interface() {
 		sleep "$IFUP_RETRY_INTERVAL"
 	done
 
-	logger -t at-webserver "警告：$iface_4g 在 $((IFUP_RETRY_TIMES * IFUP_RETRY_INTERVAL))s 内未取到地址。\
+	if [ "$got4" -eq 0 ]; then
+		logger -t at-webserver "警告：$iface_4g 在 $((IFUP_RETRY_TIMES * IFUP_RETRY_INTERVAL))s 内未取到地址。\
 已尝试 $(iface_device_name "$iface_4g")；请检查 logread -e at-webserver 与「模组是否已驻网」；\
 hotplug 钩子与后端周期对账会继续处理"
+	fi
+
+	# V6 不判定达成：只记录实际结果，便于排障时一眼看出"是有 v6 还是没下发"
+	if uci -q get "network.$iface_6g" >/dev/null 2>&1; then
+		if iface_has_address "$iface_6g"; then
+			logger -t at-webserver "$iface_6g 已获取 IPv6 地址"
+		else
+			logger -t at-webserver "$iface_6g 暂未获取 IPv6 地址（按实际网络状况获取，不影响 IPv4 使用）"
+		fi
+	fi
 	return 0
 }
 
@@ -436,7 +473,8 @@ reload_service() {
 # 有明确先后关系，而不是靠 init.d 在后端拨号之前抢跑 + 猜时间。
 on_uplink() {
 	local i
-	ensure_iface_created "$IFACE_4G" || return 1
+	ensure_iface_created "$IFACE_4G" dhcp || return 1
+	ensure_iface_created "$IFACE_6G" dhcpv6 || true
 	for i in "$IFACE_4G" "$IFACE_6G"; do
 		uci -q get "network.$i" >/dev/null 2>&1 || continue
 		if iface_has_address "$i"; then
