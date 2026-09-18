@@ -330,14 +330,76 @@ jobs:
             echo "==> 已清理旧 Release ${TAG}，将重建"
           fi
 
+      # Release 简介的取用顺序：
+      #   1) docs/release-notes/<tag>.md —— 手写、简明，发版时顺手补一个小文件；
+      #   2) CHANGELOG 该版本段落的裁剪版（只留分类小标题 + 每条首句）；
+      #   3) GitHub 自动生成的提交列表。
+      # 不用 --generate-notes 作首选：那只是提交列表，对使用者几乎没有信息量。
+      - name: Compose release notes
+        id: notes
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -e
+          VER=$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -1 | tr -d '[:space:]')
+          NOTES=/tmp/release-notes.md
+          HANDWRITTEN="docs/release-notes/${TAG}.md"
+
+          if [ -f "$HANDWRITTEN" ]; then
+            echo "==> 使用手写发布摘要：$HANDWRITTEN"
+            cp "$HANDWRITTEN" "$NOTES"
+          else
+            SECTION=/tmp/changelog-section.md
+            awk -v ver="$VER" '
+              $0 ~ "^## v" ver "($| )" { flag = 1; next }
+              flag && /^## / { exit }
+              flag { print }
+            ' CHANGELOG.md > "$SECTION"
+
+            if [ -s "$SECTION" ]; then
+              echo "::warning::未找到 $HANDWRITTEN，改用 CHANGELOG 裁剪摘要"
+              grep -E '^(### |- )' "$SECTION" \
+                | sed -E 's/^(- \*\*[^*]+\*\*: [^。]*。).*$/\1/' \
+                | head -12 > "$NOTES"
+              echo "" >> "$NOTES"
+              echo "完整变更记录见 [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)。" >> "$NOTES"
+            else
+              echo "::warning::既无 $HANDWRITTEN 也无 CHANGELOG 段落，回退为自动生成的提交列表"
+              rm -f "$NOTES"
+            fi
+          fi
+
+          if [ -s "$NOTES" ]; then
+            {
+              echo ""
+              echo "---"
+              echo ""
+              echo '**安装**：先 `cat /etc/apk/arch` 确认设备架构，选同前缀的包'
+              echo '（`aarch64_cortex-a53` / `aarch64_generic` / `x86_64`）；'
+              echo '主包与语言包需放在同一条 `apk add` / `opkg install` 里。'
+              echo '报错对照与零风险预演方法见资产 `ARCH-GUIDE.txt`。'
+            } >> "$NOTES"
+            echo "body_file=$NOTES" >> "$GITHUB_OUTPUT"
+            echo "==> Release 简介（$(wc -l < "$NOTES") 行）："
+            cat "$NOTES"
+          fi
+
       - name: Publish to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
           mapfile -t FILES < <(find dist -type f | sort)
-          gh release create "$TAG" "${FILES[@]}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --generate-notes \
-            --title "AT WebServer ${TAG}"
+          BODY="${{ steps.notes.outputs.body_file }}"
+          if [ -n "$BODY" ] && [ -s "$BODY" ]; then
+            gh release create "$TAG" "${FILES[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --notes-file "$BODY" \
+              --title "AT WebServer ${TAG}"
+          else
+            gh release create "$TAG" "${FILES[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --generate-notes \
+              --title "AT WebServer ${TAG}"
+          fi
           echo "==> Release ${TAG} 已发布，资产 ${#FILES[@]} 个"
