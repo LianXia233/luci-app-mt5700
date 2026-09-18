@@ -294,7 +294,7 @@ impl RpcServer {
 
     /// 把前端发来的字符串当作 AT 命令执行并整理成应答。
     pub async fn run_command(&self, command: &str) -> AtCommandResponse {
-        log_debug!("收到 AT 命令: {}", command.trim());
+        log_debug!("前端请求: {}", command.trim());
 
         // AT+CONNECT? 不是真的 AT 命令，用来让前端知道当前走网络还是串口。
         if command.trim() == "AT+CONNECT?" {
