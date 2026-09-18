@@ -50,10 +50,20 @@ grep OPENWRT_ARCH /etc/openwrt_release
 |:--|:--|:--|
 | `error: uninstallable arch: aarch64_cortex-a53` | 设备声明的是 `aarch64_generic` | 改下 `aarch64_generic` 的包；或临时 `echo aarch64_cortex-a53 >> /etc/apk/arch`（sysupgrade 后失效） |
 | `error: uninstallable arch: aarch64_generic` | 设备声明的是 `aarch64_cortex-a53` | 改下 `aarch64_cortex-a53` 的包 |
-| `error: uninstallable arch: all` | 语言包等 `PKGARCH=all` 的包需要 `/etc/apk/arch` 中有 `all` 行 | `echo all >> /etc/apk/arch` |
+| `error: uninstallable arch: all` | 语言包（`PKGARCH=all`）。实测 apk-tools 3.0.5 已把 `all` 视为兼容架构，通常不会遇到 | 确实遇到时 `echo all >> /etc/apk/arch` |
+| `luci-app-mt5700 (no such package): required by: luci-i18n-...` | 不是架构问题：语言包声明依赖主包，未同时安装 | 与主包放在同一条 `apk add` / `opkg install` 里 |
 | 报错后跟随 `satisfies: world[...]` | 只是依赖求解的上下文，不是另一个问题 | 按上面的 arch 处理 |
 
-Release 中附带的 `ARCH-GUIDE.txt` 是同一份说明，可离线对照。
+### 安装前可先做零风险预演
+
+`apk --simulate` 会走完整的架构校验与依赖求解，但不真正安装：
+
+```sh
+apk add --simulate --allow-untrusted ./<ARCH>-luci-app-mt5700-*.apk
+```
+
+输出形如 `(1/1) Installing luci-app-mt5700 (1.12.5-r1)` 即表示架构与依赖都已通过；
+若报 `uninstallable arch` 则说明选错了架构。Release 中附带的 `ARCH-GUIDE.txt` 是同一份说明，可离线对照。
 
 ## 安装
 
