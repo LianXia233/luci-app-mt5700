@@ -56,14 +56,38 @@ endef
 define Package/luci-app-mt5700/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
+	# ---------------------------------------------------------------------
+	# 合并 apk/opkg 因「受保护路径」留下的 .apk-new
+	#
+	# OpenWrt 的 apk 把 /etc/init.d 视为受保护路径（与 /etc/config 同等对待）：
+	# 升级时若判定目标文件被本地修改过，就把新版写成 <file>.apk-new 而**不覆盖**。
+	# 后果是服务脚本永远停在上一个版本 —— 本插件的关键修复（接口自动创建、
+	# 拨号对齐对账、hotplug 协同）全在 init.d 里，不合并等于没升级。
+	#
+	# 实测（Hiveton H5000M，1.12.3 → 1.12.5）：升级后 /etc/init.d/at-webserver
+	# 仍是 11250 字节的旧版，新版 21753 字节躺在 /etc/init.d/at-webserver.apk-new。
+	#
+	# 这里只合并服务脚本与 uci-defaults；/etc/config 下的 .apk-new 一律不动——
+	# 那是用户配置，应由用户决定是否采用新版默认值。
+	# ---------------------------------------------------------------------
+	for f in /etc/init.d/at-webserver /etc/uci-defaults/at-webserver; do
+		for suf in .apk-new .opkg-new; do
+			if [ -f "$$f$$suf" ]; then
+				mv -f "$$f$$suf" "$$f" && logger -t at-webserver "已用新版覆盖 $$f（来自 $${suf}）"
+			fi
+		done
+		if [ -f "$$f-opkg" ]; then
+			mv -f "$$f-opkg" "$$f" && logger -t at-webserver "已用新版覆盖 $$f（来自 -opkg）"
+		fi
+		chmod 0755 "$$f" 2>/dev/null
+	done
+
 	chmod 0755 /etc/init.d/at-webserver 2>/dev/null
 	/etc/init.d/at-webserver enable
 	/etc/init.d/at-webserver restart 2>/dev/null || /etc/init.d/at-webserver start
 	# 安装/升级后立即核对一次模组接口：不存在就创建（V4 必建并取址，V6 也建、
-	# 按实际网络状况取址），并尝试拉起。服务里的同类检查是在后台跑的，
-	# 装完这一刻还没跑到，所以这里同步做一遍，避免用户装完看到「没有接口」。
-	# 此时模组可能尚未就绪，失败无妨：init.d 的重试、hotplug 与后端拨号就绪
-	# 通知会继续处理。
+	# 按实际网络状况取址）。服务里的同类检查是在后台跑的，装完这一刻还没跑到。
+	# 只建接口、不做 ifup，避免被 DHCP 等待拖住安装进程。
 	/etc/init.d/at-webserver ensure_interfaces 2>/dev/null || true
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
