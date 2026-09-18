@@ -22,7 +22,9 @@ logger -t at-webserver "hotplug: 模组网口 $DEVICE（ACTION=$ACTION, INTERFAC
 
 # 若该设备已被某个接口接管，只拉起这个接口
 if [ -n "$INTERFACE" ]; then
-	ifstatus "$INTERFACE" 2>/dev/null | grep -qE '"(ipv4-address|ipv6-address)"[[:space:]]*:[[:space:]]*\[[^]]' && exit 0
+	# 与 init.d 的 iface_has_address 保持一致：ifstatus 是多行 JSON，需先去掉换行
+	ifstatus "$INTERFACE" 2>/dev/null | tr -d '\n' \
+		| grep -qE '"(ipv4-address|ipv6-address)"[[:space:]]*:[[:space:]]*\[[[:space:]]*\{' && exit 0
 	/sbin/ifup "$INTERFACE" 2>&1 | logger -t at-webserver || true
 	exit 0
 fi
