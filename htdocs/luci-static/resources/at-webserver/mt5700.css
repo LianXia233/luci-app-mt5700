@@ -3319,3 +3319,114 @@
 	background: #c94040 !important;
 	border-color: #c94040 !important;
 }
+
+/* ---------- 日志页控件美化（全部自写，不依赖主题控件） ---------- */
+
+/* 级别下拉：去掉系统外观，自绘箭头 + 主色描边，与分段控件同一套配色 */
+.mt5700-logselect select {
+	appearance: none !important;
+	-webkit-appearance: none !important;
+	-moz-appearance: none !important;
+	height: 32px !important;
+	padding: 0 32px 0 12px !important;
+	font-size: 13px !important;
+	font-weight: 500 !important;
+	color: #17a67f !important;
+	background-color: rgba(23, 166, 127, 0.10) !important;
+	border: 1px solid rgba(23, 166, 127, 0.38) !important;
+	border-radius: 8px !important;
+	box-shadow: none !important;
+	text-shadow: none !important;
+	cursor: pointer;
+	background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+	background-repeat: no-repeat !important;
+	background-position: right 10px center !important;
+	background-size: 12px 12px !important;
+	transition: background-color .15s ease, border-color .15s ease;
+}
+.mt5700-logselect select:hover {
+	background-color: rgba(23, 166, 127, 0.17) !important;
+	border-color: rgba(23, 166, 127, 0.55) !important;
+}
+.mt5700-logselect select:focus {
+	outline: none !important;
+	border-color: #17a67f !important;
+	box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.18) !important;
+}
+/* 下拉展开项（部分浏览器生效） */
+.mt5700-logselect select option {
+	color: #1f2933;
+	background: #fff;
+}
+
+/* 搜索框：聚焦时主色描边，与下拉保持一致 */
+.mt5700-logsearch input:focus {
+	outline: none !important;
+	border-color: #17a67f !important;
+	background-color: rgba(23, 166, 127, 0.08) !important;
+	box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.15) !important;
+}
+
+/* 自动刷新开关：用主色渲染原生复选框，免去自写控件 */
+.mt5700-logauto input[type="checkbox"] {
+	accent-color: #17a67f !important;
+	width: 15px;
+	height: 15px;
+	cursor: pointer;
+}
+
+/* 按钮配色：刷新=主色实心，导出=蓝色描边，清空=红色描边 */
+.mt5700-logbtn {
+	font-weight: 500;
+}
+.mt5700-logbtn-primary {
+	color: #fff !important;
+	background: #17a67f !important;
+	border-color: #17a67f !important;
+}
+.mt5700-logbtn-primary:hover {
+	background: #149774 !important;
+	border-color: #149774 !important;
+	box-shadow: 0 2px 8px rgba(23, 166, 127, 0.32) !important;
+}
+.mt5700-logbtn-primary:active { background: #118a6a !important; }
+
+.mt5700-logbtn-accent {
+	color: #2f88d8 !important;
+	background: rgba(47, 136, 216, 0.12) !important;
+	border-color: rgba(47, 136, 216, 0.48) !important;
+}
+.mt5700-logbtn-accent:hover {
+	color: #fff !important;
+	background: #2f88d8 !important;
+	border-color: #2f88d8 !important;
+	box-shadow: 0 2px 8px rgba(47, 136, 216, 0.30) !important;
+}
+.mt5700-logbtn-accent:active { background: #2878c2 !important; }
+
+/* 分段控件微调：激活态加一点阴影层次 */
+.mt5700-logtab.active {
+	box-shadow: 0 2px 8px rgba(23, 166, 127, 0.30) !important;
+}
+
+/* 主题对 select 使用了 background 简写 + !important，会把单独写的 background-color /
+ * background-image 一并重置（实测下拉变成白底、自绘箭头消失）。
+ * 这里同样用简写 + 更高特异性压回去。 */
+.mt5700-logtoolbar .mt5700-logselect select {
+	background: rgba(23, 166, 127, 0.10) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
+	background-size: 12px 12px !important;
+	color: #17a67f !important;
+	font-weight: 500 !important;
+	border: 1px solid rgba(23, 166, 127, 0.38) !important;
+}
+.mt5700-logtoolbar .mt5700-logselect select:hover {
+	background: rgba(23, 166, 127, 0.18) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
+	background-size: 12px 12px !important;
+	border-color: rgba(23, 166, 127, 0.58) !important;
+}
+.mt5700-logtoolbar .mt5700-logselect select:focus {
+	background: rgba(23, 166, 127, 0.13) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
+	background-size: 12px 12px !important;
+	border-color: #17a67f !important;
+	box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.20) !important;
+}
