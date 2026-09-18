@@ -254,23 +254,41 @@ jobs:
                  临时方案：把这行加进 /etc/apk/arch 后再安装（sysupgrade 后失效）：
                      echo aarch64_cortex-a53 >> /etc/apk/arch
 
-            error: uninstallable arch: all
-              -> 语言包等 PKGARCH=all 的包需要 /etc/apk/arch 里存在 all 这一行：
-                     echo all >> /etc/apk/arch
-
             error: uninstallable arch: aarch64_generic
               -> 设备声明的是 aarch64_cortex-a53（如 ImmortalWrt 的 mediatek/filogic），
                  请改下 aarch64_cortex-a53 的包。
 
+            error: uninstallable arch: all
+              -> 语言包（PKGARCH=all）在极少数固件上才会遇到。实测 apk-tools 3.0.5
+                 已把 OpenWrt 的 all 当作兼容架构，通常不会出现；确实遇到时补一行：
+                     echo all >> /etc/apk/arch
+
+            luci-app-mt5700 (no such package): required by: luci-i18n-mt5700-zh-cn[...]
+              -> 不是架构问题：语言包声明依赖主包，必须与主包在同一条命令里一起安装。
+
           四、安装命令
 
+            主包与语言包必须一起装（语言包声明依赖主包）：
+
             apk:
-                apk add --allow-untrusted ./<arch>-luci-app-mt5700-*.apk
-                apk add --allow-untrusted ./<arch>-luci-i18n-mt5700-zh-cn-*.apk
+                apk add --allow-untrusted \
+                    ./<arch>-luci-app-mt5700-*.apk \
+                    ./<arch>-luci-i18n-mt5700-zh-cn-*.apk
 
             opkg:
-                opkg install ./<arch>-luci-app-mt5700_*.ipk
-                opkg install ./<arch>-luci-i18n-mt5700-zh-cn_*.ipk
+                opkg install ./<arch>-luci-app-mt5700_*.ipk \
+                             ./<arch>-luci-i18n-mt5700-zh-cn_*.ipk
+
+            只需要英文界面时可以只装主包，此时不要再单独装语言包。
+
+          五、安装前可先做零风险预演
+
+            用 apk --simulate 走完整架构与依赖求解，但不真正安装：
+
+                apk add --simulate --allow-untrusted ./<arch>-luci-app-mt5700-*.apk
+
+            输出形如 "(1/1) Installing luci-app-mt5700 (1.12.5-r1)" 即表示
+            架构与依赖都已通过；若报 uninstallable arch 则说明选错了架构。
           EOF
           # 去掉 heredoc 缩进，保持文本左对齐
           sed -i 's/^          //' dist/ARCH-GUIDE.txt
