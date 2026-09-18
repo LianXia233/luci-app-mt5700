@@ -1,0 +1,2006 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MT5700M 5G 模组管理 · luci-app-mt5700 功能演示</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23087cba'/%3E%3Cpath d='M8 22l2-5 3 4 3-9 3 12 2-7' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   MT5700M 5G 模组管理 · 功能演示
+   设计系统对齐参考站点 PaperGrid 冷调浅色体系（来自插件 mt5700.css）
+   玻璃拟态 + 分层阴影 + 信号/温度语义色
+   ============================================================ */
+:root{
+  --bg: rgba(242,247,251,.72);
+  --card: rgba(255,255,255,.88);
+  --card-hover: rgba(255,255,255,.96);
+  --float: rgba(255,255,255,.94);
+  --text:#17324b; --text2:#60798d; --text3:#8ba3b6;
+  --border:rgba(220,232,241,.95); --border-sub:rgba(211,226,237,.9);
+  --divider:rgba(23,50,75,.07);
+  --blur:18px; --sat:150%;
+  --sh1:0 1px 2px rgba(21,54,83,.04),0 1px 3px rgba(21,54,83,.05);
+  --sh2:0 2px 6px rgba(21,54,83,.05),0 5px 20px rgba(21,54,83,.06);
+  --sh3:0 4px 10px rgba(21,54,83,.05),0 12px 32px rgba(16,45,89,.08),0 24px 64px rgba(16,45,89,.05);
+  --sh-float:0 4px 12px rgba(21,54,83,.07),0 12px 36px rgba(16,45,89,.1),0 24px 80px rgba(16,45,89,.08);
+  --ring:0 0 0 3px rgba(41,169,225,.22);
+  --r-sm:7px; --r-md:10px; --r-lg:14px; --r-xl:18px;
+  --acc:#087cba; --acc-l:#29a9e1;
+  --ok:#0f9d63; --ok-l:#34d399; --warn:#d98b06; --warn-l:#fbbf24; --danger:#c83d55; --danger-l:#e47988;
+  --sig-exc:#0f9d63; --sig-good:#0e9dbd; --sig-fair:#d98b06; --sig-poor:#dd6b1f; --sig-bad:#c83d55;
+  --temp-cold:#1d508f; --temp-cool:#0a7c96; --temp-normal:#0f9d63; --temp-warm:#8f7506; --temp-hot:#b04f13; --temp-high:#c83d55;
+  --ease:cubic-bezier(.22,.8,.25,1);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"SF Mono",Monaco,"Cascadia Code","Roboto Mono",Consolas,monospace;
+}
+html[data-theme="dark"] :root{
+    --bg:rgba(13,25,41,.78); --card:rgba(19,35,55,.88); --card-hover:rgba(26,53,77,.94);
+    --float:rgba(22,40,60,.96);
+    --text:#e0edf7; --text2:#97b1c5; --text3:#6b87a0;
+    --border:rgba(38,61,82,.95); --border-sub:rgba(52,80,104,.85); --divider:rgba(224,237,247,.07);
+    --sh1:0 1px 2px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.34);
+    --sh2:0 2px 6px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.36);
+    --sh3:0 4px 10px rgba(0,0,0,.32),0 8px 26px rgba(0,0,0,.42),0 16px 48px rgba(0,0,0,.28);
+    --sh-float:0 4px 12px rgba(0,0,0,.36),0 12px 36px rgba(0,0,0,.46),0 24px 64px rgba(0,0,0,.34);
+    --ring:0 0 0 3px rgba(97,201,244,.26);
+    --acc:#61c9f4; --acc-l:#8edbf9;
+    --ok:#34d399; --warn:#fbbf24; --danger:#e47988;
+    --sig-exc:#34d399; --sig-good:#22d3ee; --sig-fair:#fbbf24; --sig-poor:#fb923c; --sig-bad:#f87171;
+    --temp-cold:#60a5fa; --temp-cool:#22d3ee; --temp-normal:#34d399; --temp-warm:#fad64a; --temp-hot:#fb923c; --temp-high:#e47988;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:auto}
+body{font-family:var(--font);color:var(--text);font-size:14px;line-height:1.6;background:#f6fbfd;-webkit-font-smoothing:antialiased}
+html[data-theme="dark"] body{background:#102433}
+@media (max-width:640px){
+  body{font-size:15px}
+  input,select,textarea{font-size:16px}
+}
+/* ===== mint 主题同款分层背景：对角楔形 + 三角网格 + 人物立绘 + 遮罩 ===== */
+.bg{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:clip}
+.bg-panel{position:absolute;inset:0 0 0 52%;clip-path:polygon(24% 0,100% 0,100% 100%,0 100%);background:linear-gradient(150deg,#e4f5fa 0%,#f1faff 64%,#e0f4fc 100%)}
+.bg-grid{position:absolute;inset:0;background-image:url('https://media.doubao.com/space/api/box/stream/download/all_by_mount_point/V7jJbA6fvodfhNxRBMbcLZXNnec');background-size:1440px 810px;background-position:50% 50%;background-repeat:repeat}
+.bg-char{position:absolute;inset:0;background-repeat:no-repeat;background-position:right center;background-size:contain;opacity:0;transition:opacity .34s var(--ease)}
+.bg-char-light{background-image:url('https://media.doubao.com/space/api/box/stream/download/all_by_mount_point/Xz4PbZlwroGKrvxTv5Tcgdu0nve');opacity:1}
+.bg-char-dark{background-image:url('https://media.doubao.com/space/api/box/stream/download/all_by_mount_point/RG4QbD4KFotp0VxQ36Rcyb9Znxh')}
+.bg::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(246,251,253,.92) 0%,rgba(246,251,253,.52) 46%,rgba(246,251,253,0) 70%)}
+html[data-theme="dark"] .bg-panel{background:linear-gradient(150deg,#15394c,#123247 64%,#194054)}
+html[data-theme="dark"] .bg-grid{background-image:url('https://media.doubao.com/space/api/box/stream/download/all_by_mount_point/CTQlbcp1ToSLSKx542icBm98ntb')}
+html[data-theme="dark"] .bg-char-light{opacity:0}
+html[data-theme="dark"] .bg-char-dark{opacity:1}
+html[data-theme="dark"] .bg::after{background:linear-gradient(90deg,rgba(16,36,51,.90) 0%,rgba(16,36,51,.50) 46%,rgba(16,36,51,0) 70%)}
+@media (max-width:854px){
+  .bg-char-light{background-image:url('https://media.doubao.com/space/api/box/stream/download/all_by_mount_point/AnPVbiFuWoJuyMxCpiHcPNZSnjc')}
+  .bg-char-dark{background-image:url('https://media.doubao.com/space/api/box/stream/download/all_by_mount_point/QWzOb1RP0ocosrxxoo3c41bRnVb')}
+  .bg-char{background-position:bottom center;background-size:contain}
+  .bg-panel{inset:38% 0 0;clip-path:polygon(100% 0,100% 100%,0 100%,0 32%)}
+  .bg::after{background:linear-gradient(180deg,rgba(246,251,253,.94) 0%,rgba(246,251,253,.58) 42%,rgba(246,251,253,0) 72%)}
+  html[data-theme="dark"] .bg::after{background:linear-gradient(180deg,rgba(16,36,51,.92) 0%,rgba(16,36,51,.56) 42%,rgba(16,36,51,0) 72%)}
+}
+.app{position:relative;z-index:1;max-width:1760px;margin:0 auto;padding:20px 24px 48px}
+@media (min-width:1680px){.app{max-width:1760px}}
+
+/* ---------- 顶部 ---------- */
+.topbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 20px;border-radius:var(--r-xl);background:var(--card);border:1px solid var(--border);box-shadow:var(--sh2);backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat))}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand .logo{flex:none;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,var(--acc),var(--acc-l));box-shadow:var(--sh2)}
+.brand h1{font-size:18px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.brand .sub{font-size:12px;color:var(--text2)}
+.topbar .right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid transparent;white-space:nowrap}
+.badge.info{color:var(--acc);border-color:rgba(8,124,186,.35);background:rgba(41,169,225,.10)}
+.badge.ok{color:var(--ok);border-color:rgba(15,157,99,.35);background:rgba(15,157,99,.10)}
+.badge.warn{color:var(--warn);border-color:rgba(217,139,6,.35);background:rgba(217,139,6,.10)}
+.badge.danger{color:var(--danger);border-color:rgba(200,61,85,.35);background:rgba(200,61,85,.10)}
+.badge.ghost{color:var(--text2);border-color:var(--border);background:transparent}
+.badge.solid{color:#fff;background:var(--acc)}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+/* ---------- 页签导航 ---------- */
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-top:16px;padding:8px 10px;border-radius:var(--r-xl);background:var(--card);border:1px solid var(--border);box-shadow:var(--sh1);backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat))}
+.tab{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border:0;background:transparent;border-radius:999px;color:var(--text2);font-size:13.5px;font-family:var(--font);font-weight:600;cursor:pointer;transition:color .18s var(--ease),background .18s var(--ease),box-shadow .18s var(--ease);position:relative}
+.tab svg{width:16px;height:16px;flex:none;opacity:.85}
+.tab:hover{color:var(--text);background:rgba(41,169,225,.08)}
+.tab.active{color:#fff;background:linear-gradient(135deg,var(--acc),var(--acc-l));box-shadow:var(--sh2)}
+.tab .cnt{font-size:10.5px;opacity:.85;font-weight:500}
+
+/* ---------- 架构一眼 ---------- */
+.arch{margin-top:16px;padding:14px 20px;border-radius:var(--r-xl);background:var(--card);border:1px solid var(--border);box-shadow:var(--sh2);backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat))}
+.arch .row{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+.arch .node{flex:1;min-width:150px;padding:8px 10px;border-radius:var(--r-md);text-align:center}
+.arch .node b{display:block;font-size:13.5px;color:var(--text)}
+.arch .node span{display:block;font-size:11.5px;color:var(--text3);margin-top:2px;line-height:1.5}
+.arch .node.hl{background:linear-gradient(135deg,rgba(8,124,186,.12),rgba(41,169,225,.10));border:1px solid rgba(8,124,186,.25)}
+.arch .arrow{display:flex;align-items:center;color:var(--text3);padding:0 6px;font-size:15px;flex:none}
+.arch .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px dashed var(--divider)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:12px;color:var(--text2);background:rgba(41,169,225,.07);border:1px solid rgba(8,124,186,.18)}
+
+/* ---------- 视图 ---------- */
+.view{display:none;margin-top:16px}
+.view.active{display:block;animation:fadeUp .34s var(--ease)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.page-head{margin-bottom:14px}
+.page-head h2{font-size:22px;font-weight:700}
+.page-head p{font-size:13px;color:var(--text2);margin-top:2px}
+
+/* ---------- 连接状态条 ---------- */
+.conn-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 18px;border-radius:var(--r-lg);background:var(--card);border:1px solid var(--border);box-shadow:var(--sh2);backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat))}
+.conn-bar .st{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
+.pulse{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(15,157,99,.5);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(15,157,99,.45)}70%{box-shadow:0 0 0 9px rgba(15,157,99,0)}100%{box-shadow:0 0 0 0 rgba(15,157,99,0)}}
+.conn-bar .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.conn-bar .sp{margin-left:auto;font-size:12px;color:var(--text3)}
+
+/* ---------- 卡片 ---------- */
+.card{margin-top:16px;padding:18px 20px;border-radius:var(--r-xl);background:var(--card);border:1px solid var(--border);box-shadow:var(--sh2);backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat))}
+.card-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.card-head h3{font-size:16px;font-weight:700}
+.card-head .sub{font-size:12.5px;color:var(--text2)}
+.card-head .r{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* ---------- 指标网格 ---------- */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.metric{padding:12px 14px;border-radius:var(--r-md);background:rgba(255,255,255,.5);border:1px solid var(--border-sub)}
+html[data-theme="dark"] .metric{background:rgba(255,255,255,.03)}
+.metric .lb{font-size:12px;color:var(--text2)}
+.metric .vl{font-size:19px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.metric .vl small{font-size:12px;font-weight:600;color:var(--text2);margin-left:2px}
+.metric.temp-cold .vl{color:var(--temp-cold)} .metric.temp-cool .vl{color:var(--temp-cool)}
+.metric.temp-normal .vl{color:var(--temp-normal)} .metric.temp-warm .vl{color:var(--temp-warm)}
+.metric.temp-hot .vl{color:var(--temp-hot)} .metric.temp-high .vl{color:var(--temp-high)}
+
+/* ---------- 总评横幅（真实 mt5700 结构：图标 + 摘要 + 四指标 + 能力详情） ---------- */
+.verdict{display:flex;align-items:center;flex-wrap:wrap;gap:15px;min-height:86px;padding:10px 15px;margin-bottom:14px;background:var(--card);backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat));border:1px solid var(--border);border-left:3px solid var(--verdict-accent,#10a56a);border-radius:13px;box-shadow:var(--sh1)}
+.verdict-status{flex:0 0 31px;width:31px;color:var(--verdict-accent,#10a56a)}
+.verdict-status svg{display:block;width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8}
+.verdict-status .status-halo{opacity:.16}
+.verdict-status .verdict-tower{fill:currentColor;stroke:none;animation:v-tower 1.7s ease-in-out infinite}
+@keyframes v-tower{50%{transform:translateY(-1px)}}
+.verdict-summary{flex:0 1 auto;width:340px;min-width:165px;max-width:340px}
+.verdict-title{font-size:16px;font-weight:700;color:var(--text);line-height:1.35}
+.verdict-advice{margin-top:3px;font-size:10px;line-height:1.5;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.verdict-metrics{flex:1 1 auto;min-width:0;display:grid;grid-template-columns:repeat(4,minmax(75px,1fr));gap:6px;align-items:stretch;align-self:center}
+.verdict-metric{display:flex;align-items:center;gap:7px;min-width:0;min-height:53px;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-sub);border-radius:9px;background:var(--card)}
+.verdict-metricicon{flex:0 0 23px;width:23px;height:23px;display:inline-flex}
+.verdict-metricicon svg{display:block;width:23px;height:23px;fill:none;stroke:var(--verdict-accent,#10a56a);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.verdict-metricbox{display:flex;flex-direction:column;min-width:0}
+.verdict-metricname{font-size:9px;color:var(--text3);white-space:nowrap;line-height:1.3}
+.verdict-metricval{display:block;margin-top:2px;font-size:12px;font-weight:700;color:var(--verdict-accent,#10a56a);white-space:nowrap;line-height:1.3}
+.verdict-metric-worst{border-color:var(--verdict-accent,#10a56a);box-shadow:inset 0 0 0 1px var(--verdict-accent,#10a56a)}
+.verdict-cap{flex:0 0 auto;display:flex;align-items:center;min-width:0}
+.verdict-capitem{display:flex;flex-direction:column;min-width:0;padding:3px 9px;border-left:1px solid var(--divider)}
+.verdict-capitem:first-child{border-left:0}
+.verdict-capname{display:block;font-size:9px;color:var(--text3);white-space:nowrap;line-height:1.3}
+.verdict-capval{display:block;margin-top:2px;max-width:115px;font-size:12px;font-weight:700;color:var(--verdict-accent,#10a56a);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+.verdict-capitem-worst{background:var(--verdict-worst-bg,rgba(16,165,106,.08));border-radius:7px}
+.verdict-exc{--verdict-accent:#10a56a;--verdict-worst-bg:rgba(16,165,106,.09)}
+.verdict-good{--verdict-accent:#5c9e35;--verdict-worst-bg:rgba(92,158,53,.09)}
+.verdict-fair{--verdict-accent:#d39425;--verdict-worst-bg:rgba(211,148,37,.11)}
+.verdict-poor{--verdict-accent:#d95b51;--verdict-worst-bg:rgba(217,91,81,.1)}
+.verdict-bad{--verdict-accent:#b02b45;--verdict-worst-bg:rgba(176,43,69,.1)}
+.verdict-empty{--verdict-accent:#8ba3b6}
+.verdict-metricicon .vbar{transform-origin:center bottom;animation:v-bar 1.5s ease-in-out infinite}
+.verdict-metricicon .vbar:nth-child(2){animation-delay:.12s}
+.verdict-metricicon .vbar:nth-child(3){animation-delay:.24s}
+.verdict-metricicon .vbar:nth-child(4){animation-delay:.36s}
+.verdict-metric[data-bars="1"] .vbar:nth-child(n+2),
+.verdict-metric[data-bars="2"] .vbar:nth-child(n+3),
+.verdict-metric[data-bars="3"] .vbar:nth-child(4){opacity:.14}
+.verdict-metricicon .vwave{stroke-dasharray:5 3;animation:v-wave 1.4s linear infinite}
+.verdict-metricicon .vring{transform-origin:12px 12px;animation:v-ring 2.1s ease-out infinite}
+.verdict-metricicon .vring2{animation-delay:.45s}
+.verdict-metricicon .vdot{fill:currentColor;stroke:none}
+.verdict-metricicon .vsweep{transform-origin:12px 12px;animation:v-sweep 2s linear infinite}
+.verdict-metricicon .vcheck{animation:v-check 1.4s ease-in-out infinite}
+@keyframes v-bar{50%{transform:scaleY(1.08)}}
+@keyframes v-wave{to{stroke-dashoffset:-8}}
+@keyframes v-ring{0%{opacity:.55;transform:scale(.72)}75%,100%{opacity:0;transform:scale(1.25)}}
+@keyframes v-sweep{to{transform:rotate(360deg)}}
+@keyframes v-check{50%{opacity:.35}}
+@media (max-width:1180px){.verdict-cap{display:none}}
+@media (max-width:900px){.verdict{gap:9px;padding:9px 11px}.verdict-summary{flex-basis:155px;width:155px;min-width:125px}.verdict-metrics{grid-template-columns:repeat(2,minmax(70px,1fr))}}
+@media (max-width:520px){.verdict{gap:7px;padding:8px;min-height:78px}.verdict-status{flex-basis:25px;width:25px}.verdict-summary{flex-basis:100px;width:100px;min-width:100px}.verdict-title{font-size:12px}.verdict-advice{font-size:8px;white-space:normal;line-height:1.3;max-height:22px}.verdict-metric{padding:4px 5px;gap:5px}.verdict-metricicon,.verdict-metricicon svg{flex-basis:18px;width:18px;height:18px}.verdict-metricname{font-size:8px}.verdict-metricval{font-size:10px}}
+@media (prefers-reduced-motion:reduce){.verdict-metricicon *,.verdict-status *{animation:none!important;transition:none!important}}
+
+/* ---------- 环形仪表（真实 mt5700 结构：刻度环 + 中心值 + 标签/缩写 + 档位 + 描述） ---------- */
+.gauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));grid-auto-rows:1fr;align-items:stretch;gap:12px}
+.gauges>*{min-width:0;align-self:stretch}
+@media (max-width:719px){.gauges{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:419px){.gauges{grid-template-columns:1fr}}
+.gauge{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 8px;background:var(--card);backdrop-filter:blur(var(--blur)) saturate(var(--sat));-webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat));border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh2);min-height:100%;box-sizing:border-box;transition:transform .2s var(--ease),box-shadow .2s var(--ease)}
+.gauge:hover{transform:translateY(-3px);box-shadow:var(--sh3)}
+.gauge .dial{position:relative;width:120px;height:120px;max-width:100%}
+.gauge .dial svg{width:100%;height:100%;display:block}
+.gauge .track{fill:none;stroke:rgba(127,127,127,.16);stroke-linecap:round}
+.gauge .bar{fill:none;stroke-linecap:round;transition:stroke-dashoffset .6s cubic-bezier(.4,0,.2,1),stroke .4s ease;filter:drop-shadow(0 0 5px rgba(8,124,186,.32))}
+.gauge .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.gauge .val{font-size:22px;font-weight:700;color:var(--text);line-height:1.1;font-variant-numeric:tabular-nums}
+.gauge .unit{font-size:11px;color:var(--text3)}
+.gauge .labelbox{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;text-align:center;min-height:2.6em}
+.gauge .glabel{font-size:13px;font-weight:600;color:var(--text);letter-spacing:.02em}
+.gauge .gsub{font-size:10px;font-weight:500;color:var(--text3);letter-spacing:.08em;text-transform:uppercase}
+.gauge .cap{font-size:12px;font-weight:600;padding:2px 10px;border-radius:999px}
+.gauge .cap.exc{background:rgba(15,157,99,.14);color:#0d9e6e}
+.gauge .cap.good{background:rgba(6,182,212,.14);color:#0891b2}
+.gauge .cap.fair{background:rgba(245,158,11,.16);color:#b45309}
+.gauge .cap.poor{background:rgba(249,115,22,.16);color:#c2410c}
+.gauge .cap.bad{background:rgba(200,61,85,.14);color:#b02b45}
+.gauge .plain{display:flex;align-items:center;justify-content:center;height:4.5em;min-height:4.5em;font-size:12px;line-height:1.5;color:var(--text3);text-align:center;padding:0 2px}
+.gauge-exc{border-color:rgba(15,157,99,.35)}
+.gauge-good{border-color:rgba(6,182,212,.35)}
+.gauge-fair{border-color:rgba(245,158,11,.4)}
+.gauge-poor{border-color:rgba(221,107,31,.42)}
+.gauge-bad{border-color:rgba(200,61,85,.42)}
+html[data-theme="dark"] .gauge .cap.exc{color:#34d399}
+html[data-theme="dark"] .gauge .cap.good{color:#22d3ee}
+html[data-theme="dark"] .gauge .cap.fair{color:#fbbf24}
+html[data-theme="dark"] .gauge .cap.poor{color:#fb923c}
+html[data-theme="dark"] .gauge .cap.bad{color:#f87171}
+html[data-theme="dark"] .gauge-exc{border-color:rgba(52,211,153,.38)}
+html[data-theme="dark"] .gauge-good{border-color:rgba(34,211,238,.38)}
+html[data-theme="dark"] .gauge-fair{border-color:rgba(251,191,36,.42)}
+html[data-theme="dark"] .gauge-poor{border-color:rgba(251,146,60,.42)}
+html[data-theme="dark"] .gauge-bad{border-color:rgba(248,113,113,.42)}
+
+/* ---------- 表格 ---------- */
+.table-wrap{overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border-sub)}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+th{background:rgba(41,169,225,.07);color:var(--text2);font-weight:600;text-align:left;padding:9px 12px;border-bottom:1px solid var(--border-sub);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--divider);color:var(--text);font-variant-numeric:tabular-nums}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:rgba(41,169,225,.05)}
+.mono{font-family:var(--mono);font-size:12.5px}
+
+/* ---------- 提示 / 空态 ---------- */
+.hint{font-size:12.5px;color:var(--text3);margin-top:10px;line-height:1.7}
+.hint .t{font-weight:700;color:var(--text2)}
+.empty{padding:26px;text-align:center;color:var(--text3);font-size:13px;border:1px dashed var(--border);border-radius:var(--r-md);background:rgba(255,255,255,.3)}
+html[data-theme="dark"] .empty{background:rgba(255,255,255,.02)}
+.note-fold{margin-top:10px;font-size:12.5px;color:var(--text2);background:rgba(41,169,225,.06);border:1px dashed rgba(8,124,186,.25);border-radius:var(--r-md);padding:10px 14px}
+
+/* ---------- 按钮 ---------- */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:999px;border:1px solid transparent;font-size:13px;font-weight:600;font-family:var(--font);cursor:pointer;transition:transform .15s var(--ease),box-shadow .15s var(--ease),background .15s var(--ease),color .15s var(--ease);background:transparent;color:var(--text2)}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:none}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.btn-primary{background:linear-gradient(135deg,var(--acc),var(--acc-l));color:#fff;box-shadow:var(--sh2)}
+.btn-primary:hover{box-shadow:var(--sh3)}
+.btn-danger{background:rgba(200,61,85,.12);color:var(--danger);border-color:rgba(200,61,85,.3)}
+.btn-danger:hover{background:var(--danger);color:#fff}
+.btn-ghost{border-color:var(--border);color:var(--text2)}
+.btn-ghost:hover{border-color:var(--acc);color:var(--acc);background:rgba(41,169,225,.06)}
+.btn-sm{padding:5px 12px;font-size:12px}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+
+/* ---------- 表单 ---------- */
+.form-group{margin-bottom:12px}
+.form-group .fg-lb{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
+.form-group .fg-hint{font-size:11.5px;color:var(--text3);margin-top:4px;line-height:1.5}
+.input,.select{width:100%;max-width:340px;padding:8px 12px;border-radius:var(--r-md);border:1px solid var(--border);background:rgba(255,255,255,.7);color:var(--text);font-size:13px;font-family:var(--font);outline:none;transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}
+html[data-theme="dark"] .input,.select{background:rgba(255,255,255,.05)}
+.input:focus,.select:focus{border-color:var(--acc);box-shadow:var(--ring)}
+.select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--text2) 50%),linear-gradient(135deg,var(--text2) 50%,transparent 50%);background-position:calc(100% - 18px) 55%,calc(100% - 13px) 55%;background-size:5px 5px;background-repeat:no-repeat;padding-right:32px;cursor:pointer}
+.fg-inline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+/* 开关 */
+.switch{position:relative;display:inline-block;width:44px;height:24px;flex:none}
+.switch input{opacity:0;width:0;height:0}
+.switch .sl{position:absolute;inset:0;border-radius:999px;background:var(--border);transition:background .2s var(--ease);cursor:pointer}
+.switch .sl::before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s var(--ease)}
+.switch input:checked + .sl{background:linear-gradient(135deg,var(--acc),var(--acc-l))}
+.switch input:checked + .sl::before{transform:translateX(20px)}
+.form-group .switch{vertical-align:middle}
+
+/* ---------- 速率 ---------- */
+.speed-row{display:flex;gap:12px;flex-wrap:wrap}
+.speed-box{flex:1;min-width:170px;padding:14px 18px;border-radius:var(--r-lg);background:linear-gradient(135deg,rgba(8,124,186,.10),rgba(41,169,225,.07));border:1px solid rgba(8,124,186,.22)}
+.speed-box .sb-lb{font-size:12px;color:var(--text2);font-weight:600}
+.speed-box .sb-vl{font-size:28px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--acc)}
+.speed-box .sb-vl small{font-size:13px;font-weight:600;color:var(--text2);margin-left:3px}
+
+/* ---------- 曲线 ---------- */
+.chart-box{margin-top:12px;border-radius:var(--r-md);border:1px solid var(--border-sub);background:rgba(255,255,255,.4);padding:10px}
+html[data-theme="dark"] .chart-box{background:rgba(255,255,255,.02)}
+.chart-box svg{width:100%;height:150px;display:block}
+
+/* ---------- 日志 ---------- */
+.seg{display:inline-flex;padding:4px;border-radius:999px;background:rgba(41,169,225,.08);gap:2px}
+.seg button{border:0;background:transparent;padding:6px 14px;border-radius:999px;font-size:12.5px;font-family:var(--font);font-weight:600;color:var(--text2);cursor:pointer}
+.seg button.on{background:var(--acc);color:#fff;box-shadow:var(--sh1)}
+.log-list{margin-top:10px;border:1px solid var(--border-sub);border-radius:var(--r-md);overflow:hidden}
+.log-line{display:flex;gap:10px;align-items:baseline;padding:7px 12px;font-size:12.5px;border-bottom:1px solid var(--divider)}
+.log-line:last-child{border-bottom:0}
+.log-line .t{color:var(--text3);font-family:var(--mono);font-size:11px;flex:none}
+.log-line .dir{flex:none;padding:1px 8px;border-radius:999px;font-size:10.5px;font-weight:700}
+.dir-req{color:#6b7280;background:rgba(107,114,128,.14)}
+.dir-send{color:var(--acc);background:rgba(41,169,225,.14)}
+.dir-recv{color:var(--ok);background:rgba(15,157,99,.14)}
+.log-line .lv{flex:none;padding:1px 8px;border-radius:999px;font-size:10.5px;font-weight:700}
+.lv-debug{color:#8b5cf6;background:rgba(139,92,246,.16)}
+.lv-info{color:var(--acc);background:rgba(41,169,225,.14)}
+.lv-warn{color:var(--warn);background:rgba(217,139,6,.14)}
+.lv-err{color:var(--danger);background:rgba(200,61,85,.14)}
+.log-line .m{color:var(--text);flex:1;min-width:0}
+.log-line .m em{font-style:normal;background:rgba(217,139,6,.25);border-radius:3px;padding:0 2px}
+
+/* ---------- 终端 ---------- */
+.term{border-radius:var(--r-md);border:1px solid var(--border-sub);background:rgba(10,20,34,.92);color:#cfe6f7;font-family:var(--mono);font-size:12.5px;padding:12px;height:280px;overflow-y:auto;line-height:1.7}
+.term .in{color:#7dd3fc}
+.term .out{color:#a7f3d0}
+.term .err{color:#fda4af}
+.term .sys{color:#94a3b8}
+.term-input{display:flex;gap:10px;margin-top:10px}
+.term-input .input{font-family:var(--mono)}
+
+/* ---------- 会话（短信） ---------- */
+.conv{display:grid;grid-template-columns:220px 1fr;gap:14px}
+@media (max-width:820px){.conv{grid-template-columns:1fr}}
+.conv-list{border:1px solid var(--border-sub);border-radius:var(--r-md);overflow:hidden;max-height:420px;overflow-y:auto}
+.conv-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--divider)}
+.conv-item:hover{background:rgba(41,169,225,.06)}
+.conv-item.on{background:rgba(41,169,225,.12);border-left:3px solid var(--acc)}
+.conv-item b{font-size:13px;display:block}
+.conv-item span{font-size:11.5px;color:var(--text3)}
+.msg-box{border:1px solid var(--border-sub);border-radius:var(--r-md);padding:14px;max-height:420px;overflow-y:auto;background:rgba(255,255,255,.4)}
+html[data-theme="dark"] .msg-box{background:rgba(255,255,255,.02)}
+.msg{display:flex;margin-bottom:10px}
+.msg .b{max-width:75%;padding:8px 13px;border-radius:14px;font-size:13px}
+.msg.in .b{background:rgba(41,169,225,.12);border:1px solid rgba(8,124,186,.2);border-bottom-left-radius:4px}
+.msg.out{justify-content:flex-end}
+.msg.out .b{background:linear-gradient(135deg,var(--acc),var(--acc-l));color:#fff;border-bottom-right-radius:4px}
+.msg .t{display:block;font-size:10.5px;color:var(--text3);margin-top:3px}
+
+/* ---------- 弹窗 / Toast ---------- */
+.mask{position:fixed;inset:0;z-index:50;background:rgba(13,25,41,.4);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:20px}
+.mask.show{display:flex}
+.modal{width:100%;max-width:420px;background:var(--float);border-radius:var(--r-xl);border:1px solid var(--border);box-shadow:var(--sh-float);padding:22px}
+.modal h4{font-size:16px;margin-bottom:8px}
+.modal p{font-size:13px;color:var(--text2)}
+.modal .btn-row{justify-content:flex-end;margin-top:18px}
+.toasts{position:fixed;top:18px;right:18px;z-index:80;display:flex;flex-direction:column;gap:8px;max-width:min(360px,90vw)}
+.toast{padding:11px 16px;border-radius:var(--r-md);background:var(--float);border:1px solid var(--border);box-shadow:var(--sh-float);font-size:13px;display:flex;gap:8px;align-items:flex-start;animation:slideIn .25s var(--ease)}
+.toast.ok{border-left:4px solid var(--ok)}
+.toast.warn{border-left:4px solid var(--warn)}
+.toast.err{border-left:4px solid var(--danger)}
+.toast.info{border-left:4px solid var(--acc)}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+
+/* ---------- 进度条（升级/扫频） ---------- */
+.progress{height:10px;border-radius:999px;background:rgba(41,169,225,.14);overflow:hidden;margin-top:10px}
+.progress i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--acc),var(--ok));transition:width .3s var(--ease)}
+
+/* ---------- 页脚 ---------- */
+.foot{margin-top:28px;text-align:center;font-size:12px;color:var(--text3)}
+.foot a{color:var(--acc);text-decoration:none}
+
+/* ---------- 响应式 ---------- */
+@media (max-width:1100px){.gauges{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:640px){
+  .app{padding:12px 12px 36px}
+  .brand h1{font-size:16px}
+  .gauges{grid-template-columns:1fr 1fr;gap:8px}
+  .gauge svg{width:96px;height:96px}
+  .metrics{grid-template-columns:repeat(2,1fr)}
+  .arch .arrow{transform:rotate(90deg);padding:2px 0}
+  .topbar .right{margin-left:0;width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true">
+  <div class="bg-panel"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-char bg-char-light"></div>
+  <div class="bg-char bg-char-dark"></div>
+</div>
+<div class="app">
+
+  <!-- ===== 顶部 ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19l2.2-5.5 3 4 3-9.5 2.8 11.5 2.2-6.5"/><path d="M3 22h18"/></svg></div>
+      <div>
+        <h1>MT5700M 5G 模组管理</h1>
+        <div class="sub">luci-app-mt5700 · v1.12.7 · OpenWrt / ImmortalWrt · 前端 12 页 + Rust 后端单包交付</div>
+      </div>
+    </div>
+    <div class="right">
+      <span class="badge ok"><span class="dot"></span>AT 服务在线</span>
+      <span class="badge ghost">演示数据 · 静态示例</span>
+      <button class="badge ghost" id="theme-toggle" style="cursor:pointer;font-family:var(--font)" title="切换浅色 / 深色主题">深色</button>
+      <a class="badge info" style="text-decoration:none" href="https://github.com/LianXia233/luci-app-mt5700" target="_blank" rel="noopener">GitHub 源码</a>
+    </div>
+  </header>
+
+  <!-- ===== 12 页导航 ===== -->
+  <nav class="tabs" id="tabs" aria-label="页面导航"></nav>
+
+  <!-- ===== 架构一眼 ===== -->
+  <div class="arch">
+    <div class="row">
+      <div class="node"><b>LuCI 前端 · 12 页</b><span>网络状态 / 设置 / 拨号 / 扫频 / 短信 / AT 终端…</span></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>rpcd / ucode 代理</b><span>mt5700.uc · ACL 鉴权</span></div>
+      <div class="arrow">→</div>
+      <div class="node hl"><b>Rust 后端 at-webserver-rust</b><span>tokio · TCP newline-JSON · 仅回环 127.0.0.1:8765 · 1200 条内存日志</span></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>MT5700M 模组 AT 指令</b><span>PCUI 串口（auto 探测）/ TCP 备用</span></div>
+    </div>
+    <div class="chips">
+      <span class="chip">自动拨号对齐与对账</span>
+      <span class="chip">全网扫频 · 一键锁频</span>
+      <span class="chip">夜间/日间定时锁频</span>
+      <span class="chip">短信 / USSD</span>
+      <span class="chip">FOTA 升级</span>
+      <span class="chip">企业微信通知</span>
+      <span class="chip">接口自动拉起 MT5700M / MT5700Mv6</span>
+    </div>
+  </div>
+
+  <main class="views" id="views">
+
+    <!-- ============ 视图：网络状态 ============ -->
+    <section class="view active" id="view-status" data-title="网络状态">
+      <div class="page-head">
+        <h2>网络状态</h2>
+        <p>实时网络信息与信号质量</p>
+      </div>
+
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta">
+          <span class="badge ok">AT 通信服务运行正常</span>
+          <span class="badge info">RPC 127.0.0.1:8765</span>
+          <span class="badge ghost">PCUI 串口 · auto</span>
+          <span class="badge ghost">SERIAL 连接</span>
+        </div>
+        <span class="sp">最后刷新：<span id="st-last" class="mono">--:--:--</span></span>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>信号质量</h3><span class="sub">当前网络信号的强弱、纯度与干扰程度</span></div>
+        <div class="verdict verdict-exc" id="verdict">
+          <div class="verdict-status"><svg viewBox="0 0 24 24" role="img" aria-hidden="true"><circle class="status-halo" cx="12" cy="12" r="8" fill="none" stroke="currentColor" opacity=".16"/><circle class="verdict-tower" cx="12" cy="12" r="4.5" fill="currentColor"/></svg></div>
+          <div class="verdict-summary">
+            <div class="verdict-title" id="verdict-t">网络能力优秀</div>
+            <div class="verdict-advice" id="verdict-s">信号与频段带宽俱佳，适合高清视频及大文件下载</div>
+          </div>
+          <div class="verdict-metrics" id="verdict-metrics"></div>
+          <div class="verdict-cap" id="verdict-cap"></div>
+        </div>
+        <div class="gauges" id="gauges"></div>
+        <button class="btn btn-ghost btn-sm" id="sig-ref">查看指标说明</button>
+        <div class="note-fold" id="sig-notes" style="display:none">
+          <b>各指标含义与参考区间</b>
+          <ul style="margin:6px 0 0 18px">
+            <li>信号强度（RSRP）：接收到的信号功率，是判断覆盖好坏的首要指标。-80 dBm 以上为优秀，-100 dBm 以下偏弱。</li>
+            <li>信号质量（RSRQ）：信号中有效成分的占比，反映小区负载与干扰。-10 dB 以上为优秀。</li>
+            <li>信噪比（SINR）：有用信号比噪声强多少，直接决定实际网速上限。20 dB 以上为优秀，5 dB 以下会明显卡顿。</li>
+            <li>综合信号：模组上报的信号百分比，供快速判断使用。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>连接状态</h3><span class="sub">当前网络注册与运营商信息</span></div>
+        <div class="metrics" id="conn-metrics"></div>
+        <div style="margin-top:12px">
+          <div class="table-wrap"><table><colgroup><col style="width:33%"><col style="width:33%"><col style="width:34%"></colgroup>
+            <thead><tr><th>PLMN</th><th>LAC / 小区</th><th>PCI / 频点</th></tr></thead>
+            <tbody><tr><td class="mono">460 / 11</td><td class="mono">3842 / 135082435</td><td class="mono">86 / 149002</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>载波聚合</h3><span class="sub">当前所有激活载波</span></div>
+        <div class="table-wrap"><table><colgroup><col style="width:11%"><col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:15%"><col style="width:11%"><col style="width:10%"><col style="width:10%"><col style="width:11%"></colgroup>
+          <thead><tr><th>角色</th><th>制式</th><th>频段</th><th>频点</th><th>下行频率</th><th>带宽</th><th>RSRP</th><th>RSRQ</th><th>SINR</th></tr></thead>
+          <tbody>
+            <tr><td>主载波</td><td>5G</td><td>n79</td><td class="mono">149002</td><td class="mono">2565 MHz</td><td>100 MHz</td><td class="mono">-62 dBm</td><td class="mono">-9 dB</td><td class="mono">27 dB</td></tr>
+          </tbody>
+        </table></div>
+        <div class="hint">当前仅 1 个激活载波（未做载波聚合）。信号三项取自 ^MONSC 主小区，与上方仪表盘同源。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>辅载波信号</h3><span class="sub">^MONSSC（NSA 辅站）与 ^CASCELLINFO（LTE CA）按下行频点对上 ^HFREQINFO 载波</span></div>
+        <div class="hint">未查询到辅载波（非 NSA / 未配置 CA 时 ^MONSSC 与 ^CASCELLINFO 正常失败，属预期情况）。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>连接诊断</h3><span class="sub">ENDC 双连接、5G 核心网注册、发射功率与 PDP 地址</span></div>
+        <div class="table-wrap"><table><colgroup><col style="width:38%"><col style="width:62%"></colgroup>
+          <thead><tr><th>项目</th><th>值</th></tr></thead>
+          <tbody>
+            <tr><td>ENDC 双连接</td><td><span class="badge ok">已建立</span></td></tr>
+            <tr><td>5G 核心网注册</td><td>已注册 · 5G</td></tr>
+            <tr><td>TAC / 小区</td><td class="mono">3842 / 135082435</td></tr>
+            <tr><td>网络切片</td><td class="mono">01</td></tr>
+            <tr><td>LTE PUSCH / PUCCH</td><td class="mono">18 / 9 dBm</td></tr>
+            <tr><td>LTE SRS / PRACH</td><td class="mono">16 / 14 dBm</td></tr>
+            <tr><td>NR CC1 PUSCH</td><td class="mono">19 dBm · 2565.0 MHz</td></tr>
+          </tbody>
+        </table></div>
+        <div class="hint"><span class="t">PDP 地址：</span>CID 1 · IPv4：<span class="mono">10.159.4.26</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>实时速率</h3><span class="sub">接口实时上下行速率，每秒采样一次</span></div>
+        <div class="speed-row">
+          <div class="speed-box"><div class="sb-lb">↓ 下行</div><div class="sb-vl"><span id="rt-down">0</span> <small id="rt-down-u">B/s</small></div></div>
+          <div class="speed-box"><div class="sb-lb">↑ 上行</div><div class="sb-vl"><span id="rt-up">0</span> <small id="rt-up-u">B/s</small></div></div>
+        </div>
+        <div class="chart-box"><svg id="rate-chart" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" aria-label="速率曲线"></svg></div>
+        <div class="hint">最近 60 个采样点 · 数据面速率取自 OpenWrt 接口统计差分（不占用 AT 通道）</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>流量统计</h3><span class="sub">上行/下行累计流量与时长</span></div>
+        <div class="metrics" id="flow-metrics"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>模组温度</h3><span class="sub">各芯片温度，单位 ℃</span><span class="r"><span class="badge info" id="temp-badge">最高 -- ℃</span></span></div>
+        <div class="metrics" id="temp-metrics"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>IP 与 DNS</h3><span class="sub">DHCP 分配与 IPv6 能力</span></div>
+        <div class="table-wrap"><table><colgroup><col style="width:30%"><col style="width:70%"></colgroup>
+          <thead><tr><th>项目</th><th>值</th></tr></thead>
+          <tbody>
+            <tr><td>IPv4 地址</td><td class="mono">10.159.4.26</td></tr>
+            <tr><td>子网掩码</td><td class="mono">255.255.255.0</td></tr>
+            <tr><td>网关</td><td class="mono">10.159.4.1</td></tr>
+            <tr><td>主 DNS / 备 DNS</td><td class="mono">183.60.83.19 / 183.60.82.98</td></tr>
+            <tr><td>IPv6 能力</td><td>支持 · 双栈</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>调制方式</h3><span class="sub">上下行 MCS 与层数</span></div>
+        <div class="metrics">
+          <div class="metric"><div class="lb">下行调制</div><div class="vl">256QAM <small>MCS 27 · 1 层</small></div></div>
+          <div class="metric"><div class="lb">上行调制</div><div class="vl">64QAM <small>MCS 20 · 1 层</small></div></div>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <label class="badge ghost" style="cursor:pointer"><input type="checkbox" id="auto-refresh" checked style="margin-right:6px">自动刷新</label>
+        <button class="btn btn-primary" id="btn-refresh">刷新</button>
+      </div>
+    </section>
+
+    <!-- ============ 视图：网络设置 ============ -->
+    <section class="view" id="view-settings" data-title="网络设置">
+      <div class="page-head">
+        <h2>网络设置</h2>
+        <p>锁频、邻区与 5G 选项</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ok">已连接</span><span class="badge ghost">锁频应用时自动切换飞行模式使配置生效</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>LTE 锁频</h3><span class="sub">锁定频段/频点/小区；应用时自动切换飞行模式</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">锁频类型</label>
+            <select class="select" data-lte-type>
+              <option value="0">关闭：不锁频</option>
+              <option value="1" selected>按频段锁定</option>
+              <option value="2">按频点锁定</option>
+              <option value="3">按小区锁定</option>
+            </select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">移动性</label>
+            <select class="select" data-lte-mob>
+              <option value="0">正常移动性</option>
+              <option value="1" selected>受限移动性</option>
+            </select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">频段</label>
+            <select class="select" data-lte-band>
+              <option value="">（未选择）</option><option>B1</option><option>B3</option><option>B5</option><option>B8</option><option selected>B28</option><option>B34</option><option>B39</option><option>B40</option><option>B41</option>
+            </select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">频点</label><input class="input" placeholder="留空不限" value="9380"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">PCI</label><input class="input" placeholder="留空不限"></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="lte-lock">应用 LTE 锁频</button><button class="btn btn-ghost" data-act="lte-unlock">清除 LTE 锁频</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>NR 锁频</h3><span class="sub">NR 锁频需单板支持 NR，SCS 未指定时按频段自动推断</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">锁频类型</label>
+            <select class="select" data-nr-type>
+              <option value="0">关闭：不锁频</option>
+              <option value="1">按频段锁定</option>
+              <option value="2" selected>按频点锁定</option>
+              <option value="3">按小区锁定</option>
+            </select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">频段</label>
+            <select class="select" data-nr-band><option>n1</option><option>n3</option><option>n28</option><option>n40</option><option selected>n41</option><option>n77</option><option>n78</option><option>n79</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">频点</label><input class="input" placeholder="NR-ARFCN" value="512910"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">PCI</label><input class="input" placeholder="留空不限"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">子载波间隔</label>
+            <select class="select" data-nr-scs><option value="">（自动）</option><option>15 kHz</option><option selected>30 kHz</option><option>60 kHz</option></select></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="nr-lock">应用 NR 锁频</button><button class="btn btn-ghost" data-act="nr-unlock">清除 NR 锁频</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>邻区扫描</h3><span class="sub">AT^MONNC 查询当前邻区，可自动刷新</span><span class="r"><label class="badge ghost" style="cursor:pointer"><input type="checkbox" id="neigh-ar" checked style="margin-right:6px">自动刷新</label></span></div>
+        <div class="table-wrap"><table><colgroup><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:14%"><col style="width:15%"><col style="width:15%"></colgroup>
+          <thead><tr><th>制式</th><th>频段</th><th>频点</th><th>PCI</th><th>RSRP</th><th>RSRQ</th><th>SINR</th></tr></thead>
+          <tbody id="neigh-body">
+            <tr><td>5G</td><td>n79</td><td class="mono">149002</td><td class="mono">86</td><td class="mono">-62</td><td class="mono">-9</td><td class="mono">27</td></tr>
+            <tr><td>5G</td><td>n79</td><td class="mono">148560</td><td class="mono">311</td><td class="mono">-78</td><td class="mono">-12</td><td class="mono">15</td></tr>
+            <tr><td>5G</td><td>n1</td><td class="mono">429540</td><td class="mono">158</td><td class="mono">-91</td><td class="mono">-14</td><td class="mono">6</td></tr>
+            <tr><td>LTE</td><td>B3</td><td class="mono">1650</td><td class="mono">222</td><td class="mono">-83</td><td class="mono">-11</td><td class="mono">9</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>5G 选项</h3><span class="sub">NR SA 支持 / DC 模式 / 接入模式</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:240px"><label class="fg-lb">NR SA 支持</label>
+            <select class="select" data-opt-sa><option>不支持</option><option selected>支持</option></select></div>
+          <div style="flex:1;min-width:240px"><label class="fg-lb">DC 模式（NSA 双连接）</label>
+            <select class="select" data-opt-dc><option>LTE-NR DC</option><option selected>NR-DC</option><option>单连接</option></select></div>
+          <div style="flex:1;min-width:240px"><label class="fg-lb">接入模式</label>
+            <select class="select" data-opt-mode><option selected>SA 优先</option><option>NSA 优先</option><option>仅 SA</option><option>仅 NSA</option><option>自动</option></select></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="5g-opt">应用 5G 选项</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>网络拒绝</h3><span class="sub">^REJINFO 主动上报的网络拒绝原因（注册失败时实时更新）</span><span class="r"><span class="badge ok">最近无拒绝</span></span></div>
+        <div class="hint">模组注册失败时，这里会实时列出运营商返回的拒绝原因码与描述。</div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：拨号设置 ============ -->
+    <section class="view" id="view-dial" data-title="拨号设置">
+      <div class="page-head">
+        <h2>拨号设置</h2>
+        <p>自动拨号、APN、模式配置与 PDP 上下文</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ok">自动拨号已开启</span><span class="badge ghost">拨号状态以 ^NDISSTATQRY / +CGACT 双判据核验</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>自动拨号与 APN</h3><span class="sub">开启后设备自动保持网络连接，建议保持开启</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:230px">
+            <label class="fg-lb">自动拨号</label>
+            <div><span class="switch"><input type="checkbox" id="dial-sw" checked><span class="sl"></span></span></div>
+            <div class="fg-hint">连上模组后确保开启自动拨号（^SETAUTODIAL），并周期性对账守护</div>
+          </div>
+          <div style="flex:1;min-width:230px"><label class="fg-lb">APN</label><input class="input" value="ctnet"></div>
+          <div style="flex:1;min-width:230px"><label class="fg-lb">用户名（可选）</label><input class="input" placeholder="请输入用户名"></div>
+          <div style="flex:1;min-width:230px"><label class="fg-lb">密码（可选）</label><input class="input" type="password" placeholder="请输入密码"></div>
+          <div style="flex:1;min-width:230px"><label class="fg-lb">认证方式</label>
+            <select class="select"><option>NONE</option><option>PAP</option><option selected>CHAP</option><option>PAP 或 CHAP</option></select></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="apn">暂存 APN 更改</button><button class="btn btn-ghost" data-act="apn-apply">保存并应用</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>模式配置</h3><span class="sub">拨号方式与 USB 端口模式</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:240px"><label class="fg-lb">拨号方式</label>
+            <select class="select"><option value="1" selected>USB 网络接口（NDIS）</option><option value="2">转网口模式（数据面走以太网口）</option></select></div>
+          <div style="flex:1;min-width:240px"><label class="fg-lb">USB 端口模式</label>
+            <select class="select"><option>PCUI + AT + MODEM + DIAG</option><option selected>PCUI + AT + NDIS</option><option>仅 PCUI</option></select></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="mode">保存模式配置</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>网口模式与 DMZ</h3><span class="sub">网口数传模式、后路由与 DMZ 主机</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:240px"><label class="fg-lb">网口模式</label>
+            <select class="select"><option selected>数传模式</option><option>网卡模式</option><option>桥接模式</option></select></div>
+          <div style="flex:1;min-width:240px"><label class="fg-lb">后路由</label>
+            <select class="select"><option>关闭</option><option selected>开启</option></select></div>
+          <div style="flex:1;min-width:240px"><label class="fg-lb">DMZ 主机</label><input class="input" placeholder="如 192.168.1.100"></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="dmz">设置 DMZ</button><button class="btn btn-danger" data-act="dmz-off">关闭 DMZ</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>PDP 上下文</h3><span class="sub">CGDCONT 列表：新增、编辑、删除、激活 / 去激活</span><span class="r"><button class="btn btn-primary btn-sm" id="pdp-add">+ 新增</button></span></div>
+        <div class="table-wrap"><table><colgroup><col style="width:8%"><col style="width:16%"><col style="width:20%"><col style="width:16%"><col style="width:12%"><col style="width:28%"></colgroup>
+          <thead><tr><th>CID</th><th>APN</th><th>认证</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="pdp-body">
+            <tr><td class="mono">1</td><td class="mono">ctnet</td><td>CHAP</td><td>IPV4V6</td><td><span class="badge ok">已激活</span></td>
+              <td><span class="fg-inline"><button class="btn btn-ghost btn-sm" data-act="pdp-edit">编辑</button><button class="btn btn-ghost btn-sm" data-act="pdp-deact">去激活</button><button class="btn btn-danger btn-sm" data-act="pdp-del">删除</button></span></td></tr>
+            <tr><td class="mono">2</td><td class="mono">ims</td><td>NONE</td><td>IPV4V6</td><td><span class="badge ghost">未激活</span></td>
+              <td><span class="fg-inline"><button class="btn btn-ghost btn-sm" data-act="pdp-edit">编辑</button><button class="btn btn-primary btn-sm" data-act="pdp-act">激活</button><button class="btn btn-danger btn-sm" data-act="pdp-del">删除</button></span></td></tr>
+          </tbody>
+        </table></div>
+        <div class="hint">自动拨号开启时，手工 PDP 激活 / 去激活会禁用，避免与模组维护的上下文争用同一 CID 导致断网。</div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：全网扫频 ============ -->
+    <section class="view" id="view-scan" data-title="全网扫频">
+      <div class="page-head">
+        <h2>全网扫频</h2>
+        <p>扫出频段、频点、PCI 与子载波间隔，可据此一键锁定；支持无卡扫描</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ghost">扫描期间模组被独占，其它操作请先取消</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>扫频条件</h3><span class="sub">按手册约束构建命令</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">接入技术</label>
+            <select class="select" id="scan-rat"><option value="">全部制式</option><option>LTE</option><option selected>NR</option><option>WCDMA</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">PLMN</label><input class="input" placeholder="留空扫描所有运营商" value="46000"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">频段</label>
+            <select class="select" id="scan-band"><option value="">全频段</option><option>n41</option><option>n77</option><option>n78</option><option>n79</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">频点</label><input class="input" placeholder="留空则不限"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">PCI</label><input class="input" placeholder="留空则不限"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">子载波间隔</label>
+            <select class="select" id="scan-scs"><option value="">不限</option><option>15 kHz</option><option selected>30 kHz</option><option>60 kHz</option><option>120 kHz</option></select></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="scan-start">开始扫描</button>
+          <button class="btn btn-danger" id="scan-cancel" style="display:none">取消扫描</button>
+        </div>
+        <div class="hint" id="scan-note"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>扫描结果</h3><span class="sub">扫描到的邻区列表，可一键锁定</span><span class="r"><span class="badge info" id="scan-count">0 个小区</span></span></div>
+        <div class="table-wrap"><table><colgroup><col style="width:10%"><col style="width:13%"><col style="width:12%"><col style="width:15%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:15%"></colgroup>
+          <thead><tr><th>制式</th><th>PLMN</th><th>频段</th><th>频点</th><th>PCI</th><th>信号</th><th>SINR</th><th>操作</th></tr></thead>
+          <tbody id="scan-body"><tr><td colspan="8"><div class="empty">暂无扫描结果</div></td></tr></tbody>
+        </table></div>
+        <div class="progress" id="scan-progress" style="display:none"><i id="scan-progress-i"></i></div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：定时锁频 ============ -->
+    <section class="view" id="view-schedule" data-title="定时锁频">
+      <div class="page-head">
+        <h2>定时锁频编排</h2>
+        <p>按夜间/日间时段自动切换锁频，配置存 UCI 并由后端调度生效</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta">
+          <span class="badge info" id="sched-mode">当前时段：日间</span>
+          <span class="badge ghost">下次切换：22:00</span>
+          <span class="badge ghost">已切换 6 次</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>运行状态</h3><span class="sub">AT+SCHED? 返回的调度状态</span></div>
+        <div class="metrics">
+          <div class="metric"><div class="lb">当前时段</div><div class="vl">日间</div></div>
+          <div class="metric"><div class="lb">下次切换</div><div class="vl">22:00</div></div>
+          <div class="metric"><div class="lb">已切换次数</div><div class="vl">6</div></div>
+          <div class="metric"><div class="lb">调度状态</div><div class="vl" style="font-size:16px">生效中</div></div>
+        </div>
+        <div class="hint">总开关在「服务 → 模组管理 → 服务配置」的 schedule_enabled，启用后此页才可编辑。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>编排配置</h3><span class="sub">保存走伪命令 AT+SCHED=&lt;json&gt;，后端写 UCI 并热生效</span><span class="r"><button class="btn btn-ghost btn-sm" id="sched-toggle">收起配置</button></span></div>
+        <div class="fg-inline" style="flex-wrap:wrap;margin-bottom:6px">
+          <div style="flex:1;min-width:200px"><label class="fg-lb">检测间隔（秒）</label><input class="input" type="number" value="10" min="10"></div>
+          <div style="flex:1;min-width:200px"><label class="fg-lb">无服务超时（秒）</label><input class="input" type="number" value="30" min="30"></div>
+          <div style="flex:1;min-width:200px"><label class="fg-lb">解锁时下发 LTE 解锁</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:200px"><label class="fg-lb">解锁时下发 NR 解锁</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:200px"><label class="fg-lb">切换飞行模式使其生效</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+        </div>
+
+        <div class="fg-inline" style="flex-wrap:wrap;margin-bottom:6px">
+          <div style="flex:1;min-width:330px">
+            <div class="fg-lb">夜间模式 <span class="badge ghost">22:00 至 06:00（跨零点）</span></div>
+            <div class="fg-inline" style="margin-bottom:8px">
+              <span class="switch"><input type="checkbox" id="night-en" checked><span class="sl"></span></span>
+              <input class="input" style="max-width:110px" value="22:00">
+              <span class="hint" style="margin:0">至</span>
+              <input class="input" style="max-width:110px" value="06:00">
+            </div>
+            <div class="fg-inline">
+              <div style="flex:1"><label class="fg-lb">夜间 4G 锁频</label>
+                <select class="select" style="max-width:160px"><option value="0">关闭</option><option value="1" selected>按频段</option><option value="2">按频点</option><option value="3">按小区</option></select></div>
+              <div style="flex:1"><label class="fg-lb">夜间 5G 锁频</label>
+                <select class="select" style="max-width:160px"><option value="0">关闭</option><option value="1">按频段</option><option value="2" selected>按频点</option><option value="3">按小区</option></select></div>
+            </div>
+            <div class="hint" id="night-locks">夜间 5G 锁频：n41 · 频点 512910 · SCS 30kHz · PCI 86</div>
+          </div>
+          <div style="flex:1;min-width:330px">
+            <div class="fg-lb">日间模式 <span class="badge ghost">其余时间</span></div>
+            <div class="fg-inline" style="margin-bottom:8px">
+              <span class="switch"><input type="checkbox" id="day-en" checked><span class="sl"></span></span>
+              <span class="hint" style="margin:0">随网络自动选择，不锁频</span>
+            </div>
+            <div class="fg-inline">
+              <div style="flex:1"><label class="fg-lb">日间 4G 锁频</label>
+                <select class="select" style="max-width:160px"><option value="0" selected>关闭</option><option value="1">按频段</option><option value="2">按频点</option><option value="3">按小区</option></select></div>
+              <div style="flex:1"><label class="fg-lb">日间 5G 锁频</label>
+                <select class="select" style="max-width:160px"><option value="0" selected>关闭</option><option value="1">按频段</option><option value="2">按频点</option><option value="3">按小区</option></select></div>
+            </div>
+            <div class="hint" id="day-locks">日间不锁频（自动选网）</div>
+          </div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="sched-save">保存编排</button></div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：模组设置 ============ -->
+    <section class="view" id="view-modem" data-title="模组设置">
+      <div class="page-head">
+        <h2>模组设置</h2>
+        <p>模组设备信息、SIM、射频与系统控制</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ok">已连接</span><span class="badge ghost">保存后自动重载生效</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>设备信息</h3><span class="sub">模组型号 / IMEI / 固件</span></div>
+        <div class="metrics">
+          <div class="metric"><div class="lb">模组型号</div><div class="vl" style="font-size:15px">MT5700M</div></div>
+          <div class="metric"><div class="lb">IMEI</div><div class="vl mono" style="font-size:15px">86408405xxxxxx</div></div>
+          <div class="metric"><div class="lb">固件版本</div><div class="vl" style="font-size:15px">M5700M_V1.2.3</div></div>
+          <div class="metric"><div class="lb">硬件版本</div><div class="vl" style="font-size:15px">HW_2.0</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>SIM 卡</h3><span class="sub">槽位切换、热插拔与 PIN</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">SIM 槽位</label>
+            <select class="select"><option selected>SIM 1 · 已就绪</option><option>SIM 2 · 未插卡</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">SIM 卡热插拔</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">PIN 码</label><input class="input" type="password" placeholder="SIM 卡 PIN"></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="sim">保存 SIM 设置</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>射频控制</h3><span class="sub">飞行模式</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">飞行模式</label><div><span class="switch"><input type="checkbox" id="airplane"><span class="sl"></span></span></div>
+            <div class="fg-hint">开启后关闭射频，恢复网络连接</div></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="airplane">应用</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>设备控制</h3><span class="sub">网卡速率与电源管理</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">网卡速率</label>
+            <select class="select"><option>自适应</option><option selected>1000 Mbps</option><option>100 Mbps</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">电源管理</label><div><span class="switch"><input type="checkbox"><span class="sl"></span></span></div>
+            <div class="fg-hint">无业务时进入低功耗</div></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="dev">保存设备控制</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>NR 能力</h3><span class="sub">载波聚合、VoNR 与 DSS</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">NR 载波聚合</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">VoNR</label>
+            <select class="select"><option>关闭</option><option selected>开启</option><option>仅语音</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">NR DSS（动态频谱共享）</label><div><span class="switch"><input type="checkbox"><span class="sl"></span></span></div></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="nr">保存 NR 能力</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>网络系统配置</h3><span class="sub">选择模组搜索和驻留网络的方式</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">网络接入顺序</label>
+            <select class="select"><option>5G → 4G → 3G → 2G</option><option selected>4G → 3G → 2G</option><option>仅 5G</option><option>仅 4G</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">2G / 3G 频段</label>
+            <select class="select"><option selected>自动（全频段）</option><option>仅 GSM 900/1800</option><option>仅 WCDMA B1/B8</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">漫游</label>
+            <select class="select"><option>允许</option><option selected>禁止</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">服务域</label>
+            <select class="select"><option>仅数据</option><option selected>数据 + 语音 + 短信</option><option>仅语音</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">4G / LTE 频段</label>
+            <select class="select"><option selected>自动（全频段）</option><option>B1/B3/B5/B8</option><option>B28/B34/B39/B40/B41</option></select></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="sysnet">保存网络系统配置</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>温度保护</h3><span class="sub">自动温度保护与检测参数（THERM）</span><span class="r"><span class="badge ok">当前 41.3 ℃ · 正常</span></span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">温度保护功能</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">高温时关闭 CA / MIMO</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">检测间隔（秒）</label><input class="input" type="number" value="10"></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="therm">保存温度保护</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>系统控制</h3><span class="sub">重启与恢复出厂</span></div>
+        <div class="btn-row">
+          <button class="btn btn-danger" data-act="reboot">重启模组</button>
+          <button class="btn btn-danger" data-act="factory">恢复出厂设置</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：模组升级 ============ -->
+    <section class="view" id="view-upgrade" data-title="模组升级">
+      <div class="page-head">
+        <h2>模组升级</h2>
+        <p>FOTA 远程固件升级</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ok">已连接</span><span class="badge warn">升级期间请勿断电或断开连接</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>当前版本</h3><span class="sub">模组固件版本信息</span></div>
+        <div class="metrics">
+          <div class="metric"><div class="lb">模组固件</div><div class="vl" style="font-size:15px">M5700M_V1.2.3</div></div>
+          <div class="metric"><div class="lb">编译日期</div><div class="vl" style="font-size:15px">2026-08-20</div></div>
+          <div class="metric"><div class="lb">OTA 可用版本</div><div class="vl" style="font-size:15px;color:var(--ok)">M5700M_V1.3.0</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>固件升级</h3><span class="sub">FOTA 远程固件升级</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:300px"><label class="fg-lb">FOTA 服务器地址</label><input class="input" value="http://fota.example.com/mt5700/" style="max-width:480px">
+            <div class="fg-hint">仅支持 http 协议，结尾自动补 /</div></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="upgrade-start">开始升级</button>
+        </div>
+        <div class="progress" id="upgrade-progress" style="display:none"><i id="upgrade-progress-i"></i></div>
+        <div class="hint" id="upgrade-note"></div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：短信中心 ============ -->
+    <section class="view" id="view-sms" data-title="短信中心">
+      <div class="page-head">
+        <h2>短信中心</h2>
+        <p>收发短信与联系人会话</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ok">短信功能已开启</span><span class="badge ghost">短信存于 SIM 卡 + 浏览器本地缓存</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>会话</h3><span class="sub">按联系人聚合</span><span class="r"><button class="btn btn-primary btn-sm" id="sms-new">+ 新短信</button></span></div>
+        <div class="conv">
+          <div class="conv-list" id="conv-list"></div>
+          <div>
+            <div class="msg-box" id="msg-box"></div>
+            <div class="term-input">
+              <input class="input" id="sms-input" placeholder="输入短信内容" style="flex:1">
+              <button class="btn btn-primary" id="sms-send">发送</button>
+            </div>
+          </div>
+        </div>
+        <div class="btn-row"><button class="btn btn-danger btn-sm" id="sms-batch-del">批量删除所选</button></div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：短信设置 ============ -->
+    <section class="view" id="view-sms-settings" data-title="短信设置">
+      <div class="page-head">
+        <h2>短信设置</h2>
+        <p>短信功能开关、中心号码、存储管理与 USSD 查询</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ok">已连接</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>短信服务</h3><span class="sub">IMS 与短信收发开关</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">IMS 短信</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div>
+            <div class="fg-hint">开启后可收发短信</div></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">短信功能</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div>
+            <div class="fg-hint">开启时按顺序下发 CEUS / IMSSWITCH / CFUN / CGDCONT / CSCA 配置</div></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="sms-svc">保存短信服务</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>短信中心号码</h3><span class="sub">用于发送短信的 SMSC</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:300px"><label class="fg-lb">中心号码</label><input class="input" value="+8613800100500" style="max-width:340px"></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="smsc">保存中心号码</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>存储管理</h3><span class="sub">SIM 卡短信存储</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:260px"><label class="fg-lb">存储位置</label>
+            <select class="select"><option selected>SIM 卡（SM）</option><option>模组（ME）</option><option>SIM 卡 + 模组</option></select></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="sms-store">应用存储设置</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>本地已发缓存</h3><span class="sub">发送记录保存在浏览器本地，可导出 / 导入 / 清空</span><span class="r"><span class="badge info" id="cache-count">共 12 条</span></span></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" data-act="cache-export">导出</button>
+          <button class="btn btn-ghost btn-sm" data-act="cache-import">导入</button>
+          <button class="btn btn-danger btn-sm" data-act="cache-clear">清空</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>USSD 查询</h3><span class="sub">向运营商发送 USSD 代码，例如中国移动 *133#</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:240px"><label class="fg-lb">USSD 代码</label><input class="input" value="*133#" style="max-width:240px"></div>
+          <button class="btn btn-primary" data-act="ussd">发送 USSD 查询</button>
+        </div>
+        <div class="hint" id="ussd-result"></div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：AT 调试终端 ============ -->
+    <section class="view" id="view-terminal" data-title="AT 调试终端">
+      <div class="page-head">
+        <h2>AT 调试终端</h2>
+        <p>直接向模组发送 AT 指令</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>AT 服务在线</div>
+        <div class="meta"><span class="badge ghost">输入指令后按回车或点击发送</span><span class="badge ghost">清空仅清除本页日志，不影响模组</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>AT 调试终端</h3><span class="sub">每条指令实时下发到模组串口</span><span class="r"><button class="btn btn-ghost btn-sm" id="term-clear">清空</button><button class="btn btn-ghost btn-sm" id="term-save">保存当前命令</button></span></div>
+        <div class="term" id="term-out"></div>
+        <div class="term-input">
+          <input class="input" id="term-in" placeholder="输入 AT 指令，例如 ATI" style="flex:1" autocomplete="off">
+          <button class="btn btn-primary" id="term-send">发送</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>常用命令</h3><span class="sub">点击后需二次确认才会真正下发到模组</span></div>
+        <div class="chips" id="term-common">
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="ATI">ATI · 模块信息</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT^HCSQ?">^HCSQ? · 信号</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT+CGACT?">+CGACT? · PDP 激活</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT+COPS?">+COPS? · 运营商</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT^NDISSTATQRY?">^NDISSTATQRY? · 数据面</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT^CHIPTEMP?">^CHIPTEMP? · 温度</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT+CSQ">+CSQ · 信号质量</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT+CMGL=4">+CMGL=4 · 读短信</button>
+          <button class="chip" style="cursor:pointer;font-family:var(--font)" data-cmd="AT^MONSC">^MONSC · 服务小区</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>已保存的命令</h3><span class="sub">来自本机浏览器 localStorage</span></div>
+        <div class="chips" id="term-saved"><span class="hint" style="margin:0">暂无已保存命令，可点击上方「保存当前命令」添加。</span></div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：运行日志 ============ -->
+    <section class="view" id="view-logs" data-title="运行日志">
+      <div class="page-head">
+        <h2>运行日志</h2>
+        <p>模组拨号 · 接口拉起 · 通知记录</p>
+      </div>
+      <div class="conn-bar">
+        <div class="st"><span class="pulse"></span>后端日志缓冲在线</div>
+        <div class="meta"><span class="badge info">内存环形缓冲 1200 条</span><span class="badge ghost">RPC logs 按 seq 增量拉取</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>日志流</h3>
+          <div class="r">
+            <div class="seg" id="log-seg">
+              <button class="on" data-log-view="dial">模组拨号</button>
+              <button data-log-view="net">接口与网络</button>
+              <button data-log-view="notify">通知记录</button>
+            </div>
+          </div>
+        </div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:200px"><label class="fg-lb">级别</label>
+            <select class="select" id="log-level"><option value="">全部级别</option><option>调试</option><option selected>信息</option><option>警告</option><option>错误</option></select></div>
+          <div style="flex:1;min-width:240px"><label class="fg-lb">关键词</label><input class="input" id="log-search" placeholder="搜索 AT 命令原文 / 关键词"></div>
+          <div style="display:flex;align-items:flex-end;gap:8px">
+            <button class="btn btn-primary" id="log-refresh">刷新</button>
+            <button class="btn btn-ghost" id="log-export">导出</button>
+            <button class="btn btn-danger" id="log-clear">清空</button>
+          </div>
+        </div>
+        <div class="log-list" id="log-list"></div>
+        <div class="hint" id="log-count"></div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：服务配置 ============ -->
+    <section class="view" id="view-service" data-title="服务配置">
+      <div class="page-head">
+        <h2>服务配置</h2>
+        <p>AT 服务与通知设置（保存后自动重载）</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>服务状态</h3><span class="sub"></span></div>
+        <div class="metrics">
+          <div class="metric"><div class="lb">后端进程</div><div class="vl" style="font-size:15px;color:var(--ok)">运行中</div></div>
+          <div class="metric"><div class="lb">开机自启</div><div class="vl" style="font-size:15px;color:var(--ok)">已注册 S99</div></div>
+          <div class="metric"><div class="lb">RPC 端口</div><div class="vl mono" style="font-size:15px">8765</div></div>
+          <div class="metric"><div class="lb">接口</div><div class="vl" style="font-size:15px">MT5700M · MT5700Mv6</div></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="svc-restart">重启服务</button><button class="btn btn-ghost" data-act="svc-status">查看状态</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>调制解调器连接</h3><span class="sub">后端连接模组的通道</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">连接类型</label>
+            <select class="select"><option selected>SERIAL（PCUI 串口）</option><option>TCP 网络</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">串口设备</label>
+            <select class="select"><option selected>auto（自动探测，PCUI 优先）</option><option>/dev/ttyUSB1</option><option>/dev/ttyACM0</option><option>自定义路径</option></select></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">网络主机</label><input class="input" placeholder="模组 TCP 地址"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">网络端口</label><input class="input" value="20249">
+            <div class="fg-hint">模组 TCP 端口，默认 20249</div></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">波特率</label>
+            <select class="select"><option>115200</option><option selected>921600</option><option>3000000</option></select></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="conn">保存连接配置</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>RPC 服务</h3><span class="sub">LuCI 经 rpcd / ucode 代理连接后端使用的端口与密钥（仅回环监听，不对外暴露）</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><label class="fg-lb">RPC 端口</label><input class="input" value="8765"></div>
+          <div style="flex:1;min-width:220px"><label class="fg-lb">RPC 监听范围</label>
+            <select class="select"><option selected>仅回环 127.0.0.1</option><option>对外监听（需密钥）</option></select></div>
+          <div style="flex:1;min-width:260px"><label class="fg-lb">认证密钥</label><input class="input" type="password" value="demo-key-0000">
+            <div class="fg-hint">ucode 代理自动附带该密钥；LuCI 登录态由 rpcd 会话保证</div></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="rpc">保存 RPC 配置</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>定时锁频</h3><span class="sub">总开关与默认参数</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:240px"><label class="fg-lb">启用定时锁频</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div>
+            <div class="fg-hint">在「服务 → 模组管理 → 定时锁频」编排时段</div></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="sched">保存定时锁频开关</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>通知</h3><span class="sub">事件通知与 WebHook</span></div>
+        <div class="fg-inline" style="flex-wrap:wrap">
+          <div style="flex:1;min-width:200px"><label class="fg-lb">来电通知</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:200px"><label class="fg-lb">新短信通知</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:200px"><label class="fg-lb">信号变化通知</label><div><span class="switch"><input type="checkbox"><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:200px"><label class="fg-lb">短信存储满通知</label><div><span class="switch"><input type="checkbox" checked><span class="sl"></span></span></div></div>
+          <div style="flex:1;min-width:300px"><label class="fg-lb">企业微信 WebHook</label><input class="input" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…" value="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=demo" style="max-width:480px"></div>
+        </div>
+        <div class="btn-row"><button class="btn btn-primary" data-act="notif">保存通知设置</button><button class="btn btn-ghost" data-act="notif-test">发送测试通知</button></div>
+      </div>
+    </section>
+
+
+  </main>
+
+  <footer class="foot">
+    本页为 <a href="https://github.com/LianXia233/luci-app-mt5700" target="_blank" rel="noopener">luci-app-mt5700</a> 的功能演示原型 · 数值为静态示例数据，非真实模组读数 · GPL-3.0
+  </footer>
+</div>
+
+<div class="mask" id="mask"><div class="modal">
+  <h4 id="modal-t">确认</h4>
+  <p id="modal-m"></p>
+  <div class="btn-row">
+    <button class="btn btn-ghost" id="modal-cancel">取消</button>
+    <button class="btn btn-primary" id="modal-ok">确定</button>
+  </div>
+</div></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+(function () {
+'use strict';
+
+/* ================= 主题切换 ================= */
+var theme = localStorage.getItem('mint-theme');
+if (!theme) theme = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+document.documentElement.setAttribute('data-theme', theme);
+var themeBtn = document.getElementById('theme-toggle');
+function syncTheme() { themeBtn.textContent = theme === 'dark' ? '浅色' : '深色'; }
+syncTheme();
+themeBtn.addEventListener('click', function () {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('mint-theme', theme);
+  syncTheme();
+  toast('已切换为' + (theme === 'dark' ? '深色' : '浅色') + '主题', 'info');
+});
+
+/* ================= 工具 ================= */
+function $(id) { return document.getElementById(id); }
+function svg(tag, attrs) {
+  var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (var k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+function toast(msg, type) {
+  var box = $('toasts');
+  var t = document.createElement('div');
+  t.className = 'toast ' + (type || 'info');
+  t.textContent = msg;
+  box.appendChild(t);
+  setTimeout(function () { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(function () { t.remove(); }, 320); }, 2600);
+}
+var modalCb = null;
+function confirmBox(title, msg, cb) {
+  $('modal-t').textContent = title;
+  $('modal-m').textContent = msg;
+  modalCb = cb;
+  $('mask').classList.add('show');
+}
+function promptBox(title, placeholder, cb) {
+  var m = $('modal-m');
+  m.innerHTML = '';
+  var inp = document.createElement('input');
+  inp.className = 'input';
+  inp.placeholder = placeholder || '';
+  m.appendChild(inp);
+  $('modal-t').textContent = title;
+  modalCb = function (ok) { if (ok) cb(inp.value.trim()); };
+  $('mask').classList.add('show');
+  setTimeout(function () { inp.focus(); }, 50);
+}
+function closeModal() {
+  $('mask').classList.remove('show');
+  $('modal-m').innerHTML = '';
+  $('modal-m').textContent = '';
+  modalCb = null;
+}
+$('modal-ok').addEventListener('click', function () { var cb = modalCb; closeModal(); if (cb) cb(true); });
+$('modal-cancel').addEventListener('click', function () { var cb = modalCb; closeModal(); if (cb) cb(false); });
+$('mask').addEventListener('click', function (e) { if (e.target === $('mask')) { var cb = modalCb; closeModal(); if (cb) cb(false); } });
+function nowTime() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
+function jitter(v, amt) { return Math.round((v + (Math.random() - 0.5) * amt) * 10) / 10; }
+
+/* ================= 页签路由 ================= */
+var ICONS = {
+  status: '<path d="M3 22h18"/><path d="M5 19l2.2-5.5 3 4 3-9.5 2.8 11.5 2.2-6.5"/>',
+  settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  dial: '<path d="M9 12l4-4M5 16c-1.5-1.5-2-3-2-4s.5-2.5 2-4M19 8c1.5 1.5 2 3 2 4s-.5 2.5-2 4"/><path d="M14 10l4-4 2 2-4 4-2-2z"/><path d="M8 16l-2 2 2 2 2-2"/>',
+  scan: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M22 12h-3M12 22v-3M2 12h3M18.4 5.6l-2.1 2.1M5.6 18.4l2.1-2.1M18.4 18.4l-2.1-2.1M5.6 5.6l2.1 2.1"/>',
+  schedule: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M8 2v3M16 2v3"/>',
+  modem: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 2v3M14 2v3M10 19v3M14 19v3M2 10h3M2 14h3M19 10h3M19 14h3"/><circle cx="12" cy="12" r="1.6"/>',
+  upgrade: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/>',
+  sms: '<path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/>',
+  smssettings: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><rect x="8" y="8" width="8" height="8" rx="2"/><circle cx="12" cy="12" r="1.4"/>',
+  terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',
+  logs: '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/>',
+  service: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>'
+};
+var TABS = [
+  ['status', '网络状态'], ['settings', '网络设置'], ['dial', '拨号设置'], ['scan', '全网扫频'],
+  ['schedule', '定时锁频'], ['modem', '模组设置'], ['upgrade', '模组升级'], ['sms', '短信中心'],
+  ['sms-settings', '短信设置'], ['terminal', 'AT 调试终端'], ['logs', '运行日志'], ['service', '服务配置']
+];
+var tabNav = $('tabs');
+TABS.forEach(function (t) {
+  var b = document.createElement('button');
+  b.className = 'tab';
+  b.setAttribute('data-view', t[0]);
+  b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + ICONS[t[0]] + '</svg>' + t[1];
+  b.addEventListener('click', function () { location.hash = '#/' + t[0]; });
+  tabNav.appendChild(b);
+});
+function route() {
+  var h = (location.hash || '').replace(/^#\/?/, '') || 'status';
+  var found = false;
+  TABS.forEach(function (t) {
+    var on = t[0] === h;
+    if (on) found = true;
+    var v = $('view-' + t[0]);
+    if (v) v.classList.toggle('active', on);
+    tabNav.querySelectorAll('.tab').forEach(function (tb) {
+      if (tb.getAttribute('data-view') === t[0]) tb.classList.toggle('active', on);
+    });
+  });
+  if (!found) { location.hash = '#/status'; return; }
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', route);
+route();
+
+/* ================= 信号仪表 + 总评横幅（对齐真实 mt5700 实现） ================= */
+var SIG = [
+  { kind: 'rsrp', label: '信号强度', unit: 'dBm', sub: 'RSRP', val: -62 },
+  { kind: 'rsrq', label: '信号质量', unit: 'dB', sub: 'RSRQ', val: -9 },
+  { kind: 'sinr', label: '信噪比', unit: 'dB', sub: 'SINR', val: 27 },
+  { kind: 'pct', label: '综合信号', unit: '%', sub: 'SIGNAL', val: 100 }
+];
+function levelOf(kind, v) {
+  if (v == null || isNaN(v)) return null;
+  if (kind === 'rsrp') return v >= -80 ? 0 : v >= -90 ? 1 : v >= -100 ? 2 : v >= -110 ? 3 : 4;
+  if (kind === 'rsrq') return v >= -10 ? 0 : v >= -14 ? 1 : v >= -18 ? 2 : v >= -22 ? 3 : 4;
+  if (kind === 'sinr') return v >= 20 ? 0 : v >= 15 ? 1 : v >= 10 ? 2 : v >= 5 ? 3 : 4;
+  return v >= 80 ? 0 : v >= 60 ? 1 : v >= 40 ? 2 : v >= 20 ? 3 : 4;
+}
+var LEVEL_KEY = ['exc', 'good', 'fair', 'poor', 'bad'];
+var CAPS = { exc: '优秀', good: '良好', fair: '一般', poor: '较差', bad: '极差' };
+var PLAIN = {
+  rsrp: { exc: '信号很强，网速跑得动', good: '信号够用，日常使用顺畅', fair: '信号一般，速度可能偏慢', poor: '信号偏弱，容易卡顿掉线', bad: '信号极弱，基本无法上网' },
+  rsrq: { exc: '信号纯净，干扰很小', good: '信号质量不错', fair: '有一定干扰，速度受影响', bad: '干扰严重，上网体验差' },
+  sinr: { exc: '干扰极小，网速接近峰值', good: '干扰较小，网速稳定', fair: '干扰明显，速度会打折', bad: '干扰严重，容易出现卡顿' },
+  pct: { exc: '综合信号非常好', good: '综合信号良好', fair: '综合信号一般', bad: '综合信号较差' }
+};
+var VERDICT_TEXT = {
+  exc: { t: '网络能力优秀', s: '信号与频段带宽俱佳，适合高清视频及大文件下载' },
+  good: { t: '网络能力良好', s: '日常上网、视频与通话流畅无压力' },
+  fair: { t: '网络能力一般', s: '轻量使用够用，高清视频可能缓冲' },
+  poor: { t: '网络能力偏弱', s: '易卡顿掉线，建议调整位置或加天线' },
+  bad: { t: '网络能力很差', s: '基本无法上网，请检查天线与 SIM 卡' }
+};
+function sigIcon(key) {
+  var s = svg('svg', { viewBox: '0 0 24 24' });
+  if (key === 'rsrp') {
+    ['M4 19h3v-5H4z', 'M9 19h3V10H9z', 'M14 19h3V7h-3z', 'M19 19h1V4h-1z'].forEach(function (d) { s.appendChild(svg('path', { class: 'vbar', d: d })); });
+  } else if (key === 'rsrq') {
+    s.appendChild(svg('path', { class: 'vwave', d: 'M3 13c3-7 5 7 9 0s6 7 9 0' }));
+  } else if (key === 'sinr') {
+    s.appendChild(svg('circle', { class: 'vring', cx: 12, cy: 12, r: 7 }));
+    s.appendChild(svg('circle', { class: 'vring vring2', cx: 12, cy: 12, r: 4 }));
+    s.appendChild(svg('circle', { class: 'vdot', cx: 12, cy: 12, r: 2 }));
+    s.appendChild(svg('path', { class: 'vsweep', d: 'M12 12l6-6' }));
+  } else {
+    s.appendChild(svg('circle', { cx: 12, cy: 12, r: 8 }));
+    s.appendChild(svg('path', { class: 'vcheck', d: 'm8 12 3 3 5-6' }));
+  }
+  return s;
+}
+function sigColor(lv) {
+  return getComputedStyle(document.documentElement).getPropertyValue(lv === 0 ? '--sig-exc' : lv === 1 ? '--sig-good' : lv === 2 ? '--sig-fair' : lv === 3 ? '--sig-poor' : '--sig-bad').trim() || '#0f9d63';
+}
+var gauges = {};
+var gaugesBox = $('gauges');
+SIG.forEach(function (g) {
+  var wrap = document.createElement('div');
+  wrap.className = 'gauge';
+  var C = (2 * Math.PI * 42).toFixed(2);
+  var dial = document.createElement('div'); dial.className = 'dial';
+  var s = svg('svg', { viewBox: '0 0 100 100' });
+  s.appendChild(svg('circle', { class: 'track', cx: 50, cy: 50, r: 42, 'stroke-width': 8 }));
+  var bar = svg('circle', { class: 'bar', cx: 50, cy: 50, r: 42, 'stroke-width': 8, transform: 'rotate(-90 50 50)', 'stroke-dasharray': C, 'stroke-dashoffset': C });
+  s.appendChild(bar);
+  dial.appendChild(s);
+  var center = document.createElement('div'); center.className = 'center';
+  var val = document.createElement('div'); val.className = 'val'; val.textContent = '—';
+  var unit = document.createElement('div'); unit.className = 'unit'; unit.textContent = g.unit;
+  center.appendChild(val); center.appendChild(unit);
+  dial.appendChild(center);
+  var labelbox = document.createElement('div'); labelbox.className = 'labelbox';
+  var gl = document.createElement('div'); gl.className = 'glabel'; gl.textContent = g.label;
+  var gs = document.createElement('div'); gs.className = 'gsub'; gs.textContent = g.sub;
+  labelbox.appendChild(gl); labelbox.appendChild(gs);
+  var cap = document.createElement('div'); cap.className = 'cap';
+  var plain = document.createElement('div'); plain.className = 'plain';
+  wrap.appendChild(dial); wrap.appendChild(labelbox); wrap.appendChild(cap); wrap.appendChild(plain);
+  gaugesBox.appendChild(wrap);
+  gauges[g.kind] = { root: wrap, bar: bar, val: val, cap: cap, plain: plain, C: C, g: g };
+});
+function renderGauges() {
+  SIG.forEach(function (g) {
+    var u = gauges[g.kind];
+    var lv = levelOf(g.kind, g.val);
+    var key = LEVEL_KEY[lv == null ? 2 : lv];
+    u.val.textContent = g.val == null ? '—' : String(g.val);
+    u.bar.setAttribute('stroke', sigColor(lv));
+    var frac = g.kind === 'rsrp' ? Math.min(1, Math.max(0, (g.val + 140) / 96))
+      : g.kind === 'rsrq' ? Math.min(1, Math.max(0, (g.val + 20) / 19.5))
+      : g.kind === 'sinr' ? Math.min(1, Math.max(0, g.val / 30))
+      : Math.min(1, Math.max(0, g.val / 100));
+    u.bar.setAttribute('stroke-dashoffset', (u.C * (1 - frac)).toFixed(2));
+    u.cap.className = 'cap ' + key;
+    u.cap.textContent = CAPS[key];
+    u.plain.textContent = (PLAIN[g.kind] || {})[key] || '';
+    u.root.className = 'gauge gauge-' + key;
+  });
+  verdictRender();
+}
+function verdictRender() {
+  var worst = 0, worstCount = 0;
+  SIG.forEach(function (g) {
+    var l = levelOf(g.kind, g.val);
+    if (l != null) {
+      if (l > worst) { worst = l; worstCount = 1; }
+      else if (l === worst) worstCount++;
+    }
+  });
+  var key = LEVEL_KEY[worst];
+  var v = VERDICT_TEXT[key];
+  $('verdict').className = 'verdict verdict-' + key;
+  $('verdict-t').textContent = v.t;
+  $('verdict-s').textContent = v.s;
+  var LABELS = { rsrp: '信号强度', rsrq: '信号质量', sinr: '信噪比', pct: '综合' };
+  var mb = $('verdict-metrics');
+  mb.innerHTML = '';
+  SIG.forEach(function (g) {
+    var l = levelOf(g.kind, g.val);
+    var card = document.createElement('div');
+    card.className = 'verdict-metric verdict-metric-' + (l == null ? 'fair' : LEVEL_KEY[l]);
+    if (g.kind === 'rsrp') card.setAttribute('data-bars', [4, 3, 2, 1, 1][l == null ? 2 : l]);
+    var icon = document.createElement('span'); icon.className = 'verdict-metricicon';
+    icon.appendChild(sigIcon(g.kind));
+    var box = document.createElement('div'); box.className = 'verdict-metricbox';
+    var nm = document.createElement('span'); nm.className = 'verdict-metricname'; nm.textContent = LABELS[g.kind];
+    var vl = document.createElement('span'); vl.className = 'verdict-metricval'; vl.textContent = l == null ? '—' : CAPS[LEVEL_KEY[l]];
+    box.appendChild(nm); box.appendChild(vl);
+    card.appendChild(icon); card.appendChild(box);
+    if (worstCount === 1 && l === worst) card.classList.add('verdict-metric-worst');
+    mb.appendChild(card);
+  });
+  var cb = $('verdict-cap');
+  cb.innerHTML = '';
+  [['网络制式', '5G'], ['频段特性', '中频 2565 MHz'], ['载波带宽', '100 MHz']].forEach(function (c) {
+    var it = document.createElement('div');
+    it.className = 'verdict-capitem';
+    var nm = document.createElement('span'); nm.className = 'verdict-capname'; nm.textContent = c[0];
+    var vl = document.createElement('span'); vl.className = 'verdict-capval'; vl.textContent = c[1];
+    it.appendChild(nm); it.appendChild(vl);
+    cb.appendChild(it);
+  });
+}
+renderGauges();
+
+/* ================= 状态页指标 ================= */
+function metric(lb, vl, cls) {
+  var m = document.createElement('div');
+  m.className = 'metric' + (cls ? ' ' + cls : '');
+  var a = document.createElement('div'); a.className = 'lb'; a.textContent = lb;
+  var b = document.createElement('div'); b.className = 'vl'; b.innerHTML = vl;
+  m.appendChild(a); m.appendChild(b);
+  return m;
+}
+var CONN = [
+  ['网络状态', '已注册 · 5G NSA'], ['运营商', '中国电信'], ['网络模式', '5G'], ['信号强度', '100%'],
+  ['APN', 'ctnet'], ['QCI', '9'], ['主载波频段', 'n79'], ['主载波带宽', '100 MHz'],
+  ['下行速率（签约）', '100 <small>Mbps</small>'], ['上行速率（签约）', '40 <small>Mbps</small>']
+];
+var connBox = $('conn-metrics');
+CONN.forEach(function (c) { connBox.appendChild(metric(c[0], c[1])); });
+var FLOW = [
+  ['当前会话时长', '02:31:48'], ['当前下行流量', '1.24 <small>GB</small>'], ['当前上行流量', '286 <small>MB</small>'],
+  ['累计时长', '12d 04:12'], ['累计下行', '86.4 <small>GB</small>'], ['累计上行', '12.1 <small>GB</small>']
+];
+var flowBox = $('flow-metrics');
+FLOW.forEach(function (c) { flowBox.appendChild(metric(c[0], c[1])); });
+var TEMPS = [
+  ['Sub3G PA', 40.1], ['Sub6G PA', 41.3], ['MIMO PA', 38.7], ['TCXO', 32.5], ['AP1', 45.2], ['AP2', 43.8], ['Modem1', 44.6]
+];
+function tempLevel(t) {
+  if (t == null || t <= 0) return null;
+  if (t < 25) return 'temp-cold'; if (t < 35) return 'temp-cool'; if (t < 50) return 'temp-normal';
+  if (t < 60) return 'temp-warm'; if (t < 70) return 'temp-hot'; return 'temp-high';
+}
+var tempBox = $('temp-metrics');
+var maxTemp = 0;
+TEMPS.forEach(function (c) {
+  var lv = tempLevel(c[1]);
+  tempBox.appendChild(metric(c[0], c[1] + ' <small>℃</small>', lv));
+  if (c[1] > maxTemp) maxTemp = c[1];
+});
+$('temp-badge').textContent = '最高 ' + maxTemp.toFixed(1) + ' ℃ · 正常';
+
+/* ================= 实时速率 + 曲线 ================= */
+function fmtSpeed(v) {
+  if (v >= 1e6) return { v: (v / 1e6).toFixed(2), u: 'MB/s' };
+  if (v >= 1e3) return { v: (v / 1e3).toFixed(1), u: 'KB/s' };
+  return { v: String(Math.round(v)), u: 'B/s' };
+}
+var hist = [];
+var down = 13600, up = 7500;
+function drawChart() {
+  var el = $('rate-chart');
+  el.innerHTML = '';
+  var W = 600, H = 150, pad = 6;
+  var max = 20000;
+  hist.forEach(function (h) { if (h.d > max) max = h.d; if (h.u > max) max = h.u; });
+  max = Math.max(max, 1);
+  function X(i) { return pad + (W - pad * 2) * (hist.length <= 1 ? 0.5 : i / (hist.length - 1)); }
+  function Y(v) { return H - pad - (H - pad * 2) * (v / max); }
+  var g1 = svg('line', { x1: pad, y1: H / 2, x2: W - pad, y2: H / 2, stroke: 'rgba(128,150,170,.14)', 'stroke-width': 1 });
+  el.appendChild(g1);
+  ['20%', '40%', '60%', '80%'].forEach(function (t, i) {
+    var yy = H - pad - (H - pad * 2) * ((i + 1) / 5);
+    el.appendChild(svg('line', { x1: pad, y1: yy, x2: W - pad, y2: yy, stroke: 'rgba(128,150,170,.08)', 'stroke-width': 1 }));
+  });
+  if (!hist.length) return;
+  function path(key) {
+    return hist.map(function (h, i) { return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(h[key]).toFixed(1); }).join(' ');
+  }
+  var area = svg('path', { d: path('d') + ' L' + X(hist.length - 1).toFixed(1) + ' ' + (H - pad) + ' L' + X(0).toFixed(1) + ' ' + (H - pad) + ' Z', fill: 'rgba(8,124,186,.18)', stroke: 'none' });
+  var lineD = svg('polyline', { points: hist.map(function (h, i) { return X(i).toFixed(1) + ',' + Y(h.d).toFixed(1); }).join(' '), fill: 'none', stroke: '#087cba', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' });
+  var lineU = svg('polyline', { points: hist.map(function (h, i) { return X(i).toFixed(1) + ',' + Y(h.u).toFixed(1); }).join(' '), fill: 'none', stroke: '#0f9d63', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' });
+  el.appendChild(area); el.appendChild(lineD); el.appendChild(lineU);
+  if (hist.length) {
+    var last = hist[hist.length - 1];
+    var ld = fmtSpeed(last.d), lu = fmtSpeed(last.u);
+    var td = svg('text', { x: X(hist.length - 1), y: Y(last.d) - 6, 'text-anchor': 'end', 'font-size': 11, fill: '#087cba', 'font-family': 'var(--mono)' });
+    td.textContent = '↓' + ld.v + ld.u;
+    var tu = svg('text', { x: X(hist.length - 1), y: Y(last.u) + 14, 'text-anchor': 'end', 'font-size': 11, fill: '#0f9d63', 'font-family': 'var(--mono)' });
+    tu.textContent = '↑' + lu.v + lu.u;
+    el.appendChild(td); el.appendChild(tu);
+  }
+}
+function tickSpeed() {
+  down = Math.max(1200, down + (Math.random() - 0.48) * 4200);
+  up = Math.max(300, up + (Math.random() - 0.48) * 1800);
+  var d = fmtSpeed(down), u = fmtSpeed(up);
+  $('rt-down').textContent = d.v; $('rt-down-u').textContent = d.u;
+  $('rt-up').textContent = u.v; $('rt-up-u').textContent = u.u;
+  hist.push({ d: down, u: up });
+  if (hist.length > 60) hist = hist.slice(hist.length - 60);
+  drawChart();
+  $('st-last').textContent = nowTime();
+}
+var speedTimer = setInterval(tickSpeed, 1000);
+for (var i = 0; i < 40; i++) { down += (Math.random() - 0.48) * 4200; up += (Math.random() - 0.48) * 1800; hist.push({ d: Math.max(1200, down), u: Math.max(300, up) }); }
+drawChart();
+$('rt-down').textContent = fmtSpeed(down).v; $('rt-down-u').textContent = fmtSpeed(down).u;
+$('rt-up').textContent = fmtSpeed(up).v; $('rt-up-u').textContent = fmtSpeed(up).u;
+$('st-last').textContent = nowTime();
+
+/* 指标说明折叠 + 刷新 */
+$('sig-ref').addEventListener('click', function () {
+  var p = $('sig-notes');
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+  this.textContent = p.style.display === 'none' ? '查看指标说明' : '收起指标说明';
+});
+var autoRefreshOn = true;
+$('auto-refresh').addEventListener('change', function () { autoRefreshOn = this.checked; toast(autoRefreshOn ? '自动刷新已开启（5 秒）' : '自动刷新已关闭', 'info'); });
+$('btn-refresh').addEventListener('click', function () {
+  SIG.forEach(function (g) { g.val = g.kind === 'pct' ? Math.min(100, Math.max(20, jitter(g.val, 4))) : Math.round(jitter(g.val, g.kind === 'rsrp' ? 4 : 2) * 10) / 10; });
+  renderGauges();
+  toast('已刷新（演示数据随机微调）', 'ok');
+});
+setInterval(function () {
+  if (!autoRefreshOn) return;
+  SIG.forEach(function (g) { g.val = g.kind === 'pct' ? Math.min(100, Math.max(20, jitter(g.val, 4))) : Math.round(jitter(g.val, g.kind === 'rsrp' ? 4 : 2) * 10) / 10; });
+  renderGauges();
+}, 5000);
+
+/* ================= 通用操作分发 ================= */
+function act(name, el) {
+  var map = {
+    'lte-lock': function () { confirmBox('应用 LTE 锁频', '将自动切换飞行模式使锁频配置生效（演示），继续？', function (ok) { if (ok) toast('LTE 锁频已应用：B28 · 频点 9380（模拟）', 'ok'); }); },
+    'lte-unlock': function () { toast('已清除 LTE 锁频（模拟）', 'ok'); },
+    'nr-lock': function () { confirmBox('应用 NR 锁频', '将自动切换飞行模式使锁频配置生效（演示），继续？', function (ok) { if (ok) toast('NR 锁频已应用：n41 · 频点 512910 · SCS 30kHz（模拟）', 'ok'); }); },
+    'nr-unlock': function () { toast('已清除 NR 锁频（模拟）', 'ok'); },
+    '5g-opt': function () { toast('5G 选项已应用（模拟）', 'ok'); },
+    'apn': function () { toast('APN 更改已暂存，点击「保存并应用」生效（模拟）', 'info'); },
+    'apn-apply': function () { toast('APN 配置已保存并应用（模拟）', 'ok'); },
+    'mode': function () { toast('拨号模式已保存，后端将对账自动拨号（模拟）', 'ok'); },
+    'dmz': function () { toast('DMZ 已设置（模拟）', 'ok'); },
+    'dmz-off': function () { toast('DMZ 已关闭（模拟）', 'ok'); },
+    'sched-save': function () { toast('定时锁频配置已保存，下个检测周期生效（模拟）', 'ok'); },
+    'sim': function () { toast('SIM 设置已保存（模拟）', 'ok'); },
+    'airplane': function () { toast($('airplane').checked ? '飞行模式已开启（模拟）' : '飞行模式已关闭，正在恢复网络（模拟）', 'info'); },
+    'dev': function () { toast('设备控制已保存（模拟）', 'ok'); },
+    'nr': function () { toast('NR 能力已保存（模拟）', 'ok'); },
+    'sysnet': function () { toast('网络系统配置已保存（模拟）', 'ok'); },
+    'therm': function () { toast('温度保护已保存（模拟）', 'ok'); },
+    'reboot': function () { confirmBox('重启模组', '将向模组发送 AT 重启命令，连接会短暂中断。继续？', function (ok) { if (ok) toast('已下发重启命令（模拟）', 'warn'); }); },
+    'factory': function () { confirmBox('恢复出厂设置', '将清除模组全部配置并重启，此操作不可撤销。继续？', function (ok) { if (ok) toast('已恢复出厂设置（模拟）', 'warn'); }); },
+    'sms-svc': function () { toast('短信服务设置已保存（模拟）', 'ok'); },
+    'smsc': function () { toast('短信中心号码已保存（模拟）', 'ok'); },
+    'sms-store': function () { toast('短信存储位置已应用（模拟）', 'ok'); },
+    'cache-export': function () { toast('已导出 12 条本地发送记录（模拟）', 'ok'); },
+    'cache-import': function () { toast('已导入缓存（模拟）', 'ok'); },
+    'cache-clear': function () { confirmBox('清空本地已发缓存', '清空后不可恢复，仅影响浏览器本地记录。继续？', function (ok) { if (ok) { $('cache-count').textContent = '共 0 条'; toast('本地缓存已清空', 'ok'); } }); },
+    'ussd': function () { var v = document.querySelector('#view-sms-settings .fg-inline .input').value || '*133#';
+      $('ussd-result').textContent = 'USSD 响应（模拟）：您当前套餐剩余流量 20.5 GB，国内语音 120 分钟。'; toast('USSD 查询已发送', 'info'); },
+    'svc-restart': function () { confirmBox('重启 AT 服务', '后端进程将由 procd 自动拉起，约 1-2 秒。继续？', function (ok) { if (ok) { toast('服务已重启（模拟）', 'ok'); } }); },
+    'svc-status': function () { toast('服务运行中 · procd instance1.running = true（模拟）', 'info'); },
+    'conn': function () { toast('连接配置已保存，后端重连模组（模拟）', 'ok'); },
+    'rpc': function () { toast('RPC 配置已保存，rpcd 已重载（模拟）', 'ok'); },
+    'sched': function () { toast('定时锁频开关已保存（模拟）', 'ok'); },
+    'notif': function () { toast('通知设置已保存（模拟）', 'ok'); },
+    'notif-test': function () { toast('测试通知已推送到企业微信 WebHook（模拟）', 'ok'); }
+  };
+  if (map[name]) map[name](el);
+}
+document.addEventListener('click', function (e) {
+  var el = e.target.closest('[data-act]');
+  if (el) act(el.getAttribute('data-act'), el);
+});
+
+/* ================= 邻区自动刷新 ================= */
+var neighTimer = setInterval(function () {
+  var rows = document.querySelectorAll('#neigh-body tr');
+  rows.forEach(function (r) {
+    var tds = r.querySelectorAll('td');
+    if (tds.length >= 7) {
+      var rsrp = parseInt(tds[4].textContent, 10) + Math.round((Math.random() - 0.5) * 4);
+      var rsrq = parseInt(tds[5].textContent, 10) + Math.round((Math.random() - 0.5) * 2);
+      var sinr = parseInt(tds[6].textContent, 10) + Math.round((Math.random() - 0.5) * 2);
+      tds[4].textContent = rsrp; tds[5].textContent = rsrq; tds[6].textContent = sinr;
+    }
+  });
+}, 4000);
+
+/* ================= PDP 上下文 ================= */
+$('pdp-add').addEventListener('click', function () {
+  promptBox('新增 PDP 上下文', '输入 APN，例如 cmnet', function (apn) {
+    if (!apn) return;
+    var tbody = $('pdp-body');
+    var tr = document.createElement('tr');
+    var cid = tbody.children.length + 1;
+    tr.innerHTML = '<td class="mono">' + cid + '</td><td class="mono">' + esc(apn) + '</td><td>NONE</td><td>IPV4V6</td><td><span class="badge ghost">未激活</span></td>' +
+      '<td><span class="fg-inline"><button class="btn btn-ghost btn-sm" data-act="pdp-edit">编辑</button><button class="btn btn-primary btn-sm" data-act="pdp-act">激活</button><button class="btn btn-danger btn-sm" data-act="pdp-del">删除</button></span></td>';
+    tbody.appendChild(tr);
+    toast('已新增 PDP 上下文 CID ' + cid + '（模拟）', 'ok');
+  });
+});
+document.addEventListener('click', function (e) {
+  var el = e.target.closest('[data-act^="pdp-"]');
+  if (!el) return;
+  var tr = el.closest('tr');
+  var a = el.getAttribute('data-act');
+  if (a === 'pdp-edit') { promptBox('编辑 PDP 上下文', '输入新的 APN', function (v) { if (v) { tr.querySelectorAll('td')[1].textContent = v; toast('PDP 已更新（模拟）', 'ok'); } }); }
+  else if (a === 'pdp-act') { tr.querySelectorAll('td')[4].innerHTML = '<span class="badge ok">已激活</span>'; el.textContent = '去激活'; el.setAttribute('data-act', 'pdp-deact'); toast('PDP 上下文已激活（模拟）', 'ok'); }
+  else if (a === 'pdp-deact') { tr.querySelectorAll('td')[4].innerHTML = '<span class="badge ghost">未激活</span>'; el.textContent = '激活'; el.setAttribute('data-act', 'pdp-act'); toast('PDP 上下文已去激活（模拟）', 'info'); }
+  else if (a === 'pdp-del') { confirmBox('删除 PDP 上下文', '删除该上下文后需要重新配置。继续？', function (ok) { if (ok) { tr.remove(); toast('PDP 上下文已删除（模拟）', 'ok'); } }); }
+});
+
+/* ================= 全网扫频（模拟异步推送） ================= */
+var SCAN_POOL = [
+  { rat: 'NR', plmn: '46000', band: 'n79', freq: '149002', pci: 86, sig: -62, sinr: 27 },
+  { rat: 'NR', plmn: '46000', band: 'n79', freq: '148560', pci: 311, sig: -78, sinr: 15 },
+  { rat: 'NR', plmn: '46011', band: 'n1', freq: '429540', pci: 158, sig: -91, sinr: 6 },
+  { rat: 'NR', plmn: '46000', band: 'n41', freq: '512910', pci: 175, sig: -70, sinr: 18 },
+  { rat: 'LTE', plmn: '46000', band: 'B3', freq: '1650', pci: 222, sig: -83, sinr: 9 },
+  { rat: 'LTE', plmn: '46000', band: 'B40', freq: '39250', pci: 301, sig: -88, sinr: 8 },
+  { rat: 'NR', plmn: '46000', band: 'n78', freq: '627264', pci: 44, sig: -66, sinr: 22 },
+  { rat: 'NR', plmn: '46001', band: 'n79', freq: '149222', pci: 290, sig: -96, sinr: 3 }
+];
+var scanState = { running: false, cells: [], timer: null, idx: 0 };
+function scanRender() {
+  var tb = $('scan-body');
+  var count = $('scan-count');
+  if (!scanState.cells.length) {
+    tb.innerHTML = '<tr><td colspan="8"><div class="empty">' + (scanState.running ? '扫描中…（异步推送 cellscan 结果）' : '暂无扫描结果') + '</div></td></tr>';
+    count.textContent = '0 个小区';
+    return;
+  }
+  tb.innerHTML = '';
+  scanState.cells.forEach(function (c) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + c.rat + '</td><td class="mono">' + c.plmn + '</td><td>' + c.band + '</td><td class="mono">' + c.freq + '</td><td class="mono">' + c.pci + '</td><td class="mono">' + c.sig + ' dBm</td><td class="mono">' + c.sinr + '</td>' +
+      '<td><button class="btn btn-primary btn-sm" data-act="scan-lock" data-i="' + (scanState.cells.indexOf(c)) + '"' + (scanState.running ? ' disabled' : '') + '>锁定</button></td>';
+    tb.appendChild(tr);
+  });
+  count.textContent = scanState.cells.length + ' 个小区';
+}
+function scanStart() {
+  if (scanState.running) return;
+  scanState.running = true; scanState.cells = []; scanState.idx = 0;
+  $('scan-start').style.display = 'none';
+  $('scan-cancel').style.display = '';
+  $('scan-note').textContent = '扫描中，全频段扫描可能需要几分钟';
+  $('scan-progress').style.display = '';
+  $('scan-progress-i').style.width = '0%';
+  scanRender();
+  scanState.timer = setInterval(function () {
+    if (scanState.idx >= SCAN_POOL.length) { scanDone(); return; }
+    scanState.cells.push(SCAN_POOL[scanState.idx++]);
+    $('scan-progress-i').style.width = (scanState.idx / SCAN_POOL.length * 100) + '%';
+    scanRender();
+  }, 650);
+}
+function scanDone(cancelled) {
+  clearInterval(scanState.timer); scanState.timer = null; scanState.running = false;
+  $('scan-start').style.display = '';
+  $('scan-cancel').style.display = 'none';
+  $('scan-progress').style.display = 'none';
+  $('scan-note').textContent = cancelled ? '已取消，保留已扫到的 ' + scanState.cells.length + ' 个小区' : '扫描完成，共 ' + scanState.cells.length + ' 个小区';
+  scanRender();
+  if (!cancelled) toast('扫频完成，共 ' + scanState.cells.length + ' 个小区', 'ok');
+}
+$('scan-start').addEventListener('click', scanStart);
+$('scan-cancel').addEventListener('click', function () { if (scanState.running) scanDone(true); });
+document.addEventListener('click', function (e) {
+  var el = e.target.closest('[data-act="scan-lock"]');
+  if (!el) return;
+  var c = scanState.cells[parseInt(el.getAttribute('data-i'), 10)];
+  if (!c) return;
+  confirmBox('锁定 ' + c.rat + ' Band ' + c.band, '频点 ' + c.freq + '，PCI ' + c.pci + '。将自动切换飞行模式并下发锁频命令。', function (ok) {
+    if (ok) toast('已锁定 ' + c.rat + ' ' + c.band + '（频点 ' + c.freq + '，PCI ' + c.pci + '）· 模拟', 'ok');
+  });
+});
+
+/* ================= 定时锁频 ================= */
+$('sched-toggle').addEventListener('click', function () {
+  var card = this.closest('.card');
+  var body = card.querySelectorAll('.fg-inline, .btn-row');
+  var hidden = body[0].style.display === 'none';
+  body.forEach(function (b) { b.style.display = hidden ? '' : 'none'; });
+  this.textContent = hidden ? '收起配置' : '展开配置';
+  if (!hidden) toast('配置已收起，运行状态继续自动刷新', 'info');
+});
+
+/* ================= 模组升级 ================= */
+$('upgrade-start').addEventListener('click', function () {
+  var bar = $('upgrade-progress'), fill = $('upgrade-progress-i'), note = $('upgrade-note');
+  bar.style.display = '';
+  note.textContent = '';
+  var p = 0;
+  var t = setInterval(function () {
+    p += Math.random() * 14 + 4;
+    if (p >= 100) {
+      p = 100; clearInterval(t);
+      fill.style.width = '100%';
+      note.textContent = '升级完成：固件已更新为 M5700M_V1.3.0，模组正在重启（模拟）';
+      toast('FOTA 升级完成（模拟）', 'ok');
+      return;
+    }
+    fill.style.width = p + '%';
+    note.textContent = '正在下载固件并写入… ' + Math.floor(p) + '%';
+  }, 380);
+});
+
+/* ================= 短信中心 ================= */
+var CONVS = [
+  { num: '10086', name: '中国移动', msgs: [
+    { dir: 'in', t: '尊敬的客户：您本月已使用流量 12.6GB，剩余 20.5GB。', ts: '09-12 10:24' },
+    { dir: 'in', t: '回复 Y 可查询套餐余量。', ts: '09-12 10:25' } ] },
+  { num: '95598', name: '供电服务', msgs: [
+    { dir: 'in', t: '【电费提醒】您户号 8xxxxxx 本月电费 86.4 元，请及时缴纳。', ts: '09-15 08:02' } ] },
+  { num: '13800138000', name: '联系人 A', msgs: [
+    { dir: 'in', t: '信号这几天怎么样？', ts: '09-17 21:10' },
+    { dir: 'out', t: '好多了，锁了 n79 之后很稳定。', ts: '09-17 21:12' } ] }
+];
+var activeConv = 0;
+function convRender() {
+  var list = $('conv-list');
+  list.innerHTML = '';
+  CONVS.forEach(function (c, i) {
+    var d = document.createElement('div');
+    d.className = 'conv-item' + (i === activeConv ? ' on' : '');
+    var last = c.msgs[c.msgs.length - 1];
+    d.innerHTML = '<b>' + esc(c.name) + ' <span class="mono" style="font-weight:400;color:var(--text3)">' + esc(c.num) + '</span></b><span>' + esc(last ? last.t.slice(0, 18) : '') + ' · ' + (last ? last.ts : '') + '</span>';
+    d.addEventListener('click', function () { activeConv = i; convRender(); });
+    list.appendChild(d);
+  });
+  var box = $('msg-box');
+  box.innerHTML = '';
+  CONVS[activeConv].msgs.forEach(function (m) {
+    var d = document.createElement('div');
+    d.className = 'msg ' + m.dir;
+    d.innerHTML = '<div class="b">' + esc(m.t) + '<span class="t">' + m.ts + '</span></div>';
+    box.appendChild(d);
+  });
+  box.scrollTop = box.scrollHeight;
+}
+convRender();
+$('sms-send').addEventListener('click', function () {
+  var inp = $('sms-input');
+  var v = inp.value.trim();
+  if (!v) { toast('请输入短信内容', 'warn'); return; }
+  CONVS[activeConv].msgs.push({ dir: 'out', t: v, ts: nowTime().slice(0, 5) });
+  inp.value = '';
+  convRender();
+  toast('短信已发送（模拟）', 'ok');
+});
+$('sms-input').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('sms-send').click(); });
+$('sms-new').addEventListener('click', function () {
+  promptBox('新短信', '输入手机号', function (num) {
+    if (!num) return;
+    CONVS.push({ num: num, name: num, msgs: [] });
+    activeConv = CONVS.length - 1;
+    convRender();
+    toast('已创建会话（模拟）', 'ok');
+  });
+});
+$('sms-batch-del').addEventListener('click', function () {
+  confirmBox('批量删除所选', '演示中为全选删除，真实界面支持勾选多条。继续？', function (ok) {
+    if (ok) { CONVS[activeConv].msgs = []; convRender(); toast('已删除所选短信（模拟）', 'ok'); }
+  });
+});
+
+/* ================= AT 调试终端 ================= */
+var termLines = 0;
+function termAdd(cls, text) {
+  var out = $('term-out');
+  var d = document.createElement('div');
+  d.className = cls;
+  d.textContent = text;
+  out.appendChild(d);
+  out.scrollTop = out.scrollHeight;
+  termLines++;
+  if (termLines > 300) { out.removeChild(out.firstChild); termLines--; }
+}
+function atMock(cmd) {
+  var c = cmd.trim().toUpperCase();
+  if (!c) return ['', false];
+  if (c === 'AT') return ['OK', false];
+  if (c.indexOf('ATI') === 0) return ['MT5700M\nM5700M_V1.2.3\nOK', false];
+  if (c.indexOf('^HCSQ?') === 0) return ['^HCSQ: 5G,62,27,-62,-9,27,100\nOK', false];
+  if (c.indexOf('^MONSC') === 0) return ['^MONSC: 5G,460,11,3842,135082435,86,149002,-62,-9,27\nOK', false];
+  if (c.indexOf('^NDISSTATQRY?') === 0) return ['^NDISSTATQRY: 1,1,1\nOK', false];
+  if (c.indexOf('+CGACT?') === 0) return ['+CGACT: 1,1\n+CGACT: 2,0\nOK', false];
+  if (c.indexOf('+COPS?') === 0) return ['+COPS: 0,0,"CHINA TELECOM",7\nOK', false];
+  if (c.indexOf('^CHIPTEMP?') === 0) return ['^CHIPTEMP: 40.1,41.3,38.7,32.5,45.2,43.8,44.6\nOK', false];
+  if (c.indexOf('+CSQ') === 0) return ['+CSQ: 29,0\nOK', false];
+  if (c.indexOf('+CMGL') === 0) return ['+CMGL: 1,"REC UNREAD","+8613800100500","","24/09/12,10:24:20+32"\n尊敬的客户：您本月已使用流量 12.6GB。\nOK', false];
+  if (c.indexOf('^SETAUTODIAL') === 0) return ['^SETAUTODIAL: 1,1\nOK', false];
+  if (c.indexOf('ERROR') >= 0 || c.indexOf('AT+') > 0 && c.indexOf('?') === -1 && c.indexOf('=') === -1) return ['ERROR', true];
+  if (c.indexOf('?') > 0) return ['+CME ERROR: 100 (unknown)\nERROR', true];
+  return ['OK', false];
+}
+function termSend(cmd) {
+  if (!cmd) return;
+  termAdd('in', '> ' + cmd);
+  var r = atMock(cmd);
+  if (r[1]) termAdd('err', r[0]); else termAdd('out', r[0]);
+}
+$('term-send').addEventListener('click', function () {
+  var inp = $('term-in');
+  termSend(inp.value);
+  inp.value = '';
+  inp.focus();
+});
+$('term-in').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('term-send').click(); });
+$('term-clear').addEventListener('click', function () { $('term-out').innerHTML = ''; termLines = 0; toast('终端已清空（仅清除本页日志）', 'info'); });
+var savedCmds = [];
+try { savedCmds = JSON.parse(localStorage.getItem('mt5700-saved-cmds') || '[]'); } catch (e) { savedCmds = []; }
+function savedRender() {
+  var box = $('term-saved');
+  box.innerHTML = '';
+  if (!savedCmds.length) { box.innerHTML = '<span class="hint" style="margin:0">暂无已保存命令，可点击上方「保存当前命令」添加。</span>'; return; }
+  savedCmds.forEach(function (s, i) {
+    var b = document.createElement('span');
+    b.className = 'chip';
+    b.style.cssText = 'cursor:pointer;font-family:var(--font)';
+    b.textContent = s.remark || s.cmd;
+    b.addEventListener('click', function () { confirmBox('下发已保存命令', s.cmd, function (ok) { if (ok) termSend(s.cmd); }); });
+    var d = document.createElement('button');
+    d.className = 'btn btn-danger btn-sm';
+    d.textContent = '删除';
+    d.style.cssText = 'margin-left:6px;padding:1px 8px';
+    d.addEventListener('click', function (e) { e.stopPropagation(); savedCmds.splice(i, 1); localStorage.setItem('mt5700-saved-cmds', JSON.stringify(savedCmds)); savedRender(); });
+    var w = document.createElement('span');
+    w.style.cssText = 'display:inline-flex;align-items:center;gap:4px';
+    w.appendChild(b); w.appendChild(d);
+    box.appendChild(w);
+  });
+}
+savedRender();
+$('term-save').addEventListener('click', function () {
+  var v = $('term-in').value.trim();
+  if (!v) { toast('先输入要保存的 AT 命令', 'warn'); return; }
+  savedCmds.push({ cmd: v, remark: v });
+  localStorage.setItem('mt5700-saved-cmds', JSON.stringify(savedCmds));
+  savedRender();
+  toast('已保存命令：' + v, 'ok');
+});
+document.querySelectorAll('#term-common .chip').forEach(function (ch) {
+  ch.addEventListener('click', function () {
+    var cmd = ch.getAttribute('data-cmd');
+    confirmBox('下发常用命令', cmd + ' 将真正发送到模组（演示）。', function (ok) { if (ok) termSend(cmd); });
+  });
+});
+termAdd('sys', 'AT 终端已就绪（演示模式，输入 AT 指令后回车）');
+
+/* ================= 运行日志 ================= */
+var LOGS = {
+  dial: [
+    { t: '09-18 17:22:01.482', dir: 'req', lv: 'info', m: '前端请求: <em>ATI</em>' },
+    { t: '09-18 17:22:01.487', dir: 'send', lv: 'info', m: '发送 → 模组: <em>AT+CMEE=2</em>（错误报告）' },
+    { t: '09-18 17:22:01.491', dir: 'recv', lv: 'info', m: '接收 ← 模组: OK（共 1 行）' },
+    { t: '09-18 17:22:06.120', dir: 'info', lv: 'info', m: '自动拨号对齐：已处于期望状态（enable=1 · 方式 1）' },
+    { t: '09-18 17:22:06.126', dir: 'info', lv: 'info', m: '复核通过：^NDISSTATQRY 首字段=1，+CGACT CID1=1' },
+    { t: '09-18 17:22:08.902', dir: 'info', lv: 'info', m: '数据承载（PDP）：CID 1 已激活，IPv4 10.159.4.26' },
+    { t: '09-18 17:22:09.140', dir: 'info', lv: 'info', m: 'USB 网卡：识别到 eth2（VID 0E8D · PID 5700）' },
+    { t: '09-18 17:22:11.035', dir: 'warn', lv: 'warn', m: '串口探测：ttyUSB0 判定非 AT 口（GPS/DIAG），跳过' },
+    { t: '09-18 17:22:11.212', dir: 'info', lv: 'info', m: '串口选择：PCUI (/dev/ttyUSB1)，sysfs 打分 100' },
+    { t: '09-18 17:22:15.007', dir: 'info', lv: 'info', m: '周期对账守护：数据面正常，无需干预' },
+    { t: '09-18 17:22:41.600', dir: 'recv', lv: 'debug', m: 'URC 分发：^MODE: 2（转网口模式上报）' },
+    { t: '09-18 17:25:02.118', dir: 'err', lv: 'err', m: 'AT 命令失败：AT^REJINFO? → ERROR（重试中）' }
+  ],
+  net: [
+    { t: '09-18 17:22:00.310', dir: 'info', lv: 'info', m: 'init.d：开始拉起接口 MT5700M（dhcp）' },
+    { t: '09-18 17:22:00.315', dir: 'info', lv: 'info', m: '接口存在，跳过创建；device=eth2' },
+    { t: '09-18 17:22:00.512', dir: 'info', lv: 'info', m: 'ifup MT5700M 第 1 次尝试' },
+    { t: '09-18 17:22:10.551', dir: 'info', lv: 'info', m: '动态地址分配（DHCP）：已取到 10.159.4.26/8' },
+    { t: '09-18 17:22:10.553', dir: 'info', lv: 'info', m: 'IPv6：MT5700Mv6（@MT5700M）reqaddress=try / reqprefix=auto' },
+    { t: '09-18 17:22:12.220', dir: 'info', lv: 'info', m: '热插拔（hotplug.d/usb）：网口出现，补 ifup' },
+    { t: '09-18 17:22:13.104', dir: 'info', lv: 'info', m: '后端就绪通知：on-uplink.sh 触发成功' },
+    { t: '09-18 17:23:00.020', dir: 'info', lv: 'info', m: '接口取址判据：ipv4-address 已存在，判定成功' },
+    { t: '09-18 17:30:44.910', dir: 'warn', lv: 'warn', m: 'IPv6 前缀未下发（运营商未分配），不影响 IPv4 使用' }
+  ],
+  notify: [
+    { t: '09-17 21:12:03.221', dir: 'info', lv: 'info', m: '新短信通知：来自 13800138000，已推送 WebHook' },
+    { t: '09-16 08:05:40.118', dir: 'info', lv: 'info', m: '短信存储满通知：SIM 卡剩余 3 条，已推送' },
+    { t: '09-15 11:22:09.004', dir: 'info', lv: 'info', m: '来电通知：号码 0755-xxxxxxxx，已推送' },
+    { t: '09-14 19:03:55.777', dir: 'warn', lv: 'warn', m: '信号变化通知：RSRP 从 -92 降至 -101（偏差档）' }
+  ]
+};
+var logView = 'dial';
+function logRender() {
+  var list = $('log-list');
+  list.innerHTML = '';
+  var lvl = $('log-level').value;
+  var kw = $('log-search').value.trim().toLowerCase();
+  var data = LOGS[logView].filter(function (l) {
+    if (lvl && l.lv !== { '调试': 'debug', '信息': 'info', '警告': 'warn', '错误': 'err' }[lvl]) return false;
+    if (kw && l.m.toLowerCase().indexOf(kw) === -1) return false;
+    return true;
+  });
+  data.forEach(function (l) {
+    var d = document.createElement('div');
+    d.className = 'log-line';
+    var html = '<span class="t">' + l.t + '</span>';
+    if (l.dir === 'req') html += '<span class="dir dir-req">请求</span>';
+    else if (l.dir === 'send') html += '<span class="dir dir-send">发送</span>';
+    else if (l.dir === 'recv') html += '<span class="dir dir-recv">接收</span>';
+    html += '<span class="lv lv-' + l.lv + '">' + ({ debug: '调试', info: '信息', warn: '警告', err: '错误' }[l.lv]) + '</span>';
+    html += '<span class="m">' + l.m + '</span>';
+    d.innerHTML = html;
+    list.appendChild(d);
+  });
+  if (!data.length) list.innerHTML = '<div class="empty">无匹配日志</div>';
+  $('log-count').textContent = '共 ' + data.length + ' 条（来源：后端内存环形缓冲 1200 条 / syslog）';
+}
+$('log-seg').querySelectorAll('button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    logView = b.getAttribute('data-log-view');
+    $('log-seg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+    logRender();
+  });
+});
+$('log-level').addEventListener('change', logRender);
+$('log-search').addEventListener('input', logRender);
+$('log-refresh').addEventListener('click', function () { logRender(); toast('日志已刷新（模拟）', 'ok'); });
+$('log-clear').addEventListener('click', function () { confirmBox('清空日志', '仅清空本页展示，后端缓冲与 syslog 不受影响。继续？', function (ok) { if (ok) { $('log-list').innerHTML = '<div class="empty">已清空</div>'; $('log-count').textContent = '共 0 条'; } }); });
+$('log-export').addEventListener('click', function () {
+  var txt = LOGS[logView].map(function (l) { return l.t + ' [' + l.lv + '] ' + l.m.replace(/<[^>]+>/g, ''); }).join('\n');
+  var blob = new Blob(['at-webserver 运行日志\n' + txt], { type: 'text/plain;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'at-webserver-logs.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('日志已导出为文本', 'ok');
+});
+logRender();
+
+/* ================= 页脚年份 ================= */
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+})();
+
+</script>
+</body>
+</html>
