@@ -334,11 +334,18 @@ impl Dispatcher {
             }
         } else if line.contains("^HCSQ:") {
             let parts = split_fields(line, "^HCSQ:");
-            if parts.len() >= 4 {
-                if let Ok(raw) = parts[1].parse::<f64>() {
-                    rsrp = -140.0 + raw;
-                    sys_mode = parts[0].trim_matches('"').to_string();
-                    ok = true;
+            // 手册 13.5 字段表：LTE 为 <rssi>,<rsrp>,<sinr>,<rsrq>；NR 为 <rsrp>,<sinr>,<rsrq>。
+            // LTE 前面多一个 RSSI，RSRP 在下标 2；其余制式（NR 等）RSRP 在下标 1。
+            // 255 表示"未知或不可测"，不参与换算。
+            let mode = parts[0].trim_matches('"').to_string();
+            let rsrp_idx = if mode.eq_ignore_ascii_case("LTE") { 2 } else { 1 };
+            if let Some(field) = parts.get(rsrp_idx) {
+                if let Ok(raw) = field.parse::<f64>() {
+                    if raw != 255.0 {
+                        rsrp = -140.0 + raw;
+                        sys_mode = mode;
+                        ok = true;
+                    }
                 }
             }
         }

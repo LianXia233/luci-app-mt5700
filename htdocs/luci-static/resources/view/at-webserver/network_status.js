@@ -726,69 +726,85 @@ return L.view.extend({
 
 		function updateNetworkInfo() {
 			var carriers = [];
+			var serving = null;
 			return AtWs.client.sendCommand('AT^MONSC').then(function (monsc) {
-				var serving = monsc.success && monsc.data ? AtWs.parseMONSC(monsc.data) : null;
-				return AtWs.client.sendCommand('AT^HFREQINFO?').then(function (hfreq) {
-					carriers = hfreq.success && hfreq.data ? AtWs.parseHFREQINFO(hfreq.data) : [];
-					if (!carriers.length) return AtWs.client.sendCommand('AT^HCSQ?').then(function (hcsq) {
-						var hcsqData = hcsq.success && hcsq.data ? AtWs.parseHCSQ(hcsq.data) : null;
-						if (hcsqData) {
-							state.cell.rsrp = hcsqData.rsrp;
-							state.cell.rsrq = hcsqData.rsrq;
-							state.cell.sinr = hcsqData.sinr;
+				serving = monsc.success && monsc.data ? AtWs.parseMONSC(monsc.data) : null;
+				return AtWs.client.sendCommand('AT^HFREQINFO?');
+			}).then(function (hfreq) {
+				carriers = hfreq.success && hfreq.data ? AtWs.parseHFREQINFO(hfreq.data) : [];
+				if (serving) {
+					state.cell.mcc = serving.mcc; state.cell.mnc = serving.mnc;
+					state.cell.lac = serving.lac; state.cell.cid = serving.cid;
+					state.cell.channel = serving.channel; state.cell.pci = serving.pci;
+					state.cell.rsrp = serving.rsrp != null ? serving.rsrp : state.cell.rsrp;
+					state.cell.rsrq = serving.rsrq != null ? serving.rsrq : state.cell.rsrq;
+					state.cell.sinr = serving.sinr != null ? serving.sinr : state.cell.sinr;
+					state.cell.sysMode = serving.sysMode || state.cell.sysMode;
+					state.cell.signalPercent = serving.signalPercent || '';
+				}
+				/*
+				 * ^HCSQ 是信号三项（RSRP/RSRQ/SINR）的兜底来源，与 ^HFREQINFO
+				 * 有没有返回载波**无关**。
+				 *
+				 * 旧逻辑写成「只有 ^HFREQINFO 一条载波都没返回时才查 ^HCSQ」，
+				 * 于是 4G 场景（^HFREQINFO 正常返回 LTE 载波、而 ^MONSC 不带
+				 * SINR）永远走不到 ^HCSQ，SINR 恒显示为「—」。现改为：^MONSC
+				 * 没凑齐三项就补一次 ^HCSQ?，只填空缺、不覆盖已有值。
+				 */
+				var needHcsq = state.cell.rsrp == null || state.cell.rsrq == null || state.cell.sinr == null;
+				if (!needHcsq) return null;
+				return AtWs.client.sendCommand('AT^HCSQ?').then(function (hcsq) {
+					var hcsqData = hcsq.success && hcsq.data ? AtWs.parseHCSQ(hcsq.data) : null;
+					if (hcsqData) {
+						if (state.cell.rsrp == null) state.cell.rsrp = hcsqData.rsrp;
+						if (state.cell.rsrq == null) state.cell.rsrq = hcsqData.rsrq;
+						if (state.cell.sinr == null) state.cell.sinr = hcsqData.sinr;
+						if ((!state.cell.sysMode || state.cell.sysMode === '未知') &&
+							(hcsqData.networkMode === 'NR' || hcsqData.networkMode === 'LTE')) {
+							state.cell.sysMode = hcsqData.networkMode;
 						}
-						return null;
-					});
-					return null;
-				}).then(function () {
-					if (serving) {
-						state.cell.mcc = serving.mcc; state.cell.mnc = serving.mnc;
-						state.cell.lac = serving.lac; state.cell.cid = serving.cid;
-						state.cell.channel = serving.channel; state.cell.pci = serving.pci;
-						state.cell.rsrp = serving.rsrp != null ? serving.rsrp : state.cell.rsrp;
-						state.cell.rsrq = serving.rsrq != null ? serving.rsrq : state.cell.rsrq;
-						state.cell.sinr = serving.sinr != null ? serving.sinr : state.cell.sinr;
-						state.cell.sysMode = serving.sysMode || state.cell.sysMode;
-						state.cell.signalPercent = serving.signalPercent || '';
 					}
-					/*
-					 * ^HFREQINFO 只给载波的频点 / 频率 / 带宽，**不含任何信号字段**；
-					 * 信号（RSRP/RSRQ/SINR）来自 ^MONSC 的 serving cell。
-					 * 因此主载波（index 0）的信号三项必须从 serving 回填，
-					 * 否则「载波聚合」表格的 RSRP/RSRQ/SINR 三列恒为「—」，
-					 * 用户看到的就是"信息读取不全"。
-					 *
-					 * 为何不用频点做同小区校验：
-					 *   ^MONSC 的 channel 与 ^HFREQINFO 的 dlFcn 属**不同频点体系**
-					 *   （实测 MONSC=149002、HFREQINFO dlFcn=513000，后者才是
-					 *   2565 MHz 对应的 NR-ARFCN，5kHz 栅格段），直接相等比较必然失败。
-					 * 改用更可靠的守卫：^HFREQINFO 的 n=0 协议上即主载波，
-					 *   仅要求两侧制式一致（NR↔NR 或 LTE↔LTE）即可回填。
-					 */
-					var primaryMode = carriers.length ? String(carriers[0].sysMode || '').toUpperCase() : '';
-					var servingMode = serving && serving.sysMode ? String(serving.sysMode).toUpperCase() : '';
-					var sameRat = !!serving && (!primaryMode || !servingMode || primaryMode === servingMode);
-
-					state.carriers = carriers.map(function (c, idx) {
-						var isPrimary = idx === 0;
-						var canFill = isPrimary && sameRat;
-						return {
-							sysMode: c.sysMode || c.kind || '',
-							band: c.band ? Number(c.band) : null,
-							channel: c.dlFcn || '',
-							bandwidth: c.dlBwKHz || 0,
-							dlFreqKHz: c.dlFreqKHz || 0,
-							ulBwKHz: c.ulBwKHz || 0,
-							pci: canFill && serving.pci != null ? serving.pci : null,
-							rsrp: canFill && serving.rsrp != null ? serving.rsrp : null,
-							rsrq: canFill && serving.rsrq != null ? serving.rsrq : null,
-							sinr: canFill && serving.sinr != null ? serving.sinr : null
-						};
-					});
-					renderSignal();
-					renderCarriers();
-					renderConn();
+					return null;
 				});
+			}).then(function () {
+				/*
+				 * ^HFREQINFO 只给载波的频点 / 频率 / 带宽，**不含任何信号字段**；
+				 * 信号（RSRP/RSRQ/SINR）来自 ^MONSC 的 serving cell，缺项再由
+				 * ^HCSQ 补齐，最终都汇总在 state.cell 里。
+				 * 因此主载波（index 0）的信号三项从 state.cell 回填，
+				 * 否则「载波聚合」表格的 RSRP/RSRQ/SINR 三列恒为「—」，
+				 * 用户看到的就是"信息读取不全"。
+				 *
+				 * 为何不用频点做同小区校验：
+				 *   ^MONSC 的 channel 与 ^HFREQINFO 的 dlFcn 属**不同频点体系**
+				 *   （实测 MONSC=149002、HFREQINFO dlFcn=513000，后者才是
+				 *   2565 MHz 对应的 NR-ARFCN，5kHz 栅格段），直接相等比较必然失败。
+				 * 改用更可靠的守卫：^HFREQINFO 的 n=0 协议上即主载波，
+				 *   仅要求两侧制式一致（NR<->NR 或 LTE<->LTE）即可回填。
+				 */
+				var primaryMode = carriers.length ? String(carriers[0].sysMode || '').toUpperCase() : '';
+				var servingMode = serving && serving.sysMode ? String(serving.sysMode).toUpperCase() : '';
+				var sameRat = !!serving && (!primaryMode || !servingMode || primaryMode === servingMode);
+
+				state.carriers = carriers.map(function (c, idx) {
+					var isPrimary = idx === 0;
+					var canFill = isPrimary && sameRat;
+					return {
+						sysMode: c.sysMode || c.kind || '',
+						band: c.band ? Number(c.band) : null,
+						channel: c.dlFcn || '',
+						bandwidth: c.dlBwKHz || 0,
+						dlFreqKHz: c.dlFreqKHz || 0,
+						ulBwKHz: c.ulBwKHz || 0,
+						pci: canFill && serving.pci != null ? serving.pci : null,
+						rsrp: canFill && state.cell.rsrp != null ? state.cell.rsrp : null,
+						rsrq: canFill && state.cell.rsrq != null ? state.cell.rsrq : null,
+						sinr: canFill && state.cell.sinr != null ? state.cell.sinr : null
+					};
+				});
+				renderSignal();
+				renderCarriers();
+				renderConn();
 			});
 		}
 
