@@ -432,9 +432,14 @@ function convertRsrp(raw) { return raw === 0 ? -140 : (raw >= 97 ? -44 : -140 + 
 function convertRsrq(raw) { return raw === 0 ? -19.5 : (raw >= 34 ? -3 : -19.5 + raw * 0.5); }
 function convertSinr(raw) {
 	var v = raw === 0 ? -20 : (raw >= 251 ? 30 : -20 + raw * 0.2);
-	return Math.min(30, Math.max(-20, v));
+	v = Math.min(30, Math.max(-20, v));
+	/* 0.2 dB 步进的二进制浮点误差会拼出 25.200000000000003 这类显示，统一保留 1 位小数 */
+	return Math.round(v * 10) / 10;
 }
 function convertRssi(raw) { return raw === 0 ? -120 : (raw >= 96 ? -25 : -121 + raw); }
+/* WCDMA 的 RSCP 与 RSSI 同量程（-120…-25 dBm，96 表示 -25 dBm 及以上） */
+/* WCDMA 的 Ec/Io：0 → < -32 dB，步进 0.5 dB，65 → 0 dB 及以上 */
+function convertEcio(raw) { return raw === 0 ? -32 : (raw >= 65 ? 0 : -32 + raw * 0.5); }
 
 function calculateSignalPercent(rsrp) {
 	if (!rsrp || rsrp >= 0) return '';
@@ -515,6 +520,25 @@ function bandName(kind, band) {
 
 /* ---- ^HCSQ / 信号 ---- */
 
+/*
+ * 手册 13.5「AT^HCSQ - 查询上报信号强度」的权威字段表（第 323 页）：
+ *
+ *   <sysmode>   value1       value2       value3       value4    value5
+ *   "GSM"       gsm_rssi     -            -            -         -
+ *   "WCDMA"     wcdma_rssi   wcdma_rscp   wcdma_ecio   -         -
+ *   "LTE"       lte_rssi     lte_rsrp     lte_sinr     lte_rsrq  -
+ *   "NR"        5g_rsrp      5g_sinr      5g_rsrq      -         -
+ *   "NOSERVICE" -            -            -            -         -
+ *
+ * 两个制式既不同字段数也不同顺序，绝不能共用同一套下标：
+ *   - NR 没有 RSSI，第一个数值就是 RSRP，SINR 在 value2、RSRQ 在 value3；
+ *   - LTE 前面多一个 RSSI，SINR 在 value3、RSRQ 在 value4（与 NR 相反）。
+ *
+ * 旧实现把 LTE 当成 <rsrp>,<rsrq>,<sinr> 解析，于是 4G 下 RSRQ 与 SINR 整体
+ * 错位：^HCSQ: "LTE",45,34,106,19 会被解成 RSRP=-106 / RSRQ=-3 / SINR=-16.2，
+ * 而按手册应为 RSSI=-76 / RSRP=-106 / SINR=1.2 / RSRQ=-10 —— 真正的 SINR
+ * （106 → 1.2 dB）被当成 RSRQ 吃掉，界面上表现为「4G 下 SINR 读不出来」。
+ */
 function parseHCSQ(data) {
 	var str = extractATData(data, '^HCSQ');
 	if (!str) return null;
@@ -524,24 +548,38 @@ function parseHCSQ(data) {
 	if (mode.indexOf('NR') === 0) networkMode = 'NR';
 	else if (mode.indexOf('LTE') === 0) networkMode = 'LTE';
 	else if (mode.indexOf('WCDMA') === 0) networkMode = 'WCDMA';
+	else if (mode.indexOf('GSM') === 0) networkMode = 'GSM';
 	else networkMode = mode || '';
-	var result = { networkMode: networkMode, rssi: null, rsrp: null, rsrq: null, sinr: null };
+	var result = { networkMode: networkMode, rssi: null, rscp: null, ecio: null, rsrp: null, rsrq: null, sinr: null };
+	/*
+	 * 取第 i 个数值字段并换算。255（手册：未知或不可测）与非数字一律按「无数据」
+	 * 返回 null，避免把无效值换算成 -44 dBm / -3 dB 这类看着正常、实为假的数据。
+	 */
+	function pick(i, conv) {
+		if (i >= p.length) return null;
+		var v = parseInt(p[i], 10);
+		if (isNaN(v) || v === 255) return null;
+		return conv(v);
+	}
 	if (networkMode === 'NR') {
-		/*
-		 * NR 格式（实测 ^HCSQ: "NR",77,236,31）与 LTE 顺序不同：
-		 *   "NR",<rsrp_raw>,<sinr_raw>,<rsrq_raw>
-		 * 交叉验证：rsrp 77 → -63 dBm、sinr 236 → 27.2 dB，与 ^MONSC 的
-		 * -65 dBm / 28 dB 独立吻合，故按此顺序解析（兼容 3 或 4 数值字段）。
-		 */
-		if (p.length >= 2) result.rsrp = convertRsrp(parseInt(p[1], 10));
-		if (p.length >= 3) result.sinr = convertSinr(parseInt(p[2], 10));
-		if (p.length >= 4) result.rsrq = convertRsrq(parseInt(p[3], 10));
+		/* "NR",<5g_rsrp>,<5g_sinr>,<5g_rsrq>（兼容 3 或 4 个数值字段） */
+		result.rsrp = pick(1, convertRsrp);
+		result.sinr = pick(2, convertSinr);
+		result.rsrq = pick(3, convertRsrq);
 	} else if (networkMode === 'LTE') {
-		if (p.length >= 3) result.rsrp = convertRsrp(parseInt(p[2], 10));
-		if (p.length >= 4) result.rsrq = convertRsrq(parseInt(p[3], 10));
-		if (p.length >= 5) result.sinr = convertSinr(parseInt(p[4], 10));
+		/* "LTE",<lte_rssi>,<lte_rsrp>,<lte_sinr>,<lte_rsrq> */
+		result.rssi = pick(1, convertRssi);
+		result.rsrp = pick(2, convertRsrp);
+		result.sinr = pick(3, convertSinr);
+		result.rsrq = pick(4, convertRsrq);
+	} else if (networkMode === 'WCDMA') {
+		/* "WCDMA",<wcdma_rssi>,<wcdma_rscp>,<wcdma_ecio> */
+		result.rssi = pick(1, convertRssi);
+		result.rscp = pick(2, convertRssi);
+		result.ecio = pick(3, convertEcio);
 	} else {
-		if (p.length >= 2) result.rssi = convertRssi(parseInt(p[1], 10));
+		/* "GSM",<gsm_rssi>，以及未知 / 旧版数字制式的兜底（沿用旧行为） */
+		result.rssi = pick(1, convertRssi);
 	}
 	return result;
 }
@@ -663,7 +701,31 @@ function parseMONSC(data) {
 	 */
 	var hasLeadingMode = p.length > 0 && !/^-?\d+$/.test(p[0]);
 	var d;
-	if (hasLeadingMode) {
+	if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'LTE') {
+		/*
+		 * 手册 13.9.3/13.9.5：LTE 的 <cell_paras> 与 NR 布局差异很大（实测
+		 * ^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54）：
+		 *   LTE,<mcc>,<mnc>,<tac_hex>,<cid_hex>,<pci_hex>,<arfcn_hex>,<rsrp>,<rsrq>,<rssi>
+		 * 与 NR 相比：没有 flag 位、PCI/ARFCN/TAC 为十六进制、末位是 RSSI
+		 * （-90~-25 dBm 工程值），且 **没有 SINR 字段**——4G 的 SINR 一律由
+		 * ^HCSQ 兜底补齐（见 network_status 的 needHcsq 逻辑）。
+		 * 旧实现套用 NR 布局，4G 下 cid/pci/channel/rsrp/rsrq 全部错位
+		 * （rsrp 取到 rsrq、rsrq 取到 RSSI、channel 变成 "-85"）。
+		 */
+		d = {
+			sysMode: 'LTE',
+			mcc: p[1] || '',
+			mnc: p[2] || '',
+			lac: p[3] || '',
+			cid: p[4] || '',
+			pci: p[5] !== undefined && p[5] !== '' ? parseInt(p[5], 16) : 0,
+			channel: p[6] || '',
+			rsrp: p[7] !== undefined && p[7] !== '' ? parseFloat(p[7]) : null,
+			rsrq: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
+			sinr: null,
+			rssi: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null
+		};
+	} else if (hasLeadingMode) {
 		d = {
 			sysMode: p[0] || '',
 			mcc: p[1] || '',
@@ -807,6 +869,7 @@ var AtWs = {
 	convertRsrq: convertRsrq,
 	convertSinr: convertSinr,
 	convertRssi: convertRssi,
+	convertEcio: convertEcio,
 	calculateSignalPercent: calculateSignalPercent,
 	parseHexValue: parseHexValue,
 	hexToIP: hexToIP,
