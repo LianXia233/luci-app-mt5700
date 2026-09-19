@@ -14,6 +14,8 @@ const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resour
 const sandbox = {
 	window: {}, AtWs: undefined, Parse: undefined,
 	L: {
+		/* rpc.js 末尾会执行 L.Class.extend(...)，缺了它加载直接抛错 */
+		Class: { extend: function (o) { return o; } },
 		view: { extend: function (o) { return o; } },
 		rpc: { declare: function () { return function () { return Promise.resolve({}); }; } },
 		uci: { load: function () { return Promise.resolve(); }, get: function () { return ''; } }
@@ -41,11 +43,14 @@ function check(name, cond, detail) {
 try {
 	// 先加载 parse.js（rpc.js 的 parseRawData 运行时引用全局 Parse）
 	const parse = loadLib('parse.js');
-	sandbox.Parse = parse.Parse;
+	/* parse.js 同样以 return 结尾，附加 return 不可达：加载结果即模块对象本身 */
+	sandbox.Parse = parse.Parse || parse;
 	const ws = loadLib('rpc.js');
-	sandbox.AtWs = ws.AtWs;
-	const Parse = parse.Parse;
-	const AtWs = ws.AtWs;
+	/* rpc.js 以 `return AtWsClass;` 结尾，附加的 return 不可达；extend 被 mock 成原样返回，
+	 * 因此加载结果本身就是 AtWs 对象。 */
+	sandbox.AtWs = (ws && ws.AtWs) || ws;
+	const Parse = sandbox.Parse;
+	const AtWs = sandbox.AtWs;
 
 	/* ---- 辅载波聚合 ---- */
 	const monsscLines = '^MONSSC: "NR",2360,86,-70,-10,15,0\r\n^MONSSC: NONE';
