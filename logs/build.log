@@ -1,0 +1,1779 @@
+Unable to find image 'openwrt/sdk:aarch64_generic-24.10.8' locally
+aarch64_generic-24.10.8: Pulling from openwrt/sdk
+014ac6453c34: Pulling fs layer
+31369e20b98e: Pulling fs layer
+1bcaaa4e2341: Pulling fs layer
+70c294cdc1db: Pulling fs layer
+64eaae1619b6: Pulling fs layer
+8e3a365d41e1: Pulling fs layer
+af756eab433c: Pulling fs layer
+0e531a2c65d2: Pulling fs layer
+4f4fb700ef54: Pulling fs layer
+a05be0b128ae: Pulling fs layer
+a003e91b785a: Pulling fs layer
+e67089df3d1b: Pulling fs layer
+8e3a365d41e1: Waiting
+af756eab433c: Waiting
+0e531a2c65d2: Waiting
+4f4fb700ef54: Waiting
+a05be0b128ae: Waiting
+a003e91b785a: Waiting
+e67089df3d1b: Waiting
+70c294cdc1db: Waiting
+64eaae1619b6: Waiting
+1bcaaa4e2341: Verifying Checksum
+1bcaaa4e2341: Download complete
+014ac6453c34: Verifying Checksum
+014ac6453c34: Download complete
+70c294cdc1db: Verifying Checksum
+70c294cdc1db: Download complete
+64eaae1619b6: Download complete
+8e3a365d41e1: Verifying Checksum
+8e3a365d41e1: Download complete
+af756eab433c: Verifying Checksum
+af756eab433c: Download complete
+0e531a2c65d2: Download complete
+31369e20b98e: Verifying Checksum
+31369e20b98e: Download complete
+4f4fb700ef54: Verifying Checksum
+4f4fb700ef54: Download complete
+a05be0b128ae: Download complete
+a003e91b785a: Download complete
+e67089df3d1b: Verifying Checksum
+e67089df3d1b: Download complete
+014ac6453c34: Pull complete
+31369e20b98e: Pull complete
+1bcaaa4e2341: Pull complete
+70c294cdc1db: Pull complete
+64eaae1619b6: Pull complete
+8e3a365d41e1: Pull complete
+af756eab433c: Pull complete
+0e531a2c65d2: Pull complete
+4f4fb700ef54: Pull complete
+a05be0b128ae: Pull complete
+a003e91b785a: Pull complete
+e67089df3d1b: Pull complete
+Digest: sha256:6e63408098ef89036bd7a49ff70101279affc4db212931a8d528b197f7a48681
+Status: Downloaded newer image for openwrt/sdk:aarch64_generic-24.10.8
+==> 仓库挂载: /work / out:/out（构建开始, 期望架构=aarch64_generic ver=24.10.8）
+==> 使用镜像自带 SDK: /builder
+==> SDK 根目录: /builder
+info: downloading installer
+info: profile set to minimal
+info: default host tuple is x86_64-unknown-linux-gnu
+info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+info: latest update on 2026-09-03 for version 1.98.1 (48a229cea 2026-09-01)
+info: downloading 3 components
+info: default toolchain set to stable-x86_64-unknown-linux-gnu
+info: using existing install for stable-x86_64-unknown-linux-gnu
+
+info: default toolchain set to stable-x86_64-unknown-linux-gnu
+  stable-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+
+info: downloading component rust-std
+0.13.0
+==> zig-linker 语法 OK, target=aarch64-linux-musl
+==> zig linker: aarch64-unknown-linux-musl -> aarch64-linux-musl
+==> 初始化 feeds（仅 luci）
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'eip197-mini-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'airoha-en8811h-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8169-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'e100-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2x-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'ar3k-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'mwifiex-sdio-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb2', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'edgeport-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8152-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb3', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'amdgpu-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'i915-firmware-dmc', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'radeon-firmware', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a dependency on 'uci-firewall', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-package-manager/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-package-manager/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-file', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'cgi-io', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-fs', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-uci', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-math', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'libiwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'liblua', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'libucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libnl-tiny', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/ucode-mod-html/Makefile' has a dependency on 'libucode', which does not exist
+tmp/.config-package.in:66:warning: ignoring type redefinition of 'PACKAGE_libc' from 'bool' to 'tristate'
+tmp/.config-package.in:93:warning: ignoring type redefinition of 'PACKAGE_libgcc' from 'bool' to 'tristate'
+tmp/.config-package.in:207:warning: ignoring type redefinition of 'PACKAGE_libpthread' from 'bool' to 'tristate'
+tmp/.config-package.in:262:warning: ignoring type redefinition of 'PACKAGE_librt' from 'bool' to 'tristate'
+tmp/.config-package.in:471:warning: ignoring type redefinition of 'PACKAGE_liblucihttp' from 'bool' to 'tristate'
+tmp/.config-package.in:489:warning: ignoring type redefinition of 'PACKAGE_liblucihttp-ucode' from 'bool' to 'tristate'
+tmp/.config-package.in:499:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-luci' from 'bool' to 'tristate'
+tmp/.config-package.in:511:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-rrdns' from 'bool' to 'tristate'
+tmp/.config-package.in:527:warning: ignoring type redefinition of 'PACKAGE_luci' from 'bool' to 'tristate'
+tmp/.config-package.in:537:warning: ignoring type redefinition of 'PACKAGE_luci-light' from 'bool' to 'tristate'
+tmp/.config-package.in:555:warning: ignoring type redefinition of 'PACKAGE_luci-base' from 'bool' to 'tristate'
+tmp/.config-package.in:590:warning: ignoring type redefinition of 'LUCI_LANG_ar' from 'bool' to 'tristate'
+tmp/.config-package.in:593:warning: ignoring type redefinition of 'LUCI_LANG_bg' from 'bool' to 'tristate'
+tmp/.config-package.in:596:warning: ignoring type redefinition of 'LUCI_LANG_bn_BD' from 'bool' to 'tristate'
+tmp/.config-package.in:599:warning: ignoring type redefinition of 'LUCI_LANG_ca' from 'bool' to 'tristate'
+tmp/.config-package.in:602:warning: ignoring type redefinition of 'LUCI_LANG_cs' from 'bool' to 'tristate'
+tmp/.config-package.in:605:warning: ignoring type redefinition of 'LUCI_LANG_da' from 'bool' to 'tristate'
+tmp/.config-package.in:608:warning: ignoring type redefinition of 'LUCI_LANG_de' from 'bool' to 'tristate'
+tmp/.config-package.in:611:warning: ignoring type redefinition of 'LUCI_LANG_el' from 'bool' to 'tristate'
+tmp/.config-package.in:614:warning: ignoring type redefinition of 'LUCI_LANG_es' from 'bool' to 'tristate'
+tmp/.config-package.in:617:warning: ignoring type redefinition of 'LUCI_LANG_fa' from 'bool' to 'tristate'
+tmp/.config-package.in:620:warning: ignoring type redefinition of 'LUCI_LANG_fi' from 'bool' to 'tristate'
+tmp/.config-package.in:623:warning: ignoring type redefinition of 'LUCI_LANG_fil' from 'bool' to 'tristate'
+tmp/.config-package.in:626:warning: ignoring type redefinition of 'LUCI_LANG_fr' from 'bool' to 'tristate'
+tmp/.config-package.in:629:warning: ignoring type redefinition of 'LUCI_LANG_ga' from 'bool' to 'tristate'
+tmp/.config-package.in:632:warning: ignoring type redefinition of 'LUCI_LANG_he' from 'bool' to 'tristate'
+tmp/.config-package.in:635:warning: ignoring type redefinition of 'LUCI_LANG_hi' from 'bool' to 'tristate'
+tmp/.config-package.in:638:warning: ignoring type redefinition of 'LUCI_LANG_hu' from 'bool' to 'tristate'
+tmp/.config-package.in:641:warning: ignoring type redefinition of 'LUCI_LANG_it' from 'bool' to 'tristate'
+tmp/.config-package.in:644:warning: ignoring type redefinition of 'LUCI_LANG_ja' from 'bool' to 'tristate'
+tmp/.config-package.in:647:warning: ignoring type redefinition of 'LUCI_LANG_ko' from 'bool' to 'tristate'
+tmp/.config-package.in:650:warning: ignoring type redefinition of 'LUCI_LANG_lt' from 'bool' to 'tristate'
+tmp/.config-package.in:653:warning: ignoring type redefinition of 'LUCI_LANG_mr' from 'bool' to 'tristate'
+tmp/.config-package.in:656:warning: ignoring type redefinition of 'LUCI_LANG_ms' from 'bool' to 'tristate'
+tmp/.config-package.in:659:warning: ignoring type redefinition of 'LUCI_LANG_nb_NO' from 'bool' to 'tristate'
+tmp/.config-package.in:662:warning: ignoring type redefinition of 'LUCI_LANG_nl' from 'bool' to 'tristate'
+tmp/.config-package.in:665:warning: ignoring type redefinition of 'LUCI_LANG_pl' from 'bool' to 'tristate'
+tmp/.config-package.in:668:warning: ignoring type redefinition of 'LUCI_LANG_pt' from 'bool' to 'tristate'
+tmp/.config-package.in:671:warning: ignoring type redefinition of 'LUCI_LANG_pt_BR' from 'bool' to 'tristate'
+tmp/.config-package.in:674:warning: ignoring type redefinition of 'LUCI_LANG_ro' from 'bool' to 'tristate'
+tmp/.config-package.in:677:warning: ignoring type redefinition of 'LUCI_LANG_ru' from 'bool' to 'tristate'
+tmp/.config-package.in:680:warning: ignoring type redefinition of 'LUCI_LANG_sk' from 'bool' to 'tristate'
+tmp/.config-package.in:683:warning: ignoring type redefinition of 'LUCI_LANG_sv' from 'bool' to 'tristate'
+tmp/.config-package.in:686:warning: ignoring type redefinition of 'LUCI_LANG_tr' from 'bool' to 'tristate'
+tmp/.config-package.in:689:warning: ignoring type redefinition of 'LUCI_LANG_uk' from 'bool' to 'tristate'
+tmp/.config-package.in:692:warning: ignoring type redefinition of 'LUCI_LANG_vi' from 'bool' to 'tristate'
+tmp/.config-package.in:695:warning: ignoring type redefinition of 'LUCI_LANG_yua' from 'bool' to 'tristate'
+tmp/.config-package.in:698:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hans' from 'bool' to 'tristate'
+tmp/.config-package.in:701:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hant' from 'bool' to 'tristate'
+tmp/.config-package.in:706:warning: ignoring type redefinition of 'PACKAGE_luci-mod-admin-full' from 'bool' to 'tristate'
+tmp/.config-package.in:718:warning: ignoring type redefinition of 'PACKAGE_luci-mod-network' from 'bool' to 'tristate'
+tmp/.config-package.in:728:warning: ignoring type redefinition of 'PACKAGE_luci-mod-status' from 'bool' to 'tristate'
+tmp/.config-package.in:739:warning: ignoring type redefinition of 'PACKAGE_luci-mod-system' from 'bool' to 'tristate'
+tmp/.config-package.in:750:warning: ignoring type redefinition of 'PACKAGE_luci-app-firewall' from 'bool' to 'tristate'
+tmp/.config-package.in:768:warning: ignoring type redefinition of 'PACKAGE_luci-app-package-manager' from 'bool' to 'tristate'
+tmp/.config-package.in:779:warning: ignoring type redefinition of 'PACKAGE_luci-theme-bootstrap' from 'bool' to 'tristate'
+tmp/.config-package.in:790:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ipv6' from 'bool' to 'tristate'
+tmp/.config-package.in:799:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ppp' from 'bool' to 'tristate'
+tmp/.config-package.in:1892:warning: ignoring type redefinition of 'PACKAGE_ucode-mod-html' from 'bool' to 'tristate'
+Config-build.in:1291:warning: defaults for choice values not supported
+Config-build.in:1295:warning: defaults for choice values not supported
+Config-build.in:1299:warning: defaults for choice values not supported
+==> SDK 实际架构: ARCH_PACKAGES=aarch64_generic (board=armsr/armv8)
+==> 矩阵期望架构: aarch64_generic
+==> package 目录：
+package/feeds
+package/kernel
+package/luci-app-mt5700
+package/Makefile
+package/toolchain
+==> 选中状态：
+CONFIG_PACKAGE_luci-app-mt5700=m
+CONFIG_PACKAGE_luci-i18n-mt5700-zh-cn=m
+==> packageinfo 中的本项目包：
+1
+==> 编译单包（LuCI 前端 + Rust 后端，target=aarch64-unknown-linux-musl arch=aarch64_generic）
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'eip197-mini-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'airoha-en8811h-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8169-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'e100-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'bnx2x-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'ar3k-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'mwifiex-sdio-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb2', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'edgeport-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'r8152-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'kmod-phy-bcm-ns-usb3', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'amdgpu-firmware', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'i915-firmware-dmc', which does not exist
+WARNING: Makefile 'package/kernel/linux/Makefile' has a dependency on 'radeon-firmware', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a dependency on 'uci-firewall', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-firewall/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/luci-app-mt5700/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-package-manager/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-app-package-manager/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-file', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'rpcd-mod-ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'cgi-io', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-fs', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-uci', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a dependency on 'ucode-mod-math', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-base/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a dependency on 'uhttpd-mod-ubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-light/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-admin-full/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-network/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'libiwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a dependency on 'rpcd-mod-iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-status/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-mod-system/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ipv6/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-proto-ppp/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'lua/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/luci-theme-bootstrap/Makefile' has a build dependency on 'luasrcdiet/host', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'liblua', which does not exist
+WARNING: Makefile 'package/feeds/luci/lucihttp/Makefile' has a dependency on 'libucode', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a dependency on 'libnl-tiny', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-luci/Makefile' has a build dependency on 'iwinfo', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'rpcd', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubox', which does not exist
+WARNING: Makefile 'package/feeds/luci/rpcd-mod-rrdns/Makefile' has a dependency on 'libubus', which does not exist
+WARNING: Makefile 'package/feeds/luci/ucode-mod-html/Makefile' has a dependency on 'libucode', which does not exist
+make[2]: Entering directory '/builder/scripts/config'
+make[2]: 'conf' is up to date.
+make[2]: Leaving directory '/builder/scripts/config'
+tmp/.config-package.in:66:warning: ignoring type redefinition of 'PACKAGE_libc' from 'bool' to 'tristate'
+tmp/.config-package.in:93:warning: ignoring type redefinition of 'PACKAGE_libgcc' from 'bool' to 'tristate'
+tmp/.config-package.in:207:warning: ignoring type redefinition of 'PACKAGE_libpthread' from 'bool' to 'tristate'
+tmp/.config-package.in:262:warning: ignoring type redefinition of 'PACKAGE_librt' from 'bool' to 'tristate'
+tmp/.config-package.in:471:warning: ignoring type redefinition of 'PACKAGE_liblucihttp' from 'bool' to 'tristate'
+tmp/.config-package.in:489:warning: ignoring type redefinition of 'PACKAGE_liblucihttp-ucode' from 'bool' to 'tristate'
+tmp/.config-package.in:499:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-luci' from 'bool' to 'tristate'
+tmp/.config-package.in:511:warning: ignoring type redefinition of 'PACKAGE_rpcd-mod-rrdns' from 'bool' to 'tristate'
+tmp/.config-package.in:527:warning: ignoring type redefinition of 'PACKAGE_luci' from 'bool' to 'tristate'
+tmp/.config-package.in:537:warning: ignoring type redefinition of 'PACKAGE_luci-light' from 'bool' to 'tristate'
+tmp/.config-package.in:555:warning: ignoring type redefinition of 'PACKAGE_luci-base' from 'bool' to 'tristate'
+tmp/.config-package.in:590:warning: ignoring type redefinition of 'LUCI_LANG_ar' from 'bool' to 'tristate'
+tmp/.config-package.in:593:warning: ignoring type redefinition of 'LUCI_LANG_bg' from 'bool' to 'tristate'
+tmp/.config-package.in:596:warning: ignoring type redefinition of 'LUCI_LANG_bn_BD' from 'bool' to 'tristate'
+tmp/.config-package.in:599:warning: ignoring type redefinition of 'LUCI_LANG_ca' from 'bool' to 'tristate'
+tmp/.config-package.in:602:warning: ignoring type redefinition of 'LUCI_LANG_cs' from 'bool' to 'tristate'
+tmp/.config-package.in:605:warning: ignoring type redefinition of 'LUCI_LANG_da' from 'bool' to 'tristate'
+tmp/.config-package.in:608:warning: ignoring type redefinition of 'LUCI_LANG_de' from 'bool' to 'tristate'
+tmp/.config-package.in:611:warning: ignoring type redefinition of 'LUCI_LANG_el' from 'bool' to 'tristate'
+tmp/.config-package.in:614:warning: ignoring type redefinition of 'LUCI_LANG_es' from 'bool' to 'tristate'
+tmp/.config-package.in:617:warning: ignoring type redefinition of 'LUCI_LANG_fa' from 'bool' to 'tristate'
+tmp/.config-package.in:620:warning: ignoring type redefinition of 'LUCI_LANG_fi' from 'bool' to 'tristate'
+tmp/.config-package.in:623:warning: ignoring type redefinition of 'LUCI_LANG_fil' from 'bool' to 'tristate'
+tmp/.config-package.in:626:warning: ignoring type redefinition of 'LUCI_LANG_fr' from 'bool' to 'tristate'
+tmp/.config-package.in:629:warning: ignoring type redefinition of 'LUCI_LANG_ga' from 'bool' to 'tristate'
+tmp/.config-package.in:632:warning: ignoring type redefinition of 'LUCI_LANG_he' from 'bool' to 'tristate'
+tmp/.config-package.in:635:warning: ignoring type redefinition of 'LUCI_LANG_hi' from 'bool' to 'tristate'
+tmp/.config-package.in:638:warning: ignoring type redefinition of 'LUCI_LANG_hu' from 'bool' to 'tristate'
+tmp/.config-package.in:641:warning: ignoring type redefinition of 'LUCI_LANG_it' from 'bool' to 'tristate'
+tmp/.config-package.in:644:warning: ignoring type redefinition of 'LUCI_LANG_ja' from 'bool' to 'tristate'
+tmp/.config-package.in:647:warning: ignoring type redefinition of 'LUCI_LANG_ko' from 'bool' to 'tristate'
+tmp/.config-package.in:650:warning: ignoring type redefinition of 'LUCI_LANG_lt' from 'bool' to 'tristate'
+tmp/.config-package.in:653:warning: ignoring type redefinition of 'LUCI_LANG_mr' from 'bool' to 'tristate'
+tmp/.config-package.in:656:warning: ignoring type redefinition of 'LUCI_LANG_ms' from 'bool' to 'tristate'
+tmp/.config-package.in:659:warning: ignoring type redefinition of 'LUCI_LANG_nb_NO' from 'bool' to 'tristate'
+tmp/.config-package.in:662:warning: ignoring type redefinition of 'LUCI_LANG_nl' from 'bool' to 'tristate'
+tmp/.config-package.in:665:warning: ignoring type redefinition of 'LUCI_LANG_pl' from 'bool' to 'tristate'
+tmp/.config-package.in:668:warning: ignoring type redefinition of 'LUCI_LANG_pt' from 'bool' to 'tristate'
+tmp/.config-package.in:671:warning: ignoring type redefinition of 'LUCI_LANG_pt_BR' from 'bool' to 'tristate'
+tmp/.config-package.in:674:warning: ignoring type redefinition of 'LUCI_LANG_ro' from 'bool' to 'tristate'
+tmp/.config-package.in:677:warning: ignoring type redefinition of 'LUCI_LANG_ru' from 'bool' to 'tristate'
+tmp/.config-package.in:680:warning: ignoring type redefinition of 'LUCI_LANG_sk' from 'bool' to 'tristate'
+tmp/.config-package.in:683:warning: ignoring type redefinition of 'LUCI_LANG_sv' from 'bool' to 'tristate'
+tmp/.config-package.in:686:warning: ignoring type redefinition of 'LUCI_LANG_tr' from 'bool' to 'tristate'
+tmp/.config-package.in:689:warning: ignoring type redefinition of 'LUCI_LANG_uk' from 'bool' to 'tristate'
+tmp/.config-package.in:692:warning: ignoring type redefinition of 'LUCI_LANG_vi' from 'bool' to 'tristate'
+tmp/.config-package.in:695:warning: ignoring type redefinition of 'LUCI_LANG_yua' from 'bool' to 'tristate'
+tmp/.config-package.in:698:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hans' from 'bool' to 'tristate'
+tmp/.config-package.in:701:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hant' from 'bool' to 'tristate'
+tmp/.config-package.in:706:warning: ignoring type redefinition of 'PACKAGE_luci-mod-admin-full' from 'bool' to 'tristate'
+tmp/.config-package.in:718:warning: ignoring type redefinition of 'PACKAGE_luci-mod-network' from 'bool' to 'tristate'
+tmp/.config-package.in:728:warning: ignoring type redefinition of 'PACKAGE_luci-mod-status' from 'bool' to 'tristate'
+tmp/.config-package.in:739:warning: ignoring type redefinition of 'PACKAGE_luci-mod-system' from 'bool' to 'tristate'
+tmp/.config-package.in:750:warning: ignoring type redefinition of 'PACKAGE_luci-app-firewall' from 'bool' to 'tristate'
+tmp/.config-package.in:768:warning: ignoring type redefinition of 'PACKAGE_luci-app-package-manager' from 'bool' to 'tristate'
+tmp/.config-package.in:779:warning: ignoring type redefinition of 'PACKAGE_luci-theme-bootstrap' from 'bool' to 'tristate'
+tmp/.config-package.in:790:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ipv6' from 'bool' to 'tristate'
+tmp/.config-package.in:799:warning: ignoring type redefinition of 'PACKAGE_luci-proto-ppp' from 'bool' to 'tristate'
+tmp/.config-package.in:1892:warning: ignoring type redefinition of 'PACKAGE_ucode-mod-html' from 'bool' to 'tristate'
+Config-build.in:1291:warning: defaults for choice values not supported
+Config-build.in:1295:warning: defaults for choice values not supported
+Config-build.in:1299:warning: defaults for choice values not supported
+#
+# No change to .config
+#
+make[1]: Entering directory '/builder'
+make[2]: Entering directory '/builder/feeds/luci/modules/luci-base'
+[ ! -d ./src/ ] || cp -fpR ./src/* /builder/build_dir/hostpkg/luci-base
+touch /builder/build_dir/hostpkg/luci-base/.prepared2be46f1807694d42894c26f97b579d53_18f1e190c5d53547fed41a3eaa76e9e9
+touch /builder/build_dir/hostpkg/luci-base/.configured
+make -C src/ clean po2lmo jsmin
+make[3]: Entering directory '/builder/feeds/luci/modules/luci-base/src'
+rm -f contrib/lemon lib/*.o lib/plural_formula.c lib/plural_formula.h core.so version.uc
+cc    -DNDEBUG -c -o po2lmo.o po2lmo.c
+cc -std=gnu17 -o contrib/lemon contrib/lemon.c
+./contrib/lemon -q lib/plural_formula.y
+cc    -DNDEBUG -c -o lib/lmo.o lib/lmo.c
+cc    -DNDEBUG -c -o lib/plural_formula.o lib/plural_formula.c
+cc  -o po2lmo po2lmo.o lib/lmo.o lib/plural_formula.o
+cc    -DNDEBUG -c -o jsmin.o jsmin.c
+cc  -o jsmin jsmin.o
+make[3]: Leaving directory '/builder/feeds/luci/modules/luci-base/src'
+touch /builder/build_dir/hostpkg/luci-base/.built
+install -d -m0755 /builder/staging_dir/hostpkg/bin
+install -m0755 src/po2lmo /builder/staging_dir/hostpkg/bin/po2lmo
+install -m0755 src/jsmin /builder/staging_dir/hostpkg/bin/jsmin
+mkdir -p /builder/staging_dir/hostpkg/stamp
+touch /builder/build_dir/hostpkg/luci-base/.built
+touch /builder/staging_dir/hostpkg/stamp/.luci-base_installed 
+find /builder/build_dir/hostpkg/luci-base -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/feeds/luci/modules/luci-base'
+time: package/feeds/luci/luci-base/host-compile#1.06#0.74#1.67
+make[2]: Entering directory '/builder/package/toolchain'
+Makefile:789: WARNING: skipping libgomp -- package has no install section
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.prepared_770e988bcfb92b1acf273f271c499847_18f1e190c5d53547fed41a3eaa76e9e9_check
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.prepared_770e988bcfb92b1acf273f271c499847_18f1e190c5d53547fed41a3eaa76e9e9
+rm -f /builder/build_dir/target-aarch64_generic_musl/toolchain/.configured_*
+rm -f /builder/staging_dir/target-aarch64_generic_musl/stamp/.toolchain_installed
+(cd /builder/build_dir/target-aarch64_generic_musl/toolchain/./; if [ -x ./configure ]; then find /builder/build_dir/target-aarch64_generic_musl/toolchain/ -name config.guess | xargs -r chmod u+w; find /builder/build_dir/target-aarch64_generic_musl/toolchain/ -name config.guess | xargs -r -n1 cp --remove-destination /builder/scripts/config.guess; find /builder/build_dir/target-aarch64_generic_musl/toolchain/ -name config.sub | xargs -r chmod u+w; find /builder/build_dir/target-aarch64_generic_musl/toolchain/ -name config.sub | xargs -r -n1 cp --remove-destination /builder/scripts/config.sub; AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/toolchain=toolchain -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD="aarch64-openwrt-linux-musl-ld.bfd" NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/toolchain=toolchain -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro " CXXFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/toolchain=toolchain -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro " CPPFLAGS="-I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " LDFLAGS="-L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/lib -L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib -fuse-ld=bfd -znow -zrelro "   ./configure --target=aarch64-openwrt-linux --host=aarch64-openwrt-linux --build=x86_64-pc-linux-gnu --disable-dependency-tracking --program-prefix="" --program-suffix="" --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/sbin --libexecdir=/usr/lib --sysconfdir=/etc --datadir=/usr/share --localstatedir=/var --mandir=/usr/man --infodir=/usr/info --disable-nls  ; fi; )
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.configured_68b329da9893e34099c7d8ad5cb9c940
+rm -f /builder/build_dir/target-aarch64_generic_musl/toolchain/.built
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.built_check
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libgcc_s.so.1 /builder/build_dir/target-aarch64_generic_musl/toolchain/
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.built
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc.installed /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/lib /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/usr/bin
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/ld-musl-*.so* /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/lib/
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libc.so* /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/lib/
+ln -sf ../../lib/libc.so /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/usr/bin/ldd
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libatomic.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libc.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libcrypt.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libdl.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libitm.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libm.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libpthread.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libresolv.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/librt.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libssp_nonshared.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libstdc++.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libstdc++exp.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libstdc++fs.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libsupc++.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libutil.a /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libxnet.a /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/lib/
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/gcc/aarch64-openwrt-linux-musl/13.3.0/libgcc_pic.a /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/lib/libgcc_s_pic.a; cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/gcc/aarch64-openwrt-linux-musl/13.3.0/libgcc.map /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/lib/libgcc_s_pic.map 
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc.installed
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libc/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.libc_installed
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc/lib
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libgcc_s.so.* /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc/lib/
+find /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc
+rstrip.sh: /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc/lib/libgcc_s.so.1: shared object
+install -d -m0755 /builder/bin/targets/armsr/armv8/packages
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc /builder/bin/targets/armsr/armv8/packages
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libgcc into /builder/bin/targets/armsr/armv8/packages/libgcc1_13.3.0-r4_aarch64_generic.ipk
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/lib /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/usr/bin
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/ld-musl-*.so* /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/lib/
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libc.so* /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/lib/
+ln -sf ../../lib/libc.so /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/usr/bin/ldd
+find /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc
+rstrip.sh: /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/lib/libc.so: shared object
+install -d -m0755 /builder/bin/targets/armsr/armv8/packages
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc /builder/bin/targets/armsr/armv8/packages
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libc into /builder/bin/targets/armsr/armv8/packages/libc_1.2.5-r4_aarch64_generic.ipk
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic/lib
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libatomic.so.* /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic/lib/
+find /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic
+rstrip.sh: /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic/lib/libatomic.so.1.2.0: shared object
+install -d -m0755 /builder/bin/targets/armsr/armv8/packages
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic /builder/bin/targets/armsr/armv8/packages
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libatomic into /builder/bin/targets/armsr/armv8/packages/libatomic1_13.3.0-r4_aarch64_generic.ipk
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp/usr/lib
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libstdc++.so.* /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp/usr/lib/
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp/usr/lib/*-gdb.py
+find /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp
+rstrip.sh: /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp/usr/lib/libstdc++.so.6.0.32: shared object
+install -d -m0755 /builder/bin/targets/armsr/armv8/packages
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp /builder/bin/targets/armsr/armv8/packages
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libstdcpp into /builder/bin/targets/armsr/armv8/packages/libstdcpp6_13.3.0-r4_aarch64_generic.ipk
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread/lib
+find /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread
+install -d -m0755 /builder/bin/targets/armsr/armv8/packages
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread /builder/bin/targets/armsr/armv8/packages
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/libpthread into /builder/bin/targets/armsr/armv8/packages/libpthread_1.2.5-r4_aarch64_generic.ipk
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt/lib
+find /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt
+install -d -m0755 /builder/bin/targets/armsr/armv8/packages
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt /builder/bin/targets/armsr/armv8/packages
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/toolchain/ipkg-aarch64_generic/librt into /builder/bin/targets/armsr/armv8/packages/librt_1.2.5-r4_aarch64_generic.ipk
+echo "libc" >> /builder/staging_dir/target-aarch64_generic_musl/pkginfo/toolchain.default.install
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libgcc.installed /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libgcc
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libgcc
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libgcc/lib
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libgcc_s.so.* /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libgcc/lib/
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libgcc.installed
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libatomic.installed /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libatomic
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libatomic
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libatomic/lib
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libatomic.so.* /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libatomic/lib/
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libatomic.installed
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp.installed /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp/usr/lib
+cp -fpR /builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib/libstdc++.so.* /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp/usr/lib/
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp/usr/lib/*-gdb.py
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp.installed
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libpthread.installed /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libpthread
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libpthread
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libpthread/lib
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libpthread.installed
+rm -rf /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/librt.installed /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/librt
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/librt
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/librt/lib
+touch /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/librt.installed
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+echo '1' | cmp -s - /builder/staging_dir/target-aarch64_generic_musl/pkginfo/libgcc.version || { echo '1' > /builder/staging_dir/target-aarch64_generic_musl/pkginfo/libgcc.version;  } 
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libgcc/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.libgcc_installed
+echo "libgcc" >> /builder/staging_dir/target-aarch64_generic_musl/pkginfo/toolchain.default.install
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+echo '1' | cmp -s - /builder/staging_dir/target-aarch64_generic_musl/pkginfo/libatomic.version || { echo '1' > /builder/staging_dir/target-aarch64_generic_musl/pkginfo/libatomic.version;  } 
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libatomic/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.libatomic_installed
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+echo '6' | cmp -s - /builder/staging_dir/target-aarch64_generic_musl/pkginfo/libstdcpp.version || { echo '6' > /builder/staging_dir/target-aarch64_generic_musl/pkginfo/libstdcpp.version;  } 
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libstdcpp/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.libstdcpp_installed
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/libpthread/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.libpthread_installed
+echo "libpthread" >> /builder/staging_dir/target-aarch64_generic_musl/pkginfo/toolchain.default.install
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/toolchain/.pkgdir/librt/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.librt_installed
+echo "librt" >> /builder/staging_dir/target-aarch64_generic_musl/pkginfo/toolchain.default.install
+touch -r /builder/build_dir/target-aarch64_generic_musl/toolchain/.built /builder/build_dir/target-aarch64_generic_musl/toolchain/.autoremove 2>/dev/null >/dev/null
+find /builder/build_dir/target-aarch64_generic_musl/toolchain -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -and -not -name '.pkgdir'  -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/package/toolchain'
+time: package/toolchain/compile#0.56#1.09#1.50
+make[2]: Entering directory '/builder/feeds/luci/contrib/package/csstidy'
+mkdir -p /builder/dl
+SHELL= flock /builder/tmp/.csstidy-2021.06.13~707feaec.tar.zst.flock -c '  	/builder/scripts/download.pl "/builder/dl" "csstidy-2021.06.13~707feaec.tar.zst" "c90cdb3ff2ecae469d86abf04f5631356b8a913e03f4537c491ea31cde5f0225" "" || (  /builder/scripts/dl_github_archive.py --dl-dir="/builder/dl" --url="https://github.com/jow-/csstidy-cpp.git" --version="707feaec556c40c999514a598b1a1ea5b50826c6" --subdir="csstidy-2021.06.13~707feaec" --source="csstidy-2021.06.13~707feaec.tar.zst" --hash="c90cdb3ff2ecae469d86abf04f5631356b8a913e03f4537c491ea31cde5f0225" --submodules  || ( 	echo "Checking out files from the git repository..."; mkdir -p /builder/tmp/dl && cd /builder/tmp/dl && rm -rf csstidy-2021.06.13~707feaec && [ \! -d csstidy-2021.06.13~707feaec ] && git clone  https://github.com/jow-/csstidy-cpp.git csstidy-2021.06.13~707feaec && (cd csstidy-2021.06.13~707feaec && git checkout 707feaec556c40c999514a598b1a1ea5b50826c6) && export TAR_TIMESTAMP=`cd csstidy-2021.06.13~707feaec && git log -1 --format='\''@%ct'\''` && echo "Generating formal git archive (apply .gitattributes rules)" && (cd csstidy-2021.06.13~707feaec && git config core.abbrev 8 && git archive --format=tar HEAD --output=../csstidy-2021.06.13~707feaec.tar.git) &&  tar --numeric-owner --owner=0 --group=0 --ignore-failed-read -C csstidy-2021.06.13~707feaec -f csstidy-2021.06.13~707feaec.tar.git -r .git .gitmodules 2>/dev/null  && rm -rf csstidy-2021.06.13~707feaec && mkdir csstidy-2021.06.13~707feaec && tar -C csstidy-2021.06.13~707feaec -xf csstidy-2021.06.13~707feaec.tar.git && (cd csstidy-2021.06.13~707feaec && git submodule update --init --recursive --  && rm -rf .git .gitmodules) && echo "Packing checkout..." && 	tar --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name ${TAR_TIMESTAMP:+--mtime="$TAR_TIMESTAMP"} -c csstidy-2021.06.13~707feaec | 	zstd -T0 --ultra -20 -c > /builder/tmp/dl/csstidy-2021.06.13~707feaec.tar.zst && mv /builder/tmp/dl/csstidy-2021.06.13~707feaec.tar.zst /builder/dl/ && rm -rf csstidy-2021.06.13~707feaec; );  )    '
++ curl -f --connect-timeout 20 --retry 5 --location https://sources.cdn.openwrt.org/csstidy-2021.06.13~707feaec.tar.zst
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100 31244  100 31244    0     0   953k      0 --:--:-- --:--:-- --:--:--  984k
+. /builder/include/shell.sh; zstdcat /builder/dl/csstidy-2021.06.13~707feaec.tar.zst | tar -C /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/.. -xf -
+[ ! -d ./src/ ] || cp -fpR ./src/* /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec
+touch /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/.prepared2d3a796b32bf1e61e35815279cb732f9_18f1e190c5d53547fed41a3eaa76e9e9
+(cd /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/; if [ -x configure ]; then cp -fpR /builder/scripts/config.{guess,sub} /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec// && CC="/builder/staging_dir/host/bin/gcc" CFLAGS="-O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include" CXX="/builder/staging_dir/host/bin/g++" CPPFLAGS="-I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include" CXXFLAGS="-O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include" LDFLAGS="-L/builder/staging_dir/host/lib -L/builder/staging_dir/hostpkg/lib -L/builder/staging_dir/target-aarch64_generic_musl/host/lib" CONFIG_SHELL="/usr/bin/env bash"  bash ./configure --target=x86_64-pc-linux-gnu --host=x86_64-pc-linux-gnu --build=x86_64-pc-linux-gnu --disable-dependency-tracking --program-prefix="" --program-suffix="" --prefix=/builder/staging_dir/hostpkg --exec-prefix=/builder/staging_dir/hostpkg --sysconfdir=/builder/staging_dir/hostpkg/etc --localstatedir=/builder/staging_dir/hostpkg/var --sbindir=/builder/staging_dir/hostpkg/bin ; fi )
+touch /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/.configured
+CFLAGS="-O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include" CPPFLAGS="-I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include" CXXFLAGS="-O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include" LDFLAGS="-L/builder/staging_dir/host/lib -L/builder/staging_dir/hostpkg/lib -L/builder/staging_dir/target-aarch64_generic_musl/host/lib" make -j1 -C /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/.  
+make[3]: Entering directory '/builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec'
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/background.o csstidy/background.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/conversions.o csstidy/conversions.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/cssopt.o csstidy/cssopt.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/csspp_globals.o csstidy/csspp_globals.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/csstidy.o csstidy/csstidy.cpp
+In file included from csstidy/csspp_globals.hpp:34,
+                 from csstidy/csstidy.cpp:20:
+csstidy/umap.hpp: In member function 'valT& umap<keyT, valT>::at(int) [with keyT = std::__cxx11::basic_string<char>; valT = std::__cxx11::basic_string<char>]':
+csstidy/umap.hpp:125:3: warning: control reaches end of non-void function [-Wreturn-type]
+  125 |   }
+      |   ^
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/file_functions.o csstidy/file_functions.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/important.o csstidy/important.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/main.o csstidy/main.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/misc.o csstidy/misc.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/parse_css.o csstidy/parse_css.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/prepare.o csstidy/prepare.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/print_css.o csstidy/print_css.cpp
+csstidy/print_css.cpp: In member function 'int csstidy::_seeknocomment(int, int)':
+csstidy/print_css.cpp:76:1: warning: control reaches end of non-void function [-Wreturn-type]
+   76 | }
+      | ^
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/trim.o csstidy/trim.cpp
+g++ -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -O2 -I/builder/staging_dir/host/include -I/builder/staging_dir/hostpkg/include -I/builder/staging_dir/target-aarch64_generic_musl/host/include -c -o csstidy/umap.o csstidy/umap.cpp
+g++ -L/builder/staging_dir/host/lib -L/builder/staging_dir/hostpkg/lib -L/builder/staging_dir/target-aarch64_generic_musl/host/lib -o csstidy/csstidy csstidy/background.o csstidy/conversions.o csstidy/cssopt.o csstidy/csspp_globals.o csstidy/csstidy.o csstidy/file_functions.o csstidy/important.o csstidy/main.o csstidy/misc.o csstidy/parse_css.o csstidy/prepare.o csstidy/print_css.o csstidy/trim.o csstidy/umap.o
+make[3]: Leaving directory '/builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec'
+touch /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/.built
+install -d -m0755 /builder/staging_dir/hostpkg/bin/
+install -m0755 /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/csstidy/csstidy /builder/staging_dir/hostpkg/bin/
+mkdir -p /builder/staging_dir/hostpkg/stamp
+touch /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec/.built
+touch /builder/staging_dir/hostpkg/stamp/.csstidy_installed 
+find /builder/build_dir/hostpkg/csstidy-2021.06.13~707feaec -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/feeds/luci/contrib/package/csstidy'
+time: package/feeds/luci/csstidy/host-compile#9.97#0.92#10.76
+make[2]: Entering directory '/builder/package/luci-app-mt5700'
+touch /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.prepared_926fb423c283dc34ce7fe2ce59004e7e_18f1e190c5d53547fed41a3eaa76e9e9_check
+for d in luasrc ucode htdocs root src; do if [ -d ./$d ]; then mkdir -p /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/$d; cp -fpR ./$d/* /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/$d/; fi; done
+true
+[ ! -d ./src/ ] || cp -fpR ./src/. /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700
+touch /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.prepared_926fb423c283dc34ce7fe2ce59004e7e_18f1e190c5d53547fed41a3eaa76e9e9
+rm -f /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.configured_*
+rm -f /builder/staging_dir/target-aarch64_generic_musl/stamp/.luci-app-mt5700_installed
+touch /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.configured_811dc2f0ccfbe4b68a068320f8578dbe
+rm -f /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.built
+touch /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.built_check
+CFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " CXXFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " LDFLAGS="-L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/lib -L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib -fuse-ld=bfd -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="0.260919.46554" LUCI_GITBRANCH="LuCI" make -j1 -C /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD="aarch64-openwrt-linux-musl-ld.bfd" NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" clean compile;
+make[3]: Entering directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+cd rust && cargo clean 2>/dev/null || true
+rm -rf "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target"
+==> [mt5700] cargo build: ARCH=aarch64 ARCH_PACKAGES= RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded cc v1.4.5
+  Downloaded cfg-if v1.0.4
+  Downloaded form_urlencoded v1.2.2
+  Downloaded idna_adapter v1.2.2
+  Downloaded subtle v2.6.1
+  Downloaded tokio-macros v2.7.2
+  Downloaded webpki-roots v0.26.11
+  Downloaded zerofrom-derive v0.1.7
+  Downloaded displaydoc v0.2.7
+  Downloaded errno v0.3.14
+  Downloaded hex v0.4.3
+  Downloaded itoa v1.0.18
+  Downloaded pin-project-lite v0.2.17
+  Downloaded autocfg v1.5.1
+  Downloaded find-msvc-tools v0.1.12
+  Downloaded percent-encoding v2.3.2
+  Downloaded potential_utf v0.1.6
+  Downloaded stable_deref_trait v1.2.1
+  Downloaded zmij v1.0.23
+  Downloaded async-trait v0.1.92
+  Downloaded synstructure v0.13.2
+  Downloaded quote v1.0.47
+  Downloaded shlex v2.0.1
+  Downloaded utf8_iter v1.0.4
+  Downloaded iana-time-zone v0.1.65
+  Downloaded smallvec v1.16.0
+  Downloaded untrusted v0.9.0
+  Downloaded yoke-derive v0.8.2
+  Downloaded yoke v0.8.3
+  Downloaded rustls-pki-types v1.15.1
+  Downloaded signal-hook-registry v1.4.8
+  Downloaded socket2 v0.6.5
+  Downloaded once_cell v1.21.4
+  Downloaded serde_core v1.0.229
+  Downloaded zerofrom v0.1.8
+  Downloaded getrandom v0.2.17
+  Downloaded litemap v0.8.3
+  Downloaded log v0.4.34
+  Downloaded num-traits v0.2.19
+  Downloaded tinystr v0.8.4
+  Downloaded writeable v0.6.4
+  Downloaded zeroize v1.9.0
+  Downloaded zerovec-derive v0.11.6
+  Downloaded icu_locale_core v2.3.0
+  Downloaded icu_provider v2.3.1
+  Downloaded serde_derive v1.0.229
+  Downloaded unicode-ident v1.0.24
+  Downloaded zerotrie v0.2.5
+  Downloaded base64 v0.22.1
+  Downloaded icu_normalizer_data v2.3.0
+  Downloaded memchr v2.8.3
+  Downloaded proc-macro2 v1.0.107
+  Downloaded bytes v1.12.1
+  Downloaded icu_collections v2.3.0
+  Downloaded mio v1.2.3
+  Downloaded ureq v2.12.1
+  Downloaded url v2.5.8
+  Downloaded icu_properties v2.3.0
+  Downloaded rustls-webpki v0.103.15
+  Downloaded serde v1.0.229
+  Downloaded idna v1.1.0
+  Downloaded zerovec v0.11.8
+  Downloaded serde_json v1.0.151
+  Downloaded icu_properties_data v2.3.0
+  Downloaded webpki-roots v1.0.9
+  Downloaded chrono v0.4.45
+  Downloaded syn v2.0.119
+  Downloaded syn v3.0.5
+  Downloaded rustls v0.23.44
+  Downloaded icu_normalizer v2.3.0
+  Downloaded libc v0.2.189
+  Downloaded tokio v1.53.1
+  Downloaded ring v0.17.14
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling stable_deref_trait v1.2.1
+   Compiling libc v0.2.189
+   Compiling shlex v2.0.1
+   Compiling litemap v0.8.3
+   Compiling find-msvc-tools v0.1.12
+   Compiling writeable v0.6.4
+   Compiling cc v1.4.5
+   Compiling utf8_iter v1.0.4
+   Compiling icu_normalizer_data v2.3.0
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling icu_properties_data v2.3.0
+   Compiling zeroize v1.9.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling ring v0.17.14
+   Compiling smallvec v1.16.0
+   Compiling cfg-if v1.0.4
+   Compiling getrandom v0.2.17
+   Compiling autocfg v1.5.1
+   Compiling serde_core v1.0.229
+   Compiling untrusted v0.9.0
+   Compiling synstructure v0.13.2
+   Compiling num-traits v0.2.19
+   Compiling zmij v1.0.23
+   Compiling percent-encoding v2.3.2
+   Compiling rustls v0.23.44
+   Compiling form_urlencoded v1.2.2
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerofrom v0.1.8
+   Compiling yoke v0.8.3
+   Compiling webpki-roots v1.0.9
+   Compiling errno v0.3.14
+   Compiling serde v1.0.229
+   Compiling log v0.4.34
+   Compiling subtle v2.6.1
+   Compiling once_cell v1.21.4
+   Compiling serde_json v1.0.151
+   Compiling signal-hook-registry v1.4.8
+   Compiling zerovec-derive v0.11.6
+   Compiling displaydoc v0.2.7
+   Compiling zerotrie v0.2.5
+   Compiling zerovec v0.11.8
+   Compiling rustls-webpki v0.103.15
+   Compiling tokio-macros v2.7.2
+   Compiling tinystr v0.8.4
+   Compiling icu_locale_core v2.3.0
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.3.0
+   Compiling serde_derive v1.0.229
+   Compiling icu_provider v2.3.1
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling webpki-roots v0.26.11
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling mio v1.2.3
+   Compiling url v2.5.8
+   Compiling socket2 v0.6.5
+   Compiling base64 v0.22.1
+   Compiling iana-time-zone v0.1.65
+   Compiling itoa v1.0.18
+   Compiling bytes v1.12.1
+   Compiling pin-project-lite v0.2.17
+   Compiling memchr v2.8.3
+   Compiling chrono v0.4.45
+   Compiling tokio v1.53.1
+   Compiling ureq v2.12.1
+   Compiling async-trait v0.1.92
+   Compiling hex v0.4.3
+   Compiling at-webserver v1.5.0 (/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/rust)
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 54.93s
+test -x "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+make[3]: Leaving directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+CFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " CXXFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " LDFLAGS="-L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/lib -L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib -fuse-ld=bfd -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="0.260919.46554" LUCI_GITBRANCH="LuCI" make -C /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD="aarch64-openwrt-linux-musl-ld.bfd" NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" DESTDIR="/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install"   install;
+make[3]: Entering directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+==> [mt5700] cargo build: ARCH=aarch64 ARCH_PACKAGES= RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.05s
+test -x "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
+# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
+mkdir -p "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin"
+cp "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+chmod 0755 "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+make[3]: Leaving directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+touch /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.built
+rm -rf /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700.installed /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www
+cp -pR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/htdocs/* /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www/
+find /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www/ -type f -name '*.js' | while read src; do if jsmin < "$src" > "$src.o"; then mv "$src.o" "$src"; fi; done
+find /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/www/ -type f -name '*.css' | while read src; do if csstidy "$src" --template=highest --remove_last_semicolon=true "$src.o"; then mv "$src.o" "$src"; fi; done
+
+Selectors: 166 | Properties: 566
+Input size: 17.193KiB  Output size: 12.388KiB  Compression ratio: 27.95%
+-----------------------------------
+
+33: Invalid property in CSS3.0: gap
+76: Invalid property in CSS3.0: accent-color
+84: Invalid property in CSS3.0: word-break
+111: Invalid property in CSS3.0: word-break
+124: Invalid property in CSS3.0: gap
+166: Invalid property in CSS3.0: transform
+186: Invalid property in CSS3.0: inset
+207: Invalid property in CSS3.0: gap
+214: Invalid property in CSS3.0: gap
+238: Invalid property in CSS3.0: transform
+239: Invalid property in CSS3.0: transform
+242: Invalid property in CSS3.0: gap
+265: Invalid property in CSS3.0: gap
+283: Invalid property in CSS3.0: gap
+292: Invalid property in CSS3.0: word-break
+294: Invalid property in CSS3.0: border-bottom-right-radius
+295: Invalid property in CSS3.0: border-bottom-left-radius
+300: Invalid property in CSS3.0: gap
+302: Invalid property in CSS3.0: resize
+307: Invalid property in CSS3.0: gap
+314: Invalid property in CSS3.0: word-break
+324: Invalid property in CSS3.0: word-break
+327: Invalid property in CSS3.0: gap
+344: Invalid property in CSS3.0: word-break
+348: Invalid property in CSS3.0: gap
+356: Invalid property in CSS3.0: word-break
+361: Invalid property in CSS3.0: gap
+362: Invalid property in CSS3.0: gap
+368: Invalid property in CSS3.0: grid-template-columns
+369: Invalid property in CSS3.0: gap
+379: Invalid property in CSS3.0: word-break
+384: Invalid property in CSS3.0: gap
+391: Invalid property in CSS3.0: gap
+414: Invalid property in CSS3.0: gap
+417: Invalid property in CSS3.0: gap
+426: Invalid property in CSS3.0: gap
+439: Invalid property in CSS3.0: gap
+446: Invalid property in CSS3.0: gap
+456: Invalid property in CSS3.0: word-break
+473: Invalid property in CSS3.0: word-break
+477: Invalid property in CSS3.0: gap
+491: Invalid property in CSS3.0: gap
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+
+Selectors: 599 | Properties: 1984
+Input size: 99.414KiB  Output size: 65.684KiB  Compression ratio: 33.93%
+-----------------------------------
+
+10: Invalid property in CSS3.0: --mt5700-bg
+11: Invalid property in CSS3.0: --mt5700-card-bg
+12: Invalid property in CSS3.0: --mt5700-card-bg-hover
+13: Invalid property in CSS3.0: --mt5700-glass-bg
+14: Invalid property in CSS3.0: --mt5700-float-bg
+15: Invalid property in CSS3.0: --mt5700-text
+16: Invalid property in CSS3.0: --mt5700-text-secondary
+17: Invalid property in CSS3.0: --mt5700-text-muted
+18: Invalid property in CSS3.0: --mt5700-border
+19: Invalid property in CSS3.0: --mt5700-border-subtle
+20: Invalid property in CSS3.0: --mt5700-divider
+23: Invalid property in CSS3.0: --mt5700-blur
+24: Invalid property in CSS3.0: --mt5700-saturate
+25: Invalid property in CSS3.0: --mt5700-glass
+28: Invalid property in CSS3.0: --mt5700-sh-1
+29: Invalid property in CSS3.0: --mt5700-sh-2
+30: Invalid property in CSS3.0: --mt5700-sh-3
+31: Invalid property in CSS3.0: --mt5700-sh-float
+32: Invalid property in CSS3.0: --mt5700-sh-inset
+34: Invalid property in CSS3.0: --mt5700-ring
+36: Invalid property in CSS3.0: --mt5700-shadow-sm
+37: Invalid property in CSS3.0: --mt5700-shadow-md
+38: Invalid property in CSS3.0: --mt5700-shadow-lg
+39: Invalid property in CSS3.0: --mt5700-shadow-xl
+42: Invalid property in CSS3.0: --mt5700-radius-sm
+43: Invalid property in CSS3.0: --mt5700-radius-md
+44: Invalid property in CSS3.0: --mt5700-radius-lg
+45: Invalid property in CSS3.0: --mt5700-radius-xl
+46: Invalid property in CSS3.0: --mt5700-radius-full
+49: Invalid property in CSS3.0: --mt5700-space-xs
+50: Invalid property in CSS3.0: --mt5700-space-sm
+51: Invalid property in CSS3.0: --mt5700-space-md
+52: Invalid property in CSS3.0: --mt5700-space-lg
+53: Invalid property in CSS3.0: --mt5700-space-xl
+56: Invalid property in CSS3.0: --mt5700-ease
+57: Invalid property in CSS3.0: --mt5700-dur-control
+58: Invalid property in CSS3.0: --mt5700-dur-panel
+61: Invalid property in CSS3.0: --mt5700-accent
+62: Invalid property in CSS3.0: --mt5700-accent-light
+63: Invalid property in CSS3.0: --mt5700-success
+64: Invalid property in CSS3.0: --mt5700-success-light
+65: Invalid property in CSS3.0: --mt5700-warning
+66: Invalid property in CSS3.0: --mt5700-warning-light
+67: Invalid property in CSS3.0: --mt5700-danger
+68: Invalid property in CSS3.0: --mt5700-danger-light
+69: Invalid property in CSS3.0: --mt5700-info
+70: Invalid property in CSS3.0: --mt5700-info-light
+72: Invalid property in CSS3.0: --mt5700-sig-exc
+73: Invalid property in CSS3.0: --mt5700-sig-good
+74: Invalid property in CSS3.0: --mt5700-sig-fair
+75: Invalid property in CSS3.0: --mt5700-sig-poor
+76: Invalid property in CSS3.0: --mt5700-sig-bad
+78: Invalid property in CSS3.0: --mt5700-temp-cold
+79: Invalid property in CSS3.0: --mt5700-temp-cool
+80: Invalid property in CSS3.0: --mt5700-temp-normal
+81: Invalid property in CSS3.0: --mt5700-temp-warm
+82: Invalid property in CSS3.0: --mt5700-temp-hot
+83: Invalid property in CSS3.0: --mt5700-temp-high
+86: Invalid property in CSS3.0: --mt5700-font-sans
+87: Invalid property in CSS3.0: --mt5700-font-mono
+88: Invalid property in CSS3.0: --mt5700-font-size-xs
+89: Invalid property in CSS3.0: --mt5700-font-size-sm
+90: Invalid property in CSS3.0: --mt5700-font-size-base
+91: Invalid property in CSS3.0: --mt5700-font-size-lg
+92: Invalid property in CSS3.0: --mt5700-font-size-xl
+93: Invalid property in CSS3.0: --mt5700-font-size-2xl
+94: Invalid property in CSS3.0: --mt5700-font-size-3xl
+97: Invalid property in CSS3.0: --mt5700-transition-fast
+98: Invalid property in CSS3.0: --mt5700-transition-base
+99: Invalid property in CSS3.0: --mt5700-transition-slow
+105: Invalid property in CSS3.0: --mt5700-bg
+106: Invalid property in CSS3.0: --mt5700-card-bg
+107: Invalid property in CSS3.0: --mt5700-card-bg-hover
+108: Invalid property in CSS3.0: --mt5700-glass-bg
+109: Invalid property in CSS3.0: --mt5700-float-bg
+110: Invalid property in CSS3.0: --mt5700-text
+111: Invalid property in CSS3.0: --mt5700-text-secondary
+112: Invalid property in CSS3.0: --mt5700-text-muted
+113: Invalid property in CSS3.0: --mt5700-border
+114: Invalid property in CSS3.0: --mt5700-border-subtle
+115: Invalid property in CSS3.0: --mt5700-divider
+116: Invalid property in CSS3.0: --mt5700-sh-1
+117: Invalid property in CSS3.0: --mt5700-sh-2
+118: Invalid property in CSS3.0: --mt5700-sh-3
+119: Invalid property in CSS3.0: --mt5700-sh-float
+120: Invalid property in CSS3.0: --mt5700-sh-inset
+121: Invalid property in CSS3.0: --mt5700-ring
+123: Invalid property in CSS3.0: --mt5700-accent
+124: Invalid property in CSS3.0: --mt5700-accent-light
+125: Invalid property in CSS3.0: --mt5700-info
+126: Invalid property in CSS3.0: --mt5700-info-light
+127: Invalid property in CSS3.0: --mt5700-success
+128: Invalid property in CSS3.0: --mt5700-warning
+129: Invalid property in CSS3.0: --mt5700-danger
+130: Invalid property in CSS3.0: --mt5700-sig-exc
+131: Invalid property in CSS3.0: --mt5700-sig-good
+132: Invalid property in CSS3.0: --mt5700-sig-fair
+133: Invalid property in CSS3.0: --mt5700-sig-poor
+134: Invalid property in CSS3.0: --mt5700-sig-bad
+135: Invalid property in CSS3.0: --mt5700-temp-cold
+136: Invalid property in CSS3.0: --mt5700-temp-cool
+137: Invalid property in CSS3.0: --mt5700-temp-normal
+138: Invalid property in CSS3.0: --mt5700-temp-warm
+139: Invalid property in CSS3.0: --mt5700-temp-hot
+140: Invalid property in CSS3.0: --mt5700-temp-high
+160: Invalid property in CSS3.0: inset
+167: Invalid property in CSS3.0: backdrop-filter
+168: Invalid property in CSS3.0: -webkit-backdrop-filter
+208: Invalid property in CSS3.0: gap
+221: Optimised shorthand notation (margin): Changed "0 0 var(--mt5700-space-sm) 0" to "0 0 var(--mt5700-space-sm)"
+237: Invalid property in CSS3.0: backdrop-filter
+238: Invalid property in CSS3.0: -webkit-backdrop-filter
+255: Invalid property in CSS3.0: gap
+256: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+270: Optimised shorthand notation (margin): Changed "var(--mt5700-space-xs) 0 0 0" to "var(--mt5700-space-xs) 0 0"
+292: Invalid property in CSS3.0: gap
+293: Invalid property in CSS3.0: grid-template-columns
+296: Invalid property in CSS3.0: grid-template-columns
+297: Invalid property in CSS3.0: grid-template-columns
+298: Invalid property in CSS3.0: grid-template-columns
+304: Invalid property in CSS3.0: grid-template-columns
+313: Invalid property in CSS3.0: grid-template-columns
+323: Invalid property in CSS3.0: backdrop-filter
+324: Invalid property in CSS3.0: -webkit-backdrop-filter
+334: Invalid property in CSS3.0: transform
+354: Invalid property in CSS3.0: word-break
+359: Invalid property in CSS3.0: font-variant-numeric
+394: Invalid property in CSS3.0: grid-template-columns
+395: Invalid property in CSS3.0: grid-auto-rows
+397: Invalid property in CSS3.0: gap
+417: Invalid property in CSS3.0: grid-template-columns
+421: Invalid property in CSS3.0: grid-template-columns
+430: Invalid property in CSS3.0: grid-template-columns
+431: Invalid property in CSS3.0: grid-template-columns
+442: Invalid property in CSS3.0: gap
+445: Invalid property in CSS3.0: backdrop-filter
+446: Invalid property in CSS3.0: -webkit-backdrop-filter
+462: Invalid property in CSS3.0: transform
+473: Invalid property in CSS3.0: gap
+507: Invalid property in CSS3.0: fill
+508: Invalid property in CSS3.0: stroke
+509: Invalid property in CSS3.0: stroke-linecap
+513: Invalid property in CSS3.0: fill
+514: Invalid property in CSS3.0: stroke-linecap
+516: Invalid property in CSS3.0: filter
+521: Invalid property in CSS3.0: inset
+526: Invalid property in CSS3.0: pointer-events
+534: Invalid property in CSS3.0: font-variant-numeric
+581: Invalid property in CSS3.0: gap
+586: Invalid property in CSS3.0: backdrop-filter
+587: Invalid property in CSS3.0: -webkit-backdrop-filter
+605: Invalid property in CSS3.0: fill
+606: Invalid property in CSS3.0: stroke
+607: Invalid property in CSS3.0: stroke-width
+612: Invalid property in CSS3.0: fill
+612: Invalid property in CSS3.0: stroke
+668: Invalid property in CSS3.0: grid-template-columns
+669: Invalid property in CSS3.0: gap
+678: Invalid property in CSS3.0: gap
+700: Invalid property in CSS3.0: fill
+701: Invalid property in CSS3.0: stroke
+702: Invalid property in CSS3.0: stroke-width
+703: Invalid property in CSS3.0: stroke-linecap
+704: Invalid property in CSS3.0: stroke-linejoin
+786: Invalid property in CSS3.0: order
+806: Invalid property in CSS3.0: --mt5700-verdict-accent
+806: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+807: Invalid property in CSS3.0: --mt5700-verdict-accent
+807: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+808: Invalid property in CSS3.0: --mt5700-verdict-accent
+808: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+809: Invalid property in CSS3.0: --mt5700-verdict-accent
+809: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+810: Invalid property in CSS3.0: --mt5700-verdict-accent
+810: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+811: Invalid property in CSS3.0: --mt5700-verdict-accent
+820: Invalid property in CSS3.0: transform-origin
+822: Invalid property in CSS3.0: fill
+836: Invalid property in CSS3.0: stroke-dasharray
+841: Invalid property in CSS3.0: transform-origin
+847: Invalid property in CSS3.0: fill
+847: Invalid property in CSS3.0: stroke
+850: Invalid property in CSS3.0: transform-origin
+858: Invalid property in CSS3.0: transform
+859: Invalid property in CSS3.0: stroke-dashoffset
+861: Invalid property in CSS3.0: transform
+862: Invalid property in CSS3.0: transform
+864: Invalid property in CSS3.0: transform
+866: Invalid property in CSS3.0: transform
+875: Invalid property in CSS3.0: gap
+877: Invalid property in CSS3.0: grid-template-columns
+881: Invalid property in CSS3.0: gap
+891: Invalid property in CSS3.0: gap
+916: Invalid property in CSS3.0: --mt5700-verdict-accent
+916: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+917: Invalid property in CSS3.0: --mt5700-verdict-accent
+917: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+918: Invalid property in CSS3.0: --mt5700-verdict-accent
+918: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+919: Invalid property in CSS3.0: --mt5700-verdict-accent
+919: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+920: Invalid property in CSS3.0: --mt5700-verdict-accent
+920: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+922: Invalid property in CSS3.0: --mt5700-verdict-line
+922: Invalid property in CSS3.0: --mt5700-verdict-divider
+923: Invalid property in CSS3.0: --mt5700-verdict-metric-bg
+924: Invalid property in CSS3.0: --mt5700-verdict-label
+956: Invalid property in CSS3.0: pointer-events
+958: Invalid property in CSS3.0: backdrop-filter
+959: Invalid property in CSS3.0: -webkit-backdrop-filter
+969: Invalid property in CSS3.0: transform
+977: Invalid property in CSS3.0: gap
+987: Invalid property in CSS3.0: gap
+1004: Invalid property in CSS3.0: gap
+1014: Invalid property in CSS3.0: user-select
+1025: Invalid property in CSS3.0: pointer-events
+1026: Invalid property in CSS3.0: filter
+1031: Invalid property in CSS3.0: transform
+1037: Optimised color: Changed "white" to "#fff"
+1045: Invalid property in CSS3.0: transform
+1050: Invalid property in CSS3.0: transform
+1062: Invalid property in CSS3.0: transform
+1067: Optimised color: Changed "white" to "#fff"
+1075: Invalid property in CSS3.0: transform
+1081: Optimised color: Changed "white" to "#fff"
+1089: Invalid property in CSS3.0: transform
+1134: Invalid property in CSS3.0: gap
+1203: Invalid property in CSS3.0: appearance
+1213: Invalid property in CSS3.0: grid-template-columns
+1214: Invalid property in CSS3.0: gap
+1221: Invalid property in CSS3.0: gap
+1293: Invalid property in CSS3.0: gap
+1347: Invalid property in CSS3.0: gap
+1369: Invalid property in CSS3.0: word-break
+1431: Invalid property in CSS3.0: word-break
+1453: Invalid property in CSS3.0: gap
+1460: Invalid property in CSS3.0: accent-color
+1467: Invalid property in CSS3.0: gap
+1476: Invalid property in CSS3.0: appearance
+1495: Optimised color: Changed "white" to "#fff"
+1503: Invalid property in CSS3.0: transform
+1519: Invalid property in CSS3.0: appearance
+1546: Invalid property in CSS3.0: filter
+1551: Invalid property in CSS3.0: outline-offset
+1608: Invalid property in CSS3.0: gap
+1631: Invalid property in CSS3.0: --at-color
+1632: Invalid property in CSS3.0: --at-bg
+1633: Invalid property in CSS3.0: --at-border
+1634: Invalid property in CSS3.0: --at-text
+1635: Invalid property in CSS3.0: --at-muted
+1642: Invalid property in CSS3.0: gap
+1651: Invalid property in CSS3.0: backdrop-filter
+1652: Invalid property in CSS3.0: -webkit-backdrop-filter
+1699: Invalid property in CSS3.0: fill
+1700: Invalid property in CSS3.0: stroke
+1702: Invalid property in CSS3.0: stroke-width
+1703: Invalid property in CSS3.0: stroke-linecap
+1704: Invalid property in CSS3.0: stroke-linejoin
+1725: Invalid property in CSS3.0: transform
+1726: Invalid property in CSS3.0: transform
+1738: Invalid property in CSS3.0: gap
+1798: Invalid property in CSS3.0: gap
+1830: Invalid property in CSS3.0: --at-color
+1831: Invalid property in CSS3.0: --at-color
+1832: Invalid property in CSS3.0: --at-color
+1833: Invalid property in CSS3.0: --at-color
+1839: Invalid property in CSS3.0: gap
+1883: Invalid property in CSS3.0: gap
+1895: Invalid property in CSS3.0: --at-bg
+1896: Invalid property in CSS3.0: --at-border
+1897: Invalid property in CSS3.0: --at-text
+1898: Invalid property in CSS3.0: --at-muted
+1920: Invalid property in CSS3.0: inset
+1922: Invalid property in CSS3.0: backdrop-filter
+1923: Invalid property in CSS3.0: -webkit-backdrop-filter
+1933: Invalid property in CSS3.0: backdrop-filter
+1934: Invalid property in CSS3.0: -webkit-backdrop-filter
+1946: Invalid property in CSS3.0: transform
+1947: Invalid property in CSS3.0: transform
+1951: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+1958: Optimised shorthand notation (margin): Changed "0 0 6px 0" to "0 0 6px"
+1968: Optimised shorthand notation (padding): Changed "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-lg)" to "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg)"
+1971: Invalid property in CSS3.0: gap
+1979: Invalid property in CSS3.0: transform
+1991: Invalid property in CSS3.0: transform
+1992: Invalid property in CSS3.0: transform
+1995: Optimised color: Changed "white" to "#fff"
+1996: Optimised color: Changed "white" to "#fff"
+1997: Optimised color: Changed "white" to "#fff"
+1998: Optimised color: Changed "white" to "#fff"
+2005: Invalid property in CSS3.0: transform
+2015: Invalid property in CSS3.0: gap
+2028: Invalid property in CSS3.0: transform
+2061: Invalid property in CSS3.0: gap
+2083: Invalid property in CSS3.0: gap
+2101: Invalid property in CSS3.0: gap
+2109: Invalid property in CSS3.0: gap
+2114: Invalid property in CSS3.0: accent-color
+2130: Invalid property in CSS3.0: gap
+2143: Invalid property in CSS3.0: gap
+2147: Invalid property in CSS3.0: backdrop-filter
+2148: Invalid property in CSS3.0: -webkit-backdrop-filter
+2165: Invalid property in CSS3.0: gap
+2171: Invalid property in CSS3.0: grid-template-columns
+2172: Invalid property in CSS3.0: gap
+2181: Invalid property in CSS3.0: gap
+2184: Invalid property in CSS3.0: backdrop-filter
+2185: Invalid property in CSS3.0: -webkit-backdrop-filter
+2194: Invalid property in CSS3.0: transform
+2208: Invalid property in CSS3.0: font-variant-numeric
+2214: Invalid property in CSS3.0: gap
+2243: Invalid property in CSS3.0: grid-template-columns
+2244: Invalid property in CSS3.0: gap
+2250: Invalid property in CSS3.0: grid-template-columns
+2324: Invalid property in CSS3.0: word-break
+2330: Optimised color: Changed "white" to "#fff"
+2332: Invalid property in CSS3.0: border-bottom-right-radius
+2338: Invalid property in CSS3.0: border-bottom-left-radius
+2361: Invalid property in CSS3.0: gap
+2393: Invalid property in CSS3.0: word-break
+2403: Invalid property in CSS3.0: gap
+2410: Optimised color: Changed "white" to "#fff"
+2421: Invalid property in CSS3.0: gap
+2487: Invalid property in CSS3.0: word-break
+2501: Invalid property in CSS3.0: word-break
+2511: Invalid property in CSS3.0: gap
+2531: Invalid property in CSS3.0: gap
+2537: Invalid property in CSS3.0: gap
+2544: Invalid property in CSS3.0: gap
+2582: Invalid property in CSS3.0: gap
+2607: Invalid property in CSS3.0: gap
+2608: Invalid property in CSS3.0: gap
+2609: Invalid property in CSS3.0: gap
+2768: Invalid property in CSS3.0: grid-template-columns
+2769: Invalid property in CSS3.0: gap
+2775: Invalid property in CSS3.0: gap
+2782: Invalid property in CSS3.0: transform
+2803: Invalid property in CSS3.0: gap
+2828: Invalid property in CSS3.0: gap
+2834: Invalid property in CSS3.0: gap
+2850: Invalid property in CSS3.0: grid-template-columns
+2851: Invalid property in CSS3.0: gap
+2857: Invalid property in CSS3.0: gap
+2921: Invalid property in CSS3.0: gap
+2944: Invalid property in CSS3.0: word-break
+2959: Invalid property in CSS3.0: gap
+2964: Invalid property in CSS3.0: gap
+2975: Invalid property in CSS3.0: gap
+3004: Invalid property in CSS3.0: gap
+3066: Invalid property in CSS3.0: word-break
+3093: Invalid property in CSS3.0: gap
+3118: Invalid property in CSS3.0: user-select
+3135: Invalid property in CSS3.0: gap
+3166: Invalid property in CSS3.0: gap
+3170: Invalid property in CSS3.0: user-select
+3221: Invalid property in CSS3.0: gap
+3226: Invalid property in CSS3.0: word-break
+3264: Optimised color: Changed "#ffffff" to "#FFF"
+3318: Invalid property in CSS3.0: user-select
+3338: Invalid property in CSS3.0: appearance
+3339: Invalid property in CSS3.0: -webkit-appearance
+3340: Invalid property in CSS3.0: -moz-appearance
+3383: Invalid property in CSS3.0: accent-color
+3484: Invalid property in CSS3.0: gap
+3499: Optimised shorthand notation (margin): Changed "0 0 -1px 0!important" to "0 0 -1px!important"
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/
+cp -pR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/root/* /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/
+CFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " CXXFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " LDFLAGS="-L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/lib -L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib -fuse-ld=bfd -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="0.260919.46554" LUCI_GITBRANCH="LuCI" make -C /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD="aarch64-openwrt-linux-musl-ld.bfd" NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" DESTDIR="/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install"   install;
+make[3]: Entering directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+==> [mt5700] cargo build: ARCH=aarch64 ARCH_PACKAGES= RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.05s
+test -x "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
+# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
+mkdir -p "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin"
+cp "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+chmod 0755 "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+make[3]: Leaving directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+cp -fpR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/* /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/
+touch /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700.installed
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.luci-app-mt5700_installed
+rm -rf /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700 /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/www
+cp -pR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/htdocs/* /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/www/
+find /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/www/ -type f -name '*.js' | while read src; do if jsmin < "$src" > "$src.o"; then mv "$src.o" "$src"; fi; done
+find /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/www/ -type f -name '*.css' | while read src; do if csstidy "$src" --template=highest --remove_last_semicolon=true "$src.o"; then mv "$src.o" "$src"; fi; done
+
+Selectors: 166 | Properties: 566
+Input size: 17.193KiB  Output size: 12.388KiB  Compression ratio: 27.95%
+-----------------------------------
+
+33: Invalid property in CSS3.0: gap
+76: Invalid property in CSS3.0: accent-color
+84: Invalid property in CSS3.0: word-break
+111: Invalid property in CSS3.0: word-break
+124: Invalid property in CSS3.0: gap
+166: Invalid property in CSS3.0: transform
+186: Invalid property in CSS3.0: inset
+207: Invalid property in CSS3.0: gap
+214: Invalid property in CSS3.0: gap
+238: Invalid property in CSS3.0: transform
+239: Invalid property in CSS3.0: transform
+242: Invalid property in CSS3.0: gap
+265: Invalid property in CSS3.0: gap
+283: Invalid property in CSS3.0: gap
+292: Invalid property in CSS3.0: word-break
+294: Invalid property in CSS3.0: border-bottom-right-radius
+295: Invalid property in CSS3.0: border-bottom-left-radius
+300: Invalid property in CSS3.0: gap
+302: Invalid property in CSS3.0: resize
+307: Invalid property in CSS3.0: gap
+314: Invalid property in CSS3.0: word-break
+324: Invalid property in CSS3.0: word-break
+327: Invalid property in CSS3.0: gap
+344: Invalid property in CSS3.0: word-break
+348: Invalid property in CSS3.0: gap
+356: Invalid property in CSS3.0: word-break
+361: Invalid property in CSS3.0: gap
+362: Invalid property in CSS3.0: gap
+368: Invalid property in CSS3.0: grid-template-columns
+369: Invalid property in CSS3.0: gap
+379: Invalid property in CSS3.0: word-break
+384: Invalid property in CSS3.0: gap
+391: Invalid property in CSS3.0: gap
+414: Invalid property in CSS3.0: gap
+417: Invalid property in CSS3.0: gap
+426: Invalid property in CSS3.0: gap
+439: Invalid property in CSS3.0: gap
+446: Invalid property in CSS3.0: gap
+456: Invalid property in CSS3.0: word-break
+473: Invalid property in CSS3.0: word-break
+477: Invalid property in CSS3.0: gap
+491: Invalid property in CSS3.0: gap
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+
+Selectors: 599 | Properties: 1984
+Input size: 99.414KiB  Output size: 65.684KiB  Compression ratio: 33.93%
+-----------------------------------
+
+10: Invalid property in CSS3.0: --mt5700-bg
+11: Invalid property in CSS3.0: --mt5700-card-bg
+12: Invalid property in CSS3.0: --mt5700-card-bg-hover
+13: Invalid property in CSS3.0: --mt5700-glass-bg
+14: Invalid property in CSS3.0: --mt5700-float-bg
+15: Invalid property in CSS3.0: --mt5700-text
+16: Invalid property in CSS3.0: --mt5700-text-secondary
+17: Invalid property in CSS3.0: --mt5700-text-muted
+18: Invalid property in CSS3.0: --mt5700-border
+19: Invalid property in CSS3.0: --mt5700-border-subtle
+20: Invalid property in CSS3.0: --mt5700-divider
+23: Invalid property in CSS3.0: --mt5700-blur
+24: Invalid property in CSS3.0: --mt5700-saturate
+25: Invalid property in CSS3.0: --mt5700-glass
+28: Invalid property in CSS3.0: --mt5700-sh-1
+29: Invalid property in CSS3.0: --mt5700-sh-2
+30: Invalid property in CSS3.0: --mt5700-sh-3
+31: Invalid property in CSS3.0: --mt5700-sh-float
+32: Invalid property in CSS3.0: --mt5700-sh-inset
+34: Invalid property in CSS3.0: --mt5700-ring
+36: Invalid property in CSS3.0: --mt5700-shadow-sm
+37: Invalid property in CSS3.0: --mt5700-shadow-md
+38: Invalid property in CSS3.0: --mt5700-shadow-lg
+39: Invalid property in CSS3.0: --mt5700-shadow-xl
+42: Invalid property in CSS3.0: --mt5700-radius-sm
+43: Invalid property in CSS3.0: --mt5700-radius-md
+44: Invalid property in CSS3.0: --mt5700-radius-lg
+45: Invalid property in CSS3.0: --mt5700-radius-xl
+46: Invalid property in CSS3.0: --mt5700-radius-full
+49: Invalid property in CSS3.0: --mt5700-space-xs
+50: Invalid property in CSS3.0: --mt5700-space-sm
+51: Invalid property in CSS3.0: --mt5700-space-md
+52: Invalid property in CSS3.0: --mt5700-space-lg
+53: Invalid property in CSS3.0: --mt5700-space-xl
+56: Invalid property in CSS3.0: --mt5700-ease
+57: Invalid property in CSS3.0: --mt5700-dur-control
+58: Invalid property in CSS3.0: --mt5700-dur-panel
+61: Invalid property in CSS3.0: --mt5700-accent
+62: Invalid property in CSS3.0: --mt5700-accent-light
+63: Invalid property in CSS3.0: --mt5700-success
+64: Invalid property in CSS3.0: --mt5700-success-light
+65: Invalid property in CSS3.0: --mt5700-warning
+66: Invalid property in CSS3.0: --mt5700-warning-light
+67: Invalid property in CSS3.0: --mt5700-danger
+68: Invalid property in CSS3.0: --mt5700-danger-light
+69: Invalid property in CSS3.0: --mt5700-info
+70: Invalid property in CSS3.0: --mt5700-info-light
+72: Invalid property in CSS3.0: --mt5700-sig-exc
+73: Invalid property in CSS3.0: --mt5700-sig-good
+74: Invalid property in CSS3.0: --mt5700-sig-fair
+75: Invalid property in CSS3.0: --mt5700-sig-poor
+76: Invalid property in CSS3.0: --mt5700-sig-bad
+78: Invalid property in CSS3.0: --mt5700-temp-cold
+79: Invalid property in CSS3.0: --mt5700-temp-cool
+80: Invalid property in CSS3.0: --mt5700-temp-normal
+81: Invalid property in CSS3.0: --mt5700-temp-warm
+82: Invalid property in CSS3.0: --mt5700-temp-hot
+83: Invalid property in CSS3.0: --mt5700-temp-high
+86: Invalid property in CSS3.0: --mt5700-font-sans
+87: Invalid property in CSS3.0: --mt5700-font-mono
+88: Invalid property in CSS3.0: --mt5700-font-size-xs
+89: Invalid property in CSS3.0: --mt5700-font-size-sm
+90: Invalid property in CSS3.0: --mt5700-font-size-base
+91: Invalid property in CSS3.0: --mt5700-font-size-lg
+92: Invalid property in CSS3.0: --mt5700-font-size-xl
+93: Invalid property in CSS3.0: --mt5700-font-size-2xl
+94: Invalid property in CSS3.0: --mt5700-font-size-3xl
+97: Invalid property in CSS3.0: --mt5700-transition-fast
+98: Invalid property in CSS3.0: --mt5700-transition-base
+99: Invalid property in CSS3.0: --mt5700-transition-slow
+105: Invalid property in CSS3.0: --mt5700-bg
+106: Invalid property in CSS3.0: --mt5700-card-bg
+107: Invalid property in CSS3.0: --mt5700-card-bg-hover
+108: Invalid property in CSS3.0: --mt5700-glass-bg
+109: Invalid property in CSS3.0: --mt5700-float-bg
+110: Invalid property in CSS3.0: --mt5700-text
+111: Invalid property in CSS3.0: --mt5700-text-secondary
+112: Invalid property in CSS3.0: --mt5700-text-muted
+113: Invalid property in CSS3.0: --mt5700-border
+114: Invalid property in CSS3.0: --mt5700-border-subtle
+115: Invalid property in CSS3.0: --mt5700-divider
+116: Invalid property in CSS3.0: --mt5700-sh-1
+117: Invalid property in CSS3.0: --mt5700-sh-2
+118: Invalid property in CSS3.0: --mt5700-sh-3
+119: Invalid property in CSS3.0: --mt5700-sh-float
+120: Invalid property in CSS3.0: --mt5700-sh-inset
+121: Invalid property in CSS3.0: --mt5700-ring
+123: Invalid property in CSS3.0: --mt5700-accent
+124: Invalid property in CSS3.0: --mt5700-accent-light
+125: Invalid property in CSS3.0: --mt5700-info
+126: Invalid property in CSS3.0: --mt5700-info-light
+127: Invalid property in CSS3.0: --mt5700-success
+128: Invalid property in CSS3.0: --mt5700-warning
+129: Invalid property in CSS3.0: --mt5700-danger
+130: Invalid property in CSS3.0: --mt5700-sig-exc
+131: Invalid property in CSS3.0: --mt5700-sig-good
+132: Invalid property in CSS3.0: --mt5700-sig-fair
+133: Invalid property in CSS3.0: --mt5700-sig-poor
+134: Invalid property in CSS3.0: --mt5700-sig-bad
+135: Invalid property in CSS3.0: --mt5700-temp-cold
+136: Invalid property in CSS3.0: --mt5700-temp-cool
+137: Invalid property in CSS3.0: --mt5700-temp-normal
+138: Invalid property in CSS3.0: --mt5700-temp-warm
+139: Invalid property in CSS3.0: --mt5700-temp-hot
+140: Invalid property in CSS3.0: --mt5700-temp-high
+160: Invalid property in CSS3.0: inset
+167: Invalid property in CSS3.0: backdrop-filter
+168: Invalid property in CSS3.0: -webkit-backdrop-filter
+208: Invalid property in CSS3.0: gap
+221: Optimised shorthand notation (margin): Changed "0 0 var(--mt5700-space-sm) 0" to "0 0 var(--mt5700-space-sm)"
+237: Invalid property in CSS3.0: backdrop-filter
+238: Invalid property in CSS3.0: -webkit-backdrop-filter
+255: Invalid property in CSS3.0: gap
+256: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+270: Optimised shorthand notation (margin): Changed "var(--mt5700-space-xs) 0 0 0" to "var(--mt5700-space-xs) 0 0"
+292: Invalid property in CSS3.0: gap
+293: Invalid property in CSS3.0: grid-template-columns
+296: Invalid property in CSS3.0: grid-template-columns
+297: Invalid property in CSS3.0: grid-template-columns
+298: Invalid property in CSS3.0: grid-template-columns
+304: Invalid property in CSS3.0: grid-template-columns
+313: Invalid property in CSS3.0: grid-template-columns
+323: Invalid property in CSS3.0: backdrop-filter
+324: Invalid property in CSS3.0: -webkit-backdrop-filter
+334: Invalid property in CSS3.0: transform
+354: Invalid property in CSS3.0: word-break
+359: Invalid property in CSS3.0: font-variant-numeric
+394: Invalid property in CSS3.0: grid-template-columns
+395: Invalid property in CSS3.0: grid-auto-rows
+397: Invalid property in CSS3.0: gap
+417: Invalid property in CSS3.0: grid-template-columns
+421: Invalid property in CSS3.0: grid-template-columns
+430: Invalid property in CSS3.0: grid-template-columns
+431: Invalid property in CSS3.0: grid-template-columns
+442: Invalid property in CSS3.0: gap
+445: Invalid property in CSS3.0: backdrop-filter
+446: Invalid property in CSS3.0: -webkit-backdrop-filter
+462: Invalid property in CSS3.0: transform
+473: Invalid property in CSS3.0: gap
+507: Invalid property in CSS3.0: fill
+508: Invalid property in CSS3.0: stroke
+509: Invalid property in CSS3.0: stroke-linecap
+513: Invalid property in CSS3.0: fill
+514: Invalid property in CSS3.0: stroke-linecap
+516: Invalid property in CSS3.0: filter
+521: Invalid property in CSS3.0: inset
+526: Invalid property in CSS3.0: pointer-events
+534: Invalid property in CSS3.0: font-variant-numeric
+581: Invalid property in CSS3.0: gap
+586: Invalid property in CSS3.0: backdrop-filter
+587: Invalid property in CSS3.0: -webkit-backdrop-filter
+605: Invalid property in CSS3.0: fill
+606: Invalid property in CSS3.0: stroke
+607: Invalid property in CSS3.0: stroke-width
+612: Invalid property in CSS3.0: fill
+612: Invalid property in CSS3.0: stroke
+668: Invalid property in CSS3.0: grid-template-columns
+669: Invalid property in CSS3.0: gap
+678: Invalid property in CSS3.0: gap
+700: Invalid property in CSS3.0: fill
+701: Invalid property in CSS3.0: stroke
+702: Invalid property in CSS3.0: stroke-width
+703: Invalid property in CSS3.0: stroke-linecap
+704: Invalid property in CSS3.0: stroke-linejoin
+786: Invalid property in CSS3.0: order
+806: Invalid property in CSS3.0: --mt5700-verdict-accent
+806: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+807: Invalid property in CSS3.0: --mt5700-verdict-accent
+807: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+808: Invalid property in CSS3.0: --mt5700-verdict-accent
+808: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+809: Invalid property in CSS3.0: --mt5700-verdict-accent
+809: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+810: Invalid property in CSS3.0: --mt5700-verdict-accent
+810: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+811: Invalid property in CSS3.0: --mt5700-verdict-accent
+820: Invalid property in CSS3.0: transform-origin
+822: Invalid property in CSS3.0: fill
+836: Invalid property in CSS3.0: stroke-dasharray
+841: Invalid property in CSS3.0: transform-origin
+847: Invalid property in CSS3.0: fill
+847: Invalid property in CSS3.0: stroke
+850: Invalid property in CSS3.0: transform-origin
+858: Invalid property in CSS3.0: transform
+859: Invalid property in CSS3.0: stroke-dashoffset
+861: Invalid property in CSS3.0: transform
+862: Invalid property in CSS3.0: transform
+864: Invalid property in CSS3.0: transform
+866: Invalid property in CSS3.0: transform
+875: Invalid property in CSS3.0: gap
+877: Invalid property in CSS3.0: grid-template-columns
+881: Invalid property in CSS3.0: gap
+891: Invalid property in CSS3.0: gap
+916: Invalid property in CSS3.0: --mt5700-verdict-accent
+916: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+917: Invalid property in CSS3.0: --mt5700-verdict-accent
+917: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+918: Invalid property in CSS3.0: --mt5700-verdict-accent
+918: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+919: Invalid property in CSS3.0: --mt5700-verdict-accent
+919: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+920: Invalid property in CSS3.0: --mt5700-verdict-accent
+920: Invalid property in CSS3.0: --mt5700-verdict-worst-bg
+922: Invalid property in CSS3.0: --mt5700-verdict-line
+922: Invalid property in CSS3.0: --mt5700-verdict-divider
+923: Invalid property in CSS3.0: --mt5700-verdict-metric-bg
+924: Invalid property in CSS3.0: --mt5700-verdict-label
+956: Invalid property in CSS3.0: pointer-events
+958: Invalid property in CSS3.0: backdrop-filter
+959: Invalid property in CSS3.0: -webkit-backdrop-filter
+969: Invalid property in CSS3.0: transform
+977: Invalid property in CSS3.0: gap
+987: Invalid property in CSS3.0: gap
+1004: Invalid property in CSS3.0: gap
+1014: Invalid property in CSS3.0: user-select
+1025: Invalid property in CSS3.0: pointer-events
+1026: Invalid property in CSS3.0: filter
+1031: Invalid property in CSS3.0: transform
+1037: Optimised color: Changed "white" to "#fff"
+1045: Invalid property in CSS3.0: transform
+1050: Invalid property in CSS3.0: transform
+1062: Invalid property in CSS3.0: transform
+1067: Optimised color: Changed "white" to "#fff"
+1075: Invalid property in CSS3.0: transform
+1081: Optimised color: Changed "white" to "#fff"
+1089: Invalid property in CSS3.0: transform
+1134: Invalid property in CSS3.0: gap
+1203: Invalid property in CSS3.0: appearance
+1213: Invalid property in CSS3.0: grid-template-columns
+1214: Invalid property in CSS3.0: gap
+1221: Invalid property in CSS3.0: gap
+1293: Invalid property in CSS3.0: gap
+1347: Invalid property in CSS3.0: gap
+1369: Invalid property in CSS3.0: word-break
+1431: Invalid property in CSS3.0: word-break
+1453: Invalid property in CSS3.0: gap
+1460: Invalid property in CSS3.0: accent-color
+1467: Invalid property in CSS3.0: gap
+1476: Invalid property in CSS3.0: appearance
+1495: Optimised color: Changed "white" to "#fff"
+1503: Invalid property in CSS3.0: transform
+1519: Invalid property in CSS3.0: appearance
+1546: Invalid property in CSS3.0: filter
+1551: Invalid property in CSS3.0: outline-offset
+1608: Invalid property in CSS3.0: gap
+1631: Invalid property in CSS3.0: --at-color
+1632: Invalid property in CSS3.0: --at-bg
+1633: Invalid property in CSS3.0: --at-border
+1634: Invalid property in CSS3.0: --at-text
+1635: Invalid property in CSS3.0: --at-muted
+1642: Invalid property in CSS3.0: gap
+1651: Invalid property in CSS3.0: backdrop-filter
+1652: Invalid property in CSS3.0: -webkit-backdrop-filter
+1699: Invalid property in CSS3.0: fill
+1700: Invalid property in CSS3.0: stroke
+1702: Invalid property in CSS3.0: stroke-width
+1703: Invalid property in CSS3.0: stroke-linecap
+1704: Invalid property in CSS3.0: stroke-linejoin
+1725: Invalid property in CSS3.0: transform
+1726: Invalid property in CSS3.0: transform
+1738: Invalid property in CSS3.0: gap
+1798: Invalid property in CSS3.0: gap
+1830: Invalid property in CSS3.0: --at-color
+1831: Invalid property in CSS3.0: --at-color
+1832: Invalid property in CSS3.0: --at-color
+1833: Invalid property in CSS3.0: --at-color
+1839: Invalid property in CSS3.0: gap
+1883: Invalid property in CSS3.0: gap
+1895: Invalid property in CSS3.0: --at-bg
+1896: Invalid property in CSS3.0: --at-border
+1897: Invalid property in CSS3.0: --at-text
+1898: Invalid property in CSS3.0: --at-muted
+1920: Invalid property in CSS3.0: inset
+1922: Invalid property in CSS3.0: backdrop-filter
+1923: Invalid property in CSS3.0: -webkit-backdrop-filter
+1933: Invalid property in CSS3.0: backdrop-filter
+1934: Invalid property in CSS3.0: -webkit-backdrop-filter
+1946: Invalid property in CSS3.0: transform
+1947: Invalid property in CSS3.0: transform
+1951: Optimised shorthand notation (padding): Changed "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg)" to "var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm)"
+1958: Optimised shorthand notation (margin): Changed "0 0 6px 0" to "0 0 6px"
+1968: Optimised shorthand notation (padding): Changed "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-lg)" to "var(--mt5700-space-md) var(--mt5700-space-lg) var(--mt5700-space-lg)"
+1971: Invalid property in CSS3.0: gap
+1979: Invalid property in CSS3.0: transform
+1991: Invalid property in CSS3.0: transform
+1992: Invalid property in CSS3.0: transform
+1995: Optimised color: Changed "white" to "#fff"
+1996: Optimised color: Changed "white" to "#fff"
+1997: Optimised color: Changed "white" to "#fff"
+1998: Optimised color: Changed "white" to "#fff"
+2005: Invalid property in CSS3.0: transform
+2015: Invalid property in CSS3.0: gap
+2028: Invalid property in CSS3.0: transform
+2061: Invalid property in CSS3.0: gap
+2083: Invalid property in CSS3.0: gap
+2101: Invalid property in CSS3.0: gap
+2109: Invalid property in CSS3.0: gap
+2114: Invalid property in CSS3.0: accent-color
+2130: Invalid property in CSS3.0: gap
+2143: Invalid property in CSS3.0: gap
+2147: Invalid property in CSS3.0: backdrop-filter
+2148: Invalid property in CSS3.0: -webkit-backdrop-filter
+2165: Invalid property in CSS3.0: gap
+2171: Invalid property in CSS3.0: grid-template-columns
+2172: Invalid property in CSS3.0: gap
+2181: Invalid property in CSS3.0: gap
+2184: Invalid property in CSS3.0: backdrop-filter
+2185: Invalid property in CSS3.0: -webkit-backdrop-filter
+2194: Invalid property in CSS3.0: transform
+2208: Invalid property in CSS3.0: font-variant-numeric
+2214: Invalid property in CSS3.0: gap
+2243: Invalid property in CSS3.0: grid-template-columns
+2244: Invalid property in CSS3.0: gap
+2250: Invalid property in CSS3.0: grid-template-columns
+2324: Invalid property in CSS3.0: word-break
+2330: Optimised color: Changed "white" to "#fff"
+2332: Invalid property in CSS3.0: border-bottom-right-radius
+2338: Invalid property in CSS3.0: border-bottom-left-radius
+2361: Invalid property in CSS3.0: gap
+2393: Invalid property in CSS3.0: word-break
+2403: Invalid property in CSS3.0: gap
+2410: Optimised color: Changed "white" to "#fff"
+2421: Invalid property in CSS3.0: gap
+2487: Invalid property in CSS3.0: word-break
+2501: Invalid property in CSS3.0: word-break
+2511: Invalid property in CSS3.0: gap
+2531: Invalid property in CSS3.0: gap
+2537: Invalid property in CSS3.0: gap
+2544: Invalid property in CSS3.0: gap
+2582: Invalid property in CSS3.0: gap
+2607: Invalid property in CSS3.0: gap
+2608: Invalid property in CSS3.0: gap
+2609: Invalid property in CSS3.0: gap
+2768: Invalid property in CSS3.0: grid-template-columns
+2769: Invalid property in CSS3.0: gap
+2775: Invalid property in CSS3.0: gap
+2782: Invalid property in CSS3.0: transform
+2803: Invalid property in CSS3.0: gap
+2828: Invalid property in CSS3.0: gap
+2834: Invalid property in CSS3.0: gap
+2850: Invalid property in CSS3.0: grid-template-columns
+2851: Invalid property in CSS3.0: gap
+2857: Invalid property in CSS3.0: gap
+2921: Invalid property in CSS3.0: gap
+2944: Invalid property in CSS3.0: word-break
+2959: Invalid property in CSS3.0: gap
+2964: Invalid property in CSS3.0: gap
+2975: Invalid property in CSS3.0: gap
+3004: Invalid property in CSS3.0: gap
+3066: Invalid property in CSS3.0: word-break
+3093: Invalid property in CSS3.0: gap
+3118: Invalid property in CSS3.0: user-select
+3135: Invalid property in CSS3.0: gap
+3166: Invalid property in CSS3.0: gap
+3170: Invalid property in CSS3.0: user-select
+3221: Invalid property in CSS3.0: gap
+3226: Invalid property in CSS3.0: word-break
+3264: Optimised color: Changed "#ffffff" to "#FFF"
+3318: Invalid property in CSS3.0: user-select
+3338: Invalid property in CSS3.0: appearance
+3339: Invalid property in CSS3.0: -webkit-appearance
+3340: Invalid property in CSS3.0: -moz-appearance
+3383: Invalid property in CSS3.0: accent-color
+3484: Invalid property in CSS3.0: gap
+3499: Optimised shorthand notation (margin): Changed "0 0 -1px 0!important" to "0 0 -1px!important"
+
+-----------------------------------
+CSSTidy 1.3 by Florian Schmitz 2005, 2006
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/
+cp -pR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/root/* /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/
+CFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " CXXFLAGS="-Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro  -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include -I/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/include/fortify " LDFLAGS="-L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/usr/lib -L/builder/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/lib -fuse-ld=bfd -znow -zrelro " FPIC="-DPIC -fPIC" LUCI_VERSION="0.260919.46554" LUCI_GITBRANCH="LuCI" make -C /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/ AR="aarch64-openwrt-linux-musl-gcc-ar" AS="aarch64-openwrt-linux-musl-gcc -c -Os -pipe -mcpu=generic -fno-caller-saves -fno-plt -fhonour-copts -ffile-prefix-map=/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700=luci-app-mt5700 -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro" LD="aarch64-openwrt-linux-musl-ld.bfd" NM="aarch64-openwrt-linux-musl-gcc-nm" CC="aarch64-openwrt-linux-musl-gcc" GCC="aarch64-openwrt-linux-musl-gcc" CXX="aarch64-openwrt-linux-musl-g++" RANLIB="aarch64-openwrt-linux-musl-gcc-ranlib" STRIP=aarch64-openwrt-linux-musl-strip OBJCOPY=aarch64-openwrt-linux-musl-objcopy OBJDUMP=aarch64-openwrt-linux-musl-objdump SIZE=aarch64-openwrt-linux-musl-size CROSS="aarch64-openwrt-linux-musl-" ARCH="aarch64" DESTDIR="/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install"   install;
+make[3]: Entering directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+==> [mt5700] cargo build: ARCH=aarch64 ARCH_PACKAGES= RUST_TARGET=aarch64-unknown-linux-musl
+cd rust && \
+	CARGO_TARGET_DIR="/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target" \
+	cargo build  --release --target aarch64-unknown-linux-musl
+warning: linker stderr: In file included from /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:3:
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/../ldso/dlstart.c:146:20: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a subsequent definition [-Wdeprecated-non-prototype]
+           146 |         GETFUNCSYM(&dls2, __dls2, base+dyn[DT_PLTGOT]);
+               |                           ^
+         /opt/zig-linux-x86_64-0.13.0/lib/libc/musl/crt/rcrt1.c:11:13: note: conflicting prototype is here
+            11 | hidden void __dls2(unsigned char *base, size_t *sp)
+               |             ^
+         1 warning generated.
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `at-webserver` (bin "at-webserver") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.05s
+test -x "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" || { echo "ERROR: cargo 未产出 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver"; exit 1; }
+==> [mt5700] 后端二进制就绪: /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver
+# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
+# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
+mkdir -p "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin"
+cp "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src/target/aarch64-unknown-linux-musl/release/at-webserver" "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+chmod 0755 "/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/usr/bin/at-webserver-rust"
+make[3]: Leaving directory '/builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/src'
+cp -fpR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-install/* /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/
+find /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700 -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700
+rstrip.sh: /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/usr/bin/at-webserver-rust: executable
+patchelf: cannot find section '.dynamic'. The input file is most likely statically linked
+install -d -m0755 /builder/bin/packages/aarch64_generic/base
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm; echo "$V_Package_luci_app_mt5700_postinst" > postinst-pkg; chmod 0755 postinst-pkg; )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700 /builder/bin/packages/aarch64_generic/base
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-aarch64_generic/luci-app-mt5700 into /builder/bin/packages/aarch64_generic/base/luci-app-mt5700_1.12.9-r1_aarch64_generic.ipk
+rm -rf /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn
+mkdir -p /builder/bin/targets/armsr/armv8/packages /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn /builder/staging_dir/target-aarch64_generic_musl/pkginfo
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/etc/uci-defaults
+echo "uci set luci.languages.zh_cn='简体中文 (Simplified Chinese)'; uci commit luci" > /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/etc/uci-defaults/luci-i18n-mt5700-zh-cn
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n
+po2lmo /builder/package/luci-app-mt5700/po/zh_Hans/luci-app-mt5700.po /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n/luci-app-mt5700.zh-cn.lmo;
+find /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn -name 'CVS' -o -name '.svn' -o -name '.#*' -o -name '*~'| xargs -r rm -rf
+export CROSS="aarch64-openwrt-linux-musl-"   ; NM="aarch64-openwrt-linux-musl-nm" STRIP="/builder/staging_dir/host/bin/sstrip -z" STRIP_KMOD="/builder/scripts/strip-kmod.sh" PATCHELF="/builder/staging_dir/host/bin/patchelf" /builder/scripts/rstrip.sh /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn
+install -d -m0755 /builder/bin/packages/aarch64_generic/base
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/CONTROL
+(cd /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn/CONTROL; ( echo "$CONTROL"; printf "Description: "; echo "$DESCRIPTION" | sed -e 's,^[[:space:]]*, ,g'; ) > control; chmod 644 control; ( echo "#!/bin/sh"; echo "[ \"\${IPKG_NO_SCRIPT}\" = \"1\" ] && exit 0"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_postinst \$0 \$@"; ) > postinst; ( echo "#!/bin/sh"; echo "[ -s "\${IPKG_INSTROOT}/lib/functions.sh" ] || exit 0"; echo ". \${IPKG_INSTROOT}/lib/functions.sh"; echo "default_prerm \$0 \$@"; ) > prerm; chmod 0755 postinst prerm;  )
+/builder/staging_dir/host/bin/fakeroot /builder/staging_dir/host/bin/bash /builder/scripts/ipkg-build -m "" /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn /builder/bin/packages/aarch64_generic/base
+Packaged contents of /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/ipkg-all/luci-i18n-mt5700-zh-cn into /builder/bin/packages/aarch64_generic/base/luci-i18n-mt5700-zh-cn_0.260919.46554_all.ipk
+rm -rf /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn.installed /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn
+mkdir -p /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/etc/uci-defaults
+echo "uci set luci.languages.zh_cn='简体中文 (Simplified Chinese)'; uci commit luci" > /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/etc/uci-defaults/luci-i18n-mt5700-zh-cn
+install -d -m0755 /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n
+po2lmo /builder/package/luci-app-mt5700/po/zh_Hans/luci-app-mt5700.po /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/usr/lib/lua/luci/i18n/luci-app-mt5700.zh-cn.lmo;
+touch /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn.installed
+mkdir -p /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp
+SHELL= flock /builder/tmp/.root-copy.flock -c 'cp -fpR /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-i18n-mt5700-zh-cn/. /builder/staging_dir/target-aarch64_generic_musl/root-armsr/'
+touch /builder/staging_dir/target-aarch64_generic_musl/root-armsr/stamp/.luci-i18n-mt5700-zh-cn_installed
+touch -r /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.built /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700/.autoremove 2>/dev/null >/dev/null
+find /builder/build_dir/target-aarch64_generic_musl/luci-app-mt5700 -mindepth 1 -maxdepth 1 -not '(' -type f -and -name '.*' -and -size 0 ')' -and -not -name '.pkgdir'  -print0 | xargs -r -0 rm -rf
+make[2]: Leaving directory '/builder/package/luci-app-mt5700'
+time: package/luci-app-mt5700/compile#118.21#28.08#56.69
+make[1]: Leaving directory '/builder'
+==> 后端产物: build_dir/target-aarch64_generic_musl/luci-app-mt5700/.pkgdir/luci-app-mt5700/usr/bin/at-webserver-rust
+==> 后端二进制信息: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, stripped
+==> ELF 架构核对通过（期望含 aarch64）
+==> 产物（仅本项目包）：
+total 1256
+drwxr-xr-x 2 root root    4096 Sep 19 12:57 .
+drwxr-xr-x 3 1001 1001    4096 Sep 19 12:57 ..
+-rw-r--r-- 1 root root 1271154 Sep 19 12:57 luci-app-mt5700_1.12.9-r1_aarch64_generic.ipk
+-rw-r--r-- 1 root root    1096 Sep 19 12:57 luci-i18n-mt5700-zh-cn_0.260919.46554_all.ipk
+==> bin 下全部包（排查用）：
+bin/packages/aarch64_generic/base/luci-app-mt5700_1.12.9-r1_aarch64_generic.ipk
+bin/packages/aarch64_generic/base/luci-i18n-mt5700-zh-cn_0.260919.46554_all.ipk
+bin/targets/armsr/armv8/packages/libatomic1_13.3.0-r4_aarch64_generic.ipk
+bin/targets/armsr/armv8/packages/libc_1.2.5-r4_aarch64_generic.ipk
+bin/targets/armsr/armv8/packages/libgcc1_13.3.0-r4_aarch64_generic.ipk
+bin/targets/armsr/armv8/packages/libpthread_1.2.5-r4_aarch64_generic.ipk
+bin/targets/armsr/armv8/packages/librt_1.2.5-r4_aarch64_generic.ipk
+bin/targets/armsr/armv8/packages/libstdcpp6_13.3.0-r4_aarch64_generic.ipk
+ARCH_PACKAGES=aarch64_generic
+EXPECTED_ARCH=aarch64_generic
+MATCH=yes
+TARGET_BOARD=armsr
+TARGET_SUBTARGET=armv8
+OPENWRT_VER=24.10.8
+RUST_TRIPLE=aarch64-unknown-linux-musl
+APK_TOOLS=none
+==> 校验主包: luci-app-mt5700_1.12.9-r1_aarch64_generic.ipk (1271154 bytes)
+==> 已确认 ipk 内含 usr/bin/at-webserver-rust
+==> SDK 构建完成（arch=aarch64_generic）

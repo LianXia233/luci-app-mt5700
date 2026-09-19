@@ -1,0 +1,8 @@
+ARCH_PACKAGES=aarch64_generic
+EXPECTED_ARCH=aarch64_generic
+MATCH=yes
+TARGET_BOARD=armsr
+TARGET_SUBTARGET=armv8
+OPENWRT_VER=24.10.8
+RUST_TRIPLE=aarch64-unknown-linux-musl
+APK_TOOLS=none
