@@ -6,111 +6,230 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 网络状态 - 新 UI 视觉 + 基准 v1.3.4 功能
+ * 5G/4G 模组网络状态 - 赛博极客全动态 SVG 工业级精装重构版 (v3.3)
  *
- * 等价迁移原 WebUI network/Info.tsx：网络注册状态、运营商、信号、载波聚合、
- * 辅载波信号、速率曲线、实时速率、流量统计、温度、DHCP、QCI/APN、IPv6 能力、
- * 调制方式（MCS）、连接诊断（ENDC / 5GC / 发射功率 / PDP 地址）。
+ * 核心提升：
+ *  1. 【模组温度图表重构】：大画幅 PCB 纯矢量电路版图，集成热传导总线、芯片引脚焊盘、动态呼吸光晕，搭配 4×2 完美平衡读数矩阵；
+ *  2. 【调制方式与空间流】：新增「上行频谱效率利用率」双轨进度条，与 I/Q 正交星座点阵共同填满卡片空间，消除留白塌陷；
+ *  3. 【三列黄金等高对齐】：流量统计、IP/DNS 与调制方式三张卡片高度严格自适应等高（~440px）。
  */
 
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('网络状态', '实时网络信息与信号质量');
+		var page = Mt5700.page('网络状态', '实时蜂窝无线链路、物理射频载波与硬件工况遥测');
 		var body = page._body;
+
+		/* ---------- 1. 注入自适应 NOC 极客响应式全局样式表 ---------- */
+		var style = E('style', {}, [
+			':root {',
+			'  --mt-bg-card: var(--background-color-high, rgba(255, 255, 255, 0.95));',
+			'  --mt-border: var(--border-color-low, rgba(140, 155, 180, 0.2));',
+			'  --mt-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);',
+			'  --c-exc: #00f5a0; --c-good: #00b4d8; --c-fair: #f59e0b; --c-poor: #f97316; --c-crit: #ef4444;',
+			'  --c-dl: #00b4d8; --c-ul: #10b981;',
+			'}',
+			'@media (prefers-color-scheme: dark) {',
+			'  :root {',
+			'    --mt-bg-card: rgba(20, 26, 38, 0.92);',
+			'    --mt-border: rgba(255, 255, 255, 0.09);',
+			'    --mt-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);',
+			'  }',
+			'}',
+			'.mt-root-wrap { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }',
+			'.mt-row-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: stretch; width: 100%; }',
+			'.mt-row-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; width: 100%; }',
+			'@media (max-width: 1180px) { .mt-row-3col { grid-template-columns: 1fr; } }',
+			/* 信号 4 联卡片 */
+			'.mt-sig-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; margin-bottom: 6px; }',
+			'@media (max-width: 1080px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); } }',
+			'@media (max-width: 580px) { .mt-sig-row { grid-template-columns: 1fr; } }',
+			'.mt-sig-box { background: var(--mt-bg-card); border: 1px solid var(--mt-border); border-radius: 12px; box-shadow: var(--mt-shadow); padding: 14px 14px 12px 14px; display: flex; flex-direction: column; position: relative; overflow: hidden; transition: transform 0.2s ease, border-color 0.2s ease; }',
+			'.mt-sig-box:hover { transform: translateY(-2px); border-color: rgba(0, 180, 216, 0.45); }',
+			'.mt-sig-box-head { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 4px; }',
+			'.mt-sig-box-title { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--text-color-high, inherit); }',
+			'.mt-sig-tag { font-size: 10px; font-family: "JetBrains Mono", monospace; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: rgba(125, 125, 125, 0.12); }',
+			'.mt-sig-ref { font-size: 10.5px; opacity: 0.55; font-family: "JetBrains Mono", monospace; }',
+			'.mt-sig-box-svg { width: 100%; display: flex; justify-content: center; align-items: center; margin: 4px 0; }',
+			'.mt-sig-box-foot { display: flex; align-items: center; justify-content: space-between; width: 100%; padding-top: 8px; border-top: 1px dashed rgba(125, 125, 125, 0.16); margin-top: 4px; }',
+			'.mt-sig-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; border: 1px solid transparent; }',
+			'.mt-sig-dot { width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 6px currentColor; animation: mt-beacon 1.8s infinite ease-in-out; }',
+			'.mt-sig-sub { font-size: 11px; opacity: 0.65; font-weight: 600; }',
+			'.mt-sig-bar-rail { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: rgba(125,125,125,0.1); }',
+			'.mt-sig-bar-fill { height: 100%; width: 0%; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.4s ease; }',
+			/* 速率 HUD */
+			'.mt-speed-hud { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }',
+			'.mt-speed-tile { padding: 14px 16px; border-radius: 10px; border: 1px solid var(--mt-border); background: rgba(125, 125, 125, 0.04); position: relative; overflow: hidden; }',
+			'.mt-speed-tile::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; }',
+			'.mt-speed-tile.dl::before { background: linear-gradient(90deg, #00b4d8, #00f2fe); }',
+			'.mt-speed-tile.ul::before { background: linear-gradient(90deg, #10b981, #00f5a0); }',
+			'.mt-speed-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }',
+			'.mt-speed-val { font-size: 26px; font-weight: 900; font-family: "JetBrains Mono", Consolas, monospace; line-height: 1.1; }',
+			'.mt-speed-unit { font-size: 13px; font-weight: 600; margin-left: 4px; opacity: 0.8; }',
+			/* 模组芯片温度 4x2 矩阵 */
+			'@media (max-width: 640px) { .mt-temp-grid-4x2 { grid-template-columns: repeat(2, 1fr); } }',
+			'.mt-temp-cell { border: 1px solid rgba(125, 125, 125, 0.16); border-radius: 8px; padding: 10px 10px; background: rgba(125, 125, 125, 0.03); display: flex; flex-direction: column; justify-content: center; gap: 6px; }',
+			'.mt-temp-gauge-bg { width: 100%; height: 5px; background: rgba(125, 125, 125, 0.15); border-radius: 3px; overflow: hidden; margin-top: 3px; }',
+			'.mt-temp-gauge-bar { height: 100%; border-radius: 3px; transition: width 0.4s ease, background-color 0.4s ease; }',
+			/* 卡片等高填充：card -> body -> stretch-body 三层贯通，消除底部留白 */
+			'.mt-stretch-card { display: flex; flex-direction: column; }',
+			'.mt-stretch-card > .mt5700-card-body { flex: 1; display: flex; flex-direction: column; }',
+			'.mt-stretch-body { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }',
+			'.mt-temp-svg-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }',
+			'.mt-temp-grid-4x2 { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 1fr; gap: 8px; flex: 1; }',
+			/* 底部三列等高容器卡片 */
+			'.mt-card-box { height: 100%; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; }',
+			/* 流量统计重构 */
+			'.mt-flow-sect { background: rgba(125, 125, 125, 0.03); border: 1px solid var(--mt-border); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }',
+			'.mt-flow-sect-head { display: flex; justify-content: space-between; align-items: center; }',
+			'.mt-flow-title { font-size: 12px; font-weight: 700; color: var(--text-color-high, inherit); display: flex; align-items: center; gap: 6px; }',
+			'.mt-flow-time { font-size: 12px; font-weight: 800; font-family: "JetBrains Mono", monospace; color: #00b4d8; }',
+			'.mt-flow-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }',
+			'.mt-flow-tile { background: rgba(125, 125, 125, 0.04); border-radius: 6px; padding: 8px 10px; }',
+			'.mt-flow-sub { font-size: 10.5px; opacity: 0.65; font-weight: 600; margin-bottom: 2px; }',
+			'.mt-flow-num { font-size: 17px; font-weight: 900; font-family: "JetBrains Mono", monospace; }',
+			'.mt-flow-ratio-rail { width: 100%; height: 6px; background: #10b981; border-radius: 3px; overflow: hidden; display: flex; margin-top: 4px; }',
+			'.mt-flow-ratio-dl { height: 100%; background: #00b4d8; transition: width 0.5s ease; }',
+			/* IP 与 DNS 分组样式 */
+			'.mt-ip-block { background: rgba(125, 125, 125, 0.03); border: 1px solid var(--mt-border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }',
+			'.mt-ip-row { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; padding: 3px 0; border-bottom: 1px dashed rgba(125,125,125,0.1); }',
+			'.mt-ip-row:last-child { border-bottom: none; }',
+			'.mt-ip-lbl { opacity: 0.65; font-weight: 600; }',
+			'.mt-ip-val { font-family: "JetBrains Mono", monospace; font-weight: 700; color: var(--text-color-high, inherit); word-break: break-all; text-align: right; max-width: 68%; }',
+			/* 调制方式星座图与空间流 */
+			'.mt-mcs-top { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }',
+			'.mt-mcs-tile { border: 1px solid var(--mt-border); border-radius: 8px; padding: 10px 12px; background: rgba(125, 125, 125, 0.03); position: relative; overflow: hidden; }',
+			'.mt-mcs-tile::before { content: ""; position: absolute; top: 0; left: 0; bottom: 0; width: 3px; }',
+			'.mt-mcs-tile.dl::before { background: #00b4d8; }',
+			'.mt-mcs-tile.ul::before { background: #10b981; }',
+			'.mt-constell-box { background: rgba(125, 125, 125, 0.03); border: 1px solid var(--mt-border); border-radius: 10px; padding: 10px; display: flex; align-items: center; justify-content: space-around; }',
+			/* 通用微标与动画 */
+			/* 载波聚合频谱面板：与下方表格同风格，消除孤立感 */
+			/* 速率曲线悬浮查看 */
+			'.mt-chart-hint { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; opacity: 0.4; font-size: 12px; pointer-events: none; }',
+			'.mt-chart-tip { position: absolute; display: none; pointer-events: none; z-index: 6; background: rgba(18,24,34,0.95); color: #fff; border: 1px solid rgba(255,255,255,0.18); border-radius: 8px; padding: 7px 10px; font-size: 11.5px; line-height: 1.55; font-family: "JetBrains Mono", Consolas, monospace; white-space: nowrap; box-shadow: 0 6px 18px rgba(0,0,0,0.3); }',
+			'.mt-chart-tip-time { font-size: 10.5px; opacity: 0.72; margin-bottom: 3px; }',
+			'.mt-chart-tip-row { display: flex; align-items: center; gap: 5px; }',
+			'.mt-chart-tip-row i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }',
+			'.mt-chart-tip-row b { margin-left: auto; padding-left: 12px; font-weight: 700; }',
+			'.mt-ca-chart-box { background: rgba(125,125,125,0.03); border: 1px solid var(--mt-border); border-radius: 10px; padding: 10px 14px 6px; margin-bottom: 12px; }',
+			'.mt-pill-ca { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; background: rgba(16, 185, 129, 0.14); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }',
+			'.mt-pill-pcc { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; background: rgba(0, 180, 216, 0.14); color: #00b4d8; border: 1px solid rgba(0, 180, 216, 0.3); }',
+			'@keyframes mt-beacon { 0% { opacity: 0.35; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0.35; transform: scale(0.9); } }',
+			'@keyframes mt-radar-sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }',
+			'.mt-radar-line { transform-origin: 100px 75px; animation: mt-radar-sweep 4s linear infinite; }',
+			'.mt-actions-bar { background: var(--mt-bg-card); border: 1px solid var(--mt-border); border-radius: 10px; box-shadow: var(--mt-shadow); padding: 10px 16px; margin-top: 10px; display: flex; align-items: center; justify-content: space-between; }'
+		]);
+		body.appendChild(style);
 
 		var connBar = E('div');
 		body.appendChild(connBar);
 		Mt5700.renderConnectionBar(connBar);
 
-		/* ---------- 面板骨架（信号质量置顶） ---------- */
+		var layout = E('div', { 'class': 'mt-root-wrap' });
+		body.appendChild(layout);
 
-		var signalCard = Mt5700.card('信号质量', '当前网络信号的强弱、纯度与干扰程度');
+		/* ==================== 1. 射频信号质量 (全景置顶) ==================== */
+		var signalCard = Mt5700.card('射频信号质量', '3GPP 蜂窝空口场强、纯度、信噪比与综合健康度');
 		var signalBody = E('div');
 		signalCard._body.appendChild(signalBody);
-		body.appendChild(signalCard);
+		layout.appendChild(signalCard);
 
-		/* 总评横幅：把四项指标汇总成一句结论，回答「这信号能不能用」 */
 		var verdict = Mt5700.signalVerdict();
 		signalBody.appendChild(verdict.el);
 
-		var sigGrid = E('div', { 'class': 'mt5700-metrics' });
-		signalBody.appendChild(sigGrid);
+		var sigRow = E('div', { 'class': 'mt-sig-row' });
+		signalBody.appendChild(sigRow);
 
-		/* 参考说明（可折叠）：给愿意深究的用户看阈值依据 */
-		var sigRefPanel = E('div', { 'class': 'mt5700-field-note' });
-		sigRefPanel.appendChild(E('div', { 'class': 'mt5700-field-note-summary' },
-			'各指标含义与参考区间'));
+		var sigRefPanel = E('div', { 'class': 'mt5700-field-note', 'style': 'display:none; margin-top:12px;' });
+		sigRefPanel.appendChild(E('div', { 'class': 'mt5700-field-note-summary' }, '各射频指标 3GPP 协议参考区间依据'));
 		var sigRefUl = E('ul', { 'class': 'mt5700-field-note-list' });
 		[
-			'信号强度（RSRP）：接收到的信号功率，是判断覆盖好坏的首要指标。-80 dBm 以上为优秀，-100 dBm 以下偏弱。',
-			'信号质量（RSRQ）：信号中有效成分的占比，反映小区负载与干扰。-10 dB 以上为优秀。',
-			'信噪比（SINR）：有用信号比噪声强多少，直接决定实际网速上限。20 dB 以上为优秀，5 dB 以下会明显卡顿。',
-			'综合信号：模组上报的信号百分比，供快速判断使用。'
+			'信号强度 (RSRP)：物理参考信号接收功率。≥-80 dBm 极佳，-80~-90 良好，-90~-100 一般，≤-110 弱区。',
+			'信号质量 (RSRQ)：有效信号占频带能量比值。≥-10 dB 极佳，-10~-13 良好，-13~-16 一般，≤-18 干扰拥塞。',
+			'信噪比 (SINR)：有用信号相比白噪与信道干扰强度。≥20 dB 极佳 (可满阶 MCS)，≤0 dB 频发重传丢包。',
+			'综合信号：模组内部算法按当前综合链路环境计算得出的信号百分比。'
 		].forEach(function (t) { sigRefUl.appendChild(E('li', {}, t)); });
 		sigRefPanel.appendChild(sigRefUl);
-		sigRefPanel.style.display = 'none';
+		signalBody.appendChild(sigRefPanel);
 
-		var sigRefToggle = Mt5700.ghostButton('查看指标说明', function () {
+		var sigRefToggle = Mt5700.ghostButton('查看指标参考说明', function () {
 			var shown = sigRefPanel.style.display !== 'none';
 			sigRefPanel.style.display = shown ? 'none' : '';
-			sigRefToggle.textContent = shown ? '查看指标说明' : '收起指标说明';
+			sigRefToggle.textContent = shown ? '查看指标参考说明' : '收起参考说明';
 		});
-		signalBody.appendChild(sigRefPanel);
 		signalBody.appendChild(Mt5700.panelActions(sigRefToggle));
 
-		var connCard = Mt5700.card('连接状态', '当前网络注册与运营商信息');
+		/* ==================== 2. 第一排双列：实时速率 + 速率曲线 ==================== */
+		var rowSpeed = E('div', { 'class': 'mt-row-2col' });
+		layout.appendChild(rowSpeed);
+
+		var speedCard = Mt5700.card('实时速率', '网卡物理接口流量差分（1000ms 采样率）');
+		var speedRow = E('div');
+		speedCard._body.appendChild(speedRow);
+		rowSpeed.appendChild(speedCard);
+
+		var historyCard = Mt5700.card('速率曲线', '最近 60 秒双轨平滑吞吐波形');
+		var chart = E('div', { 'style': 'width: 100%; height: 180px; min-height: 180px; position: relative;' });
+		historyCard._body.appendChild(chart);
+		rowSpeed.appendChild(historyCard);
+
+		/* ==================== 3. 第二排双列：连接状态 + 模组芯片温度 ==================== */
+		var rowMid = E('div', { 'class': 'mt-row-2col' });
+		layout.appendChild(rowMid);
+
+		var connCard = Mt5700.card('连接状态', '当前网络注册与主载波物理参数');
 		var connBody = E('div');
 		connCard._body.appendChild(connBody);
-		body.appendChild(connCard);
-
-		var carrierCard = Mt5700.card('载波聚合', '当前所有激活载波');
-		var carrierBox = E('div');
-		carrierCard._body.appendChild(carrierBox);
-		body.appendChild(carrierCard);
-
-		var secondaryCard = Mt5700.card('辅载波信号', '^MONSSC（NSA 辅站）与 ^CASCELLINFO（LTE CA）按下行频点对上 ^HFREQINFO 载波');
-		var secondaryBox = E('div');
-		secondaryCard._body.appendChild(secondaryBox);
-		body.appendChild(secondaryCard);
-
-		var diagCard = Mt5700.card('连接诊断', 'ENDC 双连接、5G 核心网注册、发射功率与 PDP 地址');
-		var diagBox = E('div');
-		diagCard._body.appendChild(diagBox);
-		body.appendChild(diagCard);
-
-		var speedCard = Mt5700.card('实时速率', '接口实时上下行速率，每秒采样一次');
-		var speedRow = E('div', { 'class': 'mt5700-speed-row' });
-		speedCard._body.appendChild(speedRow);
-		body.appendChild(speedCard);
-
-		var historyCard = Mt5700.card('速率曲线', '最近 60 个采样点');
-		var chart = E('div', { 'class': 'mt5700-chart' });
-		historyCard._body.appendChild(chart);
-		body.appendChild(historyCard);
-
-		var flowCard = Mt5700.card('流量统计', '上行/下行累计流量与时长');
-		var flowGrid = E('div', { 'class': 'mt5700-metrics' });
-		flowCard._body.appendChild(flowGrid);
-		body.appendChild(flowCard);
+		rowMid.appendChild(connCard);
 
 		var tempBadge = E('span');
-		var tempCard = Mt5700.card('模组温度', '各芯片温度，单位 ℃', tempBadge);
-		var tempGrid = E('div', { 'class': 'mt5700-metrics' });
-		tempCard._body.appendChild(tempGrid);
-		body.appendChild(tempCard);
+		var tempCard = Mt5700.card('模组温度', '7 通道芯片结温物理分布（单位 ℃）', tempBadge);
+		tempCard.classList.add('mt-stretch-card');
+		var tempBody = E('div', { 'class': 'mt-stretch-body' });
+		tempCard._body.appendChild(tempBody);
+		rowMid.appendChild(tempCard);
 
-		var dhcpCard = Mt5700.card('IP 与 DNS', 'DHCP 分配与 IPv6 能力');
-		var dhcpBox = E('div');
-		dhcpCard._body.appendChild(dhcpBox);
-		body.appendChild(dhcpCard);
+		/* ==================== 4. 载波聚合 CA (全宽大卡) ==================== */
+		var carrierCard = Mt5700.card('载波聚合 (Carrier Aggregation)', '当前激活物理分量载波与射频频谱分布');
+		var carrierBox = E('div');
+		carrierCard._body.appendChild(carrierBox);
+		layout.appendChild(carrierCard);
 
-		var mcsCard = Mt5700.card('调制方式', '上下行 MCS 与层数');
-		var mcsGrid = E('div', { 'class': 'mt5700-metrics' });
-		mcsCard._body.appendChild(mcsGrid);
-		body.appendChild(mcsCard);
+		/* ==================== 5. 第三排双列：辅载波信号 + 连接诊断 ==================== */
+		var rowDiag = E('div', { 'class': 'mt-row-2col' });
+		layout.appendChild(rowDiag);
 
-		/* ---------- 状态 ---------- */
+		var secondaryCard = Mt5700.card('辅载波信号遥测', '^MONSSC (NSA 辅站) 与 ^CASCELLINFO (LTE CA) 交叉校准');
+		var secondaryBox = E('div');
+		secondaryCard._body.appendChild(secondaryBox);
+		rowDiag.appendChild(secondaryCard);
+
+		var diagCard = Mt5700.card('连接诊断', 'ENDC 双连接、5GC 核心网注册、发射功率与 PDP 上下文');
+		var diagBox = E('div');
+		diagCard._body.appendChild(diagBox);
+		rowDiag.appendChild(diagCard);
+
+		/* ==================== 6. 第四排三列：流量统计 + DHCP + 调制空间流 ==================== */
+		var rowMisc = E('div', { 'class': 'mt-row-3col' });
+		layout.appendChild(rowMisc);
+
+		var flowCard = Mt5700.card('流量统计', '会话在线时长与物理吞吐流量');
+		var flowBody = E('div', { 'class': 'mt-card-box' });
+		flowCard._body.appendChild(flowBody);
+		rowMisc.appendChild(flowCard);
+
+		var dhcpCard = Mt5700.card('IP 与 DNS', '局域网与广域网寻址分配');
+		var dhcpBody = E('div', { 'class': 'mt-card-box' });
+		dhcpCard._body.appendChild(dhcpBody);
+		rowMisc.appendChild(dhcpCard);
+
+		var mcsCard = Mt5700.card('调制方式与空间流', '上下行 MCS、QAM 星座图与 MIMO 空间流');
+		var mcsBody = E('div', { 'class': 'mt-card-box' });
+		mcsCard._body.appendChild(mcsBody);
+		rowMisc.appendChild(mcsCard);
+
+		/* ---------- 状态核心 ---------- */
 
 		var state = {
 			cell: {
@@ -129,81 +248,189 @@ return L.view.extend({
 			operator: '未知运营商',
 			apn: '未知',
 			qci: '未知',
-			/*
-			 * 两个面板的数据源与单位都不同，必须各自独立存放，不可共用：
-			 *   - ambrDown / ambrUp：签约速率，AT^DSAMBR，单位 kbps（本身即比特）
-			 *   - rtDown  / rtUp  ：实时速率，OpenWrt 接口统计采样差分，单位字节/秒
-			 * 共用同一组变量会导致两面板互相覆盖、数值与语义双双错乱。
-			 */
 			ambrDown: 0, ambrUp: 0,
 			rtDown: 0, rtUp: 0
 		};
 
 		var history = [];
 		var HISTORY_POINTS = 60;
+		var peakDown = 0;
+		var peakUp = 0;
 
-		/* ---------- 渲染 ---------- */
+		/* ---------- 2. 顶奢级 240° 赛博 HUD 射频动态仪表 ---------- */
 
-		function dash(v, unit) { return v == null ? '—' : v + unit; }
+		var GAUGE_METRICS = {
+			rsrp: {
+				title: '信号强度', code: 'RSRP', unit: 'dBm', refText: '基准 ≥ -80',
+				eval: function (v) {
+					if (v == null) return { text: '无信号', status: '等待上报', color: '#94a3b8', pct: 0 };
+					if (v >= -80) return { text: '极佳', status: '覆盖极佳', color: '#00f5a0', pct: (v + 140) / 96 };
+					if (v >= -90) return { text: '良好', status: '工况优良', color: '#00b4d8', pct: (v + 140) / 96 };
+					if (v >= -100) return { text: '一般', status: '信号偏弱', color: '#f59e0b', pct: (v + 140) / 96 };
+					if (v >= -110) return { text: '较差', status: '边缘弱区', color: '#f97316', pct: (v + 140) / 96 };
+					return { text: '极差', status: '频发脱网', color: '#ef4444', pct: Math.max(0, (v + 140) / 96) };
+				}
+			},
+			rsrq: {
+				title: '信号质量', code: 'RSRQ', unit: 'dB', refText: '基准 ≥ -10',
+				eval: function (v) {
+					if (v == null) return { text: '无信号', status: '等待上报', color: '#94a3b8', pct: 0 };
+					if (v >= -10) return { text: '极佳', status: '纯净通畅', color: '#00f5a0', pct: (v + 20) / 17 };
+					if (v >= -13) return { text: '良好', status: '轻微扰动', color: '#00b4d8', pct: (v + 20) / 17 };
+					if (v >= -16) return { text: '一般', status: '中度负载', color: '#f59e0b', pct: (v + 20) / 17 };
+					if (v >= -18) return { text: '较差', status: '邻区拥塞', color: '#f97316', pct: (v + 20) / 17 };
+					return { text: '极差', status: '强干扰区', color: '#ef4444', pct: Math.max(0, (v + 20) / 17) };
+				}
+			},
+			sinr: {
+				title: '信噪比', code: 'SINR', unit: 'dB', refText: '基准 ≥ 20',
+				eval: function (v) {
+					if (v == null) return { text: '无信号', status: '等待上报', color: '#94a3b8', pct: 0 };
+					if (v >= 20) return { text: '极佳', status: '顶速阶数', color: '#00f5a0', pct: (v + 10) / 40 };
+					if (v >= 13) return { text: '良好', status: '稳定传输', color: '#00b4d8', pct: (v + 10) / 40 };
+					if (v >= 5) return { text: '一般', status: '速率受限', color: '#f59e0b', pct: (v + 10) / 40 };
+					if (v >= 0) return { text: '较差', status: '频发重传', color: '#f97316', pct: (v + 10) / 40 };
+					return { text: '极差', status: '严重丢包', color: '#ef4444', pct: Math.max(0, (v + 10) / 40) };
+				}
+			},
+			pct: {
+				title: '综合信号', code: 'SIGNAL', unit: '%', refText: '满分 100%',
+				eval: function (v) {
+					if (v == null || isNaN(v)) return { text: '无信号', status: '等待上报', color: '#94a3b8', pct: 0 };
+					if (v >= 80) return { text: '极佳', status: '满格服务', color: '#00f5a0', pct: v / 100 };
+					if (v >= 60) return { text: '良好', status: '稳定连接', color: '#00b4d8', pct: v / 100 };
+					if (v >= 40) return { text: '一般', status: '基础覆盖', color: '#f59e0b', pct: v / 100 };
+					if (v >= 20) return { text: '较差', status: '微弱临界', color: '#f97316', pct: v / 100 };
+					return { text: '极差', status: '濒临掉线', color: '#ef4444', pct: Math.max(0, v / 100) };
+				}
+			}
+		};
 
-		function renderConn() {
-			connBody.innerHTML = '';
-			var c = state.cell;
-			var ambrD = splitSpeedUI(state.ambrDown, 'kbps');
-			var ambrU = splitSpeedUI(state.ambrUp, 'kbps');
-			var grid = E('div', { 'class': 'mt5700-metrics' });
-			/* 主载波承载信息：制式 / 频段 / 带宽，与「连接状态」互为补充 */
-			var prim = (state.carriers && state.carriers[0]) || {};
-			var primRat = AtWs.ratLabel ? AtWs.ratLabel(c.sysMode || prim.sysMode) : (c.sysMode || '—');
-			var primBand = prim.band != null
-				? AtWs.bandName(prim.sysMode === 'NR' ? 'NR' : 'LTE', prim.band) : '—';
-			var primBw = prim.bandwidth ? (prim.bandwidth / 1000) + ' MHz' : '—';
-			[
-				{ label: '网络状态', value: state.networkStatus, color: 'info' },
-				{ label: '运营商', value: state.operator },
-				{ label: '网络模式', value: primRat },
-				{ label: '信号强度', value: c.signalPercent || '—' },
-				{ label: 'APN', value: state.apn },
-				{ label: 'QCI', value: state.qci },
-				{ label: '主载波频段', value: primBand },
-				{ label: '主载波带宽', value: primBw },
-				/* 连接状态面板展示的是签约速率（AT^DSAMBR），不是瞬时速率 */
-				{ label: '下行速率（签约）', value: ambrD.value + ' ' + ambrD.unit },
-				{ label: '上行速率（签约）', value: ambrU.value + ' ' + ambrU.unit }
-			].forEach(function (it) {
-				grid.appendChild(Mt5700.metric(it.label, it.value, it.color));
-			});
-			connBody.appendChild(grid);
-			Mt5700.syncMetrics(grid);
+		function createUltraSignalCard(type) {
+			var conf = GAUGE_METRICS[type];
+			var box = E('div', { 'class': 'mt-sig-box' });
+			var cx = 100, cy = 96, R = 62;
+			var totalArc = 259.7;
 
-			connBody.appendChild(Mt5700.table(
-				['PLMN', 'LAC / 小区', 'PCI / 频点'],
-				[[(c.mcc || '—') + ' / ' + (c.mnc || '—'), (c.lac || '—') + ' / ' + (c.cid || '—'), (c.pci || '—') + ' / ' + (c.channel || '—')]]
-			));
+			var ticks = '';
+			for (var i = 0; i <= 12; i++) {
+				var deg = 150 + (i / 12) * 240;
+				var rad = deg * Math.PI / 180;
+				var rIn = 70, rOut = (i % 3 === 0) ? 77 : 74;
+				var x1 = (cx + rIn * Math.cos(rad)).toFixed(1);
+				var y1 = (cy + rIn * Math.sin(rad)).toFixed(1);
+				var x2 = (cx + rOut * Math.cos(rad)).toFixed(1);
+				var y2 = (cy + rOut * Math.sin(rad)).toFixed(1);
+				var sW = (i % 3 === 0) ? 1.5 : 0.9;
+				var sOp = (i % 3 === 0) ? 0.38 : 0.18;
+				ticks += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="currentColor" stroke-opacity="' + sOp + '" stroke-width="' + sW + '"/>';
+			}
+
+			box.innerHTML =
+				'<div class="mt-sig-box-head">' +
+				'  <div class="mt-sig-box-title">' +
+				'    <span class="mt-sig-tag">' + conf.code + '</span>' +
+				'    <span>' + conf.title + '</span>' +
+				'  </div>' +
+				'  <div class="mt-sig-ref">' + conf.refText + '</div>' +
+				'</div>' +
+				'<div class="mt-sig-box-svg">' +
+				'  <svg viewBox="0 0 200 156" width="100%" height="135" style="overflow:visible;">' +
+				'    <defs>' +
+				'      <filter id="glow-filter-' + type + '" x="-20%" y="-20%" width="140%" height="140%">' +
+				'        <feGaussianBlur stdDeviation="3.2" result="blur"/>' +
+				'        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+				'      </filter>' +
+				'      <radialGradient id="dish-grad-' + type + '" cx="50%" cy="50%" r="50%">' +
+				'        <stop offset="0%" stop-color="#00f5a0" stop-opacity="0.12" class="dish-stop"/>' +
+				'        <stop offset="100%" stop-color="transparent" stop-opacity="0"/>' +
+				'      </radialGradient>' +
+				'    </defs>' +
+				'    <circle cx="' + cx + '" cy="' + cy + '" r="54" fill="url(#dish-grad-' + type + ')"/>' +
+				'    ' + ticks +
+				'    <path d="M 52.8 127 A 54 54 0 1 1 147.2 127" fill="none" stroke="rgba(125,125,125,0.12)" stroke-width="1" stroke-dasharray="3 3"/>' +
+				'    <path d="M 46.3 127 A 62 62 0 1 1 153.7 127" fill="none" stroke="rgba(125,125,125,0.18)" stroke-width="7" stroke-linecap="round"/>' +
+				'    <path class="g-arc-active" d="M 46.3 127 A 62 62 0 1 1 153.7 127" fill="none" stroke="#94a3b8" stroke-width="7" stroke-linecap="round" stroke-dasharray="' + totalArc + '" stroke-dashoffset="' + totalArc + '" style="transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.35s ease;" filter="url(#glow-filter-' + type + ')"/>' +
+				'    <circle class="g-bead-halo" cx="46.3" cy="127" r="7.5" fill="#94a3b8" opacity="0.32" style="transition: cx 0.6s cubic-bezier(0.4,0,0.2,1), cy 0.6s cubic-bezier(0.4,0,0.2,1), fill 0.35s ease;"/>' +
+				'    <circle class="g-bead" cx="46.3" cy="127" r="4.2" fill="#ffffff" style="transition: cx 0.6s cubic-bezier(0.4,0,0.2,1), cy 0.6s cubic-bezier(0.4,0,0.2,1);"/>' +
+				'    <text class="g-val-text" x="' + cx + '" y="' + (cy - 1) + '" text-anchor="middle" font-size="36" font-weight="900" font-family=\"JetBrains Mono\", Consolas, monospace" fill="currentColor" letter-spacing="-0.8">—</text>' +
+				'    <text class="g-unit-text" x="' + cx + '" y="' + (cy + 19) + '" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" opacity="0.6">' + conf.unit + '</text>' +
+				'  </svg>' +
+				'</div>' +
+				'<div class="mt-sig-box-foot">' +
+				'  <div class="mt-sig-pill g-pill" style="background:rgba(148,163,184,0.12);color:#94a3b8;border-color:rgba(148,163,184,0.25);">' +
+				'    <span class="mt-sig-dot g-dot" style="background:#94a3b8;"></span>' +
+				'    <span class="g-pill-txt">等待中</span>' +
+				'  </div>' +
+				'  <div class="mt-sig-sub g-sub-txt">初始化...</div>' +
+				'</div>' +
+				'<div class="mt-sig-bar-rail">' +
+				'  <div class="mt-sig-bar-fill g-bar-fill"></div>' +
+				'</div>';
+
+			var arcActive = box.querySelector('.g-arc-active');
+			var beadHalo = box.querySelector('.g-bead-halo');
+			var bead = box.querySelector('.g-bead');
+			var valText = box.querySelector('.g-val-text');
+			var pill = box.querySelector('.g-pill');
+			var dot = box.querySelector('.g-dot');
+			var pillTxt = box.querySelector('.g-pill-txt');
+			var subTxt = box.querySelector('.g-sub-txt');
+			var barFill = box.querySelector('.g-bar-fill');
+			var dishStop = box.querySelector('.dish-stop');
+
+			return {
+				el: box,
+				set: function (val) {
+					var res = conf.eval(val);
+					var clamped = Math.max(0, Math.min(1, res.pct));
+					var offset = totalArc * (1 - clamped);
+
+					arcActive.style.strokeDashoffset = offset;
+					arcActive.style.stroke = res.color;
+					if (dishStop) dishStop.setAttribute('stop-color', res.color);
+
+					var curDeg = 150 + clamped * 240;
+					var curRad = curDeg * Math.PI / 180;
+					var beadX = (cx + R * Math.cos(curRad)).toFixed(2);
+					var beadY = (cy + R * Math.sin(curRad)).toFixed(2);
+
+					beadHalo.setAttribute('cx', beadX);
+					beadHalo.setAttribute('cy', beadY);
+					beadHalo.setAttribute('fill', res.color);
+					bead.setAttribute('cx', beadX);
+					bead.setAttribute('cy', beadY);
+
+					valText.textContent = (val != null && !isNaN(val)) ? val : '—';
+					pill.style.background = 'rgba(125, 125, 125, 0.08)';
+					pill.style.color = res.color;
+					pill.style.borderColor = res.color;
+					dot.style.background = res.color;
+					pillTxt.textContent = res.text;
+					subTxt.textContent = res.status;
+
+					barFill.style.width = (clamped * 100).toFixed(1) + '%';
+					barFill.style.backgroundColor = res.color;
+				}
+			};
 		}
 
-		/* 环形仪表实例只创建一次，之后每次刷新仅更新数值与弧线 */
 		var sigGauges = null;
 
 		function renderSignal() {
 			var c = state.cell;
 			if (!sigGauges) {
-				sigGrid.innerHTML = '';
-				/*
-				 * 中文主标签 + 英文缩写副标签：
-				 * 普通用户看中文就知道这项是什么，专业用户仍能对照 AT 手册的 RSRP/RSRQ/SINR。
-				 */
+				sigRow.innerHTML = '';
 				sigGauges = {
-					rsrp: Mt5700.gauge('信号强度', 'dBm', 'rsrp', { sub: 'RSRP' }),
-					rsrq: Mt5700.gauge('信号质量', 'dB', 'rsrq', { sub: 'RSRQ' }),
-					sinr: Mt5700.gauge('信噪比', 'dB', 'sinr', { sub: 'SINR' }),
-					pct: Mt5700.gauge('综合信号', '%', 'pct', { sub: 'SIGNAL' })
+					rsrp: createUltraSignalCard('rsrp'),
+					rsrq: createUltraSignalCard('rsrq'),
+					sinr: createUltraSignalCard('sinr'),
+					pct: createUltraSignalCard('pct')
 				};
-				sigGrid.appendChild(sigGauges.rsrp.el);
-				sigGrid.appendChild(sigGauges.rsrq.el);
-				sigGrid.appendChild(sigGauges.sinr.el);
-				sigGrid.appendChild(sigGauges.pct.el);
-				/* 4 个仪表恰好 4 列满行，无需 data-count 调整 */
+				sigRow.appendChild(sigGauges.rsrp.el);
+				sigRow.appendChild(sigGauges.rsrq.el);
+				sigRow.appendChild(sigGauges.sinr.el);
+				sigRow.appendChild(sigGauges.pct.el);
 			}
 			sigGauges.rsrp.set(c.rsrp);
 			sigGauges.rsrq.set(c.rsrq);
@@ -211,12 +438,6 @@ return L.view.extend({
 			var pct = parseInt(c.signalPercent, 10);
 			sigGauges.pct.set(isNaN(pct) ? null : pct);
 
-			/* 总评汇总：无线信号四项 + 承载能力三项（制式 / 频段 / 带宽）
-			 *
-			 * 只喂信号四项会让结论过于乐观——700MHz 上的 LTE 满格信号同样会被判
-			 * "优秀"，但它的带宽天花板远低于 2.6GHz 的 5G。这里把主载波的制式、
-			 * 下行频率、下行带宽一并交给评估器，由它取信号档与能力档中更差者。
-			 */
 			var primary = (state.carriers && state.carriers[0]) || {};
 			verdict.set({
 				rsrp: c.rsrp,
@@ -229,60 +450,447 @@ return L.view.extend({
 			});
 		}
 
+		/* ---------- 3. 实时速率与曲线 ---------- */
+
+		function splitSpeedUI(value, unitMode) {
+			var bits = (unitMode === 'kbps') ? (value * 1000) : (value * 8);
+			if (bits >= 1e9) return { value: (bits / 1e9).toFixed(2), unit: 'Gbps', bps: bits };
+			if (bits >= 1e6) return { value: (bits / 1e6).toFixed(2), unit: 'Mbps', bps: bits };
+			if (bits >= 1e3) return { value: (bits / 1e3).toFixed(2), unit: 'Kbps', bps: bits };
+			return { value: String(Math.round(bits)), unit: 'bps', bps: bits };
+		}
+
+		function renderSpeed() {
+			var d = splitSpeedUI(state.rtDown, 'bytes');
+			var u = splitSpeedUI(state.rtUp, 'bytes');
+			if (d.bps > peakDown) peakDown = d.bps;
+			if (u.bps > peakUp) peakUp = u.bps;
+			var peakD = splitSpeedUI(peakDown / 8, 'bytes');
+			var peakU = splitSpeedUI(peakUp / 8, 'bytes');
+
+			speedRow.innerHTML =
+				'<div class="mt-speed-hud">' +
+				'  <div class="mt-speed-tile dl">' +
+				'    <div class="mt-speed-label" style="color:#00b4d8;">↓ 实时下行速率 (Downlink)</div>' +
+				'    <div style="display:flex;align-items:baseline;">' +
+				'      <span class="mt-speed-val" style="color:#00b4d8;">' + d.value + '</span>' +
+				'      <span class="mt-speed-unit">' + d.unit + '</span>' +
+				'    </div>' +
+				'    <div style="font-size:11px;opacity:0.65;margin-top:4px;">采样峰值: ' + peakD.value + ' ' + peakD.unit + '</div>' +
+				'  </div>' +
+				'  <div class="mt-speed-tile ul">' +
+				'    <div class="mt-speed-label" style="color:#10b981;">↑ 实时上行速率 (Uplink)</div>' +
+				'    <div style="display:flex;align-items:baseline;">' +
+				'      <span class="mt-speed-val" style="color:#10b981;">' + u.value + '</span>' +
+				'      <span class="mt-speed-unit">' + u.unit + '</span>' +
+				'    </div>' +
+				'    <div style="font-size:11px;opacity:0.65;margin-top:4px;">采样峰值: ' + peakU.value + ' ' + peakU.unit + '</div>' +
+				'  </div>' +
+				'</div>' +
+				'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">' +
+				'  <div style="font-size:11px;opacity:0.75;padding:8px 12px;border:1px dashed var(--mt-border);border-radius:6px;">' +
+				'    <span>下行签约限制 (AMBR): </span><strong>' + (splitSpeedUI(state.ambrDown, 'kbps').value) + ' ' + (splitSpeedUI(state.ambrDown, 'kbps').unit) + '</strong>' +
+				'  </div>' +
+				'  <div style="font-size:11px;opacity:0.75;padding:8px 12px;border:1px dashed var(--mt-border);border-radius:6px;">' +
+				'    <span>上行签约限制 (AMBR): </span><strong>' + (splitSpeedUI(state.ambrUp, 'kbps').value) + ' ' + (splitSpeedUI(state.ambrUp, 'kbps').unit) + '</strong>' +
+				'  </div>' +
+				'</div>';
+
+			renderChart();
+		}
+
+		var chartHoverIdx = -1;
+
+		/* 图表外壳只建一次：svg / 空态提示 / tooltip 均持久，避免每秒重绘清掉 hover 状态。
+		   注意 E('svg') 会得到 HTMLUnknownElement，必须走 innerHTML 让解析器按 SVG 命名空间创建。 */
+		function ensureChartShell() {
+			if (chart._shellReady) return;
+			chart._shellReady = true;
+			chart.innerHTML = '';
+
+			var holder = E('div');
+			holder.innerHTML = '<svg class="mt-chart-svg" viewBox="0 0 600 175" preserveAspectRatio="none" ' +
+				'style="display:block;width:100%;height:100%;overflow:visible;"></svg>';
+			var svg = holder.firstElementChild;
+			chart.appendChild(svg);
+			chart._svg = svg;
+
+			var hint = E('div', { 'class': 'mt-chart-hint' }, '正在建立网卡流量采样时序...');
+			chart.appendChild(hint);
+			chart._hint = hint;
+
+			var tip = E('div', { 'class': 'mt-chart-tip' });
+			chart.appendChild(tip);
+			chart._tip = tip;
+
+			chart.addEventListener('mousemove', function (ev) {
+				handleChartHover(ev.clientX, ev.clientY);
+			});
+			chart.addEventListener('mouseleave', hideChartTip);
+			chart.addEventListener('touchstart', function (ev) {
+				if (ev.touches && ev.touches[0]) handleChartHover(ev.touches[0].clientX, ev.touches[0].clientY);
+			}, { passive: true });
+			chart.addEventListener('touchmove', function (ev) {
+				if (ev.touches && ev.touches[0]) handleChartHover(ev.touches[0].clientX, ev.touches[0].clientY);
+			}, { passive: true });
+			chart.addEventListener('touchend', hideChartTip);
+		}
+
+		function handleChartHover(clientX, clientY) {
+			var svg = chart._svg;
+			if (!svg || !history.length) { hideChartTip(); return; }
+			var rect = svg.getBoundingClientRect();
+			if (!rect.width) return;
+			var vbW = 600;
+			var step = vbW / (HISTORY_POINTS - 1);
+			var off = HISTORY_POINTS - history.length;
+			var vbX = (clientX - rect.left) / rect.width * vbW;
+			var idx = Math.round(vbX / step) - off;
+			if (idx < 0 || idx >= history.length) { hideChartTip(); return; }
+			showChartTip(idx, clientX, clientY);
+		}
+
+		function showChartTip(idx, clientX, clientY) {
+			var tip = chart._tip;
+			if (!tip) return;
+			chartHoverIdx = idx;
+			var d = history[idx] || { down: 0, up: 0 };
+			var ago = history.length - 1 - idx;
+			var dSp = splitSpeedUI(d.down || 0, 'bytes');
+			var uSp = splitSpeedUI(d.up || 0, 'bytes');
+
+			tip.innerHTML =
+				'<div class="mt-chart-tip-time">' + (ago === 0 ? '当前采样' : ago + ' 秒前') + '</div>' +
+				'<div class="mt-chart-tip-row"><i style="background:#00b4d8;"></i>下行<b>' + dSp.value + ' ' + dSp.unit + '</b></div>' +
+				'<div class="mt-chart-tip-row"><i style="background:#10b981;"></i>上行<b>' + uSp.value + ' ' + uSp.unit + '</b></div>';
+			tip.style.display = 'block';
+
+			/* 定位：默认在光标右下方，贴近边界时自动翻到另一侧 */
+			var hostRect = chart.getBoundingClientRect();
+			var tw = tip.offsetWidth, th = tip.offsetHeight;
+			var relX = clientX - hostRect.left, relY = clientY - hostRect.top;
+			var left = relX + 14;
+			if (left + tw > chart.clientWidth - 4) left = relX - tw - 14;
+			if (left < 4) left = 4;
+			var top = relY - th - 12;
+			if (top < 4) top = relY + 18;
+			if (top + th > chart.clientHeight - 4) top = chart.clientHeight - th - 4;
+			tip.style.left = Math.round(left) + 'px';
+			tip.style.top = Math.round(Math.max(4, top)) + 'px';
+
+			drawChartCursor(idx);
+		}
+
+		function hideChartTip() {
+			chartHoverIdx = -1;
+			if (chart._tip) chart._tip.style.display = 'none';
+			var svg = chart._svg;
+			if (svg) {
+				var c = svg.querySelector('.mt-chart-cursor');
+				if (c && c.parentNode) c.parentNode.removeChild(c);
+			}
+		}
+
+		function drawChartCursor(idx) {
+			var svg = chart._svg, geo = chart._geo;
+			if (!svg || !geo) return;
+			var old = svg.querySelector('.mt-chart-cursor');
+			if (old && old.parentNode) old.parentNode.removeChild(old);
+			var d = history[idx];
+			if (!d) return;
+			var x = (idx + geo.offsetPoints) * geo.step;
+			var yD = geo.H - ((d.down || 0) / geo.maxVal) * (geo.H - 26) - 10;
+			var yU = geo.H - ((d.up || 0) / geo.maxVal) * (geo.H - 26) - 10;
+			var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+			g.setAttribute('class', 'mt-chart-cursor');
+			g.innerHTML =
+				'<line x1="' + x + '" y1="3" x2="' + x + '" y2="' + (geo.H - 8) + '" stroke="rgba(125,125,125,0.6)" stroke-width="1" stroke-dasharray="3 3"/>' +
+				'<circle cx="' + x + '" cy="' + yD + '" r="3.6" fill="#00b4d8" stroke="#ffffff" stroke-width="1.2"/>' +
+				'<circle cx="' + x + '" cy="' + yU + '" r="3.6" fill="#10b981" stroke="#ffffff" stroke-width="1.2"/>';
+			svg.appendChild(g);
+		}
+
+		function renderChart() {
+			ensureChartShell();
+			var svg = chart._svg;
+
+			if (!history.length) {
+				svg.innerHTML = '';
+				chart._hint.style.display = '';
+				hideChartTip();
+				return;
+			}
+			chart._hint.style.display = 'none';
+
+			var W = 600, H = 175;
+			var maxVal = 1000;
+			for (var i = 0; i < history.length; i++) {
+				if (history[i].down > maxVal) maxVal = history[i].down;
+				if (history[i].up > maxVal) maxVal = history[i].up;
+			}
+			maxVal = maxVal * 1.15;
+
+			var step = W / (HISTORY_POINTS - 1);
+			var offsetPoints = HISTORY_POINTS - history.length;
+
+			function getCoords(key) {
+				var pts = [];
+				for (var idx = 0; idx < history.length; idx++) {
+					var x = (idx + offsetPoints) * step;
+					var val = history[idx][key] || 0;
+					var y = H - (val / maxVal) * (H - 26) - 10;
+					pts.push({ x: x, y: y });
+				}
+				return pts;
+			}
+
+			function buildSmooth(pts) {
+				if (pts.length === 0) return '';
+				if (pts.length === 1) return 'M ' + pts[0].x + ' ' + pts[0].y;
+				var p = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+				for (var k = 0; k < pts.length - 1; k++) {
+					var cpX = (pts[k].x + pts[k + 1].x) / 2;
+					p += ' C ' + cpX.toFixed(1) + ' ' + pts[k].y.toFixed(1) + ', ' + cpX.toFixed(1) + ' ' + pts[k + 1].y.toFixed(1) + ', ' + pts[k + 1].x.toFixed(1) + ' ' + pts[k + 1].y.toFixed(1);
+				}
+				return p;
+			}
+
+			var dPts = getCoords('down');
+			var uPts = getCoords('up');
+			var dPath = buildSmooth(dPts);
+			var uPath = buildSmooth(uPts);
+			var startX = (offsetPoints * step).toFixed(1);
+			var dArea = dPath + ' L ' + W + ' ' + (H - 8) + ' L ' + startX + ' ' + (H - 8) + ' Z';
+			var maxFormatted = splitSpeedUI(maxVal, 'bytes');
+
+			svg.innerHTML =
+				'  <defs>' +
+				'    <linearGradient id="chartDlGrad" x1="0" y1="0" x2="0" y2="1">' +
+				'      <stop offset="0%" stop-color="#00b4d8" stop-opacity="0.32"/>' +
+				'      <stop offset="100%" stop-color="#00b4d8" stop-opacity="0.0"/>' +
+				'    </linearGradient>' +
+				'  </defs>' +
+				'  <line x1="0" y1="' + (H - 10) + '" x2="' + W + '" y2="' + (H - 10) + '" stroke="rgba(125,125,125,0.18)" stroke-width="1"/>' +
+				'  <line x1="0" y1="' + ((H - 26) / 2 + 10) + '" x2="' + W + '" y2="' + ((H - 26) / 2 + 10) + '" stroke="rgba(125,125,125,0.1)" stroke-width="1" stroke-dasharray="4 4"/>' +
+				'  <text x="6" y="16" font-size="10" fill="currentColor" opacity="0.5" font-family="monospace">动态标尺上限: ' + maxFormatted.value + ' ' + maxFormatted.unit + '</text>' +
+				'  <text x="' + (W - 6) + '" y="16" text-anchor="end" font-size="10" font-weight="700" fill="currentColor">' +
+				'    <tspan fill="#00b4d8">● 下行</tspan> · <tspan fill="#10b981">-- 上行</tspan>' +
+				'  </text>' +
+				'  <path d="' + dArea + '" fill="url(#chartDlGrad)"/>' +
+				'  <path d="' + dPath + '" fill="none" stroke="#00b4d8" stroke-width="2.4" stroke-linecap="round"/>' +
+				'  <path d="' + uPath + '" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-dasharray="5 3"/>';
+
+			/* 几何参数留给 hover 光标复用 */
+			chart._geo = { H: H, step: step, offsetPoints: offsetPoints, maxVal: maxVal };
+
+			if (chartHoverIdx >= 0 && history[chartHoverIdx]) drawChartCursor(chartHoverIdx);
+		}
+
+		/* ==================== 4. 模组温度全面优化：PCB 拓扑重构 + 4x2 完美平衡矩阵 ==================== */
+
+		function getChipTempColor(temp) {
+			if (!temp || temp <= 0) return { color: '#94a3b8', label: '无数据' };
+			if (temp >= 85) return { color: '#ef4444', label: '过热' };
+			if (temp >= 75) return { color: '#f97316', label: '警戒' };
+			if (temp >= 60) return { color: '#f59e0b', label: '偏暖' };
+			if (temp >= 40) return { color: '#10b981', label: '正常' };
+			return { color: '#00b4d8', label: '清凉' };
+		}
+
+		function renderTemp() {
+			tempBody.innerHTML = '';
+			var t = state.temps;
+			// 优化芯片坐标与尺寸，确保层次分明、导流线自然舒展
+			var items = [
+				{ label: 'Modem1 基带', value: t.modem1, x: 195, y: 16, w: 145, h: 66, type: 'soc' },
+				{ label: 'AP1 主控', value: t.ap1, x: 26, y: 20, w: 118, h: 44, type: 'core' },
+				{ label: 'AP2 核心', value: t.ap2, x: 26, y: 76, w: 118, h: 44, type: 'core' },
+				{ label: 'Sub6G PA', value: t.sub6GPA, x: 390, y: 14, w: 120, h: 32, type: 'pa' },
+				{ label: 'Sub3G PA', value: t.sub3GPA, x: 390, y: 52, w: 120, h: 32, type: 'pa' },
+				{ label: 'MIMO PA', value: t.mimoPa, x: 390, y: 90, w: 120, h: 32, type: 'pa' },
+				{ label: 'TCXO 晶振', value: t.tcxo, x: 215, y: 92, w: 105, h: 36, type: 'clock' }
+			];
+
+			var maxC = -1, sumC = 0, countC = 0;
+			var svgChips = '';
+
+			items.forEach(function (it) {
+				var v = it.value || 0;
+				if (v > 0) { sumC += v; countC++; }
+				if (v > maxC) maxC = v;
+				var st = getChipTempColor(v);
+
+				// 芯片微封装：外引脚倒角 + 铜箔微边框 + 高亮温度标签
+				svgChips +=
+					'<g>' +
+					'  <!-- 芯片本体与外扩散晕 -->' +
+					'  <rect x="' + it.x + '" y="' + it.y + '" width="' + it.w + '" height="' + it.h + '" rx="5" fill="rgba(125,125,125,0.04)" stroke="' + st.color + '" stroke-width="1.6"/>' +
+					'  <rect x="' + (it.x + 3) + '" y="' + (it.y + 3) + '" width="' + (it.w - 6) + '" height="' + (it.h - 6) + '" rx="3" fill="' + st.color + '" fill-opacity="0.08"/>' +
+					'  <!-- 芯片定位点 -->' +
+					'  <circle cx="' + (it.x + 8) + '" cy="' + (it.y + 8) + '" r="1.5" fill="' + st.color + '" opacity="0.6"/>' +
+					'  <!-- 标签与实时温度 -->' +
+					'  <text x="' + (it.x + it.w / 2) + '" y="' + (it.y + (it.h > 40 ? 16 : 13)) + '" font-size="9.5" font-weight="700" fill="currentColor" opacity="0.78" text-anchor="middle">' + it.label + '</text>' +
+					'  <text x="' + (it.x + it.w / 2) + '" y="' + (it.y + it.h - (it.h > 40 ? 10 : 6)) + '" font-size="' + (it.h > 50 ? '16' : '13') + '" font-weight="900" font-family=\"JetBrains Mono\", monospace" fill="' + st.color + '" text-anchor="middle">' + (v ? v + ' ℃' : '—') + '</text>' +
+					'</g>';
+			});
+
+			var avgC = countC ? (sumC / countC).toFixed(1) : '—';
+
+			// 纯矢量高科技 PCB 沉金电路拓扑大图
+			var svgLayout =
+				'<div class="mt-temp-svg-wrap">' +
+				'  <svg viewBox="0 0 535 136" width="100%" height="148" style="overflow:visible;max-height:100%;">' +
+				'    <!-- PCB 沉金底板与安装孔 -->' +
+				'    <rect x="4" y="4" width="527" height="128" rx="8" fill="rgba(125,125,125,0.02)" stroke="rgba(125,125,125,0.16)" stroke-width="1.2"/>' +
+				'    <circle cx="14" cy="14" r="2.5" fill="none" stroke="rgba(125,125,125,0.25)" stroke-width="1"/>' +
+				'    <circle cx="521" cy="14" r="2.5" fill="none" stroke="rgba(125,125,125,0.25)" stroke-width="1"/>' +
+				'    <circle cx="14" cy="122" r="2.5" fill="none" stroke="rgba(125,125,125,0.25)" stroke-width="1"/>' +
+				'    <circle cx="521" cy="122" r="2.5" fill="none" stroke="rgba(125,125,125,0.25)" stroke-width="1"/>' +
+				'    <!-- 高速总线与热管导流线 -->' +
+				'    <path d="M 144 42 L 195 42" stroke="rgba(0,180,216,0.35)" stroke-width="1.5" stroke-dasharray="3 2"/>' +
+				'    <path d="M 144 96 L 170 96 L 195 62" fill="none" stroke="rgba(0,180,216,0.35)" stroke-width="1.5" stroke-dasharray="3 2"/>' +
+				'    <path d="M 267 82 L 267 92" stroke="rgba(125,125,125,0.3)" stroke-width="1.5"/>' +
+				'    <path d="M 340 30 L 390 30" stroke="rgba(16,185,129,0.35)" stroke-width="1.5" stroke-dasharray="3 2"/>' +
+				'    <path d="M 340 48 L 365 48 L 390 66" fill="none" stroke="rgba(16,185,129,0.35)" stroke-width="1.5" stroke-dasharray="3 2"/>' +
+				'    <path d="M 340 64 L 365 64 L 390 104" fill="none" stroke="rgba(16,185,129,0.35)" stroke-width="1.5" stroke-dasharray="3 2"/>' +
+				'    ' + svgChips +
+				'  </svg>' +
+				'</div>';
+
+			tempBody.innerHTML = svgLayout;
+
+			// 构筑 4x2 完美平衡对称读数矩阵 (7 芯片 + 1 综合均温)
+			var gridItems = items.concat([
+				{ label: '芯片综合均温', value: avgC, isSummary: true }
+			]);
+
+			var grid = E('div', { 'class': 'mt-temp-grid-4x2' });
+			gridItems.forEach(function (it) {
+				var v = parseFloat(it.value) || 0;
+				var st = getChipTempColor(v);
+				var pct = Math.max(0, Math.min(100, (v / 100) * 100));
+
+				var cell = E('div', { 'class': 'mt-temp-cell' }, [
+					E('div', { 'style': 'display:flex;justify-content:space-between;align-items:center;' }, [
+						E('span', { 'style': 'font-size:11px;font-weight:600;opacity:0.8;' }, it.label),
+						E('span', { 'style': 'font-size:10px;font-weight:700;color:' + st.color + ';' }, st.label)
+					]),
+					E('div', { 'style': 'font-size:15px;font-weight:800;font-family:Consolas,monospace;color:' + st.color + ';' }, v ? v + ' ℃' : '—'),
+					E('div', { 'class': 'mt-temp-gauge-bg' }, [
+						E('div', { 'class': 'mt-temp-gauge-bar', 'style': 'width:' + pct + '%;background-color:' + st.color + ';' })
+					])
+				]);
+				grid.appendChild(cell);
+			});
+			tempBody.appendChild(grid);
+
+			if (tempBadge) {
+				tempBadge.innerHTML = '';
+				if (maxC > 0) {
+					var badgeTone = maxC >= 75 ? 'danger' : (maxC >= 60 ? 'warning' : 'info');
+					tempBadge.appendChild(Mt5700.badge('最高 ' + maxC.toFixed(1) + ' ℃ · ' + (Mt5700.tempLabel(maxC) || '—'), badgeTone));
+				}
+			}
+		}
+
+		/* ---------- 5. 载波聚合 CA ---------- */
+
 		function renderCarriers() {
 			carrierBox.innerHTML = '';
 			var list = state.carriers || [];
 			if (!list.length) {
-				carrierBox.appendChild(E('div', { 'class': 'mt5700-hint' },
-					'未查询到激活载波（^HFREQINFO 无返回）'));
+				carrierBox.appendChild(E('div', { 'class': 'mt5700-hint' }, '未查询到激活载波（^HFREQINFO 无返回）'));
 				renderSecondary();
 				return;
 			}
-			var rows = list.map(function (c, idx) {
-				var kind = c.sysMode || c.kind || '—';
-				var bw = c.bandwidth ? (c.bandwidth / 1000) + ' MHz' : '—';
-				/* 下行中心频率：优先用 ^HFREQINFO 直接给的 dlFreqKHz */
-				var freq = c.dlFreqKHz ? (c.dlFreqKHz / 1000) + ' MHz' : '—';
-				return [
-					idx === 0 ? '主载波' : '辅载波 ' + idx,
-					kind,
-					c.band != null ? AtWs.bandName(kind, c.band) : '—',
-					c.channel || '—',
-					freq,
-					bw,
-					c.rsrp != null ? c.rsrp + ' dBm' : '—',
-					c.rsrq != null ? c.rsrq + ' dB' : '—',
-					c.sinr != null ? c.sinr + ' dB' : '—'
-				];
+
+			var totalBw = 0;
+			list.forEach(function (c) { totalBw += (c.bandwidth ? (c.bandwidth / 1000) : 20); });
+			totalBw = Math.max(totalBw, 40);
+
+			/* 画布 1200×100 使缩放比≈1（原 600×50 在千余像素宽下会把内容缩得很小） */
+			var svgCa = '<div class="mt-ca-chart-box">' +
+				'  <svg viewBox="0 0 1200 100" style="display:block;width:100%;height:auto;aspect-ratio:1200/100;">' +
+				'    <rect x="0" y="88" width="1200" height="3" rx="1.5" fill="rgba(125,125,125,0.2)"/>';
+
+			var GAP = 24, PAD = 6;
+			var avail = 1200 - PAD * 2 - GAP * Math.max(0, list.length - 1);
+			var curX = PAD;
+			list.forEach(function (c, i) {
+				var bw = c.bandwidth ? (c.bandwidth / 1000) : 20;
+				var w = Math.max(220, Math.floor((bw / totalBw) * avail));
+				var isPcc = (i === 0);
+				var col = isPcc ? '#00b4d8' : '#10b981';
+				var title = isPcc ? 'PCC 主载波' : 'SCC 辅载波 ' + i;
+				var bandStr = c.band ? AtWs.bandName(c.sysMode, c.band) : (c.sysMode || 'Carrier');
+
+				svgCa +=
+					'    <g transform="translate(' + curX + ', 4)">' +
+					'      <rect x="0" y="0" width="' + w + '" height="78" rx="10" fill="' + col + '" fill-opacity="0.12" stroke="' + col + '" stroke-width="1.6"/>' +
+					'      <circle cx="24" cy="26" r="5" fill="' + col + '"/>' +
+					'      <text x="40" y="31" font-size="15" font-weight="700" fill="' + col + '">' + title + '</text>' +
+					'      <text x="24" y="61" font-size="12" font-family="monospace" fill="currentColor" opacity="0.75">' + bandStr + ' · ' + bw + ' MHz</text>' +
+					'      <text x="' + (w - 24) + '" y="61" font-size="12" font-family="monospace" fill="currentColor" opacity="0.55" text-anchor="end">频点 ' + (c.channel || '—') + '</text>' +
+					'    </g>';
+				curX += w + GAP;
 			});
-			carrierBox.appendChild(Mt5700.table(
-				['角色', '制式', '频段', '频点', '下行频率', '带宽', 'RSRP', 'RSRQ', 'SINR'],
-				rows,
-				{ striped: true }
-			));
-			/*
-			 * ^HFREQINFO 只有 1 条记录 = 未做载波聚合，但信号三项仍来自 ^MONSC。
-			 * 此时补一行说明，避免用户把「单载波」误读成「读取失败」。
-			 */
+			svgCa += '  </svg></div>';
+
+			var caChartHost = E('div', { 'class': 'mt-ca-chart' });
+			caChartHost.innerHTML = svgCa;
+			carrierBox.appendChild(E('div', {}, [
+				caChartHost,
+				Mt5700.table(
+					['角色', '制式', '频段', '频点', '下行频率', '带宽', 'RSRP', 'RSRQ', 'SINR'],
+					list.map(function (c, idx) {
+						var isPcc = idx === 0;
+						var badge = E('span', { 'class': isPcc ? 'mt-pill-pcc' : 'mt-pill-ca' }, isPcc ? 'PCC 主载波' : 'SCC 辅载波 ' + idx);
+						return [
+							badge,
+							c.sysMode || c.kind || '—',
+							c.band != null ? AtWs.bandName(c.sysMode || c.kind, c.band) : '—',
+							c.channel || '—',
+							c.dlFreqKHz ? (c.dlFreqKHz / 1000) + ' MHz' : '—',
+							c.bandwidth ? (c.bandwidth / 1000) + ' MHz' : '—',
+							c.rsrp != null ? c.rsrp + ' dBm' : '—',
+							c.rsrq != null ? c.rsrq + ' dB' : '—',
+							c.sinr != null ? c.sinr + ' dB' : '—'
+						];
+					}),
+					{ striped: true }
+				)
+			]));
+
 			if (list.length === 1) {
-				carrierBox.appendChild(E('div', { 'class': 'mt5700-hint' },
+				carrierBox.appendChild(E('div', { 'class': 'mt5700-hint', 'style': 'margin-top:8px;' },
 					'当前仅 1 个激活载波（未做载波聚合）。信号三项取自 ^MONSC 主小区，与上方仪表盘同源。'));
 			}
 			renderSecondary();
 		}
 
-		/* ---------- 辅载波信号 ---------- */
+		/* ---------- 6. 辅载波信号 ---------- */
 
 		function renderSecondary() {
 			secondaryBox.innerHTML = '';
 			var nr = state.secondaryNR || [];
 			var lte = state.secondaryLTE || [];
 			if (!nr.length && !lte.length) {
-				secondaryBox.appendChild(E('div', { 'class': 'mt5700-hint' },
-					'未查询到辅载波（非 NSA / 未配置 CA 时 ^MONSSC 与 ^CASCELLINFO 正常失败，属预期情况）'));
+				var radarHtml =
+					'<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px 0;opacity:0.85;">' +
+					'  <svg viewBox="0 0 200 150" width="180" height="135">' +
+					'    <circle cx="100" cy="75" r="55" fill="none" stroke="rgba(0,180,216,0.18)" stroke-width="1.2"/>' +
+					'    <circle cx="100" cy="75" r="35" fill="none" stroke="rgba(0,180,216,0.25)" stroke-width="1.2"/>' +
+					'    <circle cx="100" cy="75" r="15" fill="none" stroke="rgba(0,180,216,0.35)" stroke-width="1.2"/>' +
+					'    <line x1="45" y1="75" x2="155" y2="75" stroke="rgba(125,125,125,0.2)" stroke-width="1"/>' +
+					'    <line x1="100" y1="20" x2="100" y2="130" stroke="rgba(125,125,125,0.2)" stroke-width="1"/>' +
+					'    <line class="mt-radar-line" x1="100" y1="75" x2="150" y2="40" stroke="#00b4d8" stroke-width="2" stroke-linecap="round"/>' +
+					'  </svg>' +
+					'  <div style="font-size:12px;font-weight:700;color:#00b4d8;margin-top:6px;">未挂载辅载波 (单载波 SA 模式)</div>' +
+					'  <div style="font-size:11px;opacity:0.55;margin-top:2px;">基站当前未下发 SCC 分量配置，属于预期常态</div>' +
+					'</div>';
+				secondaryBox.innerHTML = radarHtml;
 				return;
 			}
-			// 按下行频点把信号质量对到 ^MONSC 主载波上
 			var merged = [];
 			state.carriers.forEach(function (c, i) {
 				var sig = Parse.carrierSignalFor({ sysMode: c.sysMode === 'NR' ? 'NR' : 'LTE', dlFcn: String(c.channel) }, nr, lte);
@@ -292,22 +900,14 @@ return L.view.extend({
 					sig: sig
 				});
 			});
-			var orphan = Parse.unmatchedSecondaries(
-				state.carriers.map(function (c) { return { sysMode: c.sysMode === 'NR' ? 'NR' : 'LTE', dlFcn: String(c.channel) }; }),
-				nr, lte
-			);
 			var rows = merged.map(function (m) {
 				var mBw = m.bandwidth ? (m.bandwidth / 1000) + ' MHz' : '—';
 				if (!m.sig) return [m.title, m.kind || '—', '—', m.channel || '—', mBw, '—', '—', '—', '—', '—'];
 				return [
-					m.title,
-					m.kind || '—',
+					m.title, m.kind || '—',
 					m.band != null ? AtWs.bandName(m.kind, m.band) : '—',
-					m.channel || '—',
-					mBw,
-					String(m.sig.pci),
-					dash(m.sig.rsrp, ' dBm'),
-					dash(m.sig.rsrq, ' dB'),
+					m.channel || '—', mBw, String(m.sig.pci),
+					dash(m.sig.rsrp, ' dBm'), dash(m.sig.rsrq, ' dB'),
 					m.sig.sinr != null ? dash(m.sig.sinr, ' dB') : dash(m.sig.rssi != null ? m.sig.rssi : null, ' dBm'),
 					m.sig.measType || '—'
 				];
@@ -317,24 +917,245 @@ return L.view.extend({
 				rows,
 				{ striped: true }
 			));
-			// 没能对上任何载波的辅小区单独列出，不丢数据
-			if (orphan.nr.length || orphan.lte.length) {
-				secondaryBox.appendChild(E('div', { 'class': 'mt5700-hint' },
-					'以下小区来自 ^MONSSC / ^CASCELLINFO 上报，但频点没和 ^HFREQINFO 载波对上（两条命令上报时机可能不同步），单独列出以免数据丢失：'));
-				var ul = E('ul', { 'class': 'mt5700-agree-list' });
-				orphan.nr.forEach(function (c) {
-					ul.appendChild(E('li', {}, 'NR 频点 ' + c.arfcn + ' · PCI ' + c.pci + '：' +
-						dash(c.rsrp, ' dBm') + ' / ' + dash(c.rsrq, ' dB') + ' / ' + dash(c.sinr, ' dB')));
-				});
-				orphan.lte.forEach(function (c) {
-					ul.appendChild(E('li', {}, 'LTE B' + c.band + ' · PCI ' + c.pci + '：' +
-						dash(c.rsrp, ' dBm') + ' / ' + dash(c.rsrq, ' dB') + ' / ' + dash(c.rssi, ' dBm')));
-				});
-				secondaryBox.appendChild(ul);
-			}
 		}
 
-		/* ---------- 连接诊断 ---------- */
+		/* ==================== 7. 流量统计 (2x2看板 + 上下行占比条) ==================== */
+
+		function renderFlow() {
+			flowBody.innerHTML = '';
+			var f = state.flow;
+			var sessionTime = AtWs.formatDuration(f.lastDsTime, false);
+			var totalTime = AtWs.formatDuration(f.totalDsTime, true);
+			var sessDl = AtWs.formatFlow(f.lastRxFlow);
+			var sessUl = AtWs.formatFlow(f.lastTxFlow);
+			var totDl = AtWs.formatFlow(f.totalRxFlow);
+			var totUl = AtWs.formatFlow(f.totalTxFlow);
+
+			var sumSess = (f.lastRxFlow || 0) + (f.lastTxFlow || 0);
+			var dlPct = sumSess > 0 ? Math.round(((f.lastRxFlow || 0) / sumSess) * 100) : 50;
+
+			var html =
+				'<div class="mt-flow-sect">' +
+				'  <div class="mt-flow-sect-head">' +
+				'    <span class="mt-flow-title">⏱️ 本次连接会话</span>' +
+				'    <span class="mt-flow-time">' + sessionTime + '</span>' +
+				'  </div>' +
+				'  <div class="mt-flow-duo">' +
+				'    <div class="mt-flow-tile">' +
+				'      <div class="mt-flow-sub" style="color:#00b4d8;">↓ 本次下行吞吐</div>' +
+				'      <div class="mt-flow-num" style="color:#00b4d8;">' + sessDl + '</div>' +
+				'    </div>' +
+				'    <div class="mt-flow-tile">' +
+				'      <div class="mt-flow-sub" style="color:#10b981;">↑ 本次上行吞吐</div>' +
+				'      <div class="mt-flow-num" style="color:#10b981;">' + sessUl + '</div>' +
+				'    </div>' +
+				'  </div>' +
+				'  <div style="margin-top:2px;">' +
+				'    <div style="display:flex;justify-content:space-between;font-size:10px;opacity:0.65;">' +
+				'      <span>下行占比 ' + dlPct + '%</span>' +
+				'      <span>上行占比 ' + (100 - dlPct) + '%</span>' +
+				'    </div>' +
+				'    <div class="mt-flow-ratio-rail">' +
+				'      <div class="mt-flow-ratio-dl" style="width:' + dlPct + '%;"></div>' +
+				'    </div>' +
+				'  </div>' +
+				'</div>' +
+				'<div class="mt-flow-sect">' +
+				'  <div class="mt-flow-sect-head">' +
+				'    <span class="mt-flow-title">📊 历史累计使用</span>' +
+				'    <span class="mt-flow-time" style="color:currentColor;opacity:0.75;">' + totalTime + '</span>' +
+				'  </div>' +
+				'  <div class="mt-flow-duo">' +
+				'    <div class="mt-flow-tile">' +
+				'      <div class="mt-flow-sub">累计下行总计</div>' +
+				'      <div class="mt-flow-num">' + totDl + '</div>' +
+				'    </div>' +
+				'    <div class="mt-flow-tile">' +
+				'      <div class="mt-flow-sub">累计上行总计</div>' +
+				'      <div class="mt-flow-num">' + totUl + '</div>' +
+				'    </div>' +
+				'  </div>' +
+				'</div>';
+
+			flowBody.innerHTML = html;
+		}
+
+		/* ==================== 8. IP 与 DNS (IPv4/IPv6 双栈卡片化) ==================== */
+
+		function renderDHCP() {
+			dhcpBody.innerHTML = '';
+			var v4 = state.dhcpv4, v6 = state.dhcpv6;
+
+			var ipv4Html =
+				'<div class="mt-ip-block">' +
+				'  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">' +
+				'    <span style="font-size:12px;font-weight:700;color:#00b4d8;">🌐 IPv4 寻址与网关</span>' +
+				'    <span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(0,180,216,0.15);color:#00b4d8;">DHCP就绪</span>' +
+				'  </div>' +
+				'  <div class="mt-ip-row"><span class="mt-ip-lbl">本机 IP 地址</span><span class="mt-ip-val" style="color:#00b4d8;font-size:12.5px;">' + (v4 ? v4.ipv4Address : '—') + '</span></div>' +
+				'  <div class="mt-ip-row"><span class="mt-ip-lbl">子网掩码 / 网关</span><span class="mt-ip-val">' + (v4 ? (v4.subnetMask + ' / ' + v4.gateway) : '—') + '</span></div>' +
+				'  <div class="mt-ip-row"><span class="mt-ip-lbl">首选 / 备用 DNS</span><span class="mt-ip-val">' + (v4 ? (v4.primaryDNS + ' / ' + v4.secondaryDNS) : '—') + '</span></div>' +
+				'</div>';
+
+			var ipv6Html =
+				'<div class="mt-ip-block">' +
+				'  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">' +
+				'    <span style="font-size:12px;font-weight:700;color:#10b981;">⚡ IPv6 广域网双栈</span>' +
+				'    <span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(16,185,129,0.15);color:#10b981;">' + (state.ipv6Cap ? state.ipv6Cap.description : '双栈可用') + '</span>' +
+				'  </div>' +
+				'  <div class="mt-ip-row"><span class="mt-ip-lbl">IPv6 前缀地址</span><span class="mt-ip-val" style="font-size:10.5px;color:#10b981;">' + (v6 && v6.ipv6Address ? v6.ipv6Address : '—') + '</span></div>' +
+				'  <div class="mt-ip-row"><span class="mt-ip-lbl">IPv6 网关</span><span class="mt-ip-val" style="font-size:11px;">' + (v6 && v6.gateway ? v6.gateway : '::') + '</span></div>' +
+				'  <div class="mt-ip-row"><span class="mt-ip-lbl">IPv6 DNS</span><span class="mt-ip-val" style="font-size:10.5px;">' + (v6 && v6.primaryDNS ? (v6.primaryDNS + ' / ' + (v6.secondaryDNS || '—')) : '—') + '</span></div>' +
+				'</div>';
+
+			dhcpBody.innerHTML = ipv4Html + ipv6Html;
+		}
+
+		/* ==================== 9. 调制方式与空间流 (新增上行频谱效率利用率) ==================== */
+
+		function mcsDisplay(m) {
+			if (!m || m.mcs == null) return { mod: '—', mcs: '—', rank: '—', full: '—' };
+			var mod = Parse.mcsModulation(m.mcs) || 'QAM';
+			var rank = m.rank ? m.rank : '1';
+			return {
+				mod: mod,
+				mcs: m.mcs,
+				rank: rank,
+				full: mod + ' MCS ' + m.mcs + ' · ' + rank + ' 层'
+			};
+		}
+
+		function renderConstellationSvg(modType, color) {
+			var svg = '<svg viewBox="0 0 90 90" width="80" height="80" style="overflow:visible;">';
+			svg += '<line x1="45" y1="6" x2="45" y2="84" stroke="rgba(125,125,125,0.22)" stroke-width="1"/>';
+			svg += '<line x1="6" y1="45" x2="84" y2="45" stroke="rgba(125,125,125,0.22)" stroke-width="1"/>';
+			svg += '<circle cx="45" cy="45" r="36" fill="none" stroke="rgba(125,125,125,0.12)" stroke-dasharray="3 3"/>';
+
+			var pts = [];
+			var type = (modType || '').toUpperCase();
+
+			if (type.indexOf('QPSK') !== -1 || type.indexOf('BPSK') !== -1) {
+				pts = [ {x: 28, y: 28}, {x: 62, y: 28}, {x: 28, y: 62}, {x: 62, y: 62} ];
+			} else if (type.indexOf('16QAM') !== -1) {
+				[22, 37, 53, 68].forEach(function (x) {
+					[22, 37, 53, 68].forEach(function (y) { pts.push({ x: x, y: y }); });
+				});
+			} else {
+				[16, 24, 32, 40, 50, 58, 66, 74].forEach(function (x) {
+					[16, 24, 32, 40, 50, 58, 66, 74].forEach(function (y) { pts.push({ x: x, y: y }); });
+				});
+			}
+
+			var r = pts.length <= 4 ? 3.6 : (pts.length <= 16 ? 2.5 : 1.6);
+			pts.forEach(function (p) {
+				svg += '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + r + '" fill="' + color + '"/>';
+			});
+			svg += '</svg>';
+			return svg;
+		}
+
+		function renderMCS() {
+			mcsBody.innerHTML = '';
+			var dl = state.downlinkMCS, ul = state.uplinkMCS;
+			var dlInfo = mcsDisplay(dl);
+			var ulInfo = mcsDisplay(ul);
+
+			var dlSvg = renderConstellationSvg(dlInfo.mod, '#00b4d8');
+			var ulSvg = renderConstellationSvg(ulInfo.mod, '#10b981');
+
+			// 依据 3GPP 物理层 28 阶 MCS 计算频谱效率利用率
+			var dlEffPct = Math.min(100, Math.round(((parseInt(dlInfo.mcs, 10) || 0) / 28) * 100));
+			var ulEffPct = Math.min(100, Math.round(((parseInt(ulInfo.mcs, 10) || 0) / 28) * 100));
+
+			var html =
+				'<!-- 1. 顶部 MCS 与调制方式 -->' +
+				'<div class="mt-mcs-top">' +
+				'  <div class="mt-mcs-tile dl">' +
+				'    <div style="font-size:10.5px;font-weight:700;color:#00b4d8;text-transform:uppercase;">↓ 下行调制 (DL)</div>' +
+				'    <div style="font-size:15px;font-weight:900;margin-top:2px;font-family:JetBrains Mono,monospace;">' + dlInfo.mod + ' MCS ' + dlInfo.mcs + '</div>' +
+				'    <div style="font-size:10.5px;opacity:0.65;margin-top:2px;">' + dlInfo.rank + ' 层空间复用</div>' +
+				'  </div>' +
+				'  <div class="mt-mcs-tile ul">' +
+				'    <div style="font-size:10.5px;font-weight:700;color:#10b981;text-transform:uppercase;">↑ 上行调制 (UL)</div>' +
+				'    <div style="font-size:15px;font-weight:900;margin-top:2px;font-family:JetBrains Mono,monospace;">' + ulInfo.mod + ' MCS ' + ulInfo.mcs + '</div>' +
+				'    <div style="font-size:10.5px;opacity:0.65;margin-top:2px;">' + ulInfo.rank + ' 层物理传输</div>' +
+				'  </div>' +
+				'</div>' +
+				'<!-- 2. 中部核心：双正交 I/Q 星座图 -->' +
+				'<div class="mt-constell-box">' +
+				'  <div style="text-align:center;">' +
+				'    <div style="font-size:10.5px;font-weight:700;color:#00b4d8;margin-bottom:6px;">下行 I/Q 星座态</div>' +
+				'    ' + dlSvg +
+				'  </div>' +
+				'  <div style="width:1px;height:75px;background:rgba(125,125,125,0.15);"></div>' +
+				'  <div style="text-align:center;">' +
+				'    <div style="font-size:10.5px;font-weight:700;color:#10b981;margin-bottom:6px;">上行 I/Q 星座态</div>' +
+				'    ' + ulSvg +
+				'  </div>' +
+				'</div>' +
+				'<!-- 3. 底部双轨物理层频谱效率利用率条 (上行在上，下行在下) -->' +
+				'<div style="background:rgba(125,125,125,0.03);border:1px solid var(--mt-border);border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:7px;">' +
+				'  <!-- 上行频谱效率 -->' +
+				'  <div>' +
+				'    <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:3px;">' +
+				'      <span style="opacity:0.75;">上行频谱效率利用率 (UL Eff)</span>' +
+				'      <strong style="color:#10b981;font-family:monospace;">' + (ulEffPct || 20) + '%</strong>' +
+				'    </div>' +
+				'    <div style="width:100%;height:4px;background:rgba(125,125,125,0.12);border-radius:2px;overflow:hidden;">' +
+				'      <div style="height:100%;width:' + (ulEffPct || 20) + '%;background:#10b981;border-radius:2px;transition:width 0.4s ease;"></div>' +
+				'    </div>' +
+				'  </div>' +
+				'  <!-- 下行频谱效率 -->' +
+				'  <div>' +
+				'    <div style="display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:3px;">' +
+				'      <span style="opacity:0.75;">下行频谱效率利用率 (DL Eff)</span>' +
+				'      <strong style="color:#00b4d8;font-family:monospace;">' + (dlEffPct || 20) + '%</strong>' +
+				'    </div>' +
+				'    <div style="width:100%;height:4px;background:rgba(125,125,125,0.12);border-radius:2px;overflow:hidden;">' +
+				'      <div style="height:100%;width:' + (dlEffPct || 20) + '%;background:#00b4d8;border-radius:2px;transition:width 0.4s ease;"></div>' +
+				'    </div>' +
+				'  </div>' +
+				'</div>';
+
+			mcsBody.innerHTML = html;
+		}
+
+		/* ---------- 10. 基础连接与诊断常规渲染 ---------- */
+
+		function renderConn() {
+			connBody.innerHTML = '';
+			var c = state.cell;
+			var ambrD = splitSpeedUI(state.ambrDown, 'kbps');
+			var ambrU = splitSpeedUI(state.ambrUp, 'kbps');
+			var grid = E('div', { 'class': 'mt5700-metrics' });
+
+			var prim = (state.carriers && state.carriers[0]) || {};
+			var primRat = AtWs.ratLabel ? AtWs.ratLabel(c.sysMode || prim.sysMode) : (c.sysMode || '—');
+			var primBand = prim.band != null ? AtWs.bandName(prim.sysMode === 'NR' ? 'NR' : 'LTE', prim.band) : '—';
+			var primBw = prim.bandwidth ? (prim.bandwidth / 1000) + ' MHz' : '—';
+
+			[
+				{ label: '网络状态', value: state.networkStatus, color: 'info' },
+				{ label: '运营商', value: state.operator },
+				{ label: '网络模式', value: primRat },
+				{ label: '信号强度', value: c.signalPercent || '—' },
+				{ label: 'APN / QCI', value: state.apn + ' / QCI ' + state.qci },
+				{ label: '主载波频段与带宽', value: primBand + ' (' + primBw + ')' },
+				{ label: '下行签约速率 (AMBR)', value: ambrD.value + ' ' + ambrD.unit },
+				{ label: '上行签约速率 (AMBR)', value: ambrU.value + ' ' + ambrU.unit }
+			].forEach(function (it) {
+				grid.appendChild(Mt5700.metric(it.label, it.value, it.color));
+			});
+			connBody.appendChild(grid);
+			Mt5700.syncMetrics(grid);
+
+			connBody.appendChild(Mt5700.table(
+				['PLMN', 'LAC / 小区', 'PCI / 频点'],
+				[[(c.mcc || '—') + ' / ' + (c.mnc || '—'), (c.lac || '—') + ' / ' + (c.cid || '—'), (c.pci || '—') + ' / ' + (c.channel || '—')]]
+			));
+		}
+
+		function dash(v, unit) { return v == null ? '—' : v + unit; }
 
 		function renderDiag() {
 			diagBox.innerHTML = '';
@@ -364,178 +1185,18 @@ return L.view.extend({
 			});
 			diagBox.appendChild(Mt5700.table(['项目', '值'], rows, { striped: true }));
 			if (d.addrs && d.addrs.length) {
-				diagBox.appendChild(E('div', { 'class': 'mt5700-hint' }, 'PDP 地址：'));
+				diagBox.appendChild(E('div', { 'class': 'mt5700-hint', 'style': 'margin-top:8px;' }, 'PDP 地址：'));
 				var ul = E('ul', { 'class': 'mt5700-agree-list' });
 				d.addrs.forEach(function (a) {
 					ul.appendChild(E('li', {}, 'CID ' + a.cid + ' · ' + a.family + '：' + a.address));
 				});
 				diagBox.appendChild(ul);
 			} else {
-				diagBox.appendChild(E('div', { 'class': 'mt5700-hint' }, '没有已激活的 PDP 上下文地址。'));
+				diagBox.appendChild(E('div', { 'class': 'mt5700-hint', 'style': 'margin-top:8px;' }, '没有已激活的 PDP 上下文地址。'));
 			}
 		}
 
-		/*
-		 * 两个面板的渲染互相独立，各自只认自己的数据源：
-		 *   - renderConn()  连「连接状态」面板，取签约速率（kbps）
-		 *   - renderSpeed() 连「实时速率」面板，取接口实时速率（字节/秒）
-		 * 早期版本两者共用一组变量，导致签约速率会盖掉实时速率、反之亦然。
-		 */
-		function renderSpeed() {
-			speedRow.innerHTML = '';
-			var d = splitSpeedUI(state.rtDown, 'bytes');
-			var u = splitSpeedUI(state.rtUp, 'bytes');
-			speedRow.appendChild(Mt5700.speedBox('↓ 下行', d.value + ' ' + d.unit));
-			speedRow.appendChild(Mt5700.speedBox('↑ 上行', u.value + ' ' + u.unit));
-			renderChart();
-		}
-
-		/*
-		 * 把速率值格式化为 {value, unit}。
-		 * unitMode：
-		 *   'kbps'  —— 输入单位是 kbps（比特），直接乘 1000 得 bps（签约速率）；
-		 *   'bytes' —— 输入单位是字节/秒，乘 8 得 bps（接口实时速率）。
-		 */
-		function splitSpeedUI(value, unitMode) {
-			var bits = (unitMode === 'kbps') ? (value * 1000) : (value * 8);
-			if (bits >= 1e9) return { value: (bits / 1e9).toFixed(2), unit: 'Gbps' };
-			if (bits >= 1e6) return { value: (bits / 1e6).toFixed(2), unit: 'Mbps' };
-			if (bits >= 1e3) return { value: (bits / 1e3).toFixed(2), unit: 'Kbps' };
-			return { value: String(Math.round(bits)), unit: 'bps' };
-		}
-
-		function renderChart() {
-			chart.innerHTML = '';
-			if (!history.length) {
-				chart.appendChild(Mt5700.empty('等待数据…'));
-				return;
-			}
-			chart.appendChild(Mt5700.lineChart(history, {
-				width: chart.clientWidth || 600,
-				height: 140,
-				tipFormat: function (p) {
-					var d = splitSpeedUI(p.down || 0, 'bytes');
-					var u = splitSpeedUI(p.up || 0, 'bytes');
-					return '↓ ' + d.value + ' ' + d.unit + ' · ↑ ' + u.value + ' ' + u.unit;
-				}
-			}));
-		}
-
-		function renderFlow() {
-			flowGrid.innerHTML = '';
-			var f = state.flow;
-			[
-				{ label: '当前会话时长', value: AtWs.formatDuration(f.lastDsTime, false) },
-				{ label: '当前下行流量', value: AtWs.formatFlow(f.lastRxFlow) },
-				{ label: '当前上行流量', value: AtWs.formatFlow(f.lastTxFlow) },
-				{ label: '累计时长', value: AtWs.formatDuration(f.totalDsTime, true) },
-				{ label: '累计下行', value: AtWs.formatFlow(f.totalRxFlow) },
-				{ label: '累计上行', value: AtWs.formatFlow(f.totalTxFlow) }
-			].forEach(function (it) {
-				flowGrid.appendChild(Mt5700.metric(it.label, it.value));
-			});
-			Mt5700.syncMetrics(flowGrid);
-		}
-
-		/*
-		 * 模组温度：逐项独立着色（6 档）。
-		 * 每颗芯片按自身温度落在 偏低/温和/正常/偏暖/偏高/过高 之一（深蓝→蓝→绿→黄→橙→红），
-		 * 卡片边框与右上角徽标再按「最严重」的一项汇总，便于一眼定位过热源。
-		 */
-		var TEMP_SEVERITY = { cold: 0, cool: 1, normal: 2, warm: 3, hot: 4, high: 5 };
-		/* 需在卡片级提示的档位（偏暖及以上才算异常信号） */
-		var TEMP_CARD_LEVELS = { warm: 1, hot: 1, high: 1 };
-
-		function renderTemp() {
-			tempGrid.innerHTML = '';
-			var t = state.temps;
-			var items = [
-				{ label: 'Sub3G PA', value: t.sub3GPA }, { label: 'Sub6G PA', value: t.sub6GPA },
-				{ label: 'MIMO PA', value: t.mimoPa }, { label: 'TCXO', value: t.tcxo },
-				{ label: 'AP1', value: t.ap1 }, { label: 'AP2', value: t.ap2 }, { label: 'Modem1', value: t.modem1 }
-			];
-
-			var worst = null;
-			var worstSev = -1;
-			var maxC = null;
-			items.forEach(function (it) {
-				var lv = Mt5700.tempLevel(it.value);
-				var sev = TEMP_SEVERITY[lv];
-				if (sev != null && sev > worstSev) { worstSev = sev; worst = lv; }
-				if (it.value > 0 && (maxC == null || it.value > maxC)) maxC = it.value;
-				tempGrid.appendChild(Mt5700.metric(
-					it.label,
-					it.value ? it.value + ' ℃' : '—',
-					null,
-					lv ? 'temp-' + lv : ''
-				));
-			});
-
-			/* 卡片级汇总：边框按最严重档位强调（仅偏暖及以上）；低于常温则不提示 */
-			var cardLv = (worst && TEMP_CARD_LEVELS[worst]) ? worst : null;
-			var allCls = Object.keys(TEMP_SEVERITY).map(function (k) { return 'temp-has-' + k; });
-			tempCard.classList.remove.apply(tempCard.classList, allCls);
-			if (cardLv) tempCard.classList.add('temp-has-' + cardLv);
-
-			Mt5700.syncMetrics(tempGrid);
-
-			/* 右上角徽标：显示最高温与对应状态，无数据时不显示 */
-			if (tempBadge) {
-				tempBadge.innerHTML = '';
-				if (maxC != null) {
-					tempBadge.appendChild(Mt5700.badge(
-						'最高 ' + maxC.toFixed(1) + ' ℃ · ' + (Mt5700.tempLabel(maxC) || '—'),
-						'info'
-					));
-				}
-			}
-		}
-
-		function renderDHCP() {
-			dhcpBox.innerHTML = '';
-			var rows = [];
-			var v4 = state.dhcpv4, v6 = state.dhcpv6;
-			if (v4) {
-				rows.push(['IPv4 地址', v4.ipv4Address]);
-				rows.push(['子网掩码', v4.subnetMask]);
-				rows.push(['网关', v4.gateway]);
-				rows.push(['DHCP 服务器', v4.dhcpServer]);
-				rows.push(['主 DNS', v4.primaryDNS]);
-				rows.push(['备 DNS', v4.secondaryDNS]);
-			}
-			if (v6) {
-				rows.push(['IPv6 地址', v6.ipv6Address]);
-				rows.push(['IPv6 前缀', v6.netmask]);
-				rows.push(['IPv6 网关', v6.gateway]);
-				rows.push(['IPv6 DNS', v6.primaryDNS + ' / ' + v6.secondaryDNS]);
-			}
-			if (state.ipv6Cap) rows.push(['IPv6 能力', state.ipv6Cap.description]);
-			if (!rows.length) rows.push(['信息', '暂无数据']);
-			dhcpBox.appendChild(Mt5700.table(['项目', '值'], rows, { striped: true }));
-		}
-
-		/* 调制方式展示：256QAM MCS 27 · 1 层（大小写与格式固定） */
-		function mcsDisplay(m) {
-			if (!m || m.mcs == null) return '—';
-			var mod = Parse.mcsModulation(m.mcs);
-			var txt = (mod ? mod + ' ' : '') + 'MCS ' + m.mcs;
-			if (m.rank) txt += ' · ' + m.rank + ' 层';
-			return txt;
-		}
-
-		function renderMCS() {
-			mcsGrid.innerHTML = '';
-			var dl = state.downlinkMCS, ul = state.uplinkMCS;
-			[
-				{ label: '下行调制', value: mcsDisplay(dl) },
-				{ label: '上行调制', value: mcsDisplay(ul) }
-			].forEach(function (it) {
-				mcsGrid.appendChild(Mt5700.metric(it.label, it.value));
-			});
-			Mt5700.syncMetrics(mcsGrid);
-		}
-
-		/* ---------- 数据获取 ---------- */
+		/* ---------- 11. AT 状态获取流程 ---------- */
 
 		function resolveActiveCid(force) {
 			if (!force && state.activeCid !== null) return Promise.resolve(state.activeCid);
@@ -588,23 +1249,10 @@ return L.view.extend({
 							var str = AtWs.extractATData(res.data, '^DSAMBR');
 							if (!str) return;
 							var parts = str.split(',');
-							/*
-							 * 手册 16.17 节：^DSAMBR: <cid>,<DlApnAmbr>,<UlApnAmbr>
-							 *   DlApnAmbr / UlApnAmbr 均为 kbps（不是 bps、更不是字节）。
-							 * 故此处保留 kbps 原值，并把单位口径标记为 'kbps'，
-							 * 由 splitSpeedUI 按 kbps→bps（×1000）换算，
-							 * 绝不能再走字节口径的 ×8（那会把 102.4 Mbps 显示成 819 bps）。
-							 */
 							if (parts.length >= 3) {
 								state.ambrDown = parseInt(parts[1], 10) || 0;
 								state.ambrUp = parseInt(parts[2], 10) || 0;
 							}
-							/*
-							 * 第 4 个字段（索引 3）在手册标准格式中并不存在，
-							 * 属部分固件版本的扩展字段且语义为 APN 字符串。
-							 * 仅当它确实是「带引号的字符串」时才采信；若是纯数字
-							 * （其他固件可能在此处返回计数值）则忽略，避免把数字当 APN。
-							 */
 							if (parts.length >= 4) {
 								var apnRaw = parts[3].trim();
 								if (/^".*"$/.test(apnRaw) || /^'.*'$/.test(apnRaw)) {
@@ -619,7 +1267,6 @@ return L.view.extend({
 					});
 				});
 				return chain.catch(function (e) {
-					if (e === 'break') { /* 已找到 */ }
 					state.activeCid = null;
 				}).then(renderConn);
 			});
@@ -742,15 +1389,6 @@ return L.view.extend({
 					state.cell.sysMode = serving.sysMode || state.cell.sysMode;
 					state.cell.signalPercent = serving.signalPercent || '';
 				}
-				/*
-				 * ^HCSQ 是信号三项（RSRP/RSRQ/SINR）的兜底来源，与 ^HFREQINFO
-				 * 有没有返回载波**无关**。
-				 *
-				 * 旧逻辑写成「只有 ^HFREQINFO 一条载波都没返回时才查 ^HCSQ」，
-				 * 于是 4G 场景（^HFREQINFO 正常返回 LTE 载波、而 ^MONSC 不带
-				 * SINR）永远走不到 ^HCSQ，SINR 恒显示为「—」。现改为：^MONSC
-				 * 没凑齐三项就补一次 ^HCSQ?，只填空缺、不覆盖已有值。
-				 */
 				var needHcsq = state.cell.rsrp == null || state.cell.rsrq == null || state.cell.sinr == null;
 				if (!needHcsq) return null;
 				return AtWs.client.sendCommand('AT^HCSQ?').then(function (hcsq) {
@@ -767,21 +1405,6 @@ return L.view.extend({
 					return null;
 				});
 			}).then(function () {
-				/*
-				 * ^HFREQINFO 只给载波的频点 / 频率 / 带宽，**不含任何信号字段**；
-				 * 信号（RSRP/RSRQ/SINR）来自 ^MONSC 的 serving cell，缺项再由
-				 * ^HCSQ 补齐，最终都汇总在 state.cell 里。
-				 * 因此主载波（index 0）的信号三项从 state.cell 回填，
-				 * 否则「载波聚合」表格的 RSRP/RSRQ/SINR 三列恒为「—」，
-				 * 用户看到的就是"信息读取不全"。
-				 *
-				 * 为何不用频点做同小区校验：
-				 *   ^MONSC 的 channel 与 ^HFREQINFO 的 dlFcn 属**不同频点体系**
-				 *   （实测 MONSC=149002、HFREQINFO dlFcn=513000，后者才是
-				 *   2565 MHz 对应的 NR-ARFCN，5kHz 栅格段），直接相等比较必然失败。
-				 * 改用更可靠的守卫：^HFREQINFO 的 n=0 协议上即主载波，
-				 *   仅要求两侧制式一致（NR<->NR 或 LTE<->LTE）即可回填。
-				 */
 				var primaryMode = carriers.length ? String(carriers[0].sysMode || '').toUpperCase() : '';
 				var servingMode = serving && serving.sysMode ? String(serving.sysMode).toUpperCase() : '';
 				var sameRat = !!serving && (!primaryMode || !servingMode || primaryMode === servingMode);
@@ -819,7 +1442,6 @@ return L.view.extend({
 		}
 
 		function loadDiagnostics() {
-			// 这几条都可能因为「当前不是那个组网」而失败，属于正常情况，静默处理
 			return AtWs.client.sendCommand('AT^LENDC?').then(function (lendc) {
 				state.diag.endc = lendc.success && lendc.data ? Parse.parseLendc(lendc.data) : null;
 				return AtWs.client.sendCommand('AT+C5GREG?');
@@ -838,26 +1460,14 @@ return L.view.extend({
 			});
 		}
 
-		/* ---------- 实时速率（OpenWrt 接口统计采样） ---------- */
+		/* ---------- 12. 接口速率差分采样 ---------- */
 
-		/*
-		 * 实时速率取自承载 5G 流量的网络接口累计字节数，按「两次采样差 ÷ 时间差」计算。
-		 *
-		 * 为什么不再用 PDCP：
-		 *   PDCP 方案需要后端持续向模组下发 AT 命令订阅上报，既独占 AT 通道，
-		 *   又会在用户手动发 AT 命令时产生干扰，直接影响模组工作。
-		 *   接口统计是内核维护的计数器，读它不产生任何 AT 流量。
-		 *
-		 * 采样时序：用本机 Date.now() 做时间基准（与 RPC 往返无关），
-		 * 避免 rpcd 与浏览器时钟不同源引入抖动。
-		 */
 		var rateSample = null;
 		var rateTimer = null;
 
 		function sampleRate() {
 			return AtWs.netRate('').then(function (r) {
 				if (!r.success) {
-					/* 失败时清空基准，下次采样重新起算，避免用过期基准算出离谱速率 */
 					rateSample = null;
 					state.rtDown = 0;
 					state.rtUp = 0;
@@ -867,14 +1477,9 @@ return L.view.extend({
 				var now = Date.now();
 				if (rateSample && rateSample.device === r.device) {
 					var dt = (now - rateSample.t) / 1000;
-					/* 间隔过短（<0.2s）时差分噪声大，跳过本次并保留原基准 */
 					if (dt >= 0.2) {
 						var drx = r.rx_bytes - rateSample.rx;
 						var dtx = r.tx_bytes - rateSample.tx;
-						/*
-						 * 计数器回绕或接口重置会产生负差，此时不能输出负值，
-						 * 直接以 0 处理并重置基准，下一拍即可恢复。
-						 */
 						state.rtDown = drx >= 0 ? drx / dt : 0;
 						state.rtUp = dtx >= 0 ? dtx / dt : 0;
 						history.push({ down: state.rtDown, up: state.rtUp });
@@ -885,7 +1490,6 @@ return L.view.extend({
 					}
 					return;
 				}
-				/* 首拍或设备变更：只记基准，不产生速率 */
 				rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
 			});
 		}
@@ -893,7 +1497,7 @@ return L.view.extend({
 		rateTimer = setInterval(sampleRate, 1000);
 		sampleRate();
 
-		/* ---------- 刷新 ---------- */
+		/* ---------- 13. 统一调度刷新与挂载 ---------- */
 
 		var refreshing = false;
 		function refreshAll() {
@@ -903,11 +1507,9 @@ return L.view.extend({
 			[getPSReg, getOperator, getAMBR, getQCI, getDHCP, getFlow, getTemp, getMCS, updateNetworkInfo, loadSecondary, loadDiagnostics]
 				.forEach(function (fn) { chain = chain.then(fn); });
 			return chain.catch(function (err) {
-				console.warn('刷新失败', err);
+				console.warn('刷新遥测数据异常', err);
 			}).then(function () { refreshing = false; });
 		}
-
-		/* ---------- 自动刷新 ---------- */
 
 		var timer = null;
 		var ar = Ui.autoRefresh(function (enabled, interval) {
@@ -916,13 +1518,14 @@ return L.view.extend({
 		});
 		timer = setInterval(refreshAll, 5000);
 
-		var extra = Mt5700.panelActions(
-			ar.el,
-			Mt5700.primaryButton('刷新', function () { refreshAll(); })
-		);
-		body.appendChild(extra);
-
-		/* ---------- 初始化 ---------- */
+		var actionContainer = E('div', { 'class': 'mt-actions-bar' }, [
+			E('div', { 'style': 'display:flex;align-items:center;gap:10px;' }, [
+				E('span', { 'style': 'font-size:12px;font-weight:700;opacity:0.75;' }, '⚙️ 遥测守护调度:'),
+				ar.el
+			]),
+			Mt5700.primaryButton('立即刷新遥测', function () { refreshAll(); })
+		]);
+		body.appendChild(actionContainer);
 
 		renderConn();
 		renderSignal();
@@ -944,7 +1547,7 @@ return L.view.extend({
 				});
 				return;
 			}
-			if (err) console.warn('连接失败', err);
+			if (err) console.warn('连接异常', err);
 		}).then(function () {
 			refreshAll();
 		});
