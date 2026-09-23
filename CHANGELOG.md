@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Docs
+- 「系统拓扑与数据链路」与「自动拨号与全链路协同机制」两处 Mermaid 图替换为高清架构位图（`docs/topology.png`、`docs/auto-dial-sequence.png`），层级与步骤与当前实现保持一致。
+
 ## v1.12.10 (2026-09-20)
 
 ### 新增
