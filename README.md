@@ -60,49 +60,9 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 
 ## 系统拓扑与数据链路
 
-```mermaid
-flowchart TD
-    subgraph UI ["🌐 前端展示层 (LuCI WebUI)"]
-        WebUI["12 个管理页面 (网络状态 / 扫频 / 锁频 / 短信 / AT 终端)"]
-    end
-
-    subgraph RPCD ["⚡ 系统服务中介 (OpenWrt OS)"]
-        Ucode["rpcd ucode 代理脚本<br/><code>/usr/share/rpcd/ucode/mt5700.uc</code>"]
-    end
-
-    subgraph CORE ["🦀 高性能常驻后端 (Rust / Tokio)"]
-        Daemon["常驻守护进程: <code>/usr/bin/at-webserver-rust</code><br/>(仅监听 127.0.0.1 回环 TCP Socket)"]
-        subgraph Engine ["任务引擎与状态机"]
-            E1["自动拨号周期对账"]
-            E2["后台全网扫频"]
-            E3["定时锁频状态机"]
-            E4["消息编解码与推送告警"]
-        end
-        Daemon --- Engine
-    end
-
-    subgraph HARDWARE ["📡 MT5700M 5G 硬件模组"]
-        ATPort["PCUI 串口 (/dev/ttyUSB*)<br/><b>AT 控制面通道</b>"]
-        NDISPort["USB 虚拟网口<br/><b>NDIS 数据面通道</b>"]
-    end
-
-    WebUI -->|"JSON-RPC (HTTP / Session 鉴权)"| Ucode
-    Ucode -->|"TCP (newline-JSON 内部通讯)"| Daemon
-    E1 & E2 & E3 -->|"互斥锁独占控制 (防止多进程串口冲突)"| ATPort
-    Daemon -.->|"拨号就绪触发拉起网口"| NDISPort
-
-    classDef ui fill:#EBF5FB,stroke:#2980B9,stroke-width:2px,color:#1B4F72;
-    classDef rpcd fill:#FEF9E7,stroke:#F39C12,stroke-width:2px,color:#7D6608;
-    classDef rust fill:#FADBD8,stroke:#C0392B,stroke-width:2px,color:#641E16;
-    classDef modem fill:#E8F8F5,stroke:#16A085,stroke-width:2px,color:#0E6251;
-    classDef sub fill:#FFFFFF,stroke:#BDC3C7,stroke-width:1px,color:#2C3E50;
-
-    class WebUI ui;
-    class Ucode rpcd;
-    class Daemon rust;
-    class ATPort,NDISPort modem;
-    class E1,E2,E3,E4 sub;
-```
+<div align="center">
+  <img src="docs/topology.png" alt="系统拓扑与数据链路：LuCI WebUI 经 rpcd ucode 代理至 Rust/Tokio 常驻后端，独占管控 MT5700M 模组" width="880"/>
+</div>
 
 - **无冲突并发管控**：前端不直连串口，所有 AT 请求统一由 Rust 后端执行互斥锁调度与队列管理，杜绝多进程抢占 TTY 引起的数据截断。
 - **超低资源开销**：后端基于 Tokio 异步非阻塞事件驱动，静态内存占用微量，专为低功耗嵌入式路由器优化。
@@ -229,31 +189,9 @@ ubus call service list '{"name":"at-webserver"}'
 > [!CAUTION]
 > **重要认知**：模组 AT 握手在线并不等同于路由器具备上网能力。数据面打通需跨越软硬件各层级协同。
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor System as 路由器系统
-    participant HostNet as 网络子系统 (netifd / fw4)
-    participant Rust as 后端 (at-webserver-rust)
-    participant Modem as MT5700M 5G 模组
-
-    Modem->>HostNet: 1. 模组插入 / USB 总线硬件枚举就绪
-    Rust->>Modem: 2. 建立 PCUI 串口连接 (自动探测 AT 通道)
-    Rust->>Modem: 3. 下发 AT^SETAUTODIAL=1,1 (对齐自动拨号开关)
-    Modem-->>Rust: 返回 OK (模组完成基站注册驻网)
-
-    rect rgb(240, 248, 255)
-    note over Rust,Modem: 周期对账保护 (5 分钟定时巡检 / 失败指数退避)
-    Rust->>Modem: 4. 联合轮询 AT^NDISSTATQRY? 与 AT+CGACT?
-    Modem-->>Rust: 确认数据承载通路处于激活状态
-    end
-
-    Rust->>HostNet: 5. 触发回调 /usr/libexec/at-webserver/on-uplink.sh
-    HostNet->>Modem: 6. USB 网口发起 DHCP 请求
-    Modem-->>HostNet: 7. 下发 IP 地址、网关与 DNS
-    HostNet->>HostNet: 8. 自动登记接口至 wan 区域并重载 fw4 (NAT)
-    HostNet-->>System: 9. 局域网终端获得全功能外网访问
-```
+<div align="center">
+  <img src="docs/auto-dial-sequence.png" alt="MT5700M 5G 模组自动拨号与网络接入时序图" width="880"/>
+</div>
 
 ### 各环节职责与协同划分
 
