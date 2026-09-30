@@ -82,6 +82,7 @@ return L.view.extend({
 			{ label: '查询版本', command: 'ATI' },
 			{ label: '查询 SIM 状态', command: 'AT+CPIN?' },
 			{ label: '查询 ICCID', command: 'AT^ICCID?' },
+			{ label: '查询 IMSI', command: 'AT+CIMI' },
 			{ label: '查询网络注册', command: 'AT+CREG?' },
 			{ label: '查询基站信息', command: 'AT+CGREG?' },
 			{ label: '查询网络时间', command: 'AT^NWTIME?' },
