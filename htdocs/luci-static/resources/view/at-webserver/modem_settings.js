@@ -18,7 +18,7 @@
  * - 温度保护（THERMAUTOFUN / THERMLD*）
  * - 重启（RESET）、恢复出厂（AT&F）
  *
- * 注意：IMEI 相关命令（AT+CGSN / AT^PHYNUM）完全沿用基准实现，未做任何改动。
+ * 注意：IMEI 读取（AT+CGSN）与写入命令（AT^PHYNUM）完全沿用基准实现，未做任何改动；仅将 IMEI 拆分为独立卡片，入口由「点击 5 次」改为四重验证确认流程。
  */
 
 return L.view.extend({
@@ -59,7 +59,6 @@ return L.view.extend({
 		body.appendChild(devCard);
 
 		var dev = { manufacturer: '', model: '', revision: '', imei: '', connectMode: '' };
-		var imeiEl = E('span', { 'class': 'mt5700-mono' }, '—');
 
 		function renderDev() {
 			devBody.innerHTML = '';
@@ -69,38 +68,105 @@ return L.view.extend({
 					['制造商', dev.manufacturer || '—'],
 					['型号', dev.model || '—'],
 					['版本', dev.revision || '—'],
-					['IMEI（点击 5 次可修改）', imeiEl],
 					['连接模式', dev.connectMode || '—']
 				]
 			));
 		}
 		renderDev();
 
-		var imeiClickCount = 0;
-		imeiEl.style.cursor = 'pointer';
-		imeiEl.addEventListener('click', function () {
-			imeiClickCount++;
-			if (imeiClickCount >= 5) {
-				imeiClickCount = 0;
-				Ui.promptModal('修改 IMEI', [
-					{ key: 'imei', label: '新 IMEI（15 位数字）', value: dev.imei }
-				], function (values) {
-					var newImei = (values.imei || '').trim();
-					if (!/^\d{15}$/.test(newImei)) { Mt5700.error('IMEI 必须是 15 位数字'); return; }
-					Mt5700.confirm('确定将 IMEI 修改为 ' + newImei + '？此操作影响设备合法性，请谨慎。', function () {
-						send('AT^PHYNUM=IMEI,' + newImei).then(function (res) {
-							if (res.success) {
-								Mt5700.success('IMEI 修改成功');
-								dev.imei = newImei;
-								imeiEl.textContent = newImei;
-							} else {
-								Mt5700.error('IMEI 修改失败');
-							}
-						}).catch(function () { Mt5700.error('IMEI 修改失败'); });
-					});
-				});
+		/* ================= 设备标识（IMEI，独立卡片） ================= */
+
+		/*
+		 * IMEI 独立卡片：入口不再使用连续点击 5 次触发，改为四重验证确认流程。
+		 * 写入命令（AT^PHYNUM）与基准实现完全一致，本页仅重构 UI 交互层，
+		 * 不改动 IMEI 相关命令与数据流。
+		 */
+
+		var imeiCard = Mt5700.card('设备标识（IMEI）', '模组唯一身份标识，读取自 AT+CGSN');
+		var imeiBody = E('div');
+		imeiCard._body.appendChild(imeiBody);
+		body.appendChild(imeiCard);
+
+		var imeiEl = E('span', { 'class': 'mt5700-mono' }, '—');
+
+		imeiBody.appendChild(Mt5700.fieldNote(
+			'修改 IMEI 采用四重验证：输入新 IMEI（含 Luhn 校验位验证）、再次输入确认一致性、输入当前 IMEI 后 6 位验证设备归属、最终确认后执行。',
+			[
+				'写入命令与基准实现完全一致（AT^PHYNUM），本页仅重构验证流程，不改动命令本身。',
+				'擅自修改 IMEI 可能违反当地法律法规，请确认操作具备合法依据。'
+			]
+		));
+
+		var imeiRow = E('div', { 'class': 'mt5700-inline' });
+		imeiRow.appendChild(E('span', { 'class': 'mt5700-hint' }, '当前 IMEI：'));
+		imeiRow.appendChild(imeiEl);
+		imeiBody.appendChild(imeiRow);
+
+		imeiBody.appendChild(Mt5700.panelActions(
+			Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); })
+		));
+
+		/* Luhn 校验：IMEI 第 15 位为校验位（纯前端验证，不影响写入命令） */
+		function luhnValid(s) {
+			var sum = 0, dbl = false, i, d;
+			for (i = s.length - 1; i >= 0; i--) {
+				d = s.charCodeAt(i) - 48;
+				if (dbl) { d *= 2; if (d > 9) d -= 9; }
+				sum += d;
+				dbl = !dbl;
 			}
-		});
+			return sum % 10 === 0;
+		}
+
+		function startImeiChangeFlow() {
+			/* 第一重：输入新 IMEI，格式 + Luhn 校验位验证 */
+			Ui.promptModal('修改 IMEI（第 1/4 步）· 输入新 IMEI', [
+				{ key: 'imei', label: '新 IMEI（15 位数字）', value: '', placeholder: '仅数字，第 15 位须通过 Luhn 校验' }
+			], function (values) {
+				var newImei = (values.imei || '').trim();
+				if (!/^\d{15}$/.test(newImei)) { Mt5700.error('IMEI 必须是 15 位数字'); return; }
+				if (!luhnValid(newImei)) { Mt5700.error('校验位（第 15 位）未通过 Luhn 验证，请核对后重新输入'); return; }
+				if (dev.imei && newImei === dev.imei) { Mt5700.error('新 IMEI 与当前 IMEI 相同'); return; }
+
+				/* 第二重：再次输入，验证一致性 */
+				Ui.promptModal('修改 IMEI（第 2/4 步）· 再次输入确认', [
+					{ key: 'imei2', label: '再次输入新 IMEI', type: 'password', placeholder: '须与上一步完全一致' }
+				], function (v2) {
+					if ((v2.imei2 || '').trim() !== newImei) { Mt5700.error('两次输入不一致，流程已终止'); return; }
+					verifyImeiOwner(newImei);
+				});
+			});
+		}
+
+		function verifyImeiOwner(newImei) {
+			/* 第三重：输入当前 IMEI 后 6 位，验证操作者知晓当前设备标识 */
+			if (!dev.imei) {
+				/* 当前 IMEI 读取失败时无法做归属验证，跳过本重，直接进入最终确认 */
+				finalImeiConfirm(newImei);
+				return;
+			}
+			Ui.promptModal('修改 IMEI（第 3/4 步）· 设备归属验证', [
+				{ key: 'tail', label: '输入当前 IMEI 的后 6 位', type: 'password', placeholder: '用于确认你知晓当前设备标识' }
+			], function (v3) {
+				if ((v3.tail || '').trim() !== dev.imei.slice(-6)) { Mt5700.error('与当前 IMEI 后 6 位不符，流程已终止'); return; }
+				finalImeiConfirm(newImei);
+			});
+		}
+
+		function finalImeiConfirm(newImei) {
+			/* 第四重：最终确认；以下写入调用与基准实现完全一致，未做任何改动 */
+			Mt5700.confirm('最终确认：IMEI 将由 ' + (dev.imei || '（未知）') + ' 变更为 ' + newImei + '。此操作影响设备合法性，请谨慎。', function () {
+				send('AT^PHYNUM=IMEI,' + newImei).then(function (res) {
+					if (res.success) {
+						Mt5700.success('IMEI 修改成功');
+						dev.imei = newImei;
+						imeiEl.textContent = newImei;
+					} else {
+						Mt5700.error('IMEI 修改失败');
+					}
+				}).catch(function () { Mt5700.error('IMEI 修改失败'); });
+			}, '确认修改');
+		}
 
 		/* ================= SIM 卡 ================= */
 
