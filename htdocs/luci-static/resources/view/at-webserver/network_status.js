@@ -112,7 +112,19 @@ return L.view.extend({
 			'.mt-chart-tip-row { display: flex; align-items: center; gap: 5px; }',
 			'.mt-chart-tip-row i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }',
 			'.mt-chart-tip-row b { margin-left: auto; padding-left: 12px; font-weight: 700; }',
-			'.mt-ca-chart-box { background: rgba(125,125,125,0.03); border: 1px solid var(--mt-border); border-radius: 10px; padding: 10px 14px 6px; margin-bottom: 12px; }',
+			/* 载波聚合频谱卡行：固定字号 HTML 卡片（替代原 SVG 整体缩放，避免窄屏文字过小） */
+			'.mt-ca-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }',
+			'.mt-ca-item { flex: 1 1 230px; min-width: 200px; display: flex; flex-direction: column; gap: 6px; padding: 11px 13px; border: 1px solid var(--mt-border); border-left: 4px solid #00b4d8; border-radius: 10px; background: rgba(0, 180, 216, 0.06); }',
+			'.mt-ca-item.mt-ca-scc { border-left-color: #10b981; background: rgba(16, 185, 129, 0.05); }',
+			'.mt-ca-item-head { display: flex; align-items: center; gap: 7px; min-width: 0; }',
+			'.mt-ca-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #00b4d8; box-shadow: 0 0 6px rgba(0, 180, 216, 0.8); }',
+			'.mt-ca-item.mt-ca-scc .mt-ca-dot { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.8); }',
+			'.mt-ca-item-title { font-size: 13px; font-weight: 700; color: #00b4d8; white-space: nowrap; }',
+			'.mt-ca-item.mt-ca-scc .mt-ca-item-title { color: #10b981; }',
+			'.mt-ca-item-fcn { margin-left: auto; font-size: 12px; font-family: "JetBrains Mono", Consolas, monospace; opacity: 0.65; white-space: nowrap; }',
+			'.mt-ca-item-sub { font-size: 12px; font-family: "JetBrains Mono", Consolas, monospace; opacity: 0.85; word-break: break-all; }',
+			'.mt-ca-bar { height: 4px; border-radius: 2px; background: rgba(125, 125, 125, 0.15); overflow: hidden; margin-top: 2px; }',
+			'.mt-ca-bar-fill { height: 100%; border-radius: 2px; }',
 			'.mt-pill-ca { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; background: rgba(16, 185, 129, 0.14); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }',
 			'.mt-pill-pcc { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; background: rgba(0, 180, 216, 0.14); color: #00b4d8; border: 1px solid rgba(0, 180, 216, 0.3); }',
 			'@keyframes mt-beacon { 0% { opacity: 0.35; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0.35; transform: scale(0.9); } }',
@@ -804,40 +816,33 @@ return L.view.extend({
 				return;
 			}
 
-			var totalBw = 0;
-			list.forEach(function (c) { totalBw += (c.bandwidth ? (c.bandwidth / 1000) : 20); });
-			totalBw = Math.max(totalBw, 40);
+			/* 载波频谱卡行：固定字号 HTML 卡片（不用 SVG 整体缩放，窄屏文字保持可读，自动换行） */
+			var sumBw = 0;
+			list.forEach(function (c) { sumBw += (c.bandwidth ? c.bandwidth : 20000); });
+			sumBw = Math.max(sumBw, 1);
 
-			/* 画布 1200×100 使缩放比≈1（原 600×50 在千余像素宽下会把内容缩得很小） */
-			var svgCa = '<div class="mt-ca-chart-box">' +
-				'  <svg viewBox="0 0 1200 100" style="display:block;width:100%;height:auto;aspect-ratio:1200/100;">' +
-				'    <rect x="0" y="88" width="1200" height="3" rx="1.5" fill="rgba(125,125,125,0.2)"/>';
-
-			var GAP = 24, PAD = 6;
-			var avail = 1200 - PAD * 2 - GAP * Math.max(0, list.length - 1);
-			var curX = PAD;
+			var caRow = E('div', { 'class': 'mt-ca-row' });
 			list.forEach(function (c, i) {
-				var bw = c.bandwidth ? (c.bandwidth / 1000) : 20;
-				var w = Math.max(220, Math.floor((bw / totalBw) * avail));
 				var isPcc = (i === 0);
-				var col = isPcc ? '#00b4d8' : '#10b981';
-				var title = isPcc ? 'PCC 主载波' : 'SCC 辅载波 ' + i;
+				var bw = c.bandwidth ? (c.bandwidth / 1000) : 20;
+				var pct = Math.round(((c.bandwidth ? c.bandwidth : 20000) / sumBw) * 100);
 				var bandStr = c.band ? AtWs.bandName(c.sysMode, c.band) : (c.sysMode || 'Carrier');
 
-				svgCa +=
-					'    <g transform="translate(' + curX + ', 4)">' +
-					'      <rect x="0" y="0" width="' + w + '" height="78" rx="10" fill="' + col + '" fill-opacity="0.12" stroke="' + col + '" stroke-width="1.6"/>' +
-					'      <circle cx="24" cy="26" r="5" fill="' + col + '"/>' +
-					'      <text x="40" y="31" font-size="15" font-weight="700" fill="' + col + '">' + title + '</text>' +
-					'      <text x="24" y="61" font-size="12" font-family="monospace" fill="currentColor" opacity="0.75">' + bandStr + ' · ' + bw + ' MHz</text>' +
-					'      <text x="' + (w - 24) + '" y="61" font-size="12" font-family="monospace" fill="currentColor" opacity="0.55" text-anchor="end">频点 ' + (c.channel || '—') + '</text>' +
-					'    </g>';
-				curX += w + GAP;
+				var item = E('div', { 'class': isPcc ? 'mt-ca-item' : 'mt-ca-item mt-ca-scc' });
+				var head = E('div', { 'class': 'mt-ca-item-head' });
+				head.appendChild(E('span', { 'class': 'mt-ca-dot' }));
+				head.appendChild(E('span', { 'class': 'mt-ca-item-title' }, isPcc ? 'PCC 主载波' : 'SCC 辅载波 ' + i));
+				head.appendChild(E('span', { 'class': 'mt-ca-item-fcn' }, '频点 ' + (c.channel || '—')));
+				item.appendChild(head);
+				item.appendChild(E('div', { 'class': 'mt-ca-item-sub' }, bandStr + ' · ' + bw + ' MHz'));
+				var bar = E('div', { 'class': 'mt-ca-bar' });
+				bar.appendChild(E('div', { 'class': 'mt-ca-bar-fill', 'style': 'width:' + pct + '%;' }));
+				item.appendChild(bar);
+				caRow.appendChild(item);
 			});
-			svgCa += '  </svg></div>';
 
-			var caChartHost = E('div', { 'class': 'mt-ca-chart' });
-			caChartHost.innerHTML = svgCa;
+			var caChartHost = E('div');
+			caChartHost.appendChild(caRow);
 			carrierBox.appendChild(E('div', {}, [
 				caChartHost,
 				Mt5700.table(
