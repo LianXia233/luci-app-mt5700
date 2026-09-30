@@ -112,19 +112,28 @@ return L.view.extend({
 			'.mt-chart-tip-row { display: flex; align-items: center; gap: 5px; }',
 			'.mt-chart-tip-row i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }',
 			'.mt-chart-tip-row b { margin-left: auto; padding-left: 12px; font-weight: 700; }',
-			/* 载波聚合频谱卡行：固定字号 HTML 卡片（替代原 SVG 整体缩放，避免窄屏文字过小） */
-			'.mt-ca-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }',
-			'.mt-ca-item { flex: 1 1 230px; min-width: 200px; display: flex; flex-direction: column; gap: 6px; padding: 11px 13px; border: 1px solid var(--mt-border); border-left: 4px solid #00b4d8; border-radius: 10px; background: rgba(0, 180, 216, 0.06); }',
-			'.mt-ca-item.mt-ca-scc { border-left-color: #10b981; background: rgba(16, 185, 129, 0.05); }',
-			'.mt-ca-item-head { display: flex; align-items: center; gap: 7px; min-width: 0; }',
-			'.mt-ca-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #00b4d8; box-shadow: 0 0 6px rgba(0, 180, 216, 0.8); }',
-			'.mt-ca-item.mt-ca-scc .mt-ca-dot { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.8); }',
-			'.mt-ca-item-title { font-size: 13px; font-weight: 700; color: #00b4d8; white-space: nowrap; }',
-			'.mt-ca-item.mt-ca-scc .mt-ca-item-title { color: #10b981; }',
-			'.mt-ca-item-fcn { margin-left: auto; font-size: 12px; font-family: "JetBrains Mono", Consolas, monospace; opacity: 0.65; white-space: nowrap; }',
-			'.mt-ca-item-sub { font-size: 12px; font-family: "JetBrains Mono", Consolas, monospace; opacity: 0.85; word-break: break-all; }',
-			'.mt-ca-bar { height: 4px; border-radius: 2px; background: rgba(125, 125, 125, 0.15); overflow: hidden; margin-top: 2px; }',
-			'.mt-ca-bar-fill { height: 100%; border-radius: 2px; }',
+			/* 载波聚合：聚合总览条 + 频谱卡片网格（固定字号，窄屏自动换行，多载波并排） */
+			'.mt-ca-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 9px 14px; border: 1px solid var(--mt-border); border-radius: 10px; background: rgba(125, 125, 125, 0.04); }',
+			'.mt-ca-summary-tag { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; }',
+			'.mt-ca-summary-tag.ca { background: rgba(16, 185, 129, 0.14); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }',
+			'.mt-ca-summary-tag.single { background: rgba(0, 180, 216, 0.12); color: #00b4d8; border: 1px solid rgba(0, 180, 216, 0.3); }',
+			'.mt-ca-summary-text { font-size: 12px; opacity: 0.72; }',
+			'.mt-ca-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; margin-bottom: 12px; }',
+			'.mt-ca-card { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 13px 14px 12px; border-radius: 12px; border: 1px solid rgba(0, 180, 216, 0.22); background: linear-gradient(135deg, rgba(0, 180, 216, 0.10), rgba(0, 180, 216, 0.03)); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); overflow: hidden; }',
+			'.mt-ca-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: linear-gradient(180deg, #00b4d8, #00f2fe); }',
+			'.mt-ca-card.scc { border-color: rgba(16, 185, 129, 0.22); background: linear-gradient(135deg, rgba(16, 185, 129, 0.09), rgba(16, 185, 129, 0.03)); }',
+			'.mt-ca-card.scc::before { background: linear-gradient(180deg, #10b981, #34d399); }',
+			'.mt-ca-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }',
+			'.mt-ca-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #00b4d8; box-shadow: 0 0 0 3px rgba(0, 180, 216, 0.18); }',
+			'.mt-ca-card.scc .mt-ca-dot { background: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18); }',
+			'.mt-ca-card-title { font-size: 13px; font-weight: 800; color: #00b4d8; white-space: nowrap; }',
+			'.mt-ca-card.scc .mt-ca-card-title { color: #10b981; }',
+			'.mt-ca-fcn { margin-left: auto; flex: 0 0 auto; font-size: 11px; font-family: "JetBrains Mono", Consolas, monospace; font-weight: 700; padding: 2px 8px; border-radius: 12px; background: rgba(125, 125, 125, 0.10); opacity: 0.8; white-space: nowrap; }',
+			'.mt-ca-card-sub { font-size: 12px; font-family: "JetBrains Mono", Consolas, monospace; opacity: 0.8; word-break: break-all; }',
+			'.mt-ca-bar { height: 5px; border-radius: 3px; background: rgba(125, 125, 125, 0.12); overflow: hidden; }',
+			'.mt-ca-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #00b4d8, #00f2fe); }',
+			'.mt-ca-card.scc .mt-ca-bar-fill { background: linear-gradient(90deg, #10b981, #34d399); }',
+			'.mt-ca-card-foot { display: flex; justify-content: space-between; font-size: 10.5px; opacity: 0.6; }',
 			'.mt-pill-ca { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; background: rgba(16, 185, 129, 0.14); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }',
 			'.mt-pill-pcc { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; background: rgba(0, 180, 216, 0.14); color: #00b4d8; border: 1px solid rgba(0, 180, 216, 0.3); }',
 			'@keyframes mt-beacon { 0% { opacity: 0.35; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0.35; transform: scale(0.9); } }',
@@ -816,33 +825,45 @@ return L.view.extend({
 				return;
 			}
 
-			/* 载波频谱卡行：固定字号 HTML 卡片（不用 SVG 整体缩放，窄屏文字保持可读，自动换行） */
+			/* 聚合总览条 + 频谱卡片网格：固定字号 HTML 卡片（不用 SVG 缩放，窄屏自动换行，多载波并排） */
 			var sumBw = 0;
 			list.forEach(function (c) { sumBw += (c.bandwidth ? c.bandwidth : 20000); });
 			sumBw = Math.max(sumBw, 1);
+			var isCa = list.length > 1;
 
-			var caRow = E('div', { 'class': 'mt-ca-row' });
+			var summary = E('div', { 'class': 'mt-ca-summary' });
+			summary.appendChild(E('span', { 'class': 'mt-ca-summary-tag ' + (isCa ? 'ca' : 'single') },
+				isCa ? ('CA ' + list.length + 'CC 已聚合') : '单连接'));
+			summary.appendChild(E('span', { 'class': 'mt-ca-summary-text' },
+				'总带宽 ' + (sumBw / 1000) + ' MHz · ' + (isCa ? 'PCC + ' + (list.length - 1) + ' SCC 多载波聚合' : '未做载波聚合')));
+
+			var caGrid = E('div', { 'class': 'mt-ca-grid' });
 			list.forEach(function (c, i) {
 				var isPcc = (i === 0);
 				var bw = c.bandwidth ? (c.bandwidth / 1000) : 20;
 				var pct = Math.round(((c.bandwidth ? c.bandwidth : 20000) / sumBw) * 100);
 				var bandStr = c.band ? AtWs.bandName(c.sysMode, c.band) : (c.sysMode || 'Carrier');
 
-				var item = E('div', { 'class': isPcc ? 'mt-ca-item' : 'mt-ca-item mt-ca-scc' });
-				var head = E('div', { 'class': 'mt-ca-item-head' });
+				var item = E('div', { 'class': isPcc ? 'mt-ca-card' : 'mt-ca-card scc' });
+				var head = E('div', { 'class': 'mt-ca-card-head' });
 				head.appendChild(E('span', { 'class': 'mt-ca-dot' }));
-				head.appendChild(E('span', { 'class': 'mt-ca-item-title' }, isPcc ? 'PCC 主载波' : 'SCC 辅载波 ' + i));
-				head.appendChild(E('span', { 'class': 'mt-ca-item-fcn' }, '频点 ' + (c.channel || '—')));
+				head.appendChild(E('span', { 'class': 'mt-ca-card-title' }, isPcc ? 'PCC 主载波' : 'SCC 辅载波 ' + i));
+				head.appendChild(E('span', { 'class': 'mt-ca-fcn' }, '频点 ' + (c.channel || '—')));
 				item.appendChild(head);
-				item.appendChild(E('div', { 'class': 'mt-ca-item-sub' }, bandStr + ' · ' + bw + ' MHz'));
+				item.appendChild(E('div', { 'class': 'mt-ca-card-sub' }, bandStr + ' · ' + bw + ' MHz'));
 				var bar = E('div', { 'class': 'mt-ca-bar' });
 				bar.appendChild(E('div', { 'class': 'mt-ca-bar-fill', 'style': 'width:' + pct + '%;' }));
 				item.appendChild(bar);
-				caRow.appendChild(item);
+				var foot = E('div', { 'class': 'mt-ca-card-foot' });
+				foot.appendChild(E('span', {}, '带宽占用'));
+				foot.appendChild(E('span', {}, pct + '%'));
+				item.appendChild(foot);
+				caGrid.appendChild(item);
 			});
 
 			var caChartHost = E('div');
-			caChartHost.appendChild(caRow);
+			caChartHost.appendChild(summary);
+			caChartHost.appendChild(caGrid);
 			carrierBox.appendChild(E('div', {}, [
 				caChartHost,
 				Mt5700.table(
