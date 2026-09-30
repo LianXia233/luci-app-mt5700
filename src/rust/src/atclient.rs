@@ -144,6 +144,23 @@ fn parse_cgact_active(text: &str) -> Option<bool> {
     }
 }
 
+/// 扫频期间数据面操作的原始状态快照（供 prepare/restore_scan_data_plane 配对使用）。
+///
+/// 背景：模组在数据业务激活时拒绝 `AT^CELLSCAN`（`+CME ERROR: operation not allowed`），
+/// 全网扫频必须先断开蜂窝数据才能进行。prepare 记录断连前的真实状态并断开数据面，
+/// 扫频结束（无论成功/失败/超时/取消）后 restore 依据快照无条件恢复，杜绝「扫完一直断网」。
+#[derive(Debug, Default, Clone)]
+pub struct ScanDataPrior {
+    /// 断连前自动拨号是否开启。
+    pub autodial_on: bool,
+    /// 断连前自动拨号方式（1=USB 网络接口 / 2=转网口模式；模组未回方式时为 None）。
+    pub autodial_mode: Option<i64>,
+    /// 断连前 NDIS 数据面是否激活。
+    pub ndis_active: bool,
+    /// 是否实际执行过断连动作。false 表示数据面本未激活、无需恢复。
+    pub did_disconnect: bool,
+}
+
 /// 一条模组主动上报。broadcast 为真表示需要作为 raw_data 推给前端。
 #[derive(Debug)]
 pub struct Unsolicited {
@@ -172,6 +189,9 @@ pub struct AtClient {
     conn: Arc<Mutex<Option<Connection>>>,
     /// 连接标志（原子，供 Scheduler 等异步任务安全读取，替代阻塞式取锁）。
     connected_flag: Arc<AtomicBool>,
+    /// 扫频进行中标志：扫频期间数据面会被临时断开，autodial_watchdog 据此跳过对账，
+    /// 避免把「扫频导致的未就绪」误判为拨号故障而抢先重拨（会与扫频恢复逻辑抢 CID）。
+    scan_active: Arc<AtomicBool>,
     urc_tx: mpsc::Sender<Unsolicited>,
 
     /// AT 通道的「唯一放行闸」：所有命令按优先级排队申请，替代原先 FIFO 的 cmd_mu。
@@ -190,6 +210,7 @@ impl AtClient {
             cfg,
             conn: Arc::new(Mutex::new(None)),
             connected_flag: Arc::new(AtomicBool::new(false)),
+            scan_active: Arc::new(AtomicBool::new(false)),
             urc_tx,
             gate: PriLock::new(),
             long_cmd: Arc::new(AtomicI32::new(0)),
@@ -206,6 +227,15 @@ impl AtClient {
     pub fn connected(&self) -> bool {
         // 纯原子读取：绝不能在这里取锁阻塞（Scheduler 在异步循环中调用）。
         self.connected_flag.load(Ordering::Relaxed)
+    }
+
+    /// 标记扫频进行中。true 时 autodial_watchdog 暂停对账，避免与扫频恢复逻辑抢 CID。
+    pub fn set_scan_active(&self, v: bool) {
+        self.scan_active.store(v, Ordering::Relaxed);
+    }
+
+    pub fn scan_active(&self) -> bool {
+        self.scan_active.load(Ordering::Relaxed)
     }
 
     /// 连接、重连与读循环，直到 ctx 结束。
@@ -501,6 +531,88 @@ impl AtClient {
         true
     }
 
+    /// 扫频前的数据面准备：记录原状态并断开蜂窝数据。
+    ///
+    /// 模组在数据业务激活时拒绝 `AT^CELLSCAN`，必须先断开才能扫。这里：
+    ///   1) 查询并记录自动拨号开关/方式与 NDIS 数据面状态；
+    ///   2) 数据面未激活且自动拨号本就关闭时直接跳过（无卡扫描等场景不断不恢复）；
+    ///   3) 先关自动拨号（防止模组在断开后自动重拨、与恢复逻辑争用 CID），再撤数据面；
+    ///   4) 给模组 1.5s 收尾，避免紧随其后的 CELLSCAN 撞上 PDP 拆除。
+    /// 返回快照，扫频结束后必须用 [Self::restore_scan_data_plane] 成对恢复。
+    pub async fn prepare_scan_data_plane(&self, ctx: &tokio::sync::watch::Receiver<bool>) -> ScanDataPrior {
+        let mut prior = ScanDataPrior::default();
+
+        // 1) 自动拨号状态（开关 + 方式）。
+        match self.send_command(ctx, "AT^SETAUTODIAL?", COMMAND_TIMEOUT, None).await {
+            Ok(resp) => match parse_autodial_state(&resp.text()) {
+                Some((on, mode)) => {
+                    prior.autodial_on = on;
+                    prior.autodial_mode = mode;
+                }
+                None => log_warn!("扫频前查询自动拨号状态无法解析: {}", resp.text()),
+            },
+            Err(e) => log_warn!("扫频前查询自动拨号状态失败: {}", e),
+        }
+        // 2) NDIS 数据面激活状态（无法判定按未激活处理，宁可多断一次也不要漏断）。
+        if let Ok(resp) = self.send_command(ctx, "AT^NDISSTATQRY?", COMMAND_TIMEOUT, None).await {
+            prior.ndis_active = parse_ndis_state(&resp.text()).unwrap_or(false);
+        }
+
+        // 3) 本就无网：直接扫，无需断连与恢复。
+        if !prior.autodial_on && !prior.ndis_active {
+            log_info!("扫频前数据面未激活，无需断连");
+            return prior;
+        }
+
+        // 4) 先关自动拨号再撤数据面。
+        if prior.autodial_on {
+            match self.send_command(ctx, "AT^SETAUTODIAL=0", COMMAND_TIMEOUT, None).await {
+                Ok(resp) if resp.ok() => log_info!("扫频前已关闭自动拨号"),
+                Ok(resp) => log_warn!("扫频前关闭自动拨号未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!("扫频前关闭自动拨号失败: {}", e),
+            }
+        }
+        match self.send_command(ctx, "AT^NDISDUP=1,0", COMMAND_TIMEOUT, None).await {
+            Ok(resp) if resp.ok() => log_info!("扫频前已断开蜂窝数据"),
+            Ok(resp) => log_warn!("扫频前断开蜂窝数据未返回 OK: {}", resp.text()),
+            Err(e) => log_warn!("扫频前断开蜂窝数据失败: {}", e),
+        }
+        prior.did_disconnect = true;
+
+        // 5) 短暂收尾，确保 PDP 拆除完成再下发 CELLSCAN。
+        sleep_ctx(ctx, Duration::from_millis(1500)).await;
+        prior
+    }
+
+    /// 扫频结束后的数据面恢复（成功/失败/超时/取消统一调用，无条件执行）。
+    ///
+    /// 原自动拨号开启 → 只恢复自动拨号（模组自会重拨，不手动 NDISDUP 以免与自动拨号争用 CID）；
+    /// 原自动拨号关闭但数据面原已激活 → 手动恢复 NDISDUP=1,1。
+    /// 恢复失败仅记日志，由 autodial_watchdog 周期对账兜底，不会长期断网。
+    pub async fn restore_scan_data_plane(&self, ctx: &tokio::sync::watch::Receiver<bool>, prior: &ScanDataPrior) {
+        if !prior.did_disconnect {
+            return;
+        }
+        // 给模组短暂时间退出扫频独占态，避免恢复命令与扫频收尾交叠。
+        sleep_ctx(ctx, Duration::from_millis(300)).await;
+
+        if prior.autodial_on {
+            let mode = prior.autodial_mode.unwrap_or_else(|| self.cfg.autodial_mode.clamp(1, 2));
+            let cmd = format!("AT^SETAUTODIAL=1,{mode}");
+            match self.send_command(ctx, &cmd, COMMAND_TIMEOUT, None).await {
+                Ok(resp) if resp.ok() => log_info!("扫频结束，已恢复自动拨号（{}）", cmd),
+                Ok(resp) => log_warn!("扫频结束，恢复自动拨号未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!("扫频结束，恢复自动拨号失败: {}（周期对账将兜底）", e),
+            }
+        } else if prior.ndis_active {
+            match self.send_command(ctx, "AT^NDISDUP=1,1", COMMAND_TIMEOUT, None).await {
+                Ok(resp) if resp.ok() => log_info!("扫频结束，已恢复蜂窝数据连接"),
+                Ok(resp) => log_warn!("扫频结束，恢复蜂窝数据未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!("扫频结束，恢复蜂窝数据失败: {}（周期对账将兜底）", e),
+            }
+        }
+    }
+
     /// 拨号守护：链路存活期间周期性对账，覆盖「首次对齐时模组尚未驻网」与
     /// 「运行中 PDP 被网络侧或模组释放」两类自愈场景。
     ///
@@ -520,6 +632,12 @@ impl AtClient {
                 return;
             }
             if !self.connected() {
+                ticks = 0;
+                continue;
+            }
+            // 扫频进行中：数据面被临时断开，跳过本轮对账（恢复由 run_cell_scan 负责，
+            // 周期对账的下一轮自然会复核，不差这 5 分钟）。
+            if self.scan_active() {
                 ticks = 0;
                 continue;
             }

@@ -157,9 +157,37 @@ return L.view.extend({
 		}
 
 		/* ---------- 动作 ---------- */
+		function ndisDataActive(res) {
+			if (!res || !res.success || !res.data) return false;
+			var lines = String(res.data).split('\n');
+			for (var i = 0; i < lines.length; i++) {
+				var l = lines[i].trim();
+				if (l.indexOf('^NDISSTATQRY:') !== 0) continue;
+				return l.slice('^NDISSTATQRY:'.length).trim().split(',')[0].trim() === '1';
+			}
+			return false;
+		}
+
 		function start() {
 			var built = Parse.buildScanCommand(filter);
 			if (built.error) { Mt5700.error(built.error); return; }
+			// 先探数据面：激活时弹窗警告「扫描期间短暂断网、结束后自动恢复」，
+			// 用户确认后才真正开扫。后端服务会自动断开/恢复数据面，无需用户手动操作。
+			AtWs.client.sendCommand('AT^NDISSTATQRY?').then(function (res) {
+				if (ndisDataActive(res)) {
+					Mt5700.confirm('全网扫频需要短暂断开蜂窝数据连接（仅扫描期间，结束后自动恢复），期间无法上网。是否继续？', function () {
+						doStart(built.command);
+					}, '确认开始扫频');
+				} else {
+					doStart(built.command);
+				}
+			}).catch(function () {
+				// 查询失败（模组忙/超时）不阻塞扫频，直接开扫；后端仍会按需断开并恢复。
+				doStart(built.command);
+			});
+		}
+
+		function doStart(command) {
 			cells = [];
 			note = '';
 			scanning = true;
@@ -168,7 +196,7 @@ return L.view.extend({
 			cancelBtn.style.display = '';
 			render();
 			Mt5700.info('扫描中，全频段扫描可能需要几分钟');
-			AtWs.client.sendCommand(built.command).then(function (res) {
+			AtWs.client.sendCommand(command).then(function (res) {
 				if (!res.success) throw new Error(res.error || '模组拒绝了扫频命令');
 				note = '扫描中，全频段扫描可能需要几分钟';
 				renderNote();
