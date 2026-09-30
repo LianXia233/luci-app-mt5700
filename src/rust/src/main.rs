@@ -5,6 +5,8 @@
 //! - LuCI RPC 服务（rpcd ucode 代理 → TCP newline-JSON，替代原 WebSocket 传输层）
 //! - 定时锁频调度、小区扫频、短信/来电/信号通知、企业微信推送
 
+mod async_runtime;
+mod at_queue;
 mod atclient;
 mod config;
 mod logger;
@@ -19,6 +21,8 @@ mod schedule;
 mod serial_linux;
 #[cfg(target_os = "linux")]
 mod serialdetect;
+mod state;
+mod state_cfg;
 mod transport;
 mod urc;
 
@@ -78,7 +82,19 @@ async fn run(verbose: bool) -> Result<(), String> {
     let (notifier, notif_rx) = Notifier::new(cfg.notification.clone());
     let notifier = Arc::new(notifier);
     let scheduler = Scheduler::new(cfg.schedule.clone(), client.clone(), notifier.clone(), ctx_rx.clone());
-    let mut rpc = RpcServer::new(client.clone(), cfg.websocket.auth_key.clone(), scheduler.clone(), ctx_rx.clone());
+
+    // 异步状态缓存：后台按各指令刷新周期预热只读状态查询，
+    // RPC 走缓存毫秒级返回，避免前端每次刷新都发一串会排队的 AT。
+    let cache = crate::state::StateCache::new(client.clone(), ctx_rx.clone());
+    let tasks = crate::async_runtime::TaskManager::with_cap(32);
+    let mut rpc = RpcServer::new(
+        client.clone(),
+        cfg.websocket.auth_key.clone(),
+        scheduler.clone(),
+        ctx_rx.clone(),
+        cache.clone(),
+        tasks.clone(),
+    );
     rpc.set_scan_timeout(cfg.websocket.scan_timeout);
     let rpc = Arc::new(rpc);
 
@@ -111,6 +127,25 @@ async fn run(verbose: bool) -> Result<(), String> {
         let scheduler = scheduler.clone();
         async move { scheduler.run().await }
     });
+    let cache_task = tokio::spawn({
+        let cache = cache.clone();
+        let ctx = ctx_rx.clone();
+        async move { cache.run(ctx).await }
+    });
+    // 后台任务生命周期兜底：定期淘汰已结束的旧任务，避免无界增长。
+    let task_cleanup_task = {
+        let tasks = tasks.clone();
+        let mut ctx = ctx_rx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = ctx.changed() => break,
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                }
+                let _ = tasks.cleanup(Duration::from_secs(3600)).await;
+            }
+        })
+    };
     let serve_task = tokio::spawn({
         let rpc = rpc.clone();
         let port = cfg.websocket.port;
@@ -138,6 +173,8 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = notify_task.await;
         let _ = dispatch_task.await;
         let _ = sched_task.await;
+        let _ = cache_task.await;
+        let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
     })
     .await;

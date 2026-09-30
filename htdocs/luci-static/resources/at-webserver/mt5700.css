@@ -2473,6 +2473,56 @@
   transition: width 0.4s ease;
 }
 
+/* ---------- 升级提醒横幅 ---------- */
+.mt5700-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 14px 0 2px;
+  padding: 12px 14px;
+  border-radius: var(--mt5700-radius-md);
+  border: 1px solid var(--mt5700-border);
+  background: var(--mt5700-glass-bg);
+  backdrop-filter: var(--mt5700-glass);
+  -webkit-backdrop-filter: var(--mt5700-glass);
+  box-shadow: var(--mt5700-sh-1), var(--mt5700-sh-inset);
+  animation: mt5700-banner-in 0.3s ease;
+}
+
+@keyframes mt5700-banner-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mt5700-banner-icon {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.mt5700-banner-body { flex: 1; min-width: 0; }
+.mt5700-banner-title { font-size: 14px; font-weight: 700; line-height: 1.4; }
+.mt5700-banner-desc { font-size: 12px; line-height: 1.6; color: var(--mt5700-text-secondary); margin-top: 2px; }
+
+.mt5700-banner-success { border-color: color-mix(in srgb, var(--mt5700-success) 55%, transparent); background: color-mix(in srgb, var(--mt5700-success) 9%, var(--mt5700-glass-bg)); }
+.mt5700-banner-success .mt5700-banner-icon { background: var(--mt5700-success); }
+.mt5700-banner-success .mt5700-banner-title { color: var(--mt5700-success); }
+
+.mt5700-banner-info { border-color: color-mix(in srgb, var(--mt5700-accent) 55%, transparent); background: color-mix(in srgb, var(--mt5700-accent) 9%, var(--mt5700-glass-bg)); }
+.mt5700-banner-info .mt5700-banner-icon { background: var(--mt5700-accent); }
+.mt5700-banner-info .mt5700-banner-title { color: var(--mt5700-accent); }
+
+.mt5700-banner-danger { border-color: color-mix(in srgb, var(--mt5700-danger) 55%, transparent); background: color-mix(in srgb, var(--mt5700-danger) 9%, var(--mt5700-glass-bg)); }
+.mt5700-banner-danger .mt5700-banner-icon { background: var(--mt5700-danger); }
+.mt5700-banner-danger .mt5700-banner-title { color: var(--mt5700-danger); }
+
 .mt5700-agree-list {
   margin: 8px 0 0;
   padding-left: 20px;
