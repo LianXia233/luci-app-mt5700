@@ -43,7 +43,7 @@ return L.view.extend({
 			/* 信号 4 联卡片 */
 			'.mt-sig-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; margin-bottom: 6px; }',
 			'@media (max-width: 1080px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); } }',
-			'@media (max-width: 580px) { .mt-sig-row { grid-template-columns: 1fr; } }',
+			'@media (max-width: 580px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); gap: 12px; } }',
 			'.mt-sig-box { background: var(--mt-bg-card); border: 1px solid var(--mt-border); border-radius: 12px; box-shadow: var(--mt-shadow); padding: 14px 14px 12px 14px; display: flex; flex-direction: column; position: relative; overflow: hidden; transition: transform 0.2s ease, border-color 0.2s ease; }',
 			'.mt-sig-box:hover { transform: translateY(-2px); border-color: rgba(0, 180, 216, 0.45); }',
 			'.mt-sig-box-head { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 4px; }',
