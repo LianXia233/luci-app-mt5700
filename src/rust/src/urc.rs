@@ -276,7 +276,7 @@ impl Dispatcher {
             });
         entry.parts.insert(info.part_number, sms.content.clone());
 
-        if entry.total <= 0 || (entry.parts.len() as u32) < entry.total {
+        if entry.total == 0 || (entry.parts.len() as u32) < entry.total {
             return;
         }
 

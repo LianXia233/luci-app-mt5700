@@ -8,6 +8,7 @@
 //! - `abcd` 打断绕过命令锁直接写入（供扫频使用）。
 
 use crate::{log_debug, log_info, log_warn};
+use crate::at_queue::{AtPriority, PriLock};
 use crate::config::AtConfig;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -173,7 +174,9 @@ pub struct AtClient {
     connected_flag: Arc<AtomicBool>,
     urc_tx: mpsc::Sender<Unsolicited>,
 
-    cmd_mu: Arc<Mutex<()>>,
+    /// AT 通道的「唯一放行闸」：所有命令按优先级排队申请，替代原先 FIFO 的 cmd_mu。
+    /// 业务模块不能直接碰 TTY，只能经 send_command 走这个闸。
+    gate: Arc<PriLock>,
     long_cmd: Arc<AtomicI32>,
     long_cmd_end: Arc<AtomicI64>,
     last_cmd_at: Arc<Mutex<Instant>>,
@@ -188,7 +191,7 @@ impl AtClient {
             conn: Arc::new(Mutex::new(None)),
             connected_flag: Arc::new(AtomicBool::new(false)),
             urc_tx,
-            cmd_mu: Arc::new(Mutex::new(())),
+            gate: PriLock::new(),
             long_cmd: Arc::new(AtomicI32::new(0)),
             long_cmd_end: Arc::new(AtomicI64::new(0)),
             last_cmd_at: Arc::new(Mutex::new(Instant::now())),
@@ -340,6 +343,7 @@ impl AtClient {
     ///   1) 只比开关不比方式：模组停在方式 2（转网口）而期望方式 1（USB 网口）时会直接跳过；
     ///   2) 只对齐一次且失败只记日志：冷启动时 AT 通道往往早于驻网可用，
     ///      第一次下发失败后不再重试，链路一直稳定的话永远等不到自愈。
+    ///
     /// 因此这里做**带退避的重试**（最长约 4 分钟），并在复核阶段确认数据面。
     async fn ensure_autodial(self: &Arc<Self>, ctx: &tokio::sync::watch::Receiver<bool>) {
         let desired = self.cfg.autodial_enable;
@@ -539,7 +543,7 @@ impl AtClient {
     }
 
 
-    /// 串行发送一条 AT 命令并等待结束码。
+    /// 串行发送一条 AT 命令并等待结束码。普通优先级（状态查询 / 网络 / SIM 等）。
     pub async fn send_command(
         &self,
         ctx: &tokio::sync::watch::Receiver<bool>,
@@ -547,10 +551,24 @@ impl AtClient {
         timeout: Duration,
         stream: Option<Box<dyn Fn(String) + Send + Sync>>,
     ) -> Result<AtResponse, String> {
-        self.send_command_inner(ctx, command, timeout, stream).await
+        self.send_command_pri(ctx, AtPriority::Normal, command, timeout, stream)
+            .await
     }
 
-    /// 扫频一类长命令：可指定超时，并通过 stream 实时拿到每一行应答。
+    /// 以显式优先级发送一条 AT 命令并等待结束码。
+    pub async fn send_command_pri(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        prio: AtPriority,
+        command: &str,
+        timeout: Duration,
+        stream: Option<Box<dyn Fn(String) + Send + Sync>>,
+    ) -> Result<AtResponse, String> {
+        self.send_command_inner(ctx, prio, command, timeout, stream).await
+    }
+
+    /// 扫频一类长命令：Background 优先级（不抢占终端/状态查询），可指定超时，
+    /// 并通过 stream 实时拿到每一行应答。
     pub async fn send_long_command(
         &self,
         ctx: &tokio::sync::watch::Receiver<bool>,
@@ -559,7 +577,9 @@ impl AtClient {
         stream: Option<Box<dyn Fn(String) + Send + Sync>>,
     ) -> Result<AtResponse, String> {
         self.long_cmd.fetch_add(1, Ordering::SeqCst);
-        let result = self.send_command_inner(ctx, command, timeout, stream).await;
+        let result = self
+            .send_command_inner(ctx, AtPriority::Background, command, timeout, stream)
+            .await;
         self.long_cmd_end.store(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -622,25 +642,18 @@ impl AtClient {
     async fn send_command_inner(
         &self,
         ctx: &tokio::sync::watch::Receiver<bool>,
+        prio: AtPriority,
         command: &str,
         timeout: Duration,
         stream: Option<Box<dyn Fn(String) + Send + Sync>>,
     ) -> Result<AtResponse, String> {
-        // 第一段预算：排队（等命令锁 + 最小命令间隔）。
+        // 第一段预算：排队（按优先级申请放行闸 + 最小命令间隔）。
         // 这段不计入应答超时，否则初始化/重连期间用户的命令会被误判为「模组无响应」。
-        let _cmd_guard = {
-            let mut ctx_c = ctx.clone();
-            tokio::select! {
-                g = self.cmd_mu.lock() => g,
-                _ = tokio::time::sleep(QUEUE_WAIT_TIMEOUT) => {
-                    return Err(format!(
-                        "等待空闲通道超时（{}s）：模组正忙或正在重连，请稍后重试",
-                        QUEUE_WAIT_TIMEOUT.as_secs()
-                    ));
-                }
-                _ = ctx_c.changed() => return Err("上下文取消".into()),
-            }
-        };
+        // acquire 内部已处理 wait 超时与 ctx 取消，这里直接收其结果即可。
+        let _gate_permit = self
+            .gate
+            .acquire(prio, ctx, QUEUE_WAIT_TIMEOUT)
+            .await?;
 
         // 两条命令之间最小间隔。
         {
@@ -1112,12 +1125,14 @@ mod tests {
             c.read_loop(&ctx_r, Box::new(host_rd)).await
         });
 
-        // 先抢住命令锁 600ms，模拟初始化序列占用通道。
+        // 先抢住放行闸 600ms，模拟初始化序列占用通道。
         let holder = {
-            let mu = client.cmd_mu.clone();
+            let gate = client.gate.clone();
+            let ctx_h = ctx.clone();
             tokio::spawn(async move {
-                let _g = mu.lock().await;
+                let permit = gate.acquire(AtPriority::High, &ctx_h, QUEUE_WAIT_TIMEOUT).await.unwrap();
                 tokio::time::sleep(Duration::from_millis(600)).await;
+                drop(permit);
             })
         };
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1145,12 +1160,16 @@ mod tests {
         let client = AtClient::new(crate::config::default_config().at, tx);
         let (_ctx_tx, ctx) = tokio::sync::watch::channel(false);
 
-        // 永久占住命令锁（模拟通道被长时间占用/卡死）。
-        let mu = client.cmd_mu.clone();
-        let holder = tokio::spawn(async move {
-            let _g = mu.lock().await;
-            tokio::time::sleep(Duration::from_secs(60)).await;
-        });
+        // 永久占住放行闸（模拟通道被长时间占用/卡死）。
+        let holder = {
+            let gate = client.gate.clone();
+            let ctx_h = ctx.clone();
+            tokio::spawn(async move {
+                let permit = gate.acquire(AtPriority::High, &ctx_h, QUEUE_WAIT_TIMEOUT).await.unwrap();
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                drop(permit);
+            })
+        };
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // 用一个短的排队预算做验证（直接调内部函数无法改常量，故这里改为
