@@ -569,6 +569,12 @@ async fn run_cell_scan(
 ) -> Result<String, String> {
     log_info!("开始扫频: {} (超时 {}s)", command, timeout.as_secs());
 
+    // 扫频前断开蜂窝数据：模组在数据业务激活时拒绝 ^CELLSCAN（+CME ERROR: operation not allowed）。
+    // scan_active 置位让 autodial_watchdog 暂停对账，避免它把「扫频导致的未就绪」误判为故障抢先重拨、
+    // 与下方恢复逻辑争用 CID。prior 快照记录断连前的真实状态，结束后无条件恢复。
+    client.set_scan_active(true);
+    let prior = client.prepare_scan_data_plane(&ctx).await;
+
     let scan_state_stream = scan_state.clone();
     let hub_stream = hub.clone();
     let mut ctx_scan = ctx.clone();
@@ -627,6 +633,11 @@ async fn run_cell_scan(
     scan.lines.clear();
     scan.task_id = None;
     drop(scan);
+
+    // 扫频结束（成功/失败/超时/取消均必经此处）：先复位扫频标志，再无条件恢复数据面。
+    // 恢复失败仅记 WRN 日志，由 autodial_watchdog 周期对账兜底，不会长期断网。
+    client.set_scan_active(false);
+    client.restore_scan_data_plane(&ctx, &prior).await;
 
     let count = lines.len();
     match result {
