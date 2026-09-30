@@ -11,9 +11,11 @@
 //! 事件不主动推送：前端通过 events(since) 拉取增量（LuCI RPC 为请求-响应模型）。
 
 use crate::{log_debug, log_error, log_info, log_warn};
+use crate::async_runtime::{TaskInfo, TaskManager};
 use crate::atclient::AtClient;
 use crate::schedconfig::{SCHED_QUERY_COMMAND, SCHED_RESPONSE_PREFIX, SCHED_SET_PREFIX, SchedConfigDto, dto_to_schedule, schedule_to_dto, write_schedule_uci};
 use crate::schedule::Scheduler;
+use crate::state::StateCache;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -58,6 +60,8 @@ pub struct ScanState {
     pub running: bool,
     pub aborted: bool,
     pub lines: Vec<String>,
+    /// 当前扫频对应的后台任务 id（异步化新增），用于状态查询/取消。
+    pub task_id: Option<String>,
 }
 
 /// 事件总线：替代原 WebSocket Hub 的"广播给所有客户端"。
@@ -128,6 +132,11 @@ pub struct RpcServer {
     hub: Hub,
     scan: Arc<AsyncMutex<ScanState>>,
     scan_timeout: Duration,
+    /// 异步状态缓存：只读状态查询优先命中内存，避免重复 AT 与排队阻塞。
+    cache: Arc<StateCache>,
+    /// 统一后台任务管理器：长耗时操作（扫频/锁频/固件升级）以 task_id 提交后台执行，
+    /// 支持状态查询与取消，RPC handler 立即返回，不阻塞。
+    tasks: Arc<TaskManager>,
     ctx: tokio::sync::watch::Receiver<bool>,
 }
 
@@ -137,14 +146,18 @@ impl RpcServer {
         auth_key: String,
         sched: Arc<Scheduler>,
         ctx: tokio::sync::watch::Receiver<bool>,
+        cache: Arc<StateCache>,
+        tasks: Arc<TaskManager>,
     ) -> RpcServer {
         RpcServer {
             client,
             auth_key,
             sched,
             hub: Hub::new(),
-            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new() })),
+            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new(), task_id: None })),
             scan_timeout: DEFAULT_SCAN_TIMEOUT,
+            cache,
+            tasks,
             ctx,
         }
     }
@@ -161,6 +174,8 @@ impl RpcServer {
             hub: self.hub.clone(),
             scan: self.scan.clone(),
             scan_timeout: self.scan_timeout,
+            cache: self.cache.clone(),
+            tasks: self.tasks.clone(),
             ctx: self.ctx.clone(),
         }
     }
@@ -288,6 +303,48 @@ impl RpcServer {
                 let (seq, entries) = crate::logger::snapshot(since, limit);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "entries": entries } })
             }
+            // 后台任务管理（异步化新增）：查询状态 / 取消 / 列表。
+            // 不改变既有 at/events/logs 接口，前端仍通过 AT^CELLSCAN 伪命令触发扫频。
+            "task_status" => {
+                let tid = req.params.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if tid.is_empty() {
+                    return serde_json::json!({ "id": id, "error": { "code": -32602, "message": "缺少参数 id" } });
+                }
+                match self.tasks.status(tid).await {
+                    Some(info) => serde_json::json!({ "id": id, "result": { "id": info.id, "kind": info.kind, "state": info.state.as_str(), "progress": info.progress, "error": info.error, "result": info.result, "created_at": info.created_at, "started_at": info.started_at, "finished_at": info.finished_at } }),
+                    None => serde_json::json!({ "id": id, "error": { "code": -32002, "message": format!("任务不存在: {tid}") } }),
+                }
+            }
+            "task_cancel" => {
+                let tid = req.params.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if tid.is_empty() {
+                    return serde_json::json!({ "id": id, "error": { "code": -32602, "message": "缺少参数 id" } });
+                }
+                let cancelled = self.tasks.cancel(tid).await;
+                if cancelled {
+                    serde_json::json!({ "id": id, "result": { "cancelled": true, "id": tid } })
+                } else {
+                    serde_json::json!({ "id": id, "error": { "code": -32002, "message": format!("任务不存在: {tid}") } })
+                }
+            }
+            "task_list" => {
+                let list = self.tasks.list().await;
+                let items: Vec<serde_json::Value> = list
+                    .into_iter()
+                    .map(|info: TaskInfo| serde_json::json!({
+                        "id": info.id,
+                        "kind": info.kind,
+                        "state": info.state.as_str(),
+                        "progress": info.progress,
+                        "error": info.error,
+                        "result": info.result,
+                        "created_at": info.created_at,
+                        "started_at": info.started_at,
+                        "finished_at": info.finished_at,
+                    }))
+                    .collect();
+                serde_json::json!({ "id": id, "result": { "tasks": items } })
+            }
             _ => serde_json::json!({ "id": id, "error": { "code": -32601, "message": format!("未知方法: {}", req.method) } }),
         }
     }
@@ -318,6 +375,17 @@ impl RpcServer {
 
         let command = normalize_syscfgex(command);
 
+        // 状态缓存优先：白名单内的只读查询命中内存即毫秒级返回，下发 AT 的去重、
+        // 刷新与断线失效都由缓存负责。miss / 非白名单 / 抓取失败一律走 live 路径，
+        // 保证与旧行为一致（例如终端页手动执行同一条查询也能拿到真实结果）。
+        match self.cache.resolve(&command).await {
+            Ok(Some(text)) => {
+                log_debug!("缓存命中: {}", command.trim());
+                return ok_response(&text);
+            }
+            _ => {}
+        }
+
         // 外层超时 = 排队预算 + 应答预算 + 余量。
         // 排队预算单独给足，避免初始化/重连期间用户的终端命令被外层提前掐断，
         // 从而出现「模组无响应」的假失败（终端页只有 ATI 有回复的根因）。
@@ -325,7 +393,14 @@ impl RpcServer {
             crate::atclient::QUEUE_WAIT_TIMEOUT
                 + crate::atclient::COMMAND_TIMEOUT
                 + Duration::from_secs(3),
-            self.client.send_command(&self.ctx, &command, crate::atclient::COMMAND_TIMEOUT, None),
+            // 用户主动的 AT 操作属于 High 优先级，可越过后台刷新的 Low/Background。
+            self.client.send_command_pri(
+                &self.ctx,
+                crate::at_queue::AtPriority::High,
+                &command,
+                crate::atclient::COMMAND_TIMEOUT,
+                None,
+            ),
         )
         .await;
 
@@ -438,18 +513,27 @@ impl RpcServer {
         drop(scan);
 
         // 后台异步执行扫频，让 RPC 读循环空出来接收打断命令。
+        // 同时登记进 TaskManager，可获得 task_id / 状态 / 取消（AT^CELLSCAN=ABORT
+        // 撤下 AT 打断字符串，取消则经由 CancellationToken 让任务体自行收尾）。
         let client = self.client.clone();
         let hub = self.hub.clone();
+        let tasks = self.tasks.clone();
         let scan_state = self.scan.clone();
         let timeout = if self.scan_timeout > Duration::ZERO { self.scan_timeout } else { DEFAULT_SCAN_TIMEOUT };
         let ctx = self.ctx.clone();
         let command = command.trim().to_string();
-        tokio::spawn(async move {
-            run_cell_scan(client, hub, scan_state, ctx, command, timeout).await;
-        });
+        let tid = tasks
+            .spawn_with_timeout("cellscan", timeout, move |cancel: tokio::sync::watch::Receiver<bool>| async move {
+                run_cell_scan(client, hub, scan_state, ctx, cancel, command, timeout).await
+            })
+            .await;
+        {
+            let mut scan = self.scan.lock().await;
+            scan.task_id = Some(tid.clone());
+        }
 
         // 立刻应答，让前端的命令队列不被这条几分钟的命令堵住。
-        ok_response("^CELLSCAN: STARTED\r\nOK")
+        ok_response(&format!("^CELLSCAN: STARTED {tid}\r\nOK"))
     }
 
     async fn scan_in_progress(&self) -> bool {
@@ -479,15 +563,16 @@ async fn run_cell_scan(
     hub: Hub,
     scan_state: Arc<AsyncMutex<ScanState>>,
     ctx: tokio::sync::watch::Receiver<bool>,
+    mut cancel: tokio::sync::watch::Receiver<bool>,
     command: String,
     timeout: Duration,
-) {
+) -> Result<String, String> {
     log_info!("开始扫频: {} (超时 {}s)", command, timeout.as_secs());
 
     let scan_state_stream = scan_state.clone();
     let hub_stream = hub.clone();
-    let result = tokio::time::timeout(
-        timeout + Duration::from_secs(10),
+    let mut ctx_scan = ctx.clone();
+    let long =
         client.send_long_command(
             &ctx,
             &command,
@@ -510,9 +595,26 @@ async fn run_cell_scan(
                     serde_json::json!({ "state": "running", "cell": line, "count": count }),
                 );
             })),
-        ),
-    )
-    .await;
+        );
+    let outer = tokio::time::timeout(timeout + Duration::from_secs(10), long);
+    let mut outer = std::pin::pin!(outer);
+
+    let result = tokio::select! {
+        r = &mut outer => r,
+        // 任务取消（task_cancel）：撤下 AT 打断字符串，让模组尽早停止扫频。
+        _ = cancel.changed() => {
+            log_warn!("扫频被取消，下发打断字符串");
+            let _ = client.interrupt(CELLSCAN_ABORT_TOKEN).await;
+            // 等待底层长命令收尾，尽量拿到已扫到的小区。
+            outer.await
+        }
+        // 全局关闭：同样打断，避免扫频卡住优雅退出。
+        _ = ctx_scan.changed() => {
+            log_warn!("服务退出，扫频中断");
+            let _ = client.interrupt(CELLSCAN_ABORT_TOKEN).await;
+            outer.await
+        }
+    };
 
     // running 必须无条件复位：万一出了意外还留着 true，
     // 之后所有 AT 命令都会被"正在扫频"挡住，只能重启服务才能恢复。
@@ -523,6 +625,7 @@ async fn run_cell_scan(
     scan.running = false;
     scan.aborted = false;
     scan.lines.clear();
+    scan.task_id = None;
     drop(scan);
 
     let count = lines.len();
@@ -531,13 +634,16 @@ async fn run_cell_scan(
             let state = if aborted { "aborted" } else { "done" };
             log_info!("扫频结束({}): 共 {} 个小区", state, count);
             hub.broadcast_json("cellscan", serde_json::json!({ "state": state, "lines": lines, "count": count }));
+            Ok(format!("{state}:{}", count))
         }
         Ok(Ok(resp)) => {
-            log_warn!("扫频被模组拒绝: {}", resp.text());
+            let text = resp.text();
+            log_warn!("扫频被模组拒绝: {}", text);
             hub.broadcast_json(
                 "cellscan",
-                serde_json::json!({ "state": "error", "error": resp.text(), "lines": lines, "count": count }),
+                serde_json::json!({ "state": "error", "error": text, "lines": lines, "count": count }),
             );
+            Err(text)
         }
         Ok(Err(e)) => {
             log_warn!("扫频失败: {}", e);
@@ -545,6 +651,7 @@ async fn run_cell_scan(
                 "cellscan",
                 serde_json::json!({ "state": "error", "error": e, "lines": lines, "count": count }),
             );
+            Err(e)
         }
         Err(_) => {
             log_warn!("扫频超时");
@@ -552,6 +659,7 @@ async fn run_cell_scan(
                 "cellscan",
                 serde_json::json!({ "state": "error", "error": "扫频超时", "lines": lines, "count": count }),
             );
+            Err("扫频超时".to_string())
         }
     }
 }

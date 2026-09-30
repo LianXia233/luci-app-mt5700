@@ -48,6 +48,35 @@ return L.view.extend({
 		upgradeCard._body.appendChild(upgradeBody);
 		body.appendChild(upgradeCard);
 
+		/* 升级提醒横幅：检测/下载/升级等关键状态的醒目可视化，挂在升级卡底部(独立容器，不被 renderUpgrade 清空) */
+		var bannerEl = E('div');
+		upgradeCard._body.appendChild(bannerEl);
+
+		/* 提醒横幅绘制：按 FOTA 状态给出 icon、标题、说明与配色(variant) */
+		function bannerOf(state) {
+			switch (state) {
+				case 12: return { icon: '↑', variant: 'success', title: '发现新固件版本', desc: '服务器上存在可用新版本，点击上方「开始升级」即可拉取安装。' };
+				case 30: case 31: return { icon: '⭳', variant: 'info', title: '固件正在下载', desc: '正在从 FOTA 服务器拉取固件，请保持网络与供电稳定。' };
+				case 40: return { icon: '✓', variant: 'success', title: '固件下载完成', desc: '下载已就绪，即将触发模组执行升级，请勿断电。' };
+				case 50: return { icon: '⚡', variant: 'danger', title: '固件升级中', desc: '模组正在写入固件，此过程请勿断电、勿做任何操作。' };
+				case 13: case 20: return { icon: '!', variant: 'danger', title: '升级失败', desc: '未完成升级，请检查 FOTA 地址与网络后重试。' };
+				default: return null;
+			}
+		}
+
+		function renderBanner() {
+			bannerEl.innerHTML = '';
+			var b = bannerOf(fotaState);
+			if (!b) return;
+			var box = E('div', { 'class': 'mt5700-banner mt5700-banner-' + b.variant });
+			box.appendChild(E('span', { 'class': 'mt5700-banner-icon' }, b.icon));
+			var bodyx = E('div', { 'class': 'mt5700-banner-body' });
+			bodyx.appendChild(E('div', { 'class': 'mt5700-banner-title' }, b.title));
+			bodyx.appendChild(E('div', { 'class': 'mt5700-banner-desc' }, b.desc));
+			box.appendChild(bodyx);
+			bannerEl.appendChild(box);
+		}
+
 		var urlInput = Mt5700.input('text', 'http://fota.example.com/path/');
 		urlInput.style.width = '100%';
 
@@ -83,10 +112,28 @@ return L.view.extend({
 			return map[s] || (s ? '状态 ' + s : '未知');
 		}
 
+		/* FOTA 状态 → 徽章变体与数值配色（让状态一眼可判） */
+		function fotaMeta(s) {
+			var map = {
+				11: { badge: 'info', color: 'accent', text: '正在查询新版本' },
+				12: { badge: 'success', color: 'success', text: '发现新版本' },
+				13: { badge: 'danger', color: 'danger', text: '查询失败' },
+				14: { badge: 'neutral', color: '', text: '无新版本' },
+				20: { badge: 'danger', color: 'danger', text: '下载失败' },
+				30: { badge: 'warning', color: 'warning', text: '下载中' },
+				31: { badge: 'warning', color: 'warning', text: '下载挂起' },
+				40: { badge: 'success', color: 'success', text: '下载完成' },
+				50: { badge: 'danger', color: 'danger', text: '升级中' }
+			};
+			return map[s] || { badge: 'neutral', color: '', text: (s ? '状态 ' + s : '未知') };
+		}
+
 		function renderVersion() {
 			versionBody.innerHTML = '';
+			var meta = fotaMeta(fotaState);
 			versionBody.appendChild(Mt5700.metric('固件版本', version || '未知'));
-			versionBody.appendChild(Mt5700.metric('FOTA 状态', fotaStateText(fotaState)));
+			/* 状态大字 + 语义配色（查询中=蓝 / 发现新版、完成=绿 / 失败、升级中=红 / 挂起=橙），一眼可判 */
+			versionBody.appendChild(Mt5700.metric('FOTA 状态', meta.text, meta.color));
 		}
 
 		function renderUpgrade() {
@@ -109,12 +156,19 @@ return L.view.extend({
 			}
 
 			if (step === 2 || step === 3) {
+				var isUpgrading = fotaState === 50;
+				var phaseLabel = isUpgrading ? '升级进度' : '下载进度';
+				var phaseColor = isUpgrading ? 'danger' : 'accent';
+				var fillColor = isUpgrading ? '#c83d55' : '#3b82f6';
 				progressEl.innerHTML = '';
+				/* 大数字进度：metric 会自动把「40%」拆成数字 40 + 单位 % 两段 */
+				progressEl.appendChild(Mt5700.metric(phaseLabel, progress + '%', phaseColor));
+				/* 彩色进度条(颜色随阶段切换：下载=蓝 / 升级=红) */
 				var bar = E('div', { 'class': 'mt5700-progress-bar' });
-				bar.appendChild(E('div', { 'class': 'mt5700-progress-fill', style: 'width:' + progress + '%' }));
+				bar.appendChild(E('div', { 'class': 'mt5700-progress-fill', style: 'width:' + progress + '%;background:' + fillColor }));
 				progressEl.appendChild(bar);
 				progressEl.appendChild(E('div', { 'class': 'mt5700-hint' },
-					progress + '%' + (fotaState === 50 ? ' （正在升级...）' : '')));
+					isUpgrading ? '正在升级，请勿断电或执行其他操作' : '正在从 FOTA 服务器下载固件…'));
 				upgradeBody.appendChild(progressEl);
 			}
 
@@ -122,6 +176,9 @@ return L.view.extend({
 				noteEl.textContent = '升级过程中请勿断电或执行其他操作，完成后设备将自动重启。';
 				upgradeBody.appendChild(noteEl);
 			}
+
+			/* 同步升级提醒横幅(独立于上述内容，始终刷新) */
+			renderBanner();
 		}
 
 		/* ---------- 逻辑（对齐基准 v1.3.4） ---------- */
