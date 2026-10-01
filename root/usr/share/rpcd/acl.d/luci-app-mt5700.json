@@ -20,7 +20,8 @@
 					"at",
 					"events",
 					"netrate",
-					"logs"
+					"logs",
+					"usb"
 				],
 				"log": [
 					"read"

@@ -48,6 +48,19 @@ var rpcNetRate = L.rpc.declare({
 	expect: {}
 });
 
+/*
+ * 模组 USB 链路速率（自动识别数据源）。
+ * 由 mt5700.uc 的 usb 方法直接读 sysfs 下 USB 设备的 speed 节点，
+ * 全程不下发任何 AT 命令，不占用 AT 通道、不干扰模组。
+ * 返回 {success, speed_mbps, product, version}，速度单位 Mbps（如 5000 = USB 3.0）。
+ */
+var rpcUsb = L.rpc.declare({
+	object: 'mt5700',
+	method: 'usb',
+	params: [],
+	expect: {}
+});
+
 function withTimeout(p, ms, msg) {
 	return Promise.race([
 		p,
@@ -860,9 +873,54 @@ function fetchNetRate(device) {
 		});
 }
 
+/*
+ * 取模组与路由器之间的 USB 链路速率（Mbps，sysfs 自动识别）。
+ * 返回 Promise<{success, found, speed_mbps, product, version}>。
+ */
+function fetchUsb() {
+	return withTimeout(rpcUsb(), 4000, 'USB 信息读取超时')
+		.then(function (resp) {
+			resp = resp || {};
+			if (resp.success === false) {
+				return { success: false, error: (resp && resp.error) || '读不到 USB 信息' };
+			}
+			return {
+				success: true,
+				found: !!Number(resp.speed_mbps),
+				speed_mbps: Number(resp.speed_mbps) || 0,
+				product: resp.product || '',
+				version: resp.version || ''
+			};
+		})
+		.catch(function (err) {
+			return { success: false, error: (err && err.message) || 'USB 信息读取失败' };
+		});
+}
+
+/*
+ * USB 速率（Mbps）格式化成人话：5000 → "5.0 Gbps（USB 3.0）"。
+ * sysfs 的 speed 单位为 Mbps，对应 USB 规范速率：
+ *   12 → USB 1.x  480 → USB 2.0  5000 → USB 3.0  10000 → USB 3.1  20000 → USB 3.2
+ */
+function usbSpeedText(mbps) {
+	var m = Number(mbps) || 0;
+	if (m <= 0) return '';
+	var g = (m / 1000).toFixed(1);
+	var rate = m >= 1000 ? g + ' Gbps' : Math.round(m) + ' Mbps';
+	var spec = '';
+	if (m === 12) spec = 'USB 1.x';
+	else if (m === 480) spec = 'USB 2.0';
+	else if (m === 5000) spec = 'USB 3.0';
+	else if (m === 10000) spec = 'USB 3.1';
+	else if (m === 20000) spec = 'USB 3.2';
+	return spec ? rate + '（' + spec + '）' : rate;
+}
+
 var AtWs = {
 	client: atClient(),
 	netRate: fetchNetRate,
+	usb: fetchUsb,
+	usbSpeedText: usbSpeedText,
 	extractATData: extractATData,
 	extractATDataMultiline: extractATDataMultiline,
 	convertRsrp: convertRsrp,
