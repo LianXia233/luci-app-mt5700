@@ -1,6 +1,5 @@
 //! AT 客户端：维护到模组的唯一连接。
 //!
-//! 与 Go 实现完全一致的语义：
 //! - 只有一个任务读取通道，命令应答与主动上报在同一处解复用；
 //! - 命令串行执行（100ms 最小间隔），2 秒超时，最多保留 2048 行；
 //! - 空闲期收到的数据视为主动上报（raw_data 推给前端）；
@@ -22,7 +21,7 @@ pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 ///
 /// 背景（AT 终端「只有 ATI 有回复」的根因）：
 /// 服务启动/重连时会先跑 `init_modem()` 的一串初始化和自动拨号对齐命令，
-/// 这些命令全程持有 `cmd_mu`。此前 `send_command_inner` 的超时是从进入函数
+/// 这些命令全程占着通道不释放。此前 `send_command_inner` 的超时是从进入函数
 /// 就开始计时的，于是用户的终端命令会把整个预算消耗在「排队等锁」上，
 /// 2 秒一到就返回「模组无响应」——而模组其实什么都没收到。
 /// 表现为：服务刚起或刚重连的那段时间，除最先发的一条外全都没有回复。
@@ -194,7 +193,7 @@ pub struct AtClient {
     scan_active: Arc<AtomicBool>,
     urc_tx: mpsc::Sender<Unsolicited>,
 
-    /// AT 通道的「唯一放行闸」：所有命令按优先级排队申请，替代原先 FIFO 的 cmd_mu。
+    /// AT 通道的「唯一放行闸」：所有命令按优先级排队申请。
     /// 业务模块不能直接碰 TTY，只能经 send_command 走这个闸。
     gate: Arc<PriLock>,
     long_cmd: Arc<AtomicI32>,
@@ -333,7 +332,7 @@ impl AtClient {
             Err(e) => log_warn!("开启详细错误码失败: {}", e),
         }
         // 短信走 PDU 模式并开启新短信主动上报，来电开启号码显示。
-        // 与 Go 一致：查询失败或不含目标值时都要 SET，避免模组刚连上超时导致模式未启用。
+        // 查询失败或不含目标值时都要 SET，避免模组刚连上超时导致模式未启用。
         match self.send_command(ctx, "AT+CNMI?", COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.contains("+CNMI: 2,1,0,2,0") => {}
             _ => match self.send_command(ctx, "AT+CNMI=2,1,0,2,0", COMMAND_TIMEOUT, None).await {
@@ -964,7 +963,6 @@ impl AtClient {
 
         if !has_pending {
             // 空闲期收到的任何数据都视为主动上报：交给处理器，并按原样推给前端。
-            // 与 Go 实现一致（Go handleLine: p == nil 时 broadcast: true）。
             self.emit(Unsolicited { line, broadcast: true }).await;
             return;
         }
@@ -1029,7 +1027,7 @@ pub fn is_passthrough_urc(line: &str) -> bool {
 ///
 /// 时序意义：接口侧（init.d / hotplug）无法知道模组何时真正拨号成功，
 /// 只能靠开机时抢跑 + 猜时间窗口，冷启动很容易错过（实测整条链路
-/// USB 枚举→驻网→下发 DHCP 常见 30~60s，而旧实现 35s 后即放弃）。
+/// USB 枚举→驻网→下发 DHCP 常见 30~60s）。
 /// 这个通知让「拨号完成 → ifup 要地址」变成确定顺序。
 ///
 /// 脚本不存在或执行失败都静默跳过：它是补充手段，兜底路径在 init.d 的重试
@@ -1194,7 +1192,7 @@ mod tests {
 
     /// 回归：等命令锁的时间不能吃掉应答预算。
     ///
-    /// 构造：先占用 `cmd_mu` 一小段时间模拟「初始化序列正在发命令」，
+    /// 构造：先占用命令闸（gate）一小段时间模拟「初始化序列正在发命令」，
     /// 随后释放。此时后一条命令若仍按「进入函数即计时」的老逻辑，
     /// 扣除排队后留给模组的应答窗口会不足；修复后排队走独立预算，
     /// 命令应在拿到锁之后正常写入并收到应答。

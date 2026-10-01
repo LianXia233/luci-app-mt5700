@@ -1,5 +1,5 @@
 //! 到模组的字节通道：TCP 网络口或 Linux 串口。
-//! 拆成独立的 reader / writer，读循环与命令写入可并发（与 Go 语义一致）。
+//! 拆成独立的 reader / writer，读循环与命令写入可并发。
 
 use crate::config::AtConfig;
 use std::time::Duration;
