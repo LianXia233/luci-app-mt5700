@@ -58,7 +58,7 @@ return L.view.extend({
 		devCard._body.appendChild(devBody);
 		body.appendChild(devCard);
 
-		var dev = { manufacturer: '', model: '', revision: '', imei: '', connectMode: '' };
+		var dev = { manufacturer: '', model: '', revision: '', imei: '', connectMode: '', usb: '' };
 
 		function renderDev() {
 			devBody.innerHTML = '';
@@ -68,7 +68,8 @@ return L.view.extend({
 					['制造商', dev.manufacturer || '—'],
 					['型号', dev.model || '—'],
 					['版本', dev.revision || '—'],
-					['连接模式', dev.connectMode || '—']
+					['连接模式', dev.connectMode || '—'],
+					['USB 速率', dev.usb || '—']
 				]
 			));
 		}
@@ -838,6 +839,22 @@ return L.view.extend({
 			}).catch(function () { renderDev(); });
 		}
 
+		/* 自动识别模组与路由器之间的 USB 链路速率（sysfs，不发 AT 命令） */
+		function fetchUsb() {
+			return AtWs.usb().then(function (res) {
+				if (res && res.success && res.found) {
+					dev.usb = AtWs.usbSpeedText(res.speed_mbps);
+					if (res.product) dev.usb += ' · ' + res.product;
+				} else {
+					dev.usb = '';
+				}
+				renderDev();
+			}).catch(function () {
+				dev.usb = '';
+				renderDev();
+			});
+		}
+
 		function fetchSimConfig() {
 			return send('AT^SCICHG?').then(function (res) {
 				if (res.success && res.data) {
@@ -889,6 +906,7 @@ return L.view.extend({
 		function loadAll() {
 			return Promise.resolve()
 				.then(fetchDeviceInfo)
+				.then(fetchUsb)
 				.then(fetchSimConfig)
 				.then(fetchAirplane)
 				.then(fetchDeviceControl)

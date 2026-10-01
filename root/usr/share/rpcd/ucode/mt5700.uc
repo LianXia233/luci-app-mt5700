@@ -223,6 +223,86 @@ function netrateCall(req) {
 	};
 }
 
+/*
+ * 取模组与路由器之间的 USB 链路速率（自动识别，不硬编码设备路径/产品名）。
+ *
+ * 原理：扫描 /sys/bus/usb/devices 下每个 USB 设备，跳过 xHCI 根集线器
+ * （idVendor = 1d6b），剩下的真实 USB 设备即模组（本机实测为 2-1，
+ * TDTECH MT5700M-CN，speed=5000 = USB 3.0 5 Gbps）。
+ *
+ * 实现细节：本固件的 ucode 数组/对象受限（fs.readdir 返回的数组无 length，
+ * 直接 length(arr) 会抛 left-hand side is not a function），故复用 fs.popen
+ * 走 busybox /bin/sh 一行脚本在设备侧枚举并逐行回显，本函数只做串行读取与解析，
+ * 与 rpcCall() 里 fs.popen(nc ...) 的既有做法一致；speed/version 均为 sysfs
+ * 直读，全程不发任何 AT 命令，不占用 AT 通道、不干扰模组。
+ */
+/* 查单字符分隔符下标（ucode 全局 index 在本固件未必可用，用 substr 逐字符扫描） */
+function strIndexOf(s, ch) {
+	let n = length(s);
+	for (let i = 0; i < n; i++) {
+		if (substr(s, i, 1) == ch) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+function usbCall(req) {
+	const script = 'echo USB_SCAN; '
+		+ 'for x in /sys/bus/usb/devices/*/; do '
+		+ 'p=$(cat "$x/product" 2>/dev/null); '
+		+ '[ -z "$p" ] && continue; '
+		+ 'v=$(cat "$x/idVendor" 2>/dev/null); '
+		+ '[ "$v" = "1d6b" ] && continue; '
+		+ 'echo "USB=$(cat "$x/speed" 2>/dev/null) | $p | $(cat "$x/version" 2>/dev/null)"; '
+		+ 'break; done';
+	let p;
+	try {
+		p = fs.popen('/bin/sh -c ' + script, 'r');
+	} catch (e) {
+		return { success: false, error: '无法读取 USB 信息: ' + e.message };
+	}
+	if (!p) {
+		return { success: false, error: '无法读取 USB 信息' };
+	}
+	let speed = '';
+	let product = '';
+	let version = '';
+	let guard = 0;
+	while (1) {
+		if (guard++ >= 20) {
+			break;
+		}
+		let line = p.read('line');
+		if (line == null) {
+			break;
+		}
+		if (substr(line, 0, 4) == 'USB=') {
+			let rest = trim(substr(line, 4));
+			let i = strIndexOf(rest, '|');
+			if (i < 0) {
+				continue;
+			}
+			speed = trim(substr(rest, 0, i));
+			let tail = substr(rest, i + 1);
+			let k = strIndexOf(tail, '|');
+			if (k >= 0) {
+				product = trim(substr(tail, 0, k));
+				version = trim(substr(tail, k + 1));
+			} else {
+				product = trim(tail);
+			}
+			break;
+		}
+	}
+	p.close();
+	if (speed == '') {
+		return { success: false, error: '未检测到 USB 模组设备' };
+	}
+	let mbps = int(speed) || 0;
+	return { success: true, speed_mbps: mbps, product: product, version: version };
+}
+
 function rpcCall(method, params) {
 	const rpcCfg = readRpcConfig();
 	const port = rpcCfg.port;
@@ -365,6 +445,12 @@ return {
 			args: { device: '' },
 			call: function (req) {
 				return netrateCall(req);
+			}
+		},
+		usb: {
+			args: { _rid: '' },
+			call: function (req) {
+				return usbCall(req);
 			}
 		},
 		logs: {

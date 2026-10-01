@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 模组设置：自动识别并显示 USB 链路速率
+
+- **feat(settings)**: 「模组设置」页设备信息表格新增 **USB 速率** 行，自动识别模组与路由器之间的 USB 链路速率并格式化为可读文案（如 `5.0 Gbps（USB 3.0）`），并一并展示模组 product 名称（如 `TDTECH MT5700M-CN`）。
+- **feat(settings)**: 数据源直接走 **sysfs**（扫描 `/sys/bus/usb/devices/*/`，按 `idVendor ≠ 1d6b` 跳过 xHCI 根集线器后定位真实 USB 模组设备），**自动识别、不硬编码**设备路径 / 产品名；全程不下发任何 AT 命令，不占用 AT 通道、不干扰模组。
+- **feat(rpc)**: 新增 `mt5700.usb` RPC 方法（rpcd ucode 插件内 `fs.popen` + busybox 一行脚本在设备侧枚举 USB 设备，本函数逐行解析 `speed` / `version` / `product`）；前置 `rpc.js` 封装 `AtWs.usb()` 与 `usbSpeedText()`（速率→规范名，如 5000→USB 3.0）。
+- **feat(acl)**: rpcd ACL（`rpcd/acl.d/luci-app-mt5700.json`）仅给 `mt5700` 的 **read** 方法列表追加 `usb` 只读授权，无任何写入权限变更。
+- **docs**: README 功能矩阵「模组设置」补充 USB 链路速率说明。
+
 ### 5G 状态页：载波聚合卡片重构
 
 - **fix(status)**: 修复「载波聚合 (Carrier Aggregation)」卡片在窄屏/手机上文字过小难以阅读的问题 —— 频谱展示由「SVG 整体缩放」（1200 宽 viewBox 拉伸，窄屏字号被压缩到不可读）重构为**固定字号 HTML 频谱卡片网格**，字号不再随容器缩放。
