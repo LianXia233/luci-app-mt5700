@@ -55,7 +55,7 @@ fn configure_termios(fd: i32, speed: libc::speed_t) -> std::io::Result<()> {
     t.c_cc[libc::VMIN] = 1;
     t.c_cc[libc::VTIME] = 0;
 
-    // 波特率写进 c_cflag 的 CBAUD 位（与 Go 实现对 Linux 的处理一致）。
+    // 波特率写进 c_cflag 的 CBAUD 位。
     t.c_cflag = (t.c_cflag & !libc::CBAUD) | speed;
 
     ioctl_tcsetattr(fd, &t)

@@ -1,5 +1,5 @@
 //! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
-//! 键名与 Go 实现（config.go）以及 LuCI 页面完全一致。
+//! 键名与 LuCI 页面约定完全一致。
 
 use crate::logger::{self, Level};
 use std::collections::HashMap;
@@ -229,7 +229,7 @@ impl UciReader {
 
 /// 用一次 `uci show at-webserver` 取回整个配置段。
 pub async fn uci_values() -> Result<UciReader, String> {
-    // 与 Go 版一致：加 5s 超时，避免 uci 命令异常挂起卡死启动。
+    // 加 5s 超时，避免 uci 命令异常挂起卡死启动。
     let out = tokio::time::timeout(
         Duration::from_secs(5),
         tokio::process::Command::new("uci")

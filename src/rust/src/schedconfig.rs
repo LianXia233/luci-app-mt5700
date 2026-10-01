@@ -1,5 +1,4 @@
 //! 定时锁频配置：DTO <-> UCI 转换与校验。
-//! 与 Go 实现（schedconfig.go）键名、校验规则完全一致。
 
 use chrono::Timelike;
 use crate::config::{BandLock, ScheduleConfig};

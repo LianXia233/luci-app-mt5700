@@ -1,5 +1,4 @@
 //! 通知：企业微信 webhook（60 秒合并、重试 3 次）+ 本地日志文件。
-//! 与 Go 实现（notify.go）行为一致。
 
 use crate::{log_error, log_info, log_warn};
 use crate::config::NotificationConfig;
@@ -20,7 +19,7 @@ pub enum NotifyKind {
     Signal,
 }
 
-/// 与旧实现一致的两个特殊发送方名字，决定了消息的排版样式。
+/// 两个特殊发送方名字，决定消息的排版样式。
 pub const SENDER_CALL: &str = "来电提醒";
 pub const SENDER_SIGNAL: &str = "信号监控";
 
@@ -38,7 +37,7 @@ pub struct Notifier {
     log_file: Option<String>,
 }
 
-#[allow(dead_code)] // sender 字段保留（通知来源标识，与 Go 一致）
+#[allow(dead_code)] // sender 字段保留（通知来源标识）
 impl Notifier {
     pub fn new(cfg: NotificationConfig) -> (Notifier, mpsc::Receiver<Notification>) {
         let (tx, rx) = mpsc::channel(NOTIFY_QUEUE_SIZE);
@@ -240,7 +239,7 @@ fn post_webhook(hook: &str, body: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 复刻旧实现的排版，单条与多条走不同格式。
+/// 单条与多条消息走不同排版格式。
 pub fn combine_messages(msgs: &[Notification]) -> String {
     if msgs.is_empty() {
         return String::new();

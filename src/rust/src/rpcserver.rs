@@ -27,12 +27,12 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 
 const RPC_READ_TIMEOUT: Duration = Duration::from_secs(30);
-/// RPC 请求行长度上限（防异常长行撑爆内存；Go 版 WebSocket 是 64KB 读限）。
+/// RPC 请求行长度上限（防异常长行撑爆内存）。
 const MAX_RPC_LINE: usize = 8192;
 const CELLSCAN_ABORT_TOKEN: &str = "abcd";
 const DEFAULT_SCAN_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// 发给前端的命令应答。字段名与原实现严格一致。
+/// 发给前端的命令应答，字段名与前端约定严格一致。
 #[derive(Serialize)]
 pub struct AtCommandResponse {
     pub success: bool,

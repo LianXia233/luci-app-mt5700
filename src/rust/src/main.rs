@@ -35,7 +35,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 
-/// 构建时通过 -ldflags 注入版本（与 Go 一致的 CLI 行为）。
+/// 版本号取自 Cargo 包元数据，构建时编译进二进制。
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
