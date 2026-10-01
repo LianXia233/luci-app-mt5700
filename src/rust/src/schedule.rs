@@ -1,5 +1,4 @@
 //! 定时锁频调度器：按时段切换锁频设置，长时间无服务时自动解锁恢复。
-//! 与 Go 实现（schedule.go）逻辑一致。
 
 use chrono::Timelike;
 use crate::{log_info, log_warn};

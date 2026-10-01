@@ -1,5 +1,4 @@
 //! 主动上报分发：来电、新短信、存储满、信号变化、PDCP 统计。
-//! 与 Go 实现（urc.go）逐项一致。
 
 use crate::{log_info, log_warn};
 use crate::atclient::{AtClient, AtResponse, Unsolicited};

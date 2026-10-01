@@ -1,5 +1,4 @@
 //! SMS PDU 解码（SMS-DELIVER），GSM7/UCS2/8bit + UDH 长短信。
-//! 逻辑与 Go 实现（pdu.go）逐项一致。
 
 use chrono::{DateTime, Local, TimeZone};
 
@@ -117,7 +116,7 @@ fn decode_timestamp(ts: &[u8]) -> DateTime<Local> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
         return Local::now();
     }
-    // 时区字节存在但沿用本地时区解释，与旧实现保持一致。
+    // 时区字节存在但沿用本地时区解释。
     match Local.with_ymd_and_hms(year, month as u32, day as u32, hour as u32, minute as u32, second as u32) {
         chrono::LocalResult::Single(dt) => dt,
         _ => Local::now(),
@@ -256,7 +255,7 @@ fn parse_udh_concat(udh: &[u8]) -> Option<PartialInfo> {
 mod tests {
     use super::*;
 
-    // 发送方 13800138000，时间戳 2025-08-25 12:00:00，UCS2 正文 "测试"（与 Go 测试同源）。
+    // 发送方 13800138000，时间戳 2025-08-25 12:00:00，UCS2 正文 "测试"。
     const UCS2_PDU: &str = "00040B913108108300F0000852805221000023046D4B8BD5";
 
     // 同一个头，DCS=00，GSM 7-bit 正文 "hello"。
