@@ -44,11 +44,14 @@ return L.view.extend({
 			return wrap;
 		}
 
-		/* ---------- IMS 与短信开关 ---------- */
+		/* ---------- IMS 与短信开关 + 短信中心号码（双列并排） ---------- */
+		var rowSms = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowSms);
+
 		var smsCard = Mt5700.card('短信服务', 'IMS 与短信收发开关');
 		var smsBody = E('div');
 		smsCard._body.appendChild(smsBody);
-		body.appendChild(smsCard);
+		rowSms.appendChild(smsCard);
 
 		var imsSwitch = mkCheck(function (checked, input) {
 			AtWs.client.sendCommand('AT^IMSSWITCH=' + (checked ? '1,0,0' : '0,0,0')).then(function (res) {
@@ -71,7 +74,7 @@ return L.view.extend({
 		var centerCard = Mt5700.card('短信中心号码', '用于发送短信的 SMSC');
 		var centerBody = E('div');
 		centerCard._body.appendChild(centerBody);
-		body.appendChild(centerCard);
+		rowSms.appendChild(centerCard);
 
 		var centerInput = Mt5700.input('text', '+8613800755500', '');
 		centerInput.addEventListener('input', function () { state.centerNumber = centerInput.value; });
@@ -88,10 +91,14 @@ return L.view.extend({
 		));
 
 		/* ---------- 存储管理 ---------- */
+		/* 存储管理 + 本地已发缓存：双列并排 */
+		var rowStore = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowStore);
+
 		var storeCard = Mt5700.card('存储管理', 'SIM 卡短信存储');
 		var storeBody = E('div');
 		storeCard._body.appendChild(storeBody);
-		body.appendChild(storeCard);
+		rowStore.appendChild(storeCard);
 
 		var storageEl = E('div', { 'class': 'mt5700-hint' }, '存储用量：—');
 		storeBody.appendChild(storageEl);
@@ -143,7 +150,7 @@ return L.view.extend({
 		var cacheCard = Mt5700.card('本地已发缓存', '发送记录保存在浏览器本地，可导出/导入/清空');
 		var cacheBody = E('div');
 		cacheCard._body.appendChild(cacheBody);
-		body.appendChild(cacheCard);
+		rowStore.appendChild(cacheCard);
 
 		var cacheEl = E('div', { 'class': 'mt5700-hint' }, '缓存条数：0');
 		cacheBody.appendChild(cacheEl);

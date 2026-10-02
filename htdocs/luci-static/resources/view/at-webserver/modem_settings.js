@@ -53,10 +53,14 @@ return L.view.extend({
 
 		/* ================= 设备信息 ================= */
 
+		/* 设备信息 + 设备标识(IMEI)：双列并排 */
+		var rowDev = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowDev);
+
 		var devCard = Mt5700.card('设备信息', '');
 		var devBody = E('div');
 		devCard._body.appendChild(devBody);
-		body.appendChild(devCard);
+		rowDev.appendChild(devCard);
 
 		var dev = { manufacturer: '', model: '', revision: '', imei: '', connectMode: '', usb: '' };
 
@@ -86,7 +90,7 @@ return L.view.extend({
 		var imeiCard = Mt5700.card('设备标识（IMEI）', '模组唯一身份标识，读取自 AT+CGSN');
 		var imeiBody = E('div');
 		imeiCard._body.appendChild(imeiBody);
-		body.appendChild(imeiCard);
+		rowDev.appendChild(imeiCard);
 
 		var imeiEl = E('span', { 'class': 'mt5700-mono' }, '—');
 
@@ -169,12 +173,15 @@ return L.view.extend({
 			}, '确认修改');
 		}
 
-		/* ================= SIM 卡 ================= */
+		/* ================= SIM 卡 + 飞行模式（双列并排） ================= */
+
+		var rowSim = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowSim);
 
 		var simCard = Mt5700.card('SIM 卡', '槽位切换、热插拔与 PIN');
 		var simBody = E('div');
 		simCard._body.appendChild(simBody);
-		body.appendChild(simCard);
+		rowSim.appendChild(simCard);
 
 		var simStatusRow = E('div', { 'class': 'mt5700-inline' });
 		var simSqEl = E('span', { 'class': 'mt5700-hint' }, 'SIM 状态：—');
@@ -284,7 +291,7 @@ return L.view.extend({
 		var rfCard = Mt5700.card('射频控制', '飞行模式');
 		var rfBody = E('div');
 		rfCard._body.appendChild(rfBody);
-		body.appendChild(rfCard);
+		rowSim.appendChild(rfCard);
 
 		var airplaneSwitch = makeSwitch(function (checked, input) {
 			send('AT+CFUN=' + (checked ? '0' : '1')).then(function (res) {
@@ -298,12 +305,15 @@ return L.view.extend({
 		rfBody.appendChild(Mt5700.formGroup('飞行模式', airplaneSwitch, '开启后关闭射频，恢复网络连接'));
 		var airplaneChk = airplaneSwitch.querySelector('input');
 
-		/* ================= 设备控制 ================= */
+		/* ================= 设备控制 + NR 能力（双列并排） ================= */
+
+		var rowCtrl = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowCtrl);
 
 		var ctrlCard = Mt5700.card('设备控制', '网卡速率与电源管理');
 		var ctrlBody = E('div');
 		ctrlCard._body.appendChild(ctrlBody);
-		body.appendChild(ctrlCard);
+		rowCtrl.appendChild(ctrlCard);
 
 		var nicSel = Mt5700.select([
 			{ label: '自动协商', value: '0' },
@@ -344,7 +354,7 @@ return L.view.extend({
 		var nrCard = Mt5700.card('NR 能力', '载波聚合、VoNR 与 DSS');
 		var nrBody = E('div');
 		nrCard._body.appendChild(nrBody);
-		body.appendChild(nrCard);
+		rowCtrl.appendChild(nrCard);
 
 		var caSwitch = makeSwitch(function (checked, input) {
 			send('AT^NRRCCAPCFG=3,' + (checked ? 1 : 0)).then(function (res) {
@@ -696,10 +706,14 @@ return L.view.extend({
 
 		/* ================= 温度保护 ================= */
 
+		/* 温度保护 + 系统控制：双列并排 */
+		var rowSys = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowSys);
+
 		var thermCard = Mt5700.card('温度保护', '自动温度保护与检测参数（THERM）');
 		var thermBody = E('div');
 		thermCard._body.appendChild(thermBody);
-		body.appendChild(thermCard);
+		rowSys.appendChild(thermCard);
 
 		var thermStatus = E('div', { 'class': 'mt5700-hint' }, '温度保护：—');
 		thermBody.appendChild(thermStatus);
@@ -781,7 +795,7 @@ return L.view.extend({
 		var sysCtrlCard = Mt5700.card('系统控制', '重启与恢复出厂');
 		var sysCtrlBody = E('div');
 		sysCtrlCard._body.appendChild(sysCtrlBody);
-		body.appendChild(sysCtrlCard);
+		rowSys.appendChild(sysCtrlCard);
 
 		sysCtrlBody.appendChild(Mt5700.panelActions(
 			Mt5700.dangerButton('重启模组', function () {
