@@ -194,7 +194,7 @@ return L.view.extend({
 
 	render: function (data) {
 		var self = this;
-		var page = Mt5700.page('运行日志', '模组拨号 · 接口拉起 · 通知记录');
+		var page = Mt5700.page('运行日志', '模组拨号事件 · 接口拉起链路 · 异步通知记录实时审计', 'logs', '事件审计 · 运行日志');
 		var body = page._body;
 		var notifyPath = (data && data.path) || '/tmp/at-notifications.log';
 

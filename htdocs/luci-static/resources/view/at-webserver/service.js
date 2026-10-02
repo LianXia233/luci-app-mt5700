@@ -172,7 +172,7 @@ return L.view.extend({
 
 	render: function (data) {
 		var self = this;
-		var page = Mt5700.page('服务配置', 'AT 服务与通知设置（保存后自动重载）');
+		var page = Mt5700.page('服务配置', 'AT 后台守护进程、串口/TCP 探测与异步通知联动配置', 'service', '守护进程 · 后台服务');
 		var body = page._body;
 
 		var state = data || {};
