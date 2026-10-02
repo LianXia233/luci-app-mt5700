@@ -30,32 +30,40 @@ return L.view.extend({
 			option5g: null
 		};
 
+		/* LTE 锁频 + NR 锁频：表单相近且各自不高，双列并排省掉两整行占位 */
+		var rowLock = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowLock);
+
 		var lteCard = Mt5700.card('LTE 锁频', '锁定频段/频点/小区；应用时会自动切换飞行模式使配置生效');
 		var lteBody = E('div');
 		lteCard._body.appendChild(lteBody);
-		body.appendChild(lteCard);
+		rowLock.appendChild(lteCard);
 
 		var nrCard = Mt5700.card('NR 锁频', 'NR 锁频需单板支持 NR，SCS 未指定时按频段自动推断');
 		var nrBody = E('div');
 		nrCard._body.appendChild(nrBody);
-		body.appendChild(nrCard);
+		rowLock.appendChild(nrCard);
 
 		var neighCard = Mt5700.card('邻区扫描', 'AT^MONNC 查询当前邻区，可自动刷新');
 		var neighBody = E('div');
 		neighCard._body.appendChild(neighBody);
 		body.appendChild(neighCard);
 
+		/* 5G 选项 + 网络拒绝：双列并排 */
+		var rowOpt = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowOpt);
+
 		var optCard = Mt5700.card('5G 选项', 'NR SA 支持 / DC 模式 / 接入模式');
 		var optBody = E('div', { 'class': 'mt5700-metrics' });
 		optCard._body.appendChild(optBody);
-		body.appendChild(optCard);
+		rowOpt.appendChild(optCard);
 
 		/* ---------- 网络拒绝原因（^REJINFO 主动上报） ---------- */
 
 		var rejectCard = Mt5700.card('网络拒绝', '^REJINFO 主动上报的网络拒绝原因（注册失败时实时更新）');
 		var rejectBody = E('div');
 		rejectCard._body.appendChild(rejectBody);
-		body.appendChild(rejectCard);
+		rowOpt.appendChild(rejectCard);
 		var lastReject = null;
 
 		function renderReject() {

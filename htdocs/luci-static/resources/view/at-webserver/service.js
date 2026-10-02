@@ -180,10 +180,14 @@ return L.view.extend({
 		/* ---------- 服务状态判定（五态） ---------- */
 		var status = resolveStatus(state);
 
+		/* 服务状态 + 定时锁频：双列并排（定时锁频卡在下方创建，此处先建容器） */
+		var rowTop = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowTop);
+
 		var statusCard = Mt5700.card('服务状态', '');
 		var statusBody = E('div');
 		statusCard._body.appendChild(statusBody);
-		body.appendChild(statusCard);
+		rowTop.appendChild(statusCard);
 
 		var statusRow = E('div', { 'class': 'mt5700-inline' });
 		statusRow.appendChild(Mt5700.badge(status.label, status.variant));
@@ -203,11 +207,14 @@ return L.view.extend({
 		}
 		statusBody.appendChild(actions);
 
-		/* ---------- 连接配置 ---------- */
+		/* ---------- 连接配置 + RPC 服务（双列并排） ---------- */
+		var rowConn = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowConn);
+
 		var connCard = Mt5700.card('调制解调器连接', '后端连接模组的通道');
 		var connBody = E('div');
 		connCard._body.appendChild(connBody);
-		body.appendChild(connCard);
+		rowConn.appendChild(connCard);
 
 		var connTypeSel = Mt5700.select([
 			{ label: 'PCUI 串口（默认，优先 /dev/ttyUSB1）', value: 'SERIAL' },
@@ -263,7 +270,7 @@ return L.view.extend({
 		var wsCard = Mt5700.card('RPC 服务', 'LuCI 经 rpcd/ucode 代理连接后端使用的端口与密钥（仅回环监听，不对外暴露）');
 		var wsBody = E('div');
 		wsCard._body.appendChild(wsBody);
-		body.appendChild(wsCard);
+		rowConn.appendChild(wsCard);
 
 		var wsHostInput = Mt5700.input('text', '留空表示本机', '');
 		wsBody.appendChild(Mt5700.formGroup('监听地址', wsHostInput, '保留兼容：RPC 固定监听 127.0.0.1，该键不再生效'));
@@ -286,7 +293,7 @@ return L.view.extend({
 		var schedCard = Mt5700.card('定时锁频', '总开关与默认参数');
 		var schedBody = E('div');
 		schedCard._body.appendChild(schedBody);
-		body.appendChild(schedCard);
+		rowTop.appendChild(schedCard);
 
 		var schedSwitch = E('div', { 'class': 'mt5700-switch' });
 		var schedChk = E('input', { type: 'checkbox' });
