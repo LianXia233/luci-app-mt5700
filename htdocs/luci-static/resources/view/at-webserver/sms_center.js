@@ -19,7 +19,7 @@
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('短信中心', '收发短信与联系人会话');
+		var page = Mt5700.page('短信中心', '即时短信收发、会话列表、长短信拼接与存储箱管理', 'sms_center', '即时消息 · 会话管理');
 		var body = page._body;
 
 		var connBar = E('div');

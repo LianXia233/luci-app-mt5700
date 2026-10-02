@@ -23,7 +23,7 @@
 
 return L.view.extend({
 	render: function () {
-		var page = Mt5700.page('模组设置', '模组设备信息、SIM、射频与系统控制');
+		var page = Mt5700.page('模组设置', '硬件信息遥测、SIM/USIM 状态、射频模式与系统重置控制', 'modem_settings', '模组核心 · 硬件控制');
 		var body = page._body;
 
 		var connBar = E('div');

@@ -6,30 +6,30 @@
 
 /* ---------- CSS Variables ---------- */
 :root {
-  /* 颜色 —— 对齐参考站点 (PaperGrid) 冷调浅色体系 */
-  --mt5700-bg: rgba(242, 247, 251, 0.72);
-  --mt5700-card-bg: rgba(255, 255, 255, 0.88);
-  --mt5700-card-bg-hover: rgba(255, 255, 255, 0.96);
-  --mt5700-glass-bg: rgba(255, 255, 255, 0.62);
-  --mt5700-float-bg: rgba(255, 255, 255, 0.94);
+  /* 颜色 —— 白色毛玻璃 (White Frosted Glass) 现代设计体系 */
+  --mt5700-bg: rgba(240, 246, 252, 0.75);
+  --mt5700-card-bg: rgba(255, 255, 255, 0.80);
+  --mt5700-card-bg-hover: rgba(255, 255, 255, 0.92);
+  --mt5700-glass-bg: rgba(255, 255, 255, 0.70);
+  --mt5700-float-bg: rgba(255, 255, 255, 0.88);
   --mt5700-text: #17324b;
-  --mt5700-text-secondary: #60798d;
+  --mt5700-text-secondary: #5a738e;
   --mt5700-text-muted: #8ba3b6;
-  --mt5700-border: rgba(220, 232, 241, 0.95);
-  --mt5700-border-subtle: rgba(211, 226, 237, 0.9);
+  --mt5700-border: rgba(255, 255, 255, 0.85);
+  --mt5700-border-subtle: rgba(218, 230, 242, 0.85);
   --mt5700-divider: rgba(23, 50, 75, 0.07);
 
-  /* 玻璃效果 */
-  --mt5700-blur: 18px;
-  --mt5700-saturate: 150%;
+  /* 白色毛玻璃特效 */
+  --mt5700-blur: 24px;
+  --mt5700-saturate: 180%;
   --mt5700-glass: blur(var(--mt5700-blur)) saturate(var(--mt5700-saturate));
 
-  /* 多层阴影 (Z 轴深度) —— 冷调、低透明度，贴近参考站点纸感层次 */
-  --mt5700-sh-1: 0 1px 2px rgba(21, 54, 83, 0.04), 0 1px 3px rgba(21, 54, 83, 0.05);
-  --mt5700-sh-2: 0 2px 6px rgba(21, 54, 83, 0.05), 0 5px 20px rgba(21, 54, 83, 0.06);
-  --mt5700-sh-3: 0 4px 10px rgba(21, 54, 83, 0.05), 0 12px 32px rgba(16, 45, 89, 0.08), 0 24px 64px rgba(16, 45, 89, 0.05);
-  --mt5700-sh-float: 0 4px 12px rgba(21, 54, 83, 0.07), 0 12px 36px rgba(16, 45, 89, 0.1), 0 24px 80px rgba(16, 45, 89, 0.08);
-  --mt5700-sh-inset: inset 0 1px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 0 rgba(21, 54, 83, 0.03);
+  /* 多层轻柔阴影 + 顶层微光反光 */
+  --mt5700-sh-1: 0 1px 3px rgba(18, 48, 86, 0.04), 0 2px 6px rgba(18, 48, 86, 0.04);
+  --mt5700-sh-2: 0 4px 12px rgba(18, 48, 86, 0.06), 0 10px 24px rgba(18, 48, 86, 0.05);
+  --mt5700-sh-3: 0 8px 24px rgba(18, 48, 86, 0.07), 0 20px 48px rgba(18, 48, 86, 0.06);
+  --mt5700-sh-float: 0 12px 36px rgba(18, 48, 86, 0.09), 0 28px 72px rgba(18, 48, 86, 0.07);
+  --mt5700-sh-inset: inset 0 1px 1px rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(18, 48, 86, 0.03);
   /* 焦点环 —— 对齐参考站点 --ring */
   --mt5700-ring: 0 0 0 3px rgba(41, 169, 225, 0.22);
   /* 兼容旧变量名 */
@@ -3587,3 +3587,278 @@
 /* 斑马纹降到极淡，仍有层次但不抢眼 */
 .mt5700-logrow:nth-child(even) { background: rgba(128, 128, 128, 0.035); }
 .mt5700-logrow:hover { background: rgba(23, 166, 127, 0.07); }
+
+/* ==========================================================================
+   白色毛玻璃 Hero 卡片与动态 SVG 动画系统 (Dynamic Frosted Hero System)
+   ========================================================================== */
+
+.mt5700-hero-card {
+  position: relative;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.88) 0%, rgba(240, 248, 255, 0.76) 100%);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: var(--mt5700-radius-xl);
+  box-shadow: 0 10px 30px rgba(18, 48, 86, 0.07), inset 0 1px 2px rgba(255, 255, 255, 0.95);
+  padding: 24px 28px;
+  overflow: hidden;
+  margin-bottom: var(--mt5700-space-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  transition: all var(--mt5700-transition-slow);
+}
+
+.mt5700-hero-card::before {
+  content: "";
+  position: absolute;
+  top: -60px;
+  right: 120px;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(41, 169, 225, 0.15) 0%, rgba(8, 124, 186, 0) 70%);
+  pointer-events: none;
+  z-index: 0;
+  animation: mt-float-slow 8s ease-in-out infinite alternate;
+}
+
+.mt5700-hero-card:hover {
+  box-shadow: 0 14px 40px rgba(18, 48, 86, 0.1), inset 0 1px 2px rgba(255, 255, 255, 1);
+  transform: translateY(-2px);
+}
+
+.mt5700-hero-content {
+  flex: 1 1 500px;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.mt5700-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #087cba;
+  background: rgba(41, 169, 225, 0.12);
+  border: 1px solid rgba(41, 169, 225, 0.25);
+  margin-bottom: 10px;
+  backdrop-filter: blur(8px);
+}
+
+.mt5700-hero-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #087cba;
+  box-shadow: 0 0 8px #29a9e1;
+  animation: mt-pulse-glow 2s infinite;
+}
+
+.mt5700-hero-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--mt5700-text);
+  letter-spacing: -0.02em;
+  margin: 0 0 8px 0;
+  line-height: 1.25;
+}
+
+.mt5700-hero-desc {
+  font-size: 13.5px;
+  color: var(--mt5700-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 640px;
+}
+
+.mt5700-hero-art {
+  flex: 0 0 160px;
+  width: 160px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+.mt5700-hero-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 6px 14px rgba(8, 124, 186, 0.15));
+}
+
+/* ---------- 动态 SVG 关键帧动效库 ---------- */
+
+@keyframes mt-pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+    filter: drop-shadow(0 0 2px rgba(8, 124, 186, 0.4));
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+    filter: drop-shadow(0 0 10px rgba(41, 169, 225, 0.8));
+  }
+}
+
+@keyframes mt-radar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes mt-wave-expand {
+  0% {
+    r: 8;
+    opacity: 0.9;
+    stroke-width: 2;
+  }
+  70% {
+    opacity: 0.4;
+    stroke-width: 1.5;
+  }
+  100% {
+    r: 34;
+    opacity: 0;
+    stroke-width: 0.5;
+  }
+}
+
+@keyframes mt-float-slow {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(1.5deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+@keyframes mt-data-stream {
+  0% { stroke-dashoffset: 60; }
+  100% { stroke-dashoffset: 0; }
+}
+
+@keyframes mt-spin-slow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes mt-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes mt-ecg {
+  0% { stroke-dashoffset: 120; }
+  50% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -120; }
+}
+
+/* SVG 元素动画绑定类 */
+.mt-anim-pulse { animation: mt-pulse-glow 2.5s ease-in-out infinite; transform-origin: center; }
+.mt-anim-spin { animation: mt-spin-slow 12s linear infinite; transform-origin: center; }
+.mt-anim-sweep { animation: mt-radar-sweep 4s linear infinite; transform-origin: center; }
+.mt-anim-wave1 { animation: mt-wave-expand 2.8s cubic-bezier(0.2, 0.8, 0.4, 1) infinite; }
+.mt-anim-wave2 { animation: mt-wave-expand 2.8s cubic-bezier(0.2, 0.8, 0.4, 1) infinite; animation-delay: 0.9s; }
+.mt-anim-wave3 { animation: mt-wave-expand 2.8s cubic-bezier(0.2, 0.8, 0.4, 1) infinite; animation-delay: 1.8s; }
+.mt-anim-stream {
+  stroke-dasharray: 8 4;
+  animation: mt-data-stream 2s linear infinite;
+}
+.mt-anim-float { animation: mt-float-slow 4s ease-in-out infinite alternate; }
+
+/* 骨架屏加载态 (Responsive Skeleton Glass) */
+.mt-skeleton-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.mt-skeleton-card {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: var(--mt5700-radius-lg);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mt-skeleton-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: mt-shimmer 1.8s infinite;
+}
+
+.mt-skeleton-line {
+  height: 14px;
+  border-radius: 6px;
+  background: rgba(210, 224, 238, 0.45);
+  margin-bottom: 10px;
+}
+
+.mt-skeleton-line-title { width: 35%; height: 20px; margin-bottom: 16px; }
+.mt-skeleton-line-full { width: 100%; }
+.mt-skeleton-line-3q { width: 75%; }
+.mt-skeleton-line-half { width: 50%; }
+
+/* 暗黑模式下的毛玻璃 Hero */
+@media (prefers-color-scheme: dark) {
+  .mt5700-hero-card {
+    background: linear-gradient(135deg, rgba(20, 38, 60, 0.82) 0%, rgba(14, 26, 42, 0.88) 100%);
+    border-color: rgba(97, 201, 244, 0.22);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  }
+  .mt5700-hero-card::before {
+    background: radial-gradient(circle, rgba(97, 201, 244, 0.15) 0%, rgba(8, 124, 186, 0) 70%);
+  }
+  .mt5700-hero-badge {
+    color: #61c9f4;
+    background: rgba(97, 201, 244, 0.15);
+    border-color: rgba(97, 201, 244, 0.3);
+  }
+  .mt5700-hero-badge-dot {
+    background: #61c9f4;
+    box-shadow: 0 0 8px #61c9f4;
+  }
+  .mt-skeleton-card {
+    background: rgba(22, 40, 60, 0.7);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  .mt-skeleton-card::after {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  }
+  .mt-skeleton-line {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* 响应式 (PC vs PE 移动端) 适配 */
+@media (max-width: 768px) {
+  .mt5700-hero-card {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    padding: 16px 18px;
+    gap: 12px;
+  }
+  .mt5700-hero-art {
+    width: 100%;
+    height: 90px;
+    justify-content: center;
+  }
+  .mt5700-hero-title {
+    font-size: 20px;
+  }
+  .mt5700-hero-desc {
+    font-size: 12.5px;
+  }
+}
+
