@@ -3849,9 +3849,18 @@
     padding: 16px 18px;
     gap: 12px;
   }
+  /* 竖排时桌面规则 flex:1 1 500px 的 flex-basis 作用于高度，会把内容区撑成 500px 高、
+     整卡几乎占满手机整屏（实测 375px 视口下 hero-card 高达 706px）。这里改为 auto。 */
+  .mt5700-hero-content {
+    flex: 1 1 auto;
+  }
+  /* 同理覆盖桌面 flex:0 0 160px，让 height 真正生效（列方向 flex-basis 会压过 height）。 */
   .mt5700-hero-art {
+    flex: 0 0 auto;
+    align-self: center;
     width: 100%;
-    height: 90px;
+    max-width: 210px;
+    height: 96px;
     justify-content: center;
   }
   .mt5700-hero-title {
