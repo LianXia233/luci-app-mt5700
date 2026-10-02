@@ -21,7 +21,7 @@
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('短信设置', '短信功能开关、中心号码、存储管理与 USSD 查询');
+		var page = Mt5700.page('短信设置', '短信服务开关、服务中心号码 (SMSC)、存储器映射与 USSD 代码查询', 'sms_settings', '短信配置 · 存储/USSD');
 		var body = page._body;
 
 		var connBar = E('div');

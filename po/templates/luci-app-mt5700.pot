@@ -146,7 +146,20 @@ msgid "AT WebServer"
 msgstr "AT WebServer"
 
 msgid "LuCI support for AT WebServer"
-msgstr "LuCI support for AT WebServer"
+msgstr "MT5700 5G 模组 AT WebServer LuCI 控制台"
 
 msgid "通知日志：查看短信、来电、信号变化等通知记录"
 msgstr "通知日志：查看短信、来电、信号变化等通知记录"
+
+msgid "移动网络"
+msgstr "移动网络"
+
+msgid "5G 模组管理"
+msgstr "5G 模组管理"
+
+msgid "运行日志"
+msgstr "运行日志"
+
+msgid "AT 后台守护进程、串口/TCP 探测与异步通知联动配置"
+msgstr "AT 后台守护进程、串口/TCP 探测与异步通知联动配置"
+

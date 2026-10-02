@@ -22,7 +22,7 @@
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('全网扫频', '扫出频段、频点、PCI 与子载波间隔，可据此一键锁定；支持无卡扫描');
+		var page = Mt5700.page('全网扫频', '基站探测、频段/频点/PCI 扫描与一键锁定，支持无卡探测', 'scan', '基站探测 · 载波扫描');
 		var body = page._body;
 
 		var connBar = E('div');
