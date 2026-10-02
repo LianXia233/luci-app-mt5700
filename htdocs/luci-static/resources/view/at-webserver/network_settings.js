@@ -16,7 +16,7 @@
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('网络设置', '锁频、邻区与 5G 选项');
+		var page = Mt5700.page('网络设置', '锁频策略、邻区探测与 5G 独立组网参数', 'network_settings', '射频频段 · 锁频策略');
 		var body = page._body;
 
 		var connBar = E('div');

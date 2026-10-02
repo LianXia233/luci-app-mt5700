@@ -20,7 +20,7 @@
 
 return L.view.extend({
 	render: function () {
-		var page = Mt5700.page('拨号设置', '自动拨号、APN、模式配置与 PDP 上下文');
+		var page = Mt5700.page('拨号设置', '自动拨号、APN 接入点、USB/网口工作模式与 PDP 上下文配置', 'dial', '数据链路 · APN 拨号');
 		var body = page._body;
 
 		var connBar = E('div');

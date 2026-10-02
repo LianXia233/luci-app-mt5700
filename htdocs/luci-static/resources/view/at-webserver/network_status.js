@@ -17,22 +17,22 @@
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('网络状态', '实时蜂窝无线链路、物理射频载波与硬件工况遥测');
+		var page = Mt5700.page('网络状态', '实时蜂窝无线链路、物理射频载波与硬件工况遥测', 'network_status', '实时遥测 · 5G NR/LTE');
 		var body = page._body;
 
-		/* ---------- 1. 注入自适应 NOC 极客响应式全局样式表 ---------- */
+		/* ---------- 1. 注入自适应 NOC 极客响应式全局样式表 (白色毛玻璃) ---------- */
 		var style = E('style', {}, [
 			':root {',
-			'  --mt-bg-card: var(--background-color-high, rgba(255, 255, 255, 0.95));',
-			'  --mt-border: var(--border-color-low, rgba(140, 155, 180, 0.2));',
-			'  --mt-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);',
+			'  --mt-bg-card: rgba(255, 255, 255, 0.80);',
+			'  --mt-border: rgba(255, 255, 255, 0.85);',
+			'  --mt-shadow: 0 8px 24px rgba(18, 48, 86, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.95);',
 			'  --c-exc: #00f5a0; --c-good: #00b4d8; --c-fair: #f59e0b; --c-poor: #f97316; --c-crit: #ef4444;',
 			'  --c-dl: #00b4d8; --c-ul: #10b981;',
 			'}',
 			'@media (prefers-color-scheme: dark) {',
 			'  :root {',
-			'    --mt-bg-card: rgba(20, 26, 38, 0.92);',
-			'    --mt-border: rgba(255, 255, 255, 0.09);',
+			'    --mt-bg-card: rgba(20, 26, 38, 0.88);',
+			'    --mt-border: rgba(255, 255, 255, 0.12);',
 			'    --mt-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);',
 			'  }',
 			'}',
@@ -40,12 +40,12 @@ return L.view.extend({
 			'.mt-row-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: stretch; width: 100%; }',
 			'.mt-row-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; width: 100%; }',
 			'@media (max-width: 1180px) { .mt-row-3col { grid-template-columns: 1fr; } }',
-			/* 信号 4 联卡片 */
+			/* 信号 4 联卡片 (白色毛玻璃) */
 			'.mt-sig-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; margin-bottom: 6px; }',
 			'@media (max-width: 1080px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); } }',
 			'@media (max-width: 580px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); gap: 12px; } }',
-			'.mt-sig-box { background: var(--mt-bg-card); border: 1px solid var(--mt-border); border-radius: 12px; box-shadow: var(--mt-shadow); padding: 14px 14px 12px 14px; display: flex; flex-direction: column; position: relative; overflow: hidden; transition: transform 0.2s ease, border-color 0.2s ease; }',
-			'.mt-sig-box:hover { transform: translateY(-2px); border-color: rgba(0, 180, 216, 0.45); }',
+			'.mt-sig-box { background: var(--mt-bg-card); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid var(--mt-border); border-radius: 14px; box-shadow: var(--mt-shadow); padding: 14px 14px 12px 14px; display: flex; flex-direction: column; position: relative; overflow: hidden; transition: transform 0.2s ease, border-color 0.2s ease; }',
+			'.mt-sig-box:hover { transform: translateY(-2px); border-color: rgba(0, 180, 216, 0.55); box-shadow: 0 10px 28px rgba(18, 48, 86, 0.08); }',
 			'.mt-sig-box-head { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 4px; }',
 			'.mt-sig-box-title { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--text-color-high, inherit); }',
 			'.mt-sig-tag { font-size: 10px; font-family: "JetBrains Mono", monospace; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: rgba(125, 125, 125, 0.12); }',

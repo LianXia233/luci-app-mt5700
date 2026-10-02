@@ -19,7 +19,7 @@
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('模组升级', 'FOTA 远程固件升级');
+		var page = Mt5700.page('模组升级', 'FOTA 在线与本地固件版本升级、校验与刷新维护', 'upgrade', '固件更新 · FOTA 在线');
 		var body = page._body;
 
 		var connBar = E('div');

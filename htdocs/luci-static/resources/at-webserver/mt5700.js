@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.10.0';
+var MT5700_CSS_VERSION = '2.11.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -45,9 +45,19 @@ var Mt5700 = (function () {
 				}
 			}
 		}
-		// 文本内容：字符串走 textContent，DOM 节点直接挂载（避免被 String() 序列化成 [object HTMLDivElement]）
+		// 文本内容：字符串走 textContent，DOM 节点/数组直接挂载
 		if (text != null) {
-			if (typeof text === 'object' && text.nodeType) {
+			if (Array.isArray(text)) {
+				for (var j = 0; j < text.length; j++) {
+					if (text[j] != null) {
+						if (typeof text[j] === 'object' && text[j].nodeType) {
+							el.appendChild(text[j]);
+						} else {
+							el.appendChild(document.createTextNode(String(text[j])));
+						}
+					}
+				}
+			} else if (typeof text === 'object' && text.nodeType) {
 				el.appendChild(text);
 			} else {
 				el.textContent = String(text);
@@ -67,19 +77,261 @@ var Mt5700 = (function () {
 		return el;
 	}
 
-	/* ================= 页面结构 ================= */
+	/* ================= 动态 SVG 动效组件系统 ================= */
+
+	/**
+	 * 生成带 CSS 动画的现代化动态矢量插画 (160x120 viewBox)
+	 * 为每个页面呈现定制的高科技白色毛玻璃动态图形
+	 */
+	api.heroIllustration = function (pageKey) {
+		var svg = svgEl('svg', {
+			'class': 'mt5700-hero-svg',
+			viewBox: '0 0 160 120',
+			fill: 'none',
+			xmlns: 'http://www.w3.org/2000/svg'
+		});
+
+		var defs = svgEl('defs');
+		// 渐变 1：主青色
+		var g1 = svgEl('linearGradient', { id: 'mt-g-accent', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
+		g1.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#29a9e1', 'stop-opacity': '0.95' }));
+		g1.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#087cba', 'stop-opacity': '0.95' }));
+		defs.appendChild(g1);
+
+		// 渐变 2：青绿微光
+		var g2 = svgEl('linearGradient', { id: 'mt-g-cyan', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
+		g2.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#34d399', 'stop-opacity': '0.9' }));
+		g2.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#0ea5e9', 'stop-opacity': '0.8' }));
+		defs.appendChild(g2);
+
+		// 渐变 3：毛玻璃半透明底
+		var g3 = svgEl('linearGradient', { id: 'mt-g-glass', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
+		g3.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#ffffff', 'stop-opacity': '0.85' }));
+		g3.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#e0f2fe', 'stop-opacity': '0.35' }));
+		defs.appendChild(g3);
+
+		svg.appendChild(defs);
+
+		// 背景淡光环
+		svg.appendChild(svgEl('circle', {
+			cx: 80, cy: 60, r: 46,
+			fill: 'url(#mt-g-glass)',
+			stroke: 'rgba(255, 255, 255, 0.8)',
+			'stroke-width': 1.5
+		}));
+
+		if (pageKey === 'network_status') {
+			// 5G 实时遥测：基站信号波与雷达脉冲
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 8, 'class': 'mt-anim-wave1', stroke: '#087cba', fill: 'none' }));
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 8, 'class': 'mt-anim-wave2', stroke: '#29a9e1', fill: 'none' }));
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 8, 'class': 'mt-anim-wave3', stroke: '#38bdf8', fill: 'none' }));
+			// 信号塔核心
+			svg.appendChild(svgEl('path', { d: 'M70 94L80 44L90 94M74 76H86M77 62H83', stroke: '#087cba', 'stroke-width': '2.2', 'stroke-linecap': 'round' }));
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 42, r: 4, fill: '#087cba', 'class': 'mt-anim-pulse' }));
+			// 5G 徽标
+			svg.appendChild(svgEl('rect', { x: 106, y: 30, width: 28, height: 16, rx: 5, fill: 'url(#mt-g-accent)' }));
+			var t = svgEl('text', { x: 120, y: 42, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '9', 'font-weight': 'bold', 'font-family': 'sans-serif' });
+			t.textContent = '5G';
+			svg.appendChild(t);
+		} else if (pageKey === 'network_settings') {
+			// 锁频与射频策略：齿轮与频段轨道
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 36, stroke: '#29a9e1', 'stroke-width': '1.5', 'stroke-dasharray': '5 3', 'class': 'mt-anim-spin' }));
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 24, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
+			// 锁形轮廓
+			svg.appendChild(svgEl('rect', { x: 73, y: 55, width: 14, height: 12, rx: 2, fill: '#ffffff' }));
+			svg.appendChild(svgEl('path', { d: 'M76 55V50C76 47.8 77.8 46 80 46C82.2 46 84 47.8 84 50V55', stroke: '#ffffff', 'stroke-width': '2', fill: 'none' }));
+			// 卫星频点节点
+			svg.appendChild(svgEl('circle', { cx: 112, cy: 44, r: 4, fill: '#34d399', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 48, cy: 76, r: 4, fill: '#38bdf8', 'class': 'mt-anim-pulse' }));
+		} else if (pageKey === 'dial') {
+			// 拨号与高速隧道：流动数据流
+			svg.appendChild(svgEl('path', { d: 'M34 60C50 35 110 35 126 60C110 85 50 85 34 60Z', stroke: 'rgba(8,124,186,0.3)', 'stroke-width': '2', fill: 'none' }));
+			svg.appendChild(svgEl('path', { d: 'M34 60C50 35 110 35 126 60', stroke: '#087cba', 'stroke-width': '2.5', fill: 'none', 'class': 'mt-anim-stream' }));
+			svg.appendChild(svgEl('circle', { cx: 42, cy: 60, r: 7, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 118, cy: 60, r: 7, fill: 'url(#mt-g-cyan)', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 5, fill: '#0ea5e9' }));
+		} else if (pageKey === 'scan') {
+			// 全网扫频：360° 动态雷达扫描
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 38, stroke: 'rgba(8,124,186,0.25)', 'stroke-width': '1.5', fill: 'none' }));
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 24, stroke: 'rgba(8,124,186,0.35)', 'stroke-width': '1', fill: 'none' }));
+			svg.appendChild(svgEl('line', { x1: 42, y1: 60, x2: 118, y2: 60, stroke: 'rgba(8,124,186,0.3)', 'stroke-width': '1' }));
+			svg.appendChild(svgEl('line', { x1: 80, y1: 22, x2: 80, y2: 98, stroke: 'rgba(8,124,186,0.3)', 'stroke-width': '1' }));
+			// 扫描指针
+			var sweepG = svgEl('g', { 'class': 'mt-anim-sweep', style: 'transform-origin: 80px 60px;' });
+			sweepG.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 114, y2: 36, stroke: '#0ea5e9', 'stroke-width': '2.5', 'stroke-linecap': 'round' }));
+			sweepG.appendChild(svgEl('polygon', { points: '80,60 114,36 100,24', fill: 'rgba(41,169,225,0.25)' }));
+			svg.appendChild(sweepG);
+			// 扫描到的基站目标
+			svg.appendChild(svgEl('circle', { cx: 96, cy: 46, r: 3, fill: '#10b981', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 64, cy: 72, r: 2.5, fill: '#f59e0b' }));
+		} else if (pageKey === 'schedule') {
+			// 定时时钟与切换弧线
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 34, stroke: '#087cba', 'stroke-width': '2', fill: 'none' }));
+			svg.appendChild(svgEl('path', { d: 'M80 32A28 28 0 0 1 108 60', stroke: '#34d399', 'stroke-width': '4', fill: 'none', 'stroke-linecap': 'round' }));
+			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 80, y2: 40, stroke: '#087cba', 'stroke-width': '2.5', 'stroke-linecap': 'round' }));
+			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 98, y2: 60, stroke: '#29a9e1', 'stroke-width': '2', 'stroke-linecap': 'round' }));
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 4, fill: '#087cba', 'class': 'mt-anim-pulse' }));
+		} else if (pageKey === 'modem_settings') {
+			// 模组核心 SoC
+			svg.appendChild(svgEl('rect', { x: 56, y: 36, width: 48, height: 48, rx: 8, fill: 'url(#mt-g-accent)', stroke: '#ffffff', 'stroke-width': '2', 'class': 'mt-anim-float' }));
+			svg.appendChild(svgEl('rect', { x: 68, y: 48, width: 24, height: 24, rx: 4, fill: '#ffffff', 'fill-opacity': '0.9' }));
+			// 总线引脚
+			[44, 52, 60, 68, 76].forEach(function (y) {
+				svg.appendChild(svgEl('line', { x1: 44, y1: y, x2: 56, y2: y, stroke: '#29a9e1', 'stroke-width': '2', 'stroke-linecap': 'round' }));
+				svg.appendChild(svgEl('line', { x1: 104, y1: y, x2: 116, y2: y, stroke: '#29a9e1', 'stroke-width': '2', 'stroke-linecap': 'round' }));
+			});
+		} else if (pageKey === 'upgrade') {
+			// 固件升级：云端与向上箭头
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 36, stroke: '#29a9e1', 'stroke-width': '2', 'stroke-dasharray': '8 4', fill: 'none', 'class': 'mt-anim-spin' }));
+			svg.appendChild(svgEl('path', { d: 'M62 66C60 62 62 55 68 53C70 45 80 43 85 47C90 44 98 48 97 55C102 58 101 66 96 68H64', fill: 'url(#mt-g-accent)', opacity: '0.85' }));
+			// 向上浮动箭头
+			var upArrow = svgEl('path', { d: 'M80 78V58M73 65L80 58L87 65', stroke: '#ffffff', 'stroke-width': '2.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'class': 'mt-anim-float' });
+			svg.appendChild(upArrow);
+		} else if (pageKey === 'sms_center') {
+			// 短信中心：悬浮气泡
+			svg.appendChild(svgEl('rect', { x: 44, y: 36, width: 50, height: 32, rx: 8, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-float' }));
+			svg.appendChild(svgEl('line', { x1: 52, y1: 46, x2: 84, y2: 46, stroke: '#ffffff', 'stroke-width': '2', 'stroke-linecap': 'round' }));
+			svg.appendChild(svgEl('line', { x1: 52, y1: 54, x2: 74, y2: 54, stroke: 'rgba(255,255,255,0.7)', 'stroke-width': '2', 'stroke-linecap': 'round' }));
+			// 回复气泡
+			svg.appendChild(svgEl('rect', { x: 74, y: 56, width: 44, height: 28, rx: 8, fill: '#ffffff', stroke: 'rgba(41,169,225,0.4)', 'stroke-width': '1.5', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 86, cy: 70, r: 2, fill: '#087cba' }));
+			svg.appendChild(svgEl('circle', { cx: 96, cy: 70, r: 2, fill: '#087cba' }));
+			svg.appendChild(svgEl('circle', { cx: 106, cy: 70, r: 2, fill: '#087cba' }));
+		} else if (pageKey === 'sms_settings') {
+			// 短信设置：信封与齿轮
+			svg.appendChild(svgEl('rect', { x: 48, y: 44, width: 64, height: 42, rx: 6, fill: 'url(#mt-g-glass)', stroke: '#087cba', 'stroke-width': '2' }));
+			svg.appendChild(svgEl('path', { d: 'M48 48L80 68L112 48', stroke: '#087cba', 'stroke-width': '2', fill: 'none' }));
+			// 设置小角标
+			svg.appendChild(svgEl('circle', { cx: 106, cy: 44, r: 12, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 106, cy: 44, r: 5, fill: '#ffffff' }));
+		} else if (pageKey === 'terminal') {
+			// 终端窗口与闪烁光标
+			svg.appendChild(svgEl('rect', { x: 40, y: 34, width: 80, height: 52, rx: 7, fill: '#0f172a', stroke: 'rgba(255,255,255,0.2)', 'stroke-width': '1.5' }));
+			svg.appendChild(svgEl('circle', { cx: 48, cy: 42, r: 2, fill: '#ef4444' }));
+			svg.appendChild(svgEl('circle', { cx: 55, cy: 42, r: 2, fill: '#f59e0b' }));
+			svg.appendChild(svgEl('circle', { cx: 62, cy: 42, r: 2, fill: '#10b981' }));
+			// Prompt & command
+			var p = svgEl('text', { x: 48, y: 58, fill: '#34d399', 'font-size': '8', 'font-family': 'monospace', 'font-weight': 'bold' });
+			p.textContent = '> AT+CSQ';
+			svg.appendChild(p);
+			// 闪烁光标
+			svg.appendChild(svgEl('rect', { x: 86, y: 52, width: 5, height: 8, fill: '#38bdf8', 'class': 'mt-anim-pulse' }));
+		} else if (pageKey === 'logs') {
+			// 日志心电波形图
+			svg.appendChild(svgEl('rect', { x: 38, y: 36, width: 84, height: 48, rx: 6, fill: '#0f172a', stroke: 'rgba(255,255,255,0.15)', 'stroke-width': '1.5' }));
+			svg.appendChild(svgEl('path', {
+				d: 'M44 60H56L62 48L68 72L74 54L80 64L86 60H116',
+				stroke: '#10b981', 'stroke-width': '2', fill: 'none',
+				'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+				'class': 'mt-anim-stream'
+			}));
+			svg.appendChild(svgEl('circle', { cx: 114, cy: 60, r: 3, fill: '#34d399', 'class': 'mt-anim-pulse' }));
+		} else if (pageKey === 'service') {
+			// 服务集群机柜与绿灯
+			svg.appendChild(svgEl('rect', { x: 52, y: 32, width: 56, height: 56, rx: 8, fill: 'url(#mt-g-accent)', stroke: '#ffffff', 'stroke-width': '1.5' }));
+			svg.appendChild(svgEl('rect', { x: 58, y: 38, width: 44, height: 12, rx: 3, fill: 'rgba(255,255,255,0.85)' }));
+			svg.appendChild(svgEl('rect', { x: 58, y: 54, width: 44, height: 12, rx: 3, fill: 'rgba(255,255,255,0.85)' }));
+			svg.appendChild(svgEl('rect', { x: 58, y: 70, width: 44, height: 12, rx: 3, fill: 'rgba(255,255,255,0.85)' }));
+			// 状态指示灯
+			svg.appendChild(svgEl('circle', { cx: 94, cy: 44, r: 2.5, fill: '#10b981', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 94, cy: 60, r: 2.5, fill: '#10b981', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 94, cy: 76, r: 2.5, fill: '#10b981', 'class': 'mt-anim-pulse' }));
+		} else {
+			// 默认：互联节点
+			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 16, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('circle', { cx: 48, cy: 42, r: 8, fill: 'url(#mt-g-cyan)', 'class': 'mt-anim-float' }));
+			svg.appendChild(svgEl('circle', { cx: 112, cy: 78, r: 10, fill: 'url(#mt-g-cyan)', 'class': 'mt-anim-float' }));
+			svg.appendChild(svgEl('line', { x1: 48, y1: 42, x2: 80, y2: 60, stroke: '#29a9e1', 'stroke-width': '1.5' }));
+			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 112, y2: 78, stroke: '#29a9e1', 'stroke-width': '1.5' }));
+		}
+
+		return svg;
+	};
+
+	/* ================= 页面结构 (白色毛玻璃 + 动态 SVG Hero) ================= */
 
 	// 页面容器
-	api.page = function (title, subtitle) {
+	api.page = function (title, subtitle, pageKey, badgeText) {
 		var node = E('div', { 'class': 'mt5700-page' });
-		var h = E('div', { 'class': 'mt5700-page-header' });
-		h.appendChild(E('h2', { 'class': 'mt5700-page-title' }, title || ''));
-		if (subtitle) h.appendChild(E('p', { 'class': 'mt5700-page-subtitle' }, subtitle));
-		node.appendChild(h);
+
+		// 自动匹配 pageKey（如果没传）
+		if (!pageKey) {
+			var t = String(title || '');
+			if (/状态|status/i.test(t)) pageKey = 'network_status';
+			else if (/网络设置|settings/i.test(t)) pageKey = 'network_settings';
+			else if (/拨号|dial/i.test(t)) pageKey = 'dial';
+			else if (/扫频|scan/i.test(t)) pageKey = 'scan';
+			else if (/定时|schedule/i.test(t)) pageKey = 'schedule';
+			else if (/模组设置|modem/i.test(t)) pageKey = 'modem_settings';
+			else if (/升级|upgrade/i.test(t)) pageKey = 'upgrade';
+			else if (/短信中心|sms_center/i.test(t)) pageKey = 'sms_center';
+			else if (/短信设置|sms_settings/i.test(t)) pageKey = 'sms_settings';
+			else if (/终端|terminal/i.test(t)) pageKey = 'terminal';
+			else if (/日志|log/i.test(t)) pageKey = 'logs';
+			else if (/服务|service|config/i.test(t)) pageKey = 'service';
+			else pageKey = 'default';
+		}
+
+		if (!badgeText) {
+			var badgeMap = {
+				network_status: '实时遥测 · 5G NR/LTE',
+				network_settings: '射频频段 · 锁频策略',
+				dial: '数据链路 · APN 拨号',
+				scan: '基站探测 · 载波扫描',
+				schedule: '时段调度 · 智能倒换',
+				modem_settings: '模组核心 · 硬件控制',
+				upgrade: '固件更新 · FOTA 在线',
+				sms_center: '即时消息 · 会话管理',
+				sms_settings: '短信配置 · 存储/USSD',
+				terminal: 'AT 控制台 · 交互调试',
+				logs: '事件审计 · 运行日志',
+				service: '守护进程 · 后台服务',
+				'default': 'MT5700 5G 模组'
+			};
+			badgeText = badgeMap[pageKey] || 'MT5700 5G 模组';
+		}
+
+		var hero = E('div', { 'class': 'mt5700-hero-card' });
+		var content = E('div', { 'class': 'mt5700-hero-content' });
+
+		var badge = E('div', { 'class': 'mt5700-hero-badge' }, [
+			E('span', { 'class': 'mt5700-hero-badge-dot' }),
+			E('span', {}, badgeText)
+		]);
+		content.appendChild(badge);
+
+		content.appendChild(E('h2', { 'class': 'mt5700-hero-title' }, title || ''));
+		if (subtitle) {
+			content.appendChild(E('p', { 'class': 'mt5700-hero-desc' }, subtitle));
+		}
+		hero.appendChild(content);
+
+		var art = E('div', { 'class': 'mt5700-hero-art' });
+		art.appendChild(api.heroIllustration(pageKey));
+		hero.appendChild(art);
+
+		node.appendChild(hero);
+
 		var body = E('div', { 'class': 'mt5700-page-body' });
 		node.appendChild(body);
 		node._body = body;
+		node._hero = hero;
 		return node;
+	};
+
+	/* ================= 骨架屏加载态 (Responsive Skeleton) ================= */
+
+	api.skeleton = function () {
+		var wrap = E('div', { 'class': 'mt-skeleton-wrap' });
+		for (var i = 0; i < 2; i++) {
+			var card = E('div', { 'class': 'mt-skeleton-card' });
+			card.appendChild(E('div', { 'class': 'mt-skeleton-line mt-skeleton-line-title' }));
+			card.appendChild(E('div', { 'class': 'mt-skeleton-line mt-skeleton-line-full' }));
+			card.appendChild(E('div', { 'class': 'mt-skeleton-line mt-skeleton-line-3q' }));
+			card.appendChild(E('div', { 'class': 'mt-skeleton-line mt-skeleton-line-half' }));
+			wrap.appendChild(card);
+		}
+		return wrap;
 	};
 
 	/* ================= 卡片 ================= */
