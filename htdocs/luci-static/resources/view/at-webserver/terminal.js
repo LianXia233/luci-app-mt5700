@@ -72,10 +72,13 @@ return L.view.extend({
 		});
 
 		/* ---------- 常用命令 ---------- */
+		var rowCommon = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowCommon);
+
 		var commonCard = Mt5700.card('常用命令', '点击后需二次确认才会真正下发到模组');
 		var commonWrap = E('div', { 'class': 'mt5700-inline' });
 		commonCard._body.appendChild(commonWrap);
-		body.appendChild(commonCard);
+		rowCommon.appendChild(commonCard);
 
 		var COMMON = [
 			{ label: '查询信号强度', command: 'AT^HCSQ?' },
@@ -100,7 +103,7 @@ return L.view.extend({
 		var savedCard = Mt5700.card('已保存的命令', '来自本机浏览器 localStorage');
 		var savedWrap = E('div', { 'class': 'mt5700-inline' });
 		savedCard._body.appendChild(savedWrap);
-		body.appendChild(savedCard);
+		rowCommon.appendChild(savedCard);
 
 		function renderSaved() {
 			savedWrap.innerHTML = '';
