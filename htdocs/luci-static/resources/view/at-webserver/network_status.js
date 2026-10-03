@@ -39,10 +39,6 @@ return L.view.extend({
 			'.mt-root-wrap { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }',
 			'.mt-row-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: stretch; width: 100%; }',
 			'.mt-row-2col > * { min-width: 0; }',
-			'.mt-row-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; width: 100%; }',
-			'.mt-row-3col > * { min-width: 0; }',
-			'@media (max-width: 1180px) { .mt-row-3col { grid-template-columns: repeat(2, 1fr); } }',
-			'@media (max-width: 760px) { .mt-row-3col { grid-template-columns: 1fr; } }',
 			/* 信号 4 联卡片 (白色毛玻璃) */
 			'.mt-sig-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; margin-bottom: 6px; }',
 			'@media (max-width: 1080px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); } }',
@@ -198,8 +194,8 @@ return L.view.extend({
 		historyCard._body.appendChild(chart);
 		rowSpeed.appendChild(historyCard);
 
-		/* ==================== 3. 第二排三列：连接状态 + 辅载波信号 + 连接诊断 ==================== */
-		var rowTri = E('div', { 'class': 'mt-row-3col' });
+		/* ==================== 3. 第二排双列：连接状态 + 辅载波信号 + 连接诊断 ==================== */
+		var rowTri = E('div', { 'class': 'mt-row-2col' });
 		layout.appendChild(rowTri);
 
 		var connCard = Mt5700.card('连接状态', '当前网络注册与主载波物理参数');
@@ -233,8 +229,8 @@ return L.view.extend({
 		tempCard._body.appendChild(tempBody);
 		rowCarrier.appendChild(tempCard);
 
-		/* ==================== 5. 第三排三列：流量统计 + DHCP + 调制空间流 ==================== */
-		var rowMisc = E('div', { 'class': 'mt-row-3col' });
+		/* ==================== 5. 第三排双列：流量统计 + DHCP + 调制空间流 ==================== */
+		var rowMisc = E('div', { 'class': 'mt-row-2col' });
 		layout.appendChild(rowMisc);
 
 		var flowCard = Mt5700.card('流量统计', '会话在线时长与物理吞吐流量');
