@@ -1,0 +1,8 @@
+ARCH_PACKAGES=aarch64_cortex-a53
+EXPECTED_ARCH=aarch64_cortex-a53
+MATCH=yes
+TARGET_BOARD=bcm27xx
+TARGET_SUBTARGET=bcm2710
+OPENWRT_VER=25.12.5
+RUST_TRIPLE=aarch64-unknown-linux-musl
+APK_TOOLS=none
