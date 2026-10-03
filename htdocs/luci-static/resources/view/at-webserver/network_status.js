@@ -38,8 +38,11 @@ return L.view.extend({
 			'}',
 			'.mt-root-wrap { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }',
 			'.mt-row-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: stretch; width: 100%; }',
+			'.mt-row-2col > * { min-width: 0; }',
 			'.mt-row-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; width: 100%; }',
-			'@media (max-width: 1180px) { .mt-row-3col { grid-template-columns: 1fr; } }',
+			'.mt-row-3col > * { min-width: 0; }',
+			'@media (max-width: 1180px) { .mt-row-3col { grid-template-columns: repeat(2, 1fr); } }',
+			'@media (max-width: 760px) { .mt-row-3col { grid-template-columns: 1fr; } }',
 			/* 信号 4 联卡片 (白色毛玻璃) */
 			'.mt-sig-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; margin-bottom: 6px; }',
 			'@media (max-width: 1080px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); } }',
@@ -195,43 +198,42 @@ return L.view.extend({
 		historyCard._body.appendChild(chart);
 		rowSpeed.appendChild(historyCard);
 
-		/* ==================== 3. 第二排双列：连接状态 + 模组芯片温度 ==================== */
-		var rowMid = E('div', { 'class': 'mt-row-2col' });
-		layout.appendChild(rowMid);
+		/* ==================== 3. 第二排三列：连接状态 + 辅载波信号 + 连接诊断 ==================== */
+		var rowTri = E('div', { 'class': 'mt-row-3col' });
+		layout.appendChild(rowTri);
 
 		var connCard = Mt5700.card('连接状态', '当前网络注册与主载波物理参数');
 		var connBody = E('div');
 		connCard._body.appendChild(connBody);
-		rowMid.appendChild(connCard);
+		rowTri.appendChild(connCard);
+
+		var secondaryCard = Mt5700.card('辅载波信号遥测', '^MONSSC (NSA 辅站) 与 ^CASCELLINFO (LTE CA) 交叉校准');
+		var secondaryBox = E('div');
+		secondaryCard._body.appendChild(secondaryBox);
+		rowTri.appendChild(secondaryCard);
+
+		var diagCard = Mt5700.card('连接诊断', 'ENDC 双连接、5GC 核心网注册、发射功率与 PDP 上下文');
+		var diagBox = E('div');
+		diagCard._body.appendChild(diagBox);
+		rowTri.appendChild(diagCard);
+
+		/* ==================== 4. 载波聚合 CA + 模组芯片温度（双列并排） ==================== */
+		var rowCarrier = E('div', { 'class': 'mt-row-2col' });
+		layout.appendChild(rowCarrier);
+
+		var carrierCard = Mt5700.card('载波聚合 (Carrier Aggregation)', '当前激活物理分量载波与射频频谱分布');
+		var carrierBox = E('div');
+		carrierCard._body.appendChild(carrierBox);
+		rowCarrier.appendChild(carrierCard);
 
 		var tempBadge = E('span');
 		var tempCard = Mt5700.card('模组温度', '7 通道芯片结温物理分布（单位 ℃）', tempBadge);
 		tempCard.classList.add('mt-stretch-card');
 		var tempBody = E('div', { 'class': 'mt-stretch-body' });
 		tempCard._body.appendChild(tempBody);
-		rowMid.appendChild(tempCard);
+		rowCarrier.appendChild(tempCard);
 
-		/* ==================== 4. 载波聚合 CA (全宽大卡) ==================== */
-		var carrierCard = Mt5700.card('载波聚合 (Carrier Aggregation)', '当前激活物理分量载波与射频频谱分布');
-		var carrierBox = E('div');
-		carrierCard._body.appendChild(carrierBox);
-		layout.appendChild(carrierCard);
-
-		/* ==================== 5. 第三排双列：辅载波信号 + 连接诊断 ==================== */
-		var rowDiag = E('div', { 'class': 'mt-row-2col' });
-		layout.appendChild(rowDiag);
-
-		var secondaryCard = Mt5700.card('辅载波信号遥测', '^MONSSC (NSA 辅站) 与 ^CASCELLINFO (LTE CA) 交叉校准');
-		var secondaryBox = E('div');
-		secondaryCard._body.appendChild(secondaryBox);
-		rowDiag.appendChild(secondaryCard);
-
-		var diagCard = Mt5700.card('连接诊断', 'ENDC 双连接、5GC 核心网注册、发射功率与 PDP 上下文');
-		var diagBox = E('div');
-		diagCard._body.appendChild(diagBox);
-		rowDiag.appendChild(diagCard);
-
-		/* ==================== 6. 第四排三列：流量统计 + DHCP + 调制空间流 ==================== */
+		/* ==================== 5. 第三排三列：流量统计 + DHCP + 调制空间流 ==================== */
 		var rowMisc = E('div', { 'class': 'mt-row-3col' });
 		layout.appendChild(rowMisc);
 

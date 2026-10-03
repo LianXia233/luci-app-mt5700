@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Status Layout Mock</title>
+<link rel="stylesheet" href="/luci-static/resources/at-webserver/mt5700.css?v=2.13.0">
+<style>
+  body { margin:0; background:#d7dee6; }
+  /* 以下类取自 network_status.js 内联样式，仅保留布局相关 */
+  .mt-root-wrap { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .mt-row-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: stretch; width: 100%; }
+  .mt-row-2col > * { min-width: 0; }
+  .mt-row-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; width: 100%; }
+  .mt-row-3col > * { min-width: 0; }
+  @media (max-width: 1180px) { .mt-row-3col { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 760px) { .mt-row-3col { grid-template-columns: 1fr; } }
+  .mt-sig-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; margin-bottom: 6px; }
+  @media (max-width: 1080px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 580px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); gap: 12px; } }
+  .mt-stretch-card { display: flex; flex-direction: column; }
+  .mt-stretch-card > .mt5700-card-body { flex: 1; display: flex; flex-direction: column; }
+  .mt-stretch-body { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .mt-card-box { height: 100%; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; }
+  .mt-temp-svg-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  .mt-temp-grid-4x2 { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 1fr; gap: 8px; flex: 1; }
+  @media (max-width: 640px) { .mt-temp-grid-4x2 { grid-template-columns: repeat(2, 1fr); } }
+  .mt-temp-cell { border: 1px solid rgba(125,125,125,0.16); border-radius: 8px; padding: 10px 10px; background: rgba(125,125,125,0.03); display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+  .mt-ca-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; margin-bottom: 12px; }
+  .mt-ca-card { border: 1px solid rgba(125,125,125,0.16); border-radius: 8px; padding: 10px 12px; }
+  .mt-ca-bar { width: 100%; height: 6px; background: rgba(125,125,125,0.12); border-radius: 3px; margin-top: 6px; }
+  .mt-ca-bar-fill { height: 100%; background: #00b4d8; border-radius: 3px; width: 60%; }
+  .mt-temp-gauge-bg { width: 100%; height: 4px; background: rgba(125,125,125,0.12); border-radius: 2px; }
+  .mt-temp-gauge-bar { height: 100%; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="mt5700-app">
+  <div class="mt5700-page">
+    <div class="mt5700-page-body">
+      <!-- 1. 信号质量（全宽，保持） -->
+      <div class="mt5700-card">
+        <div class="mt5700-card-header"><h3 class="mt5700-card-title">射频信号质量</h3><p class="mt5700-card-subtitle">3GPP 蜂窝空口场强、纯度、信噪比与综合健康度</p></div>
+        <div class="mt5700-card-body">
+          <div class="mt-sig-row">
+            <div class="mt5700-metric"><div class="mt5700-metric-label">RSRP 参考信号接收功率</div><div class="mt5700-metric-value">-87 dBm</div></div>
+            <div class="mt5700-metric"><div class="mt5700-metric-label">RSRQ 参考信号接收质量</div><div class="mt5700-metric-value">-11.2 dB</div></div>
+            <div class="mt5700-metric"><div class="mt5700-metric-label">SINR 信噪比</div><div class="mt5700-metric-value">14.5 dB</div></div>
+            <div class="mt5700-metric"><div class="mt5700-metric-label">综合信号强度</div><div class="mt5700-metric-value">78%</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 实时速率 + 速率曲线（保持） -->
+      <div class="mt-row-2col">
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">实时速率</h3><p class="mt5700-card-subtitle">网卡物理接口流量差分（1000ms 采样率）</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt5700-metrics" data-count="2">
+              <div class="mt5700-metric"><div class="mt5700-metric-label">下行速率</div><div class="mt5700-metric-value">128.4 Mbps</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">上行速率</div><div class="mt5700-metric-value">32.1 Mbps</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">速率曲线</h3><p class="mt5700-card-subtitle">最近 60 秒双轨平滑吞吐波形</p></div>
+          <div class="mt5700-card-body"><div style="width:100%;height:180px;background:repeating-linear-gradient(45deg,rgba(0,180,216,0.06),rgba(0,180,216,0.06) 8px,transparent 8px,transparent 16px);border-radius:8px;"></div></div>
+        </div>
+      </div>
+
+      <!-- 3. 连接状态 + 辅载波 + 连接诊断（3 列） -->
+      <div class="mt-row-3col">
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">连接状态</h3><p class="mt5700-card-subtitle">当前网络注册与主载波物理参数</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt5700-metrics">
+              <div class="mt5700-metric"><div class="mt5700-metric-label">网络状态</div><div class="mt5700-metric-value">已注册</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">运营商</div><div class="mt5700-metric-value">中国联通</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">网络模式</div><div class="mt5700-metric-value">5G NR</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">信号强度</div><div class="mt5700-metric-value">78%</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">APN / QCI</div><div class="mt5700-metric-value">wonet / 9</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">主载波频段</div><div class="mt5700-metric-value">n78 (100 MHz)</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">辅载波信号遥测</h3><p class="mt5700-card-subtitle">^MONSSC 与 ^CASCELLINFO 交叉校准</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt5700-table-wrapper"><table class="mt5700-table mt5700-table-striped"><thead><tr><th>载波</th><th>制式</th><th>频段</th><th>RSRP</th><th>SINR</th></tr></thead><tbody><tr><td>主载波</td><td>NR</td><td>n78</td><td>-87 dBm</td><td>14.5 dB</td></tr><tr><td>辅载波 1</td><td>LTE</td><td>B3</td><td>-92 dBm</td><td>9.2 dB</td></tr></tbody></table></div>
+          </div>
+        </div>
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">连接诊断</h3><p class="mt5700-card-subtitle">ENDC 双连接、5GC 注册、发射功率</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt5700-table-wrapper"><table class="mt5700-table mt5700-table-striped"><thead><tr><th>项目</th><th>值</th></tr></thead><tbody><tr><td>ENDC 双连接</td><td>已建立</td></tr><tr><td>5G 核心网注册</td><td>已注册 5G</td></tr><tr><td>TAC / 小区</td><td>12345 / 678</td></tr><tr><td>网络切片</td><td>NSSAI</td></tr><tr><td>LTE PUSCH</td><td>4.2 dBm</td></tr></tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. 载波聚合 + 模组温度（2 列） -->
+      <div class="mt-row-2col">
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">载波聚合 (Carrier Aggregation)</h3><p class="mt5700-card-subtitle">当前激活物理分量载波与射频频谱分布</p></div>
+          <div class="mt5700-card-body">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;"><span class="mt5700-badge">CA 2CC 已聚合</span><span style="font-size:12px;">总带宽 120 MHz</span></div>
+            <div class="mt-ca-grid">
+              <div class="mt-ca-card"><div style="font-size:11px;font-weight:700;">PCC 主载波</div><div style="font-size:12px;">NR n78 · 100 MHz</div><div class="mt-ca-bar"><div class="mt-ca-bar-fill" style="width:70%;"></div></div></div>
+              <div class="mt-ca-card"><div style="font-size:11px;font-weight:700;">SCC 辅载波 1</div><div style="font-size:12px;">LTE B3 · 20 MHz</div><div class="mt-ca-bar"><div class="mt-ca-bar-fill" style="width:30%;"></div></div></div>
+            </div>
+            <div class="mt5700-table-wrapper"><table class="mt5700-table mt5700-table-striped"><thead><tr><th>角色</th><th>制式</th><th>频段</th><th>频点</th><th>下行频率</th><th>带宽</th><th>RSRP</th><th>RSRQ</th><th>SINR</th></tr></thead><tbody><tr><td>PCC 主载波</td><td>NR</td><td>n78</td><td>630000</td><td>3450 MHz</td><td>100 MHz</td><td>-87 dBm</td><td>-11 dB</td><td>14 dB</td></tr><tr><td>SCC 辅载波 1</td><td>LTE</td><td>B3</td><td>1650</td><td>1845 MHz</td><td>20 MHz</td><td>-92 dBm</td><td>-12 dB</td><td>9 dB</td></tr></tbody></table></div>
+          </div>
+        </div>
+        <div class="mt5700-card mt-stretch-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">模组温度</h3><p class="mt5700-card-subtitle">7 通道芯片结温物理分布（单位 ℃）</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt-stretch-body">
+              <div class="mt-temp-svg-wrap"><svg viewBox="0 0 535 136" width="100%" height="148"><rect x="4" y="4" width="527" height="128" rx="8" fill="rgba(125,125,125,0.02)" stroke="rgba(125,125,125,0.16)"/><rect x="195" y="16" width="145" height="66" rx="5" fill="rgba(0,180,216,0.08)" stroke="#0a7c96"/></svg></div>
+              <div class="mt-temp-grid-4x2">
+                <div class="mt-temp-cell"><div style="font-size:11px;">Modem1 基带</div><div style="font-size:15px;font-weight:800;">51.2 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:51%;background:#0a7c96;"></div></div></div>
+                <div class="mt-temp-cell"><div style="font-size:11px;">AP1 主控</div><div style="font-size:15px;font-weight:800;">47.5 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:47%;background:#0a7c96;"></div></div></div>
+                <div class="mt-temp-cell"><div style="font-size:11px;">AP2 核心</div><div style="font-size:15px;font-weight:800;">46.8 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:46%;background:#0a7c96;"></div></div></div>
+                <div class="mt-temp-cell"><div style="font-size:11px;">Sub6G PA</div><div style="font-size:15px;font-weight:800;">58.3 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:58%;background:#8f7506;"></div></div></div>
+                <div class="mt-temp-cell"><div style="font-size:11px;">Sub3G PA</div><div style="font-size:15px;font-weight:800;">55.1 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:55%;background:#8f7506;"></div></div></div>
+                <div class="mt-temp-cell"><div style="font-size:11px;">MIMO PA</div><div style="font-size:15px;font-weight:800;">54.0 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:54%;background:#8f7506;"></div></div></div>
+                <div class="mt-temp-cell"><div style="font-size:11px;">TCXO 晶振</div><div style="font-size:15px;font-weight:800;">44.2 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:44%;background:#0a7c96;"></div></div></div>
+                <div class="mt-temp-cell"><div style="font-size:11px;">芯片综合均温</div><div style="font-size:15px;font-weight:800;">51.9 ℃</div><div class="mt-temp-gauge-bg"><div class="mt-temp-gauge-bar" style="width:52%;background:#0a7c96;"></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. 流量 + DHCP + MCS（3 列） -->
+      <div class="mt-row-3col">
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">流量统计</h3><p class="mt5700-card-subtitle">会话在线时长与物理吞吐流量</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt5700-metrics" data-count="2">
+              <div class="mt5700-metric"><div class="mt5700-metric-label">本次下行吞吐</div><div class="mt5700-metric-value">1.2 GB</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">本次上行吞吐</div><div class="mt5700-metric-value">256 MB</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">IP 与 DNS</h3><p class="mt5700-card-subtitle">局域网与广域网寻址分配</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt5700-metrics" data-count="2">
+              <div class="mt5700-metric"><div class="mt5700-metric-label">IPv4 地址</div><div class="mt5700-metric-value">10.0.0.2</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">网关</div><div class="mt5700-metric-value">10.0.0.1</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="mt5700-card">
+          <div class="mt5700-card-header"><h3 class="mt5700-card-title">调制方式与空间流</h3><p class="mt5700-card-subtitle">上下行 MCS、QAM 星座图与 MIMO 空间流</p></div>
+          <div class="mt5700-card-body">
+            <div class="mt5700-metrics" data-count="2">
+              <div class="mt5700-metric"><div class="mt5700-metric-label">下行调制</div><div class="mt5700-metric-value">256QAM</div></div>
+              <div class="mt5700-metric"><div class="mt5700-metric-label">上行调制</div><div class="mt5700-metric-value">64QAM</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
