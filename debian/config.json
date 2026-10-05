@@ -1,0 +1,32 @@
+{
+  "_comment": "MT5700M AT 服务配置（Debian）。键名沿用原 OpenWrt UCI 语义，值为字符串。仅列出常用键，全部键支持默认值缺省。",
+
+  "enabled": "1",
+
+  "connection_type": "SERIAL",
+  "serial_port": "auto",
+  "serial_baudrate": "115200",
+  "serial_timeout": "10",
+  "network_host": "192.168.8.1",
+  "network_port": "20249",
+  "network_timeout": "10",
+  "autodial_enable": "1",
+  "autodial_mode": "1",
+
+  "http_port": "9000",
+  "http_bind": "0.0.0.0",
+  "web_root": "/usr/share/mt5700/webui",
+  "auth_key": "",
+
+  "netdev": "",
+  "uplink_hook": "/etc/mt5700/on-uplink.sh",
+
+  "notify_sms": "1",
+  "notify_call": "1",
+  "notify_signal": "1",
+  "notify_memory_full": "1",
+  "wechat_webhook": "",
+  "log_file": "/tmp/at-notifications.log",
+
+  "schedule_enabled": "0"
+}
