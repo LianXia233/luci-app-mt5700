@@ -1,7 +1,8 @@
-//! 定时锁频配置：DTO <-> UCI 转换与校验。
+//! 定时锁频配置：DTO <-> 配置存储转换与校验。
 
 use chrono::Timelike;
 use crate::config::{BandLock, ScheduleConfig};
+use crate::configstore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -303,20 +304,13 @@ impl SchedConfigDto {
     }
 }
 
-/// 落盘配置。用 exec 直接传参，不经过 shell，避免值里的引号被解释。
+/// 落盘配置（Debian）：写 JSON 配置存储，键名沿用原 UCI 语义。
 pub async fn write_schedule_uci(d: &SchedConfigDto) -> Result<(), String> {
+    let mut patch = configstore::ConfigMap::new();
     for (k, v) in d.uci_entries() {
-        let arg = format!("at-webserver.config.{k}={v}");
-        let out = tokio::process::Command::new("uci").args(["set", &arg]).output().await.map_err(|e| e.to_string())?;
-        if !out.status.success() {
-            return Err(format!("写入 {k} 失败: {}", String::from_utf8_lossy(&out.stderr)));
-        }
+        patch.insert(k, v);
     }
-    let out = tokio::process::Command::new("uci").args(["commit", "at-webserver"]).output().await.map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("提交配置失败: {}", String::from_utf8_lossy(&out.stderr)));
-    }
-    Ok(())
+    configstore::update(patch).await.map(|_| ())
 }
 
 /// 下一次时段切换的时刻（HH:MM），夜间时段的两个端点就是切换点。

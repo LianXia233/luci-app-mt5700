@@ -166,6 +166,51 @@ impl RpcServer {
         self.hub.clone()
     }
 
+    /* ========= 供 HTTP API 层（httpserver.rs）复用的访问器 =========
+     * HTTP 层与 TCP RPC 层共享同一套核心：AT 队列、事件总线、任务管理器、
+     * 状态缓存与定时锁频调度。这里只暴露查询/操作入口，不复制状态。 */
+
+    /// 事件总线增量拉取（等价 TCP RPC 的 events 方法）。
+    pub async fn events_since(&self, since: u64) -> (u64, Vec<serde_json::Value>) {
+        self.hub.bus.since(since)
+    }
+
+    /// 后端运行日志快照（等价 TCP RPC 的 logs 方法）。
+    pub async fn logs_since(&self, since: u64, limit: usize) -> (u64, Vec<crate::logger::LogRecord>) {
+        crate::logger::snapshot(since, limit.min(1200))
+    }
+
+    /// 任务状态查询（等价 task_status）。
+    pub async fn task_status(&self, tid: &str) -> Option<TaskInfo> {
+        self.tasks.status(tid).await
+    }
+
+    /// 任务取消（等价 task_cancel）。
+    pub async fn task_cancel(&self, tid: &str) -> bool {
+        self.tasks.cancel(tid).await
+    }
+
+    /// 任务列表（等价 task_list）。
+    pub async fn task_list(&self) -> Vec<TaskInfo> {
+        self.tasks.list().await
+    }
+
+    /// 热应用定时锁频配置：由 HTTP /api/config/apply 调用，免去重启。
+    pub async fn apply_schedule_config(&self, sched: &crate::config::ScheduleConfig) -> Result<(), String> {
+        let dto = crate::schedconfig::schedule_to_dto(sched);
+        if let Err(e) = dto.validate() {
+            return Err(e);
+        }
+        self.sched.set_config(crate::schedconfig::dto_to_schedule(&dto)).await;
+        log_info!(
+            "定时锁频配置已热应用: 启用={} 夜间={} 日间={}",
+            dto.enabled,
+            dto.night.enabled,
+            dto.day.enabled
+        );
+        Ok(())
+    }
+
     fn shallow_clone(&self) -> RpcServer {
         RpcServer {
             client: self.client.clone(),

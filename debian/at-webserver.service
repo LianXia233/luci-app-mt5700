@@ -1,0 +1,30 @@
+[Unit]
+Description=MT5700M 5G module AT service (WebUI + HTTP API on :9000)
+Documentation=https://github.com/LianXia233/luci-app-mt5700
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/at-webserver
+Restart=always
+RestartSec=3
+
+# 串口访问权限（/dev/ttyUSB* 通常属 dialout 组）
+SupplementaryGroups=dialout
+
+# 优雅退出：WebUI 重启按钮 / systemctl restart 均走 SIGTERM
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# 资源与安全基线（不干扰 USB 设备访问所需的最小权限集）
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/mt5700 /tmp
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

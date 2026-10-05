@@ -1,6 +1,8 @@
-//! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
-//! 键名与 LuCI 页面约定完全一致。
+//! 配置读取（Debian）：从 JSON 扁平键值配置文件（/etc/mt5700/config.json，
+//! 可用 MT5700_CONFIG 覆盖）读取整个配置。键名与原 OpenWrt UCI 完全一致，
+//! 前端页面与业务逻辑无需感知存储介质的变化。
 
+use crate::configstore;
 use crate::logger::{self, Level};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -74,10 +76,23 @@ pub struct WebSocketConfig {
     pub port: u16,
     pub auth_key: String,
     pub allow_wan: bool,
-    /// RPC 监听地址：127.0.0.1（默认）或 0.0.0.0（allow_wan / websocket_bind）
+    /// TCP RPC 监听地址：127.0.0.1（默认，兼容 mock-modem e2e 等本地工具）
     pub bind: String,
     /// 一次 ^CELLSCAN 允许跑多久
     pub scan_timeout: Duration,
+}
+
+/// 独立 WebUI 的 HTTP 服务配置（Debian 分支新增）。
+#[derive(Debug, Clone)]
+pub struct HttpConfig {
+    /// HTTP API + WebUI 监听端口，默认 9000
+    pub port: u16,
+    /// 监听地址，默认 0.0.0.0（开箱即用：浏览器直访 http://<设备IP>:9000）
+    pub bind: String,
+    /// 静态 WebUI 根目录
+    pub web_root: String,
+    /// 访问密钥；为空表示不启用认证
+    pub auth_key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +121,7 @@ pub struct Config {
     pub at: AtConfig,
     pub notification: NotificationConfig,
     pub websocket: WebSocketConfig,
+    pub http: HttpConfig,
     pub schedule: ScheduleConfig,
 }
 
@@ -146,6 +162,12 @@ pub fn default_config() -> Config {
             bind: "127.0.0.1".into(),
             scan_timeout: Duration::from_secs(180),
         },
+        http: HttpConfig {
+            port: 9000,
+            bind: "0.0.0.0".into(),
+            web_root: String::new(),
+            auth_key: String::new(),
+        },
         schedule: ScheduleConfig {
             enabled: false,
             check_interval: Duration::from_secs(60),
@@ -165,19 +187,17 @@ pub fn default_config() -> Config {
     }
 }
 
-/// 还原 uci show 的单引号包裹，包括 '\'' 的内嵌引号转义。
-fn unquote_uci(raw: &str) -> String {
-    let raw = raw.trim();
-    if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
-        raw[1..raw.len() - 1].replace("'\\''", "'")
-    } else {
-        raw.to_string()
-    }
-}
+/// WebUI 静态根目录默认值（发行包安装到 /usr/share/mt5700/webui）。
+pub const DEFAULT_WEB_ROOT: &str = "/usr/share/mt5700/webui";
 
 pub struct UciReader(HashMap<String, String>);
 
 impl UciReader {
+    /// 从 JSON 配置存储的扁平键值映射构造（键名沿用原 UCI 语义）。
+    fn from_map(map: configstore::ConfigMap) -> UciReader {
+        UciReader(map.into_iter().collect())
+    }
+
     pub fn str(&self, key: &str, def: &str) -> String {
         match self.0.get(key) {
             Some(v) if !v.is_empty() => v.clone(),
@@ -227,44 +247,13 @@ impl UciReader {
     }
 }
 
-/// 用一次 `uci show at-webserver` 取回整个配置段。
-pub async fn uci_values() -> Result<UciReader, String> {
-    // 加 5s 超时，避免 uci 命令异常挂起卡死启动。
-    let out = tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::process::Command::new("uci")
-            .args(["show", "at-webserver"])
-            .output(),
-    )
-    .await
-    .map_err(|_| "uci show 超时".to_string())?
-    .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("uci show 退出码 {}", out.status));
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let prefix = "at-webserver.config.";
-    let mut values = HashMap::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(eq) = line.find('=') {
-            let key = &line[..eq];
-            let raw = &line[eq + 1..];
-            if key.starts_with(prefix) {
-                values.insert(key[prefix.len()..].to_string(), unquote_uci(raw));
-            }
-        }
-    }
-    Ok(UciReader(values))
-}
-
-/// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
+/// 从配置存储读取；读取失败时返回默认配置，让服务仍能起来。
 pub async fn load_config() -> Config {
     let mut cfg = default_config();
-    let values = match uci_values().await {
-        Ok(v) => v,
+    let values = match configstore::read_map().await {
+        Ok(map) => UciReader::from_map(map),
         Err(e) => {
-            logger::emit(Level::Warn, "CFG", format_args!("读取 UCI 配置失败，使用默认配置: {e}"));
+            logger::emit(Level::Warn, "CFG", format_args!("读取配置文件失败，使用默认配置: {e}"));
             return cfg;
         }
     };
@@ -306,6 +295,26 @@ pub async fn load_config() -> Config {
     };
     // 下限 10 秒而不是默认 3 分钟：用户配置的小于 3 分钟的值不能被悄悄抬回。
     cfg.websocket.scan_timeout = values.seconds("cellscan_timeout", cfg.websocket.scan_timeout, Duration::from_secs(10));
+
+    // 独立 WebUI 的 HTTP 服务（Debian）：默认 9000 端口对外监听，开箱即用。
+    cfg.http.port = values.int("http_port", 9000).clamp(1, 65535) as u16;
+    cfg.http.bind = {
+        let b = values.str("http_bind", "0.0.0.0");
+        if b.is_empty() { "0.0.0.0".to_string() } else { b }
+    };
+    cfg.http.web_root = {
+        let w = values.str("web_root", "");
+        if w.is_empty() {
+            std::env::var("MT5700_WEBROOT").unwrap_or_else(|_| DEFAULT_WEB_ROOT.to_string())
+        } else {
+            w
+        }
+    };
+    // 认证密钥：auth_key（新）与 websocket_auth_key（兼容旧配置键）取其一
+    {
+        let k = values.str("auth_key", "");
+        cfg.http.auth_key = if k.is_empty() { values.str("websocket_auth_key", "") } else { k };
+    }
 
     cfg.notification.wechat_webhook = values.str("wechat_webhook", "");
     cfg.notification.log_file = values.str("log_file", "");
