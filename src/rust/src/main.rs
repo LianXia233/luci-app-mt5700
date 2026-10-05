@@ -1,14 +1,17 @@
-//! at-webserver —— MT5700M 5G 模组 AT 服务（Rust 实现）。
+//! at-webserver —— MT5700M 5G 模组 AT 服务（Rust 实现，Debian 独立版）。
 //!
 //! 完整业务逻辑迁移：
-//! - AT 客户端（网络/串口/自动探测）
-//! - LuCI RPC 服务（rpcd ucode 代理 → TCP newline-JSON，替代原 WebSocket 传输层）
+//! - AT 客户端（网络/串口/自动探测，接口独占 + 异步队列，不阻塞 WebUI）
+//! - 独立 WebUI/HTTP API（0.0.0.0:9000，前端经 HTTP + WebSocket 通信）
+//! - LuCI RPC 兼容通道（TCP newline-JSON，保留给 mock-modem e2e 与本地调试）
 //! - 定时锁频调度、小区扫频、短信/来电/信号通知、企业微信推送
 
 mod async_runtime;
 mod at_queue;
 mod atclient;
 mod config;
+mod configstore;
+mod httpserver;
 mod logger;
 mod notify;
 mod pdu;
@@ -89,7 +92,7 @@ async fn run(verbose: bool) -> Result<(), String> {
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
     let mut rpc = RpcServer::new(
         client.clone(),
-        cfg.websocket.auth_key.clone(),
+        cfg.http.auth_key.clone(),
         scheduler.clone(),
         ctx_rx.clone(),
         cache.clone(),
@@ -102,9 +105,14 @@ async fn run(verbose: bool) -> Result<(), String> {
     let hub = rpc.hub();
     let broadcaster: Broadcaster = Arc::new(move |v: serde_json::Value| hub.broadcast(&v));
 
-    log_info!("启动完成，LuCI RPC 127.0.0.1:{}（经 rpcd/ucode 代理，不对外暴露）", cfg.websocket.port);
+    log_info!(
+        "启动完成：WebUI/HTTP API {}:{}；LuCI RPC 兼容通道 127.0.0.1:{}",
+        cfg.http.bind,
+        cfg.http.port,
+        cfg.websocket.port
+    );
     if !verbose {
-        // 稳态只留警告和错误，避免刷满 procd 日志。
+        // 稳态只留警告和错误，避免刷满 journald。
         crate::logger::set_level(crate::logger::Level::Warn);
     }
 
@@ -153,18 +161,38 @@ async fn run(verbose: bool) -> Result<(), String> {
         async move { rpc.serve(port, &bind).await }
     });
 
-    // 等待退出信号或服务异常。
+    // 独立 WebUI / HTTP API（Debian 主入口）。
+    let cur_map = configstore::read_map().await.unwrap_or_default();
+    let cfg_snapshot = Arc::new(tokio::sync::RwLock::new(cfg.clone()));
+    let http_task = tokio::spawn({
+        let http = httpserver::HttpServer::new(rpc.clone(), cfg_snapshot.clone(), cur_map, ctx_rx.clone());
+        let port = cfg.http.port;
+        let bind = cfg.http.bind.clone();
+        async move { http.serve(&bind, port).await }
+    });
+
+    // 等待退出信号或任一服务异常。
     let mut serve_handle = serve_task;
+    let mut http_handle = http_task;
+    let mut http_failed = false;
     let serve_result = tokio::select! {
         _ = shutdown_signal() => None,
         r = &mut serve_handle => Some(r),
+        r = &mut http_handle => {
+            http_failed = true;
+            Some(r)
+        },
     };
 
     // 触发优雅关闭。
     let _ = ctx_tx.send(true);
 
     if let Some(Ok(Err(e))) = serve_result {
-        log_error!("LuCI RPC 服务异常退出: {}", e);
+        if http_failed {
+            log_error!("WebUI/HTTP 服务异常退出: {}", e);
+        } else {
+            log_error!("LuCI RPC 兼容通道异常退出: {}", e);
+        }
     }
 
     // 给后台任务一点时间优雅收尾。
@@ -176,6 +204,9 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = cache_task.await;
         let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
+        if !http_failed {
+            let _ = http_handle.await;
+        }
     })
     .await;
 
@@ -211,16 +242,21 @@ fn log_config(cfg: &Config) {
     }
 
     log_info!(
-        "LuCI RPC: {}:{}，密钥: {}",
-        cfg.websocket.bind,
-        cfg.websocket.port,
-        if cfg.websocket.auth_key.is_empty() { "未设置" } else { "已设置" }
+        "WebUI/HTTP API: {}:{}，密钥: {}",
+        cfg.http.bind,
+        cfg.http.port,
+        if cfg.http.auth_key.is_empty() { "未设置" } else { "已设置" }
     );
-    if cfg.websocket.bind != "127.0.0.1" {
+    log_info!(
+        "LuCI RPC 兼容通道: {}:{}（本地调试/e2e 用）",
+        cfg.websocket.bind,
+        cfg.websocket.port
+    );
+    if cfg.http.bind != "127.0.0.1" {
         log_warn!(
-            "RPC 对外监听 {}:{} —— 请确保防火墙已限制访问，并设置 websocket_auth_key",
-            cfg.websocket.bind,
-            cfg.websocket.port
+            "HTTP 对外监听 {}:{} —— 请确认部署网络可信，必要时设置 auth_key",
+            cfg.http.bind,
+            cfg.http.port
         );
     }
 

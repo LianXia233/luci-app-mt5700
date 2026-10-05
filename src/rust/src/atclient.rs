@@ -9,6 +9,7 @@
 use crate::{log_debug, log_info, log_warn};
 use crate::at_queue::{AtPriority, PriLock};
 use crate::config::AtConfig;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1033,12 +1034,24 @@ pub fn is_passthrough_urc(line: &str) -> bool {
 /// 脚本不存在或执行失败都静默跳过：它是补充手段，兜底路径在 init.d 的重试
 /// 与 hotplug 钩子里，缺了它功能仍然可用。
 async fn notify_uplink_ready() {
-    const HOOK: &str = "/usr/libexec/at-webserver/on-uplink.sh";
-    if !std::path::Path::new(HOOK).exists() {
-        return;
-    }
-    match tokio::process::Command::new(HOOK).status().await {
-        Ok(st) if st.success() => log_info!("已通知系统侧拉起模组接口（{}）", HOOK),
+    /* Debian 分支：钩子路径可配置（MT5700_UPLINK_HOOK 环境变量优先），
+     * 依次探测发行包默认位置与旧 OpenWrt 位置，均不存在时静默跳过。 */
+    const HOOK_CANDIDATES: [&str; 3] = [
+        "/etc/mt5700/on-uplink.sh",
+        "/usr/libexec/at-webserver/on-uplink.sh",
+        "/usr/libexec/mt5700/on-uplink.sh",
+    ];
+    let hook = std::env::var("MT5700_UPLINK_HOOK")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| HOOK_CANDIDATES.iter().map(PathBuf::from).find(|p| p.exists()));
+    let hook = match hook {
+        Some(h) => h,
+        None => return,
+    };
+    match tokio::process::Command::new(&hook).status().await {
+        Ok(st) if st.success() => log_info!("已通知系统侧拉起模组接口（{}）", hook.display()),
         Ok(st) => log_warn!("拉起模组接口的钩子返回非零退出码: {:?}", st.code()),
         Err(e) => log_warn!("执行拉起模组接口的钩子失败: {}", e),
     }
