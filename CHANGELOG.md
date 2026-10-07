@@ -12,6 +12,20 @@
 >
 > **详细说明**：逐版本的完整设计说明与实测记录见 `docs/release-notes/`。
 
+## [未发布]
+
+### 变更
+
+- **ci(debian)**: **移除工作流的日志归档步骤，云编译不再产出 `ci-logs` 分支** ——
+  原「日志归档」步骤（`if: always()` + `continue-on-error: true`）会在构建时把工具版本、
+  产物清单与 deb 元数据写入 `logs/debian/debian-<arch>-<时间>.txt` 并推送到仓库的
+  `ci-logs` 分支。移除后 Actions 不再向仓库写入任何内容，构建日志仅保留在 Actions
+  运行日志中（保留期由 GitHub 侧控制）。编译 job 由 9 步缩为 **8 步**，发布 job 保持 7 步，
+  步骤编号顺延为 1~15。`permissions: contents: write` 保留 —— 发布 Release 步骤仍需该权限。
+  > 历史记录说明：v2.0.0 曾包含该步骤及其两处修复（`.gitignore` 的 `*.log` 冲突、
+  > 首次创建分支的 `git fetch` 容错）。步骤移除后，这些修复不再有意义，故不再列入当前代码；
+  > 相关说明保留在 v2.0.0 的历史条目中以备追溯。
+
 ## v2.0.0 (2026-10-07)
 
 首次以 Debian 独立版身份发布。相对 `main` 分支为**不兼容变更**（移除全部 OpenWrt 依赖），
@@ -74,9 +88,9 @@
 
 ### 打包与发布：GitHub Actions 云编译产出 deb
 
-- **ci(debian)**: 新增 `.github/workflows/build-deb.yml` —— 编译 job 9 步
+- **ci(debian)**: 新增 `.github/workflows/build-deb.yml` —— 编译 job 8 步
   （检出代码 / 环境准备 / 依赖安装 / 构建执行 / 产物校验·二进制 / 打包执行 /
-  产物校验·deb 元数据闸门 / 日志归档 / 产物归档）+ 发布 job 7 步，步骤名与输出全汉化。
+  产物校验·deb 元数据闸门 / 产物归档）+ 发布 job 7 步，步骤名与输出全汉化。
 - **ci(debian)**: 架构矩阵两架构**均用官方原生 runner** —— `amd64` = `ubuntu-24.04`，
   `arm64` = `ubuntu-24.04-arm`（Cobalt 100 / Arm Neoverse N2，4 vCPU）。
   原生化的三项收益：无需注入交叉链接器与 `AR`（配置面更小、失败点更少）；产物不经交叉翻译层
@@ -106,8 +120,6 @@
   `/etc/mt5700/config.json`（**conffile**，升级保留用户修改）、`/etc/mt5700/on-uplink.sh`、
   `/lib/systemd/system/at-webserver.service`、`/usr/share/doc/at-webserver/`。
   `postinst` 遵循 `deb-systemd-helper` 惯例且**启动失败不中断安装**（未接模组属预期状态）。
-- **chore(ci)**: 构建日志推送至 `ci-logs` 分支 `logs/debian/`（`.txt` 扩展名，
-  规避仓库 `.gitignore` 的 `*.log` 规则）。
 - **实测（Debian 13 x86_64，Rust 1.99.0）**：amd64 编译 1m12s / arm64 1m00s；两架构
   control 声明与包内二进制实际架构交叉校验一致；安装生命周期（安装 → 改 `config.json` →
   重装保留用户修改 → purge 全清除）通过；7 项静态资源与 `/api/service/status` 抽测正常。
@@ -120,7 +132,8 @@
      env 文件，GitHub 的 env 指令解析器要求 `KEY=value`，故报
      `Invalid format 'dist/at-webserver_2.0.0-1_amd64.deb'` 并 `exit 1`。该变量本就未被消费
      （后续用 `ls dist/*.deb` 重新定位），直接删除，从根上消除跨步骤依赖；
-  2. 日志归档步骤 —— 仓库 `.gitignore` 含 `*.log` 导致 `git add` 被忽略而失败，
+  2. 日志归档步骤（**该步骤已于「未发布」段落中整体移除，以下仅作历史追溯**）——
+     仓库 `.gitignore` 含 `*.log` 导致 `git add` 被忽略而失败，
      改用 `.txt` 扩展名（并保留 `git add -f` 双保险）；`git fetch origin ci-logs` 在分支不存在时
      以非 0 退出，改用 `git ls-remote --exit-code --heads` 判存在后再 fetch；push 失败降级为警告；
      步骤级加 `continue-on-error: true`（日志属附带产物，不应阻断构建）。
