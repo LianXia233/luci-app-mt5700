@@ -26,9 +26,6 @@ return L.view.extend({
 		var page = Mt5700.page('模组设置', '硬件信息遥测、SIM/USIM 状态、射频模式与系统重置控制', 'modem_settings', '模组核心 · 硬件控制');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		/* ---------- 通用小工具 ---------- */
 
@@ -87,29 +84,52 @@ return L.view.extend({
 		 * 不改动 IMEI 相关命令与数据流。
 		 */
 
+		/* 区域样式（作用域前缀 mt-imei-，仅本页注入一次） */
+		var imeiStyle = E('style', {}, [
+			'.mt-imei { display: flex; flex-direction: column; gap: 12px; }',
+			'.mt-imei-value { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--mt5700-border); border-radius: 10px; background: rgba(125, 125, 125, 0.03); }',
+			'.mt-imei-label { font-size: 12.5px; font-weight: 600; color: var(--mt5700-text-secondary); white-space: nowrap; }',
+			'.mt-imei-value .mt5700-mono { font-size: 16px; font-weight: 700; letter-spacing: 0.06em; color: var(--mt5700-text); word-break: break-all; }'
+		].join('\n'));
+		body.appendChild(imeiStyle);
+
 		var imeiCard = Mt5700.card('设备标识（IMEI）', '模组唯一身份标识，读取自 AT+CGSN');
 		var imeiBody = E('div');
 		imeiCard._body.appendChild(imeiBody);
 		rowDev.appendChild(imeiCard);
 
+		/* imeiEl 节点保持不变：仍由 AT+CGSN 读取回填与写入成功后的更新逻辑驱动 */
 		var imeiEl = E('span', { 'class': 'mt5700-mono' }, '—');
 
-		imeiBody.appendChild(Mt5700.fieldNote(
+		var imeiZone = E('div', { 'class': 'mt-imei' });
+
+		/* 当前 IMEI 取值展示（视觉焦点置顶） */
+		var imeiValueRow = E('div', { 'class': 'mt-imei-value' });
+		imeiValueRow.appendChild(E('span', { 'class': 'mt-imei-label' }, '当前 IMEI'));
+		imeiValueRow.appendChild(imeiEl);
+		imeiZone.appendChild(imeiValueRow);
+
+		/* 操作条：复用「系统控制」的 mt-sysctl-item is-danger 结构，按钮样式与排版完全对齐 */
+		var imeiActions = E('div', { 'class': 'mt-sysctl-item is-danger' });
+		var imeiInfo = E('div', { 'class': 'mt-sysctl-info' });
+		var imeiNameRow = E('div', { 'class': 'mt-sysctl-name' });
+		imeiNameRow.appendChild(E('span', { 'class': 'mt-sysctl-dot' }));
+		imeiNameRow.appendChild(E('span', {}, '修改 IMEI'));
+		imeiInfo.appendChild(imeiNameRow);
+		imeiInfo.appendChild(E('div', { 'class': 'mt-sysctl-desc' }, '四重验证确认后执行（AT^PHYNUM），需具备合法依据。'));
+		imeiActions.appendChild(imeiInfo);
+		imeiActions.appendChild(Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); }));
+		imeiZone.appendChild(imeiActions);
+
+		/* 说明与风险提示作为次级信息置底 */
+		imeiZone.appendChild(Mt5700.fieldNote(
 			'修改 IMEI 采用四重验证：输入新 IMEI（含 Luhn 校验位验证）、再次输入确认一致性、输入当前 IMEI 后 6 位验证设备归属、最终确认后执行。',
 			[
 				'写入命令与基准实现完全一致（AT^PHYNUM），本页仅重构验证流程，不改动命令本身。',
 				'擅自修改 IMEI 可能违反当地法律法规，请确认操作具备合法依据。'
 			]
 		));
-
-		var imeiRow = E('div', { 'class': 'mt5700-inline' });
-		imeiRow.appendChild(E('span', { 'class': 'mt5700-hint' }, '当前 IMEI：'));
-		imeiRow.appendChild(imeiEl);
-		imeiBody.appendChild(imeiRow);
-
-		imeiBody.appendChild(Mt5700.panelActions(
-			Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); })
-		));
+		imeiBody.appendChild(imeiZone);
 
 		/* Luhn 校验：IMEI 第 15 位为校验位（纯前端验证，不影响写入命令） */
 		function luhnValid(s) {
@@ -792,28 +812,87 @@ return L.view.extend({
 
 		/* ================= 系统控制 ================= */
 
-		var sysCtrlCard = Mt5700.card('系统控制', '重启与恢复出厂');
+		/* 区域样式（作用域前缀 mt-sysctl-，仅本页注入一次） */
+		var sysCtlStyle = E('style', {}, [
+			'.mt-sysctl { display: flex; flex-direction: column; gap: 12px; }',
+			'.mt-sysctl-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--mt5700-border); border-radius: 12px; background: rgba(125, 125, 125, 0.03); transition: border-color .2s ease, box-shadow .2s ease; }',
+			'.mt-sysctl-item:hover { border-color: rgba(41, 169, 225, 0.3); }',
+			'.mt-sysctl-item.is-warn { border-color: rgba(245, 158, 11, 0.28); background: linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.02)); }',
+			'.mt-sysctl-item.is-warn:hover { border-color: rgba(245, 158, 11, 0.5); }',
+			'.mt-sysctl-item.is-danger { border-color: rgba(239, 68, 68, 0.28); background: linear-gradient(135deg, rgba(239, 68, 68, 0.06), rgba(239, 68, 68, 0.02)); }',
+			'.mt-sysctl-item.is-danger:hover { border-color: rgba(239, 68, 68, 0.5); }',
+			'.mt-sysctl-info { flex: 1 1 auto; min-width: 0; }',
+			'.mt-sysctl-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; color: var(--mt5700-text); }',
+			'.mt-sysctl-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }',
+			'.mt-sysctl-item.is-warn .mt-sysctl-dot { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }',
+			'.mt-sysctl-item.is-danger .mt-sysctl-dot { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15); }',
+			'.mt-sysctl-desc { font-size: 12px; color: var(--mt5700-text-secondary); line-height: 1.55; margin-top: 4px; }',
+			'.mt-sysctl-item .mt5700-btn { flex: 0 0 auto; min-width: 128px; }',
+			/* 警戒级按钮：琥珀色描边，介于普通操作与危险操作之间 */
+			'.mt5700-btn-warn { color: #b45309; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.4); }',
+			'.mt5700-btn-warn:hover:not(:disabled) { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.6); }',
+			'.mt5700-btn-danger { position: relative; }'
+		].join('\n'));
+		body.appendChild(sysCtlStyle);
+
+		var sysCtrlCard = Mt5700.card('系统控制', '重启与恢复出厂（高危操作，需逐级确认）');
 		var sysCtrlBody = E('div');
 		sysCtrlCard._body.appendChild(sysCtrlBody);
 		rowSys.appendChild(sysCtrlCard);
 
-		sysCtrlBody.appendChild(Mt5700.panelActions(
-			Mt5700.dangerButton('重启模组', function () {
-				Mt5700.confirm('确定重启模组？网络将暂时中断。', function () {
+		var sysCtlZone = E('div', { 'class': 'mt-sysctl' });
+		sysCtrlBody.appendChild(sysCtlZone);
+
+		function sysCtlItem(variant, name, desc, btnLabel, btnVariant, onClick) {
+			var item = E('div', { 'class': 'mt-sysctl-item ' + variant });
+			var info = E('div', { 'class': 'mt-sysctl-info' });
+			var nameRow = E('div', { 'class': 'mt-sysctl-name' });
+			nameRow.appendChild(E('span', { 'class': 'mt-sysctl-dot' }));
+			nameRow.appendChild(E('span', {}, name));
+			info.appendChild(nameRow);
+			info.appendChild(E('div', { 'class': 'mt-sysctl-desc' }, desc));
+			var btn = (btnVariant === 'warn') ? Mt5700.button(btnLabel, onClick, 'warn') : Mt5700.dangerButton(btnLabel, onClick);
+			item.appendChild(info);
+			item.appendChild(btn);
+			return item;
+		}
+
+		/* 重启模组：一次确认 */
+		sysCtlZone.appendChild(sysCtlItem(
+			'is-warn', '重启模组', '模组将重新初始化并注网，期间数据业务中断约 1~2 分钟。',
+			'重启模组', 'warn',
+			function () {
+				Mt5700.confirm('确定重启模组？执行后网络将暂时中断约 1~2 分钟。', function () {
 					send('AT^RESET').then(function (res) {
 						if (res.success) Mt5700.success('重启指令已发送');
 						else Mt5700.error('重启指令发送失败');
 					}).catch(function () { Mt5700.error('重启指令发送失败'); });
-				});
-			}),
-			Mt5700.dangerButton('恢复出厂设置', function () {
-				Mt5700.confirm('确定恢复出厂设置？所有配置将被清空。', function () {
-					send('AT&F').then(function (res) {
-						if (res.success) Mt5700.success('恢复出厂设置指令已发送');
-						else Mt5700.error('恢复出厂设置指令发送失败');
-					}).catch(function () { Mt5700.error('恢复出厂设置指令发送失败'); });
-				});
-			})
+				}, '确认重启');
+			}
+		));
+
+		/* 恢复出厂设置：三重连续警告确认 */
+		sysCtlZone.appendChild(sysCtlItem(
+			'is-danger', '恢复出厂设置', '清空全部用户配置（APN、频段锁频、SIM 设置等），且不可轻易撤销。需连续 3 次确认。',
+			'恢复出厂设置', 'danger',
+			function () {
+				var steps = [
+					'【第 1/3 步】即将恢复出厂设置：所有用户配置（APN、频段、锁频、SIM 设置等）将被清空。是否继续？',
+					'【第 2/3 步】恢复出厂后模组将无法联网，需要重新配置才能恢复数据服务。确定继续？',
+					'【第 3/3 步】最后确认：这是高危操作且后果需自行承担。确认下发恢复出厂设置指令？'
+				];
+				function ask(i) {
+					if (i >= steps.length) {
+						send('AT&F').then(function (res) {
+							if (res.success) Mt5700.success('恢复出厂设置指令已发送');
+							else Mt5700.error('恢复出厂设置指令发送失败');
+						}).catch(function () { Mt5700.error('恢复出厂设置指令发送失败'); });
+						return;
+					}
+					Mt5700.confirm(steps[i], function () { ask(i + 1); }, '继续（' + (i + 1) + '/3）');
+				}
+				ask(0);
+			}
 		));
 
 		/* ================= 数据加载 ================= */

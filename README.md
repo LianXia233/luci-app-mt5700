@@ -50,6 +50,7 @@ webui/                     独立 WebUI（静态资源）
   ├── app.js               路由 + 模块加载器
   ├── luci.js              LuCI 兼容垫片（L.rpc/L.uci/L.fs/E）
   ├── shell.css            外壳样式
+  ├── _layout-test/        布局回归样张（脱离后端静态预览栅格）
   └── luci-static/...      原视图与组件（仅 rpc.js 配置流程、service.js Debian 化）
 src/rust/                  后端（Rust + tokio）
   ├── httpserver.rs        HTTP API + WebSocket（新增）
@@ -64,6 +65,10 @@ debian/
   └── install.sh           一键编译安装
 tests/mock-modem/          mock 模组 e2e 测试（TCP RPC 通道）
 ```
+
+> **前端无构建步骤**：`webui/` 为手写源码，由 `install.sh` 直接复制到 `/usr/share/mt5700/webui`
+> 并由后端 `serve_static()` 原样返回。因此浏览器拿到的 JS/CSS **始终是未压缩源码**，
+> 排查问题时可直接阅读页面加载到的文件内容。
 
 ## 部署（Debian 11+）
 
@@ -155,6 +160,26 @@ cargo test
 
 mock 模组 e2e（TCP RPC 兼容通道）：见 `tests/mock-modem/run-e2e.sh`。
 
+前端解析层单测（Node 环境，无需浏览器与后端）：
+
+```bash
+cd tests/mock-modem
+node hcsq-test.js         # ^HCSQ / ^MONSC 字段解析（28 项）
+node parse-extra-test.js  # 辅载波聚合 / REJINFO / SIMSQ（19 项）
+node temp-level-test.js   # 模组温度 6 档分级（26 项）
+```
+
+## 布局回归样张
+
+网络状态页底部卡片区的栅格排版可脱离后端静态预览（无需连接模组）：
+
+```
+http://<host>:9000/_layout-test/status-mock.html
+```
+
+样张内为静态占位数据，仅用于校验 2 列栅格、奇数末卡横跨全宽、温度网格等布局规则，
+不代表真实设备状态。
+
 ## 与 main（OpenWrt）分支的差异
 
 | 项 | main | Debian |
@@ -166,6 +191,24 @@ mock 模组 e2e（TCP RPC 兼容通道）：见 `tests/mock-modem/run-e2e.sh`。
 | 接口管理 | netifd / init.d / hotplug | on-uplink.sh 钩子（DHCP 尽力而为） |
 | 系统日志 | logread (syslogd) | journalctl |
 | 打包 | ipk/apk（OpenWrt SDK 交叉编译） | cargo 直接编译 + install.sh |
+| 前端压缩 | LuCI 打包期可 minify（`LUCI_MINIFY_JS`） | **无构建期压缩**，源码直出 |
+| CI | `.github/workflows/build-openwrt.yml`（3 架构矩阵） | 无（本分支未配置 CI） |
+
+### 前端同步机制
+
+`webui/luci-static/resources/**` 与 `main` 分支的 `htdocs/luci-static/resources/**`
+**保持同源同步**：`main` 的纯前端 UI 改动可直接同步到本分支对应路径，改动随下次
+`install.sh` 部署即生效，无需打包或构建。
+
+以下文件为 Debian 独立实现，**同步时必须保留本分支版本，不得用 `main` 覆盖**：
+
+| 文件 | 独立实现的原因 |
+| --- | --- |
+| `at-webserver/rpc.js` | `main` 走 LuCI RPC（`L.rpc.declare` + rpcd/ucode 代理）；本分支映射到后端 HTTP API（`/api/*`），含鉴权头注入、401 → `REQUIRE_AUTH_KEY` 流程 |
+| `view/at-webserver/service.js` | `main` 经 init.d 管理服务；本分支经 systemd，管理 `/api/service/status|restart` 与 `/dev` 串口扫描，保存流程改为 `/api/config` + `/api/config/apply` 热应用 |
+
+`main` 侧的 `Makefile`、`scripts/sdk-build.sh`、`.github/workflows/` 属 OpenWrt 构建
+体系，本分支无对应物，不做移植。
 
 ## 许可
 

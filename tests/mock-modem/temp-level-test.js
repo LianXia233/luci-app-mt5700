@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const MTJS = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'at-webserver', 'mt5700.js');
+const MTJS = path.join(__dirname, '..', '..', 'webui', 'luci-static', 'resources', 'at-webserver', 'mt5700.js');
 const src = fs.readFileSync(MTJS, 'utf8');
 
 /* 抽取 TEMP_LEVELS 表与 tempLevel 的真实实现，避免测试与实现漂移 */

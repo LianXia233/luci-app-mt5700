@@ -22,9 +22,6 @@ return L.view.extend({
 		var page = Mt5700.page('短信中心', '即时短信收发、会话列表、长短信拼接与存储箱管理', 'sms_center', '即时消息 · 会话管理');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		var state = {
 			contacts: [],        // [{ number, lastMessage, lastTime, unreadCount, messages: [] }]
