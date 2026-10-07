@@ -1,4 +1,4 @@
-name: Build OpenWrt packages (apk + ipk)
+name: OpenWrt 软件包云编译（apk + ipk）
 
 # 云编译 OpenWrt 软件包：
 #   - 25.12.x（当前稳定版，包管理器 apk）  → 产出 .apk
@@ -42,6 +42,7 @@ concurrency:
 
 jobs:
   build:
+    name: 编译构建（${{ matrix.fmt }} · ${{ matrix.arch }}）
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -87,27 +88,52 @@ jobs:
             fmt: ipk
 
     steps:
-      - name: Checkout
+      - name: 检出仓库代码
         uses: actions/checkout@v4
 
-      - name: Build in OpenWrt SDK container
+      - name: 环境准备（输出目录与构建参数）
         run: |
           mkdir -p out
+          echo "==> 构建参数：OpenWrt ${{ matrix.ver }} / 架构 ${{ matrix.arch }} / 包格式 ${{ matrix.fmt }} / 目标 ${{ matrix.target }}"
+          echo "==> Rust 目标三元组：${{ matrix.rust }}"
+          echo "==> 工作目录：$(pwd)，SDK 镜像：openwrt/sdk:${{ matrix.image }}"
+
+      # 依赖安装与构建执行分为两个 SDK 容器运行：
+      #   依赖安装阶段把 Rust 工具链与 zig 装进 /opt 卷（宿主机 .ci-toolchain 目录持久化），
+      #   构建执行阶段复用同一 /opt 卷，无需重复下载工具链。
+      - name: 依赖安装（Rust 工具链 + zig 交叉链接器，SDK 容器内）
+        run: |
           set +e
           docker run --rm --user root \
             -v "$PWD:/work" \
+            -v "$PWD/.ci-toolchain:/opt" \
+            -e SDK_BUILD_PHASE=deps \
+            openwrt/sdk:${{ matrix.image }} \
+            /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}" 2>&1 | tee deps.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "==> 依赖安装退出码: $rc"
+          exit $rc
+
+      - name: 构建执行（OpenWrt SDK 编译 LuCI 前端 + Rust 后端）
+        run: |
+          set +e
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v "$PWD/.ci-toolchain:/opt" \
             -v "$PWD/out:/out" \
+            -e SDK_BUILD_PHASE=build \
             openwrt/sdk:${{ matrix.image }} \
             /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}" 2>&1 | tee build.log
           rc=${PIPESTATUS[0]}
           set -e
-          echo "==> docker run 退出码: $rc"
+          echo "==> 构建执行退出码: $rc"
           exit $rc
 
       # 架构一致性闸门：脚本按 SDK 实际报告的 ARCH_PACKAGES 输出到 out/<真实架构>/，
       # 因此若 out/<矩阵期望架构>/ 不存在，说明镜像 tag 与矩阵登记不符。
       # 这一步把「发错架构的包」从「用户装不上」提前到「CI 直接失败」。
-      - name: Verify SDK-reported arch matches matrix
+      - name: 产物校验（架构一致性闸门）
         run: |
           set -e
           echo "==> out 目录实际结构："
@@ -124,7 +150,7 @@ jobs:
 
       # 构建日志对排查至关重要：Actions 日志下载受网络策略限制时，
       # 把日志提交到 ci-logs-<fmt>-<arch> 分支，便于离线取回。
-      - name: Publish build log branch
+      - name: 日志归档（推送构建日志到 ci-logs 分支）
         if: always()
         # 日志归档是辅助能力：多个 run 并发向同一 ci-logs-* 分支 force push
         # 时会被 git ref CAS 拒绝（cannot lock ref ... is at X but expected Y），
@@ -140,13 +166,14 @@ jobs:
           git rm -rf --cached . >/dev/null 2>&1 || true
           mkdir -p logs
           cp build.log "logs/build.log" 2>/dev/null || true
+          cp deps.log "logs/deps.log" 2>/dev/null || true
           cp "out/${{ matrix.arch }}/ARCH.txt" "logs/ARCH.txt" 2>/dev/null || true
           find out -type f | sort > logs/artifacts.txt 2>/dev/null || true
           git add -f logs
           git commit -m "ci log ${{ matrix.fmt }}-${{ matrix.arch }} run ${{ github.run_id }}"
           git push --force origin "HEAD:$BR"
 
-      - name: Verify single package bundle
+      - name: 产物校验（单包完整性与后端二进制闸门）
         run: |
           set -e
           if [ -z "$(find "out/${{ matrix.arch }}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)" ]; then
@@ -167,7 +194,7 @@ jobs:
           fi
           echo "==> 体积校验通过（单包策略）"
 
-      - name: Upload artifacts
+      - name: 产物归档（上传 Actions 构件）
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.fmt }}-${{ matrix.arch }}
@@ -180,15 +207,16 @@ jobs:
   # 资产统一加 <架构>- 前缀：不同架构的依赖包 basename 相同（如 libc-1.2.6-r5.apk），
   # 同名文件在同一 Release 内必然冲突。用 gh CLI 替代 softprops 避免元数据更新 404 竞态。
   release:
+    name: 统一发布（汇总全部架构产物并发布 Release）
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout (read PKG_VERSION)
+      - name: 检出仓库代码（读取版本号）
         uses: actions/checkout@v4
 
-      - name: Resolve release tag
+      - name: 解析发布版本号
         id: ver
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
@@ -201,14 +229,14 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "==> 发布版本: ${TAG} (ref=${GITHUB_REF})"
 
-      - name: Download all build artifacts
+      - name: 下载全部构建产物
         uses: actions/download-artifact@v4
         with:
           pattern: '*'
           path: out/
           merge-multiple: true
 
-      - name: Flatten packages with arch prefix
+      - name: 产物平铺（附加架构前缀重命名）
         run: |
           mkdir -p dist
           while IFS= read -r f; do
@@ -220,7 +248,7 @@ jobs:
 
       # 发布一份架构选择指南：让用户可自行核对设备架构再选包，
       # 避免「架构看起来一致但装不上」这类问题反复出现。
-      - name: Generate arch guide
+      - name: 生成架构选择指南
         run: |
           cat > dist/ARCH-GUIDE.txt <<'EOF'
           luci-app-mt5700 架构选择指南
@@ -294,7 +322,7 @@ jobs:
           sed -i 's/^          //' dist/ARCH-GUIDE.txt
           cat dist/ARCH-GUIDE.txt
 
-      - name: Verify dist completeness
+      - name: 发布完整性校验（6 组合主包 + 架构覆盖）
         run: |
           set -e
           ARCHES="x86_64 aarch64_cortex-a53 aarch64_generic"
@@ -320,7 +348,7 @@ jobs:
             [ -n "$f" ] || echo "::warning::缺少 ${arch} 的 apk 语言包"
           done
 
-      - name: Clean up previous release (same tag)
+      - name: 清理同名旧 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -335,7 +363,7 @@ jobs:
       #   2) CHANGELOG 该版本段落的裁剪版（只留分类小标题 + 每条首句）；
       #   3) GitHub 自动生成的提交列表。
       # 不用 --generate-notes 作首选：那只是提交列表，对使用者几乎没有信息量。
-      - name: Compose release notes
+      - name: 撰写发布说明
         id: notes
         env:
           TAG: ${{ steps.ver.outputs.tag }}
@@ -451,7 +479,7 @@ jobs:
             cat "$NOTES"
           fi
 
-      - name: Publish to GitHub Release
+      - name: 发布 GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
