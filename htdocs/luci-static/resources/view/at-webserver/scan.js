@@ -25,9 +25,6 @@ return L.view.extend({
 		var page = Mt5700.page('全网扫频', '基站探测、频段/频点/PCI 扫描与一键锁定，支持无卡探测', 'scan', '基站探测 · 载波扫描');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		var filter = { rat: '', plmn: '', freq: '', pci: '', band: '', scs: '' };
 		var scanning = false;

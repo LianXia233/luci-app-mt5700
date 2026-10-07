@@ -19,9 +19,6 @@ return L.view.extend({
 		var page = Mt5700.page('网络设置', '锁频策略、邻区探测与 5G 独立组网参数', 'network_settings', '射频频段 · 锁频策略');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		/* ---------- 锁频编辑器状态 ---------- */
 		var lockState = {

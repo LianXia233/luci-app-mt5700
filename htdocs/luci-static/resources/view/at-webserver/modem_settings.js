@@ -26,9 +26,6 @@ return L.view.extend({
 		var page = Mt5700.page('模组设置', '硬件信息遥测、SIM/USIM 状态、射频模式与系统重置控制', 'modem_settings', '模组核心 · 硬件控制');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		/* ---------- 通用小工具 ---------- */
 
