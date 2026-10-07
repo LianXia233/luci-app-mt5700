@@ -37,8 +37,11 @@ return L.view.extend({
 			'  }',
 			'}',
 			'.mt-root-wrap { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }',
-			'.mt-row-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: stretch; width: 100%; }',
+			'.mt-row-2col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; width: 100%; }',
 			'.mt-row-2col > * { min-width: 0; }',
+			/* 奇数张卡的行：末卡横跨全宽，消除 2 列栅格换行留下的空位 */
+			'.mt-row-2col > :nth-child(odd):last-child { grid-column: 1 / -1; }',
+			'@media (max-width: 900px) { .mt-row-2col { grid-template-columns: 1fr; } .mt-row-2col > :nth-child(odd):last-child { grid-column: auto; } }',
 			/* 信号 4 联卡片 (白色毛玻璃) */
 			'.mt-sig-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 12px; margin-bottom: 6px; }',
 			'@media (max-width: 1080px) { .mt-sig-row { grid-template-columns: repeat(2, 1fr); } }',
