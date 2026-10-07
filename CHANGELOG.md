@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.14.9 (2026-10-07)
+
+### 「修改 IMEI」按钮与「系统控制」操作条样式对齐
+
+- **style(modem-settings)**: IMEI 卡片的「修改 IMEI」操作由独立按钮行改为复用「系统控制」的 `mt-sysctl-item is-danger` 操作条结构 —— 左侧红点标识 + 操作名 + 风险说明（四重验证确认后执行），右侧红色按钮（min-width 128px），与「恢复出厂设置」操作条的样式、尺寸与排版**完全一致**。
+- **security(scope)**: 仍仅限前端 UI 展示层 —— `imeiEl` 节点、四重验证流程、`AT^PHYNUM` 写入命令与数据流零改动。
+- **docs**: README 版本号与安装示例同步至 v1.14.9；新增 `docs/release-notes/v1.14.9.md` 发布说明。
+
 ## v1.14.8 (2026-10-07)
 
 ### 「设备标识（IMEI）」卡片排版优化（仅 UI 展示层）
