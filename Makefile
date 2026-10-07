@@ -14,7 +14,7 @@ LUCI_DEPENDS:=
 LUCI_PKGARCH:=
 
 PKG_NAME:=luci-app-mt5700
-PKG_VERSION:=1.14.6
+PKG_VERSION:=1.14.7
 PKG_RELEASE:=1
 
 # 兼容旧版：已安装 at-webserver-rust 的系统升级到单包后，声明提供同名能力，
@@ -95,6 +95,12 @@ define Package/luci-app-mt5700/postinst
 }
 exit 0
 endef
+
+# 关闭前端 JS 压缩：luci.mk 在 Package/install 阶段默认用 jsmin 把 htdocs 下
+# 所有 .js 压成单行（受 CONFIG_LUCI_JSMIN 与 LUCI_MINIFY_JS 双重控制）。
+# 设为 0 后 JsMin 变为空操作宏，产物保留未压缩源码，便于线上排查与对比。
+# 另由 scripts/sdk-build.sh 在 .config 中显式关闭 CONFIG_LUCI_JSMIN（双保险）。
+LUCI_MINIFY_JS:=0
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
