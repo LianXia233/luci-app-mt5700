@@ -23,9 +23,6 @@ return L.view.extend({
 		var page = Mt5700.page('拨号设置', '自动拨号、APN 接入点、USB/网口工作模式与 PDP 上下文配置', 'dial', '数据链路 · APN 拨号');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		/*
 		 * 未保存更改暂存器（OpenWrt 保存并应用语义）：

@@ -142,9 +142,6 @@ return L.view.extend({
 		]);
 		body.appendChild(style);
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		var layout = E('div', { 'class': 'mt-root-wrap' });
 		body.appendChild(layout);

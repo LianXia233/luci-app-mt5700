@@ -24,9 +24,6 @@ return L.view.extend({
 		var page = Mt5700.page('短信设置', '短信服务开关、服务中心号码 (SMSC)、存储器映射与 USSD 代码查询', 'sms_settings', '短信配置 · 存储/USSD');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		var state = {
 			imsOn: false,
