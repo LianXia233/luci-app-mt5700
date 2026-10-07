@@ -6,6 +6,8 @@ OpenWrt 专属组件的全部依赖。
 
 原 OpenWrt/LuCI 版本保留在 `main` 分支，本分支不回改其任何代码。
 
+变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。
+
 ## 功能
 
 与 `main` 分支功能一致：
@@ -316,6 +318,15 @@ http://<host>:9000/_layout-test/status-mock.html
 
 `main` 侧的 `Makefile`、`scripts/sdk-build.sh`、`.github/workflows/` 属 OpenWrt 构建
 体系，本分支无对应物，不做移植。
+
+## 更新日志
+
+本分支的变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，逐版本的设计说明与实测记录见
+[`docs/release-notes/`](docs/release-notes/)。
+
+版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.0.0`，
+Release 标签前缀 `debian-v*`），不对应 `main` 的 v1.x 编号；`main` 侧的变更记录见
+`main` 分支的 `CHANGELOG.md`。
 
 ## 许可
 
