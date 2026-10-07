@@ -128,22 +128,29 @@ sudo systemctl daemon-reload && sudo systemctl enable --now at-webserver
 不依赖 CI，本地即可构建与安装：
 
 ```bash
-# 编译 + 打包（amd64）
+# 编译 + 打包（当前机器架构，amd64 机器上即 amd64 包）
 debian/build-deb.sh
 
-# 已有二进制直接打包
+# 已有二进制直接打包（架构由 ELF 自动判定）
 debian/build-deb.sh --bin src/rust/target/release/at-webserver
-
-# arm64 交叉打包（需先安装 gcc-aarch64-linux-gnu）
-sudo apt install -y gcc-aarch64-linux-gnu
-export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-cargo build --release --target aarch64-unknown-linux-gnu
-debian/build-deb.sh --bin src/rust/target/aarch64-unknown-linux-gnu/release/at-webserver
 
 # 指定修订号（默认 1）
 debian/build-deb.sh --revision 2
 ```
+
+> **本地打 arm64 包需要交叉工具链**：CI 已改用 GitHub 原生 arm runner，但在 x64 机器上
+> 本地交叉打 arm64 包仍需 `gcc-aarch64-linux-gnu`：
+>
+> ```bash
+> sudo apt install -y gcc-aarch64-linux-gnu
+> export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+> export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+> cargo build --release --target aarch64-unknown-linux-gnu
+> debian/build-deb.sh --bin src/rust/target/aarch64-unknown-linux-gnu/release/at-webserver
+> ```
+>
+> 若你手上有 arm64 机器（树莓派等），直接在该机器上 `debian/build-deb.sh` 即可产出
+> 原生 arm64 包，无需交叉工具链。
 
 产物位于 `dist/`：`at-webserver_<版本>-<修订>_<架构>.deb`。
 
@@ -227,10 +234,21 @@ cargo test
 
 ```
 GitHub Actions → Debian 软件包云编译（deb）
-  ├─ 编译打包（amd64）    宿主原生
-  ├─ 编译打包（arm64）    aarch64-linux-gnu 交叉编译
+  ├─ 编译打包（amd64 · ubuntu-24.04）      官方 x64 runner，原生编译
+  ├─ 编译打包（arm64 · ubuntu-24.04-arm）  官方原生 arm64 runner，原生编译
   └─ 统一发布             汇总两架构产物 → Release
 ```
+
+两个架构均使用 GitHub 官方**原生** runner，arm64 由 arm64 机器（Cobalt 100 / Arm
+Neoverse N2，4 vCPU）直接编译，不走 x64 交叉编译：
+
+- 无需注入交叉链接器与 `AR`，配置面更小、失败点更少；
+- 产物由 arm64 原生工具链产出，不经交叉翻译层，可信度与兼容性更佳；
+- `ring`（`ureq`/rustls 的 TLS 后端）需要 C 编译器与汇编器，原生 runner 自带 gcc。
+
+> **前置条件：仓库必须为 public。** GitHub 的 `ubuntu-*-arm` 免费标签仅对公开仓库开放；
+> 仓库转为 private 后该标签不被调度，workflow 将直接失败（不会静默降级）。工作流内的
+> 「runner 架构闸门」会显式校验 `uname -m` 与目标架构是否匹配，防止误配静默产出错包。
 
 产物命名：`at-webserver_<Cargo版本>-<修订>_<架构>.deb`。
 可用 Actions 页面手动触发并指定修订号（默认 `1`）。
