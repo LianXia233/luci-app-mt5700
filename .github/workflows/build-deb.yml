@@ -1,15 +1,25 @@
 name: Debian 软件包云编译（deb）
 
-# 云编译 Debian 二进制包（.deb）：
-#   - amd64   x86_64               （PC / 虚拟机 / x86 工控机）
-#   - arm64   aarch64              （树莓派 4/5、ARM 工控机、Arm SystemReady）
+# 云编译 Debian 二进制包（.deb），两架构均使用 GitHub 官方原生 runner：
+#   - amd64   ubuntu-24.04        x64runner（PC / 虚拟机 / x86 工控机）
+#   - arm64   ubuntu-24.04-arm    原生 arm64 runner（树莓派 4/5、ARM 工控机、Arm SystemReady）
+#
+# 为什么 arm64 用原生 arm runner 而不是 x64 交叉编译：
+#   1) 无需 gcc-aarch64-linux-gnu 与 linker/AR 环境变量注入，配置面更小、失败点更少；
+#   2) 产物由 arm64 原生工具链产出，不经交叉翻译层，可信度与兼容性更佳；
+#   3) ring（ureq/rustls 的 TLS 后端）需要 C 编译器与汇编器，原生 runner 自带 gcc。
+#
+# 前置条件：仓库必须为 public。GitHub 的 ubuntu-*-arm 免费标签仅对公开仓库开放，
+#           仓库转为 private 后该标签不被调度，workflow 将直接失败（不会静默降级）。
+#           构建步骤内另有「runner 架构闸门」显式校验 uname -m 与目标架构是否匹配。
 #
 # 产物：at-webserver_<upstream 版本>-<deb 修订号>_<架构>.deb
 # 版本单一来源：src/rust/Cargo.toml 的 version（后端即包本体，避免包版本与
 #               二进制版本不一致）。Debian 修订号用 --revision 控制，默认 1。
 #
 # 架构判定：打包脚本从产物 ELF 自动判定架构（不信任宿主 dpkg --print-architecture），
-#           因此交叉编译产出的包 Architecture 字段与内含二进制必然一致。
+#           保证包 Architecture 字段与内含二进制必然一致——即使未来改回交叉编译，
+#           也不会产出「架构字段与实际二进制不符」的坏包。
 #
 # 触发：push 到 Debian 分支、打 debian-v* 标签、或手动 workflow_dispatch
 # 产物发布：每次编译成功后自动发布 GitHub Release
@@ -42,25 +52,30 @@ concurrency:
 
 jobs:
   build:
-    name: 编译打包（${{ matrix.deb_arch }}）
-    runs-on: ubuntu-latest
+    name: 编译打包（${{ matrix.deb_arch }} · ${{ matrix.runner }}）
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ---- amd64：宿主原生编译，无需交叉工具链 ----
+          # ---- amd64：官方 x64 runner，原生编译 ----
           - deb_arch: amd64
+            runner: ubuntu-24.04
             rust_target: x86_64-unknown-linux-gnu
-            cross_linker: ''                       # 空 = 使用宿主 gcc
-            apt_cross: ''                         # 无需交叉编译工具链
-          # ---- arm64：aarch64-linux-gnu 交叉编译 ----
-          # ring（ureq/rustls 的 TLS 后端）需要 C 编译器与汇编器，
-          # 因此必须安装 gcc-aarch64-linux-gnu 并显式指定 linker，
-          # 仅 rustup target add 不足以完成链接。
+            # 原生 runner 上编译器即宿主 gcc，无需交叉配置
+            apt_cross: ''
+          # ---- arm64：官方原生 arm64 runner（免费，仅 public 仓库可用）----
+          # 用原生 arm 机器而非 x64 交叉编译：
+          #   1) 无需 gcc-aarch64-linux-gnu 与 linker 注入，配置面更小、失败点更少；
+          #   2) 产物由 arm64 原生工具链产出，不经交叉翻译层，可信度更高；
+          #   3) ring（ureq/rustls 的 TLS 后端）需要 C 编译器与汇编器，
+          #      原生 runner 自带 gcc，天然满足。
+          # 注意：ubuntu-*-arm 标签仅在 public 仓库可用；仓库转为 private 后
+          #      该标签会导致 workflow 直接失败（GitHub 明确不提供此镜像）。
           - deb_arch: arm64
+            runner: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
-            cross_linker: aarch64-linux-gnu-gcc
-            apt_cross: gcc-aarch64-linux-gnu
+            apt_cross: ''
 
     steps:
       # ---------- 1 ----------
@@ -68,36 +83,28 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------- 2 ----------
-      - name: 环境准备（输出目录与构建参数）
+      - name: 环境准备（校验 runner 架构与构建参数）
         run: |
           set -euo pipefail
+          echo "Runner 标签：${{ matrix.runner }}"
           echo "目标架构（deb）：${{ matrix.deb_arch }}"
           echo "Rust 目标三元组：${{ matrix.rust_target }}"
-          echo "交叉链接器：${CROSS_LINKER:-（宿主 gcc）}"
           mkdir -p dist
           # 修订号：workflow_dispatch 输入优先，push/tag 时默认 1
           REV="${{ github.event.inputs.revision }}"
           REV="${REV:-1}"
           echo "Debian 修订号：$REV"
           echo "REV=$REV" >> "$GITHUB_ENV"
-          # 供后续步骤引用
           echo "DEB_ARCH=${{ matrix.deb_arch }}" >> "$GITHUB_ENV"
           echo "RUST_TARGET=${{ matrix.rust_target }}" >> "$GITHUB_ENV"
 
       # ---------- 3 ----------
-      - name: 依赖安装（Rust 工具链 + 打包工具 + 交叉编译器）
+      - name: 依赖安装（Rust 工具链 + 打包工具）
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           # dpkg（提供 dpkg-deb）、binutils（objdump/readelf）、build-essential、curl
           sudo apt-get install -y -qq dpkg-dev binutils build-essential curl ca-certificates
-          # 交叉工具链（仅 arm64 需要）
-          if [ -n "${{ matrix.apt_cross }}" ]; then
-            echo "==> 安装交叉编译器：${{ matrix.apt_cross }}"
-            sudo apt-get install -y -qq "${{ matrix.apt_cross }}"
-          else
-            echo "==> 宿主原生编译，无需交叉工具链"
-          fi
           # Rust 工具链
           if ! command -v cargo >/dev/null 2>&1; then
             echo "==> 安装 rustup（minimal profile）"
@@ -105,44 +112,54 @@ jobs:
               | sh -s -- -y --profile minimal --default-toolchain stable
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          rustup target add "${{ matrix.rust_target }}"
           rustc --version
           cargo --version
           dpkg-deb --version | head -1
 
       # ---------- 4 ----------
-      - name: 构建执行（cargo release + dpkg 打包）
+      - name: 构建执行（原生 cargo release）
         run: |
           set -euo pipefail
+          echo "==> Runner 实测架构：$(uname -m)"
+          # 架构闸门：确认 runner 真实架构与目标架构一致。
+          # 原生 arm runner 标签在某些情况下可能不被调度（如仓库转为 private），
+          # 此时 workflow 会直接失败而非静默降级；此处再做一次显式校验，
+          # 确保「在 arm 机器上编译 arm 包」这一前提成立。
+          case "${{ matrix.deb_arch }}:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) echo "✓ runner 架构与目标架构匹配" ;;
+            *) echo "错误：runner 架构 $(uname -m) 与目标 ${{ matrix.deb_arch }} 不匹配" >&2; exit 1 ;;
+          esac
+          # dpkg 架构应与目标一致（arm 原生 runner 上即为 arm64）
+          echo "==> dpkg 架构：$(dpkg --print-architecture)"
           cd src/rust
-          # 交叉链接器注入（仅 arm64；宿主原生留空）
-          if [ -n "${{ matrix.cross_linker }}" ]; then
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${{ matrix.cross_linker }}"
-            export CC_aarch64_unknown_linux_gnu="${{ matrix.cross_linker }}"
-            export AR_aarch64_unknown_linux_gnu="aarch64-linux-gnu-ar"
-            echo "==> 交叉编译目标：${{ matrix.rust_target }}"
-          else
-            echo "==> 原生编译目标：${{ matrix.rust_target }}"
-          fi
-          cargo build --release --target "${{ matrix.rust_target }}"
+          cargo build --release
+          echo "==> 编译完成"
 
       # ---------- 5 ----------
       - name: 产物校验（架构一致性与二进制闸门）
         run: |
           set -euo pipefail
-          BIN="src/rust/target/${{ matrix.rust_target }}/release/at-webserver"
+          BIN="src/rust/target/release/at-webserver"
           [ -f "$BIN" ] || { echo "错误：未找到编译产物 $BIN" >&2; exit 1; }
           echo "==> 产物信息"
           ls -lh "$BIN"
           file "$BIN"
           echo "==> 动态依赖（打包脚本据此生成 Depends）"
           objdump -p "$BIN" | awk '/NEEDED/ {print "    " $2}'
+          # 产物架构必须与目标架构一致（原生编译下由 runner 架构决定，
+          # 这里再断言一次，确保打包脚本拿到的确实是目标架构二进制）
+          MACHINE="$(readelf -h "$BIN" | sed -n 's/^[[:space:]]*Machine:[[:space:]]*//p' | tr '[:upper:]' '[:lower:]')"
+          echo "==> ELF Machine：$MACHINE"
+          case "${{ matrix.deb_arch }}:$MACHINE" in
+            amd64:*x86-64*|arm64:*aarch64*) echo "✓ 产物架构与目标一致" ;;
+            *) echo "错误：产物架构 $MACHINE 与目标 ${{ matrix.deb_arch }} 不符" >&2; exit 1 ;;
+          esac
 
       # ---------- 6 ----------
       - name: 打包执行（生成 .deb）
         run: |
           set -euo pipefail
-          BIN="src/rust/target/${{ matrix.rust_target }}/release/at-webserver"
+          BIN="src/rust/target/release/at-webserver"
           bash debian/build-deb.sh \
             --bin "$BIN" \
             --out-dir dist \
