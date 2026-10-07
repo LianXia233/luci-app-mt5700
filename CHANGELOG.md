@@ -8,6 +8,7 @@
 - **ci(workflow)**: 编译 job 由 8 步缩为 **7 步**（检出代码 / 环境准备 / 依赖安装 / 构建执行 / 产物校验·架构一致性 / 产物校验·单包完整性 / 产物归档），发布 job 保持 9 步不变。`permissions: contents: write` 保留 —— 「清理同名旧 Release」与「发布 GitHub Release」仍需该权限，与日志推分支无关。
 - **ci(concurrency)**: 并发组注释同步 —— 原注释列出两条并发风险（`ci-logs-*` 分支 force push 撞 ref CAS、release job 对同一 tag 并发 delete+create），现仅剩后者，故删除 `ci-logs` 相关描述；`concurrency` 配置本身（`group: build-${{ github.sha }}`、`cancel-in-progress: false`）不变。
 - **docs**: 工作流头部注释新增「构建日志：不向仓库写入」说明。
+- **chore(repo)**: 清理远端遗留的历史 `ci-logs*` 分支共 7 个 —— 由上述已移除的步骤产生（3 格式 × 3 架构 + 早期单一 `ci-logs`），现已一并从 `refs/heads/` 移除：`ci-logs`、`ci-logs-{apk,ipk}-{aarch64_cortex-a53,aarch64_generic,x86_64}`。删除远端分支不可逆，日志内容仅存于历史提交中。
 - **note**: v1.14.7 的历史条目（含「日志归档」步骤与 8 步表述）作为版本事实保留不改，仅在必要时追溯；步骤已从当前代码移除。
 
 ## v1.14.9 (2026-10-07)
