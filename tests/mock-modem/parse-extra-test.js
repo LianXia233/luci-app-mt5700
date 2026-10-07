@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', '..', 'webui', 'luci-static', 'resources', 'at-webserver');
 
 // 用 Function 模拟 LuCI 全局环境加载两个库文件
 const sandbox = {

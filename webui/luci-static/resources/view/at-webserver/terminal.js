@@ -20,9 +20,6 @@ return L.view.extend({
 		var page = Mt5700.page('AT 调试终端', '底层 AT 指令交互控制台、命令审计与快捷指令预设', 'terminal', 'AT 控制台 · 交互调试');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		var entries = [];
 		var saved = [];

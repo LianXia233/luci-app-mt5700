@@ -212,61 +212,10 @@ var Ui = (function () {
 
 	/* ---------- 连接状态条 ---------- */
 
-	api.renderConnectionBar = function (container) {
-		var bar = E('div', { 'class': 'at-conn-bar at-conn-idle' });
-		function setText(state, text) {
-			bar.className = 'at-conn-bar at-conn-' + state;
-			bar.innerHTML = '';
-			var dot = E('span', { 'class': 'at-conn-dot' });
-			bar.appendChild(dot);
-			bar.appendChild(E('span', { 'class': 'at-conn-text' }, text));
-			return bar;
-		}
-		setText('idle', '正在连接 AT 服务…');
-		container.appendChild(bar);
-
-		var cl = AtWs.client;
-		function labelConnected() {
-			var port = cl.port || 8765;
-			var host = cl.bind || cl.host || '127.0.0.1';
-			var where;
-			if (host === '127.0.0.1' || host === 'localhost') {
-				where = '本机 RPC';
-			} else if (host === '0.0.0.0' || host === '::') {
-				where = 'RPC 所有接口';
-			} else {
-				where = 'RPC ' + host;
-			}
-			return 'AT 服务已连接 · ' + where + ' :' + port;
-		}
-		cl.onConnectionStateChange(function (state, err) {
-			if (state === 'connected') {
-				setText('connected', labelConnected());
-				return;
-			}
-			if (state === 'error') {
-				bar.className = 'at-conn-bar at-conn-error';
-				bar.innerHTML = '';
-				bar.appendChild(E('span', { 'class': 'at-conn-dot' }));
-				bar.appendChild(E('span', { 'class': 'at-conn-text' }, err || '连接失败'));
-				var retry = api.button('重试', 'cbi-button-action', function () {
-					cl.connect().catch(function () {});
-				});
-				retry.style.marginLeft = '10px';
-				bar.appendChild(retry);
-				return;
-			}
-			var texts = {
-				connecting: '正在连接 AT 服务…',
-				authenticating: '正在验证访问密钥…',
-				reconnecting: '连接中断，正在重连…',
-				disconnected: '未连接 AT 服务',
-				idle: '正在连接 AT 服务…'
-			};
-			setText(state, texts[state] || state);
-		});
-		return bar;
-	};
+		// 连接状态卡片已按需求从所有页面移除：保留空实现兜底，任何调用不再渲染任何内容
+		api.renderConnectionBar = function () {
+			return E('div', { 'style': 'display:none' });
+		};
 
 	/* ---------- 常用 AT 辅助（等价 modem/atx.ts） ---------- */
 
