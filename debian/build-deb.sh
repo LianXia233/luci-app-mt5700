@@ -81,9 +81,13 @@ fi
 
 # ---------- 4. 架构判定（从 ELF 推断，不信任宿主 dpkg）----------
 # 为什么必须从二进制推断：交叉编译场景下 `dpkg --print-architecture` 给出的是
-# 宿主架构（x86_64 机器上打出 Architecture: amd64 却内含 aarch64 二进制），
+# 宿主架构（在 x86_64 机器上打出 Architecture: amd64 却内含 aarch64 二进制），
 # 该包在 arm64 设备上会被 dpkg 直接拒绝安装（"package architecture (amd64)
 # does not match system (arm64)"）。因此以二进制自身的 ELF 机器类型为准。
+#
+# 注意：CI 已改为 GitHub 原生 arm runner（ubuntu-24.04-arm）编译，宿主架构与目标
+#       架构天然一致，此处判定同样成立；保留自ELF 判定是为了让本脚本在本地交叉
+#       编译、以及未来可能的其他交叉场景下依然产出正确架构标注的包。
 detect_deb_arch() {
     local bin="$1" machine=""
     if command -v readelf >/dev/null 2>&1; then
