@@ -21,9 +21,6 @@ return L.view.extend({
 		var page = Mt5700.page('定时锁频编排', '按夜间/日间时段自动切换锁频策略，UCI 驱动后端守护调度', 'schedule', '时段调度 · 智能倒换');
 		var body = page._body;
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
 
 		var cfg = null;
 		var draft = null;
