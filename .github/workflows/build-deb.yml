@@ -175,17 +175,21 @@ jobs:
           done
           # WebUI 资源数量闸门：缺失说明前端未打进包
           echo "✓ WebUI 资源文件数：$(echo "$LIST" | grep -c 'usr/share/mt5700/webui')"
-          echo "$DEB" >> "$GITHUB_ENV"
+          # 不把 $DEB 写入 GITHUB_ENV：后续步骤用 `ls dist/*.deb` 重新定位，
+          # 无需跨步骤传递。相对路径写入 env 文件会被指令解析器拒绝
+          # （Invalid format 'dist/at-webserver_2.0.0-1_amd64.deb'）。
+          echo "✓ 闸门全部通过"
 
       # ---------- 8 ----------
       - name: 日志归档（推送构建日志到 ci-logs 分支）
         if: always()
+        continue-on-error: true
         env:
           DEB_ARCH_NAME: ${{ matrix.deb_arch }}
         run: |
           set -euo pipefail
           LOG_DIR="debian"
-          LOG="debian-${DEB_ARCH_NAME}-$(date -u '+%Y%m%d-%H%M%S').log"
+          LOG="debian-${DEB_ARCH_NAME}-$(date -u '+%Y%m%d-%H%M%S').txt"
           {
             echo "=== Debian 云编译构建日志 ==="
             echo "提交: ${{ github.sha }}"
@@ -208,11 +212,13 @@ jobs:
             done
           } | tee "$LOG"
 
-          # 推送到 ci-logs 分支（不存在则创建）；冲突时用 merge 保留历史
+          # 推送到 ci-logs 分支（不存在则创建）
+          # 注意：仓库 .gitignore 含 `*.log`，日志文件必须用 `git add -f` 强制添加；
+          # ci-logs 分支首次创建时 `git fetch origin ci-logs` 会以非 0 退出，需容错。
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin ci-logs || true
           if git ls-remote --exit-code --heads origin ci-logs >/dev/null 2>&1; then
+            git fetch origin ci-logs || true
             git checkout -B ci-logs origin/ci-logs
           else
             git checkout --orphan ci-logs
@@ -220,13 +226,13 @@ jobs:
           fi
           mkdir -p "logs/$LOG_DIR"
           cp "$LOG" "logs/$LOG"
-          git add "logs/$LOG"
+          # -f：绕过 .gitignore 的 *.log 规则
+          git add -f "logs/$LOG"
           if ! git diff --cached --quiet; then
             git commit -m "ci(debian): ${DEB_ARCH_NAME} 构建日志 $(date -u '+%Y-%m-%d %H:%M UTC')"
-            # 并发下 force push 可能覆盖他人日志，用 merge 策略重试一次
-            git push origin ci-logs || {
-              echo "日志推送冲突，本次跳过（日志已留在 Actions 日志中）"
-            }
+            # 并发下 push 可能因 ref 竞争失败；日志已同时保留在 Actions 日志中，不阻断构建
+            git push origin ci-logs || \
+              echo "警告：日志推送冲突，本次仅保留在 Actions 运行日志中" >&2
           fi
           echo "==> 日志已保存：logs/$LOG"
 
