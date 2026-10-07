@@ -84,29 +84,46 @@ return L.view.extend({
 		 * 不改动 IMEI 相关命令与数据流。
 		 */
 
+		/* 区域样式（作用域前缀 mt-imei-，仅本页注入一次） */
+		var imeiStyle = E('style', {}, [
+			'.mt-imei { display: flex; flex-direction: column; gap: 12px; }',
+			'.mt-imei-value { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--mt5700-border); border-radius: 10px; background: rgba(125, 125, 125, 0.03); }',
+			'.mt-imei-label { font-size: 12.5px; font-weight: 600; color: var(--mt5700-text-secondary); white-space: nowrap; }',
+			'.mt-imei-value .mt5700-mono { font-size: 16px; font-weight: 700; letter-spacing: 0.06em; color: var(--mt5700-text); word-break: break-all; }',
+			'.mt-imei-actions { display: flex; justify-content: flex-end; }'
+		].join('\n'));
+		body.appendChild(imeiStyle);
+
 		var imeiCard = Mt5700.card('设备标识（IMEI）', '模组唯一身份标识，读取自 AT+CGSN');
 		var imeiBody = E('div');
 		imeiCard._body.appendChild(imeiBody);
 		rowDev.appendChild(imeiCard);
 
+		/* imeiEl 节点保持不变：仍由 AT+CGSN 读取回填与写入成功后的更新逻辑驱动 */
 		var imeiEl = E('span', { 'class': 'mt5700-mono' }, '—');
 
-		imeiBody.appendChild(Mt5700.fieldNote(
+		var imeiZone = E('div', { 'class': 'mt-imei' });
+
+		/* 当前 IMEI 取值展示（视觉焦点置顶） */
+		var imeiValueRow = E('div', { 'class': 'mt-imei-value' });
+		imeiValueRow.appendChild(E('span', { 'class': 'mt-imei-label' }, '当前 IMEI'));
+		imeiValueRow.appendChild(imeiEl);
+		imeiZone.appendChild(imeiValueRow);
+
+		/* 操作按钮（右对齐，与取值展示分离） */
+		var imeiActions = E('div', { 'class': 'mt-imei-actions' });
+		imeiActions.appendChild(Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); }));
+		imeiZone.appendChild(imeiActions);
+
+		/* 说明与风险提示作为次级信息置底 */
+		imeiZone.appendChild(Mt5700.fieldNote(
 			'修改 IMEI 采用四重验证：输入新 IMEI（含 Luhn 校验位验证）、再次输入确认一致性、输入当前 IMEI 后 6 位验证设备归属、最终确认后执行。',
 			[
 				'写入命令与基准实现完全一致（AT^PHYNUM），本页仅重构验证流程，不改动命令本身。',
 				'擅自修改 IMEI 可能违反当地法律法规，请确认操作具备合法依据。'
 			]
 		));
-
-		var imeiRow = E('div', { 'class': 'mt5700-inline' });
-		imeiRow.appendChild(E('span', { 'class': 'mt5700-hint' }, '当前 IMEI：'));
-		imeiRow.appendChild(imeiEl);
-		imeiBody.appendChild(imeiRow);
-
-		imeiBody.appendChild(Mt5700.panelActions(
-			Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); })
-		));
+		imeiBody.appendChild(imeiZone);
 
 		/* Luhn 校验：IMEI 第 15 位为校验位（纯前端验证，不影响写入命令） */
 		function luhnValid(s) {
