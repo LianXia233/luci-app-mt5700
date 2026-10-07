@@ -1,0 +1,354 @@
+name: Debian 软件包云编译（deb）
+
+# 云编译 Debian 二进制包（.deb）：
+#   - amd64   x86_64               （PC / 虚拟机 / x86 工控机）
+#   - arm64   aarch64              （树莓派 4/5、ARM 工控机、Arm SystemReady）
+#
+# 产物：at-webserver_<upstream 版本>-<deb 修订号>_<架构>.deb
+# 版本单一来源：src/rust/Cargo.toml 的 version（后端即包本体，避免包版本与
+#               二进制版本不一致）。Debian 修订号用 --revision 控制，默认 1。
+#
+# 架构判定：打包脚本从产物 ELF 自动判定架构（不信任宿主 dpkg --print-architecture），
+#           因此交叉编译产出的包 Architecture 字段与内含二进制必然一致。
+#
+# 触发：push 到 Debian 分支、打 debian-v* 标签、或手动 workflow_dispatch
+# 产物发布：每次编译成功后自动发布 GitHub Release
+#   - 标签推送   → 使用该标签名（如 debian-v2.0.0）
+#   - 分支推送   → 使用 debian-v<版本>（与 main 分支的 v* 标签空间隔离）
+#
+# 注意：标签前缀固定为 debian-v，避免与 main 分支（OpenWrt 打包）的 v* 触发
+#       同一工作流或造成 Release 同名冲突。
+
+on:
+  push:
+    branches: [ Debian ]
+    tags: [ 'debian-v*' ]
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Debian 修订号（打包为 <upstream>-<revision>）'
+        required: false
+        default: '1'
+
+permissions:
+  contents: write
+
+# 分支推送与标签推送若指向同一 sha 会同时触发两个 run，两者 sha 相同。
+# Release job 对同一 tag 会 delete + create，并发执行会互相踩踏。
+# 按 sha 归入同一并发组并排队（不取消），串行执行即可消除竞争。
+concurrency:
+  group: deb-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 编译打包（${{ matrix.deb_arch }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ---- amd64：宿主原生编译，无需交叉工具链 ----
+          - deb_arch: amd64
+            rust_target: x86_64-unknown-linux-gnu
+            cross_linker: ''                       # 空 = 使用宿主 gcc
+            apt_cross: ''                         # 无需交叉编译工具链
+          # ---- arm64：aarch64-linux-gnu 交叉编译 ----
+          # ring（ureq/rustls 的 TLS 后端）需要 C 编译器与汇编器，
+          # 因此必须安装 gcc-aarch64-linux-gnu 并显式指定 linker，
+          # 仅 rustup target add 不足以完成链接。
+          - deb_arch: arm64
+            rust_target: aarch64-unknown-linux-gnu
+            cross_linker: aarch64-linux-gnu-gcc
+            apt_cross: gcc-aarch64-linux-gnu
+
+    steps:
+      # ---------- 1 ----------
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      # ---------- 2 ----------
+      - name: 环境准备（输出目录与构建参数）
+        run: |
+          set -euo pipefail
+          echo "目标架构（deb）：${{ matrix.deb_arch }}"
+          echo "Rust 目标三元组：${{ matrix.rust_target }}"
+          echo "交叉链接器：${CROSS_LINKER:-（宿主 gcc）}"
+          mkdir -p dist
+          # 修订号：workflow_dispatch 输入优先，push/tag 时默认 1
+          REV="${{ github.event.inputs.revision }}"
+          REV="${REV:-1}"
+          echo "Debian 修订号：$REV"
+          echo "REV=$REV" >> "$GITHUB_ENV"
+          # 供后续步骤引用
+          echo "DEB_ARCH=${{ matrix.deb_arch }}" >> "$GITHUB_ENV"
+          echo "RUST_TARGET=${{ matrix.rust_target }}" >> "$GITHUB_ENV"
+
+      # ---------- 3 ----------
+      - name: 依赖安装（Rust 工具链 + 打包工具 + 交叉编译器）
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          # dpkg（提供 dpkg-deb）、binutils（objdump/readelf）、build-essential、curl
+          sudo apt-get install -y -qq dpkg-dev binutils build-essential curl ca-certificates
+          # 交叉工具链（仅 arm64 需要）
+          if [ -n "${{ matrix.apt_cross }}" ]; then
+            echo "==> 安装交叉编译器：${{ matrix.apt_cross }}"
+            sudo apt-get install -y -qq "${{ matrix.apt_cross }}"
+          else
+            echo "==> 宿主原生编译，无需交叉工具链"
+          fi
+          # Rust 工具链
+          if ! command -v cargo >/dev/null 2>&1; then
+            echo "==> 安装 rustup（minimal profile）"
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup target add "${{ matrix.rust_target }}"
+          rustc --version
+          cargo --version
+          dpkg-deb --version | head -1
+
+      # ---------- 4 ----------
+      - name: 构建执行（cargo release + dpkg 打包）
+        run: |
+          set -euo pipefail
+          cd src/rust
+          # 交叉链接器注入（仅 arm64；宿主原生留空）
+          if [ -n "${{ matrix.cross_linker }}" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${{ matrix.cross_linker }}"
+            export CC_aarch64_unknown_linux_gnu="${{ matrix.cross_linker }}"
+            export AR_aarch64_unknown_linux_gnu="aarch64-linux-gnu-ar"
+            echo "==> 交叉编译目标：${{ matrix.rust_target }}"
+          else
+            echo "==> 原生编译目标：${{ matrix.rust_target }}"
+          fi
+          cargo build --release --target "${{ matrix.rust_target }}"
+
+      # ---------- 5 ----------
+      - name: 产物校验（架构一致性与二进制闸门）
+        run: |
+          set -euo pipefail
+          BIN="src/rust/target/${{ matrix.rust_target }}/release/at-webserver"
+          [ -f "$BIN" ] || { echo "错误：未找到编译产物 $BIN" >&2; exit 1; }
+          echo "==> 产物信息"
+          ls -lh "$BIN"
+          file "$BIN"
+          echo "==> 动态依赖（打包脚本据此生成 Depends）"
+          objdump -p "$BIN" | awk '/NEEDED/ {print "    " $2}'
+
+      # ---------- 6 ----------
+      - name: 打包执行（生成 .deb）
+        run: |
+          set -euo pipefail
+          BIN="src/rust/target/${{ matrix.rust_target }}/release/at-webserver"
+          bash debian/build-deb.sh \
+            --bin "$BIN" \
+            --out-dir dist \
+            --revision "${{ env.REV }}"
+
+      # ---------- 7 ----------
+      - name: 产物校验（deb 元数据闸门）
+        run: |
+          set -euo pipefail
+          DEB=$(ls -1 dist/at-webserver_*.deb | head -1)
+          [ -f "$DEB" ] || { echo "错误：未生成 deb 产物" >&2; exit 1; }
+          echo "==> deb 元数据"
+          dpkg-deb --info "$DEB"
+          echo "==> 架构一致性闸门（control 声明 vs 期望架构）"
+          ARCH=$(dpkg-deb --field "$DEB" Architecture)
+          if [ "$ARCH" != "${{ matrix.deb_arch }}" ]; then
+            echo "错误：control 架构为 $ARCH，期望 ${{ matrix.deb_arch }}" >&2
+            exit 1
+          fi
+          echo "✓ 架构一致：$ARCH"
+          echo "==> 内容完整性（关键路径必须存在）"
+          LIST=$(dpkg-deb --fsys-tarfile "$DEB" | tar -t)
+          for p in ./usr/bin/at-webserver \
+                   ./etc/mt5700/config.json \
+                   ./etc/mt5700/on-uplink.sh \
+                   ./lib/systemd/system/at-webserver.service \
+                   ./usr/share/doc/at-webserver/README.Debian; do
+            echo "$LIST" | grep -qx "$p" || { echo "错误：包内缺少 $p" >&2; exit 1; }
+            echo "✓ $p"
+          done
+          # WebUI 资源数量闸门：缺失说明前端未打进包
+          echo "✓ WebUI 资源文件数：$(echo "$LIST" | grep -c 'usr/share/mt5700/webui')"
+          echo "$DEB" >> "$GITHUB_ENV"
+
+      # ---------- 8 ----------
+      - name: 日志归档（推送构建日志到 ci-logs 分支）
+        if: always()
+        env:
+          DEB_ARCH_NAME: ${{ matrix.deb_arch }}
+        run: |
+          set -euo pipefail
+          LOG_DIR="debian"
+          LOG="debian-${DEB_ARCH_NAME}-$(date -u '+%Y%m%d-%H%M%S').log"
+          {
+            echo "=== Debian 云编译构建日志 ==="
+            echo "提交: ${{ github.sha }}"
+            echo "分支/标签: ${{ github.ref }}"
+            echo "架构: ${DEB_ARCH_NAME}"
+            echo "时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "--- 工具版本 ---"
+            rustc --version || true
+            cargo --version || true
+            dpkg-deb --version | head -1 || true
+            echo
+            echo "--- 产物清单 ---"
+            ls -lh dist/ 2>/dev/null || echo "(dist 为空)"
+            echo
+            echo "--- deb 元数据 ---"
+            for d in dist/*.deb; do
+              [ -f "$d" ] || continue
+              dpkg-deb --field "$d" Package Version Architecture Depends
+            done
+          } | tee "$LOG"
+
+          # 推送到 ci-logs 分支（不存在则创建）；冲突时用 merge 保留历史
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin ci-logs || true
+          if git ls-remote --exit-code --heads origin ci-logs >/dev/null 2>&1; then
+            git checkout -B ci-logs origin/ci-logs
+          else
+            git checkout --orphan ci-logs
+            git rm -rf --cached . >/dev/null 2>&1 || true
+          fi
+          mkdir -p "logs/$LOG_DIR"
+          cp "$LOG" "logs/$LOG"
+          git add "logs/$LOG"
+          if ! git diff --cached --quiet; then
+            git commit -m "ci(debian): ${DEB_ARCH_NAME} 构建日志 $(date -u '+%Y-%m-%d %H:%M UTC')"
+            # 并发下 force push 可能覆盖他人日志，用 merge 策略重试一次
+            git push origin ci-logs || {
+              echo "日志推送冲突，本次跳过（日志已留在 Actions 日志中）"
+            }
+          fi
+          echo "==> 日志已保存：logs/$LOG"
+
+      # ---------- 9 ----------
+      - name: 产物归档（上传 Actions 构件）
+        uses: actions/upload-artifact@v4
+        with:
+          name: at-webserver-deb-${{ matrix.deb_arch }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  release:
+    name: 统一发布（汇总全部架构产物并发布 Release）
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # ---------- 10 ----------
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      # ---------- 11 ----------
+      - name: 下载全部架构产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: at-webserver-deb-*
+          path: dist-collected
+          merge-multiple: true
+
+      # ---------- 12 ----------
+      - name: 产物汇总校验
+        run: |
+          set -euo pipefail
+          echo "==> 收集到的 deb 产物"
+          ls -lh dist-collected/
+          COUNT=$(ls -1 dist-collected/*.deb | wc -l)
+          [ "$COUNT" -ge 1 ] || { echo "错误：无 deb 产物" >&2; exit 1; }
+          echo "共 $COUNT 个产物"
+          echo "==> 逐个校验元数据"
+          for d in dist-collected/*.deb; do
+            echo "--- $(basename "$d") ---"
+            dpkg-deb --field "$d" Package Version Architecture Depends
+          done
+
+      # ---------- 13 ----------
+      - name: 版本号判定（标签优先，回退版本号拼接）
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            echo "使用标签作为 Release 名：$TAG"
+          else
+            VER=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' src/rust/Cargo.toml | head -1)
+            [ -n "$VER" ] || { echo "错误：无法从 Cargo.toml 解析版本" >&2; exit 1; }
+            TAG="debian-v$VER"
+            echo "使用版本号拼接 Release 名：$TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # ---------- 14 ----------
+      - name: 生成发布说明
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          {
+            echo "## at-webserver（Debian 独立版）$TAG"
+            echo
+            echo "MT5700M 5G 模组管理服务的 Debian 二进制包。安装后 systemd 托管，"
+            echo "WebUI 与 HTTP API 默认监听 \`0.0.0.0:9000\`。"
+            echo
+            echo "### 产物"
+            echo
+            echo "| 文件 | 架构 |"
+            echo "| --- | --- |"
+            for d in dist-collected/*.deb; do
+              A=$(dpkg-deb --field "$d" Architecture)
+              echo "| \`$(basename "$d")\` | $A |"
+            done
+            echo
+            echo "### 安装"
+            echo
+            echo '```bash'
+            echo "# 按架构选包（如 arm64）"
+            echo "sudo apt install ./at-webserver_*_arm64.deb"
+            echo '```'
+            echo
+            echo "安装后浏览器访问 \`http://<设备IP>:9000\`。"
+            echo
+            echo "### 说明"
+            echo
+            echo "- 包内 \`/etc/mt5700/config.json\` 为 conffile，升级时保留用户修改。"
+            echo "- 服务默认已 \`systemctl enable\`；未接模组时自动启动可能失败，属预期，"
+            echo "  接入模组后执行 \`systemctl restart at-webserver\` 即可。"
+            echo "- 完整变更说明见仓库 \`docs/release-notes/\`。"
+          } > release-notes.md
+          cat release-notes.md
+
+      # ---------- 15 ----------
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          # 同名 Release 可能来自历史构建，先删后建，保证资产与本次代码一致
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "at-webserver $TAG（Debian deb 包）" \
+            --notes-file release-notes.md \
+            dist-collected/*.deb
+          echo "==> Release 已发布：$TAG"
+          gh release view "$TAG" --json tagName,name --jq '"  标签: " + .tagName + "\n  名称: " + .name'
+
+      # ---------- 16 ----------
+      - name: 发布结果校验
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          echo "==> Release 资产清单"
+          gh release view "$TAG" --json assets --jq '.assets[] | "  " + .name + "  (" + (.size|tostring) + " B)"'
+          N=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          [ "$N" -ge 1 ] || { echo "错误：Release 无资产" >&2; exit 1; }
+          echo "✓ 共 $N 个资产"

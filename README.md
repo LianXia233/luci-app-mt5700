@@ -62,7 +62,11 @@ debian/
   ├── at-webserver.service systemd 服务单元
   ├── config.json          默认配置（安装到 /etc/mt5700/config.json）
   ├── on-uplink.sh         拨号就绪钩子（DHCP 拉起模组网口）
-  └── install.sh           一键编译安装
+  ├── install.sh           一键编译安装（源码方式）
+  ├── build-deb.sh         构建 .deb 包（CI 与本地共用）
+  └── ci-verify.sh         本地模拟 CI 闸门（不开 Actions 时验证产物）
+.github/workflows/
+  └── build-deb.yml        云编译工作流（amd64 + arm64 → deb → Release）
 tests/mock-modem/          mock 模组 e2e 测试（TCP RPC 通道）
 ```
 
@@ -72,7 +76,26 @@ tests/mock-modem/          mock 模组 e2e 测试（TCP RPC 通道）
 
 ## 部署（Debian 11+）
 
-### 一键安装
+### 方式一：安装 deb 包（推荐）
+
+从 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 下载对应架构的
+`at-webserver_<版本>-<修订>_<架构>.deb`：
+
+```bash
+# 树莓派 / ARM 工控机
+sudo apt install ./at-webserver_2.0.0-1_arm64.deb
+
+# PC / x86 虚拟机
+sudo apt install ./at-webserver_2.0.0-1_amd64.deb
+```
+
+`apt` 会自动处理依赖解析与服务注册（`postinst` 中 `daemon-reload` + `enable` + `start`）。
+
+> **未接模组也能安装**：服务启动失败不会中断安装（`postinst` 已容错），日志提示后
+> 待模组接入再 `sudo systemctl restart at-webserver` 即可。配置文件 `/etc/mt5700/config.json`
+> 为 **conffile**，升级时保留用户修改；彻底卸载用 `sudo apt purge at-webserver`。
+
+### 方式二：源码安装（自行编译）
 
 ```bash
 sudo apt install -y build-essential pkg-config curl
@@ -81,6 +104,12 @@ sudo ./debian/install.sh
 
 脚本执行：编译 `src/rust` → 安装二进制与 WebUI → 写入配置与 systemd 单元 →
 `systemctl enable --now at-webserver`。
+
+支持 `--bin` 跳过编译、`--no-deps` 跳过依赖检测：
+
+```bash
+sudo ./debian/install.sh --bin /path/to/at-webserver
+```
 
 ### 手动部署
 
@@ -93,6 +122,40 @@ sudo cp ../../debian/config.json /etc/mt5700/config.json
 sudo cp ../../debian/at-webserver.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now at-webserver
 ```
+
+### 本地打包 deb
+
+不依赖 CI，本地即可构建与安装：
+
+```bash
+# 编译 + 打包（amd64）
+debian/build-deb.sh
+
+# 已有二进制直接打包
+debian/build-deb.sh --bin src/rust/target/release/at-webserver
+
+# arm64 交叉打包（需先安装 gcc-aarch64-linux-gnu）
+sudo apt install -y gcc-aarch64-linux-gnu
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+cargo build --release --target aarch64-unknown-linux-gnu
+debian/build-deb.sh --bin src/rust/target/aarch64-unknown-linux-gnu/release/at-webserver
+
+# 指定修订号（默认 1）
+debian/build-deb.sh --revision 2
+```
+
+产物位于 `dist/`：`at-webserver_<版本>-<修订>_<架构>.deb`。
+
+打包脚本的两个关键设计：
+
+- **版本单一来源**：取自 `src/rust/Cargo.toml` 的 `version`，与后端二进制版本天然一致，
+  不会出现「包版本与二进制版本不符」。
+- **架构自 ELF 判定**：从产物二进制读取 ELF Machine 字段判定架构，而非信任
+  `dpkg --print-architecture`。交叉编译场景下后者给出的是宿主架构，会产出
+  `Architecture: amd64` 却内含 arm64 二进制的坏包（该包在 arm64 设备上会被 dpkg 拒绝）。
+- **依赖动态推导**：读 `objdump -p` 的 `NEEDED` 条目映射到 Debian 包名并去重，不硬编码
+  依赖清单，避免虚报或漏报。
 
 ### 开箱即用
 
@@ -158,6 +221,27 @@ cargo build --release
 cargo test
 ```
 
+### 云编译（GitHub Actions）
+
+推送 `Debian` 分支或打 `debian-v*` 标签即自动编译并发布 Release：
+
+```
+GitHub Actions → Debian 软件包云编译（deb）
+  ├─ 编译打包（amd64）    宿主原生
+  ├─ 编译打包（arm64）    aarch64-linux-gnu 交叉编译
+  └─ 统一发布             汇总两架构产物 → Release
+```
+
+产物命名：`at-webserver_<Cargo版本>-<修订>_<架构>.deb`。
+可用 Actions 页面手动触发并指定修订号（默认 `1`）。
+
+本地不开 Actions 时，可用等价脚本验证同一套闸门：
+
+```bash
+bash debian/ci-verify.sh x86_64-unknown-linux-gnu amd64
+bash debian/ci-verify.sh aarch64-unknown-linux-gnu arm64
+```
+
 mock 模组 e2e（TCP RPC 兼容通道）：见 `tests/mock-modem/run-e2e.sh`。
 
 前端解析层单测（Node 环境，无需浏览器与后端）：
@@ -190,9 +274,14 @@ http://<host>:9000/_layout-test/status-mock.html
 | 配置存储 | UCI（`/etc/config/at-webserver`） | JSON（`/etc/mt5700/config.json`） |
 | 接口管理 | netifd / init.d / hotplug | on-uplink.sh 钩子（DHCP 尽力而为） |
 | 系统日志 | logread (syslogd) | journalctl |
-| 打包 | ipk/apk（OpenWrt SDK 交叉编译） | cargo 直接编译 + install.sh |
+| 打包 | ipk/apk（OpenWrt SDK 交叉编译） | cargo 直接编译 + install.sh，或 deb 包 |
 | 前端压缩 | LuCI 打包期可 minify（`LUCI_MINIFY_JS`） | **无构建期压缩**，源码直出 |
-| CI | `.github/workflows/build-openwrt.yml`（3 架构矩阵） | 无（本分支未配置 CI） |
+| 二进制分发 | Release 挂 ipk/apk 资产 | Release 挂 `at-webserver_*_amd64/arm64.deb`，标签前缀 `debian-v*` |
+| CI | `.github/workflows/build-openwrt.yml`（3 架构矩阵） | `.github/workflows/build-deb.yml`（amd64 + arm64 矩阵） |
+
+> **标签空间隔离**：本分支的 Release 标签统一使用 `debian-v*` 前缀（如 `debian-v2.0.0`），
+> 与 `main` 分支的 `v*`（OpenWrt 包）互不干扰。分支推送时 CI 自动以 `debian-v<Cargo版本>`
+> 作为 Release 名；也可手动打 `debian-v*` 标签指定名称。
 
 ### 前端同步机制
 
