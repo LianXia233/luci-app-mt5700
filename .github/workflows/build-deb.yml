@@ -198,62 +198,6 @@ jobs:
           echo "✓ 闸门全部通过"
 
       # ---------- 8 ----------
-      - name: 日志归档（推送构建日志到 ci-logs 分支）
-        if: always()
-        continue-on-error: true
-        env:
-          DEB_ARCH_NAME: ${{ matrix.deb_arch }}
-        run: |
-          set -euo pipefail
-          LOG_DIR="debian"
-          LOG="debian-${DEB_ARCH_NAME}-$(date -u '+%Y%m%d-%H%M%S').txt"
-          {
-            echo "=== Debian 云编译构建日志 ==="
-            echo "提交: ${{ github.sha }}"
-            echo "分支/标签: ${{ github.ref }}"
-            echo "架构: ${DEB_ARCH_NAME}"
-            echo "时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            echo
-            echo "--- 工具版本 ---"
-            rustc --version || true
-            cargo --version || true
-            dpkg-deb --version | head -1 || true
-            echo
-            echo "--- 产物清单 ---"
-            ls -lh dist/ 2>/dev/null || echo "(dist 为空)"
-            echo
-            echo "--- deb 元数据 ---"
-            for d in dist/*.deb; do
-              [ -f "$d" ] || continue
-              dpkg-deb --field "$d" Package Version Architecture Depends
-            done
-          } | tee "$LOG"
-
-          # 推送到 ci-logs 分支（不存在则创建）
-          # 注意：仓库 .gitignore 含 `*.log`，日志文件必须用 `git add -f` 强制添加；
-          # ci-logs 分支首次创建时 `git fetch origin ci-logs` 会以非 0 退出，需容错。
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --heads origin ci-logs >/dev/null 2>&1; then
-            git fetch origin ci-logs || true
-            git checkout -B ci-logs origin/ci-logs
-          else
-            git checkout --orphan ci-logs
-            git rm -rf --cached . >/dev/null 2>&1 || true
-          fi
-          mkdir -p "logs/$LOG_DIR"
-          cp "$LOG" "logs/$LOG"
-          # -f：绕过 .gitignore 的 *.log 规则
-          git add -f "logs/$LOG"
-          if ! git diff --cached --quiet; then
-            git commit -m "ci(debian): ${DEB_ARCH_NAME} 构建日志 $(date -u '+%Y-%m-%d %H:%M UTC')"
-            # 并发下 push 可能因 ref 竞争失败；日志已同时保留在 Actions 日志中，不阻断构建
-            git push origin ci-logs || \
-              echo "警告：日志推送冲突，本次仅保留在 Actions 运行日志中" >&2
-          fi
-          echo "==> 日志已保存：logs/$LOG"
-
-      # ---------- 9 ----------
       - name: 产物归档（上传 Actions 构件）
         uses: actions/upload-artifact@v4
         with:
@@ -266,11 +210,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # ---------- 10 ----------
+      # ---------- 9 ----------
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
-      # ---------- 11 ----------
+      # ---------- 10 ----------
       - name: 下载全部架构产物
         uses: actions/download-artifact@v4
         with:
@@ -278,7 +222,7 @@ jobs:
           path: dist-collected
           merge-multiple: true
 
-      # ---------- 12 ----------
+      # ---------- 11 ----------
       - name: 产物汇总校验
         run: |
           set -euo pipefail
@@ -293,7 +237,7 @@ jobs:
             dpkg-deb --field "$d" Package Version Architecture Depends
           done
 
-      # ---------- 13 ----------
+      # ---------- 12 ----------
       - name: 版本号判定（标签优先，回退版本号拼接）
         id: ver
         run: |
@@ -309,7 +253,7 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # ---------- 14 ----------
+      # ---------- 13 ----------
       - name: 生成发布说明
         run: |
           set -euo pipefail
@@ -347,7 +291,7 @@ jobs:
           } > release-notes.md
           cat release-notes.md
 
-      # ---------- 15 ----------
+      # ---------- 14 ----------
       - name: 发布 Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -363,7 +307,7 @@ jobs:
           echo "==> Release 已发布：$TAG"
           gh release view "$TAG" --json tagName,name --jq '"  标签: " + .tagName + "\n  名称: " + .name'
 
-      # ---------- 16 ----------
+      # ---------- 15 ----------
       - name: 发布结果校验
         env:
           GH_TOKEN: ${{ github.token }}
