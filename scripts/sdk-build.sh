@@ -24,19 +24,35 @@ VER="$3"
 
 echo "==> 仓库挂载: /work / out:/out（构建开始, 期望架构=$EXPECTED_ARCH ver=$VER）"
 
+# ---------- 构建阶段划分（CI 细分步骤：依赖安装 / 构建执行可分两个容器运行） ----------
+# SDK_BUILD_PHASE=deps  → 仅依赖安装：基础工具 + Rust 工具链 + zig（CI 侧挂载 /opt 卷持久化）
+# SDK_BUILD_PHASE=build → 仅构建执行：定位 SDK + 放入包 + feeds + 编译 + 产物收集
+# 默认 all              → 一次性完整构建（本地调试与旧行为兼容）
+PHASE="${SDK_BUILD_PHASE:-all}"
+case "$PHASE" in
+  deps|build|all) ;;
+  *) echo "ERROR: 未知构建阶段 SDK_BUILD_PHASE=$PHASE（可选 deps / build / all）"; exit 1 ;;
+esac
+phase_run() { [ "$PHASE" = "all" ] || [ "$PHASE" = "$1" ]; }
+echo "==> 构建阶段: $PHASE（deps=依赖安装 / build=构建执行 / all=完整流程）"
+
 # ---------- 0) 基础工具（SDK 容器已内置 curl/tar/gosu；xz/zst 压缩包解压需要对应工具） ----------
-SUDO=''
-if [ "$(id -u)" -ne 0 ]; then SUDO='sudo'; fi
-if command -v apt-get >/dev/null 2>&1; then
-  if [ -n "$SUDO" ] && ! command -v sudo >/dev/null 2>&1; then
-    echo "WARN: 容器非 root 且无 sudo，跳过 apt 补装（SDK 解压将尝试 tar 内置支持）"
-  else
-    $SUDO apt-get update -qq -o Acquire::Check-Valid-Until=false || true
-    $SUDO apt-get install -y -qq xz-utils zstd >/dev/null 2>&1 || true
-  fi
-fi
 command -v curl >/dev/null 2>&1 || { echo "ERROR: 容器缺少 curl"; exit 1; }
 command -v zstd >/dev/null 2>&1 || echo "WARN: 容器缺少 zstd（snapshot SDK 为 .tar.zst 时需要）"
+
+if phase_run deps; then
+  echo "==> 【依赖安装 1/3】基础工具检查与补装"
+  SUDO=''
+  if [ "$(id -u)" -ne 0 ]; then SUDO='sudo'; fi
+  if command -v apt-get >/dev/null 2>&1; then
+    if [ -n "$SUDO" ] && ! command -v sudo >/dev/null 2>&1; then
+      echo "WARN: 容器非 root 且无 sudo，跳过 apt 补装（SDK 解压将尝试 tar 内置支持）"
+    else
+      $SUDO apt-get update -qq -o Acquire::Check-Valid-Until=false || true
+      $SUDO apt-get install -y -qq xz-utils zstd >/dev/null 2>&1 || true
+    fi
+  fi
+fi
 
 # ---------- 1) 定位 OpenWrt SDK（优先镜像自带的 /builder，不落盘到仓库） ----------
 # 关键：绝不使用 `find ... | head -1` 在多个 SDK 目录间挑一个——readdir 顺序不确定，
@@ -44,65 +60,79 @@ command -v zstd >/dev/null 2>&1 || echo "WARN: 容器缺少 zstd（snapshot SDK 
 TARGET_DIR="${4:-${TARGET:-x86/64}}"
 SDK_DIR=""
 
-if [ -f /builder/feeds.conf.default ] && [ -f /builder/Makefile ]; then
-  # 官方 openwrt/sdk 镜像把 SDK 直接解压在 /builder
-  SDK_DIR=/builder
-  echo "==> 使用镜像自带 SDK: $SDK_DIR"
-else
-  CANDIDATES=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' 2>/dev/null || true)
-  N=$(printf '%s\n' "$CANDIDATES" | grep -c . || true)
-  if [ "$N" -eq 1 ] && [ -f "$CANDIDATES/feeds.conf.default" ]; then
-    SDK_DIR="$CANDIDATES"
+if phase_run build; then
+  echo "==> 【构建执行 1/5】定位 OpenWrt SDK"
+  if [ -f /builder/feeds.conf.default ] && [ -f /builder/Makefile ]; then
+    # 官方 openwrt/sdk 镜像把 SDK 直接解压在 /builder
+    SDK_DIR=/builder
     echo "==> 使用镜像自带 SDK: $SDK_DIR"
   else
-    [ "$N" -gt 1 ] && echo "WARN: /builder 下有 $N 个 SDK 目录，全部清理后重新下载以消除歧义"
-    rm -rf /builder/openwrt-sdk-*
-    case "$VER" in
-      main|snapshots) BASE_URL="https://downloads.openwrt.org/snapshots" ;;
-      *) BASE_URL="https://downloads.openwrt.org/releases/$VER" ;;
-    esac
-    echo "==> 定位 SDK: $BASE_URL/targets/$TARGET_DIR/"
-    LISTING=$(curl -sL "$BASE_URL/targets/$TARGET_DIR/")
-    SDK_FILE=$(echo "$LISTING" | grep -oE 'openwrt-sdk-[^"< ]+\.tar\.(xz|zst)' | grep -v '\.asc' | head -1)
-    [ -n "$SDK_FILE" ] || { echo "ERROR: 未找到 SDK 下载文件（$BASE_URL/targets/$TARGET_DIR/）"; exit 1; }
-    echo "==> 下载 SDK: $SDK_FILE"
-    curl -sSL "$BASE_URL/targets/$TARGET_DIR/$SDK_FILE" -o /builder/sdk.tar
-    tar -xf /builder/sdk.tar -C /builder
-    rm -f /builder/sdk.tar
-    SDK_DIR=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -1)
+    CANDIDATES=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' 2>/dev/null || true)
+    N=$(printf '%s\n' "$CANDIDATES" | grep -c . || true)
+    if [ "$N" -eq 1 ] && [ -f "$CANDIDATES/feeds.conf.default" ]; then
+      SDK_DIR="$CANDIDATES"
+      echo "==> 使用镜像自带 SDK: $SDK_DIR"
+    else
+      [ "$N" -gt 1 ] && echo "WARN: /builder 下有 $N 个 SDK 目录，全部清理后重新下载以消除歧义"
+      rm -rf /builder/openwrt-sdk-*
+      case "$VER" in
+        main|snapshots) BASE_URL="https://downloads.openwrt.org/snapshots" ;;
+        *) BASE_URL="https://downloads.openwrt.org/releases/$VER" ;;
+      esac
+      echo "==> 定位 SDK: $BASE_URL/targets/$TARGET_DIR/"
+      LISTING=$(curl -sL "$BASE_URL/targets/$TARGET_DIR/")
+      SDK_FILE=$(echo "$LISTING" | grep -oE 'openwrt-sdk-[^"< ]+\.tar\.(xz|zst)' | grep -v '\.asc' | head -1)
+      [ -n "$SDK_FILE" ] || { echo "ERROR: 未找到 SDK 下载文件（$BASE_URL/targets/$TARGET_DIR/）"; exit 1; }
+      echo "==> 下载 SDK: $SDK_FILE"
+      curl -sSL "$BASE_URL/targets/$TARGET_DIR/$SDK_FILE" -o /builder/sdk.tar
+      tar -xf /builder/sdk.tar -C /builder
+      rm -f /builder/sdk.tar
+      SDK_DIR=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -1)
+    fi
   fi
+
+  [ -n "$SDK_DIR" ] && [ -f "$SDK_DIR/feeds.conf.default" ] || { echo "ERROR: SDK 解压异常"; ls -la /builder; exit 1; }
+  cd "$SDK_DIR"
+  echo "==> SDK 根目录: $SDK_DIR"
 fi
 
-[ -n "$SDK_DIR" ] && [ -f "$SDK_DIR/feeds.conf.default" ] || { echo "ERROR: SDK 解压异常"; ls -la /builder; exit 1; }
-cd "$SDK_DIR"
-echo "==> SDK 根目录: $SDK_DIR"
-
-# ---------- 2) Rust 工具链（仅容器内 /opt，不落盘到仓库） ----------
-# mipsel-unknown-linux-musl 自 Rust 1.75 起无预编译 std：用 nightly + `-Z build-std` 现编
+# ---------- 2) Rust 工具链（仅容器内 /opt 卷，CI 分步运行时可持久化） ----------
 export RUSTUP_HOME=/opt/rust
 export CARGO_HOME=/opt/cargo
-if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
-fi
 export PATH="$CARGO_HOME/bin:$PATH"
-if [ "$RUST_TRIPLE" = "mipsel-unknown-linux-musl" ]; then
-  echo "==> mips: nightly + build-std（musl std 无预编译）"
-  rustup toolchain install nightly --profile minimal --component rust-src >/dev/null 2>&1
-  rustup default nightly
-  # -Z build-std 是 cargo 的 unstable 选项（经 Makefile 的 $(CARGO_BUILD_STD_FLAGS) 传入）
-  export CARGO_BUILD_STD_FLAGS="-Z build-std=std,panic_abort"
-else
-  rustup default stable
-  rustup target add "$RUST_TRIPLE"
+
+if phase_run deps; then
+  echo "==> 【依赖安装 2/3】Rust 工具链（rustup + $RUST_TRIPLE 目标）"
+  # mipsel-unknown-linux-musl 自 Rust 1.75 起无预编译 std：用 nightly + `-Z build-std` 现编
+  if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+    curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
+  fi
+  if [ "$RUST_TRIPLE" = "mipsel-unknown-linux-musl" ]; then
+    echo "==> mips: nightly + build-std（musl std 无预编译）"
+    rustup toolchain install nightly --profile minimal --component rust-src >/dev/null 2>&1
+    rustup default nightly
+    # -Z build-std 是 cargo 的 unstable 选项（经 Makefile 的 $(CARGO_BUILD_STD_FLAGS) 传入）
+    export CARGO_BUILD_STD_FLAGS="-Z build-std=std,panic_abort"
+  else
+    rustup default stable
+    rustup target add "$RUST_TRIPLE"
+  fi
 fi
 
 # ---------- 3) zig（交叉链接器，支持 musl 静态链接全部目标） ----------
 ZIG_VER=0.13.0
-if [ ! -x "/opt/bin/zig" ]; then
-  mkdir -p /opt/bin
-  curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
-    | tar -xJ -C /opt
-  ln -sf "/opt/zig-linux-x86_64-${ZIG_VER}/zig" /opt/bin/zig
+if phase_run deps; then
+  echo "==> 【依赖安装 3/3】zig 交叉链接器 $ZIG_VER"
+  if [ ! -x "/opt/bin/zig" ]; then
+    mkdir -p /opt/bin
+    curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
+      | tar -xJ -C /opt
+    ln -sf "/opt/zig-linux-x86_64-${ZIG_VER}/zig" /opt/bin/zig
+  fi
+fi
+if [ ! -x /opt/bin/zig ]; then
+  echo "ERROR: zig 不可用（依赖安装阶段未运行或 /opt 卷未持久化），请先以 SDK_BUILD_PHASE=deps 运行"
+  exit 1
 fi
 export PATH="/opt/bin:$PATH"
 zig version
@@ -117,7 +147,7 @@ case "$RUST_TRIPLE" in
   *) ZIG_TARGET="$(echo "$RUST_TRIPLE" | sed 's/-unknown-/-/')" ;;
 esac
 
-# 生成 zig 链接器 wrapper + cargo 全局配置（仅容器内，不写入仓库）
+# 生成 zig 链接器 wrapper + cargo 全局配置（幂等，构建阶段也会自愈重建）
 # 过滤 zig 不认识的 OpenWrt/LLD 旗标（aarch64_cortex-a53 会注入 --fix-cortex-a53-843419）
 cat > /opt/zig-linker <<EOF
 #!/bin/sh
@@ -145,7 +175,14 @@ rustflags = ["-C", "link-self-contained=no"]
 EOF
 echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 
+if [ "$PHASE" = "deps" ]; then
+  echo "==> 【依赖安装】阶段完成（Rust 工具链与 zig 已就绪并持久化到 /opt 卷）"
+  exit 0
+fi
+
+if phase_run build; then
 # ---------- 4) 把仓库包放入 buildroot package/ ----------
+echo "==> 【构建执行 2/5】放入软件包源码到 buildroot"
 # 单包结构：src/Makefile 让 luci.mk 在编译 LuCI 包时顺带编译 Rust 后端，
 # 并把 at-webserver-rust 二进制装进同一个包，不再有独立的 at-webserver-rust 包。
 rm -rf package/luci-app-mt5700
@@ -158,6 +195,7 @@ chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/iface/99-at-webserver
 chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/usb/99-at-webserver
 chmod 0755 package/luci-app-mt5700/root/usr/libexec/at-webserver/on-uplink.sh
 
+echo "==> 【构建执行 3/5】初始化 luci feeds"
 # ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
 if [ ! -f feeds/luci/luci.mk ]; then
   echo "==> 初始化 feeds（仅 luci）"
@@ -166,6 +204,7 @@ if [ ! -f feeds/luci/luci.mk ]; then
 fi
 [ -f feeds/luci/luci.mk ] || { echo "ERROR: luci feed 不可用"; exit 1; }
 
+echo "==> 【构建执行 4/5】SDK 配置与编译"
 # ---------- 6) 配置并编译 ----------
 rm -rf tmp
 
@@ -181,7 +220,17 @@ for p in luci-app-mt5700; do
 	echo "CONFIG_PACKAGE_luci-i18n-mt5700-zh-cn=m" >> .config
 done
 
+# 关闭前端 JS 压缩：CONFIG_LUCI_JSMIN 控制 luci.mk 安装阶段的 jsmin 处理，
+# 显式关闭后前端 .js 产物保持未压缩源码（配合包级 LUCI_MINIFY_JS=0 双保险）
+echo "# CONFIG_LUCI_JSMIN is not set" >> .config
+
 make defconfig >/dev/null
+
+if grep -q '^CONFIG_LUCI_JSMIN=y' .config; then
+	echo "WARN: CONFIG_LUCI_JSMIN=y（SDK 配置覆盖），JS 压缩将由包级 LUCI_MINIFY_JS=0 兜底跳过"
+else
+	echo "==> JS 压缩已关闭：前端 .js 产物保持未压缩源码（CONFIG_LUCI_JSMIN 未启用）"
+fi
 
 # ---------- 6.1) 读取 SDK 真实架构（决定输出目录，杜绝架构错配） ----------
 ARCH_PKGS=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"$/\1/p' .config | head -1)
@@ -250,6 +299,7 @@ if [ -n "$EXPECT_ELF" ] && command -v file >/dev/null 2>&1; then
 	fi
 fi
 
+echo "==> 【构建执行 5/5】收集与校验产物"
 # ---------- 7) 收集产物到 /out/<真实架构>/（白名单：只收本项目包）----------
 # 系统库（libc/libgcc1/libstdcpp6/libatomic1/libquadmath1/libpthread/librt 等）由 opkg/apk
 # 在安装时按依赖自动解决，不应出现在 Release 资产里。
@@ -322,3 +372,10 @@ case "$PKG_FILE" in
 		;;
 esac
 echo "==> SDK 构建完成（arch=${ARCH_PKGS}）"
+
+echo "==> 【构建执行】阶段完成（arch=${ARCH_PKGS}）"
+fi
+
+if [ "$PHASE" = "build" ]; then
+	echo "==> 【构建执行】阶段完成（全部产物已输出到 /out 卷）"
+fi
