@@ -89,8 +89,7 @@ return L.view.extend({
 			'.mt-imei { display: flex; flex-direction: column; gap: 12px; }',
 			'.mt-imei-value { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--mt5700-border); border-radius: 10px; background: rgba(125, 125, 125, 0.03); }',
 			'.mt-imei-label { font-size: 12.5px; font-weight: 600; color: var(--mt5700-text-secondary); white-space: nowrap; }',
-			'.mt-imei-value .mt5700-mono { font-size: 16px; font-weight: 700; letter-spacing: 0.06em; color: var(--mt5700-text); word-break: break-all; }',
-			'.mt-imei-actions { display: flex; justify-content: flex-end; }'
+			'.mt-imei-value .mt5700-mono { font-size: 16px; font-weight: 700; letter-spacing: 0.06em; color: var(--mt5700-text); word-break: break-all; }'
 		].join('\n'));
 		body.appendChild(imeiStyle);
 
@@ -110,8 +109,15 @@ return L.view.extend({
 		imeiValueRow.appendChild(imeiEl);
 		imeiZone.appendChild(imeiValueRow);
 
-		/* 操作按钮（右对齐，与取值展示分离） */
-		var imeiActions = E('div', { 'class': 'mt-imei-actions' });
+		/* 操作条：复用「系统控制」的 mt-sysctl-item is-danger 结构，按钮样式与排版完全对齐 */
+		var imeiActions = E('div', { 'class': 'mt-sysctl-item is-danger' });
+		var imeiInfo = E('div', { 'class': 'mt-sysctl-info' });
+		var imeiNameRow = E('div', { 'class': 'mt-sysctl-name' });
+		imeiNameRow.appendChild(E('span', { 'class': 'mt-sysctl-dot' }));
+		imeiNameRow.appendChild(E('span', {}, '修改 IMEI'));
+		imeiInfo.appendChild(imeiNameRow);
+		imeiInfo.appendChild(E('div', { 'class': 'mt-sysctl-desc' }, '四重验证确认后执行（AT^PHYNUM），需具备合法依据。'));
+		imeiActions.appendChild(imeiInfo);
 		imeiActions.appendChild(Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); }));
 		imeiZone.appendChild(imeiActions);
 
