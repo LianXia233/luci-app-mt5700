@@ -62,7 +62,7 @@ impl StateCache {
         })
     }
 
-    /// 该指令是否在白名单（可缓存）。目前主要由测试直接断言；业务读取统一走 `resolve`。
+    /// 该指令是否在白名单（可缓存）。仅测试直接使用；业务读取统一走 `resolve`。
     #[allow(dead_code)]
     pub fn is_cacheable(&self, command: &str) -> bool {
         self.rules.contains_key(&command.trim().to_uppercase())
@@ -116,8 +116,8 @@ impl StateCache {
             return Err("AT 通道未连接".into());
         }
 
-        // 扫频/锁频等长命令独占通道：此时不下发新的 AT，以免排队阻塞，
-        // 改由新鲜窗口内的旧缓存顶住（见 resolve 的 long-command 分支）。
+        // 扫频/锁频等长命令独占通道：本函数直接返回 Err，不下发新 AT，
+        // 回退旧缓存由 resolve 的 long-command 分支处理。
         if self.client.long_command_active() {
             return Err("模组正忙（长命令进行中），暂不刷新缓存".into());
         }

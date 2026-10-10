@@ -298,6 +298,7 @@ impl TaskManager {
     }
 
     /// 淘汰：超过 cap 时删除最早结束的已完成任务（软上限兜底）。
+    /// `_kind` 预留按类型淘汰，当前未使用。
     fn evict_locked(&self, tasks: &mut HashMap<String, Arc<TaskHandle>>, _kind: &str) {
         while tasks.len() > self.cap {
             // 找最早 finished_at 的已完成任务；找不到（全在跑）则保留并停止淘汰。

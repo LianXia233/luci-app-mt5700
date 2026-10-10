@@ -1,4 +1,4 @@
-//! 主动上报分发：来电、新短信、存储满、信号变化、PDCP 统计。
+//! 主动上报分发：raw_data 广播、来电、新短信、存储满、信号变化、PDCP 统计。
 
 use crate::{log_info, log_warn};
 use crate::atclient::{AtClient, AtResponse, Unsolicited};
@@ -15,7 +15,7 @@ const MAX_PARTIAL_SMS: usize = 100;
 
 pub type Broadcaster = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 
-#[allow(dead_code)] // sender 保留（分段归属校验）
+#[allow(dead_code)] // sender 随分段信息留存，当前仅写入，保留供后续归属核对
 struct PartialSms {
     sender: String,
     total: u32,
@@ -96,7 +96,7 @@ impl Dispatcher {
         self.handle(&line).await;
     }
 
-    /// 按固定优先级找到第一个能处理该行的处理器。
+    /// 按固定顺序匹配，命中即处理。
     async fn handle(&mut self, line: &str) {
         if is_call_line(line) {
             self.handle_call(line).await;

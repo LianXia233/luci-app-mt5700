@@ -43,7 +43,7 @@ pub struct SerialConfig {
 
 #[derive(Debug, Clone)]
 pub struct AtConfig {
-    /// "NETWORK" 或 "SERIAL"
+    /// 连接方式："NETWORK" 或 "SERIAL"（非 NETWORK 一律回落 SERIAL）
     pub type_: String,
     pub network: NetworkConfig,
     pub serial: SerialConfig,
@@ -74,9 +74,9 @@ pub struct WebSocketConfig {
     pub port: u16,
     pub auth_key: String,
     pub allow_wan: bool,
-    /// RPC 监听地址：127.0.0.1（默认）或 0.0.0.0（allow_wan / websocket_bind）
+    /// RPC 监听地址：websocket_bind 显式值优先；否则 allow_wan=1 → 0.0.0.0，默认 127.0.0.1
     pub bind: String,
-    /// 一次 ^CELLSCAN 允许跑多久
+    /// 一次 ^CELLSCAN 允许跑多久；读 UCI cellscan_timeout，下限 10s，默认 180s
     pub scan_timeout: Duration,
 }
 

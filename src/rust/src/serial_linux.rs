@@ -1,5 +1,6 @@
 //! Linux 串口传输（termios raw 模式）。
-//! 打开后拆成读写两半：读侧由 tokio AsyncFd 事件驱动，空闲不占 CPU。
+//! 打开后经 termios raw 配置，拆成读写两半，均由 tokio AsyncFd 事件驱动
+//! （fd 置 O_NONBLOCK），空闲不占 CPU。
 
 use crate::config::SerialConfig;
 use crate::log_error;
@@ -46,10 +47,12 @@ fn configure_termios(fd: i32, speed: libc::speed_t) -> std::io::Result<()> {
         | libc::INLCR | libc::IGNCR | libc::ICRNL | libc::IXON | libc::IXOFF);
     t.c_oflag &= !libc::OPOST;
     t.c_lflag &= !(libc::ECHO | libc::ECHONL | libc::ICANON | libc::ISIG | libc::IEXTEN);
+    // 8N1：CS8 数据位、清 PARENB 无校验、清 CSTOPB 1 停止位、清 CRTSCTS 关硬件流控。
     t.c_cflag &= !(libc::CSIZE | libc::PARENB | libc::CSTOPB | libc::CRTSCTS);
     t.c_cflag |= libc::CS8 | libc::CREAD | libc::CLOCAL;
 
-    // 阻塞语义交给 tokio AsyncFd：fd 为 O_NONBLOCK，VMIN=1 时无数据会返回 EAGAIN。
+    // 阻塞语义交给 tokio AsyncFd：此处 EAGAIN 行为依赖 open 时的 O_NONBLOCK，
+    // 故 VMIN=1 无数据才返回 EAGAIN 而非阻塞。
     // 不能用 VMIN=0：Linux tty 在 VMIN=0/VTIME=0 下「暂无数据」的 read 返回 0，
     // 会被读循环当成 EOF，刚连上就退出导致所有 AT 命令超时（实机必现）。
     t.c_cc[libc::VMIN] = 1;
@@ -94,7 +97,7 @@ impl AsyncRead for SerialReader {
     }
 }
 
-#[allow(dead_code)] // write_timeout 保留（写超时扩展位）
+#[allow(dead_code)] // 预留字段：本层不实现写超时（由上层 send_command 负责），暂透传未使用
 pub struct SerialWriter {
     afd: tokio::io::unix::AsyncFd<OwnedFd>,
     write_timeout: Duration,
