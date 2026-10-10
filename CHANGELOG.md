@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.14.10 (2026-10-10)
+
+### Argon 主题（2.4.x）兼容修复
+
+- **fix(theme-compat)**: 修复 luci-theme-argon 2.4.8 下模块设置页面两处显示异常（issue #12，@unolejiongg 报告并提供已验证修复样式）：
+  - **开关轨道异常**：Argon 对全局 `input[type=checkbox]` 施加高优先级样式，隐藏了插件开关的自绘轨道，仅剩白色圆形旋钮。在 `mt5700.css` 末尾新增「Argon 主题（2.4.x）兼容覆盖」块，以同等优先级 + `!important` 固定 44×24 轨道尺寸与底色（未选 `--mt5700-border-subtle` / 选中 `--mt5700-accent`），压制主题背景图与 `::after` 伪元素串扰，`::before` 旋钮位移恢复正常。
+  - **下拉框文字偏下被裁切**：Argon 对全局 `select` 的高度与内边距覆盖导致选中项（如 VoNR「关闭」、网卡速率「自动协商」）文字垂直偏移并被裁切。新增 `select.mt5700-select` 覆盖规则：固定 40px 高度、`0 36px 0 12px` 内边距、`line-height: normal`，恢复文字垂直居中。
+- **scope**: 仅前端 CSS 展示层 —— JS 逻辑、AT 命令与 IMEI 相关代码流零改动；其他主题（含 Aurora）显示不受影响。
+- **docs**: README 版本号与安装示例同步至 v1.14.10；新增 `docs/release-notes/v1.14.10.md` 发布说明。
+
 ## [未发布]
 
 ### CI 不再向仓库写入构建日志
