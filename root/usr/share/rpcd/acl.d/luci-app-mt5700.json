@@ -16,13 +16,15 @@
 					"getInitList",
 					"getRealtimeStats"
 				],
-				"mt5700": [
-					"at",
-					"events",
-					"netrate",
-					"logs",
-					"usb"
-				],
+			"mt5700": [
+				"at",
+				"events",
+				"netrate",
+				"logs",
+				"notify_test",
+				"qq_bind_status",
+				"usb"
+			],
 				"log": [
 					"read"
 				],

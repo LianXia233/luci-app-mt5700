@@ -138,6 +138,10 @@ pub struct RpcServer {
     /// 统一后台任务管理器：长耗时操作（扫频/锁频/固件升级）以 task_id 提交后台执行，
     /// 支持状态查询与取消，RPC handler 立即返回，不阻塞。
     tasks: Arc<TaskManager>,
+    /// 通知器：notify_test 直发测试消息，验证推送通道链路。
+    notify: Arc<crate::notify::Notifier>,
+    /// QQ 绑定进度（bind 模式时由绑定任务更新，qq_bind_status 读取；未设置则返回 idle）
+    bind_status: Option<std::sync::Arc<crate::qqbind::BindStatus>>,
     ctx: tokio::sync::watch::Receiver<bool>,
 }
 
@@ -149,6 +153,7 @@ impl RpcServer {
         ctx: tokio::sync::watch::Receiver<bool>,
         cache: Arc<StateCache>,
         tasks: Arc<TaskManager>,
+        notify: Arc<crate::notify::Notifier>,
     ) -> RpcServer {
         RpcServer {
             client,
@@ -160,7 +165,14 @@ impl RpcServer {
             cache,
             tasks,
             ctx,
+            notify,
+            bind_status: None,
         }
+    }
+
+    /// 注入 QQ 绑定进度句柄（main 在 spawn 绑定任务前调用）。
+    pub fn set_bind_status(&mut self, s: std::sync::Arc<crate::qqbind::BindStatus>) {
+        self.bind_status = Some(s);
     }
 
     pub fn hub(&self) -> Hub {
@@ -178,6 +190,8 @@ impl RpcServer {
             cache: self.cache.clone(),
             tasks: self.tasks.clone(),
             ctx: self.ctx.clone(),
+            notify: self.notify.clone(),
+            bind_status: self.bind_status.clone(),
         }
     }
 
@@ -290,6 +304,40 @@ impl RpcServer {
                 let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
                 let (seq, events) = self.hub.bus.since(since);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "events": events } })
+            }
+            // 通知通道测试（LuCI「发送测试通知」按钮）：绕过合并窗口直发一条测试消息。
+            "notify_test" => {
+                let channel = req.params.get("channel").and_then(|v| v.as_str()).unwrap_or("qq").to_string();
+                match self.notify.notify_test(&channel).await {
+                    Ok(()) => serde_json::json!({ "id": id, "result": { "success": true, "channel": channel } }),
+                    Err(e) => serde_json::json!({ "id": id, "result": { "success": false, "channel": channel, "error": e } }),
+                }
+            }
+            // QQ 绑定进度（LuCI bind 模式轮询展示状态与倒计时）。
+            "qq_bind_status" => {
+                let s = self
+                    .bind_status
+                    .as_ref()
+                    .map(|b| b.snapshot())
+                    .unwrap_or_default();
+                // waiting 状态计算倒计时剩余秒数；其余状态不适用
+                let left = if s.state == "waiting" {
+                    s.started
+                        .map(|t| {
+                            let elapsed = t.elapsed().as_secs();
+                            crate::qqbind::BIND_WINDOW_SECS.saturating_sub(elapsed)
+                        })
+                        .unwrap_or(crate::qqbind::BIND_WINDOW_SECS)
+                } else {
+                    0
+                };
+                serde_json::json!({ "id": id, "result": {
+                    "state": if s.state.is_empty() { "idle" } else { s.state.as_str() },
+                    "left": left,
+                    "target_type": s.target.as_ref().map(|t| t.target_type.as_str()).unwrap_or(""),
+                    "target_id": s.target.as_ref().map(|t| t.target_id.as_str()).unwrap_or(""),
+                    "error": s.error,
+                } })
             }
             // 后端运行日志（含被级别过滤掉的 info）：拨号对齐、串口探测、接口拉起协作、
             // URC 分发等过程都在这里，是 syslog 看不到的部分（稳态级别是 Warn）。

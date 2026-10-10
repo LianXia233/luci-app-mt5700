@@ -85,7 +85,7 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 | **消息与运维** | **短信中心** | 支持 PDU / Text 短信收发、长短信自动分段重组、SIM 卡短信池查看 |
 | | **短信设置** | 自定义短信中心号（SMSC）、自动化短信转发与容量自清理策略 |
 | | **AT 调试终端** | Web 原生交互式控制台，支持常用指令自动补全、历史回溯与原语调试 |
-| | **通知日志** | 掉线告警、频段漂移记录，支持企业微信机器人与 Webhook 实时推送 |
+| | **通知日志** | 掉线告警、频段漂移记录，支持企业微信机器人、QQ 机器人（API v2）与 Webhook 实时推送 |
 | | **服务配置** | 守护进程参数、通信串口绑定、退避重试阈值与自愈巡检开关 |
 
 ---
@@ -263,6 +263,30 @@ config at-webserver 'config'
     option autodial_mode '1'            # 拨号工作模式：1=USB网卡，2=转以太网口模式
     option cellscan_timeout '180'       # 扫频超时阈值(秒)，最低安全下限 10
 ```
+
+---
+
+## 事件通知配置
+
+事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件，事件先经 60 秒合并窗口去重汇总后发送：
+
+| 通道 | 配置项 | 说明 |
+|:--|:--|:--|
+| 企业微信 | `wechat_webhook` | 群机器人 WebHook 地址 |
+| QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道） |
+| 日志文件 | `log_file` | 本地逐条落盘 |
+
+### QQ 机器人通道说明
+
+- **启用条件**：AppID、AppSecret、目标 ID 三项全部非空。
+- **凭据安全**：AppSecret 建议不写入 UCI，改由环境变量注入（`QQ_BOT_APP_SECRET`；AppID 可用 `QQ_BOT_APP_ID`），环境变量优先于 UCI。可在 `/etc/init.d/at-webserver` 的 `procd_set_param env` 处追加。
+- **目标 ID**：`group_openid` / 用户 openid / `channel_id` 由机器人事件回调（如 `GROUP_AT_MESSAGE_CREATE`）获得，**不是 QQ 号或群号**。
+- **绑定自己的 QQ 号（一次性流程）**：QQ 开放平台出于隐私设计，接口层不提供「QQ 号 → openid」转换，openid 只能从机器人事件中获取。每个用户只需绑定一次：
+  1. 本机执行 `pip install websocket-client`，然后运行 `python3 scripts/qq-capture-openid.py --app-id <AppID> --app-secret <AppSecret>`（或用环境变量传凭据）；
+  2. 在 QQ 里给机器人发一条消息（单聊任意内容，或群里 @机器人）；
+  3. 脚本输出 openid 与现成的 UCI 配置命令，粘贴执行即可。凭据与 openid 不经手第三方。
+- **鉴权**：`POST https://api.bot.qq.com/app/getAppAccessToken` 换取 `access_token`（7200 秒），服务自动缓存并在过期前 120 秒刷新。
+- **已知限制**：本服务为单向推送、不连 WebSocket，所有消息均为**主动消息**（不带 `msg_id`），受官方频控约束（群 30~60 条/分钟、单关系 20 条/分钟、1000 条/群/天，未认证/认证档不同），且 QQ 用户关闭「允许主动发送」后推送会失败；频道主动推送官方要求机器人保持 WebSocket 在线，`channel` 模式可能被平台拒绝。60 秒合并窗口天然适配上述频控。
 
 ---
 

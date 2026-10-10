@@ -26,6 +26,14 @@ config at-webserver 'config'
 
 	# 通知配置
 	option wechat_webhook ''
+	# QQ 机器人推送（官方 API v2）。AppID + AppSecret + 目标 ID 全部填写后启用；
+	# AppSecret 建议留空并改用环境变量 QQ_BOT_APP_SECRET（AppID 可用 QQ_BOT_APP_ID）注入，
+	# 避免凭据落盘 UCI。推送为「主动消息」：群 30~60 条/分钟、单关系 20 条/分钟、1000 条/群/天。
+	option qq_app_id ''
+	option qq_app_secret ''
+	option qq_target_type 'group'          # group=群聊 / c2c=单聊 / channel=频道 / bind=自动绑定
+	option qq_target_id ''                 # group_openid / 用户 openid / channel_id（bind 模式由后端自动写回，勿手填）
+	option qq_bind_qq ''                   # 绑定模式下你的 QQ 号（仅日志标签；绑定后给机器人发条消息即自动完成）
 	option log_file '/tmp/at-notifications.log'
 	option notify_sms '1'
 	option notify_call '1'
