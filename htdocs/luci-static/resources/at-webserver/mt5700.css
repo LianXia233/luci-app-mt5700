@@ -3924,6 +3924,26 @@
   display: none !important;
 }
 
+/* hover / 焦点 / 禁用反馈同样需要 !important，否则会被上方基础覆盖块压掉 */
+.mt5700-switch input[type="checkbox"]:hover:not(:disabled):not(:checked) {
+  background: rgba(127, 127, 127, 0.35) !important;
+}
+
+.mt5700-switch input[type="checkbox"]:hover:not(:disabled):checked {
+  background: #087cba !important;
+}
+
+.mt5700-switch input[type="checkbox"]:focus-visible {
+  outline: none !important;
+  box-shadow: var(--mt5700-ring) !important;
+}
+
+.mt5700-switch input[type="checkbox"]:disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.4) !important;
+}
+
 /* Argon 下拉框兼容：固定高度与内边距，恢复文字垂直居中、消除裁切 */
 select.mt5700-select {
   box-sizing: border-box !important;
