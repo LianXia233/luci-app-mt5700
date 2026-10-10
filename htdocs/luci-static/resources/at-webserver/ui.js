@@ -7,7 +7,7 @@
 
 /**
  * LuCI 页面公共 UI 辅助：连接状态条、面板、字段、提示、加载态。
- * 保持与原 WebUI（Semi Design）一致的交互语义：加载态、错误提示、确认弹窗、自动刷新。
+ * 统一各页面的交互语义：加载态、错误提示、确认弹窗、自动刷新。
  */
 
 // 注入公共样式（at.css 与 ui.js 同目录）。
@@ -217,18 +217,18 @@ var Ui = (function () {
 		return E('div', { 'style': 'display:none' });
 	};
 
-	/* ---------- 常用 AT 辅助（等价 modem/atx.ts） ---------- */
+	/* ---------- 常用 AT 辅助 ---------- */
 
 	api.sleep = function (ms) {
 		return new Promise(function (resolve) { window.setTimeout(resolve, ms); });
 	};
 
-	// 原前端发命令前固定等 100ms，保证命令间隔
+	// 发命令前固定等待 100ms，保证命令之间的发送间隔
 	api.sendCmd = function (command) {
 		return api.sleep(100).then(function () { return AtWs.client.sendCommand(command); });
 	};
 
-	// 错误文本还原（等价 atx.ts 的 atErrorText）
+	// 错误文本还原：把 CME ERROR 等原始错误码转成可读中文提示
 	api.atErrorText = function (res, fallback) {
 		if (!res || res.success) return fallback;
 		var msg = res.error || fallback;
