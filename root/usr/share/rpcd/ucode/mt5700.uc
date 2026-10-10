@@ -733,6 +733,23 @@ return {
 				return rpcCall('events', { since: since, _rid: getStr(a, '_rid') });
 			}
 		},
+		notify_test: {
+			args: { channel: '', _rid: '' },
+			call: function (req) {
+				let a = req.args;
+				let ch = getStr(a, 'channel');
+				if (ch == null || ch == '') {
+					return { success: false, error: '缺少参数 channel' };
+				}
+				return rpcCall('notify_test', { channel: ch, _rid: getStr(a, '_rid') });
+			}
+		},
+		qq_bind_status: {
+			args: { _rid: '' },
+			call: function (req) {
+				return rpcCall('qq_bind_status', { _rid: getStr(req.args, '_rid') });
+			}
+		},
 		netrate: {
 			args: { device: '' },
 			call: function (req) {

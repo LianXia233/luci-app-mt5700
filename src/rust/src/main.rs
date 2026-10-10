@@ -12,6 +12,7 @@ mod config;
 mod logger;
 mod notify;
 mod pdu;
+mod qqbind;
 mod rpcserver;
 mod schedconfig;
 mod schedule;
@@ -94,7 +95,11 @@ async fn run(verbose: bool) -> Result<(), String> {
         ctx_rx.clone(),
         cache.clone(),
         tasks.clone(),
+        notifier.clone(),
     );
+    // QQ 绑定进度：bind 模式下由绑定任务更新，LuCI 经 qq_bind_status 轮询展示倒计时
+    let qq_bind_status = std::sync::Arc::new(crate::qqbind::BindStatus::default());
+    rpc.set_bind_status(qq_bind_status.clone());
     rpc.set_scan_timeout(cfg.websocket.scan_timeout);
     let rpc = Arc::new(rpc);
 
@@ -119,6 +124,24 @@ async fn run(verbose: bool) -> Result<(), String> {
         let ctx = ctx_rx.clone();
         async move { notifier.run(notif_rx, ctx).await }
     });
+
+    // QQ 机器人「绑定模式」：目标类型为 bind 时，后台连网关等用户发消息，
+    // 拿到 openid 写回 UCI 并热替换推送通道（无需重启）。
+    if cfg.notification.qq.target_type == "bind" {
+        let q = cfg.notification.qq.clone();
+        if q.app_id.is_empty() || q.app_secret.is_empty() {
+            log_error!("QQ 绑定模式缺少 AppID/AppSecret，跳过绑定");
+        } else {
+            if q.bind_qq.trim().is_empty() {
+                log_warn!("QQ 绑定模式未填写 qq_bind_qq（QQ 号标签），仍可继续绑定");
+            }
+            let notifier2 = notifier.clone();
+            let ctx2 = ctx_rx.clone();
+            let status2 = qq_bind_status.clone();
+            tokio::spawn(async move { run_qq_bind(notifier2, status2, q, ctx2).await });
+        }
+    }
+
     let dispatch_task = tokio::spawn({
         let mut dispatcher = Dispatcher::new(client.clone(), notifier.clone(), broadcaster, ctx_rx.clone());
         async move { dispatcher.run(urc_rx).await }
@@ -182,6 +205,54 @@ async fn run(verbose: bool) -> Result<(), String> {
     crate::logger::set_level(crate::logger::Level::Info);
     log_info!("服务已停止");
     Ok(())
+}
+
+/// QQ 绑定模式任务：监听 → 写 UCI → 热替换通道。
+async fn run_qq_bind(
+    notifier: Arc<Notifier>,
+    status: std::sync::Arc<crate::qqbind::BindStatus>,
+    q: crate::config::QqNotifyConfig,
+    ctx: watch::Receiver<bool>,
+) {
+    log_info!("QQ 绑定模式启动（QQ 号标签: {}），等待用户给机器人发消息…", q.bind_qq);
+    match qqbind::run_bind_tracked(status, &q.app_id, &q.app_secret, ctx).await {
+        Ok(target) => {
+            log_info!("QQ 绑定成功: type={} id={}", target.target_type, target.target_id);
+            if let Err(e) = qqbind::persist_uci(&target).await {
+                // 写不进 UCI 也要热替换，保证本次运行内可用
+                log_error!("QQ 绑定结果写回 UCI 失败（本次运行内仍热生效）: {}", e);
+            } else {
+                log_info!("QQ 绑定结果已写回 UCI（qq_target_type/qq_target_id）");
+            }
+            let bind_tag = q.bind_qq.clone();
+            let sender = crate::notify::QqSender::from_config(&crate::config::QqNotifyConfig {
+                app_id: q.app_id,
+                app_secret: q.app_secret,
+                target_type: target.target_type,
+                target_id: target.target_id,
+                bind_qq: q.bind_qq,
+            });
+            if let Some(sender) = sender {
+                // 绑定成功后立即回一条确认消息，让用户知道后续通知会发到这里。
+                // 主动推送不依赖 WS 会话（run_bind 返回后 WS 已断开），失败仅记日志。
+                let tag = if bind_tag.is_empty() {
+                    String::new()
+                } else {
+                    format!("（QQ 号标签: {}）", bind_tag)
+                };
+                let content = format!("[luci-app-mt5700] 绑定成功{}：后续通知将推送到本会话", tag);
+                match sender.send(&content).await {
+                    Ok(()) => log_info!("QQ 绑定确认消息已发送"),
+                    Err(e) => log_error!("QQ 绑定确认消息发送失败（不影响绑定生效）: {}", e),
+                }
+                notifier.set_qq(Some(sender));
+            } else {
+                // from_config 正常不会返回 None（凭据已校验），兜底防御
+                log_error!("QQ 绑定后构造发送器失败，跳过热替换");
+            }
+        }
+        Err(e) => log_error!("QQ 绑定失败: {}（下次服务重启会自动重试）", e),
+    }
 }
 
 #[cfg(unix)]
