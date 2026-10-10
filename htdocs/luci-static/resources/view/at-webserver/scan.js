@@ -8,7 +8,7 @@
 /**
  * 全网扫频 - 新 UI 视觉 + 基准 v1.3.4 功能
  *
- * 等价迁移原 WebUI network/ScanPanel.tsx：
+ * 全网扫频页面：
  * - 筛选：接入技术 / PLMN / 频段 / 频点 / PCI / 子载波间隔，命令按手册约束构建
  * - 异步扫描：服务端推送 cellscan 状态（running 逐行 / done / aborted / error）
  * - 页面刷新时通过 AT^CELLSCAN=STATE 恢复扫描中状态

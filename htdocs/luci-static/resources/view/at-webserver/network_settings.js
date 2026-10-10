@@ -8,7 +8,7 @@
 /**
  * 网络设置 - 新 UI 视觉 + 基准 v1.3.4 功能
  *
- * 等价迁移原 WebUI network/Settings.tsx：LTE/NR 锁频、邻区扫描（MONNC）、
+ * 网络设置页面：LTE/NR 锁频、邻区扫描（MONNC）、
  * 5G 选项（C5GOPTION）、网络拒绝原因（^REJINFO 主动上报）。
  * 锁频应用流程与基准一致：飞行模式 → 下发锁频命令 → 关闭飞行模式 → 重新查询。
  */

@@ -3,7 +3,7 @@
 /* global baseclass */
 
 /**
- * 短信发送 PDU 编码器（等价原前端 node-pdu 的 SMS-SUBMIT 编码）。
+ * 短信发送 PDU 编码器（SMS-SUBMIT 编码）。
  * 3GPP 23.040 / 23.038：
  * - GSM 7bit 打包（低位在前），非 GSM 字符自动切 UCS2
  * - 长短信自动分片并带 8-bit 拼接头（IEI 0x00）
