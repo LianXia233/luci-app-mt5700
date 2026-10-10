@@ -49,6 +49,15 @@
 				"/dev/*": [
 					"stat"
 				],
+				"/dev/serial": [
+					"list"
+				],
+				"/dev/serial/by-id": [
+					"list"
+				],
+				"/dev/serial/by-id/*": [
+					"stat"
+				],
 				"/etc/config/at-webserver": [
 					"read",
 					"stat"

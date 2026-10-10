@@ -76,6 +76,8 @@ function ATClient() {
 	this.requireAuth = false;
 	this.authKey = '';
 	this.commandTimeout = 14000;
+	/* 探活超时：略大于 ucode 的 12s 硬超时，避免提前掐断后端结论 */
+	this.healthTimeout = 13000;
 	this.subscribers = [];            // 推送订阅者
 	this.stateCallbacks = [];
 	this.state = 'idle';
@@ -87,6 +89,20 @@ function ATClient() {
 	this.firstPoll = true;
 	this.host = '127.0.0.1';
 	this.port = 8765;
+	/* 降级自动重连定时器与尝试次数（由 scheduleReconnect 维护，必须初始化，
+	 * 否则 clearTimeout(undefined) 虽然无害，但 reconnectAttempts 累加会 NaN） */
+	this.reconnectTimer = null;
+	this.reconnectAttempts = 0;
+	/* 命令熔断器：连续失败 failThreshold 次后开闸 circuitCooldownMs，
+	 * 期间 sendCommand 立即返回，不再消耗 14s 超时预算 */
+	this.failStreak = 0;
+	this.failThreshold = 3;
+	this.circuitOpenUntil = 0;
+	this.circuitCooldownMs = 8000;
+	/* 后端可用性结论（由 healthCheck 维护，供各页面数据请求共享） */
+	this.backendKnownDown = false;
+	this.backendDownCause = '';
+	this.backendDownError = '';
 	this.configReady = this.loadConfig();
 }
 
@@ -131,27 +147,205 @@ ATClient.prototype.loadConfig = function () {
 
 /* ---------- 连接管理（RPC 模式下为逻辑连接） ---------- */
 
+/*
+ * 轻量探活：确认后端真的可用，而不是「假定可用」。
+ *
+ * 改动动机（原实现的稳定性缺陷）：
+ *   原先 connect() 里直接 self.connected = true，这只是把「配置读到了」
+ *   当成「后端好了」。后端没起来时，页面照样进入 connected 状态，
+ *   随后每个区块的请求才逐个失败、各自报错，用户看到的是满屏报错
+ *   而不是一句「服务未启动」。
+ *
+ * 探针选型（实机实测后确定）：用 events 而不是 netrate。
+ *   - netrate 在 ucode 侧直读 /sys/class/net 的计数器，
+ *     **根本不经过 Rust 后端**。实测把后端 SIGSTOP 冻结后 netrate 仍
+ *     正常返回 —— 拿它探活等于没探。
+ *   - events 一定会走「ucode → nc → Rust 后端」全链路，且语义最轻：
+ *     只查事件环形缓冲的增量，不下发 AT、不占用 AT 通道、不干扰模组；
+ *     后端不可用时 ucode 的 12s 硬超时会兜底返回。
+ *
+ * 三级结果，供调用方区分处理：
+ *   'ok'       后端在跑且能应答
+ *   'offline'  后端未运行 / 端口未监听 / 应答超时 —— 走降级，不算异常
+ *   'error'    其它意外（保留给未来扩展，当前归入 offline 处理）
+ *
+ * 无论成败都不抛错：connect() 的契约是「永远 resolve」，
+ * 由 state 回调驱动 UI 降级展示，避免调用方因未捕获 rejection 而整页卡住。
+ */
+ATClient.prototype.healthCheck = function () {
+	var self = this;
+	/*
+	 * 探活预算取 healthTimeout（13s），略大于 ucode 的 12s 硬超时，
+	 * 让 ucode 的明确结论先到达，而不是被前端提前掐断。
+	 * 之前用过 3s，会把「刚启动、正在做首次串口探测」的正常后端
+	 * 误判成未就绪，导致页面无谓降级。
+	 */
+	return withTimeout(rpcEvents(0), self.healthTimeout, 'HEALTH_TIMEOUT').then(function (resp) {
+		resp = resp || {};
+		/* ucode 在端口未监听 / 缺 nc / 超时 时都会带 cause 字段并置 success=false */
+		if (resp.success === false) {
+			self.markBackendDown(resp.cause, resp.error);
+			return { status: 'offline', error: resp.error || 'Rust 后端未就绪', cause: resp.cause || '' };
+		}
+		self.markBackendUp();
+		/* events 正常应答形如 { events: [...], seq: N }；只要拿到对象就说明后端活了 */
+		return { status: 'ok' };
+	}).catch(function (err) {
+		var msg = (err && err.message) || '探活失败';
+		if (msg === 'HEALTH_TIMEOUT') {
+			self.markBackendDown('timeout', null);
+			return { status: 'offline', error: '后端响应超时，可能正在启动或已卡住', cause: 'timeout' };
+		}
+		self.markBackendDown('error', msg);
+		return { status: 'offline', error: msg, cause: 'error' };
+	});
+};
+
+/*
+ * 后端可用性标记。用于让所有页面的数据请求共享同一份结论，
+ * 避免「探活说离线、数据请求说在线」这种自相矛盾的状态。
+ */
+ATClient.prototype.markBackendDown = function (cause, error) {
+	this.backendKnownDown = true;
+	this.backendDownCause = cause || '';
+	this.backendDownError = error || '';
+};
+
+ATClient.prototype.markBackendUp = function () {
+	this.backendKnownDown = false;
+	this.backendDownCause = '';
+	this.backendDownError = '';
+};
+
+/*
+ * 连接（RPC 模式下为逻辑连接）。
+ *
+ * 设计要点：**乐观放行 + 后台探活**，而不是「先探活再决定」。
+ *
+ * 为什么不能先探活再放行：
+ *   后端半死（进程在但卡住）时探活要等满 ucode 的 12s 硬超时，
+ *   而所有 10 个页面都在 page() 里 await connect()，
+ *   等于每个页面首屏都白白多等 12s —— 这恰恰违背了本次优化目标。
+ *
+ * 现在的语义：
+ *   1. 配置就绪即乐观置 connected='true 并立即 resolve，
+ *      页面马上开始加载数据（正常场景零额外延迟）；
+ *   2. 探活在后台同时跑：
+ *        - 成功  -> 什么也不做（已处于 connected）；
+ *        - 失败  -> 置 'degraded' 并派发 state 回调，
+ *                   各页面据此弹出「后端未就绪」提示条；
+ *                   同时启动退避重连，恢复后自动刷新。
+ *   3. 若首个数据请求先于探活返回错误，sendCommand 里的熔断
+ *      会把 failStreak 累起来；探活结论到达时二者自然一致。
+ *
+ * 这样「后端正常」时零开销，「后端异常」时也不额外拖延首屏。
+ */
 ATClient.prototype.connect = function () {
-	if (this.isReady()) {
+	if (this.isReady() && this.state !== 'degraded') {
 		this.setConnectionState('connected');
 		return Promise.resolve(true);
 	}
 	var self = this;
+	var wasDegraded = (this.state === 'degraded' || this.state === 'error');
 	this.setConnectionState('connecting');
 	return this.configReady.then(function () {
+		/*
+		 * 乐观放行仅在「首次连接」时使用；从降级态重连时**不**乐观放行。
+		 *
+		 * 实测问题：若重连也乐观置 connected，时间线会变成
+		 *   degraded → connecting → connected → degraded → connecting → ...
+		 * 每 3s 一轮，页面的提示条被反复移除/恢复，用户看到闪烁，
+		 * 而且每次都会白跑一轮数据请求。因此降级期重连改为
+		 * 「先探活、拿到结论再定状态」，这样状态只会在真正恢复时翻转。
+		 */
+		if (!wasDegraded) {
+			self.connected = true;
+			self.authenticated = true;
+			self.firstPoll = true;
+			self.reconnectAttempts = 0;
+			if (self.reconnectTimer) {
+				clearTimeout(self.reconnectTimer);
+				self.reconnectTimer = null;
+			}
+			self.failStreak = 0;
+			self.circuitOpenUntil = 0;
+			self.setConnectionState('connected');
+			if (self.subscribers.length) self.startPolling();
+		}
+
+		/* 探活：首次连接时后台跑（不阻塞首屏）；重连时前台跑（决定状态）。 */
+		var hc = self.healthCheck().then(function (res) {
+			if (!res || res.status !== 'ok') {
+				self.connected = false;
+				self.stopPolling();
+				self.setConnectionState('degraded', res.error || 'Rust 后端未就绪');
+				if (!self.reconnectTimer) self.scheduleReconnect();
+			} else if (wasDegraded) {
+				/* 重连成功：清熔断、恢复状态 */
+				self.connected = true;
+				self.authenticated = true;
+				self.firstPoll = true;
+				self.reconnectAttempts = 0;
+				self.failStreak = 0;
+				self.circuitOpenUntil = 0;
+				if (self.reconnectTimer) {
+					clearTimeout(self.reconnectTimer);
+					self.reconnectTimer = null;
+				}
+				self.setConnectionState('connected');
+				if (self.subscribers.length) self.startPolling();
+			}
+			return res;
+		});
+
+		if (wasDegraded) {
+			/* 重连：等探活结论，让状态翻转只在真有结果时发生 */
+			return hc.then(function () { return self.connected; });
+		}
+		/* 首次连接：立即放行，探活在后台继续 */
+		return true;
+	}).catch(function (err) {
+		/* 配置加载等意外：仍然放行，避免整页不可用；
+		 * 数据请求自身会失败并由熔断处理。 */
+		console.warn('连接初始化异常', err);
 		self.connected = true;
-		self.authenticated = true;
-		self.firstPoll = true;
-		self.reconnectAttempts = 0;
 		self.setConnectionState('connected');
-		if (self.subscribers.length) self.startPolling();
 		return true;
 	});
+};
+
+/*
+ * 降级期的自动重连（指数退避，5s 起、上限 60s）。
+ * 与 pollEvents 失败后的重连共用同一入口，避免出现两条独立的
+ * 定时器互相叠加（旧的 bug：pollEvents 里 setTimeout(reconnect, 3000)
+ * 与页面自身轮询同时跑，重连风暴）。
+ *
+ * 退避起点取 5s：ucode 侧的熔断窗口是 15s，探活最坏 12s，
+ * 若重连间隔比这个还短，会出现「上一轮探活还没结束、下一轮已经开始」
+ * 的叠加，实测表现为状态每 3s 抖动一次、页面提示条闪烁。
+ * 5s 起步 + 每轮 +5s 能保证上一轮结论先落地。
+ */
+ATClient.prototype.scheduleReconnect = function () {
+	var self = this;
+	if (this.reconnectTimer) return;
+	this.reconnectAttempts = (this.reconnectAttempts || 0) + 1;
+	var delay = Math.min(5000 * this.reconnectAttempts, 60000);
+	this.reconnectTimer = setTimeout(function () {
+		self.reconnectTimer = null;
+		/* 降级态下重新走一次探活；成功则由 connect() 内部恢复 */
+		if (!self.connected) {
+			self.connect().catch(function () { /* connect 自身不 reject，这里只兜底 */ });
+		}
+	}, delay);
 };
 
 ATClient.prototype.disconnect = function () {
 	this.clearPendingCommands('连接已手动断开');
 	this.stopPolling();
+	if (this.reconnectTimer) {
+		clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = null;
+	}
 	this.connected = false;
 	this.authenticated = false;
 	this.setConnectionState('disconnected');
@@ -164,7 +358,6 @@ ATClient.prototype.reconnect = function () {
 	this.setConnectionState('reconnecting');
 	return this.connect().catch(function () {});
 };
-
 /* ---------- 事件轮询 ---------- */
 
 ATClient.prototype.startPolling = function () {
@@ -199,8 +392,10 @@ ATClient.prototype.pollEvents = function () {
 			self.setConnectionState('error', 'RPC 调用失败: ' + (err.message || err));
 			self.connected = false;
 			self.stopPolling();
-			// rpcd/Rust 恢复后自动重连（有订阅者时）
-			setTimeout(function () { self.reconnect(); }, 3000);
+			/* 统一经由 scheduleReconnect 走指数退避重连，不再自带一个
+			 * 固定 3s 的独立定时器（与原 connect 里的重连定时器叠加时
+			 * 会造成重连风暴）。 */
+			self.scheduleReconnect();
 		}
 	});
 };
@@ -229,19 +424,157 @@ ATClient.prototype.handlePush = function (ev) {
 ATClient.prototype.sendCommand = function (command) {
 	var self = this;
 	this.commandQueue = this.commandQueue.then(function () {
-		if (!self.connected) return { success: false, error: '未连接到调制解调器' };
+		/*
+		 * 不可用判据用 state 而不是 connected：
+		 * connect() 已改为「乐观放行」，connected 初始就是 true，
+		 * 只有探活结论到达后 state 才是权威状态。若这里只看 connected，
+		 * 降级态下仍会照常发请求，继续占用 rpcd worker ——
+		 * 这正是实测中「后端冻结时浏览器报 XHR 超时」的直接原因。
+		 */
+		if (self.state === 'degraded' || self.state === 'error' || self.state === 'disconnected') {
+			return {
+				success: false,
+				error: self.error || '未连接到调制解调器',
+				cause: 'not-connected'
+			};
+		}
+		/* 熔断：连续失败到阈值后，短期内直接快速失败，
+		 * 不再逐条把 14s 超时预算耗完。
+		 *
+		 * 动机（原实现的稳定性缺陷）：原先每条命令都独立超时、彼此
+		 * 不共享失败记忆。模组掉线时，页面里 20 条串行 AT 会一条一条
+		 * 各等 14s，用户要等 4 分钟以上才看到全部失败——
+		 * 而实际上第 3 条失败时就已经能断定「通道不可用了」。
+		 *
+		 * 注意：熔断只针对**连续失败**，任何一次成功都会清零计数，
+		 * 因此不会影响正常的偶发抖动。
+		 */
+		if (self.circuitOpenUntil > Date.now()) {
+			var wait = Math.ceil((self.circuitOpenUntil - Date.now()) / 1000);
+			return {
+				success: false,
+				error: 'AT 通道连续失败，已暂停请求（约 ' + wait + 's 后自动恢复）',
+				cause: 'circuit-open'
+			};
+		}
+		/* ucode 侧的共享熔断：后端在其它请求里已确认无应答时，
+		 * 这里也直接跳过，避免重复触发 12s 硬超时 */
+		if (self.backendKnownDown) {
+			return {
+				success: false,
+				error: self.backendDownError || 'Rust 后端无应答，请稍后重试',
+				cause: 'circuit-open'
+			};
+		}
 		return withTimeout(rpcAt(command), self.commandTimeout,
 			'命令执行超时（模组可能正忙或正在重连，请稍后重试）').then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
-				return { success: false, error: resp.error || '命令执行失败' };
+				/* ucode 侧熔断标记生效时，同步到前端，让后续请求立即短路 */
+				if (resp.cause === 'circuit-open') {
+					self.markBackendDown('circuit-open', resp.error);
+				}
+				self.noteCommandFailure(resp.cause);
+				return { success: false, error: resp.error || '命令执行失败', cause: resp.cause };
 			}
+			self.noteCommandSuccess();
+			self.markBackendUp();
 			return { success: true, data: resp.data };
 		}).catch(function (err) {
-			return { success: false, error: (err && err.message) || '命令执行失败' };
+			self.noteCommandFailure('timeout');
+			return { success: false, error: (err && err.message) || '命令执行失败', cause: 'timeout' };
 		});
 	});
 	return this.commandQueue;
+};
+
+/*
+ * 熔断器状态更新。
+ *   - 'not-listening' / 'not-connected' / 'circuit-open' 视为
+ *     「后端或链路整体不可用」，直接开闸（这些错误重试必然还是失败）。
+ *   - 其它失败（含超时、模组返回 ERROR）累计到 3 次才开闸。
+ * 开闸时长固定 8s：够后端完成一轮重连退避，又不会让用户等太久。
+ *
+ * 关键：开闸的同时把 state 置为 'degraded'，让所有页面立刻：
+ *   a) 停止继续发请求（sendCommand 开头就会拦下）；
+ *   b) 弹出「后端未就绪」提示条。
+ * 这一步不能只依赖 healthCheck —— 探活在并发场景下可能还没返回，
+ * 而数据请求已经先失败了；让熔断与探活两条路径都能驱动降级，
+ * 才能保证「后端异常时页面一定给出提示」。
+ */
+ATClient.prototype.noteCommandFailure = function (cause) {
+	if (cause === 'not-listening' || cause === 'not-connected' || cause === 'circuit-open') {
+		this.failStreak = this.failThreshold;
+	} else {
+		this.failStreak = (this.failStreak || 0) + 1;
+	}
+	if (this.failStreak >= this.failThreshold) {
+		this.circuitOpenUntil = Date.now() + this.circuitCooldownMs;
+		if (this.state !== 'degraded') {
+			this.connected = false;
+			this.stopPolling();
+			this.setConnectionState('degraded',
+				this.backendDownError || 'AT 通道连续失败，后端可能未运行或已卡住');
+			this.scheduleReconnect();
+		}
+	}
+};
+
+ATClient.prototype.noteCommandSuccess = function () {
+	this.failStreak = 0;
+	this.circuitOpenUntil = 0;
+};
+
+/*
+ * 批量发送（并发分组）：用于页面初始化 / 定时刷新这类「一批命令一起要」的场景。
+ *
+ * 与 sendCommand 的区别：sendCommand 走全局 FIFO，保证单条命令的先后次序；
+ * sendBatch 把一批命令分成若干组，**组内串行、组间并发**，在不违反
+ * 「同一 AT 通道同一时刻只跑一条命令」的前提下，把往返延迟重叠起来。
+ *
+ * 为什么不是全并发：Rust 后端有优先级门闸（at_queue::PriLock），
+ * 全并发只会让请求在门闸里排队，前端侧看到的延迟不变，却放大了
+ * rpcd 与 ucode 的并发压力。分组（默认 3 组）是实测比较平衡的取值。
+ *
+ * 返回与入参等长的结果数组，顺序与入参一致；任一命令失败不影响其它命令，
+ * 调用方按索引取用即可（这正是「单个接口失败不影响其他区块」的基础）。
+ */
+ATClient.prototype.sendBatch = function (commands, groups) {
+	var self = this;
+	var list = Array.isArray(commands) ? commands : [];
+	if (!list.length) return Promise.resolve([]);
+
+	var n = parseInt(groups, 10) || 3;
+	if (n < 1) n = 1;
+	if (n > list.length) n = list.length;
+
+	var results = new Array(list.length);
+	var buckets = [];
+	for (var i = 0; i < n; i++) buckets.push([]);
+	/* 轮转分配：把耗时差异较大的命令均匀打散到各组，
+	 * 避免「一组长、一组空」导致整体被最慢组拖住 */
+	for (var j = 0; j < list.length; j++) {
+		buckets[j % n].push(j);
+	}
+
+	var runners = [];
+	for (var b = 0; b < buckets.length; b++) {
+		runners.push((function (idxList) {
+			var chain = Promise.resolve();
+			idxList.forEach(function (idx) {
+				chain = chain.then(function () {
+					return self.sendCommand(list[idx]).then(function (r) {
+						results[idx] = r;
+					}).catch(function (err) {
+						results[idx] = { success: false, error: (err && err.message) || '命令执行失败' };
+					});
+				});
+			});
+			return chain;
+		})(buckets[b]));
+	}
+
+	return Promise.all(runners).then(function () { return results; });
 };
 
 ATClient.prototype.clearPendingCommands = function (err) {

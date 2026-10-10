@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.12-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.14.13-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -159,11 +159,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.14.12-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.14.13-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.14.12_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.14.13_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -173,7 +173,7 @@ opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 # 1. 提交初始服务配置
 uci set at-webserver.config.enabled=1
 uci set at-webserver.config.connection_type=SERIAL   # 选用 PCUI 串口直连
-uci set at-webserver.config.serial_port=auto         # 自动探测系统 AT 串口
+uci set at-webserver.config.serial_port=auto         # 自动探测系统 AT 串口（优先 by-id）
 uci commit at-webserver
 
 # 2. 启动服务并验证后端
@@ -181,6 +181,24 @@ service at-webserver restart
 ls -l /usr/bin/at-webserver-rust
 ubus call service list '{"name":"at-webserver"}'
 ```
+
+### 串口路径选择建议
+
+`serial_port` 支持三种取值：`auto`（自动探测）、`/dev/serial/by-id/<链接名>`（**推荐**）、`/dev/ttyUSB*`（回退）。
+
+`/dev/ttyUSB*` 的编号由内核枚举顺序决定，**同一模组换 USB 口或换控制器后会整体平移**（实测换口后 PC UI 从 `ttyUSB1` 变成 `ttyUSB2`），手工选定的路径随即失效，表现为「昨天配好能用，拔插一次就再也不通」。`/dev/serial/by-id/` 下的链接名由 `idVendor:idProduct` 与接口描述符生成，与枚举顺序无关：
+
+```sh
+# 查看当前稳定链接与 AT 口对应关系
+ls -l /dev/serial/by-id/
+
+# 固化到配置（if12 为 PC UI / AT 口）
+uci set at-webserver.config.serial_port='/dev/serial/by-id/usb-XXXX:XXXX-if12-<序列号>'
+uci commit at-webserver
+service at-webserver restart
+```
+
+自动探测的优先级为：`by-id` 稳定链接 → `ttyUSB*`/`ttyACM*`/`ttyAP*` → `ttyS*`/`ttyAMA*`。AT 口识别依次依据**接口名整词匹配**（`PC UI` / `PCUI` / `AT PORT`）与 **`bInterfaceProtocol` 兜底**（`0x12`=PC UI、`0x14`=GPS），后者在 OEM 固件接口名留空时仍能正确认口。
 
 ---
 
@@ -208,6 +226,8 @@ ubus call service list '{"name":"at-webserver"}'
 | 检查项 | 排查命令 | 预期状态 |
 |:--|:--|:--|
 | **串口设备识别** | `ls -l /dev/ttyUSB* /dev/ttyACM*` | 至少存在一个可用的 AT 通信口 |
+| **稳定路径链接** | `ls -l /dev/serial/by-id/` | 每个 USB 串口口对应一条链接（`if12` 为 AT 口），零断链 |
+| **重建稳定链接** | `/etc/init.d/at-webserver sync_serial_by_id` | 输出「已维护 N 个 /dev/serial/by-id 稳定链接」 |
 | **自动拨号对账** | `logread -e at-webserver \| grep 自动拨号` | 输出「已处于期望状态」或「复核通过」 |
 | **承载接口地址** | `ifstatus MT5700M \| grep -A2 "ipv4-address"` | 存在明确分配的 `address` 字段 |
 | **NAT 区域绑定** | `uci show firewall \| grep 'network=.*MT5700M'` | 有输出（**若未绑定区域，会导致有 IP 却上不了网**） |
@@ -237,8 +257,8 @@ ubus call service list '{"name":"at-webserver"}'
 config at-webserver 'config'
     option enabled '1'                  # 服务总开关：1=启用，0=禁用
     option connection_type 'SERIAL'     # 通信方式：SERIAL(串口) / TCP(网络回环)
-    option serial_port 'auto'           # 串口定位：auto(自动匹配) / custom(手动指定)
-    option serial_port_custom '/dev/ttyUSB1' # 手动指定的串口设备绝对路径
+    option serial_port 'auto'           # 串口定位：auto(自动探测) / /dev/serial/by-id/<链接> / /dev/ttyUSB*
+    option serial_port_custom '/dev/ttyUSB1' # 手动指定时的备用路径（前端「自定义路径」写入）
     option autodial_enable '1'          # 自动拨号守护开关：1=启用，0=关闭
     option autodial_mode '1'            # 拨号工作模式：1=USB网卡，2=转以太网口模式
     option cellscan_timeout '180'       # 扫频超时阈值(秒)，最低安全下限 10
@@ -250,7 +270,7 @@ config at-webserver 'config'
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.12)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.13)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / ui.js / at.css)

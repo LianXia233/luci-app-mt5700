@@ -1,8 +1,9 @@
 'use strict';
 'require at-webserver/rpc';
 'require at-webserver/parse';
+'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Mt5700 */
+/* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
  * 模组升级页面：
@@ -311,13 +312,7 @@ return L.view.extend({
 		/* ---------- 初始化 ---------- */
 		renderUpgrade();
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Mt5700.error('需要提供连接密钥');
-				return;
-			}
-			if (err) console.warn(err);
-		}).then(function () {
+		Ui.startup(body, function () {
 			fetchVersion();
 			if (!agreed) showDisclaimer();
 		});
