@@ -1,7 +1,7 @@
 //! JSON 扁平键值配置存储（Debian 分支专用，替代 OpenWrt UCI）。
 //!
 //! - 配置文件路径：环境变量 `MT5700_CONFIG` 优先，默认 `/etc/mt5700/config.json`。
-//! - 键名与原 UCI `at-webserver.config.*` 完全一致（如 `serial_port`、
+//! - 键名为扁平字符串键（如 `serial_port`、
 //!   `schedule_night_lte_bands`），前端页面与后端读取逻辑无需感知迁移。
 //! - 值一律为字符串，与 UCI 的文本语义保持一致，避免类型歧义。
 //!

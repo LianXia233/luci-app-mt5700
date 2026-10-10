@@ -40,7 +40,7 @@ pub struct Sms {
     pub partial: Option<PartialInfo>,
 }
 
-/// 把 8 位字节流还原成 7 位码位序列。
+/// 把 8 位字节流解包成 7 位码位序列，返回至多 count 个码位（数据不足时可能更少）。
 fn unpack_septets(data: &[u8], count: usize) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(count);
     let mut acc: u32 = 0;
@@ -97,7 +97,7 @@ fn decode_ucs2(data: &[u8]) -> String {
     String::from_utf16_lossy(&units)
 }
 
-/// 还原一个半字节交换的 BCD 字节，返回两位数字。
+/// 还原半字节交换（swapped nibble）的 BCD 字节为十进制数值，如 0x21 返回 12。
 fn bcd_digit(b: u8) -> i32 {
     (b & 0x0F) as i32 * 10 + (b >> 4) as i32
 }

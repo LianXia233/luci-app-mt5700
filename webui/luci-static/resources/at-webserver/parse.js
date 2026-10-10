@@ -4,7 +4,7 @@
 
 /**
  * 补充解析库：运行状态 / 扫频 / USSD / 短信 / 锁频 / 定时锁频 DTO。
- * 全部从原 React 前端 modem/*.ts 等价迁移，与 Rust 后端的应答格式严格一致。
+ * 对应模组 AT 应答格式，与后端解析保持一致。
  */
 
 var Parse = (function () {
@@ -465,7 +465,8 @@ var Parse = (function () {
 	 *   0xC0-0xDF 消息等待组：bit3=1 为 UCS2，否则 GSM7
 	 *   0xF0-0xFF 数据编码/消息类别组：固定 GSM7（bit3-2 是类别不是编码！）
 	 * 返回 0=GSM7 / 1=8bit / 2=UCS2。
-	 * 旧实现用 dcs & 0x0C，会把 F 组的类别位误读成编码位导致乱码。
+	 * 注意：不能统一用 dcs & 0x0C 判定 —— 0xF 组的 bit3-2 是消息类别而非编码，
+	 * 误用会把 F 组的类别位当成编码位导致乱码。
 	 */
 	function dcsEncoding(dcs) {
 		var group = dcs >> 4;
@@ -547,7 +548,7 @@ var Parse = (function () {
 			/*
 			 * 7-bit：UDH 占用的 septet 数按其八位组长度折算，
 			 * 必须先解「完整 UD 字节流」的 septet 序列、再跳过头部码位；
-			 * 旧实现先按字节切掉 UDH 再解包，位流错位导致长短信正文乱码。
+			 * 不可先按字节切掉 UDH 再解包，否则位流错位会导致长短信正文乱码。
 			 */
 			var udhSeptets = (udhi && ud.length > 0) ? Math.ceil((ud[0] + 1) * 8 / 7) : 0;
 			var totalSeptets = Math.max(udl, udhSeptets);
@@ -616,7 +617,7 @@ var Parse = (function () {
 		return sms;
 	};
 
-	// 短信中心保存的已发消息缓存（等价原 localStorage sms_sent_messages_cache）
+	// 已发送短信本地缓存（localStorage 键 sms_sent_messages_cache）
 	api.SMS_CACHE_KEY = 'sms_sent_messages_cache';
 	api.MAX_SMS_CACHE = 1000;
 
@@ -702,7 +703,7 @@ var Parse = (function () {
 		return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: pcis };
 	};
 
-	// 原前端拼锁频命令（即时生效场景，如扫频结果一键锁定）
+	// 拼装锁频命令（即时生效场景，如扫频结果一键锁定）
 	api.buildLockCommand = function (kind, type, mobility, items) {
 		var cmd = kind === 'lte' ? 'AT^LTEFREQLOCK' : 'AT^NRFREQLOCK';
 		if (type === 0) return cmd + '=0';
@@ -752,7 +753,7 @@ var Parse = (function () {
 
 	api.modeText = function (mode) { return mode === '' ? '当前时段不锁频' : mode; };
 
-	/* ================= 辅载波/辅站小区（carrier.ts 等价迁移） ================= */
+	/* ================= 辅载波 / 辅站小区解析 ================= */
 	// 手册 13.27 AT^MONSSC — NSA 下 5G 辅连接服务小区（最多 8CC）
 	// 手册 13.18 AT^CASCELLINFO? — LTE CA 的辅小区（最多 4 个 SCELL）
 	// ^HFREQINFO 只给频点与带宽，这两条补每个辅载波各自的信号质量。
@@ -860,7 +861,7 @@ var Parse = (function () {
 		};
 	};
 
-	/* ================= 网络拒绝原因 ^REJINFO（reject.ts 等价迁移） ================= */
+	/* ================= 网络拒绝原因 ^REJINFO ================= */
 	// 手册 13.14：注册或业务请求或网络 DETACH 过程被网络拒绝时主动上报。
 	// 锁频锁错小区导致掉网时，这条上报能直接区分"被网络拒绝"和"根本没覆盖"。
 
@@ -873,7 +874,7 @@ var Parse = (function () {
 		0: 'LAU 被拒', 1: '鉴权失败', 2: '业务请求被拒', 3: '网络 detach 被拒',
 		4: 'ATTACH 被拒', 5: 'RAU 被拒', 6: 'TAU 被拒'
 	};
-	// 原因值来自 3GPP TS 24.008 / 24.301 / 24.501，未收录的原样显示编号
+	// 原因值来自 3GPP TS 24.008 / 24.301 / 24.501，未收录的直接显示编号
 	var REJ_CAUSES = {
 		2: 'IMSI 未在 HSS 登记', 3: '非法终端', 5: 'IMEI 不被接受', 6: '非法设备',
 		7: '不允许使用分组域业务', 8: '不允许使用分组域和非分组域业务', 9: '网络无法识别终端身份',
@@ -935,7 +936,7 @@ var Parse = (function () {
 		};
 	};
 
-	/* ================= SIM 信号质量 ^SIMSQ（sim.ts 等价迁移） ================= */
+	/* ================= SIM 信号质量 ^SIMSQ ================= */
 	// 手册 6.6：^SIMSQ 能区分卡不在位 / 被锁 / PUK 锁死，+CPIN 看不出来。
 	var SIM_STATUS = {
 		0: '卡不在位', 1: '卡已插入', 2: '卡被 PIN/PUK 锁定', 3: 'SIMLOCK 锁定',

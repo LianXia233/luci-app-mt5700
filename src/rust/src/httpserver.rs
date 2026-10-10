@@ -1,7 +1,7 @@
-//! 独立 WebUI 服务（Debian 分支新增）：HTTP API + WebSocket + 静态文件。
+//! 独立 WebUI 服务：HTTP API + WebSocket + 静态文件。
 //!
 //! 监听 0.0.0.0:9000（默认），浏览器直访 http://<设备IP>:9000 即进入 WebUI。
-//! 与 TCP RPC（rpcserver.rs，保留用于 mock-modem e2e 与本地调试）共享同一套
+//! 与 TCP RPC（rpcserver.rs，用于 mock-modem e2e 与本地调试）共享同一套
 //! 核心组件：AT 队列、事件总线、后台任务、状态缓存、定时锁频调度。
 //!
 //! API 一览：
@@ -10,16 +10,16 @@
 //!   GET  /api/logs?since&limit   后端运行日志
 //!   GET  /api/netrate?device     接口累计字节数（sysfs，不占 AT 通道）
 //!   GET  /api/usb                模组 USB 链路速率（sysfs，不占 AT 通道）
-//!   GET  /api/syslog?lines       系统日志（journalctl，等价 rpcd log.read）
+//!   GET  /api/syslog?lines       系统日志（journalctl -t at-webserver）
 //!   GET/POST /api/config         配置读取 / 合并落盘（JSON 扁平键值）
 //!   POST /api/config/apply       热应用；结构性变更返回 restart_required
 //!   GET  /api/service/status     版本/PID/运行时长/串口清单
-//!   POST /api/service/restart    优雅退出（systemd 自动拉起）
+//!   POST /api/service/restart    延时后退出进程（systemd 自动拉起）
 //!   GET/POST /api/file/read|write|list|stat   受限文件访问（日志文件等）
-//!   GET  /ws                     WebSocket 事件推送（每 400ms 批量增量）
+//!   GET  /ws                     WebSocket 事件推送（每 400ms 批量增量；每 30s ping 保活）
 //!
 //! 认证：配置 auth_key 后，/api 与 /ws 需携带 X-Auth-Key 头（/ws 可用 ?key=）；
-//! 静态资源不设防，页面加载后由前端弹窗索取密钥。
+//! 静态资源不设防，页面加载后由前端弹窗索取密钥；/api 与 /ws 均需携带密钥。
 
 use crate::config::{Config, DEFAULT_WEB_ROOT};
 use crate::configstore;
@@ -523,7 +523,7 @@ fn detect_modem_netdev() -> Option<String> {
     candidates.into_iter().next()
 }
 
-/// 模组 USB 链路信息（等价原 ucode usbCall 的 shell 扫描，改为 Rust 直读 sysfs）。
+/// 模组 USB 链路信息：直读 /sys/bus/usb/devices，返回速率 / 产品名 / 版本。
 fn usb_info() -> Value {
     let dir = Path::new("/sys/bus/usb/devices");
     let entries = match std::fs::read_dir(dir) {
@@ -557,7 +557,7 @@ fn usb_info() -> Value {
     json!({ "success": false, "error": "未检测到 USB 模组设备" })
 }
 
-/// 系统日志（等价 rpcd log.read）：journalctl 读取 at-webserver 标识的最近日志。
+/// 系统日志：通过 journalctl 读取 at-webserver 标识的最近若干行。
 async fn syslog(lines: usize) -> Value {
     let out = tokio::time::timeout(
         Duration::from_secs(5),
@@ -600,7 +600,7 @@ async fn syslog(lines: usize) -> Value {
     json!({ "log": entries })
 }
 
-/// 串口设备清单（ttyUSB/ttyACM/ttyAMA/ttyS），等价原 rpcd file.list('/dev') 过滤。
+/// 串口设备清单：枚举 /dev，保留 ttyUSB / ttyACM / ttyAMA 及 ttyS<数字> 形式的设备。
 fn list_serial_devices() -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir("/dev") {

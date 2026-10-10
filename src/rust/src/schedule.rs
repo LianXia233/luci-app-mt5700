@@ -500,7 +500,7 @@ fn is_night(cfg: &ScheduleConfig, now: chrono::DateTime<chrono::Local>) -> bool 
     }
 }
 
-/// 匹配 +CREG/+CGREG/+CEREG/+C5GREG 的查询应答。
+/// 匹配含 +CxREG 的查询应答（实际下发 C5GREG / CEREG / CREG）。
 /// 按 3GPP 27.007，查询应答是 "+CxREG: <n>,<stat>[,...]"，<stat> 为 1=已注册本地网络，5=已注册漫游网络。
 fn registered(text: &str) -> bool {
     let mut rest = text;

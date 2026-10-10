@@ -28,6 +28,17 @@
 - **chore(repo)**: 清理远端遗留的历史 `ci-logs` 分支 —— 该分支由上述已移除的步骤产生，
   现已一并从 `refs/heads/` 移除（删除远端分支不可逆，日志内容仅存于历史提交中）。
 
+## v2.0.1 (2026-10-10)
+
+### 注释语义校正与来源表述清理
+
+- **docs(comment)**: 前端与后端注释按代码实际行为逐条校正，并清除指向历史实现、外部工程与旧设计稿的来源性表述，使注释自足可读。
+- **docs(webui-js)**: 清理 `webui/` 各 JS/CSS 中的对照字样 —— `等价迁移原 WebUI xxx.tsx`、`原 WebUI（Semi Design）`、`原前端`、`等价 atx.ts`、`等价原 AutoRefresh`、`等价 modem/*.ts`、`等价 Rust pdu.rs / Go pdu.go`、`carrier.ts / reject.ts / sim.ts 等价迁移`、`等价原 localStorage`、`node-pdu`、`等价 rpcd log.read` 等，并删除页面头部的「新 UI 视觉 + 基准 v1.3.4 功能」版本对照。
+- **docs(webui-js)**: 按实际代码校正注释语义 —— `rpc.js` 的 `_dirty` 为布尔而非页数、`uciSave` 返回含 `changes` 字段、去掉已不存在的 OpenWrt ubus 状态码历史叙事、认证说明改为 auth_key + 401 弹窗；`mt5700.js` 的宽度分档改述为 len-md/len-lg/len-xl 三档、`BAR_COUNT` 明确为 5 档位映射 4 值；`ui.js` 的 `autoRefresh` 返回值补全 `getInterval/isEnabled`；`network_status.js` 头部由「三列等高 ~440px」修正为双列栅格 + 末卡跨行；`sms_settings.js` 的短信开关关闭步骤由「反向」修正为实际命令序列；`smsEncode.js` 标准引用补 3GPP 编号；`logs.js` 去掉对不存在的 `mt5700.uc` 的引用。
+- **docs(rust)**: 后端注释依代码实际校正 —— `logger.rs` 输出流为 stderr（`eprintln!`）；`httpserver.rs` 补 `/ws` 每 30s ping、`/api/service/restart` 为延时退出而非「优雅退出」、认证边界涵盖 `/ws`；`state.rs` 修正长命令分支返回语义；`schedule.rs` 的 `registered` 实际下发 C5GREG / CEREG / CREG；`serialdetect.rs` 去掉版本叙事；`pdu.rs` 补充 `unpack_septets` 的 count 语义与 BCD 返回类型；`atclient.rs` 去掉历史叙事并修正钩子路径说明；`at_queue.rs` 的 pump 改为实际方法名 dispatch；`config.rs` / `configstore.rs` / `schedconfig.rs` 去掉对 UCI 的溯源表述。
+- **scope**: 仅注释与文档 —— 前端逻辑、样式规则、AT 命令流与后端代码零改动。前后端均经「剥离注释放后逐字符比对」确认代码完全一致；后端另经 `cargo check` 通过。
+- **docs**: README 版本号与安装示例同步至 v2.0.1；新增 `docs/release-notes/v2.0.1.md` 发布说明。
+
 ## v2.0.0 (2026-10-07)
 
 首次以 Debian 独立版身份发布。相对 `main` 分支为**不兼容变更**（移除全部 OpenWrt 依赖），
