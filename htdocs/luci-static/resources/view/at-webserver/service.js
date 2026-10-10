@@ -395,6 +395,93 @@ return L.view.extend({
 		var webhookInput = Mt5700.input('text', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx', '');
 		notifBody.appendChild(Mt5700.formGroup('企业微信 WebHook', webhookInput, '通知将推送到该 WebHook 地址'));
 
+		/* QQ 机器人（官方 API v2）：AppID+AppSecret+目标 ID 全部填写后启用 */
+		var qqAppIdInput = Mt5700.input('text', 'QQ 开放平台 AppID（纯数字）', '');
+		var qqSecretInput = Mt5700.input('password', '留空则回退环境变量 QQ_BOT_APP_SECRET', '');
+		var qqTargetSel = Mt5700.select([
+			{ label: '群聊（group_openid）', value: 'group' },
+			{ label: '单聊（用户 openid）', value: 'c2c' },
+			{ label: '频道（channel_id）', value: 'channel' },
+			{ label: '绑定（自动获取 openid，推荐首次使用）', value: 'bind' }
+		], 'group');
+		var qqBindInput = Mt5700.input('text', '你的 QQ 号（仅作绑定标签）', '');
+		var qqTargetIdInput = Mt5700.input('text', 'group_openid / 用户 openid / channel_id', '');
+		notifBody.appendChild(Mt5700.formGroup('QQ 机器人 AppID', qqAppIdInput, '也可用环境变量 QQ_BOT_APP_ID 覆盖'));
+		notifBody.appendChild(Mt5700.formGroup('QQ 机器人 AppSecret', qqSecretInput, '建议留空并经环境变量 QQ_BOT_APP_SECRET 注入，避免凭据落盘 UCI'));
+		notifBody.appendChild(Mt5700.formGroup('QQ 推送目标类型', qqTargetSel, '选「绑定」：保存并应用后，用你的 QQ 给机器人发一条消息即自动完成绑定'));
+		notifBody.appendChild(Mt5700.formGroup('绑定 QQ 号', qqBindInput, '仅用于日志标识（平台事件里拿不到 QQ 号），openid 由后端自动抓取'));
+		notifBody.appendChild(Mt5700.formGroup('QQ 推送目标 ID', qqTargetIdInput, '绑定模式留空即可；手动模式填 openid（非 QQ 号）'));
+
+		/* 测试通知通道：经 rpcd 代理直发一条测试消息，绕过 60 秒合并窗口 */
+		var notifyTest = L.rpc.declare({
+			object: 'mt5700', method: 'notify_test',
+			params: ['channel', '_rid'], expect: {}
+		});
+		var testBtn = Mt5700.button('发送测试通知', function () {
+			testBtn.disabled = true;
+			testStatus.textContent = '正在发送测试通知…';
+			var channels = [];
+			if (String(get('wechat_webhook', '')) !== '') channels.push('wechat');
+			if (String(get('qq_target_type', '')) === 'bind' || String(get('qq_app_id', '')) !== '') channels.push('qq');
+			if (channels.length === 0) {
+				testStatus.textContent = '没有已启用的推送通道（先填写企业微信 WebHook 或 QQ 配置并保存）';
+				testBtn.disabled = false;
+				return;
+			}
+			Promise.all(channels.map(function (ch) {
+				return notifyTest(ch, 'test-' + ch + '-' + Date.now()).then(function (res) {
+					return { channel: ch, ok: !!(res && res.success), error: (res && res.error) || '' };
+				}).catch(function (err) {
+					return { channel: ch, ok: false, error: (err && err.message) || 'RPC 调用失败' };
+				});
+			})).then(function (results) {
+				var text = results.map(function (r) {
+					return (r.channel === 'qq' ? 'QQ 机器人' : '企业微信') + '：' + (r.ok ? '发送成功' : '失败（' + r.error + '）');
+				}).join('；');
+				testStatus.textContent = text;
+				results.forEach(function (r) {
+					if (r.ok) { Mt5700.success((r.channel === 'qq' ? 'QQ 机器人' : '企业微信') + '测试通知已发送'); }
+					else { Mt5700.error((r.channel === 'qq' ? 'QQ 机器人' : '企业微信') + '测试失败'); }
+				});
+			}).finally(function () {
+				testBtn.disabled = false;
+			});
+		});
+		var testStatus = E('span', { 'class': 'mt5700-hint' }, '');
+		notifBody.appendChild(E('div', { 'class': 'mt5700-form-group' }, testBtn, testStatus));
+
+		/* 绑定进度：轮询后端 qq_bind_status，展示状态与 600 秒窗口倒计时 */
+		var qqBindStatus = L.rpc.declare({
+			object: 'mt5700', method: 'qq_bind_status',
+			params: ['_rid'], expect: {}
+		});
+		var bindStatusLine = E('span', { 'class': 'mt5700-hint' }, '');
+		notifBody.appendChild(E('div', { 'class': 'mt5700-form-group' }, E('strong', {}, '绑定进度：'), bindStatusLine));
+		var bindState = '';
+		var bindTimer = setInterval(function () {
+			/* 页面已卸载时停止轮询 */
+			if (!bindStatusLine.isConnected) { clearInterval(bindTimer); return; }
+			qqBindStatus('bind-' + Date.now()).then(function (res) {
+				if (!res) return;
+				bindState = String(res.state || 'idle');
+				var left = parseInt(res.left, 10) || 0;
+				var isBind = String(get('qq_target_type', '')) === 'bind' || qqTargetSel.value === 'bind';
+				if (bindState === 'waiting') {
+					bindStatusLine.textContent = '等待绑定：用你的 QQ 给机器人发一条消息即可完成（剩余 ' + left + ' 秒，超时后重启服务自动重试）';
+				} else if (bindState === 'success') {
+					var tid = String(res.target_id || '');
+					bindStatusLine.textContent = '绑定成功：目标 ' + (res.target_type || '') + ' ' + (tid.length > 12 ? tid.slice(0, 12) + '…' : tid) + '（已写回 UCI 并生效）';
+				} else if (bindState === 'failed') {
+					bindStatusLine.textContent = '绑定失败：' + (res.error || '未知原因') + '（下次服务重启自动重试）';
+				} else if (isBind) {
+					bindStatusLine.textContent = '已配置绑定模式：保存并应用后开始等待消息';
+				} else {
+					bindState = '';
+					bindStatusLine.textContent = '';
+				}
+			}).catch(function () { /* RPC 暂不可用时静默，下个周期重试 */ });
+		}, 2000);
+
 		/* ---------- 载入 UCI（单 section `config` + 扁平键，与 Rust/ucode 一致） ---------- */
 		var get = function (key, def) {
 			var v = L.uci.get('at-webserver', 'config', key);
@@ -419,6 +506,11 @@ return L.view.extend({
 		notifySignal.input.checked = get('notify_signal', '1') === '1';
 		notifyMem.input.checked = get('notify_memory_full', '1') === '1';
 		webhookInput.value = String(get('wechat_webhook', ''));
+		qqAppIdInput.value = String(get('qq_app_id', ''));
+		qqSecretInput.value = String(get('qq_app_secret', ''));
+		qqTargetSel.value = String(get('qq_target_type', 'group'));
+		qqBindInput.value = String(get('qq_bind_qq', ''));
+		qqTargetIdInput.value = String(get('qq_target_id', ''));
 
 		/* ---------- 保存（OpenWrt 标准「保存并应用」流程） ----------
 		 *
@@ -453,6 +545,11 @@ return L.view.extend({
 			set('notify_signal', notifySignal.input.checked ? '1' : '0');
 			set('notify_memory_full', notifyMem.input.checked ? '1' : '0');
 			set('wechat_webhook', webhookInput.value.trim());
+			set('qq_app_id', qqAppIdInput.value.trim());
+			set('qq_app_secret', qqSecretInput.value.trim());
+			set('qq_target_type', qqTargetSel.value);
+			set('qq_bind_qq', qqBindInput.value.trim());
+			set('qq_target_id', qqTargetIdInput.value.trim());
 
 			// 写内存后立刻标脏，未点保存就离开会被浏览器拦截
 			AtWs.uci.markDirty();

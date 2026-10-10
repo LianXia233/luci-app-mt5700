@@ -1,5 +1,21 @@
 # Changelog
 
+## 未发布
+
+### 通知模块新增「QQ 机器人」推送通道（官方 API v2）
+
+- **feat(notify)**: 新增 QQ 机器人推送通道，复用既有通知链路（`NotifyKind` 四类事件、60 秒合并窗口、`NOTIFY_MAX_RETRIES=3` 重试与指数退避）。鉴权按官方文档实现：`POST https://api.bot.qq.com/app/getAppAccessToken`（body `{appId, clientSecret}`）换取 `access_token`（7200 秒，官方示例 `expires_in` 为字符串，已兼容字符串/数字两种返回），后续请求携带 `Authorization: QQBot <token>` 头；服务内凭证缓存并在过期前 120 秒锁内单飞刷新，避免并发重复取凭证。
+- **feat(notify)**: 目标类型三选一：群 `POST /v2/groups/{group_openid}/messages`、单聊 `POST /v2/users/{openid}/messages`、频道 `POST /channels/{channel_id}/messages`，文本消息 `msg_type=0 + content`，未知目标类型回落群聊。失败重试时会连同非 2xx 响应体前 300 字符一并记日志（QQ openapi 错误码在其中），便于排障。
+- **feat(config)**: 新增 UCI 配置 `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id`；密钥支持环境变量 `QQ_BOT_APP_ID` / `QQ_BOT_APP_SECRET` 注入且优先于 UCI，避免凭据落盘。
+- **feat(luci)**: 服务配置页通知卡片新增 QQ AppID / AppSecret（密码框）/ 目标类型 / 目标 ID 四个表单项，沿用既有 `Mt5700.formGroup` 风格与「保存并应用」链路。
+- **feat(qqbind)**: 新增后端自动绑定模式 —— UCI `qq_target_type='bind'` 时服务启动自动连接 QQ WS 网关（`GET /gateway` → Hello(op=10) → Identify(op=2, intents `1<<25`)），监听 C2C/群消息事件：用户向机器人发一条消息，即从事件中提取 `user_openid` 写回 UCI（`qq_target_type='c2c'`、`qq_target_id=<openid>`，经 `tokio::process` 执行 `uci set/commit`）并热替换运行中的 QQ 通道实例（无需重启）。**绑定成功后立即通过新通道向用户回发一条确认消息**（「绑定成功…后续通知将推送到本会话」，含 QQ 号标签；主动推送不依赖 WS 会话，发送失败仅记日志不影响绑定生效）。UCI `qq_bind_qq` 仅作标签备注（平台事件拿不到 QQ 号）。写 UCI 失败仍热生效，下次重启自动重试；600 秒窗口未收到事件则放弃等待。
+- **feat(rpc)**: 新增 `mt5700` ubus 方法 `notify_test`（参数 `channel`：`qq` / `wechat`），直发测试消息并**绕过 60 秒合并窗口**，返回逐通道成功/失败结果；失败时附具体错误（含 QQ 鉴权/发送接口的业务码与响应体摘要）。`Notifier::send` / `send_webhook` 改返回 `Result<(), String>` 以支撑结果反馈。
+- **feat(rpc)**: 新增 `mt5700` ubus 方法 `qq_bind_status` —— 返回绑定进度（`state`：`idle` / `waiting` / `success` / `failed`、`left`：等待中剩余秒数（600 秒窗口倒计时）、`target_type` / `target_id`（成功时）、`error`（失败原因）），供 LuCI 轮询展示。
+- **feat(luci)**: 通知卡片新增「发送测试通知」按钮 —— 按已配置通道（企业微信 webhook / QQ 机器人）并行探测，逐通道展示成功或失败原因，链路为 service.js → rpcd ucode 代理（busybox timeout 12s 上限）→ Rust TCP RPC。QQ 表单同步新增 `bind` 目标类型选项与「绑定 QQ 号」字段；**新增「绑定进度」区域**：每 2 秒轮询 `qq_bind_status`，实时展示等待中倒计时、绑定成功目标（openid 截断显示）与失败原因，页面卸载自动停止轮询；ACL 白名单增补 `notify_test` / `qq_bind_status`。
+- **已知限制**（文档已注明）：本服务为单向推送、不连 WebSocket（仅绑定模式短暂连网关抓 openid），推送消息均为**主动消息**，受官方频控（群 30~60 条/分钟、单关系 20 条/分钟、1000 条/群/天）与用户端「允许主动发送」开关约束；频道主动推送官方要求机器人保持 WebSocket 在线，`channel` 模式可能被平台拒绝；QQ 号不能直接当 openid 使用（实测 code 11255），必须经绑定流程获取。
+- **verify**: `cargo test` **42 passed / 0 failed / 2 ignored**（新增 QQ 通道与绑定测试：URL 按目标类型路由、未知类型回落群聊、凭据缺失不启用、目标类型归一化、`expires_in` 双类型解析与倒计时窗口、令牌刷新余量、`parse_token_response` 业务码显式检查成功/失败、绑定事件等价性与 brief 截断；另 2 项真实接口冒烟用例以 `#[ignore]` 标记、凭据走环境变量）；`node --check` 校验 `service.js` 语法通过。真实链路实测：鉴权 → C2C 推送 HTTP 200 消息送达；`getAppAccessToken` 错误 Secret 返回 HTTP 200 + 业务码 `100016`，已显式拦截。
+- **deps**: Rust 侧新增 `tokio-tungstenite`（0.24，`rustls-tls-webpki-roots` + `connect` 特性，复用 ureq 的 rustls 栈）与 `futures-util`（`sink` 特性）用于绑定模式的 WS 连接。
+
 ## v1.14.13 (2026-10-10)
 
 ### 无模组场景解耦、`/dev/serial/by-id` 稳定路径与 AT 口判定修复

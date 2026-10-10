@@ -67,6 +67,19 @@ pub struct NotificationConfig {
     pub wechat_webhook: String,
     pub log_file: String,
     pub types: NotifyTypes,
+    /// QQ 机器人（官方 API v2）推送配置；AppSecret 建议走环境变量 QQ_BOT_APP_SECRET。
+    pub qq: QqNotifyConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct QqNotifyConfig {
+    pub app_id: String,
+    pub app_secret: String,
+    /// "group" | "c2c" | "channel" | "bind"（bind=启动后自动抓取 openid 并写回 UCI）
+    pub target_type: String,
+    pub target_id: String,
+    /// 绑定模式下的用户 QQ 号（仅作展示标签，事件里拿不到 QQ 号）
+    pub bind_qq: String,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +150,13 @@ pub fn default_config() -> Config {
                 call: true,
                 memory_full: true,
                 signal: true,
+            },
+            qq: QqNotifyConfig {
+                app_id: String::new(),
+                app_secret: String::new(),
+                target_type: "group".into(),
+                target_id: String::new(),
+                bind_qq: String::new(),
             },
         },
         websocket: WebSocketConfig {
@@ -227,6 +247,11 @@ impl UciReader {
     }
 }
 
+/// 读取环境变量（trim 后为空视为未设置）。
+fn env_nonempty(key: &str) -> String {
+    std::env::var(key).unwrap_or_default().trim().to_string()
+}
+
 /// 用一次 `uci show at-webserver` 取回整个配置段。
 pub async fn uci_values() -> Result<UciReader, String> {
     // 加 5s 超时，避免 uci 命令异常挂起卡死启动。
@@ -314,6 +339,18 @@ pub async fn load_config() -> Config {
         call: values.bool("notify_call", true),
         memory_full: values.bool("notify_memory_full", true),
         signal: values.bool("notify_signal", true),
+    };
+
+    // QQ 机器人推送：密钥优先取环境变量（QQ_BOT_APP_ID / QQ_BOT_APP_SECRET），
+    // 避免敏感凭据硬编码进 UCI 配置；环境变量为空时回落 UCI。
+    let qq_app_id = env_nonempty("QQ_BOT_APP_ID");
+    let qq_app_secret = env_nonempty("QQ_BOT_APP_SECRET");
+    cfg.notification.qq = QqNotifyConfig {
+        app_id: if qq_app_id.is_empty() { values.str("qq_app_id", "") } else { qq_app_id },
+        app_secret: if qq_app_secret.is_empty() { values.str("qq_app_secret", "") } else { qq_app_secret },
+        target_type: crate::notify::normalize_qq_target_type(&values.str("qq_target_type", "group")),
+        target_id: values.str("qq_target_id", ""),
+        bind_qq: values.str("qq_bind_qq", ""),
     };
 
     let s = &mut cfg.schedule;

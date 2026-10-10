@@ -14,6 +14,10 @@ hex = "0.4"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 libc = "0.2"
 async-trait = "0.1"
+# QQ 机器人 openid 自动绑定：后端直连官方 WebSocket 网关抓取事件
+# （rustls 栈与 ureq 共用，避免引入 openssl）
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 
 [profile.release]
 opt-level = "s"
