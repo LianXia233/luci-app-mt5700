@@ -994,17 +994,37 @@ return L.view.extend({
 			}).catch(function () {});
 		}
 
+		/*
+		 * 加载全部数据。
+		 *
+		 * 原实现是 8 个 fetch 全串行（Promise.resolve().then(f)....），
+		 * 其中 fetchDeviceInfo 内部又有 3 条串行 AT、fetchSimConfig 内部
+		 * 有 4 条串行 AT，折算下来单次 loadAll 要串行跑近 20 条 AT。
+		 * 模组未就绪时每条都会耗满超时预算，页面表现为长时间空白。
+		 *
+		 * 改法：拆成 4 组，**组内串行、组间并发**。
+		 *   - 依赖同一命令族的（设备信息 / USB 速率）放一组，保证顺序语义；
+		 *   - 互不依赖的配置族分散到不同组，让往返延迟重叠；
+		 *   - 每组各自 catch，任何一组失败都不影响其它组渲染
+		 *     （即「单个接口失败不影响其他区块」）。
+		 */
 		function loadAll() {
-			return Promise.resolve()
-				.then(fetchDeviceInfo)
-				.then(fetchUsb)
-				.then(fetchSimConfig)
-				.then(fetchAirplane)
-				.then(fetchDeviceControl)
-				.then(fetchNRCapability)
-				.then(fetchSysCfg)
-				.then(fetchThermConfig)
-				.catch(function (err) { console.warn('部分数据加载失败', err); });
+			var groups = [
+				[fetchDeviceInfo, fetchUsb],
+				[fetchSimConfig, fetchAirplane],
+				[fetchDeviceControl, fetchNRCapability],
+				[fetchSysCfg, fetchThermConfig]
+			];
+			var runners = groups.map(function (g) {
+				var chain = Promise.resolve();
+				g.forEach(function (fn) {
+					chain = chain.then(fn).catch(function (err) {
+						console.warn('数据块加载失败', err);
+					});
+				});
+				return chain;
+			});
+			return Promise.all(runners);
 		}
 
 		var bottomActions = Mt5700.panelActions(
@@ -1012,19 +1032,18 @@ return L.view.extend({
 		);
 		body.appendChild(bottomActions);
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [{ key: 'key', label: '连接密钥', type: 'password' }], function (values) {
-					if (values.key) {
-						AtWs.client.connect(values.key).catch(function (e) { Mt5700.error((e && e.message) || '认证失败'); });
-					}
-				});
-				return;
-			}
-			if (err) console.warn(err);
-		}).then(function () {
-			loadAll();
-		});
+		/*
+		 * 启动：页面骨架已经渲染完毕（上面的控件都是同步创建的），
+		 * 这里只负责「填充数据」，且**不阻塞页面可用性**。
+		 *
+		 * 原实现把 loadAll 挂在 connect().then 上，而 connect 只要 reject
+		 * 就整条 then 链跳过 —— 后端没起来时数据永远不加载，页面停在
+		 * 空控件状态，用户看不到任何原因。
+		 *
+		 * 改法：connect() 已保证永不 reject（降级走 state 回调），
+		 * 统一由 Ui.startup 处理「降级提示 + 恢复后自动加载」。
+		 */
+		Ui.startup(body, function () { loadAll(); });
 
 		return page;
 	}

@@ -27,6 +27,10 @@
 var SERVICE = 'at-webserver';
 var BINARY = '/usr/bin/at-webserver-rust';
 
+/* /dev/serial/by-id 稳定符号链接目录（与 Rust 侧 BY_ID_DIR 及 init.d 保持一致）。
+ * 由 init.d 的 sync_serial_by_id 维护：本机没有 udev/mdev，没有组件会替我们建它。 */
+var BY_ID_DIR = '/dev/serial/by-id';
+
 /**
  * 由多源状态推导服务状态标签、颜色与原因提示。
  * 优先级：运行中 > 已禁用 > 未安装 > 不可执行 > 未注册 > 已停止
@@ -97,7 +101,10 @@ return L.view.extend({
 			L.uci.load(SERVICE),
 			serviceList(SERVICE).catch(function () { return {}; }),
 			listSerial('/dev').catch(function () { return { entries: [] }; }),
-			statBinary(BINARY).catch(function () { return null; })
+			statBinary(BINARY).catch(function () { return null; }),
+			/* by-id 稳定路径目录可能不存在（无模组 / 尚未执行 sync_serial_by_id），
+			 * 这里独立请求并独立 catch：失败不能影响其它五项，页面照常渲染 */
+			listSerial(BY_ID_DIR).catch(function () { return { entries: [] }; })
 		]).then(function (res) {
 			var raw = res[2];
 			var entries = [];
@@ -127,6 +134,43 @@ return L.view.extend({
 			});
 			serials = serials.filter(function (p, i, a) { return a.indexOf(p) === i; });
 			serials.sort();
+
+			/* ---- by-id 稳定路径（优先展示） ----
+			 *
+			 * 与上面 ttyUSB* 列表分开收集、分开排序：两者用途不同，
+			 * by-id 是「配置里应当持久化的那个」，ttyUSB* 是「回退与排障用」。
+			 * 下拉框里分组呈现，避免用户混选后又遇到编号漂移。
+			 */
+			var byIdEntries = (function () {
+				var r = res[4];
+				var list = [];
+				if (Array.isArray(r)) {
+					list = r;
+				} else if (r && Array.isArray(r.entries)) {
+					list = r.entries;
+				} else if (r && typeof r === 'object') {
+					Object.keys(r).forEach(function (k) {
+						var v = r[k];
+						if (v && typeof v === 'object') {
+							list.push(Object.assign({ name: k }, v));
+						} else {
+							list.push({ name: k, type: String(v || '') });
+						}
+					});
+				}
+				var out = [];
+				list.forEach(function (e) {
+					var n = e && (e.name || '');
+					if (!n) return;
+					// 只要符号链接条目（by-id 下应当全是链接）
+					var t = e && e.type ? String(e.type) : '';
+					if (t && t !== 'link' && t !== 'symlink') return;
+					out.push(BY_ID_DIR + '/' + String(n).replace(/^.*\//, ''));
+				});
+				out = out.filter(function (p, i, a) { return a.indexOf(p) === i; });
+				out.sort();
+				return out;
+			})();
 
 			/* ---------- 服务状态多源判定 ---------- */
 			var svc = (res[1] && res[1][SERVICE]) || {};
@@ -163,7 +207,8 @@ return L.view.extend({
 				binExists: binExists,
 				binExec: binExec,
 				enabled: enabled,
-				serials: serials
+				serials: serials,
+				byIdSerials: byIdEntries
 			};
 		});
 	},
@@ -236,11 +281,35 @@ return L.view.extend({
 				var o = E('option', { value: v }, label || v);
 				serialSel.appendChild(o);
 			}
-			add('auto', '自动探测（优先 /dev/ttyUSB1 PCUI）');
-			(state.serials || []).forEach(function (p) {
-				var hint = p === '/dev/ttyUSB1' ? '（PCUI 推荐）' : '';
-				add(p, p + hint);
-			});
+			/* 分组呈现（<optgroup>），把「稳定路径」与「会漂移的裸编号」在视觉上
+			 * 分开：
+			 *   - 第一组 by-id：跨 USB 口/控制器稳定，是**应当持久化到配置**的那个，
+			 *     默认推荐选它；
+			 *   - 第二组 ttyUSB*：会随枚举顺序平移，仅作回退与排障用。
+			 * 不分组直接平铺，用户很容易随手选了 ttyUSB1，之后拔插一次就失效。 */
+			add('auto', '自动探测（优先 by-id / PCUI）');
+
+			var byIds = state.byIdSerials || [];
+			if (byIds.length) {
+				var gById = E('optgroup', { label: '稳定路径（推荐，不受插口变化影响）' });
+				byIds.forEach(function (p) {
+					// if12 = PC UI Interface（AT 口），是本插件最常用的那个
+					var hint = /-if12(-|$)/.test(p) ? '（PCUI / AT 口）' : '';
+					gById.appendChild(E('option', { value: p }, p + hint));
+				});
+				serialSel.appendChild(gById);
+			}
+
+			var bare = state.serials || [];
+			if (bare.length) {
+				var gBare = E('optgroup', { label: '内核编号（可能随插口变化）' });
+				bare.forEach(function (p) {
+					var hint = p === '/dev/ttyUSB1' ? '（常见 PCUI 编号）' : '';
+					gBare.appendChild(E('option', { value: p }, p + hint));
+				});
+				serialSel.appendChild(gBare);
+			}
+
 			add('__custom__', '自定义路径…');
 			if (current) {
 				var exists = false;
@@ -258,7 +327,9 @@ return L.view.extend({
 		serialSel.addEventListener('change', function () {
 			serialCustom.style.display = serialSel.value === '__custom__' ? '' : 'none';
 		});
-		connBody.appendChild(Mt5700.formGroup('串口设备', serialSel, '列出系统已识别的 ttyUSB/ttyACM/ttyS 设备'));
+		connBody.appendChild(Mt5700.formGroup('串口设备', serialSel,
+			'优先选「稳定路径」分组：它由 VID:PID 与接口描述符生成，换 USB 口或重启后路径不变；' +
+			'「内核编号」分组在插口变化时会整体平移，仅作回退。'));
 		connBody.appendChild(Mt5700.formGroup('自定义串口路径', serialCustom, '仅在选择「自定义路径」时生效'));
 
 		var baudInput = Mt5700.input('number', '115200', '');

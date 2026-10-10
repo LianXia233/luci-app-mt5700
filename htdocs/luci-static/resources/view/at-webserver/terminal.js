@@ -206,19 +206,7 @@ return L.view.extend({
 		renderSaved();
 		renderConsole();
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [{ key: 'key', label: '连接密钥', type: 'password' }], function (values) {
-					if (values.key) {
-						AtWs.client.connect(values.key).catch(function (e) {
-							Mt5700.error((e && e.message) || '认证失败');
-						});
-					}
-				});
-				return;
-			}
-			if (err) console.warn(err);
-		});
+		Ui.startup(body);
 
 		return page;
 	}

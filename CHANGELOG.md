@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.14.13 (2026-10-10)
+
+### 无模组场景解耦、`/dev/serial/by-id` 稳定路径与 AT 口判定修复
+
+- **fix(serialdetect)**: **修复 AT 口判定被「Application」误命中的真实缺陷** —— 原实现用 `iface.contains("AT")` 找 AT 口，而实机接口名由模组固件写为 `TDTECH Connect - PC UI Interface` / `TDTECH Connect - Application Interface`：`PC UI` 中间有空格导致 `contains("PCUI")` 不命中，反过来 `Applic**at**ion` 含子串 `at` 导致 `contains("AT")` **误命中**。后果是 Application 口（1 分）排在真正的 PC UI 口（2 分）**前面**，自动探测先试错口、白等一个 800ms 超时；若某些固件的 Application 口恰好应答 `OK`，更会直接把错口选成 AT 口。现改为**按非字母数字切 token 后整词匹配**（`AT` 必须是独立词），并新增 `pcui_must_outrank_application` 等回归用例。实机验证：候选序首位由 `if13(Application)` 纠正为 `if12(PC UI)`，探测**首次即命中**（日志中零「无有效应答」跳过记录）。
+- **feat(serialdetect)**: **新增 `bInterfaceProtocol` 二级兜底判据** —— 接口名字符串缺失（部分 OEM 固件留空）或无法识别时，回退读 USB 接口描述符的 `bInterfaceProtocol`：`0x12`=PC UI/AT 口、`0x14`=GPS（明确排除）、`0x13`/`0x1b`/`0x1c`=Application/SerialB/SerialC（已知非 AT 口）。该值写死在模组固件中，换 USB 口、换 xHCI 控制器、换主机均不变，比接口名更耐改版。
+- **fix(serialdetect)**: **新增强弱信号分级与协议号交叉校验** —— 实测发现多个口可能同时命中 AT 判据（如某 OEM 把数据口也描述成 `AT Port`），此时排序退化为字典序、选谁纯属巧合。现把 `PCUI` / `PC UI` / `ATPORT` 归为**强信号**（专有叫法，直接采信），`AT` / `Modem` / `Command` 归为**弱信号**：弱信号若被协议号 `0x13/0x14/0x1b/0x1c` 明确否决，则改取协议号结论。既避免伪 AT 口抢位，又避免名字误判被反向压掉。
+- **fix(serialdetect)**: **修复 by-id 路径无法解析接口名** —— `/sys/class/tty/` 下只有真实内核设备名，没有符号链接入口；原实现直接 `trim_start_matches("/dev/")` 拼接会得到 `/sys/class/tty/serial/by-id/.../device` 这种不存在的路径，导致接口名永远取不到、by-id 路径拿不到 AT 口优先权。新增 `resolve_tty_name()` 先 `canonicalize` 解出实体名再查 sysfs。
+- **feat(by-id)**: **新增 `/dev/serial/by-id` 稳定设备路径支持** —— 探测顺序改为三层：① `by-id` 稳定链接（编号漂移免疫，优先）→ ② `ttyUSB*`/`ttyACM*`/`ttyAP*`（回退）→ ③ `ttyS*`/`ttyAMA*`（仅在完全无 USB 串口时）。排序元组扩为四元 `(接口分, 是否非by-id, 编号偏好, 序号)`，同分时稳定路径必定排在裸编号之前。前端下拉框按 `<optgroup>` 分组呈现「稳定路径（推荐）」与「内核编号（可能随插口变化）」，用户所选路径照常持久化到 UCI `serial_port`。
+- **feat(init.d)**: **新增 `sync_serial_by_id` 维护稳定链接** —— 本机（ImmortalWrt SNAPSHOT, mediatek/filogic）既无 udev 也无 mdev，没有任何组件会创建 `/dev/serial/by-id`，故由 init.d 在服务启动时自行枚举 USB 接口并重建链接，映射到 `bind_modem_serial` 之后、接口拉起之前执行。
+  - **命名取组合键 `usb-<idVendor>:<idProduct>-if<协议号>[-<iSerial 片段>][-n<N>]`**：`bInterfaceProtocol` 作主键（设备内互不相同、跨主机不变），`iSerial` 仅作可选区分片段——因为**同型号模组的 iSerial 不保证唯一**（出厂批次号+序号，可能重复甚至为空），单靠它无法区分同型号多台设备。
+  - **兜底设计**：`iSerial` 为空时自动降级为不带该片段；**同型号撞名时追加 `-n2`/`-n3` 去重后缀**，保证不会互相覆盖；整批清理 `usb-*` 后重建（增量维护无法判断拔出设备对应哪个旧链接）；`ln -sf` 后以 `readlink -f` + `[ -c ]` 校验，失败即删除，避免留下断链。
+  - **健壮性**：`sanitize_id_part` 清洗非法字符并将「纯点号」结果作废（`.`/`..` 在路径语义中危险）；`to_hex2` 因 **busybox `tr` 对 POSIX 字符类解析有缺陷**（`tr -d '[:space:]'` 会把 `s/p/a/c/e` 当字面字符删除、`tr '[:upper:]' '[:lower:]'` 完全无效），改用 `sed` 清洗 + `tr 'A-F' 'a-f'` 显式区间写法。
+  - **注意**：`EXTRA_COMMANDS` 中登记的命令名**必须与同名函数完全一致**（rc.common 末尾执行 `$action "$@"` 按名查找函数），否则抛 `xxx: not found` 而非「未知命令」。
+- **fix(acl)**: rpcd ACL 增补 `/dev/serial`、`/dev/serial/by-id`、`/dev/serial/by-id/*` 的 `list`/`stat` 权限，使前端能枚举稳定路径。
+- **scope**: 未触碰任何 IMEI 相关代码与数据流（`modem_settings.js` 的 `AT+CGSN` 读取、`AT^PHYNUM=IMEI` 写入、四重验证与 `luhnValid` 全部原样）；未引入新的外部依赖（Rust 侧零新增 crate，shell 侧仅用 busybox 自带命令与 ucode `fs` 模块）。
+- **verify**: ① `cargo test` **47 passed / 0 failed**（含 `serialdetect` 14 项，此前因模块条件编译而在非 Linux 宿主上全部跳过）；② 交叉编译 aarch64-musl 产物经 ELF 头校验（`ELF64`/`EM_AARCH64`/`EXEC`）后部署实机，AT 调试终端执行 `ATI` 返回真实模组信息；③ 实机场景覆盖：正常识别 / 接口名缺失（协议号兜底）/ 全无信息（字典序+探测兜底）/ by-id 混入断链（自动排除）/ 他厂 MT5700 接口名重复命中（交叉校验纠正）；④ `sync_serial_by_id` 连续三次幂等复测均为 5 条链接、0 断链，AT 口正确映射到 `/dev/ttyUSB1`。
+- **docs**: README 版本号与安装示例同步至 v1.14.13；新增 `docs/release-notes/v1.14.13.md` 发布说明。
+
 ## v1.14.12 (2026-10-10)
 
 ### 注释语义校正与来源表述清理
