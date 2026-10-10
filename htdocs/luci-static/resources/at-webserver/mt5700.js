@@ -6,8 +6,8 @@
 /* global L, AtWs, Parse, baseclass */
 
 /**
- * MT5700 LuCI 前端 - Modern Dimensional Layering 组件系统 v2
- * 软极简 + 玻璃拟态材质 + 现代数据看板
+ * MT5700 LuCI 前端公共组件库：页面骨架、卡片/面板、表单控件、
+ * 信号仪表与网络能力总评（木桶原理取最差项），以及实时速率折线图。
  */
 
 // 注入新样式
@@ -356,7 +356,7 @@ var Mt5700 = (function () {
 	/* ================= 指标卡片 ================= */
 
 	/*
-	 * 单位白名单：显式枚举，避免把「5G」「100%」这类纯文本误拆。
+	 * 单位白名单：显式枚举。
 	 * 只有命中白名单才做「数字 + 单位」分段渲染，否则整段原样输出。
 	 */
 	var METRIC_UNITS = [
@@ -404,7 +404,7 @@ var Mt5700 = (function () {
 		if (color) v.classList.add(color);
 		m.appendChild(v);
 		/* status 为可选状态类（如温度 temp-normal），用于整卡背景着色；
-		 * 不传时行为与旧版完全一致，不影响既有调用。 */
+		 * 不传时不加任何状态类，仅渲染基础指标卡。 */
 		if (status) m.classList.add(status);
 		return m;
 	};
@@ -449,7 +449,7 @@ var Mt5700 = (function () {
 		{ level: 'cold',   min: -Infinity }
 	];
 
-	/* 兼容旧字段：高危/告警阈值（供外部按单值判断时复用） */
+	/* 兼容字段：warm 阈值 61℃、high 阈值 77℃，供外部按单值判断时复用 */
 	api.TEMP_WARN_C = 61;
 	api.TEMP_HIGH_C = 77;
 
@@ -570,7 +570,7 @@ var Mt5700 = (function () {
 
 	/**
 	 * 创建环形仪表。SVG viewBox 缩放自适应容器，DOM 开销固定（1 svg + 2 circle）。
-	 * 返回 { el, set(value), setSub(text), setPlain(text) }。
+	 * 返回 { el, set(value) }；sub / plain 为构造期静态选项，创建后不可改。
 	 *
 	 * opts:
 	 *   sub   —— 英文缩写（如 RSRP），显示在中文标签下方，保留给专业用户对照手册
@@ -666,12 +666,12 @@ var Mt5700 = (function () {
 	 * 汇总规则分两层：
 	 *   第一层 信号档（LEVEL_ORDER 木桶原理）：取 rsrp/rsrq/sinr/pct 四项中最差者。
 	 *          任何一项拖后腿都会实际影响体验，取最差比取平均更贴近真实感受。
-	 *   第二层 能力档（CAP_ORDER 木桶原理）：取「制式代际」「频段传播特性」「载波带宽」
+	 *   第二层 能力档（同样取最差项）：对「制式代际」「频段传播特性」「载波带宽」
 	 *          三项中最差者。这一层回答的是「这条链路最快能跑多少」。
 	 *
 	 * 最终结论 = 两层取更差者。理由：信号好只说明「链路质量好」，不等于「网速快」。
 	 * 例如 700MHz(n28) 上的 LTE 信号满格，RSRP -70 属"优秀"，但 20MHz 带宽 + 4G 制式
-	 * 决定了它的峰值吞吐远不如 2.6GHz(n41) 的 5G 100MHz。旧版只看信号档就下
+	 * 决定了它的峰值吞吐远不如 2.6GHz(n41) 的 5G 100MHz。若只看信号档就下
 	 * 「适合看高清视频、下载大文件」的结论，属于典型的乐观误判。
 	 */
 	var LEVEL_ORDER = { exc: 0, good: 1, fair: 2, poor: 3, bad: 4 };
@@ -944,8 +944,7 @@ var Mt5700 = (function () {
 
 	/*
 	 * 档位 → 柱状信号格点亮根数。
-	 * exc(4) / good(3) / fair(2) / poor(1) / bad(1)，
-	 * 与参考稿 data-bars 的 4/3/2/1 四档对齐。
+	 * exc 4 格 / good 3 格 / fair 2 格 / poor 与 bad 均为 1 格（共 4 种取值）。
 	 */
 	var BAR_COUNT = { exc: 4, good: 3, fair: 2, poor: 1, bad: 1 };
 
@@ -1153,9 +1152,7 @@ var Mt5700 = (function () {
 	};
 
 	/* ================= 连接状态卡片 ================= */
-	// 独立 at-status-* 命名空间，样式自包含于 mt5700.css，不依赖 LuCI 主题
-
-		// 连接状态卡片已按需求从所有页面移除：保留空实现兜底，任何调用不再渲染任何内容
+	// 连接状态卡片已按需求从所有页面移除：保留空实现兜底，任何调用不再渲染任何内容
 	api.renderConnectionBar = function () {
 		return E('div', { 'style': 'display:none' });
 	};
@@ -1279,10 +1276,10 @@ var Mt5700 = (function () {
 	var _gradSeq = 0;
 
 	/**
-	 * 实时速率折线图（v2 视觉版）
+	 * 实时速率折线图
 	 * - 双折线（下行/上行）+ 下行面积渐变填充
 	 * - 悬浮提示（tooltip，L4 浮层），数据格式通过 options.tipFormat(point, index) 定制
-	 * - 函数签名与数据格式（[{down, up}, ...]）与 v1 完全兼容，旧调用无需改动
+	 * - 数据格式 [{down, up}, ...]，缺省 width/height/max 时分别取 600/160/1
 	 */
 	api.lineChart = function (data, options) {
 		options = options || {};

@@ -6,8 +6,6 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 模组设置 - 新 UI 视觉 + 基准 v1.3.4 功能
- *
  * 模组设置页面，覆盖以下可操作功能：
  * - 设备信息（ATI / IMEI / 连接模式 AT+CONNECT?）
  * - SIM 卡：槽位切换（SCICHG + HVSST + CFUN 重启）、热插拔（TDSIMHP）、PIN 状态/操作
@@ -18,7 +16,7 @@
  * - 温度保护（THERMAUTOFUN / THERMLD*）
  * - 重启（RESET）、恢复出厂（AT&F）
  *
- * 注意：IMEI 读取（AT+CGSN）与写入命令（AT^PHYNUM）完全沿用基准实现，未做任何改动；仅将 IMEI 拆分为独立卡片，入口由「点击 5 次」改为四重验证确认流程。
+ * 注意：IMEI 读写沿用既有 AT 命令（读取 AT+CGSN、写入 AT^PHYNUM）不改；仅将 IMEI 拆分为独立卡片，入口由「点击 5 次」改为四重验证确认流程。
  */
 
 return L.view.extend({
@@ -80,7 +78,7 @@ return L.view.extend({
 
 		/*
 		 * IMEI 独立卡片：入口不再使用连续点击 5 次触发，改为四重验证确认流程。
-		 * 写入命令（AT^PHYNUM）与基准实现完全一致，本页仅重构 UI 交互层，
+		 * 写入命令固定为 AT^PHYNUM，本页仅重构 UI 交互层，
 		 * 不改动 IMEI 相关命令与数据流。
 		 */
 
@@ -179,7 +177,7 @@ return L.view.extend({
 		}
 
 		function finalImeiConfirm(newImei) {
-			/* 第四重：最终确认；以下写入调用与基准实现完全一致，未做任何改动 */
+			/* 第四重：最终确认；写入命令固定为 AT^PHYNUM */
 			Mt5700.confirm('最终确认：IMEI 将由 ' + (dev.imei || '（未知）') + ' 变更为 ' + newImei + '。此操作影响设备合法性，请谨慎。', function () {
 				send('AT^PHYNUM=IMEI,' + newImei).then(function (res) {
 					if (res.success) {

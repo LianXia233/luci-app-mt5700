@@ -5,9 +5,7 @@
 /* global L, AtWs, Parse, Mt5700 */
 
 /**
- * 模组升级 - 新 UI 视觉 + 基准 v1.3.4 功能
- *
- * 模组升级页面，保留 v1.4.x 玻璃拟态卡片风格：
+ * 模组升级页面：
  * - 免责声明（未同意前不允许开始升级）
  * - 当前版本 AT+CGMR
  * - FOTA 状态机轮询 AT^FOTASTATE?：11 查询中 / 12 发现新版本 / 13 查询失败 /
@@ -178,7 +176,7 @@ return L.view.extend({
 			renderBanner();
 		}
 
-		/* ---------- 逻辑（对齐基准 v1.3.4） ---------- */
+		/* ---------- FOTA 流程 ---------- */
 		function fetchVersion() {
 			return AtWs.client.sendCommand('AT+CGMR').then(function (res) {
 				if (res.success && typeof res.data === 'string') {

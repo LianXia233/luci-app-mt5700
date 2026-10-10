@@ -14,8 +14,8 @@
  *
  * 语义兼容：
  * - sendCommand(cmd) → {success,data,error}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
- * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型），推送类型与事件流一致：
- *   raw_data / new_sms / incoming_call / pdcp_data / memory_full / cellscan / urc_data
+ * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型）。订阅者收到的事件类型：
+ *   urc_data（由 raw_data 文本解析而来）/ new_sms / incoming_call / pdcp_data / memory_full / cellscan
  * - 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI websocket_auth_key 由 ucode 代理附加，
  *   页面无需输入密钥（密钥配置保持向后兼容）
  */
@@ -296,8 +296,7 @@ ATClient.prototype.setConnection = function (host, port) {
 
 /* ================= UCI 保存/应用编排 =================
  *
- * 背景（问题一）：本应用此前在页面里直接连续调用
- *     L.uci.set(...) → L.uci.save() → L.uci.apply()
+ * 背景：直接在页面里连续调用 set → save → apply
  * 这条链路存在三个与 OpenWrt 标准「保存及应用」流程不一致的地方：
  *
  *   1) 缺少「未保存更改的确认」。OpenWrt 的 CBI 表单在离开页面时会提示
@@ -317,7 +316,7 @@ ATClient.prototype.setConnection = function (host, port) {
  * uciHasChanges(section)，语义与 LuCI 的「保存并应用」按钮一致。
  */
 var AtUci = {
-	// 已注册「未保存更改」提示的页面数
+	// 当前页面是否有未保存更改（true=有）
 	_dirty: false,
 	_beforeUnload: null,
 	_dirtyFlush: [],
@@ -394,8 +393,8 @@ var AtUci = {
 	},
 
 	/**
-	 * commit 型保存：仅落盘，不触发服务 reload。
-	 * 用于「服务配置」这类自身不作为 reload 触发源、而由页面显式重载的场景。
+	 * commit 型保存：save 后同样调用 apply，走完整 commit+apply 流程
+	 * （与 uciSave 实现一致，会记录 config hash 并触发 procd reload）。
 	 */
 	uciCommit: function (section) {
 		var result = { saved: false, applied: false, appliedSkipped: false };

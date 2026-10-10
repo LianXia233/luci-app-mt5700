@@ -6,9 +6,7 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * AT 调试终端 - 新 UI 视觉 + 基准 v1.3.4 功能
- *
- * AT 调试终端页面，保留 v1.4.x 终端外观：
+ * AT 调试终端页面：
  * - 命令输入 + 回车发送、发送 / 清空 / 保存命令
  * - 终端式输出（成功 / 失败着色，自动滚动到底部）
  * - 常用命令快捷按钮：点击后先二次确认再发送（避免误触，尤其是写命令）
@@ -86,7 +84,7 @@ return L.view.extend({
 			{ label: '查询网络注册', command: 'AT+CREG?' },
 			{ label: '查询基站信息', command: 'AT+CGREG?' },
 			{ label: '查询网络时间', command: 'AT^NWTIME?' },
-			/* 以下条目与 IMEI 相关，完全沿用基准实现，未做任何改动 */
+			/* IMEI 查询：AT+CGSN（只读，无副作用） */
 			{ label: '查询 IMEI', command: 'AT+CGSN' }
 		];
 

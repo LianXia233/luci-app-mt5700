@@ -6,7 +6,7 @@
  * 短信发送 PDU 编码器（SMS-SUBMIT 编码）。
  * 3GPP 23.040 / 23.038：
  * - GSM 7bit 打包（低位在前），非 GSM 字符自动切 UCS2
- * - 长短信自动分片并带 8-bit 拼接头（IEI 0x00）
+ * - 长短信自动分片，带 6 字节 UDH（UDHL=0x05，IEI=0x00 连接头）+ 8 位参考号
  * - SMSC 地址打包、TPDU 长度计算
  */
 
@@ -126,8 +126,8 @@ var SmsEncode = (function () {
 		var udhi = opts.udhi || null;
 		var firstOctet = 0x01; // MTI=01 (SMS-SUBMIT)
 		if (udhi) firstOctet |= 0x40; // TP-UDHI
-		firstOctet |= 0x10; // TP-VPF=10 (relative)
-		firstOctet |= 0x20; // TP-RD=1 (reject duplicates)
+		firstOctet |= 0x10; // TP-VPF=10（相对格式，固定）
+		firstOctet |= 0x20; // TP-RD=1（恒置，拒绝重复）
 
 		var da = encodeAddress(opts.destination);
 		var mr = '00';
@@ -146,7 +146,7 @@ var SmsEncode = (function () {
 	var GSM7_MAX = 160;
 	var GSM7_MAX_UDH = 153;
 	var UCS2_MAX = 140;   // 70 字符
-	var UCS2_MAX_UDH = 134; // 67 字符
+	var UCS2_MAX_UDH = 134; // 134 octets → 67 字符
 
 	function needsUcs2(message) {
 		var chars = Array.from(message);
@@ -213,7 +213,7 @@ var SmsEncode = (function () {
 			if (chars.length <= 70) {
 				parts.push({ message: message, encoding: 'UCS2', udhi: null });
 			} else {
-				var perC = Math.floor(UCS2_MAX_UDH / 2); // 67 octets → 33 chars
+				var perC = Math.floor(UCS2_MAX_UDH / 2); // 134 octets → 67 字符
 				var totalC = Math.ceil(chars.length / perC);
 				var refC = Math.floor(Math.random() * 255) + 1;
 				for (var i = 0; i < totalC; i++) {

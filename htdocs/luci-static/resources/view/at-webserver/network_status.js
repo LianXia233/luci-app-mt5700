@@ -6,12 +6,13 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 5G/4G 模组网络状态 - 赛博极客全动态 SVG 工业级精装重构版 (v3.3)
+ * 5G/4G 模组网络状态页：实时速率、射频信号四联仪表、载波聚合、
+ * 模组温度 PCB 图、流量统计 / IP 与 DNS / 调制方式三组卡片。
  *
- * 核心提升：
- *  1. 【模组温度图表重构】：大画幅 PCB 纯矢量电路版图，集成热传导总线、芯片引脚焊盘、动态呼吸光晕，搭配 4×2 完美平衡读数矩阵；
- *  2. 【调制方式与空间流】：新增「上行频谱效率利用率」双轨进度条，与 I/Q 正交星座点阵共同填满卡片空间，消除留白塌陷；
- *  3. 【三列黄金等高对齐】：流量统计、IP/DNS 与调制方式三张卡片高度严格自适应等高（~440px）。
+ * 布局要点：
+ *  1. 模组温度：PCB 矢量版图 + 7 通道芯片结温读数矩阵（外加 1 格综合均温凑成 4×2）；
+ *  2. 调制方式与空间流：上下行 MCS、I/Q 星座点阵与频谱效率占用条；
+ *  3. 流量统计 / IP 与 DNS / 调制方式三卡走 `.mt-row-2col` 两列栅格，等高由 `.mt-card-box` 自适应实现。
  */
 
 return L.view.extend({
@@ -1087,7 +1088,7 @@ return L.view.extend({
 			var dlSvg = renderConstellationSvg(dlInfo.mod, '#00b4d8');
 			var ulSvg = renderConstellationSvg(ulInfo.mod, '#10b981');
 
-			// 依据 3GPP 物理层 28 阶 MCS 计算频谱效率利用率
+			// MCS 占用条：以 MCS 索引(0–28)线性归一化的粗略参考值，非 3GPP 精确频谱效率
 			var dlEffPct = Math.min(100, Math.round(((parseInt(dlInfo.mcs, 10) || 0) / 28) * 100));
 			var ulEffPct = Math.min(100, Math.round(((parseInt(ulInfo.mcs, 10) || 0) / 28) * 100));
 
