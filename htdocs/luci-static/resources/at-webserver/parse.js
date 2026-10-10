@@ -465,7 +465,7 @@ var Parse = (function () {
 	 *   0xC0-0xDF 消息等待组：bit3=1 为 UCS2，否则 GSM7
 	 *   0xF0-0xFF 数据编码/消息类别组：固定 GSM7（bit3-2 是类别不是编码！）
 	 * 返回 0=GSM7 / 1=8bit / 2=UCS2。
-	 * 旧实现用 dcs & 0x0C，会把 F 组的类别位误读成编码位导致乱码。
+	 * 注意：若用 dcs & 0x0C 判断，会把 F 组的类别位误读成编码位导致乱码。
 	 */
 	function dcsEncoding(dcs) {
 		var group = dcs >> 4;
@@ -547,7 +547,7 @@ var Parse = (function () {
 			/*
 			 * 7-bit：UDH 占用的 septet 数按其八位组长度折算，
 			 * 必须先解「完整 UD 字节流」的 septet 序列、再跳过头部码位；
-			 * 旧实现先按字节切掉 UDH 再解包，位流错位导致长短信正文乱码。
+			 * 注意：若先按字节切掉 UDH 再解包，位流会错位，导致长短信正文乱码。
 			 */
 			var udhSeptets = (udhi && ud.length > 0) ? Math.ceil((ud[0] + 1) * 8 / 7) : 0;
 			var totalSeptets = Math.max(udl, udhSeptets);

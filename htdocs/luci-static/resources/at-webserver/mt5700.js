@@ -834,7 +834,7 @@ var Mt5700 = (function () {
 
 	/*
 	 * 状态图标：外圈淡描边 + 内实心圆（实心圆带脉冲动画）。
-	 * 与参考稿 status svg 完全一致：
+	 * 结构与既有状态 SVG 一致：
 	 *   <circle cx=12 cy=12 r=8 fill=none stroke=currentColor opacity=.16/>
 	 *   <circle class=tower cx=12 cy=12 r=4.5 fill=currentColor/>
 	 */
@@ -852,8 +852,7 @@ var Mt5700 = (function () {
 	}
 
 	/*
-	 * 四项信号指标的图标，与参考稿 mt5700_dynamic_svg_all_states_preview.html 逐条对齐。
-	 * 绘制约定（参照稿 .metric svg）：
+	 * 四项信号指标的图标，沿用统一的绘制约定：
 	 *   svg 级：fill:none + stroke:var(--accent) + stroke-width:1.8 + linecap/linejoin:round
 	 *   个别元素自带 fill:currentColor（雷达内点）或 fill:none（描边路径）覆盖
 	 *   rsrp → 4 根闭合柱（闭合路径由 stroke 描出轮廓，实机呈现为实心格）
@@ -1052,7 +1051,7 @@ var Mt5700 = (function () {
 					var icon = E('span', { 'class': 'mt5700-verdict-metricicon' });
 					/*
 					 * 柱状信号格按档位映射点亮根数，让图标形态跟着信号强弱走
-					 * （参考稿用 data-bars 控制，这里在 JS 侧直接决定）。
+					 * （静态稿用 data-bars 控制，这里由 JS 侧直接决定）。
 					 */
 					if (it.key === 'rsrp') {
 						card.setAttribute('data-bars', BAR_COUNT[it.level] || 4);
