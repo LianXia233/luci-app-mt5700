@@ -1,4 +1,4 @@
-//! 定时锁频配置：DTO <-> UCI 转换与校验。
+//! 定时锁频配置：DTO <-> UCI 转换与校验，并定义 AT+SCHED 伪命令字面量。
 
 use chrono::Timelike;
 use crate::config::{BandLock, ScheduleConfig};

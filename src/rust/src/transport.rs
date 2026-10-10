@@ -60,6 +60,7 @@ impl AsyncWrite for TcpWriter {
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
+        // 连接由上层 drop 关闭，此处不主动 shutdown。
         std::task::Poll::Ready(Ok(()))
     }
 }

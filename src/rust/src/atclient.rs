@@ -3,7 +3,8 @@
 //! - 只有一个任务读取通道，命令应答与主动上报在同一处解复用；
 //! - 命令串行执行（100ms 最小间隔），2 秒超时，最多保留 2048 行；
 //! - 空闲期收到的数据视为主动上报（raw_data 推给前端）；
-//! - 有命令等待时，只把「绝不可能是查询结果」的行（^REJINFO/+CUSD 等）截出来；
+//! - 有命令等待时，只截取绝不可能出现在查询应答里的上报（来电 RING/+CLIP、
+//!   短信 +CMTI、通话 ^CEND 等）；^REJINFO/+CUSD 经 passthrough 一并纳入；
 //! - `abcd` 打断绕过命令锁直接写入（供扫频使用）。
 
 use crate::{log_debug, log_info, log_warn};
@@ -176,7 +177,7 @@ pub struct PendingCmd {
     pub stream: Option<Box<dyn Fn(String) + Send + Sync>>,
 }
 
-#[allow(dead_code)] // describe 保留给诊断输出
+#[allow(dead_code)] // describe 当前仅构造未读取，保留字段以免改动构造函数签名
 pub struct Connection {
     writer: Arc<Mutex<Box<dyn tokio::io::AsyncWrite + Unpin + Send>>>,
     describe: String,
@@ -661,6 +662,7 @@ impl AtClient {
 
 
     /// 串行发送一条 AT 命令并等待结束码。普通优先级（状态查询 / 网络 / SIM 等）。
+    /// 注意：超时前若已收到任意行，返回 Ok 并携带这些部分行；仅当一行未收到时才返回超时错误。
     pub async fn send_command(
         &self,
         ctx: &tokio::sync::watch::Receiver<bool>,
@@ -847,7 +849,7 @@ impl AtClient {
             return Ok(AtResponse { lines });
         }
         if answered {
-            // 收到过结束码但没攒到任何内容（例如模组只回一个空结束码）。
+            // 极端情形：结束码行内容与命令回显相同而被过滤，于是有应答标记却无内容。
             Err(format!("模组未返回内容: {}", command.trim()))
         } else {
             Err(format!(

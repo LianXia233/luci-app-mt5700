@@ -2,7 +2,7 @@
 //!
 //! 完整业务逻辑迁移：
 //! - AT 客户端（网络/串口/自动探测）
-//! - LuCI RPC 服务（rpcd ucode 代理 → TCP newline-JSON，替代原 WebSocket 传输层）
+//! - LuCI RPC 服务（rpcd ucode 代理 → 本地 TCP newline-JSON）
 //! - 定时锁频调度、小区扫频、短信/来电/信号通知、企业微信推送
 
 mod async_runtime;

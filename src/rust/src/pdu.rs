@@ -2,13 +2,13 @@
 
 use chrono::{DateTime, Local, TimeZone};
 
-/// GSM 03.38 默认字母表（按码位索引）。
+/// 3GPP TS 23.038 默认字母表（按码位索引）。
 const GSM7_ALPHABET: &str = concat!(
     "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?",
     "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
 );
 
-/// 0x1B 转义后的扩展表。
+/// 0x1B 转义表：入参为 0x1B 之后的码位，返回对应扩展字符。
 fn gsm7_extension(c: u8) -> Option<char> {
     match c {
         0x0A => Some('\u{000C}'),
@@ -40,7 +40,7 @@ pub struct Sms {
     pub partial: Option<PartialInfo>,
 }
 
-/// 把 8 位字节流还原成 7 位码位序列。
+/// 把 8 位字节流按 LSB-first 还原成 7 位码位序列（0x1B 扩展由 septets_to_string 处理）。
 fn unpack_septets(data: &[u8], count: usize) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(count);
     let mut acc: u32 = 0;
@@ -97,7 +97,7 @@ fn decode_ucs2(data: &[u8]) -> String {
     String::from_utf16_lossy(&units)
 }
 
-/// 还原一个半字节交换的 BCD 字节，返回两位数字。
+/// 半字节交换 BCD：返回低半字节*10 + 高半字节（A-F 等非法值不在此校验）。
 fn bcd_digit(b: u8) -> i32 {
     (b & 0x0F) as i32 * 10 + (b >> 4) as i32
 }
@@ -179,7 +179,7 @@ pub fn decode_incoming_pdu(pdu_hex: &str) -> Result<Sms, String> {
     let udl = cut(&raw, &mut pos, 1)?[0] as usize;
     let ud = &raw[pos..];
 
-    // DCS bit3-2 选编码：00=GSM7 01=8bit 10=UCS2
+    // DCS 低 2 位为消息类别；bit3-2 选编码：00=GSM7 01=8bit 10=UCS2
     let encoding = (dcs >> 2) & 0x03;
 
     let mut udh_len = 0usize;

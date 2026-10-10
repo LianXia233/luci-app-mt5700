@@ -1,4 +1,4 @@
-//! 通知：企业微信 webhook（60 秒合并、重试 3 次）+ 本地日志文件。
+//! 通知：短信/来电/信号/内存满四类事件，经企业微信 webhook（60 秒合并、重试 3 次）与本地日志文件输出。
 
 use crate::{log_error, log_info, log_warn};
 use crate::config::NotificationConfig;
@@ -37,7 +37,7 @@ pub struct Notifier {
     log_file: Option<String>,
 }
 
-#[allow(dead_code)] // sender 字段保留（通知来源标识）
+#[allow(dead_code)] // 通知事件类型与来源标识
 impl Notifier {
     pub fn new(cfg: NotificationConfig) -> (Notifier, mpsc::Receiver<Notification>) {
         let (tx, rx) = mpsc::channel(NOTIFY_QUEUE_SIZE);
@@ -105,7 +105,7 @@ impl Notifier {
     }
 
     /// 驱动企业微信的合并发送，直到 ctx 结束。
-    /// 合并窗口 60 秒：窗口内到达的事件攒成一条发，窗口到期立即发。
+    /// 合并窗口 60 秒：窗口内到达的事件合并成一条发送；空队列不触发发送。
     pub async fn run(&self, mut rx: mpsc::Receiver<Notification>, mut ctx: tokio::sync::watch::Receiver<bool>) {
         if self.cfg.wechat_webhook.is_empty() {
             while ctx.changed().await.is_ok() {}

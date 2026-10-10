@@ -1,4 +1,5 @@
-//! 定时锁频调度器：按时段切换锁频设置，长时间无服务时自动解锁恢复。
+//! 定时锁频调度器：按时段切换 LTE/NR 锁频，可选切换飞行模式；
+//! 长时间无服务时自动解锁恢复，并推送通知。
 
 use chrono::Timelike;
 use crate::{log_info, log_warn};
@@ -246,7 +247,8 @@ impl Scheduler {
         false
     }
 
-    /// 下发一次完整的锁频切换。返回是否成功（全部实际下发的锁频命令均 OK）。
+    /// 下发一次完整的锁频切换。
+    /// 返回是否成功：至少下发一条锁频命令且均 OK；一条锁频命令都未下发时视为失败。
     async fn apply_lock(&self, cfg: &LockPair, mode: &str) -> bool {
         let switch_count = {
             let mut s = self.state.write().await;
@@ -500,7 +502,7 @@ fn is_night(cfg: &ScheduleConfig, now: chrono::DateTime<chrono::Local>) -> bool 
     }
 }
 
-/// 匹配 +CREG/+CGREG/+CEREG/+C5GREG 的查询应答。
+/// 匹配含 +CxREG 的查询应答（实际下发 C5GREG / CEREG / CREG）。
 /// 按 3GPP 27.007，查询应答是 "+CxREG: <n>,<stat>[,...]"，<stat> 为 1=已注册本地网络，5=已注册漫游网络。
 fn registered(text: &str) -> bool {
     let mut rest = text;
