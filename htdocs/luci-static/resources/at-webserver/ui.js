@@ -280,7 +280,7 @@ var Ui = (function () {
 		return el;
 	};
 
-	/* ---------- 自动刷新（等价原 AutoRefresh 组件） ---------- */
+	/* ---------- 自动刷新 ---------- */
 
 	// 自动刷新开关 + 间隔选择。返回 { el, setEnabled, setInterval }
 	api.autoRefresh = function (onChange) {
@@ -340,7 +340,7 @@ var Ui = (function () {
 
 	/**
 	 * set interval，路由切换（hashchange）时自动 clear。
-	 * 返回原 timer id。
+	 * 返回定时器 id。
 	 */
 	api.interval = function (ms, fn) {
 		_installHashHook();
