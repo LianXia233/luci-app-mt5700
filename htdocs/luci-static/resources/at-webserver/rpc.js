@@ -6,7 +6,7 @@
 /* global L, baseclass */
 
 /**
- * AT LuCI RPC 客户端（保持原 ATClient 的 API 面）。
+ * AT LuCI RPC 客户端。
  *
  * 传输链路（LuCI RPC，无 WebSocket）：
  *   LuCI JS → L.rpc.declare('mt5700.at'/'mt5700.events') → rpcd → ucode 插件
@@ -14,10 +14,10 @@
  *
  * 语义兼容：
  * - sendCommand(cmd) → {success,data,error}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
- * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型），推送类型与原 WS 一致：
+ * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型），推送类型与事件流一致：
  *   raw_data / new_sms / incoming_call / pdcp_data / memory_full / cellscan / urc_data
  * - 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI websocket_auth_key 由 ucode 代理附加，
- *   页面无需输入密钥（原有密钥配置保持兼容）
+ *   页面无需输入密钥（密钥配置保持向后兼容）
  */
 
 // rpcd 对象 mt5700 的方法声明（与 root/usr/share/rpcd/ucode/mt5700.uc 对应）
@@ -187,7 +187,7 @@ ATClient.prototype.pollEvents = function () {
 		var events = Array.isArray(resp.events) ? resp.events : [];
 		self.eventSeq = seq;
 		if (self.firstPoll) {
-			// 首次连接只对齐序号，不重放服务启动前的事件（与原 WS 连接语义一致）
+			// 首次连接只对齐序号，不重放服务启动前的事件（与事件流语义一致）
 			self.firstPoll = false;
 			return;
 		}
@@ -296,7 +296,7 @@ ATClient.prototype.setConnection = function (host, port) {
 
 /* ================= UCI 保存/应用编排 =================
  *
- * 背景（问题一）：本应用原先在页面里直接连续调用
+ * 背景（问题一）：本应用此前在页面里直接连续调用
  *     L.uci.set(...) → L.uci.save() → L.uci.apply()
  * 这条链路存在三个与 OpenWrt 标准「保存及应用」流程不一致的地方：
  *
@@ -691,7 +691,7 @@ function parsePDCP(fields) {
 	obj.tx_retx_pct = parseInt(fields[11], 10) || 0;
 	obj.rx_volte_bytes = parseInt(fields[12], 10) || 0;
 	obj.tx_volte_bytes = parseInt(fields[13], 10) || 0;
-	obj.downSpeed = obj.rx_rate / 1024;   // Kbps 原始
+	obj.downSpeed = obj.rx_rate / 1024;   // Kbps（原始速率）
 	obj.upSpeed = obj.tx_rate / 1024;
 	return obj;
 }
@@ -709,7 +709,7 @@ function parseMONSC(data) {
 	 *     实测: ^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-10,28
 	 *     RSRP/RSRQ/SINR 为直接工程值（dBm/dB/dB），无需 convert* 换算。
 	 *     与 ^HCSQ: "NR",77,236,31 独立交叉验证一致（77→-63, 236→27.2）。
-	 *   格式 B（旧版，无前导制式，原始编码值）:
+	 *   格式 B（旧编码，无前导制式，直接给出编码值）:
 	 *     ^MONSC: <mcc>,<mnc>,<lac>,<cid>,<pci>,<ch>,<rsrp_raw>,<rsrq_raw>,<sinr_raw>,<sysmode>
 	 */
 	var hasLeadingMode = p.length > 0 && !/^-?\d+$/.test(p[0]);
