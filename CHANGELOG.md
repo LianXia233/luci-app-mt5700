@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.14.12 (2026-10-10)
+
+### 注释语义校正与来源表述清理
+
+- **docs(comment)**: 前端与后端注释按代码实际行为逐条校正，并清除指向历史实现、设计稿与外部工程的来源性表述，使注释自足可读。
+- **docs(frontend-js)**: 全量审查 `htdocs/luci-static/resources/` —— ①移除「原 WebUI / 原前端 / 等价 atx.ts 的 atErrorText」等对照字样共 17 处，涉及 `at-webserver/{ui,parse,smsEncode}.js` 与 `dial / modem_settings / network_settings / scan / schedule / terminal / upgrade` 视图；②清理含「原」字的对照表述共 16 处，涉及 `rpc.js / ui.js / parse.js / mt5700.js / mt5700.css / logs.js / modem_settings.js`；③依据代码实际校正 16 个文件的注释语义（`rpc.js` 的 `_dirty` 与 `uciCommit` 行为、`mt5700.js` 的 `gauge` 返回值与 `BAR_COUNT`、`ui.js` 的 `autoRefresh` 接口、`service.js` 的多源探测与状态枚举、`dial.js` 的自动拨号写入键、`network_status.js` 的双列栅格、`smsEncode.js` 的 134 octets → 67 字符等），并删除 9 个页面头部的版本对照说明。
+- **docs(css)**: 澄清歧义样式注释 —— 将 dangling 设计稿引用与「旧实现」表述改写为自足技术说明。
+- **docs(rust)**: 后端 16 个文件依代码实际校正注释 —— `logger.rs` 输出流为 stderr（`eprintln!`）而非 stdout、syslog 由 init.d 重定向产生；`serialdetect.rs` 去掉版本叙事、说明子串匹配会误判；`serial_linux.rs` 明确读写两半均由 `AsyncFd` 驱动并补 8N1 位域说明；`rpcserver.rs` 修正事件类型清单为 `urc_data / new_sms / incoming_call / pdcp_data / cellscan / raw_data`，补充 `logs / task_status / task_cancel / task_list` 方法；`schedule.rs` 的 `registered` 实际下发 C5GREG / CEREG / CREG；`pdu.rs` 补充 DCS 低 2 位消息类别与 `unpack_septets` 的 LSB-first；`atclient.rs` 的独占 URC 示例改为 RING / +CLIP / +CMTI / ^CEND；`notify.rs` 补全四类通知事件；`state.rs` 修正长命令分支返回语义；`config.rs` 明确 `type_` 回落、`bind` 优先级与 `scan_timeout` 的 UCI 键。
+- **scope**: 仅注释与文档 —— 前后端逻辑、AT 命令流、样式规则与 IMEI 相关代码零改动。后端注释改动经 `cargo check` 通过；前后端差异经「剥离注释放逐字符比对」确认代码完全一致。
+- **verify**: 每一处改动均以 `git diff` 过滤非注释行核验，确认无一行业务代码被修改。
+- **docs**: README 版本号与安装示例同步至 v1.14.12；新增 `docs/release-notes/v1.14.12.md` 发布说明。
+
 ## v1.14.11 (2026-10-10)
 
 ### 前端样式代码全量审查与清理
