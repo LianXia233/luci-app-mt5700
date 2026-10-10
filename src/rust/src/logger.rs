@@ -1,4 +1,4 @@
-//! 极简分级日志器：写 stdout（由 procd/logd 接管），同时在内存里留一份环形缓冲。
+//! 极简分级日志器：写 stderr（由 procd/logd 接管），同时在内存里留一份环形缓冲。
 //!
 //! 为什么要留内存副本：
 //!   稳态下（非 verbose）日志级别是 Warn，**info 级的拨号/接口过程日志不会进 syslog**，
@@ -6,7 +6,8 @@
 //!   这里把**所有**日志（含会被级别过滤掉的）先记入环形缓冲，再由 RPC 的 logs 方法提供，
 //!   与 syslog 形成互补：
 //!     - 内存缓冲：最新 N 条完整记录（含被级别挡掉的），进程重启即清零；
-//!     - syslog：历史记录（可能已滚动丢失），但包含 init.d 的 logger 输出。
+//!     - syslog：历史记录（可能已滚动丢失），但包含 init.d 的 logger 输出
+//!       （stderr 由 init.d 重定向产生，本模块不直接写 syslog）。
 //!   LuCI 的日志页把两者合并展示，所以「拨号过程」与「接口拉起」都能看到。
 
 use chrono::TimeZone;
@@ -43,7 +44,7 @@ fn timestamp() -> String {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = now.as_secs();
     let millis = now.subsec_millis();
-    // 用 chrono 格式化本地时间
+    // 本地时区格式化到秒，毫秒单独拼接，兼顾可读性与精度
     let dt = chrono::Local.timestamp_opt(secs as i64, 0).single().unwrap_or_else(|| chrono::Local::now());
     format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), millis)
 }
@@ -57,7 +58,7 @@ fn now_ms() -> i64 {
 
 /* ----------------------------- 内存环形缓冲 ----------------------------- */
 
-/// 缓冲容量（条）。够覆盖一次完整启动 + 拨号 + 若干次重连与对账。
+/// 内存环形缓冲容量（条）。超出后从队首淘汰最旧记录。
 const LOG_BUFFER_CAP: usize = 1200;
 
 #[derive(Clone, serde::Serialize)]

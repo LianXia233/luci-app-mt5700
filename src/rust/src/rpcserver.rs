@@ -1,5 +1,5 @@
 //! LuCI RPC 服务：TCP newline-JSON（127.0.0.1:8765），由 rpcd ucode 插件（mt5700.uc）代理转发。
-//! 替代原 WebSocket 传输层；核心业务逻辑（伪命令/扫频/命令分发/事件总线）全部保留。
+//! 核心业务逻辑（伪命令/扫频/命令分发/事件总线）均在此实现。
 //!
 //! 协议（每行一个 JSON 对象）：
 //!   请求: {"id":1,"method":"at","params":{"cmd":"AT+CSQ","auth_key":"..."}}
@@ -8,6 +8,7 @@
 //!   应答: {"id":2,"result":{"seq":18,"events":[{"type":"raw_data","data":"..."}]}}
 //!   错误: {"id":1,"error":{"code":-1,"message":"..."}}
 //!
+//! 另支持方法：logs / task_status / task_cancel / task_list。
 //! 事件不主动推送：前端通过 events(since) 拉取增量（LuCI RPC 为请求-响应模型）。
 
 use crate::{log_debug, log_error, log_info, log_warn};
@@ -64,8 +65,8 @@ pub struct ScanState {
     pub task_id: Option<String>,
 }
 
-/// 事件总线：替代原 WebSocket Hub 的"广播给所有客户端"。
-/// 所有推送（raw_data/new_sms/incoming_call/pdcp_data/memory_full/cellscan/urc_data）
+/// 事件总线：向所有订阅客户端广播。
+/// 推送类型（urc_data/new_sms/incoming_call/pdcp_data/cellscan/raw_data）
 /// 按序入队并分配单调递增 seq；前端轮询 events(since) 拉取增量。
 #[derive(Clone)]
 pub struct Hub {
@@ -377,7 +378,7 @@ impl RpcServer {
 
         // 状态缓存优先：白名单内的只读查询命中内存即毫秒级返回，下发 AT 的去重、
         // 刷新与断线失效都由缓存负责。miss / 非白名单 / 抓取失败一律走 live 路径，
-        // 保证与旧行为一致（例如终端页手动执行同一条查询也能拿到真实结果）。
+        // 保证终端页手动执行同一条查询也能拿到真实结果。
         match self.cache.resolve(&command).await {
             Ok(Some(text)) => {
                 log_debug!("缓存命中: {}", command.trim());

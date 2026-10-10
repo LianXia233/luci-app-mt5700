@@ -4,7 +4,7 @@
 //! - 仅缓存**查询**（带 ? 或纯查询指令）且对网络状态页高频轮询、且页面在写入后又
 //!   会立刻读的指令**不能**缓存（例如 AT^LTEFREQLOCK? / AT^NRFREQLOCK? / AT+CPMS?），
 //!   否则写入后读到的是旧缓存。
-//! - 每条指令有自己的刷新周期（十一节），避免所有数据用同一个 polling interval。
+//! - 每条指令可配置独立的刷新周期（interval），避免所有数据共用一个 polling interval。
 //! - 键统一大写比较；`resolve` 在 fast-path 命中时毫秒级返回，冷启动才走一次 AT。
 
 use std::time::Duration;
