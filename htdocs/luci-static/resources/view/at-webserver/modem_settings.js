@@ -8,7 +8,7 @@
 /**
  * 模组设置 - 新 UI 视觉 + 基准 v1.3.4 功能
  *
- * 等价迁移原 WebUI system/Info.tsx 的全部可操作功能：
+ * 模组设置页面，覆盖以下可操作功能：
  * - 设备信息（ATI / IMEI / 连接模式 AT+CONNECT?）
  * - SIM 卡：槽位切换（SCICHG + HVSST + CFUN 重启）、热插拔（TDSIMHP）、PIN 状态/操作
  * - 飞行模式（CFUN）

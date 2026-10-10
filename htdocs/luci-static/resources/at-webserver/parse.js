@@ -4,7 +4,7 @@
 
 /**
  * 补充解析库：运行状态 / 扫频 / USSD / 短信 / 锁频 / 定时锁频 DTO。
- * 全部从原 React 前端 modem/*.ts 等价迁移，与 Rust 后端的应答格式严格一致。
+ * 各解析函数与 Rust 后端的应答格式严格一致。
  */
 
 var Parse = (function () {
@@ -702,7 +702,7 @@ var Parse = (function () {
 		return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: pcis };
 	};
 
-	// 原前端拼锁频命令（即时生效场景，如扫频结果一键锁定）
+	// 拼接锁频命令（即时生效场景，如扫频结果一键锁定）
 	api.buildLockCommand = function (kind, type, mobility, items) {
 		var cmd = kind === 'lte' ? 'AT^LTEFREQLOCK' : 'AT^NRFREQLOCK';
 		if (type === 0) return cmd + '=0';
@@ -752,7 +752,7 @@ var Parse = (function () {
 
 	api.modeText = function (mode) { return mode === '' ? '当前时段不锁频' : mode; };
 
-	/* ================= 辅载波/辅站小区（carrier.ts 等价迁移） ================= */
+	/* ================= 辅载波/辅站小区 ================= */
 	// 手册 13.27 AT^MONSSC — NSA 下 5G 辅连接服务小区（最多 8CC）
 	// 手册 13.18 AT^CASCELLINFO? — LTE CA 的辅小区（最多 4 个 SCELL）
 	// ^HFREQINFO 只给频点与带宽，这两条补每个辅载波各自的信号质量。
@@ -860,7 +860,7 @@ var Parse = (function () {
 		};
 	};
 
-	/* ================= 网络拒绝原因 ^REJINFO（reject.ts 等价迁移） ================= */
+	/* ================= 网络拒绝原因 ^REJINFO ================= */
 	// 手册 13.14：注册或业务请求或网络 DETACH 过程被网络拒绝时主动上报。
 	// 锁频锁错小区导致掉网时，这条上报能直接区分"被网络拒绝"和"根本没覆盖"。
 
@@ -935,7 +935,7 @@ var Parse = (function () {
 		};
 	};
 
-	/* ================= SIM 信号质量 ^SIMSQ（sim.ts 等价迁移） ================= */
+	/* ================= SIM 信号质量 ^SIMSQ ================= */
 	// 手册 6.6：^SIMSQ 能区分卡不在位 / 被锁 / PUK 锁死，+CPIN 看不出来。
 	var SIM_STATUS = {
 		0: '卡不在位', 1: '卡已插入', 2: '卡被 PIN/PUK 锁定', 3: 'SIMLOCK 锁定',
