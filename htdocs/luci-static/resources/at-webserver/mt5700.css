@@ -32,7 +32,7 @@
   --mt5700-sh-inset: inset 0 1px 1px rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(18, 48, 86, 0.03);
   /* 焦点环 —— 对齐参考站点 --ring */
   --mt5700-ring: 0 0 0 3px rgba(41, 169, 225, 0.22);
-  /* 兼容旧变量名 */
+  /* 兼容旧变量名（保留别名，避免外部或历史样式引用失效；当前样式层统一用 sh-*） */
   --mt5700-shadow-sm: var(--mt5700-sh-1);
   --mt5700-shadow-md: var(--mt5700-sh-2);
   --mt5700-shadow-lg: var(--mt5700-sh-3);
@@ -68,13 +68,17 @@
   --mt5700-danger-light: #e47988;
   --mt5700-info: #087cba;
   --mt5700-info-light: #29a9e1;
+  /* 信号等级色 / 温度状态色（6 档）——设计令牌，亮暗两套色板成对维护。
+   * 说明：样式层当前以硬编码 rgba() 实现渐变底与描边（见 .mt5700-metric.temp-*），
+   * 未直接 var() 消费本组令牌；此处保留是作为统一色板来源，
+   * 便于后续改动时对照取值，请勿单独删除。 */
   /* 信号等级色 (绿→青→黄→橙→红 平滑映射) */
   --mt5700-sig-exc: #0f9d63;
   --mt5700-sig-good: #0e9dbd;
   --mt5700-sig-fair: #d98b06;
   --mt5700-sig-poor: #dd6b1f;
   --mt5700-sig-bad: #c83d55;
-  /* 温度状态色（6 档，逐项独立着色用，见 .mt5700-metric.temp-*） */
+  /* 温度状态色（6 档） */
   --mt5700-temp-cold: #1d508f;
   --mt5700-temp-cool: #0a7c96;
   --mt5700-temp-normal: #0f9d63;
@@ -1626,292 +1630,6 @@
 .mt5700-badge-info { background: rgba(8, 124, 186, 0.12); color: var(--mt5700-accent); }
 .mt5700-badge-neutral { background: rgba(0, 0, 0, 0.05); color: var(--mt5700-text-secondary); }
 
-/* ---------- AT 服务状态卡片 (L2，独立命名空间，不依赖 LuCI 主题) ---------- */
-.at-status-card {
-  --at-color: #35b879;
-  --at-bg: rgba(255, 255, 255, 0.62);
-  --at-border: rgba(255, 255, 255, 0.72);
-  --at-text: #17211d;
-  --at-muted: #7b8781;
-
-  width: 100%;
-  box-sizing: border-box;
-
-  display: flex;
-  align-items: center;
-  gap: 18px;
-
-  padding: 18px 22px;
-
-  border: 1px solid var(--at-border);
-  border-radius: 20px;
-
-  background: var(--at-bg);
-
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-
-  box-shadow:
-    0 10px 35px rgba(35, 55, 48, 0.10),
-    inset 0 1px 0 rgba(255,255,255,.55);
-
-  color: var(--at-text);
-
-  transition:
-    background .3s ease,
-    border-color .3s ease,
-    box-shadow .3s ease,
-    color .3s ease;
-}
-
-/* SVG 状态图标 */
-.at-status-icon {
-  width: 52px;
-  height: 52px;
-
-  flex: 0 0 52px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  border-radius: 16px;
-
-  background: color-mix(
-    in srgb,
-    var(--at-color) 12%,
-    transparent
-  );
-
-  color: var(--at-color);
-
-  transition:
-    color .3s ease,
-    background .3s ease;
-}
-
-.at-status-icon svg {
-  width: 30px;
-  height: 30px;
-
-  display: block;
-
-  fill: none;
-  stroke: currentColor;
-
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* 在线 / 连接中旋转 */
-.at-status-card.is-online .at-status-icon svg,
-.at-status-card.is-connecting .at-status-icon svg {
-  animation: at-spin 1.8s linear infinite;
-}
-
-/* 连接中稍微快一点 */
-.at-status-card.is-connecting .at-status-icon svg {
-  animation-duration: 1.1s;
-}
-
-/* 离线 / 未知不旋转 */
-.at-status-card.is-offline .at-status-icon svg,
-.at-status-card.is-unknown .at-status-icon svg {
-  animation: none;
-}
-
-@keyframes at-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* 主信息 */
-.at-status-main {
-  min-width: 0;
-  flex: 1;
-}
-
-.at-status-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  margin: 0;
-
-  font-size: 16px;
-  line-height: 1.4;
-  font-weight: 700;
-
-  color: var(--at-text);
-}
-
-.at-status-dot {
-  width: 8px;
-  height: 8px;
-
-  flex: 0 0 8px;
-
-  border-radius: 50%;
-
-  background: var(--at-color);
-
-  box-shadow:
-    0 0 0 4px color-mix(
-      in srgb,
-      var(--at-color) 12%,
-      transparent
-    );
-
-  transition: background .3s ease;
-}
-
-/* 在线状态点呼吸 */
-.is-online .at-status-dot {
-  animation: at-pulse 2s ease-in-out infinite;
-}
-
-@keyframes at-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .45; }
-}
-
-.at-status-description {
-  margin-top: 5px;
-
-  font-size: 12px;
-  line-height: 1.5;
-
-  color: var(--at-muted);
-
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* RPC 地址 */
-.at-status-rpc {
-  flex: 0 0 auto;
-
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  padding: 9px 12px;
-
-  border-radius: 11px;
-
-  background: rgba(255,255,255,.42);
-  border: 1px solid rgba(0,0,0,.045);
-
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Consolas,
-    monospace;
-
-  font-size: 12px;
-
-  color: var(--at-muted);
-
-  white-space: nowrap;
-}
-
-.at-status-rpc-label {
-  opacity: .72;
-}
-
-.at-status-rpc-value {
-  color: var(--at-text);
-  font-weight: 600;
-}
-
-/* 状态配色 */
-.at-status-card.is-online { --at-color: #35b879; }
-.at-status-card.is-connecting { --at-color: #e7a63b; }
-.at-status-card.is-offline { --at-color: #e45d5d; }
-.at-status-card.is-unknown { --at-color: #8a938e; }
-
-/* 手机端 */
-@media (max-width: 600px) {
-
-  .at-status-card {
-    gap: 13px;
-
-    padding: 15px 16px;
-
-    border-radius: 17px;
-  }
-
-  .at-status-icon {
-    width: 44px;
-    height: 44px;
-
-    flex-basis: 44px;
-
-    border-radius: 13px;
-  }
-
-  .at-status-icon svg {
-    width: 25px;
-    height: 25px;
-  }
-
-  .at-status-title {
-    font-size: 14px;
-  }
-
-  .at-status-description {
-    font-size: 11px;
-  }
-
-  .at-status-rpc {
-    padding: 7px 9px;
-
-    font-size: 10px;
-  }
-
-  .at-status-rpc-label {
-    display: none;
-  }
-}
-
-/* 很窄的手机 */
-@media (max-width: 430px) {
-
-  .at-status-card {
-    gap: 11px;
-  }
-
-  .at-status-rpc {
-    display: none;
-  }
-}
-
-/* 深色模式 */
-@media (prefers-color-scheme: dark) {
-
-  .at-status-card {
-    --at-bg: rgba(30, 37, 34, .76);
-    --at-border: rgba(255,255,255,.07);
-    --at-text: #eaf2ed;
-    --at-muted: #87938d;
-
-    box-shadow:
-      0 12px 40px rgba(0,0,0,.24),
-      inset 0 1px 0 rgba(255,255,255,.035);
-  }
-
-  .at-status-rpc {
-    background: rgba(255,255,255,.035);
-    border-color: rgba(255,255,255,.06);
-  }
-
-  .at-status-rpc-value {
-    color: var(--at-text);
-  }
-}
-
 /* ==========================================================================
    模态框 (最高 Z 层)
    ========================================================================== */
@@ -2636,7 +2354,6 @@
   .mt5700-chart { height: 140px; }
   .mt5700-btn-group { width: 100%; }
   .mt5700-btn-group .mt5700-btn { flex: 1; }
-  .at-status-card { flex-direction: row; flex-wrap: wrap; }
   .mt5700-modal { max-width: 100%; }
 }
 
@@ -2658,7 +2375,6 @@
 .mt5700-gap-md { gap: var(--mt5700-space-md); }
 .mt5700-gap-lg { gap: var(--mt5700-space-lg); }
 
-/* 减少动态效果偏好 */
 /* ==========================================================================
    模组温度状态（逐项独立着色 · 6 档）
    档位由 network_status.js renderTemp() 经 Mt5700.tempLevel() 判定后写入：
@@ -2787,13 +2503,7 @@
   .mt5700-btn {
     transition: none;
   }
-  .at-status-icon svg,
-  .at-status-dot {
-    animation: none !important;
-    transition: none;
-  }
 }
-
 
 /* ==========================================================================
    MOBILE-OPT v2 —— 移动端布局优化（仅 <=768px 生效，PC 零影响）
@@ -3035,7 +2745,6 @@
   }
 }
 
-
 /* ---------- 9) 两列表格紧凑化（键值表专用，类名由 JS 添加）----------
  * 第 3 节把所有表格一律堆成「一行一卡」，对 9 列宽表是正确的，
  * 但键值表只有两列，堆叠后每项被拆成上下两行，项数一多反而更高
@@ -3135,145 +2844,149 @@
 /* ===================== 运行日志页 ===================== */
 
 /* 分段控件：用 div 承载，避免继承主题对原生 button 的强样式
- * （实测：用 button 时会被主题改成白底方框加阴影，完全不像控件） */
+ * （实测：用 button 时会被主题改成白底方框加阴影，完全不像控件）
+ *
+ * 本段为日志页「基础层」，负责尺寸 / 字号 / 字体族 / padding 等内容盒模型；
+ * 文件下方另有一处「主题配色覆盖层」按选择器再次覆盖 background / border / color，
+ * 两层属性集基本不重叠，切勿误判为重复代码而删除其中任意一层。 */
 .mt5700-logtabs {
-	display: inline-flex !important;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 4px;
-	margin: 0 0 12px !important;
-	padding: 4px !important;
-	background: rgba(128, 128, 128, 0.10) !important;
-	border: 1px solid rgba(128, 128, 128, 0.18) !important;
-	border-radius: 11px !important;
-	max-width: 100%;
+  display: inline-flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 12px !important;
+  padding: 4px !important;
+  background: rgba(128, 128, 128, 0.10) !important;
+  border: 1px solid rgba(128, 128, 128, 0.18) !important;
+  border-radius: 11px !important;
+  max-width: 100%;
 }
 .mt5700-logtab {
-	display: inline-flex !important;
-	align-items: center;
-	justify-content: center;
-	min-width: 92px;
-	padding: 7px 16px !important;
-	margin: 0 !important;
-	font-size: 13px !important;
-	line-height: 1.4 !important;
-	color: inherit !important;
-	background: transparent !important;
-	border: 1px solid transparent !important;
-	border-radius: 8px !important;
-	box-shadow: none !important;
-	text-shadow: none !important;
-	text-decoration: none !important;
-	cursor: pointer;
-	user-select: none;
-	transition: background .15s ease, color .15s ease;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 7px 16px !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  color: inherit !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  text-decoration: none !important;
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s ease, color .15s ease;
 }
 .mt5700-logtab:hover { background: rgba(128, 128, 128, 0.18) !important; }
 .mt5700-logtab.active {
-	background: #17a67f !important;
-	border-color: #17a67f !important;
-	color: #fff !important;
-	font-weight: 500 !important;
-	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18) !important;
+  background: #17a67f !important;
+  border-color: #17a67f !important;
+  color: #fff !important;
+  font-weight: 500 !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18) !important;
 }
 
 /* 工具栏：一行排布，窄屏自动折行 */
 .mt5700-logtoolbar {
-	display: flex !important;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 8px;
-	margin: 0 0 10px !important;
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px !important;
 }
 .mt5700-logselect { flex: 0 0 auto; }
 .mt5700-logselect select {
-	min-width: 120px !important;
-	height: 32px !important;
-	padding: 0 8px !important;
-	font-size: 13px !important;
-	border-radius: 8px !important;
-	border: 1px solid rgba(128, 128, 128, 0.28) !important;
-	background: rgba(128, 128, 128, 0.08) !important;
-	color: inherit !important;
-	box-shadow: none !important;
+  min-width: 120px !important;
+  height: 32px !important;
+  padding: 0 8px !important;
+  font-size: 13px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(128, 128, 128, 0.28) !important;
+  background: rgba(128, 128, 128, 0.08) !important;
+  color: inherit !important;
+  box-shadow: none !important;
 }
 .mt5700-logsearch { flex: 1 1 240px; min-width: 170px; }
 .mt5700-logsearch input {
-	width: 100% !important;
-	height: 32px !important;
-	padding: 0 11px !important;
-	font-size: 13px !important;
-	border-radius: 8px !important;
-	border: 1px solid rgba(128, 128, 128, 0.28) !important;
-	background: rgba(128, 128, 128, 0.08) !important;
-	color: inherit !important;
-	box-shadow: none !important;
+  width: 100% !important;
+  height: 32px !important;
+  padding: 0 11px !important;
+  font-size: 13px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(128, 128, 128, 0.28) !important;
+  background: rgba(128, 128, 128, 0.08) !important;
+  color: inherit !important;
+  box-shadow: none !important;
 }
 .mt5700-logsearch input::placeholder { opacity: 0.5; }
 .mt5700-logauto {
-	display: inline-flex !important;
-	align-items: center;
-	gap: 6px;
-	font-size: 12.5px;
-	opacity: 0.88;
-	cursor: pointer;
-	user-select: none;
-	white-space: nowrap;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  opacity: 0.88;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
 }
 .mt5700-logauto input[type="checkbox"] { margin: 0 !important; }
 .mt5700-logtoolbar button,
 .mt5700-logtoolbar .cbi-button {
-	height: 32px !important;
-	padding: 0 12px !important;
-	font-size: 13px !important;
-	border-radius: 8px !important;
-	box-shadow: none !important;
+  height: 32px !important;
+  padding: 0 12px !important;
+  font-size: 13px !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
 }
 
 /* 日志面板：一体式边框，内部三段（说明 / 列表 / 统计） */
 .mt5700-logpanel {
-	border: 1px solid rgba(128, 128, 128, 0.20);
-	border-radius: 11px;
-	overflow: hidden;
-	background: rgba(128, 128, 128, 0.05);
+  border: 1px solid rgba(128, 128, 128, 0.20);
+  border-radius: 11px;
+  overflow: hidden;
+  background: rgba(128, 128, 128, 0.05);
 }
 .mt5700-logpanel-hint {
-	padding: 9px 13px;
-	font-size: 12px;
-	line-height: 1.65;
-	opacity: 0.72;
-	border-bottom: 1px solid rgba(128, 128, 128, 0.14);
-	background: rgba(128, 128, 128, 0.07);
+  padding: 9px 13px;
+  font-size: 12px;
+  line-height: 1.65;
+  opacity: 0.72;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.14);
+  background: rgba(128, 128, 128, 0.07);
 }
 .mt5700-loglist {
-	max-height: 58vh;
-	overflow: auto;
-	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-	font-size: 12.5px;
-	line-height: 1.7;
+  max-height: 58vh;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
 }
 .mt5700-logfooter {
-	padding: 7px 13px;
-	font-size: 12px;
-	opacity: 0.62;
-	text-align: right;
-	border-top: 1px solid rgba(128, 128, 128, 0.14);
-	background: rgba(128, 128, 128, 0.04);
+  padding: 7px 13px;
+  font-size: 12px;
+  opacity: 0.62;
+  text-align: right;
+  border-top: 1px solid rgba(128, 128, 128, 0.14);
+  background: rgba(128, 128, 128, 0.04);
 }
 .mt5700-logactions {
-	padding: 0 13px 12px;
+  padding: 0 13px 12px;
 }
 
 /* 单行日志：时间 / 级别徽章 / 正文 */
 .mt5700-logrow {
-	display: flex !important;
-	align-items: baseline;
-	gap: 10px;
-	padding: 5px 13px 5px 10px;
-	border-left: 3px solid transparent;
-	border-bottom: 1px solid rgba(128, 128, 128, 0.10);
-	white-space: pre-wrap;
-	word-break: break-word;
+  display: flex !important;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 13px 5px 10px;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.10);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .mt5700-logrow:last-child { border-bottom: none; }
 .mt5700-logrow:nth-child(even) { background: rgba(128, 128, 128, 0.05); }
@@ -3290,20 +3003,20 @@
 .mt5700-logrow-dbg .mt5700-logmsg { opacity: 0.80; }
 
 .mt5700-logtime {
-	flex: 0 0 auto;
-	opacity: 0.55;
-	font-size: 11.5px;
-	letter-spacing: -0.2px;
+  flex: 0 0 auto;
+  opacity: 0.55;
+  font-size: 11.5px;
+  letter-spacing: -0.2px;
 }
 .mt5700-loglv {
-	flex: 0 0 auto;
-	min-width: 36px;
-	text-align: center;
-	font-size: 11px;
-	font-weight: 500;
-	padding: 1px 6px;
-	border-radius: 999px;
-	border: 1px solid transparent;
+  flex: 0 0 auto;
+  min-width: 36px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
 }
 .mt5700-logrow-info .mt5700-loglv { color: #378add; border-color: rgba(55, 138, 221, 0.45); background: rgba(55, 138, 221, 0.14); }
 .mt5700-logrow-warn .mt5700-loglv { color: #c9882a; border-color: rgba(224, 160, 58, 0.50); background: rgba(224, 160, 58, 0.16); }
@@ -3311,20 +3024,20 @@
 /* 调试徽章：此前只有 color 与 border-color、没有 background，透明底导致几乎看不见。
  * 改为实心紫底 + 白字，亮色与暗色主题下都清晰。 */
 .mt5700-logrow-dbg  .mt5700-loglv {
-	color: #ffffff;
-	border-color: #7c4ddb;
-	background: #8b5cf6;
-	box-shadow: 0 1px 2px rgba(124, 77, 219, 0.35);
+  color: #ffffff;
+  border-color: #7c4ddb;
+  background: #8b5cf6;
+  box-shadow: 0 1px 2px rgba(124, 77, 219, 0.35);
 }
 
 .mt5700-logmsg { flex: 1 1 auto; }
 .mt5700-logsrc {
-	flex: 0 0 auto;
-	font-size: 10.5px;
-	opacity: 0.5;
-	border: 1px solid rgba(128, 128, 128, 0.35);
-	border-radius: 999px;
-	padding: 0 6px;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  opacity: 0.5;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 999px;
+  padding: 0 6px;
 }
 
 /* 空状态：留白充足、信息分层 */
@@ -3334,189 +3047,189 @@
 
 /* 搜索高亮 */
 .mt5700-loglist mark {
-	background: rgba(224, 160, 58, 0.38);
-	color: inherit;
-	border-radius: 3px;
-	padding: 0 1px;
+  background: rgba(224, 160, 58, 0.38);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
 }
 
 /* 窄屏：分段控件与工具栏铺满 */
 @media (max-width: 640px) {
-	.mt5700-logtabs { display: flex !important; width: 100%; }
-	.mt5700-logtab { flex: 1 1 auto; min-width: 0; padding: 7px 10px !important; }
-	.mt5700-logsearch { flex: 1 1 100%; }
+  .mt5700-logtabs { display: flex !important; width: 100%; }
+  .mt5700-logtab { flex: 1 1 auto; min-width: 0; padding: 7px 10px !important; }
+  .mt5700-logsearch { flex: 1 1 100%; }
 }
 
 /* 自写按钮：不继承主题 button 样式，尺寸与工具栏输入框对齐 */
 .mt5700-logbtn {
-	display: inline-flex !important;
-	align-items: center;
-	justify-content: center;
-	height: 32px;
-	padding: 0 14px;
-	font-size: 13px;
-	line-height: 1;
-	color: inherit !important;
-	background: rgba(128, 128, 128, 0.14) !important;
-	border: 1px solid rgba(128, 128, 128, 0.26) !important;
-	border-radius: 8px !important;
-	box-shadow: none !important;
-	text-shadow: none !important;
-	text-decoration: none !important;
-	white-space: nowrap;
-	cursor: pointer;
-	user-select: none;
-	transition: background .15s ease, border-color .15s ease;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  line-height: 1;
+  color: inherit !important;
+  background: rgba(128, 128, 128, 0.14) !important;
+  border: 1px solid rgba(128, 128, 128, 0.26) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  text-decoration: none !important;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s ease, border-color .15s ease;
 }
 .mt5700-logbtn:hover { background: rgba(128, 128, 128, 0.22) !important; border-color: rgba(128, 128, 128, 0.36) !important; }
 .mt5700-logbtn:active { background: rgba(128, 128, 128, 0.28) !important; }
 .mt5700-logbtn-danger {
-	color: #d94f4f !important;
-	border-color: rgba(224, 90, 90, 0.45) !important;
-	background: rgba(224, 90, 90, 0.10) !important;
+  color: #d94f4f !important;
+  border-color: rgba(224, 90, 90, 0.45) !important;
+  background: rgba(224, 90, 90, 0.10) !important;
 }
 .mt5700-logbtn-danger:hover {
-	color: #fff !important;
-	background: #c94040 !important;
-	border-color: #c94040 !important;
+  color: #fff !important;
+  background: #c94040 !important;
+  border-color: #c94040 !important;
 }
 
 /* ---------- 日志页控件美化（全部自写，不依赖主题控件） ---------- */
 
 /* 级别下拉：去掉系统外观，自绘箭头 + 主色描边，与分段控件同一套配色 */
 .mt5700-logselect select {
-	appearance: none !important;
-	-webkit-appearance: none !important;
-	-moz-appearance: none !important;
-	height: 32px !important;
-	padding: 0 32px 0 12px !important;
-	font-size: 13px !important;
-	font-weight: 500 !important;
-	color: #17a67f !important;
-	background-color: rgba(23, 166, 127, 0.10) !important;
-	border: 1px solid rgba(23, 166, 127, 0.38) !important;
-	border-radius: 8px !important;
-	box-shadow: none !important;
-	text-shadow: none !important;
-	cursor: pointer;
-	background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
-	background-repeat: no-repeat !important;
-	background-position: right 10px center !important;
-	background-size: 12px 12px !important;
-	transition: background-color .15s ease, border-color .15s ease;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  height: 32px !important;
+  padding: 0 32px 0 12px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: #17a67f !important;
+  background-color: rgba(23, 166, 127, 0.10) !important;
+  border: 1px solid rgba(23, 166, 127, 0.38) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 10px center !important;
+  background-size: 12px 12px !important;
+  transition: background-color .15s ease, border-color .15s ease;
 }
 .mt5700-logselect select:hover {
-	background-color: rgba(23, 166, 127, 0.17) !important;
-	border-color: rgba(23, 166, 127, 0.55) !important;
+  background-color: rgba(23, 166, 127, 0.17) !important;
+  border-color: rgba(23, 166, 127, 0.55) !important;
 }
 .mt5700-logselect select:focus {
-	outline: none !important;
-	border-color: #17a67f !important;
-	box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.18) !important;
+  outline: none !important;
+  border-color: #17a67f !important;
+  box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.18) !important;
 }
 /* 下拉展开项（部分浏览器生效） */
 .mt5700-logselect select option {
-	color: #1f2933;
-	background: #fff;
+  color: #1f2933;
+  background: #fff;
 }
 
 /* 搜索框：聚焦时主色描边，与下拉保持一致 */
 .mt5700-logsearch input:focus {
-	outline: none !important;
-	border-color: #17a67f !important;
-	background-color: rgba(23, 166, 127, 0.08) !important;
-	box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.15) !important;
+  outline: none !important;
+  border-color: #17a67f !important;
+  background-color: rgba(23, 166, 127, 0.08) !important;
+  box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.15) !important;
 }
 
 /* 自动刷新开关：用主色渲染原生复选框，免去自写控件 */
 .mt5700-logauto input[type="checkbox"] {
-	accent-color: #17a67f !important;
-	width: 15px;
-	height: 15px;
-	cursor: pointer;
+  accent-color: #17a67f !important;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
 }
 
 /* 按钮配色：刷新=主色实心，导出=蓝色描边，清空=红色描边 */
 .mt5700-logbtn {
-	font-weight: 500;
+  font-weight: 500;
 }
 .mt5700-logbtn-primary {
-	color: #fff !important;
-	background: #17a67f !important;
-	border-color: #17a67f !important;
+  color: #fff !important;
+  background: #17a67f !important;
+  border-color: #17a67f !important;
 }
 .mt5700-logbtn-primary:hover {
-	background: #149774 !important;
-	border-color: #149774 !important;
-	box-shadow: 0 2px 8px rgba(23, 166, 127, 0.32) !important;
+  background: #149774 !important;
+  border-color: #149774 !important;
+  box-shadow: 0 2px 8px rgba(23, 166, 127, 0.32) !important;
 }
 .mt5700-logbtn-primary:active { background: #118a6a !important; }
 
 .mt5700-logbtn-accent {
-	color: #2f88d8 !important;
-	background: rgba(47, 136, 216, 0.12) !important;
-	border-color: rgba(47, 136, 216, 0.48) !important;
+  color: #2f88d8 !important;
+  background: rgba(47, 136, 216, 0.12) !important;
+  border-color: rgba(47, 136, 216, 0.48) !important;
 }
 .mt5700-logbtn-accent:hover {
-	color: #fff !important;
-	background: #2f88d8 !important;
-	border-color: #2f88d8 !important;
-	box-shadow: 0 2px 8px rgba(47, 136, 216, 0.30) !important;
+  color: #fff !important;
+  background: #2f88d8 !important;
+  border-color: #2f88d8 !important;
+  box-shadow: 0 2px 8px rgba(47, 136, 216, 0.30) !important;
 }
 .mt5700-logbtn-accent:active { background: #2878c2 !important; }
 
 /* 分段控件微调：激活态加一点阴影层次 */
 .mt5700-logtab.active {
-	box-shadow: 0 2px 8px rgba(23, 166, 127, 0.30) !important;
+  box-shadow: 0 2px 8px rgba(23, 166, 127, 0.30) !important;
 }
 
 /* 主题对 select 使用了 background 简写 + !important，会把单独写的 background-color /
  * background-image 一并重置（实测下拉变成白底、自绘箭头消失）。
  * 这里同样用简写 + 更高特异性压回去。 */
 .mt5700-logtoolbar .mt5700-logselect select {
-	background: rgba(23, 166, 127, 0.10) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
-	background-size: 12px 12px !important;
-	color: #17a67f !important;
-	font-weight: 500 !important;
-	border: 1px solid rgba(23, 166, 127, 0.38) !important;
+  background: rgba(23, 166, 127, 0.10) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
+  background-size: 12px 12px !important;
+  color: #17a67f !important;
+  font-weight: 500 !important;
+  border: 1px solid rgba(23, 166, 127, 0.38) !important;
 }
 .mt5700-logtoolbar .mt5700-logselect select:hover {
-	background: rgba(23, 166, 127, 0.18) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
-	background-size: 12px 12px !important;
-	border-color: rgba(23, 166, 127, 0.58) !important;
+  background: rgba(23, 166, 127, 0.18) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
+  background-size: 12px 12px !important;
+  border-color: rgba(23, 166, 127, 0.58) !important;
 }
 .mt5700-logtoolbar .mt5700-logselect select:focus {
-	background: rgba(23, 166, 127, 0.13) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
-	background-size: 12px 12px !important;
-	border-color: #17a67f !important;
-	box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.20) !important;
+  background: rgba(23, 166, 127, 0.13) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center !important;
+  background-size: 12px 12px !important;
+  border-color: #17a67f !important;
+  box-shadow: 0 0 0 3px rgba(23, 166, 127, 0.20) !important;
 }
 
 /* 方向徽章：请求（灰）/ 发送（蓝）/ 接收（绿），与级别徽章并排 */
 .mt5700-logdir {
-	flex: 0 0 auto;
-	min-width: 30px;
-	text-align: center;
-	font-size: 10.5px;
-	font-weight: 500;
-	padding: 0 6px;
-	border-radius: 999px;
-	border: 1px solid transparent;
+  flex: 0 0 auto;
+  min-width: 30px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
 }
 .mt5700-logdir-tx {
-	color: #2f88d8;
-	border-color: rgba(47, 136, 216, 0.45);
-	background: rgba(47, 136, 216, 0.13);
+  color: #2f88d8;
+  border-color: rgba(47, 136, 216, 0.45);
+  background: rgba(47, 136, 216, 0.13);
 }
 .mt5700-logdir-rx {
-	color: #14906d;
-	border-color: rgba(23, 166, 127, 0.45);
-	background: rgba(23, 166, 127, 0.13);
+  color: #14906d;
+  border-color: rgba(23, 166, 127, 0.45);
+  background: rgba(23, 166, 127, 0.13);
 }
 .mt5700-logdir-req {
-	color: rgba(128, 128, 128, 1);
-	border-color: rgba(128, 128, 128, 0.40);
-	background: rgba(128, 128, 128, 0.12);
+  color: rgba(128, 128, 128, 1);
+  border-color: rgba(128, 128, 128, 0.40);
+  background: rgba(128, 128, 128, 0.12);
 }
 /* 发送行淡蓝、接收行淡绿，扫一眼就能看出方向 */
 .mt5700-logrow:has(.mt5700-logdir-tx) { background: rgba(47, 136, 216, 0.055); }
@@ -3527,60 +3240,67 @@
  * 面板又叠了一层半灰底，和主题的卡片风格不一致。
  * 改为最常见的「下划线式」页签：容器无底色、只在激活项下方留一条主色线，
  * 其余全部跟随主题文字色；面板与列表底色透明，只留淡边框。
- * 这样放到任何主题里都不会突兀。 */
+ * 这样放到任何主题里都不会突兀。
+ *
+ * 注意：本段是「主题配色覆盖层」，与上方 L3138 起的「基础层」是分层关系，不是重复。
+ *   · 基础层负责尺寸 / 字号 / 字体族 / padding / 内容盒模型（如 .mt5700-loglist 的
+ *     max-height、font-family、overflow，.mt5700-logfooter 的 padding、text-align）；
+ *   · 本层只覆盖配色与边框（background / border / color / opacity），
+ *     让这些控件在任何主题下都贴合宿主风格。
+ *   两层属性集基本不重叠，任何一层都不可单独删除。 */
 .mt5700-logtabs {
-	display: flex !important;
-	flex-wrap: wrap;
-	gap: 2px;
-	margin: 0 0 14px !important;
-	padding: 0 !important;
-	background: transparent !important;
-	border: none !important;
-	border-bottom: 1px solid rgba(128, 128, 128, 0.22) !important;
-	border-radius: 0 !important;
-	max-width: none !important;
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0 0 14px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.22) !important;
+  border-radius: 0 !important;
+  max-width: none !important;
 }
 .mt5700-logtab {
-	display: inline-flex !important;
-	align-items: center;
-	justify-content: center;
-	min-width: 88px;
-	padding: 9px 16px !important;
-	margin: 0 0 -1px 0 !important;
-	font-size: 13.5px !important;
-	font-weight: 400 !important;
-	line-height: 1.4 !important;
-	color: inherit !important;
-	background: transparent !important;
-	border: none !important;
-	border-bottom: 2px solid transparent !important;
-	border-radius: 0 !important;
-	box-shadow: none !important;
-	text-shadow: none !important;
-	opacity: 0.6;
-	transition: opacity .15s ease, border-color .15s ease;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  padding: 9px 16px !important;
+  margin: 0 0 -1px 0 !important;
+  font-size: 13.5px !important;
+  font-weight: 400 !important;
+  line-height: 1.4 !important;
+  color: inherit !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  opacity: 0.6;
+  transition: opacity .15s ease, border-color .15s ease;
 }
 .mt5700-logtab:hover {
-	opacity: 0.92;
-	background: transparent !important;
+  opacity: 0.92;
+  background: transparent !important;
 }
 .mt5700-logtab.active {
-	opacity: 1 !important;
-	font-weight: 500 !important;
-	color: inherit !important;
-	background: transparent !important;
-	border-bottom-color: #17a67f !important;
-	box-shadow: none !important;
+  opacity: 1 !important;
+  font-weight: 500 !important;
+  color: inherit !important;
+  background: transparent !important;
+  border-bottom-color: #17a67f !important;
+  box-shadow: none !important;
 }
 
 /* 面板 / 列表 / 说明条 / 页脚：底色全部透明，只保留一道淡边框 */
 .mt5700-logpanel {
-	background: transparent !important;
-	border: 1px solid rgba(128, 128, 128, 0.20) !important;
+  background: transparent !important;
+  border: 1px solid rgba(128, 128, 128, 0.20) !important;
 }
 .mt5700-logpanel-hint {
-	background: transparent !important;
-	opacity: 0.68;
+  background: transparent !important;
+  opacity: 0.68;
 }
 .mt5700-loglist { background: transparent !important; }
 .mt5700-logfooter { background: transparent !important; }
@@ -3954,4 +3674,3 @@ select.mt5700-select {
   line-height: normal !important;
   text-indent: 0 !important;
 }
-
