@@ -359,7 +359,7 @@ var Parse = (function () {
 		return isNaN(parsed.getTime()) ? new Date() : parsed;
 	};
 
-	/* ================= 短信 PDU 解码（等价 Rust pdu.rs / Go pdu.go） ================= */
+	/* ================= 短信 PDU 解码（3GPP TS 23.040） ================= */
 
 	var GSM7_ALPHABET = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
 
@@ -560,7 +560,7 @@ var Parse = (function () {
 		return { sender: addr.address, content: content, date: date, partial: partial };
 	};
 
-	// 解析 CMGL=4 应答（PDU 块 / 已解码文本行），输出 SMS[]（等价 modem/sms.ts parseCMGL + PDU 解析）
+	// 解析 CMGL=4 应答（PDU 块 / 已解码文本行），输出 SMS[]
 	api.parseCMGL = function (data) {
 		var sms = [];
 		var text = data;

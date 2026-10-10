@@ -282,7 +282,7 @@ var Ui = (function () {
 
 	/* ---------- 自动刷新 ---------- */
 
-	// 自动刷新开关 + 间隔选择。返回 { el, setEnabled, setInterval }
+	// 自动刷新开关 + 间隔选择。返回 { el, setEnabled, setInterval, getInterval, isEnabled }
 	api.autoRefresh = function (onChange) {
 		var wrap = E('div', { 'class': 'at-autorefresh' });
 		var enabled = true;
