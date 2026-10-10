@@ -217,6 +217,103 @@ var Ui = (function () {
 		return E('div', { 'style': 'display:none' });
 	};
 
+	/* ---------- 后端降级提示（统一入口） ---------- */
+
+	/**
+	 * 在页面顶部插入「后端未就绪」提示条，并在真正恢复后自动移除 + 重新加载数据。
+	 *
+	 * 背景：connect() 现在「乐观放行 + 后台探活」，后端不可用时会在稍后
+	 * 派发 'degraded' 状态。各页面若不做提示，用户看到的是空控件，
+	 * 会以为页面坏了。这里把「提示 + 自愈」收敛成一个函数，
+	 * 避免 10 个页面各写一份样式与逻辑。
+	 *
+	 * 关键实现约束（实测踩过的坑）：**不能一看到 connected 就移除提示条**。
+	 * connect() 是乐观放行，重连时它会先派发 connecting→connected，
+	 * 探活结论 10s 后才到。若在 connected 时移除，提示条会「闪一下就没了」，
+	 * 而重连只要还失败就会反复出现这个闪烁。因此这里的移除条件是
+	 * 「恢复到 connected 且后端已知可用（未处于熔断/已知不可用状态）」。
+	 *
+	 * @param {HTMLElement} body   页面根节点（提示条插到最前）
+	 * @param {Function}    onReady 后端恢复后要执行的数据加载函数
+	 * @returns {HTMLElement|null} 提示条元素
+	 */
+	api.degradedNotice = function (body, onReady) {
+		if (!body || !AtWs || !AtWs.client) return null;
+
+		/* 幂等：已有提示条就复用它，避免重连抖动导致插入多个 */
+		if (body.__atwsDegradedBanner && body.__atwsDegradedBanner.parentNode) {
+			return body.__atwsDegradedBanner;
+		}
+
+		var err = AtWs.client.error || AtWs.client.backendDownError
+			|| '正在等待 at-webserver 服务启动，页面会在恢复后自动刷新。';
+		var banner = E('div', { 'class': 'alert-message warning' }, [
+			E('strong', {}, '模组后端未就绪：'),
+			E('span', {}, err)
+		]);
+		body.insertBefore(banner, body.firstChild);
+		body.__atwsDegradedBanner = banner;
+
+		/* 一次注册、长期生效：依据「后端是否真的可用」决定去留 */
+		AtWs.client.onConnectionStateChange(function (state) {
+			var genuinelyUp = (state === 'connected' && !AtWs.client.backendKnownDown
+				&& AtWs.client.circuitOpenUntil <= Date.now());
+			if (genuinelyUp) {
+				if (banner.parentNode) banner.parentNode.removeChild(banner);
+				if (body.__atwsDegradedBanner === banner) body.__atwsDegradedBanner = null;
+				if (typeof onReady === 'function') onReady();
+			} else if ((state === 'degraded' || state === 'error')
+				&& !banner.parentNode) {
+				/* 又降级了：提示条若已被移除则重新插回 */
+				body.insertBefore(banner, body.firstChild);
+			}
+		});
+
+		return banner;
+	};
+
+	/**
+	 * 各页面启动时的统一入口：连接 → 降级则提示 → 否则加载数据。
+	 *
+	 * 因为 connect() 采用「乐观放行 + 后台探活」，这里要处理两种情况：
+	 *   a) 调用时刻已经是 degraded（例如重连过程中再次进入页面）-> 立刻提示；
+	 *   b) 调用时刻还是 connected，但探活随后失败 -> 由 state 回调异步提示。
+	 *
+	 * 实现要点：**监听必须在 onReady 之前注册**。
+	 * 若先加载数据、后挂监听，探活 12s 后才报 degraded 时，
+	 * 数据请求早已失败并被各自的 catch 吞掉，页面拿到不到任何提示
+	 * （实测就是这样：页面不卡了，但用户看不到「后端未就绪」）。
+	 *
+	 * degradedNotice 内部已做成幂等且自管理去留，
+	 * 因此这里只需在「曾进入降级」时调用一次即可，无需守卫重复调用。
+	 *
+	 * 用法：Ui.startup(body, function () { loadAll(); });
+	 */
+	api.startup = function (body, onReady) {
+		/* 先挂监听，再启动：保证任何时刻进入 degraded 都能被捕获。
+		 * onConnectionStateChange 注册时会立刻回调一次当前状态，
+		 * 因此场景 a 无需额外分支。 */
+		AtWs.client.onConnectionStateChange(function (state) {
+			if (state === 'degraded' || state === 'error') {
+				api.degradedNotice(body, onReady);
+			}
+		});
+
+		return AtWs.client.connect().then(function () {
+			if (AtWs.client.state === 'degraded') {
+				api.degradedNotice(body, onReady);
+				return;
+			}
+			if (typeof onReady === 'function') onReady();
+		}).catch(function (err) {
+			/* connect 自身已保证不 reject；这里是最后一道兜底，保证页面不白屏 */
+			console.warn('启动流程异常', err);
+			if (typeof onReady === 'function') {
+				try { onReady(); } catch (e) { /* ignore */ }
+			}
+		});
+	};
+
 	/* ---------- 常用 AT 辅助 ---------- */
 
 	api.sleep = function (ms) {

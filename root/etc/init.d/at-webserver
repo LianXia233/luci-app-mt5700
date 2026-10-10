@@ -6,17 +6,362 @@ STOP=10
 USE_PROCD=1
 
 # 自定义动作：登记到帮助里，用户不必知道内部函数名也能发现这两个入口。
-#   ensure_interfaces  确保 V4/V6 模组接口存在（安装/升级后 postinst 也会调用）
-#   on_uplink          拉起模组接口（后端确认拨号就绪时调用）
-EXTRA_COMMANDS="ensure_interfaces on_uplink"
+#   ensure_interfaces      确保 V4/V6 模组接口存在（安装/升级后 postinst 也会调用）
+#   on_uplink              拉起模组接口（后端确认拨号就绪时调用）
+#   sync_serial_by_id      维护 /dev/serial/by-id 稳定符号链接
+#
+# 严重陷阱（本喵实测踩到，务必保留此说明）：
+#   EXTRA_COMMANDS 里登记的名字**必须与同名函数完全一致**。rc.common 最后
+#   执行的是 `$action "$@"`，即按命令名找同名函数；名字对不上时不会报
+#   「未知命令」，而是由 shell 抛 `sync_by_id: not found`，看起来像函数没定义，
+#   实际函数一直都在（type 能查到）。排查时会严重误导方向。
+#   且 rc.common 的 list_contains 校验**只检查名字在不在列表里**，
+#   不检查对应函数是否存在 —— 所以这个错误完全不会被提前拦住。
+EXTRA_COMMANDS="ensure_interfaces on_uplink sync_serial_by_id"
 EXTRA_HELP="	ensure_interfaces	确保 V4/V6 模组接口存在并登记到上行防火墙区域（安装/升级后自动调用）
-	on_uplink		拉起模组接口（后端确认拨号就绪时调用）"
+	on_uplink		拉起模组接口（后端确认拨号就绪时调用）
+	sync_serial_by_id	重建 /dev/serial/by-id 稳定符号链接（模组拔插后自动调用）"
 
 PROG=/usr/bin/at-webserver-rust
 PROG_NAME="at-webserver-rust"
 
 # 加载 UCI 函数库
 . /lib/functions.sh
+
+# ---------------------------------------------------------------------------
+# /dev/serial/by-id 稳定符号链接维护
+#
+# 为什么需要（真实故障）：
+#   ttyUSB* 编号由「内核枚举顺序 + option 驱动绑定顺序」决定，同一个模组换 USB
+#   口、换 xHCI 控制器、或与别的 USB 串口设备共存时，编号会整体平移 ——
+#   实测换口后 PCUI 由 ttyUSB1 变成 ttyUSB2。用户在 LuCI 里手工选定的
+#   /dev/ttyUSB1 就此失效，现象是「昨天配好能用，拔插一次就再也不通」，
+#   而且换回去又能用，极难定位。
+#   by-id 命名只用「模组自身描述符 + 接口标识」，与枚举顺序完全无关。
+#
+# 为什么不用 udev / mdev：
+#   本固件（ImmortalWrt SNAPSHOT, mediatek/filogic）既没有 udev 也没有 mdev
+#   （/proc/sys/kernel/hotplug 指向 procd 的 /sbin/hotplug），所有串口设备节点
+#   都是内核 devtmpfs 直接产出的，没有任何组件会替我们建 /dev/serial/by-id。
+#   因此由本脚本自己维护，触发点：服务启动、hotplug 事件、手动 sync_by_id。
+#
+# ---------------------------------------------------------------------------
+# 命名策略（本条是本函数最需要小心的地方，踩过坑）
+#
+# 命名必须同时满足两条互相拉扯的要求：
+#   (a) 跨编号漂移稳定 —— 换 USB 口 / 换控制器 / 共存设备变化后，同一物理口
+#       必须得到同一个路径名，否则「持久化到配置里」这个目标无法成立；
+#   (b) 跨设备唯一 —— 同一台机器上挂两个模组（或模组 + 其它 USB 串口）时，
+#       命名不能互相覆盖，否则 while 循环里后写的会盖掉先写的，
+#       表现为「两个口只剩一个 by-id，另一个静默消失」。
+#
+# 实测拿到的描述符（TDTECH MT5700M-CN，但设计上不依赖这个具体型号）：
+#   idVendor=3466 idProduct=3301 serial=57050M5826800582 bNumInterfaces=7
+#   接口列表（USB 3.0 复合设备，配置号是 2，故目录名为 2-1:2.x）：
+#     2-1:2.0 class=02 sub=0d proto=00  "TDTECH Connect - Network Card"  (网卡)
+#     2-1:2.1 class=0a sub=00 proto=01  "CDC Network Data"
+#     2-1:2.2 class=ff sub=06 proto=13  "TDTECH Connect - Application Interface"
+#     2-1:2.3 class=ff sub=06 proto=12  "TDTECH Connect - PC UI Interface"   ← AT 口
+#     2-1:2.4 class=ff sub=06 proto=1b  "TDTECH Connect - SerialB"
+#     2-1:2.5 class=ff sub=06 proto=1c  "TDTECH Connect - SerialC"
+#     2-1:2.6 class=ff sub=06 proto=14  "TDTECH Connect - GPS Interface"
+#
+# 各候选键的稳定性评估：
+#   - iSerial（57050M5826800582）：**不保证唯一**。它是模组出厂批次号+序号，
+#     同型号不同台可能重复（贴牌/批量刷写会撞号），部分批次甚至为空。
+#     仅凭它命名会在双模组场景互相覆盖 → 不能单独作为主键。
+#   - product（"TDTECH MT5700M-CN"）：多个模组必然相同，且含空格/连字符，
+#     作为文件名需清洗；更关键的是刷不同固件后 product 会变 → 不适合做键。
+#   - bInterfaceProtocol（0x12/0x13/0x1b/0x1c/0x14）：**模组固件写死在接口
+#     描述符里的接口标识**，同一固件的同一物理口恒定，换 USB 口/换控制器/
+#     换主机全都不变 → 满足 (a)；同一设备内各接口协议号互不相同 → 满足 (b)。
+#     唯一缺点：两台不同型号模组若碰巧协议号相同会撞名，但那种情况下
+#     iSerial 前缀会把它区分开（见下）。
+#
+# 最终采用「组合键」而不是任何单一键：
+#   usb-<idVendor>:<idProduct>-if<proto2hex><可选 -<iSerial 清洗片段>><可选 -n<N>>
+#   例：usb-3466:3301-if12-57050M5826800582
+#       usb-3466:3301-if12-57050M5826800582-n2   （同描述符撞名时的去重后缀）
+#
+#   - VID:PID 打头：跨模组唯一性的第一道闸（不同型号必不同）；
+#   - if<proto>：设备内唯一性的保证，也是 AT 口识别的主要依据；
+#   - iSerial 片段：同型号多台时区分（有则加，无则省略，不影响可用性）；
+#   - -n<N>：极端情况（同型号 + 同 iSerial + 同接口号）才出现的兜底去重序号。
+#
+# 这样命名的好处：**换了新模组、新型号，不需要改一行代码**，函数自动产出
+# 与描述符一致的唯一路径；AT 口优先级则交给 Rust 侧按 interface 名判定
+# （见 serialdetect::interface_score），两边职责分离、各自独立演进。
+detect_usb_netdev() {
+	local d link
+	for d in /sys/class/net/*; do
+		[ -e "$d" ] || continue
+		case "$(basename "$d")" in
+			lo|br-*|eth0|eth1) continue ;;
+		esac
+		link=$(readlink -f "$d/device" 2>/dev/null)
+		case "$link" in
+			*usb*) echo "$(basename "$d")"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+iface_device_name() {
+	local iface dev
+	iface="$1"
+	dev=$(uci -q get "network.$iface.device")
+	[ -n "$dev" ] || dev=$(uci -q get "network.$iface.ifname")
+	[ -n "$dev" ] || dev=$(detect_usb_netdev 2>/dev/null)
+	echo "$dev"
+}
+
+# 接口是否已经拿到地址。
+# 不能用 ifstatus 的 "up": true 当作「已拿到地址」：dhcp 在请求中或失败重试时
+# 接口同样是 up，此时日志却会写「已就绪（已拿到地址）」，把排障方向带偏。
+# 判据：ifstatus 的 ipv4-address / ipv6-address 数组里确实有元素。
+#
+# 踩坑记录：ifstatus 输出是**美化过的多行 JSON**，`"ipv4-address": [` 之后就是换行。
+# 若正则写成 `\[[^]]`（要求 `[` 后同行还有非 ] 字符），则永远匹配不到 ——
+# 实测该 bug 会让「接口明明有 IP」也被判成没有地址，于是走满 180s 重试并打出
+# 「未取到地址」的误报，同时拖住安装流程。必须先 tr 掉换行再匹配。
+iface_has_address() {
+	ifstatus "$1" 2>/dev/null | tr -d '\n' \
+		| grep -qE '"(ipv4-address|ipv6-address)"[[:space:]]*:[[:space:]]*\[[[:space:]]*\{'
+}
+
+# ---------------------------------------------------------------------------
+BY_ID_DIR='/dev/serial/by-id'
+
+# 把字符串清洗成安全的文件名片段。
+#
+# 规则与理由：
+#   1) 只保留 [A-Za-z0-9._-]，其余（空格、斜杠、冒号、非 ASCII）统一替换为 '_'。
+#      product/manufacturer 常带空格（"TDTECH Connect - PC UI"），不清洗会产出
+#      带空格的路径，Shell 与 UCI 里都要额外加引号，容易出错。
+#   2) 去掉首尾的 '_'，避免出现 "usb-3466:3301-if12-_foo" 这种噪声。
+#   3) **纯点号结果必须作废**：异常固件/未初始化 flash 可能把 iSerial 报成 "."、
+#      ".."、甚至一串点号，而 ".." 在路径语义里是「上一级目录」，
+#      虽然本函数的调用点都带了固定前缀（不会真的逃逸），但产出
+#      "usb-...-if12-.." 这种名字本身就没有任何辨识价值，且会让
+#      readlink -f 的解析结果变得难读。直接判空，交给调用方走「省略该片段」分支。
+#   4) 长度截断到 48 字符：USB 描述符字段最长 126 字节，极端情况下会把
+#      文件名撑到超过 NAME_MAX 的余量；iSerial 前 48 字符已足够区分同批设备。
+sanitize_id_part() {
+	local out
+	out=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_' | sed 's/^_*//; s/_*$//')
+	# 纯点号（含 "." / ".." / "..."）无区分价值，一律作废
+	case "$out" in
+		.*) case "$out" in *[!.]*) ;; *) echo ''; return 0 ;; esac ;;
+	esac
+	# 截断到 48 字符
+	out=$(printf '%.48s' "$out")
+	echo "$out"
+}
+
+# 接口协议号 → 两位小写十六进制，用于 by-id 命名的 if<N> 片段。
+#
+# 严重陷阱（实测踩到）：sysfs 的 bInterfaceProtocol 读出来的是**十六进制字符串**
+# （本机实测为 "12" / "13" / "1b" / "1c" / "14" 共 5 个不同值），
+# 直接 `printf '%02x' "$1"` 会让 printf 按**十进制**解释它：
+#   "12"(0x12=18dec) 被当成 12dec → 输出 "0c"   ← 错，且与真实协议号无关
+#   "1b" 因含非十进制字符，busybox printf 报错 → fallback "00"
+#   结果 ttyUSB2/ttyUSB3 双双变成 "0000"，产生本不该有的撞名。
+#
+# 正确做法：分两步归一化 ——
+#   1) 统一去掉可能存在的 "0x" 前缀（不同内核对 sysfs 打印格式不完全一致）；
+#   2) 用已知的十六进制值域做校验：两位且字符合法，则原样保留（它已经是
+#      十六进制表示，不需要再转换）；否则视为异常值回退 "00"。
+# 关键认识：**这里的输入已经是十六进制文本，不需要也不应该做进制换算**，
+# 唯一要做的是校验并保持原样。
+to_hex2() {
+	local v
+	# 去 0x / 0X 前缀（不同内核对 sysfs 的打印格式不完全一致）
+	v=$(printf '%s' "$1" | sed 's/^0[xX]//')
+	# 去首尾与中间空白。
+	#
+	# ===== 严重陷阱，务必保留此说明（本喵实测踩到并花了几轮才定位）=====
+	# 这里**绝不能用 tr -d '[:space:]'**。busybox 的 tr 对 POSIX 字符类
+	# 解析有缺陷：它会把 "[:space:]" 里的字母按**字面字符集**处理，
+	# 于是 's','p','a','c','e' 这几个字母全被当成要删除的字符！
+	# 实测后果（bInterfaceProtocol 的真实取值）：
+	#   '1c' -> '1'     （c 被当成 space 里的字符删掉）
+	#   '1e' -> '1'     （e 同上）
+	#   '0c' -> '0'
+	#   '0e' -> '0'
+	#   而 '1b'/'1d'/'1f'/'13'/'14' 幸存 —— 因为 b/d/f 不在 "space" 里。
+	# 表现是「只有含 c/e 的接口号被算错」，毫无规律、极难定位，
+	# 且会让不同物理口算出同一个 if 号（本可避免的撞名）。
+	# 同理 tr '[:upper:]' '[:lower:]' 在 busybox 上**完全无效**（实测 FF 原样保留），
+	# 也不能用 —— 那边的缺陷只是不生效，这边的缺陷是**破坏数据**，更危险。
+	# 结论：本函数一律用 sed 完成清洗，不依赖 busybox tr 的字符类。
+	v=$(printf '%s' "$v" | sed 's/[[:space:]]//g')
+	# 大小写归一（用 tr 的显式字符区间写法，实测 busybox 对该写法正确）
+	v=$(printf '%s' "$v" | tr 'A-F' 'a-f')
+	# 校验：1~2 位纯十六进制字符才可用；1 位补前导 0（如 "c" → "0c"）
+	case "$v" in
+		*[!0-9a-f]*) echo '00'; return 0 ;;
+	esac
+	if [ -z "$v" ]; then
+		echo '00'
+		return 0
+	fi
+	# 超长（>2 位）视为异常，防止把整个字段塞进文件名
+	if [ "${#v}" -gt 2 ]; then
+		echo '00'
+		return 0
+	fi
+	if [ "${#v}" -eq 1 ]; then
+		echo "0$v"
+		return 0
+	fi
+	echo "$v"
+}
+
+sync_serial_by_id() {
+	local tty base up parent iface ifnum proto hex cur vid pid serial
+	local link name cnt=0 target
+	# 已生成的名字清单（用于 -n<N> 去重），以及各自的重名计数
+	local used_names='' n dup
+
+	[ -d /dev ] || return 1
+
+	# 没有任何 USB 串口时不做任何事（也不建目录），避免在无模组的机器上留空目录。
+	# 两个通配符要分开判定：ls 对不存在的参数会报错并返回非 0，写在一起会把
+	# 「另一个通配符有匹配」的情况误判成「没有串口」。
+	if ! ls /dev/ttyUSB* >/dev/null 2>&1 && ! ls /dev/ttyACM* >/dev/null 2>&1; then
+		# 设备都拔了：清掉旧链接，防止断链被后端当成有效候选
+		# （断链会让自动探测白等一次 800ms 超时预算）
+		if [ -d "$BY_ID_DIR" ]; then
+			for link in "$BY_ID_DIR"/usb-*; do
+				[ -L "$link" ] || continue
+				rm -f "$link" 2>/dev/null
+			done
+		fi
+		return 0
+	fi
+
+	mkdir -p "$BY_ID_DIR" 2>/dev/null || {
+		logger -t at-webserver "警告：无法创建 $BY_ID_DIR，by-id 稳定路径不可用（将回退 ttyUSB*）"
+		return 1
+	}
+
+	# 先清掉本轮之前生成的全部 usb-* 链接，再统一重建。
+	#
+	# 为什么整批清而不做增量：
+	#   增量维护需要「旧链接 → 新设备」的映射，而设备拔出后旧链接已无法解析，
+	#   无从判断它对应哪个口。整批重建最坏也只是短时间内链接不存在（毫秒级），
+	#   且本函数在服务启动/hotplug 时同步执行，不涉及运行期读路径竞争。
+	#   只删 usb-* 前缀，不动目录里其它内容（避免误删别人放的链接）。
+	for link in "$BY_ID_DIR"/usb-*; do
+		[ -L "$link" ] || continue
+		rm -f "$link" 2>/dev/null
+	done
+
+	for tty in /dev/ttyUSB* /dev/ttyACM*; do
+		# -c 判定字符设备：通配符无匹配时会原样作为字面量传入，这一步会滤掉
+		[ -c "$tty" ] || continue
+		base=$(basename "$tty")
+
+		# 解析该 tty 所属的 USB 接口目录：
+		#   /sys/class/tty/ttyUSB1/device -> .../2-1:2.3/ttyUSB1
+		# 其父目录即接口目录，接口标识与设备描述符都在那里。
+		up=$(readlink -f "/sys/class/tty/$base/device" 2>/dev/null)
+		[ -n "$up" ] || continue
+		parent=$(dirname "$up")
+		[ -d "$parent" ] || continue
+
+		# 接口号：目录名形如 "2-1:2.3"，取 ':' 之后的 "2.3"。
+		# 注意配置号不一定是 1（USB 3.0 复合设备实测为 2），且设备口位会变，
+		# 因此这个值**只用来说明「哪个配置」，不参与稳定性判定**。
+		ifnum=$(basename "$parent" | sed -n 's/.*://p')
+		[ -n "$ifnum" ] || continue
+
+		# 接口名（"TDTECH Connect - PC UI Interface"）：仅用于日志可读性，
+		# 不参与命名 —— 它含空格会带来引号麻烦，且刷固件后可能变化。
+		iface=$(cat "$parent/interface" 2>/dev/null)
+
+		# bInterfaceProtocol 是命名主键。
+		# 它由模组固件写死在接口描述符里，同一物理口恒定，
+		# 与 USB 口位/控制器/编号/主机无关；同一设备内各接口互不相同。
+		proto=$(cat "$parent/bInterfaceProtocol" 2>/dev/null)
+		hex=$(to_hex2 "$proto")
+
+		# 往上找到真正的 USB 设备目录（含 idVendor 的那一级）。
+		# 不能只取 parent 的父目录：复合设备/集线器下层级数不固定，必须上溯。
+		vid=''; pid=''; serial=''
+		cur="$parent"
+		while [ "$cur" != "/" ] && [ "$cur" != "." ]; do
+			if [ -f "$cur/idVendor" ]; then
+				vid=$(cat "$cur/idVendor" 2>/dev/null)
+				pid=$(cat "$cur/idProduct" 2>/dev/null)
+				serial=$(cat "$cur/serial" 2>/dev/null)
+				break
+			fi
+			cur=$(dirname "$cur")
+		done
+		[ -n "$vid" ] || continue
+		# 跳过根集线器（1d6b 是 Linux Foundation 的 xHCI 根 hub 供应商号）
+		[ "$vid" = "1d6b" ] && continue
+
+		# 组装名称：VID:PID（跨型号唯一） + 接口协议号（设备内唯一）
+		name="usb-${vid}:${pid}-if${hex}"
+		# iSerial 可用则追加，用于同型号多台时的区分；不可用则省略，
+		# 此时同型号多台会靠下面的 -n<N> 序号兜底，功能不受影响。
+		if [ -n "$serial" ]; then
+			name="$name-$(sanitize_id_part "$serial")"
+		fi
+
+		# 撞名兜底：极端情况下（同型号 + 同 iSerial + 同协议号）加 -n<N>。
+		# 用 used_names 记录本轮已用名字，避免后写的链接覆盖先写的。
+		n=1
+		dup="$name"
+		while : ; do
+			case " $used_names " in
+				*" $dup "*) n=$((n + 1)); dup="$name-n$n" ;;
+				*) break ;;
+			esac
+		done
+		name="$dup"
+		used_names="$used_names $name"
+
+		link="$BY_ID_DIR/$name"
+
+		# ln -sf 对已存在的链接会覆盖（GNU/busybox 都是先 unlink 再创建），
+		# 但为稳妥仍显式 rm：某些 busybox 版本的 -f 在跨设备时行为不一致。
+		rm -f "$link" 2>/dev/null
+		ln -sf "$tty" "$link" 2>/dev/null || {
+			logger -t at-webserver "警告：创建 $link 失败"
+			continue
+		}
+
+		# 校验产出有效（能解析回一个存在的字符设备），避免留下断链
+		target=$(readlink -f "$link" 2>/dev/null)
+		if [ -c "$target" ]; then
+			cnt=$((cnt + 1))
+			logger -t at-webserver "by-id: $base（$iface）-> $name"
+		else
+			logger -t at-webserver "警告：$link 解析结果 $target 不是有效字符设备，已删除"
+			rm -f "$link" 2>/dev/null
+		fi
+	done
+
+	if [ "$cnt" -gt 0 ]; then
+		logger -t at-webserver "已维护 $cnt 个 $BY_ID_DIR 稳定链接"
+	else
+		logger -t at-webserver "未生成任何 by-id 链接（USB 串口可能尚未完全枚举），后端将回退使用 ttyUSB*"
+	fi
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# 模组网口的设备名（统一来源，避免各处硬编码 eth2）
+#
+# 优先取 UCI network.<iface>.device，其次兼容旧的 ifname；
+# 都拿不到时在 /sys/class/net 里探测挂在 USB 总线上的网卡
+# （cdc_ncm / cdc_ether / rndis_host / cdc_mbim 都会出现在 usb 设备路径下）。
+# 硬编码 eth2 在不同机型上可能不成立；仓库里 ucode 侧早就改成「不硬编码」，
+# 这里统一到同一套规则。
+# ---------------------------------------------------------------------------
 
 # 模组接口名（与机型定制包保持一致）
 IFACE_4G='MT5700M'
@@ -121,6 +466,11 @@ at_webserver_post_start() {
 		bind_modem_serial
 	fi
 
+	# 1b) 维护 by-id 稳定链接。必须排在 bind_modem_serial 之后：绑定失败的
+	#     唯一职责就是产出 ttyUSB*，链接才有可指向的目标。放在接口拉起之前，
+	#     保证后端首次读配置时链接已就绪。
+	sync_serial_by_id
+
 	# 2) 模组接口的启动对齐（见下方 ensure_modem_interface 注释）
 	ensure_modem_interface
 
@@ -172,54 +522,6 @@ bind_modem_serial() {
 	return 1
 }
 
-# ---------------------------------------------------------------------------
-# 模组网口的设备名（统一来源，避免各处硬编码 eth2）
-#
-# 优先取 UCI network.<iface>.device，其次兼容旧的 ifname；
-# 都拿不到时在 /sys/class/net 里探测挂在 USB 总线上的网卡
-# （cdc_ncm / cdc_ether / rndis_host / cdc_mbim 都会出现在 usb 设备路径下）。
-# 硬编码 eth2 在不同机型上可能不成立；仓库里 ucode 侧早就改成「不硬编码」，
-# 这里统一到同一套规则。
-# ---------------------------------------------------------------------------
-detect_usb_netdev() {
-	local d link
-	for d in /sys/class/net/*; do
-		[ -e "$d" ] || continue
-		case "$(basename "$d")" in
-			lo|br-*|eth0|eth1) continue ;;
-		esac
-		link=$(readlink -f "$d/device" 2>/dev/null)
-		case "$link" in
-			*usb*) echo "$(basename "$d")"; return 0 ;;
-		esac
-	done
-	return 1
-}
-
-iface_device_name() {
-	local iface dev
-	iface="$1"
-	dev=$(uci -q get "network.$iface.device")
-	[ -n "$dev" ] || dev=$(uci -q get "network.$iface.ifname")
-	[ -n "$dev" ] || dev=$(detect_usb_netdev 2>/dev/null)
-	echo "$dev"
-}
-
-# 接口是否已经拿到地址。
-# 不能用 ifstatus 的 "up": true 当作「已拿到地址」：dhcp 在请求中或失败重试时
-# 接口同样是 up，此时日志却会写「已就绪（已拿到地址）」，把排障方向带偏。
-# 判据：ifstatus 的 ipv4-address / ipv6-address 数组里确实有元素。
-#
-# 踩坑记录：ifstatus 输出是**美化过的多行 JSON**，`"ipv4-address": [` 之后就是换行。
-# 若正则写成 `\[[^]]`（要求 `[` 后同行还有非 ] 字符），则永远匹配不到 ——
-# 实测该 bug 会让「接口明明有 IP」也被判成没有地址，于是走满 180s 重试并打出
-# 「未取到地址」的误报，同时拖住安装流程。必须先 tr 掉换行再匹配。
-iface_has_address() {
-	ifstatus "$1" 2>/dev/null | tr -d '\n' \
-		| grep -qE '"(ipv4-address|ipv6-address)"[[:space:]]*:[[:space:]]*\[[[:space:]]*\{'
-}
-
-# ---------------------------------------------------------------------------
 # 机型未预置接口时自动创建（V4 与 V6 都要创建）
 #
 # 旧行为是「接口不存在则 continue」——在非定制机型上等于什么都不做，也没有任何日志。

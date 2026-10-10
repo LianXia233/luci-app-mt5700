@@ -1525,13 +1525,40 @@ return L.view.extend({
 		/* ---------- 13. 统一调度刷新与挂载 ---------- */
 
 		var refreshing = false;
+		/*
+		 * 原实现把这 11 个函数全串行（含 loadDiagnostics 内部 9 条 AT），
+		 * 一轮刷新最坏要串行跑 20 多条 AT；模组异常时每条都耗满超时，
+		 * 5 秒的刷新周期根本跑不完，定时器不断堆积。
+		 *
+		 * 改法：按「数据族」分 4 组，组内串行、组间并发。
+		 * 分组依据是数据来源与依赖关系，而不是随意均分：
+		 *   - 注册/运营商：同属网络注册信息，放一组（顺带保证先后语义）；
+		 *   - 承载/流量：AMBR/QCI/DHCP/Flow 都属于承载与流量统计；
+		 *   - 温度/MCS：两个独立的单点查询，放一组；
+		 *   - 网络信息/副小区/诊断：诊断内部最重，单独成组避免拖累其它组。
+		 * 每组各自 catch，单组异常不影响其它组更新。
+		 */
 		function refreshAll() {
 			if (refreshing) return Promise.resolve();
 			refreshing = true;
-			var chain = Promise.resolve();
-			[getPSReg, getOperator, getAMBR, getQCI, getDHCP, getFlow, getTemp, getMCS, updateNetworkInfo, loadSecondary, loadDiagnostics]
-				.forEach(function (fn) { chain = chain.then(fn); });
-			return chain.catch(function (err) {
+
+			var groups = [
+				[getPSReg, getOperator],
+				[getAMBR, getQCI, getDHCP, getFlow],
+				[getTemp, getMCS],
+				[updateNetworkInfo, loadSecondary, loadDiagnostics]
+			];
+			var runners = groups.map(function (g) {
+				var chain = Promise.resolve();
+				g.forEach(function (fn) {
+					chain = chain.then(fn).catch(function (err) {
+						console.warn('遥测数据块刷新失败', err);
+					});
+				});
+				return chain;
+			});
+
+			return Promise.all(runners).catch(function (err) {
 				console.warn('刷新遥测数据异常', err);
 			}).then(function () { refreshing = false; });
 		}
@@ -1562,20 +1589,11 @@ return L.view.extend({
 		renderDHCP();
 		renderMCS();
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [
-					{ key: 'key', label: '连接密钥', type: 'password', hint: '该密钥保存在 UCI at-webserver.websocket.auth_key' }
-				], function (values) {
-					if (!values.key) return;
-					AtWs.client.connect(values.key).catch(function (e) { Mt5700.error((e && e.message) || '认证失败'); });
-				});
-				return;
-			}
-			if (err) console.warn('连接异常', err);
-		}).then(function () {
-			refreshAll();
-		});
+		/*
+		 * 启动：页面骨架与静态卡片已渲染完毕，这里只填充遥测数据。
+		 * 统一由 Ui.startup 处理「降级提示 + 恢复后自动刷新（自愈）」。
+		 */
+		Ui.startup(body, function () { refreshAll(); });
 
 		self._dispose = function () {
 			if (timer) clearInterval(timer);
