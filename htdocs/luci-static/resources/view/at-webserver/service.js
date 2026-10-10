@@ -5,9 +5,7 @@
 /* global L, AtWs, Parse, Mt5700 */
 
 /**
- * 服务配置 - 新 UI 视觉 + 基准 v1.3.4 功能
- *
- * 合并旧版 LuCI config.js 的全部功能 + 新增项：
+ * 服务配置页面，覆盖以下配置项：
  * - connection_type / network_host / network_port / serial_port / baud_rate
  * - websocket_host / websocket_port / websocket_auth_key
  * - 通知开关：notify_*（来电/短信/信号/内存满/WebHook URL 与企业微信）
@@ -19,10 +17,10 @@
  * 白化）或服务从未被拉起时，它返回的是空对象——这与「服务配置为禁用」在界面上
  * 无法区分，且不给出任何原因。本页改为多源交叉判定：
  *   1) 已注册实例的 running/pid（procd 权威状态）
- *   2) 二进制是否存在且可执行（file.stat）
- *   3) 配置是否启用（UCI enabled）
- *   4) 监听端口是否有进程在听（间接佐证，避免仅凭配置误判）
- * 并区分「运行中」/「已停止」/「未注册」/「未安装」/「已禁用」五种语义，
+ *   2) 二进制是否存在（file.stat）
+ *   3) 二进制是否可执行（file.stat 的执行位）
+ *   4) 配置是否启用（UCI enabled）
+ * 并区分「运行中」/「已禁用」/「未安装」/「不可执行」/「未注册」/「已停止」六种语义，
  * 给出对应的修复建议。
  */
 
@@ -31,7 +29,7 @@ var BINARY = '/usr/bin/at-webserver-rust';
 
 /**
  * 由多源状态推导服务状态标签、颜色与原因提示。
- * 优先级：运行中 > 已禁用 > 未安装 > 未注册 > 已停止
+ * 优先级：运行中 > 已禁用 > 未安装 > 不可执行 > 未注册 > 已停止
  */
 function resolveStatus(state) {
 	var running = !!state.running;

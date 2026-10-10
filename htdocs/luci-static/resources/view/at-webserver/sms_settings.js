@@ -7,7 +7,7 @@
 /* global L, AtWs, Parse, Ui, SmsEncode, Mt5700 */
 
 /**
- * 短信设置 - 新 UI 视觉 + 基准 v1.3.4 功能（含 USSD 查询）
+ * 短信设置页面（含 USSD 查询）：
  *
  * - IMS 开关（AT^IMSSWITCH? / AT^IMSSWITCH=1,0,0 等）
  * - 短信开关（开启步骤：CEUS=1/IMSSWITCH=1/CFUN=1/CGDCONT=5/CSCA；关闭步骤反向）
