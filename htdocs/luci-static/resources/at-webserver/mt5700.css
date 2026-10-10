@@ -38,7 +38,7 @@
   --mt5700-shadow-lg: var(--mt5700-sh-3);
   --mt5700-shadow-xl: var(--mt5700-sh-float);
 
-  /* 圆角 —— 基准对齐参考站点 --radius: .85rem */
+  /* 圆角档位 —— 中档对齐通用 --radius: .85rem */
   --mt5700-radius-sm: 7px;
   --mt5700-radius-md: 10px;
   --mt5700-radius-lg: 14px;
@@ -455,7 +455,7 @@
   /*
    * 四项仪表等高对齐：让标签行、仪表行、档位行、描述行各自处在同一条基线上。
    * 用 min-height 而非 height:100% —— 网格行高由 grid-auto-rows:1fr 统一，
-   * 此处只保证不矮于基准高度；内容多时允许卡片自身撑开，
+   * 此处只保证不矮于该最小高度；内容多时允许卡片自身撑开，
    * 由网格的 align-self:stretch 保证同行等高，不会溢出压住下方元素。
    */
   min-height: 100%;
