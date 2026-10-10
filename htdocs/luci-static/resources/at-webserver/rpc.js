@@ -546,7 +546,7 @@ function bandName(kind, band) {
  *   - NR 没有 RSSI，第一个数值就是 RSRP，SINR 在 value2、RSRQ 在 value3；
  *   - LTE 前面多一个 RSSI，SINR 在 value3、RSRQ 在 value4（与 NR 相反）。
  *
- * 旧实现把 LTE 当成 <rsrp>,<rsrq>,<sinr> 解析，于是 4G 下 RSRQ 与 SINR 整体
+ * 注意：若把 LTE 当成 <rsrp>,<rsrq>,<sinr> 解析，4G 下 RSRQ 与 SINR 会整体
  * 错位：^HCSQ: "LTE",45,34,106,19 会被解成 RSRP=-106 / RSRQ=-3 / SINR=-16.2，
  * 而按手册应为 RSSI=-76 / RSRP=-106 / SINR=1.2 / RSRQ=-10 —— 真正的 SINR
  * （106 → 1.2 dB）被当成 RSRQ 吃掉，界面上表现为「4G 下 SINR 读不出来」。
@@ -590,7 +590,7 @@ function parseHCSQ(data) {
 		result.rscp = pick(2, convertRssi);
 		result.ecio = pick(3, convertEcio);
 	} else {
-		/* "GSM",<gsm_rssi>，以及未知 / 旧版数字制式的兜底（沿用旧行为） */
+		/* "GSM",<gsm_rssi>，以及未知 / 纯数字制式的兜底 */
 		result.rssi = pick(1, convertRssi);
 	}
 	return result;
@@ -721,7 +721,7 @@ function parseMONSC(data) {
 		 * 与 NR 相比：没有 flag 位、PCI/ARFCN/TAC 为十六进制、末位是 RSSI
 		 * （-90~-25 dBm 工程值），且 **没有 SINR 字段**——4G 的 SINR 一律由
 		 * ^HCSQ 兜底补齐（见 network_status 的 needHcsq 逻辑）。
-		 * 旧实现套用 NR 布局，4G 下 cid/pci/channel/rsrp/rsrq 全部错位
+		 * 注意：若直接套用 NR 布局，4G 下 cid/pci/channel/rsrp/rsrq 会全部错位
 		 * （rsrp 取到 rsrq、rsrq 取到 RSSI、channel 变成 "-85"）。
 		 */
 		d = {

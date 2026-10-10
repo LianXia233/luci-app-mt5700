@@ -617,7 +617,7 @@
 
 /* 2) 摘要块：标题 + 描述 */
 /*
- * 参考稿写死 width:205px，但那是按英文/短句的短描述设计的。
+ * 早期设计稿写死 width:205px，那是按英文/短句的短描述定的。
  * 中文描述实测需 221px，套 205px 会被截尾（「…适合看高清视频及大文件下…」）。
  * 实机卡片宽 1596px、指标区之外仍有富余，因此给描述**按可用宽度自适应**：
  *   宽屏（>=1400px）放足 340px，中文整句完整可读；
@@ -671,7 +671,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(75px, 1fr));
   gap: 6px;
-  /* 与卡片同级居中对齐；参考稿指标区高 53px（23px 图标 + 上下 12px padding + 边框） */
+  /* 与卡片同级居中对齐；指标区高 53px（23px 图标 + 上下 12px padding + 边框） */
   align-items: stretch;
   align-self: center;
 }
@@ -681,7 +681,7 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  /* 参考稿实测 53px 高：图标 23px 之外由 label+value 两行撑起（9+12+2+行高） */
+  /* 实测 53px 高：图标 23px 之外由 label+value 两行撑起（9+12+2+行高） */
   min-height: 53px;
   box-sizing: border-box;
   padding: 6px 8px;
@@ -814,11 +814,11 @@
 .mt5700-verdict-bad  { --mt5700-verdict-accent: #b02b45; --mt5700-verdict-worst-bg: rgba(176, 43, 69, 0.1); }
 .mt5700-verdict-empty { --mt5700-verdict-accent: #8ba3b6; }
 
-/* ---------- 图标动效（与参考稿逐条对齐，全部由 CSS 驱动） ---------- */
+/* ---------- 图标动效（全部由 CSS 驱动） ---------- */
 /*
- * 参考稿的柱状图是「闭合路径 + stroke 描边」呈现（.metric svg 统一 fill:none），
+ * 柱状图以「闭合路径 + stroke 描边」呈现（.metric svg 统一 fill:none），
  * 不是实心填充块。此处必须保持 fill:none + stroke 继承，
- * 否则会渲染成实心矩形，与参考稿的细线格栅观感不符。
+ * 否则会渲染成实心矩形，与细线格栅的观感不符。
  */
 .mt5700-verdict-metricicon .mt5700-bar {
   transform-origin: center bottom;
@@ -831,7 +831,7 @@
 .mt5700-verdict-metricicon .mt5700-bar:nth-child(3) { animation-delay: 0.24s; }
 .mt5700-verdict-metricicon .mt5700-bar:nth-child(4) { animation-delay: 0.36s; }
 
-/* 按档位点亮柱数：4 档 4 根，最差 1 根（与参考稿 data-bars 规则一致） */
+/* 按档位点亮柱数：4 档 4 根，最差 1 根（规则同 BAR_COUNT / data-bars） */
 .mt5700-verdict-metric[data-bars="1"] .mt5700-bar:nth-child(n+2),
 .mt5700-verdict-metric[data-bars="2"] .mt5700-bar:nth-child(n+3),
 .mt5700-verdict-metric[data-bars="3"] .mt5700-bar:nth-child(4) { opacity: 0.14; }
