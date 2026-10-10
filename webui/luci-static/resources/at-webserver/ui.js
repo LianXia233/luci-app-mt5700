@@ -7,7 +7,7 @@
 
 /**
  * LuCI 页面公共 UI 辅助：连接状态条、面板、字段、提示、加载态。
- * 保持与原 WebUI（Semi Design）一致的交互语义：加载态、错误提示、确认弹窗、自动刷新。
+ * 页面公共 UI 辅助：面板、字段、提示、加载态、确认弹窗、自动刷新。
  */
 
 // 注入公共样式（at.css 与 ui.js 同目录）。
@@ -212,7 +212,7 @@ var Ui = (function () {
 
 	/* ---------- 连接状态条 ---------- */
 
-		// 连接状态卡片已按需求从所有页面移除：保留空实现兜底，任何调用不再渲染任何内容
+		// 连接状态卡片已从所有页面移除；renderConnectionBar 为空实现兜底，返回一个隐藏 div。
 		api.renderConnectionBar = function () {
 			return E('div', { 'style': 'display:none' });
 		};
@@ -223,12 +223,12 @@ var Ui = (function () {
 		return new Promise(function (resolve) { window.setTimeout(resolve, ms); });
 	};
 
-	// 原前端发命令前固定等 100ms，保证命令间隔
+	// 发命令前固定等 100ms，保证命令间隔
 	api.sendCmd = function (command) {
 		return api.sleep(100).then(function () { return AtWs.client.sendCommand(command); });
 	};
 
-	// 错误文本还原（等价 atx.ts 的 atErrorText）
+	// 错误文本还原：将 CME ERROR:<n> 映射为中文提示
 	api.atErrorText = function (res, fallback) {
 		if (!res || res.success) return fallback;
 		var msg = res.error || fallback;
@@ -280,9 +280,9 @@ var Ui = (function () {
 		return el;
 	};
 
-	/* ---------- 自动刷新（等价原 AutoRefresh 组件） ---------- */
+	/* ---------- 自动刷新开关 + 间隔选择 ---------- */
 
-	// 自动刷新开关 + 间隔选择。返回 { el, setEnabled, setInterval }
+	// 自动刷新开关 + 间隔选择。返回 { el, setEnabled(v), setInterval(s), getInterval(), isEnabled() }
 	api.autoRefresh = function (onChange) {
 		var wrap = E('div', { 'class': 'at-autorefresh' });
 		var enabled = true;
@@ -340,7 +340,7 @@ var Ui = (function () {
 
 	/**
 	 * set interval，路由切换（hashchange）时自动 clear。
-	 * 返回原 timer id。
+	 * 返回 timer id。
 	 */
 	api.interval = function (ms, fn) {
 		_installHashHook();

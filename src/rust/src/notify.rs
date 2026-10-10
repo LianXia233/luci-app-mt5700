@@ -37,7 +37,7 @@ pub struct Notifier {
     log_file: Option<String>,
 }
 
-#[allow(dead_code)] // sender 字段保留（通知来源标识）
+#[allow(dead_code)] // sender() 方法保留，供外部获取通知发送通道
 impl Notifier {
     pub fn new(cfg: NotificationConfig) -> (Notifier, mpsc::Receiver<Notification>) {
         let (tx, rx) = mpsc::channel(NOTIFY_QUEUE_SIZE);

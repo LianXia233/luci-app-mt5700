@@ -281,7 +281,7 @@ return L.view.extend({
 		var bottomActions = Mt5700.panelActions(saveBtn, saveStatus);
 		body.appendChild(bottomActions);
 
-		// 任何表单控件变更都标记为「未保存」，与原「保存并应用」行为对齐
+		// 任何表单控件变更都标记为「未保存」，离开页面时由浏览器拦截提醒
 		page.addEventListener('change', function () { AtWs.uci.markDirty(); });
 		page.addEventListener('input', function () { AtWs.uci.markDirty(); });
 

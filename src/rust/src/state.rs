@@ -116,8 +116,8 @@ impl StateCache {
             return Err("AT 通道未连接".into());
         }
 
-        // 扫频/锁频等长命令独占通道：此时不下发新的 AT，以免排队阻塞，
-        // 改由新鲜窗口内的旧缓存顶住（见 resolve 的 long-command 分支）。
+        // 扫频/锁频等长命令独占通道：本函数直接返回 Err，不下发新 AT，
+        // 由 resolve 的 long-command 分支以已有缓存顶住。
         if self.client.long_command_active() {
             return Err("模组正忙（长命令进行中），暂不刷新缓存".into());
         }
@@ -143,7 +143,7 @@ impl StateCache {
     }
 
     /// 读穿接口：返回 `Some(text)` 表示从缓存/一次抓取得到结果（毫秒级命中）；
-    /// 返回 `Ok(None)` 表示该指令不在白名单，调用方走原有 live 路径；
+    /// 返回 `Ok(None)` 表示该指令不在白名单，调用方改走 live 直发路径；
     /// 返回 `Err(msg)` 表示白名单内但抓取失败（如未连接 / 模组正忙），调用方可回退或报错。
     pub async fn resolve(&self, command: &str) -> Result<Option<String>, String> {
         let key = command.trim().to_uppercase();

@@ -85,10 +85,10 @@ tests/mock-modem/          mock 模组 e2e 测试（TCP RPC 通道）
 
 ```bash
 # 树莓派 / ARM 工控机
-sudo apt install ./at-webserver_2.0.0-1_arm64.deb
+sudo apt install ./at-webserver_2.0.1-1_arm64.deb
 
 # PC / x86 虚拟机
-sudo apt install ./at-webserver_2.0.0-1_amd64.deb
+sudo apt install ./at-webserver_2.0.1-1_amd64.deb
 ```
 
 `apt` 会自动处理依赖解析与服务注册（`postinst` 中 `daemon-reload` + `enable` + `start`）。
@@ -299,7 +299,7 @@ http://<host>:9000/_layout-test/status-mock.html
 | 二进制分发 | Release 挂 ipk/apk 资产 | Release 挂 `at-webserver_*_amd64/arm64.deb`，标签前缀 `debian-v*` |
 | CI | `.github/workflows/build-openwrt.yml`（3 架构矩阵） | `.github/workflows/build-deb.yml`（amd64 + arm64 矩阵） |
 
-> **标签空间隔离**：本分支的 Release 标签统一使用 `debian-v*` 前缀（如 `debian-v2.0.0`），
+> **标签空间隔离**：本分支的 Release 标签统一使用 `debian-v*` 前缀（如 `debian-v2.0.1`），
 > 与 `main` 分支的 `v*`（OpenWrt 包）互不干扰。分支推送时 CI 自动以 `debian-v<Cargo版本>`
 > 作为 Release 名；也可手动打 `debian-v*` 标签指定名称。
 
@@ -324,7 +324,7 @@ http://<host>:9000/_layout-test/status-mock.html
 本分支的变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，逐版本的设计说明与实测记录见
 [`docs/release-notes/`](docs/release-notes/)。
 
-版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.0.0`，
+版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.0.1`，
 Release 标签前缀 `debian-v*`），不对应 `main` 的 v1.x 编号；`main` 侧的变更记录见
 `main` 分支的 `CHANGELOG.md`。
 

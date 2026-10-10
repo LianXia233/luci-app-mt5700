@@ -5,9 +5,7 @@
 /* global L, AtWs, Parse, Mt5700 */
 
 /**
- * 模组升级 - 新 UI 视觉 + 基准 v1.3.4 功能
- *
- * 等价迁移原 WebUI system/Upgrade.tsx，并保留 v1.4.x 玻璃拟态卡片风格：
+ * 模组升级页：
  * - 免责声明（未同意前不允许开始升级）
  * - 当前版本 AT+CGMR
  * - FOTA 状态机轮询 AT^FOTASTATE?：11 查询中 / 12 发现新版本 / 13 查询失败 /

@@ -2,8 +2,8 @@
 /*
  * 独立 WebUI 应用外壳：模块加载器 + hash 路由。
  *
- * 页面清单与原 LuCI menu.d 完全一致（标题、顺序、视图文件），视图代码
- * 原样复用 webui/luci-static/resources/view/at-webserver/*.js。
+ * 独立 WebUI 的页面清单（path / title / view），视图代码位于
+ * webui/luci-static/resources/view/at-webserver/*.js。
  *
  * 加载方式与 LuCI 的 require 一致：fetch 视图源码 → 剥离 'require ...'
  * 声明行 → new Function('L', code) 求值 → 取返回的视图类 →

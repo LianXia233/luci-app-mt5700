@@ -6,7 +6,7 @@
 /* global L, baseclass */
 
 /**
- * AT LuCI RPC 客户端（保持原 ATClient 的 API 面）。
+ * AT RPC 客户端。
  *
  * 传输链路（LuCI RPC，无 WebSocket）：
  *   LuCI JS → L.rpc.declare('mt5700.at'/'mt5700.events') → rpcd → ucode 插件
@@ -14,10 +14,9 @@
  *
  * 语义兼容：
  * - sendCommand(cmd) → {success,data,error}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
- * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型），推送类型与原 WS 一致：
+ * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型），推送类型：
  *   raw_data / new_sms / incoming_call / pdcp_data / memory_full / cellscan / urc_data
- * - 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI websocket_auth_key 由 ucode 代理附加，
- *   页面无需输入密钥（原有密钥配置保持兼容）
+ * - 认证：后端配置 auth_key 后所有请求需携带密钥；401 时前端弹出密钥输入
  */
 
 // rpcd 对象 mt5700 的方法声明（与 root/usr/share/rpcd/ucode/mt5700.uc 对应）
@@ -182,7 +181,7 @@ ATClient.prototype.pollEvents = function () {
 		var events = Array.isArray(resp.events) ? resp.events : [];
 		self.eventSeq = seq;
 		if (self.firstPoll) {
-			// 首次连接只对齐序号，不重放服务启动前的事件（与原 WS 连接语义一致）
+			// 首次轮询只对齐事件序号，跳过服务启动前的历史事件
 			self.firstPoll = false;
 			return;
 		}
@@ -291,28 +290,14 @@ ATClient.prototype.setConnection = function (host, port) {
 
 /* ================= UCI 保存/应用编排 =================
  *
- * 背景（问题一）：本应用原先在页面里直接连续调用
- *     L.uci.set(...) → L.uci.save() → L.uci.apply()
- * 这条链路存在三个与 OpenWrt 标准「保存及应用」流程不一致的地方：
- *
- *   1) 缺少「未保存更改的确认」。OpenWrt 的 CBI 表单在离开页面时会提示
- *      「有未保存的更改」，本应用的自定义 E() 表单没有挂到该机制上，
- *      用户改完不点保存直接切页，改动静默丢失，表现为「保存了但没生效」。
- *
- *   2) set/save/apply 三段各自独立，任何一段失败都只是整体 reject，
- *      无法区分「写内存失败」「落盘失败」「reload 失败」，用户看到的是
- *      一句笼统的「保存失败」。
- *
- *   3) reload 触发依赖 apply() 内部生成的配置 hash。当 at-webserver 的
- *      UCI 变更 hash 与上一次相同（例如只改了 service.js 里不写盘的派生
- *      项），rpcd 的 apply 会因为「无待应用变更」直接返回 ubus 状态码 5
- *      (NO_DATA)，前端把它当成失败——实际上配置已经生效。
- *
- * 本模块把上述流程收敛为一处，对外只暴露 uciSave(section) 与
- * uciHasChanges(section)，语义与 LuCI 的「保存并应用」按钮一致。
+ * 将 set/save/apply 三段收敛为一处，对外只暴露 uciSave(section) 与
+ * uciHasChanges(section)，语义对齐 CBI 的「保存并应用」：
+ *   - 有未保存更改时在离开页面给予提示；
+ *   - 落盘与热应用合并为一次结果，失败时能区分阶段；
+ *   - 无待应用变更时直接视为已生效，不报错。
  */
 var AtUci = {
-	// 已注册「未保存更改」提示的页面数
+	// 当前页面是否存在未保存更改
 	_dirty: false,
 	_beforeUnload: null,
 	_dirtyFlush: [],
@@ -353,8 +338,8 @@ var AtUci = {
 
 	/**
 	 * 保存并应用（等价 CBI 底部「保存并应用」按钮）。
-	 * Debian 流程：暂存键值落盘到配置文件 → 通知后端热应用。
-	 * 返回 { applied: bool, saved: bool, appliedSkipped: bool }
+	 * 流程：暂存键值落盘到配置文件 → 通知后端热应用。
+	 * 返回 { saved, applied, appliedSkipped, changes }
 	 */
 	uciSave: function (section, opts) {
 		var options = opts || {};
@@ -521,8 +506,8 @@ function bandName(kind, band) {
  *   - NR 没有 RSSI，第一个数值就是 RSRP，SINR 在 value2、RSRQ 在 value3；
  *   - LTE 前面多一个 RSSI，SINR 在 value3、RSRQ 在 value4（与 NR 相反）。
  *
- * 旧实现把 LTE 当成 <rsrp>,<rsrq>,<sinr> 解析，于是 4G 下 RSRQ 与 SINR 整体
- * 错位：^HCSQ: "LTE",45,34,106,19 会被解成 RSRP=-106 / RSRQ=-3 / SINR=-16.2，
+ * 若把 LTE 当成 <rsrp>,<rsrq>,<sinr> 解析，4G 下 RSRQ 与 SINR 会整体错位：
+ * ^HCSQ: "LTE",45,34,106,19 会被解成 RSRP=-106 / RSRQ=-3 / SINR=-16.2，
  * 而按手册应为 RSSI=-76 / RSRP=-106 / SINR=1.2 / RSRQ=-10 —— 真正的 SINR
  * （106 → 1.2 dB）被当成 RSRQ 吃掉，界面上表现为「4G 下 SINR 读不出来」。
  */
@@ -565,7 +550,7 @@ function parseHCSQ(data) {
 		result.rscp = pick(2, convertRssi);
 		result.ecio = pick(3, convertEcio);
 	} else {
-		/* "GSM",<gsm_rssi>，以及未知 / 旧版数字制式的兜底（沿用旧行为） */
+		/* "GSM",<gsm_rssi>，以及未知制式的兜底：仅取第 1 个字段作 RSSI */
 		result.rssi = pick(1, convertRssi);
 	}
 	return result;
@@ -696,7 +681,7 @@ function parseMONSC(data) {
 		 * 与 NR 相比：没有 flag 位、PCI/ARFCN/TAC 为十六进制、末位是 RSSI
 		 * （-90~-25 dBm 工程值），且 **没有 SINR 字段**——4G 的 SINR 一律由
 		 * ^HCSQ 兜底补齐（见 network_status 的 needHcsq 逻辑）。
-		 * 旧实现套用 NR 布局，4G 下 cid/pci/channel/rsrp/rsrq 全部错位
+		 * 不可套用 NR 布局：4G 的 cid/pci/channel/rsrp/rsrq 若按 NR 下标取会全部错位
 		 * （rsrp 取到 rsrq、rsrq 取到 RSSI、channel 变成 "-85"）。
 		 */
 		d = {

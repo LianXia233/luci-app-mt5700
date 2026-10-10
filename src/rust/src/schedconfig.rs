@@ -304,7 +304,7 @@ impl SchedConfigDto {
     }
 }
 
-/// 落盘配置（Debian）：写 JSON 配置存储，键名沿用原 UCI 语义。
+/// 落盘配置：将 DTO 摊平成扁平字符串键值，写入 JSON 配置存储。
 pub async fn write_schedule_uci(d: &SchedConfigDto) -> Result<(), String> {
     let mut patch = configstore::ConfigMap::new();
     for (k, v) in d.uci_entries() {

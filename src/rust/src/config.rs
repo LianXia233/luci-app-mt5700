@@ -1,5 +1,5 @@
 //! 配置读取（Debian）：从 JSON 扁平键值配置文件（/etc/mt5700/config.json，
-//! 可用 MT5700_CONFIG 覆盖）读取整个配置。键名与原 OpenWrt UCI 完全一致，
+//! 可用 MT5700_CONFIG 覆盖）读取整个配置。键名为扁平字符串键，
 //! 前端页面与业务逻辑无需感知存储介质的变化。
 
 use crate::configstore;
@@ -193,7 +193,7 @@ pub const DEFAULT_WEB_ROOT: &str = "/usr/share/mt5700/webui";
 pub struct UciReader(HashMap<String, String>);
 
 impl UciReader {
-    /// 从 JSON 配置存储的扁平键值映射构造（键名沿用原 UCI 语义）。
+    /// 从 JSON 配置存储的扁平键值映射构造。
     fn from_map(map: configstore::ConfigMap) -> UciReader {
         UciReader(map.into_iter().collect())
     }

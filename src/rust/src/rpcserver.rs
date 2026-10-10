@@ -1,5 +1,5 @@
 //! LuCI RPC 服务：TCP newline-JSON（127.0.0.1:8765），由 rpcd ucode 插件（mt5700.uc）代理转发。
-//! 替代原 WebSocket 传输层；核心业务逻辑（伪命令/扫频/命令分发/事件总线）全部保留。
+//! 核心业务逻辑（伪命令 / 扫频 / 命令分发 / 事件总线）均在本模块内实现。
 //!
 //! 协议（每行一个 JSON 对象）：
 //!   请求: {"id":1,"method":"at","params":{"cmd":"AT+CSQ","auth_key":"..."}}
@@ -64,7 +64,7 @@ pub struct ScanState {
     pub task_id: Option<String>,
 }
 
-/// 事件总线：替代原 WebSocket Hub 的"广播给所有客户端"。
+/// 事件总线：向所有订阅客户端广播。
 /// 所有推送（raw_data/new_sms/incoming_call/pdcp_data/memory_full/cellscan/urc_data）
 /// 按序入队并分配单调递增 seq；前端轮询 events(since) 拉取增量。
 #[derive(Clone)]
@@ -310,7 +310,7 @@ impl RpcServer {
         let id = req.id;
 
         // 认证：配置了密钥时，每个请求必须携带匹配的 auth_key（rpcd ucode 代理从 UCI 读取并附加；
-        // 页面登录态由 LuCI/rpcd 会话保证，密钥保持原配置语义兼容）。
+        // 密钥校验保持既有配置语义兼容）。
         let key = req.params.get("auth_key").and_then(|v| v.as_str()).unwrap_or("");
         if !self.auth_key.is_empty() && key != self.auth_key {
             log_warn!("RPC 请求被拒绝: 密钥错误 (method={})", req.method);
@@ -422,7 +422,7 @@ impl RpcServer {
 
         // 状态缓存优先：白名单内的只读查询命中内存即毫秒级返回，下发 AT 的去重、
         // 刷新与断线失效都由缓存负责。miss / 非白名单 / 抓取失败一律走 live 路径，
-        // 保证与旧行为一致（例如终端页手动执行同一条查询也能拿到真实结果）。
+        // 保证终端页手动执行同一条查询也能拿到真实结果。
         match self.cache.resolve(&command).await {
             Ok(Some(text)) => {
                 log_debug!("缓存命中: {}", command.trim());
