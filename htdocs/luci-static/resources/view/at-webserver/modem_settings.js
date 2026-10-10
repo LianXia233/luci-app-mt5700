@@ -524,7 +524,7 @@ return L.view.extend({
 
 		/*
 		 * 漫游：0 不支持 / 1 支持 / 2 无变化（官方手册 13.2.3）。
-		 * 原界面缺 0 档，且文案「仅本网」与「自动漫游」没讲清「本网」指什么。
+		 * 界面缺少 0 档，且文案「仅本网」与「自动漫游」没讲清「本网」指什么。
 		 */
 		var ROAM_OPTIONS = [
 			{
@@ -550,7 +550,7 @@ return L.view.extend({
 		/*
 		 * 服务域：0 CS_ONLY / 1 PS_ONLY / 2 CS_PS / 3 ANY / 4 无变化。
 		 * 官方约束（手册 13.2.3 注 2）：接入制式含 LTE 或 NR 时，不允许设置为 0 或 3。
-		 * 界面按此动态禁用，把原本只存在于文档里的约束显性化。
+		 * 界面按此动态禁用，把原本仅见于文档的约束显性化。
 		 */
 		var SRV_OPTIONS = [
 			{
@@ -669,7 +669,7 @@ return L.view.extend({
 						sysCfg.srvdomain = Number(m[4]);
 						sysCfg.lteband = m[5].trim();
 
-						/* 回填控件；若当前值不在预设内，保留原值并提示，绝不静默改写 */
+						/* 回填控件；若当前值不在预设内，则保留当前值并提示，绝不静默改写 */
 						applyAcqValue(sysCfg.acqorder);
 						applyPreset(bandSel, sysCfg.band);
 						applyPreset(lteBandSel, sysCfg.lteband);

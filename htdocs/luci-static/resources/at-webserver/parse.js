@@ -616,7 +616,7 @@ var Parse = (function () {
 		return sms;
 	};
 
-	// 短信中心保存的已发消息缓存（等价原 localStorage sms_sent_messages_cache）
+	// 短信中心保存的已发消息缓存（localStorage sms_sent_messages_cache）
 	api.SMS_CACHE_KEY = 'sms_sent_messages_cache';
 	api.MAX_SMS_CACHE = 1000;
 
