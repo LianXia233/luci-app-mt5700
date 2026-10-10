@@ -3871,3 +3871,67 @@
   }
 }
 
+/* ---------- Argon 主题（2.4.x）兼容覆盖 ----------
+   Argon 对全局 input[type=checkbox] / select 施加高优先级样式，会覆盖
+   上方开关与下拉框规则：开关轨道被隐藏只剩白色旋钮，下拉框文字偏下被裁切。
+   此处以同等优先级 + !important 压回本插件的期望样式（issue #12 已验证）。 */
+
+/* Argon 开关兼容：固定轨道尺寸与底色，压制主题背景图与伪元素串扰 */
+.mt5700-switch input[type="checkbox"] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  display: inline-block !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+  flex: 0 0 44px !important;
+  width: 44px !important;
+  min-width: 44px !important;
+  max-width: 44px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 9999px !important;
+  background: var(--mt5700-border-subtle, #dae6f2) !important;
+  background-image: none !important;
+}
+
+.mt5700-switch input[type="checkbox"]:checked {
+  background: var(--mt5700-accent, #087cba) !important;
+}
+
+.mt5700-switch input[type="checkbox"]::before {
+  content: "" !important;
+  position: absolute !important;
+  top: 2px !important;
+  left: 2px !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 20px !important;
+  height: 20px !important;
+  border: none !important;
+  border-radius: 50% !important;
+  background: #fff !important;
+  transform: translateX(0) !important;
+}
+
+.mt5700-switch input[type="checkbox"]:checked::before {
+  transform: translateX(20px) !important;
+}
+
+.mt5700-switch input[type="checkbox"]::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* Argon 下拉框兼容：固定高度与内边距，恢复文字垂直居中、消除裁切 */
+select.mt5700-select {
+  box-sizing: border-box !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 36px 0 12px !important;
+  font-size: 14px !important;
+  line-height: normal !important;
+  text-indent: 0 !important;
+}
+
