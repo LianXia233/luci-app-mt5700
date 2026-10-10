@@ -263,7 +263,7 @@ return L.view.extend({
 			flow: { lastDsTime: 0, lastTxFlow: 0, lastRxFlow: 0, totalDsTime: 0, totalTxFlow: 0, totalRxFlow: 0 },
 			dhcpv4: null, dhcpv6: null, ipv6Cap: null,
 			uplinkMCS: null, downlinkMCS: null,
-			activeCid: null,
+			dataBearer: null,
 			networkStatus: '等待状态中',
 			operator: '未知运营商',
 			apn: '未知',
@@ -1223,17 +1223,51 @@ return L.view.extend({
 
 		/* ---------- 11. AT 状态获取流程 ---------- */
 
-		function resolveActiveCid(force) {
-			if (!force && state.activeCid !== null) return Promise.resolve(state.activeCid);
+		/* 互联网数据承载解析：不能只取编号最小的激活 cid —— IMS 信令承载（APN=ims）
+		   的 cid 往往更小，选它会得到 30/30 Mbps 的假数据。这里遍历所有激活 cid，
+		   逐个查 AT^DSAMBR=<cid> 拿 APN 与速率，跳过 ims/sos/emergency 承载，
+		   锁定互联网数据承载；兜底策略为取下行速率最大的承载。 */
+		function resolveDataBearer(force) {
+			if (!force && state.dataBearer !== null) return Promise.resolve(state.dataBearer);
 			return AtWs.client.sendCommand('AT+CGACT?').then(function (res) {
-				if (!res.success || !res.data) return state.activeCid;
+				if (!res.success || !res.data) return null;
 				var active = [];
 				AtWs.extractATDataMultiline(res.data, '+CGACT').forEach(function (row) {
 					var p = row.split(',');
 					if (p[1] && p[1].trim() === '1' && Number(p[0]) > 0) active.push(Number(p[0]));
 				});
-				state.activeCid = active.length ? Math.min.apply(null, active) : null;
-				return state.activeCid;
+				if (!active.length) return null;
+				var chain = Promise.resolve([]);
+				active.forEach(function (cid) {
+					chain = chain.then(function (acc) {
+						return AtWs.client.sendCommand('AT^DSAMBR=' + cid).then(function (r) {
+							var str = (r.success && r.data) ? AtWs.extractATData(r.data, '^DSAMBR') : '';
+							if (!str) return acc.concat([{ cid: cid, down: 0, up: 0, apn: '' }]);
+							var parts = str.split(',');
+							var apn = parts.length >= 4 ? parts[3].trim().replace(/^["']|["']$/g, '') : '';
+							return acc.concat([{
+								cid: cid,
+								down: parseInt(parts[1], 10) || 0,
+								up: parseInt(parts[2], 10) || 0,
+								apn: apn
+							}]);
+						}).catch(function () {
+							return acc.concat([{ cid: cid, down: 0, up: 0, apn: '' }]);
+						});
+					});
+				});
+				return chain.then(function (bearers) {
+					var data = bearers.filter(function (b) {
+						return !/^(ims|sos|emergency)$/i.test(b.apn);
+					});
+					var pool = data.length ? data : bearers;
+					if (!pool.length) return null;
+					pool.sort(function (a, b) { return b.down - a.down; });
+					return pool[0];
+				});
+			}).then(function (b) {
+				state.dataBearer = b;
+				return b;
 			});
 		}
 
@@ -1261,44 +1295,19 @@ return L.view.extend({
 		}
 
 		function getAMBR() {
-			return resolveActiveCid().then(function (cid) {
-				var candidates = [];
-				if (cid && cid > 0) candidates.push(cid);
-				candidates.push(1);
-				var unique = candidates.filter(function (v, i, a) { return a.indexOf(v) === i; });
-				var chain = Promise.resolve();
-				unique.forEach(function (candidate) {
-					chain = chain.then(function () {
-						return AtWs.client.sendCommand('AT^DSAMBR=' + candidate).then(function (res) {
-							if (!res.success || !res.data) return;
-							var str = AtWs.extractATData(res.data, '^DSAMBR');
-							if (!str) return;
-							var parts = str.split(',');
-							if (parts.length >= 3) {
-								state.ambrDown = parseInt(parts[1], 10) || 0;
-								state.ambrUp = parseInt(parts[2], 10) || 0;
-							}
-							if (parts.length >= 4) {
-								var apnRaw = parts[3].trim();
-								if (/^".*"$/.test(apnRaw) || /^'.*'$/.test(apnRaw)) {
-									state.apn = apnRaw.replace(/^["']|["']$/g, '') || '未知';
-								}
-							}
-							throw 'done';
-						}).catch(function (e) {
-							if (e === 'done') return Promise.reject('break');
-							return Promise.resolve();
-						});
-					});
-				});
-				return chain.catch(function (e) {
-					state.activeCid = null;
-				}).then(renderConn);
+			return resolveDataBearer().then(function (b) {
+				if (b) {
+					state.ambrDown = b.down;
+					state.ambrUp = b.up;
+					if (b.apn) state.apn = b.apn;
+				}
+				renderConn();
 			});
 		}
 
 		function getQCI() {
-			return resolveActiveCid().then(function (cid) {
+			return resolveDataBearer().then(function (b) {
+				var cid = b ? b.cid : null;
 				return AtWs.client.sendCommand('AT+CGEQOSRDP').then(function (res) {
 					if ((!res.success || !res.data) && cid) return AtWs.client.sendCommand('AT+CGEQOSRDP=' + cid);
 					return res;

@@ -2,6 +2,12 @@
 
 ## 未发布
 
+### 网络状态页互联网承载选择修复（APN/QCI/AMBR 显示错承载）
+
+- **fix(network-status)**: **修复「取编号最小激活 cid」导致选中 IMS 信令承载的真实缺陷** —— 原实现 `resolveActiveCid` 对 `AT+CGACT?` 的激活 cid 取 `Math.min`，而多数卡机组合下 IMS 信令承载（APN=`ims`，QCI=5，30/30 Mbps）的 cid 恰好最小，APN / QCI / AMBR 三项因此全部显示成信令承载的假数据，真正的互联网数据承载（如 `3gnet`，QCI=6，3000/300 Mbps）被跳过。现改为 `resolveDataBearer`：遍历**全部激活 cid** 逐个查询 `AT^DSAMBR=<cid>`（APN=第 4 字段、速率 kbps），**跳过 APN 为 `ims`/`sos`/`emergency` 的承载**锁定互联网承载；兜底策略为取下行速率最大的承载（APN 全部缺失或查询失败时仍能落到数据承载）。QCI 查询同步使用该承载 cid 定位 `AT+CGEQOSRDP` 对应行，失败回落首行。
+- **refactor(network-status)**: 移除死代码 `resolveActiveCid` 与 `state.activeCid`（新逻辑统一走 `resolveDataBearer` + `state.dataBearer` 缓存），原「候选 [cid,1] 逐个试 + throw done/break」的探测链路一并删除。
+- **verify**: `node --check` 语法通过；实机部署验证 md5 一致，网络状态页 APN/QCI/AMBR 正确显示互联网数据承载数据。
+
 ### 通知模块新增「QQ 机器人」推送通道（官方 API v2）
 
 - **feat(notify)**: 新增 QQ 机器人推送通道，复用既有通知链路（`NotifyKind` 四类事件、60 秒合并窗口、`NOTIFY_MAX_RETRIES=3` 重试与指数退避）。鉴权按官方文档实现：`POST https://api.bot.qq.com/app/getAppAccessToken`（body `{appId, clientSecret}`）换取 `access_token`（7200 秒，官方示例 `expires_in` 为字符串，已兼容字符串/数字两种返回），后续请求携带 `Authorization: QQBot <token>` 头；服务内凭证缓存并在过期前 120 秒锁内单飞刷新，避免并发重复取凭证。
