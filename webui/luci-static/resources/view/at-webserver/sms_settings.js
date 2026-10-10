@@ -7,10 +7,10 @@
 /* global L, AtWs, Parse, Ui, SmsEncode, Mt5700 */
 
 /**
- * 短信设置 - 新 UI 视觉 + 基准 v1.3.4 功能（含 USSD 查询）
- *
+ * 短信设置页（含 USSD 查询）：
  * - IMS 开关（AT^IMSSWITCH? / AT^IMSSWITCH=1,0,0 等）
- * - 短信开关（开启步骤：CEUS=1/IMSSWITCH=1/CFUN=1/CGDCONT=5/CSCA；关闭步骤反向）
+ * - 短信开关（开启按 [CEUS=1 → IMSSWITCH=1,0,0 → CFUN=1 → CGDCONT=5 → CSCA] 顺序下发；
+ *   关闭按 [CEUS=0 → IMSSWITCH=0,0,0 → CFUN=0 → CMGD=1,4 清空短信] 执行）
  * - 短信中心号码（AT+CSCA? / AT+CSCA="..."）
  * - 存储位置与用量（AT+CMGF=0 + AT+CPMS? / AT+CPMS=...）
  * - 清空全部短信（AT+CMGD=1,4 逐存储）

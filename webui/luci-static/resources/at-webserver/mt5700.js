@@ -384,7 +384,7 @@ var Mt5700 = (function () {
 
 		/*
 		 * 纯文本值的宽度分级：按「显示宽度」估算（CJK 记 1，ASCII 记 0.55）。
-		 * 分档阈值经 176px 卡宽实测校准：≤6 全尺寸，>6 逐级降到 0.62em。
+		 * 按宽度分级：≤6 全尺寸；>6–9 用 len-md(0.85×)、>9–12 用 len-lg(0.72×)、>12 用 len-xl(0.62×)。
 		 */
 		var w = 0;
 		for (var i = 0; i < text.length; i++) {
@@ -943,9 +943,8 @@ var Mt5700 = (function () {
 	}
 
 	/*
-	 * 档位 → 柱状信号格点亮根数。
-	 * exc(4) / good(3) / fair(2) / poor(1) / bad(1)，
-	 * 与参考稿 data-bars 的 4/3/2/1 四档对齐。
+	 * 档位 → 柱状信号格点亮根数：exc=4 / good=3 / fair=2 / poor=1 / bad=1
+	 * （poor 与 bad 同为最低 1 格）。
 	 */
 	var BAR_COUNT = { exc: 4, good: 3, fair: 2, poor: 1, bad: 1 };
 

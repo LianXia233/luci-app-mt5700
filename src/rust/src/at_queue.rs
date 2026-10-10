@@ -12,7 +12,7 @@
 //! 设计要点：
 //!   - 完全异步，排队的等待者不再自旋占 CPU；
 //!   - `acquire` 自带超时与上下文取消，取带可让出通道；
-//!   - 用 Notify + 显式 pump 派发，取消者直接从堆里移除，不会占着不放。
+//!   - 用 Notify + 显式 dispatch 派发，取消者标记后从堆中弹出，不会占着不放。
 
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::BinaryHeap;

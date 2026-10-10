@@ -1,6 +1,6 @@
 [package]
 name = "at-webserver"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 description = "MT5700M 5G module management backend for Debian: HTTP API + WebUI, AT command queue, URC/event bus, schedule and cellscan"
 license = "GPL-3.0"

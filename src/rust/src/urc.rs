@@ -15,7 +15,7 @@ const MAX_PARTIAL_SMS: usize = 100;
 
 pub type Broadcaster = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 
-#[allow(dead_code)] // sender 保留（分段归属校验）
+#[allow(dead_code)] // sender 随分段信息留存，当前仅写入，保留备用
 struct PartialSms {
     sender: String,
     total: u32,

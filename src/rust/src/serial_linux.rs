@@ -94,7 +94,7 @@ impl AsyncRead for SerialReader {
     }
 }
 
-#[allow(dead_code)] // write_timeout 保留（写超时扩展位）
+#[allow(dead_code)] // write_timeout 预留字段：本层不施加写超时（由上层负责），暂透传未使用
 pub struct SerialWriter {
     afd: tokio::io::unix::AsyncFd<OwnedFd>,
     write_timeout: Duration,

@@ -4,14 +4,13 @@
 //!
 //! 1) 候选不能只限 ttyUSB*。MT5700M 在不同 USB 组合下 AT 口可能枚举成 ttyACM*
 //!    （AT^SETMODE 可切换 ECM/NCM/RNDIS/PPP，组合变了接口类就变），部分固件上
-//!    还会挂到 ttyS*/ttyAMA*。此前只认 ttyUSB 会让 serial_port=auto（默认值）
+//!    还会挂到 ttyS*/ttyAMA*。只认 ttyUSB 会让 serial_port=auto（默认值）
 //!    直接报「没有找到任何 /dev/ttyUSB* 设备」，而前端下拉框却能列出这些设备——
 //!    表现为「手工选串口能用，默认自动探测永远失败」。
 //!
-//! 2) 优先级不能靠硬编码编号。was: 把 /dev/ttyUSB1 当成 PCUI 优先——
-//!    枚举顺序由内核与 option 驱动绑定顺序决定，随版本变化，写死编号不可靠。
-//!    now: 读 sysfs 的 USB 接口名字符串（PCUI / Application / GPS ...）打分，
-//!    拿不到 sysfs 信息时才退回编号偏好。
+//! 2) 优先级不依赖硬编码编号：枚举顺序由内核与 option 驱动的绑定顺序决定，
+//!    随版本变化，写死编号不可靠。因此读 sysfs 的 USB 接口名字符串
+//!    （PCUI / Application / GPS ...）打分排序，拿不到 sysfs 信息时才退回编号偏好。
 
 use crate::{log_info, log_warn};
 use crate::config::{SerialConfig, PREFERRED_AT_PORT};
@@ -167,7 +166,7 @@ async fn probe_at(tp: Box<dyn Transport>) -> bool {
         match res {
             Ok(Ok(n)) if n > 0 => {
                 residual.extend_from_slice(&buf[..n]);
-                // 按整行判定，不做子串匹配。此前用 seen.contains("OK")，
+                // 按整行判定，不做子串匹配。若用 contains("OK") 子串匹配，
                 // 命令回显与 URC 拼接（如 ^SIMSQ: 0,123OK）都会把不可用的端口
                 // 误判成 AT 口，于是自动探测可能选中 GPS/应用口。
                 while let Some(i) = residual.iter().position(|&b| b == b'\n') {

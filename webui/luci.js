@@ -2,7 +2,7 @@
 /*
  * LuCI 兼容垫片（Debian 独立 WebUI 专用）。
  *
- * 目标：让原 LuCI 视图代码（at-webserver/* 与 view/at-webserver/*）在不修改
+ * 目标：让 LuCI 风格视图代码（at-webserver/* 与 view/at-webserver/*）在不修改
  * 业务逻辑的前提下直接运行。仅实现本项目实际用到的那一小部分 LuCI API：
  *
  *   L.Class.extend / L.view.extend   —— 类与视图基类
@@ -10,15 +10,15 @@
  *                                    —— 映射到后端 HTTP API（/api/...）
  *   L.uci.load/get/set/changes/save/apply
  *                                    —— 映射到 /api/config（JSON 扁平键值配置）
- *   L.fs.read/write                  —— 映射到 /api/file/read|write（受限白名单）
+ *   L.fs.read/write/list/stat        —— 映射到 /api/file/read|write|list|stat（受限白名单）
  *   E(tag, attrs, text)              —— LuCI dom helper（语义与视图内实现一致）
  *
- * 传输层：全部走 HTTP（fetch）。实时事件沿用原有「增量轮询 events(since)」
+ * 传输层：全部走 HTTP（fetch）。实时事件采用「增量轮询 events(since)」
  * 语义（后端事件总线序号单调递增），另有 /ws WebSocket 通道可供外部消费。
  *
  * 认证：后端配置 auth_key 后，所有 /api 请求需携带 X-Auth-Key 头；
  * 密钥保存在 localStorage('mt5700_key')，401 时抛 REQUIRE_AUTH_KEY 由
- * 视图层的 promptModal 流程接管（与原 LuCI 行为一致）。
+ * 401 时抛 REQUIRE_AUTH_KEY，由视图层的 promptModal 流程接管。
  */
 
 (function () {
@@ -161,11 +161,11 @@
 			if (method === 'netrate') return httpJson('/api/netrate?device=' + encodeURIComponent(params.device || ''));
 			if (method === 'usb') return httpJson('/api/usb');
 		}
-		/* log 对象：等价 rpcd log.read（syslog）→ /api/syslog */
+		/* log 对象：读取系统日志 → /api/syslog */
 		if (object === 'log' && method === 'read') {
 			return httpJson('/api/syslog?lines=' + encodeURIComponent(params.lines || 200));
 		}
-		/* file 对象：等价 rpcd file.read / file.write（后端白名单受限） */
+		/* file 对象：读 / 写文件（后端白名单受限）→ /api/file/read|write|list|stat */
 		if (object === 'file' && method === 'read') {
 			return httpJson('/api/file/read?path=' + encodeURIComponent(params.path || ''));
 		}
