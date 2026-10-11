@@ -19,9 +19,9 @@ use crate::atclient::{AtClient, COMMAND_TIMEOUT};
 use crate::config::{in_poll_window, PollConfig};
 use crate::notify::{Notification, NotifyKind, Notifier, SENDER_SIGNAL};
 use crate::schedule::sleep_ctx;
-use crate::urc::{parse_signal_reading, signal_level};
+use crate::signalgrade::{Assessment, Grade, SignalInput};
+use crate::urc::{parse_signal_reading, query_hfreqinfo, query_monsc};
 use crate::{log_debug, log_info};
-use chrono::Timelike;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{watch, Mutex};
@@ -95,8 +95,8 @@ impl SignalWatcher {
             return;
         }
 
-        let Some((rsrp, mode)) = self.read_signal(ctx).await else {
-            log_debug!("信号轮询未取到有效读数（未注册 / 无服务小区 / 不可测），本轮跳过");
+        let Some(sample) = self.sample(ctx).await else {
+            log_debug!("信号巡检未取到有效读数（未注册 / 无服务小区 / 不可测），本轮跳过");
             return;
         };
 
@@ -108,38 +108,69 @@ impl SignalWatcher {
                 self.poll.delta,
                 st.last_rsrp,
                 &st.last_mode,
-                rsrp,
-                &mode,
+                sample.rsrp,
+                &sample.rat,
             );
             if push {
                 st.have = true;
-                st.last_rsrp = rsrp;
-                st.last_mode = mode.clone();
+                st.last_rsrp = sample.rsrp;
+                st.last_mode = sample.rat.clone();
             }
             push
         };
 
         if !push {
             log_debug!(
-                "信号轮询：RSRP {:.0} dBm（{}），变化未达阈值（{:.0} dB），不推送",
-                rsrp,
-                mode,
+                "信号巡检：RSRP {:.0} dBm（{}），变化未达阈值（{:.0} dB），不推送",
+                sample.rsrp,
+                sample.rat,
                 self.poll.delta
             );
             return;
         }
 
-        log_info!("信号轮询触发推送：RSRP {:.0} dBm（{}，{}）", rsrp, mode, signal_level(rsrp));
-        self.notify_signal(rsrp, &mode).await;
+        log_info!("信号巡检触发推送：RSRP {:.0} dBm（{}）", sample.rsrp, sample.rat);
+        self.notify_signal(&sample).await;
     }
 
-    /// 向模组查询一次当前信号。响应可能含多行（回显 + 结果 + OK），
-    /// 取第一条能解析出的读数。
-    async fn read_signal(&self, ctx: &watch::Receiver<bool>) -> Option<(f64, String)> {
+    /// 采样一次完整信号状态。
+    ///
+    /// 主数据源是 `AT^MONSC`（一条命令同时给出制式与 RSRP/RSRQ/SINR，且与页面
+    /// 状态卡同源）；`AT^HFREQINFO?` 补上频点与带宽，供网络能力总评使用。
+    /// 若 MONSC 没给出可用 RSRP（个别制式或未注册时为空/0），回退 `AT^HCSQ?`
+    /// ——它至少能给一个强度读数，宁可少几项明细也不要整轮不出声。
+    async fn sample(&self, ctx: &watch::Receiver<bool>) -> Option<Sample> {
+        let monsc = query_monsc(&self.client, ctx).await;
+        let mut rat = monsc.rat.clone();
+        // RSRP/RSRQ 恒为负值；0 与空串都表示「无有效读数」而不是真实值
+        let mut rsrp = parse_db(&monsc.rsrp).filter(|v| *v < 0.0 && *v > -200.0);
+        let rsrq = parse_db(&monsc.rsrq).filter(|v| *v < 0.0 && *v > -50.0);
+        // SINR 可以为 0（对应「频发重传」档），故这里不能按「非零」过滤
+        let sinr = parse_db(&monsc.sinr).filter(|v| *v >= -30.0 && *v <= 50.0);
+
+        if rsrp.is_none() {
+            if let Some((v, m)) = self.read_hcsq(ctx).await {
+                rsrp = Some(v);
+                if rat.trim().is_empty() || rat == "未知" {
+                    rat = m;
+                }
+            }
+        }
+
+        let (dl_freq_khz, dl_bw_khz) = match query_hfreqinfo(&self.client, ctx).await {
+            Some((f, b)) => (Some(f), if b > 0.0 { Some(b) } else { None }),
+            None => (None, None),
+        };
+
+        Some(Sample { rat, rsrp: rsrp?, rsrq, sinr, dl_freq_khz, dl_bw_khz })
+    }
+
+    /// 回退路径：`AT^HCSQ?` 只给强度，但字段位置随制式不同，解析复用 URC 那套。
+    async fn read_hcsq(&self, ctx: &watch::Receiver<bool>) -> Option<(f64, String)> {
         let resp = match self.client.send_command(ctx, "AT^HCSQ?", COMMAND_TIMEOUT, None).await {
             Ok(r) => r,
             Err(e) => {
-                log_debug!("信号轮询 AT^HCSQ? 失败: {}", e);
+                log_debug!("信号巡检 AT^HCSQ? 失败: {}", e);
                 return None;
             }
         };
@@ -151,16 +182,18 @@ impl SignalWatcher {
         None
     }
 
-    /// 组装轮询巡检文案并交给通知中枢（模板、通道、合并窗口都由它统一处理）。
-    async fn notify_signal(&self, rsrp: f64, mode: &str) {
+    /// 渲染完整巡检报告并交给通知中枢（模板、通道、合并窗口都由它统一处理）。
+async fn notify_signal(&self, sample: &Sample) {
         let now = crate::notify::now_string();
-        let content = format!(
-            "📶 信号巡检\n时间: {}\n制式: {}\n信号: {} dBm（{}）",
-            now,
-            mode,
-            rsrp.round() as i64,
-            signal_level(rsrp)
-        );
+        let assessment = assess(sample);
+        /*
+         * 总评档位也落到日志：QQ 里只留最近几条推送，
+         * 事后要判断「这次评估合不合理」只能对着日志看。
+         */
+        if let Some(v) = &assessment.verdict {
+            log_info!("信号评估：网络能力{}（{}）", v.level.caption(), v.title);
+        }
+        let content = render_report_with(&assessment, sample, &now);
         self.notifier
             .notify(Notification {
                 sender: SENDER_SIGNAL.into(),
@@ -173,10 +206,137 @@ impl SignalWatcher {
     }
 }
 
+/// 一次采样得到的信号快照。
+#[derive(Debug, Clone)]
+pub struct Sample {
+    pub rat: String,
+    pub rsrp: f64,
+    pub rsrq: Option<f64>,
+    pub sinr: Option<f64>,
+    pub dl_freq_khz: Option<f64>,
+    pub dl_bw_khz: Option<f64>,
+}
+
+/// 把 MONSC 的字符串字段解析成数值；空串、非数字、0 都视为「无读数」。
+fn parse_db(s: &str) -> Option<f64> {
+    let v = s.trim().trim_matches('"').parse::<f64>().ok()?;
+    if v == 0.0 {
+        None
+    } else {
+        Some(v)
+    }
+}
+
+/// 渲染巡检报告。
+///
+/// 设计取向：**与网页「射频信号质量」卡片同源同口径**——用户在网页上看到的
+/// 等级、状态短语、网络能力总评，在推送里必须一模一样，否则同一时刻两处结论
+/// 不同会直接损害可信度。因此这里不做任何「简化版」换算。
+/// 由一次采样算出完整评估。
+///
+/// 报告渲染与推送日志共用同一份评估结果，避免两处各算一遍导致口径走偏
+/// （评估里含「木桶两层取更差」这类逻辑，重复实现迟早不一致）。
+pub fn assess(sample: &Sample) -> Assessment {
+    Assessment::new(&SignalInput {
+        rat: sample.rat.clone(),
+        rsrp: Some(sample.rsrp),
+        rsrq: sample.rsrq,
+        sinr: sample.sinr,
+        dl_freq_khz: sample.dl_freq_khz,
+        dl_bw_khz: sample.dl_bw_khz,
+    })
+}
+
+/// 渲染推送文案（自算评估再委托 `render_report_with`）。
+///
+/// 生产路径先算评估、再用同一份评估渲染日志与推送（见 `notify_signal`），
+/// 所以这里只留给测试用：避免"测试用入口"在生产构建里成为 dead_code。
+#[cfg(test)]
+pub fn render_report(sample: &Sample, now: &str) -> String {
+    render_report_with(&assess(sample), sample, now)
+}
+
+/// 用已算好的评估渲染推送文案。
+pub fn render_report_with(assessment: &Assessment, sample: &Sample, now: &str) -> String {
+    let mut out = String::from("📶 信号巡检\n");
+    out.push_str(&format!("时间: {now}\n"));
+
+    if let Some(v) = &assessment.verdict {
+        // title 形如「网络能力优秀」，此处已在上文标了「网络能力:」，去掉重复前缀
+        let short = v.title.strip_prefix("网络能力").unwrap_or(v.title);
+        out.push_str(&format!("网络能力: {short}\n{}\n", v.advice));
+    }
+    out.push('\n');
+
+    out.push_str(&format!(
+        "信号强度 RSRP（基准 ≥ -80）: {} dBm  {}（{}）\n",
+        fmt_num(sample.rsrp),
+        grade_text(assessment.rsrp),
+        grade_status(assessment.rsrp)
+    ));
+    if let (Some(v), Some(g)) = (sample.rsrq, assessment.rsrq) {
+        out.push_str(&format!("信号质量 RSRQ（基准 ≥ -10）: {} dB  {}（{}）\n", fmt_num(v), g.text, g.status));
+    }
+    if let (Some(v), Some(g)) = (sample.sinr, assessment.sinr) {
+        out.push_str(&format!("信噪比 SINR（基准 ≥ 20）: {} dB  {}（{}）\n", fmt_num(v), g.text, g.status));
+    }
+    if let (Some(pct), Some(g)) = (assessment.signal_percent, assessment.pct) {
+        out.push_str(&format!("综合信号 SIGNAL（满分 100%）: {pct} %  {}（{}）\n", g.text, g.status));
+    }
+
+    // 制式与载波：总评的第二层证据（能力档），写出来用户才知道总评是怎么来的
+    if !sample.rat.trim().is_empty() {
+        let gen = assessment
+            .capability
+            .iter()
+            .find(|c| c.label == "网络制式")
+            .map(|c| format!("（{}）", c.value))
+            .unwrap_or_default();
+        out.push_str(&format!("\n制式: {}{gen}\n", sample.rat));
+    }
+    if let Some(freq) = sample.dl_freq_khz {
+        let band = assessment.capability.iter().find(|c| c.label == "频段特性");
+        let bw = sample
+            .dl_bw_khz
+            .map(|b| format!(" · 带宽 {} MHz", fmt_num(b / 1000.0)))
+            .unwrap_or_default();
+        let note = assessment
+            .capability
+            .iter()
+            .find(|c| c.label == "载波带宽")
+            .map(|c| format!("（{}）", c.note))
+            .unwrap_or_default();
+        match band {
+            Some(c) => out.push_str(&format!("载波: {}{bw}{note}\n", c.value)),
+            None => out.push_str(&format!("载波: {} MHz{bw}{note}\n", fmt_num(freq / 1000.0))),
+        }
+    }
+
+    out.trim_end().to_string()
+}
+
+/// 指标值格式化：整数不带小数点，非整数保留一位（-10 → "-10"，-9.5 → "-9.5"）。
+fn fmt_num(v: f64) -> String {
+    if (v - v.round()).abs() < 0.05 {
+        format!("{}", v.round() as i64)
+    } else {
+        format!("{v:.1}")
+    }
+}
+
+fn grade_text(g: Option<Grade>) -> &'static str {
+    g.map(|x| x.text).unwrap_or("未知")
+}
+
+fn grade_status(g: Option<Grade>) -> &'static str {
+    g.map(|x| x.status).unwrap_or("暂无数据")
+}
+
 /// 当前时刻在当天的分钟数（0..=1439），供时段判定使用。
+///
+/// 时区口径由 [`crate::localtime`] 统一（系统时区，缺省北京时间）。
 pub fn minute_of_day_now() -> i64 {
-    let now = chrono::Local::now();
-    i64::from(now.hour()) * 60 + i64::from(now.minute())
+    crate::localtime::minute_of_day_now()
 }
 
 /// 「本次读数是否应当推送」的纯判定，便于单测覆盖各策略组合。
@@ -347,5 +507,87 @@ mod tests {
             assert!(in_poll_window("25:00", "18:00", m));
             assert!(in_poll_window("08:00", "xx:yy", m));
         }
+    }
+
+    // ---- 巡检报告渲染 ----
+
+    /// 实测场景：NR n41 100MHz、RSRP -62、RSRQ -10、SINR 28
+    fn full_sample() -> Sample {
+        Sample {
+            rat: "NR".into(),
+            rsrp: -62.0,
+            rsrq: Some(-10.0),
+            sinr: Some(28.0),
+            dl_freq_khz: Some(2_565_000.0),
+            dl_bw_khz: Some(100_000.0),
+        }
+    }
+
+    #[test]
+    fn report_carries_every_metric_the_page_shows() {
+        // 推送内容必须与网页「射频信号质量」卡片逐项对齐：
+        // 指标名 + 基准 + 实测值 + 档位 + 状态短语 + 网络能力总评
+        let text = render_report(&full_sample(), "2026-10-11 23:43:12");
+        assert!(text.starts_with("📶 信号巡检"), "实际: {text}");
+        assert!(text.contains("时间: 2026-10-11 23:43:12"));
+        assert!(text.contains("网络能力: 优秀"), "总评缺少档位: {text}");
+        assert!(text.contains("信号与频段带宽俱佳"), "总评缺少可执行建议: {text}");
+        assert!(text.contains("信号强度 RSRP（基准 ≥ -80）: -62 dBm  极佳（覆盖极佳）"), "实际: {text}");
+        assert!(text.contains("信号质量 RSRQ（基准 ≥ -10）: -10 dB  极佳（纯净通畅）"), "实际: {text}");
+        assert!(text.contains("信噪比 SINR（基准 ≥ 20）: 28 dB  极佳（顶速阶数）"), "实际: {text}");
+        assert!(text.contains("综合信号 SIGNAL（满分 100%）: 100 %  极佳（满格服务）"), "实际: {text}");
+        assert!(text.contains("制式: NR（5G）"), "实际: {text}");
+        assert!(text.contains("载波: 中频 2565 MHz · 带宽 100 MHz"), "实际: {text}");
+        assert!(text.ends_with("）"), "报告末尾不应留多余空行: {text:?}");
+    }
+
+    #[test]
+    fn report_omits_metrics_without_reading() {
+        // LTE 的 MONSC 不提供 SINR，也没有频点信息：
+        // 既不凭空写一行「未知」，也不因为「缺失」把总评误判成最差
+        let s = Sample {
+            rat: "LTE".into(),
+            rsrp: -75.0,
+            rsrq: Some(-9.0),
+            sinr: None,
+            dl_freq_khz: None,
+            dl_bw_khz: None,
+        };
+        let text = render_report(&s, "t");
+        assert!(text.contains("信号强度 RSRP"));
+        assert!(text.contains("信号质量 RSRQ"));
+        assert!(!text.contains("信噪比 SINR"), "无读数时不该输出该行: {text}");
+        assert!(!text.contains("载波:"), "无频点信息时不该输出载波行: {text}");
+        assert!(text.contains("制式: LTE（4G）"));
+        assert!(text.contains("网络能力: 良好"), "缺失项不应把总评压成极差: {text}");
+    }
+
+    #[test]
+    fn report_skips_rat_line_when_mode_unknown() {
+        let mut s = full_sample();
+        s.rat = "  ".into();
+        let text = render_report(&s, "t");
+        assert!(!text.contains("制式:"), "制式未知时不该输出制式行: {text}");
+        // 能力档仍由频段与带宽支撑，总评不受影响
+        assert!(text.contains("网络能力: 优秀"), "实际: {text}");
+    }
+
+    #[test]
+    fn number_formatting_drops_trailing_zero() {
+        assert_eq!(fmt_num(-62.0), "-62");
+        assert_eq!(fmt_num(-10.0), "-10");
+        assert_eq!(fmt_num(-9.5), "-9.5");
+    }
+
+    #[test]
+    fn parse_db_treats_zero_and_blank_as_missing() {
+        // MONSC 在未注册时会把数值字段填 0 或留空，二者都不是真实读数
+        assert_eq!(parse_db("-62"), Some(-62.0));
+        assert_eq!(parse_db(" 28 "), Some(28.0));
+        assert_eq!(parse_db("-10.5"), Some(-10.5));
+        assert_eq!(parse_db(""), None);
+        assert_eq!(parse_db("0"), None);
+        assert_eq!(parse_db("--"), None);
+        assert_eq!(parse_db("\"\"") , None);
     }
 }

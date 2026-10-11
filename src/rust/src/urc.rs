@@ -2,7 +2,7 @@
 
 use crate::{log_info, log_warn};
 use crate::atclient::{AtClient, AtResponse, Unsolicited};
-use crate::notify::{Notification, NotifyKind, Notifier, SENDER_CALL, SENDER_SIGNAL};
+use crate::notify::{normalize_phone_number, Notification, NotifyKind, Notifier, SENDER_CALL, SENDER_SIGNAL};
 use crate::pdu::{Sms, decode_incoming_pdu};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -128,6 +128,9 @@ impl Dispatcher {
                 Some(n) => n,
                 None => return,
             };
+            /* 号码归一化：+CLIP 给的是国际格式 `+8613...`，
+               推送与界面（短信中心显示 138...）口径必须一致，见 normalize_phone_number */
+            let number = normalize_phone_number(&number);
             let now = Instant::now();
             let same_call = number == self.last_call_number
                 && now.duration_since(self.last_call_at) <= CALL_DEDUP_WINDOW
@@ -140,7 +143,7 @@ impl Dispatcher {
             self.last_call_at = now;
             self.call_state = "ringing".into();
 
-            let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let ts = crate::localtime::now_string();
             self.notifier
                 .notify(Notification {
                     sender: SENDER_CALL.into(),
@@ -156,7 +159,7 @@ impl Dispatcher {
             }));
         } else if line.contains("^CEND:") || line == "NO CARRIER" {
             if !self.last_call_number.is_empty() {
-                let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let ts = crate::localtime::now_string();
                 let number = self.last_call_number.clone();
                 self.notifier
                     .notify(Notification {
@@ -217,9 +220,11 @@ impl Dispatcher {
                 self.assemble_partial(sms);
                 continue;
             }
+            /* 归一化号码：PDU 里是 `8613800138000`，界面显示的是 `13800138000` */
+            let sender = normalize_phone_number(&sms.sender);
             self.notifier
                 .notify(Notification {
-                    sender: sms.sender.clone(),
+                    sender: sender.clone(),
                     content: sms.content.clone(),
                     kind: NotifyKind::Sms,
                     memory_full: false,
@@ -229,7 +234,7 @@ impl Dispatcher {
             self.ws(serde_json::json!({
                 "type": "new_sms",
                 "data": {
-                    "sender": sms.sender,
+                    "sender": sender,
                     "content": sms.content,
                     "time": sms.date.format("%Y-%m-%d %H:%M:%S").to_string(),
                 }
@@ -293,7 +298,9 @@ impl Dispatcher {
         self.partials.remove(&format!("{}_{}", sms.sender, info.reference));
 
         let notifier = self.notifier.clone();
-        let sender = sms.sender.clone();
+        /* 拼装完成后同样归一化号码，保证长短信与普通短信口径一致 */
+        let sender = normalize_phone_number(&sms.sender);
+        let sender_ws = sender.clone();
         let content = full.clone();
         tokio::spawn(async move {
             notifier
@@ -309,7 +316,7 @@ impl Dispatcher {
         self.ws(serde_json::json!({
             "type": "new_sms",
             "data": {
-                "sender": sms.sender,
+                "sender": sender_ws,
                 "content": full,
                 "time": date.format("%Y-%m-%d %H:%M:%S").to_string(),
                 "isComplete": true,
@@ -410,48 +417,7 @@ impl Dispatcher {
 
     /// AT^MONSC 返回的服务小区信息。
     async fn query_monsc(&self) -> MonscInfo {
-        let mut info = MonscInfo { rat: "未知".into(), ..Default::default() };
-        let resp = match self.client.send_command(&self.ctx, "AT^MONSC", crate::atclient::COMMAND_TIMEOUT, None).await {
-            Ok(r) => r,
-            Err(_) => return info,
-        };
-        for line in &resp.lines {
-            if !line.starts_with("^MONSC:") {
-                continue;
-            }
-            let parts = split_fields(line, "^MONSC:");
-            if parts.len() < 2 {
-                return info;
-            }
-            info.rat = parts[0].trim_matches('"').to_string();
-            match info.rat.as_str() {
-                "NR" => {
-                    if parts.len() >= 11 {
-                        info.arfcn = parts[3].clone();
-                        info.cell_id = parts[5].clone();
-                        info.pci = hex_to_dec(&parts[6]);
-                        info.tac = parts[7].clone();
-                        info.rsrp = parts[8].clone();
-                        info.rsrq = parts[9].clone();
-                        info.sinr = parts[10].clone();
-                    }
-                }
-                "LTE" => {
-                    if parts.len() >= 10 {
-                        info.arfcn = parts[3].clone();
-                        info.cell_id = parts[4].clone();
-                        info.pci = hex_to_dec(&parts[5]);
-                        info.tac = parts[6].clone();
-                        info.rsrp = parts[7].clone();
-                        info.rsrq = parts[8].clone();
-                        info.rssi = parts[9].clone();
-                    }
-                }
-                _ => {}
-            }
-            return info;
-        }
-        info
+        query_monsc(&self.client, &self.ctx).await
     }
 
     // ============= PDCP 统计 =============
@@ -497,16 +463,16 @@ pub static PDCP_FIELDS: &[(&str, bool)] = &[
 ];
 
 #[derive(Default)]
-struct MonscInfo {
-    rat: String,
-    arfcn: String,
-    cell_id: String,
-    pci: String,
-    tac: String,
-    rsrp: String,
-    rsrq: String,
-    sinr: String,
-    rssi: String,
+pub(crate) struct MonscInfo {
+    pub(crate) rat: String,
+    pub(crate) arfcn: String,
+    pub(crate) cell_id: String,
+    pub(crate) pci: String,
+    pub(crate) tac: String,
+    pub(crate) rsrp: String,
+    pub(crate) rsrq: String,
+    pub(crate) sinr: String,
+    pub(crate) rssi: String,
 }
 
 fn is_call_line(line: &str) -> bool {
@@ -581,6 +547,89 @@ pub fn split_fields(line: &str, prefix: &str) -> Vec<String> {
         .split(',')
         .map(|p| p.trim().to_string())
         .collect()
+}
+
+/// 查询服务小区信息（`AT^MONSC`）。
+///
+/// 抽成自由函数的原因：URC 分发（收到信号上报时补全明细）与定时巡检
+/// （主动取样）都要用它，而巡检并不持有 `Dispatcher`。
+pub(crate) async fn query_monsc(
+    client: &AtClient,
+    ctx: &tokio::sync::watch::Receiver<bool>,
+) -> MonscInfo {
+    let mut info = MonscInfo { rat: "未知".into(), ..Default::default() };
+    let resp = match client.send_command(ctx, "AT^MONSC", crate::atclient::COMMAND_TIMEOUT, None).await {
+        Ok(r) => r,
+        Err(_) => return info,
+    };
+    for line in &resp.lines {
+        if !line.starts_with("^MONSC:") {
+            continue;
+        }
+        let parts = split_fields(line, "^MONSC:");
+        if parts.len() < 2 {
+            return info;
+        }
+        info.rat = parts[0].trim_matches('"').to_string();
+        match info.rat.as_str() {
+            "NR" => {
+                if parts.len() >= 11 {
+                    info.arfcn = parts[3].clone();
+                    info.cell_id = parts[5].clone();
+                    info.pci = hex_to_dec(&parts[6]);
+                    info.tac = parts[7].clone();
+                    info.rsrp = parts[8].clone();
+                    info.rsrq = parts[9].clone();
+                    info.sinr = parts[10].clone();
+                }
+            }
+            "LTE" => {
+                if parts.len() >= 10 {
+                    info.arfcn = parts[3].clone();
+                    info.cell_id = parts[4].clone();
+                    info.pci = hex_to_dec(&parts[5]);
+                    info.tac = parts[6].clone();
+                    info.rsrp = parts[7].clone();
+                    info.rsrq = parts[8].clone();
+                    info.rssi = parts[9].clone();
+                }
+            }
+            _ => {}
+        }
+        return info;
+    }
+    info
+}
+
+/// 查询服务载波的下行频点与带宽（`AT^HFREQINFO?`）→ `(dl_freq_khz, dl_bw_khz)`。
+///
+/// 手册 13.16.3 字段顺序（实测 NR n41）：
+/// `^HFREQINFO:<n>,<sysmode>,<band>,<dl_fcn>,<dl_freq>,<dl_bw>,<ul_fcn>,<ul_freq>,<ul_bw>`
+/// 例如 `0,7,41,513000,2565000,100000,...` → 下行 2565 MHz / 100 MHz。
+/// 多载波时取第一个（主载波）——推送文案不需要逐载波展开。
+pub(crate) async fn query_hfreqinfo(
+    client: &AtClient,
+    ctx: &tokio::sync::watch::Receiver<bool>,
+) -> Option<(f64, f64)> {
+    let resp = client
+        .send_command(ctx, "AT^HFREQINFO?", crate::atclient::COMMAND_TIMEOUT, None)
+        .await
+        .ok()?;
+    for line in &resp.lines {
+        if !line.contains("^HFREQINFO:") {
+            continue;
+        }
+        let parts = split_fields(line, "^HFREQINFO:");
+        if parts.len() < 6 {
+            continue;
+        }
+        let dl_freq = parts[4].parse::<f64>().ok()?;
+        let dl_bw = parts[5].parse::<f64>().ok()?;
+        if dl_freq > 0.0 {
+            return Some((dl_freq, dl_bw));
+        }
+    }
+    None
 }
 
 /// 从一行上报文本里解析信号读数 → `(RSRP dBm, 制式)`。

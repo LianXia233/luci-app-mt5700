@@ -10,7 +10,6 @@
 //!       （stderr 由 init.d 重定向产生，本模块不直接写 syslog）。
 //!   LuCI 的日志页把两者合并展示，所以「拨号过程」与「接口拉起」都能看到。
 
-use chrono::TimeZone;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
@@ -44,8 +43,10 @@ fn timestamp() -> String {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = now.as_secs();
     let millis = now.subsec_millis();
-    // 本地时区格式化到秒，毫秒单独拼接，兼顾可读性与精度
-    let dt = chrono::Local.timestamp_opt(secs as i64, 0).single().unwrap_or_else(|| chrono::Local::now());
+    // 系统时区（未配置时北京时间）格式化到秒，毫秒单独拼接，兼顾可读性与精度。
+    // 走 crate::localtime 而非 chrono::Local：本固件没有 tzdata，
+    // 守护进程也没有 TZ 环境变量，chrono::Local 会静默落到 UTC。
+    let dt = crate::localtime::from_unix(secs as i64);
     format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), millis)
 }
 

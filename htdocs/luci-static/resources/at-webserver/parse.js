@@ -340,23 +340,56 @@ var Parse = (function () {
 		return /^\d{5,19}$/.test(api.normalizePhoneNumber(number));
 	};
 
+	/*
+	 * Date → PDU 时间串 `YY/MM/DD,HH:MM:SS`。
+	 *
+	 * 这是短信中心内部统一的时间表示（也是 AT+CMGL 文本模式给出的格式）。
+	 * 传进来的 Date 无效时返回**空串**而不是回落当前时刻：
+	 * 旧实现回落成 `new Date().toLocaleString()`，等于给一条时间未知的短信
+	 * 盖上「刚刚」的章，既污染排序又误导用户。空串在界面上会显示为「时间未知」。
+	 */
 	api.formatPDUTime = function (ts) {
+		/*
+		 * null / undefined 表示「时间未知」，必须显式短路：
+		 * `new Date(null)` 会得到 epoch（1970-01-01T00:00:00Z），那是一个**合法**日期，
+		 * 单靠下面的 isNaN 判不出来 —— 会把「不知道什么时候」渲染成 1970 年，
+		 * 而且它小于任何真实时间，排序时还会被排到最前面。
+		 */
+		if (ts == null) return '';
 		var d = ts instanceof Date ? ts : new Date(ts);
-		if (isNaN(d.getTime())) return new Date().toLocaleString('zh-CN');
+		if (isNaN(d.getTime())) return '';
 		var pad = function (n) { return String(n).padStart(2, '0'); };
 		return pad(d.getFullYear() % 100) + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) +
 			',' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 	};
 
+	/*
+	 * 时间串 → Date；无法识别返回 **null**（不是「此刻」）。
+	 *
+	 * 支持两种来源：
+	 *   - `YY/MM/DD,HH:MM:SS`，即 formatPDUTime 的输出；
+	 *   - 任何 `new Date()` 能识别的串（兜底容错）。
+	 *
+	 * 为什么必须返回 null：旧实现在两种都失败时返回 `new Date()`。
+	 * 后果有两层：一是时间未知的老短信永远排在最新，二是 `now` 每次刷新都在变，
+	 * 排序结果随之抖动，表现为会话列表「自己乱跳」。如实返回 null 后，
+	 * 由调用方按「时间未知」处理，排序才是稳定的。
+	 */
 	api.parseMessageTime = function (timeStr) {
-		if (!timeStr) return new Date();
+		if (!timeStr) return null;
 		var match = String(timeStr).trim().match(/(\d{2})\/(\d{2})\/(\d{2}),(\d{2}):(\d{2}):(\d{2})/);
 		if (match) {
 			return new Date(2000 + parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10),
 				parseInt(match[4], 10), parseInt(match[5], 10), parseInt(match[6], 10));
 		}
 		var parsed = new Date(timeStr);
-		return isNaN(parsed.getTime()) ? new Date() : parsed;
+		return isNaN(parsed.getTime()) ? null : parsed;
+	};
+
+	/* 时间串 → 毫秒时间戳；时间未知返回 null。排序与「最近一条」判定统一走这里。 */
+	api.messageTimeMs = function (timeStr) {
+		var d = api.parseMessageTime(timeStr);
+		return d ? d.getTime() : null;
 	};
 
 	/* ================= 短信 PDU 解码（3GPP TS 23.040） ================= */
@@ -418,8 +451,14 @@ var Parse = (function () {
 
 	function bcdDigit(b) { return (b & 0x0F) * 10 + (b >> 4); }
 
+	/*
+	 * 7 字节 BCD 时间戳（TP-SCTS / TP-VP 绝对格式）→ Date；字段非法返回 null。
+	 *
+	 * 同样不再回落 `new Date()`：时间戳坏了就是「不知道」，
+	 * 编一个当前时刻会让排序与界面都在说谎。
+	 */
 	function decodeTimestamp(ts) {
-		if (ts.length < 7) return new Date();
+		if (!ts || ts.length < 7) return null;
 		var year = 2000 + bcdDigit(ts[0]);
 		var month = bcdDigit(ts[1]);
 		var day = bcdDigit(ts[2]);
@@ -427,7 +466,7 @@ var Parse = (function () {
 		var minute = bcdDigit(ts[4]);
 		var second = bcdDigit(ts[5]);
 		if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) {
-			return new Date();
+			return null;
 		}
 		return new Date(year, month - 1, day, hour, minute, second);
 	}
@@ -478,7 +517,30 @@ var Parse = (function () {
 		return (dcs >> 2) & 0x03;
 	}
 
-	// 解析一条 SMS-DELIVER PDU（hex），返回 { sender, content, date, partial }
+	/*
+	 * 解析一条短信 PDU（hex），返回
+	 * { direction, number, sender, content, date, timeApprox, partial }；无法解析返回 null。
+	 *
+	 * 支持两种 PDU 类型（3GPP TS 23.040）：
+	 *
+	 *   TP-MTI = 0  SMS-DELIVER —— 对方发来的。地址字段是 TP-OA（发件号码），
+	 *               随后 7 字节 TP-SCTS 是服务中心盖的**收信时刻**，时间可信。
+	 *
+	 *   TP-MTI = 1  SMS-SUBMIT  —— 本机发出的。模组若把已发短信存在存储里，
+	 *               AT+CMGL 就会以这种类型列出来。地址字段是 TP-DA（收件号码），
+	 *               前面多一个 TP-MR（1 字节）。SUBMIT **没有发送时刻字段**，
+	 *               只有一个 TP-VP 有效期：VPF=01/11（7 字节）时能解出时间，
+	 *               但语义是「有效期截止」而非「发送时刻」，故标记 timeApprox；
+	 *               VPF=10（1 字节相对格式，本插件发信时用的就是它）拿不到绝对时间，
+	 *               此时 date 返回 null —— 宁可显示「时间未知」，也不编一个时刻出来。
+	 *
+	 * 为什么必须支持 SUBMIT：旧实现开头就是 `if (mti !== 0) return null`，
+	 * 整条 SUBMIT 被丢掉；而 parseCMGL 又把解析成功的统统标成 'received'。
+	 * 两者叠加会把「本机发出的短信」变成一条假的 incoming —— 号码是自己的收件人，
+	 * 方向却是「收到」。这里由 PDU 的 MTI 决定方向，不再靠调用方猜。
+	 *
+	 * MTI = 2/3（SMS-STATUS-REPORT / SMS-COMMAND）本页不展示，返回 null 跳过。
+	 */
 	api.decodeIncomingPdu = function (hex) {
 		var raw = [];
 		for (var i = 0; i + 1 < hex.length; i += 2) {
@@ -490,19 +552,52 @@ var Parse = (function () {
 		if (pos >= raw.length) return null;
 		var firstOctet = raw[pos];
 		var mti = firstOctet & 0x03;
-		if (mti !== 0) return null; // 只处理 SMS-DELIVER
+		if (mti !== 0 && mti !== 1) return null;
+		var isSubmit = mti === 1;
 		pos += 1;
-		var oaLen = raw[pos];
-		if (pos + 1 + Math.ceil(oaLen / 2) > raw.length) return null;
-		var addr = decodeAddress(raw, pos);
-		pos += 2 + Math.ceil(oaLen / 2);
+
+		var addr;
+		if (isSubmit) {
+			/* TP-MR 占 1 字节，跳过；随后才是与 DELIVER 同构的地址字段 */
+			if (pos >= raw.length) return null;
+			pos += 1;
+			var daLen = raw[pos];
+			if (pos + 1 + Math.ceil(daLen / 2) > raw.length) return null;
+			addr = decodeAddress(raw, pos);
+			pos += 2 + Math.ceil(daLen / 2);
+		} else {
+			var oaLen = raw[pos];
+			if (pos + 1 + Math.ceil(oaLen / 2) > raw.length) return null;
+			addr = decodeAddress(raw, pos);
+			pos += 2 + Math.ceil(oaLen / 2);
+		}
 		if (pos + 1 >= raw.length) return null;
 		var pid = raw[pos]; pos += 1;
 		var dcs = raw[pos]; pos += 1;
-		if (pos + 7 > raw.length) return null;
-		var ts = raw.slice(pos, pos + 7);
-		var date = decodeTimestamp(ts);
-		pos += 7;
+
+		/*
+		 * TP-VP 长度由首字节的 bit4:bit3（TP-VPF）决定（TS 23.040）：
+		 *   bit4 bit3
+		 *     0    0   → 无 TP-VP
+		 *     1    0   → 相对格式，1 字节（只有「还有多久过期」，无绝对时间）
+		 *     0    1   → 增强格式，7 字节
+		 *     1    1   → 绝对格式，7 字节
+		 * (firstOctet >> 3) & 0x03 正好得到上表的行号 0/1/2/3，
+		 * 故长度表为 [0, 7, 1, 7]（下标 1 = 增强、下标 2 = 相对）。
+		 */
+		var vpf = (firstOctet >> 3) & 0x03;
+		var vpLen = [0, 7, 1, 7][vpf];
+		var date = null;
+		var timeApprox = false;
+		if (isSubmit) {
+			if (pos + vpLen > raw.length) return null;
+			if (vpLen === 7) { date = decodeTimestamp(raw.slice(pos, pos + 7)); timeApprox = true; }
+			pos += vpLen;
+		} else {
+			if (pos + 7 > raw.length) return null;
+			date = decodeTimestamp(raw.slice(pos, pos + 7));
+			pos += 7;
+		}
 		if (pos >= raw.length) return null;
 		var udl = raw[pos]; pos += 1;
 		var udLen;
@@ -557,7 +652,17 @@ var Parse = (function () {
 				: '';
 		}
 
-		return { sender: addr.address, content: content, date: date, partial: partial };
+		return {
+			direction: isSubmit ? 'sent' : 'received',
+			/* SUBMIT 的地址是收件人、DELIVER 的是发件人，统一用 number 表示「对方号码」 */
+			number: addr.address,
+			sender: addr.address,
+			content: content,
+			/* Date 或 null（时间未知） */
+			date: date,
+			timeApprox: timeApprox,
+			partial: partial
+		};
 	};
 
 	// 解析 CMGL=4 应答（PDU 块 / 已解码文本行），输出 SMS[]
@@ -599,13 +704,22 @@ var Parse = (function () {
 			if (pduHex) {
 				var decoded = api.decodeIncomingPdu(pduHex);
 				if (decoded) {
+					/*
+					 * 方向必须取自 PDU 的 MTI，不能像旧实现那样硬编码 'received'：
+					 * 模组把已发短信也列出来时（SUBMIT PDU），硬编码会让「我发出去的」
+					 * 显示成「我收到的」，号码还是对方 —— 直接看反了对话方向。
+					 * 时间同样如实传递：decoded.date 为 null 时 formatPDUTime 返回空串，
+					 * 界面标注「时间未知」，排序也不会被假时间带偏。
+					 */
 					sms.push({
 						index: idx,
 						content: decoded.content,
-						number: api.normalizePhoneNumber(decoded.sender || ''),
+						number: api.normalizePhoneNumber(decoded.number || ''),
 						time: api.formatPDUTime(decoded.date),
-						type: 'received',
-						isConcatenated: !!decoded.partial,
+						type: decoded.direction,
+						timeApprox: decoded.timeApprox,
+						/* 长短信拼接只对收到的消息做（发送侧由本机自己分片，无需重组） */
+						isConcatenated: !!decoded.partial && decoded.direction === 'received',
 						concatenatedRef: decoded.partial ? decoded.partial.reference : undefined,
 						concatenatedSeq: decoded.partial ? decoded.partial.part_number : undefined,
 						concatenatedTotal: decoded.partial ? decoded.partial.parts_count : undefined

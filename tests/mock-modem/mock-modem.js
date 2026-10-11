@@ -8,12 +8,30 @@
  * 用法：
  *   node mock-modem.js [port]
  * 支持的命令见 CMD_TABLE；未知命令返回 "ERROR\r\n"。
+ *
+ * 环境变量：
+ *   MOCK_QUIET=1      关掉自发的周期 URC（信号 / 伪来电 / 伪短信）。
+ *                     做推送模拟时必开：自发 URC 会混进结果，让收到的推送无法归因。
+ *   MOCK_CMGL_TEXT=1  AT+CMGL=4 返回文本模式样本，而非 PDU 夹具。
+ *
+ * 短信内容来自 sms-fixtures.js（时间 = 当前北京时间 − 偏移），
+ * 与前端渲染测试（sms-center-render.js）共用同一份样本。
  */
 'use strict';
 
 const net = require('net');
+const fixtures = require('./sms-fixtures.js');
 
 const PORT = parseInt(process.argv[2], 10) || 20249;
+
+/*
+ * 短信存储内容由夹具动态生成（时间 = 当前北京时间 − 偏移）。
+ * 写死日期的样本看不出排序 / 分区对不对，也无法验证「时间戳走的是北京时间」。
+ */
+const SMS_LIST = fixtures.buildConversations();
+/* 模组只把「对方发来的」放进收件箱；已发短信在 CMGL 里以 STO SENT 出现 */
+const RECV_INDICES = SMS_LIST.filter(function (s) { return s.direction === 'received'; })
+	.map(function (s) { return s.index; });
 
 /* ---------- 状态 ---------- */
 const state = {
@@ -36,9 +54,50 @@ const state = {
 	ndis: 1
 };
 
+/* 依次轮换收件箱索引，保证每次 AT+TESTPUSH=2 都能读到一条真实存在的短信 */
+function nextSmsIndex() {
+	state.smsSeq = (state.smsSeq % RECV_INDICES.length) + 1;
+	return RECV_INDICES[state.smsSeq - 1];
+}
+
+/* ---------- 安全护栏 ---------- */
+
+/*
+ * 危险命令一律拒绝：IMEI 写入、序列号写入、恢复出厂设置、复位。
+ *
+ * 即使是模拟器也不给这些命令留入口 —— 模拟器的价值在于「测试脚本跑通了，
+ * 换成真机也能跑」，那么它就绝不能对危险命令回 OK：
+ * 一旦有人把测试指向真实模组（或改错了网络端口），
+ * 日志里那句 OK 就会变成「已经执行过」的证据。
+ *
+ * 只读命令（AT+CGSN 读 IMEI、ATI 读型号）保留：后端启动时要读它们做设备识别，
+ * 不做修改就没有不可逆后果。本插件的硬约束是「不碰 IMEI」，即不写、不改、不恢复。
+ */
+const FORBIDDEN = [
+	// IMEI / 序列号写入
+	/^AT\+EGMR/i,
+	/^AT\+WRIMEI/i,
+	/^AT\^IMEI/i,
+	/^AT\+SN=/i,
+	/^AT\^SN=/i,
+	// 恢复出厂设置 / 清 NV
+	/^AT&F/i,
+	/^AT\^NVDEFAULT/i,
+	// 复位 / 重启
+	/^AT\+RESET/i,
+	/^AT\^RESET/i,
+	/^AT\+CFUN=1\s*,\s*1$/i
+];
+
 /* ---------- 应答表 ---------- */
 function replyFor(cmd) {
 	const c = cmd.replace(/\r/g, '');
+	for (let i = 0; i < FORBIDDEN.length; i++) {
+		if (FORBIDDEN[i].test(c)) {
+			console.log('[mock] 拒绝危险命令（IMEI 写入 / 恢复出厂 / 复位）: ' + c);
+			return 'ERROR';
+		}
+	}
 	if (c === 'AT') return 'OK';
 	if (c === 'ATI') return 'Manufacturer: MTK\r\nModel: MT5700M\r\nRevision: MT5700M_CN_A0_V002\r\nIMEI: ' + state.imei + '\r\nOK';
 	if (c === 'AT+CGSN') return state.imei + '\r\nOK';
@@ -60,28 +119,41 @@ function replyFor(cmd) {
 	if (c === 'AT+CREG?') return '+CREG: 0,1\r\nOK';
 	if (c === 'AT+COPS?') return '+COPS: 0,0,"CHN-UNICOM",7\r\nOK';
 	if (c === 'AT+COPS=3,2') return 'OK';
-	if (c === 'AT^MONSC?') return '^MONSC: 0,460,01,0,250,29001,119,71,2360,46,20,97,0\r\nOK';
-	if (c === 'AT^HFREQINFO?') return '^HFREQINFO: 0,2360,46,0,97,0\r\nOK';
+	/*
+	 * 信号应答必须用**实机真实格式**：rpc.js parseMONSC 与 Rust urc::query_monsc
+	 * 都按这个字段顺序取值，占位数字会让 RSRP 解析不出来（回落成 -140 dBm）。
+	 * 行内是实机抓到的样本（NR n41、RSRP -65 / RSRQ -10 / SINR 28）。
+	 */
+	if (c === 'AT^MONSC?') return '^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-10,28\r\nOK';
+	if (c === 'AT^HFREQINFO?') return '^HFREQINFO: 0,7,41,513000,2565000,100000,0,0,0\r\nOK';
 	if (c === 'AT^LENDC?') return '^LENDC: 0,1,10,0,0\r\nOK';
 	if (c === 'AT^TXPOWER?') return '^TXPOWER: 0,15,23\r\nOK';
 	if (c === 'AT^NTXPOWER?') return '^NTXPOWER: 0,1,20,23\r\nOK';
 	if (c === 'AT+CGPADDR') return '+CGPADDR: 1,"10.10.1.2"\r\n+CGPADDR: 2,"2408:8400:8000:0:0:0:0:1"\r\nOK';
 	if (c === 'AT^CHIPTEMP?') return '^CHIPTEMP: 42\r\nOK';
 	if (c === 'AT+CPIN?') return '+CPIN: READY\r\nOK';
+	/*
+	 * 短信列表与单条读取喂**动态夹具**（sms-fixtures.js），与短信中心渲染测试同源。
+	 * MOCK_CMGL_TEXT=1 时退回文本模式样本，覆盖前端的非 PDU 分支。
+	 */
 	if (c === 'AT+CMGL=4') {
-		state.smsSeq++;
-		if (state.smsSeq <= 1) return '';
-		// 第 2 次起给一条短信（PDU 或文本行）
-		return '+CMGL: 1,"REC READ","+8613800138000",,"25/09/10,10:30:00+32"\r\n你好，这是测试短信。\r\nOK';
+		if (process.env.MOCK_CMGL_TEXT === '1') {
+			return '+CMGL: 1,"REC READ","+8613800138000",,"25/09/10,10:30:00+32"\r\n你好，这是测试短信。\r\nOK';
+		}
+		return fixtures.cmglText(SMS_LIST);
 	}
 	if (c.startsWith('AT+CMGR=')) {
-		// SMS-DELIVER PDU（GSM7 "hello"，来自 Rust pdu.rs 测试用例）
-		return '+CMGR: "REC READ",24\r\n00040B913108108300F000005280522100002305E8329BFD06';
+		const want = parseInt(c.slice('AT+CMGR='.length), 10);
+		const item = SMS_LIST.filter(function (s) { return s.index === want; })[0];
+		/* 收件箱里没有的（含已发短信）一律 ERROR：真模组也不会用 CMGR 取已发记录 */
+		if (!item || item.direction !== 'received') return 'ERROR';
+		return fixtures.cmgrText(item.pdu);
 	}
 	if (c === 'AT+CSCA?') return '+CSCA: "' + state.csca + '",145\r\nOK';
 	if (c.startsWith('AT+CSCA=')) { const m = c.match(/AT\+CSCA="([^"]+)"/); if (m) state.csca = m[1]; return 'OK'; }
-	if (c === 'AT^CPMS?') return '^CPMS: "SM",1,50,"SM",1,50,"MT",1,50\r\nOK';
-	if (c === 'AT+CPMS?') return '+CPMS: "SM",1,50,"SM",1,50,"MT",1,50\r\nOK';
+	/* 存储用量与夹具条数保持一致，否则界面会显示「存储 0/50」却列出 6 条短信 */
+	if (c === 'AT^CPMS?') return '^CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"MT",0,50\r\nOK';
+	if (c === 'AT+CPMS?') return '+CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"MT",0,50\r\nOK';
 	if (c.startsWith('AT+CPMS=')) return 'OK';
 	if (c === 'AT+CMGD=1,4') return 'OK';
 	if (c.startsWith('AT+CMGD=')) return 'OK';
@@ -148,8 +220,7 @@ function replyFor(cmd) {
 	if (c === 'AT^THERMLDAUTOPARA?') return '^THERMLDAUTOPARA: 80,85,90,95,100,105,110,115,120\r\nOK';
 	if (c === 'AT^THERMLDAUTOSTATUS?') return '^THERMLDAUTOSTATUS: 1,0,0,0,0,1\r\nOK';
 	if (c.startsWith('AT^THERM')) return 'OK';
-	if (c === 'AT&F') return 'OK';
-	if (c === 'AT+RESET' || c === 'AT^RESET') return 'OK';
+	/* AT&F / AT+RESET / AT^RESET 已由上面的 FORBIDDEN 护栏拦截，此处刻意不实现 */
 	if (c === 'AT+CGMR') return 'MT5700M_CN_A0_V002\r\nOK';
 	if (c === 'AT^FOTASTATE?') return '^FOTASTATE: 0\r\nOK';
 	if (c.startsWith('AT^FOTA')) return 'OK';
@@ -171,8 +242,17 @@ function replyFor(cmd) {
 function specialAction(c) {
 	if (c === 'AT+TESTPUSH=1') return 'push-call';
 	if (c === 'AT+TESTPUSH=2') return 'push-sms';
+	/* AT+TESTPUSH=2,<索引>：指定要推送哪一条存储短信（默认按收件箱顺序轮换） */
+	if (/^AT\+TESTPUSH=2,\d+$/.test(c)) return 'push-sms';
 	if (c === 'AT+TESTPUSH=3') return 'push-rejinfo';
+	if (c === 'AT+TESTPUSH=4') return 'push-hangup';
 	return null;
+}
+
+/* 从 AT+TESTPUSH=2[,<索引>] 里取出要读的短信索引 */
+function smsIndexFrom(c) {
+	const m = /^AT\+TESTPUSH=2,(\d+)$/.exec(c);
+	return m ? parseInt(m[1], 10) : nextSmsIndex();
 }
 
 /* ---------- 连接处理 ---------- */
@@ -186,8 +266,13 @@ const server = net.createServer(function (socket) {
 		if (!socket.destroyed) socket.write(text);
 	};
 
-	// 周期性推送：信号变化、伪来电、伪新短信
+	/*
+	 * 周期性推送：信号变化、伪来电、伪新短信。
+	 * MOCK_QUIET=1 时全部关掉 —— 做推送模拟时这些自发 URC 会混进结果，
+	 * 让「收到的推送」里出现无法归因的条目。
+	 */
 	const timers = [];
+	if (process.env.MOCK_QUIET !== '1') {
 	timers.push(setInterval(function () {
 		state.rsrp = state.rsrp + (Math.random() > 0.5 ? 1 : -1);
 		push('^HCSQ: 0,0,0,0,17,45,' + Math.abs(state.rsrp) + ',10,14\r\n');
@@ -196,9 +281,9 @@ const server = net.createServer(function (socket) {
 		push('+CLIP: "+8613800138000",129,"",0\r\n');
 	}, 30000));
 	timers.push(setInterval(function () {
-		state.smsSeq++;
-		push('+CMTI: "SM",' + state.smsSeq + '\r\n');
+		push('+CMTI: "SM",' + nextSmsIndex() + '\r\n');
 	}, 45000));
+	}
 
 	socket.on('data', function (chunk) {
 		buf += chunk.toString('binary');
@@ -224,12 +309,23 @@ const server = net.createServer(function (socket) {
 				continue;
 			}
 			if (action === 'push-sms') {
-				console.log('[mock] #' + id + ' > OK (test push sms)');
+				const idx = smsIndexFrom(cmd);
+				console.log('[mock] #' + id + ' > OK (test push sms, index ' + idx + ')');
 				push('OK\r\n');
-				setTimeout(function () { state.smsSeq++; console.log('[mock] #' + id + ' >push +CMTI ' + state.smsSeq); push('+CMTI: "SM",' + state.smsSeq + '\r\n'); }, 100);
+				setTimeout(function () {
+					console.log('[mock] #' + id + ' >push +CMTI "SM",' + idx);
+					push('+CMTI: "SM",' + idx + '\r\n');
+				}, 100);
 				continue;
 			}
-			if (action === 'push-rejinfo') {
+			if (action === 'push-hangup') {
+			/* 挂断：真实模组在对方挂机时给 NO CARRIER，后端据此发「通话结束」 */
+			console.log('[mock] #' + id + ' > OK (test push hangup)');
+			push('OK\r\n');
+			setTimeout(function () { console.log('[mock] #' + id + ' >push NO CARRIER'); push('NO CARRIER\r\n'); }, 100);
+			continue;
+		}
+		if (action === 'push-rejinfo') {
 				console.log('[mock] #' + id + ' > OK (test push rejinfo)');
 				push('OK\r\n');
 				// 手册 13.14 示例：^REJINFO:46000,1,40,2,3,40,"0026F8","FF","0A444202"
