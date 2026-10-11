@@ -599,7 +599,7 @@ async function main() {
 	}
 
 	/* ---------- 6. LuCI「发送测试通知」按钮 ---------- */
-	console.log('\n=== 5. 测试通知按钮（LuCI 发送测试通知）===');
+	console.log('\n=== 5. 测试推送（通道连通性 + 按事件类型）===');
 	const TEST_TEXT = '喵～测试通知来啦！推送通道一切正常，链路畅通无阻喵！';
 	const markTest = hook.received.length;
 	/* 与 at() 一样必须带 auth_key：notify_test 是普通 RPC 方法，不带头会被拒（密钥错误） */
@@ -614,6 +614,58 @@ async function main() {
 	check('文案与约定一致', !!testRec && testRec.content.indexOf(TEST_TEXT) >= 0,
 		testRec ? testRec.content.replace(/\n/g, '\\n').slice(0, 70) : '');
 	check('测试通知不含插件名', !!testRec && testRec.content.indexOf('mt5700') < 0);
+
+	/*
+	 * 按事件类型测试（channel=sms|call）。
+	 *
+	 * 短信与来电只能由模组 URC 触发，没有注入入口就没法在设备上验证「新文案长什么样、
+	 * 是不是真的实时」。这里断言它确实是**同形状事件走完整链路**，而不是另一段固定文案：
+	 * 输出必须套用真实短信/来电模板（发送者/内容占位符被真实填上），且不等合并窗口。
+	 */
+	const markKind = hook.received.length;
+	const tk = Date.now();
+	const smsTest = await rpcConn2.rpc('notify_test', { channel: 'sms', auth_key: AUTH });
+	check('短信测试推送 RPC 返回成功', !!(smsTest.result && smsTest.result.success),
+		smsTest.result && smsTest.result.error ? String(smsTest.result.error) : 'success');
+	const smsTestRec = await waitFor(() => {
+		const m = hook.received.slice(markKind).filter((r) => r.content && r.content.indexOf('模拟短信') >= 0)[0];
+		return m || null;
+	}, 8000, '收到短信测试推送');
+	check('短信测试推送已送达 webhook', !!smsTestRec);
+	check('短信测试不等合并窗口（与真实短信同为实时直发）', Date.now() - tk < MERGE_WINDOW_MS,
+		(Date.now() - tk) + ' ms < ' + MERGE_WINDOW_MS + ' ms');
+	const smsTestText = smsTestRec ? smsTestRec.content : '';
+	check('套用真实短信模板（发送者占位符被填）', smsTestText.indexOf('发送者: 138****0000') >= 0,
+		(smsTestText.split('\n').filter((l) => l.indexOf('发送者') >= 0)[0] || ''));
+	check('套用真实短信模板（内容占位符被填）', smsTestText.indexOf('这是一条模拟短信') >= 0);
+	check('测试短信自带标注，不会被当成真短信', smsTestText.indexOf('非真实短信') >= 0);
+	check('测试短信不含插件名', smsTestText.indexOf('mt5700') < 0);
+
+	const tk2 = Date.now();
+	const callTest = await rpcConn2.rpc('notify_test', { channel: 'call', auth_key: AUTH });
+	check('来电测试推送 RPC 返回成功', !!(callTest.result && callTest.result.success),
+		callTest.result && callTest.result.error ? String(callTest.result.error) : 'success');
+	const callTestRec = await waitFor(() => {
+		const m = hook.received.slice(markKind).filter((r) => r.content && r.content.indexOf('来电振铃（测试消息') >= 0)[0];
+		return m || null;
+	}, 8000, '收到来电测试推送');
+	check('来电测试推送已送达 webhook', !!callTestRec);
+	check('来电测试不等合并窗口', Date.now() - tk2 < MERGE_WINDOW_MS, (Date.now() - tk2) + ' ms');
+	const callTestText = callTestRec ? callTestRec.content : '';
+	check('套用真实来电模板（标题与真实来电一致）', callTestText.indexOf('有电话打进来啦') >= 0,
+		callTestText.split('\n')[0] || '');
+	check('测试来电正文含掩码号码与振铃状态', callTestText.indexOf('138****0000') >= 0 && callTestText.indexOf('状态：来电振铃') >= 0);
+	check('测试来电自带标注，不会被当成真来电', callTestText.indexOf('非真实来电') >= 0);
+
+	/* 非法 channel 必须明确失败：假装成功会让用户以为推送通着，实际什么都没发 */
+	const badTest = await rpcConn2.rpc('notify_test', { channel: 'no-such-channel', auth_key: AUTH });
+	check('未知通道明确报错而不是假装成功',
+		!!(badTest.result && !badTest.result.success && String(badTest.result.error).indexOf('未知通道') >= 0),
+		badTest.result ? String(badTest.result.error) : '');
+	const sigTest = await rpcConn2.rpc('notify_test', { channel: 'signal', auth_key: AUTH });
+	check('信号不支持类型化测试（走真实巡检，避免造出假读数）',
+		!!(sigTest.result && !sigTest.result.success && String(sigTest.result.error).indexOf('不支持测试推送') >= 0),
+		sigTest.result ? String(sigTest.result.error) : '');
 
 	/* ---------- 8. 信号巡检推送 ---------- */
 	console.log('\n=== 6. 信号巡检推送（具体频段 + 网络代际 + 完整评估）===');

@@ -306,9 +306,27 @@ impl RpcServer {
                 serde_json::json!({ "id": id, "result": { "seq": seq, "events": events } })
             }
             // 通知通道测试（LuCI「发送测试通知」按钮）：绕过合并窗口直发一条测试消息。
+            // channel 分两组语义：
+            //   qq / wechat —— 只测**通道连通性**（固定文案，不走事件链路）；
+            //   sms / call  —— 测**某一类的完整链路**，构造同形状事件走 notify()，
+            //                  收到的文本与真实短信/来电一致（含实时直发与文案模板）。
+            // signal / memory_full 也交给类型化分支：它们不受支持，但理由必须说清楚
+            // （信号指标是真实读数，造假的「RSRP -xx dBm」只会误导），而不是笼统的
+            // 「未知通道」——后者会让人以为是拼错了名字，反复试。
             "notify_test" => {
                 let channel = req.params.get("channel").and_then(|v| v.as_str()).unwrap_or("qq").to_string();
-                match self.notify.notify_test(&channel).await {
+                let kind = match channel.as_str() {
+                    "sms" => Some(crate::notify::NotifyKind::Sms),
+                    "call" => Some(crate::notify::NotifyKind::Call),
+                    "signal" => Some(crate::notify::NotifyKind::Signal),
+                    "memory_full" => Some(crate::notify::NotifyKind::MemoryFull),
+                    _ => None,
+                };
+                let result = match kind {
+                    Some(k) => self.notify.notify_test_event(k).await,
+                    None => self.notify.notify_test(&channel).await,
+                };
+                match result {
                     Ok(()) => serde_json::json!({ "id": id, "result": { "success": true, "channel": channel } }),
                     Err(e) => serde_json::json!({ "id": id, "result": { "success": false, "channel": channel, "error": e } }),
                 }
