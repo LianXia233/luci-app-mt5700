@@ -187,12 +187,17 @@ return L.view.extend({
 		}
 
 		/*
-		 * 消息时刻（`YY/MM/DD,HH:MM:SS`）→ 日期分隔条文案。
-		 * 「时间未知」自成一档：不能把它并进某一天，否则会被误读成当天的消息。
+		 * 日期分隔条文案（`YY/MM/DD,HH:MM:SS` → `20YY-MM-DD`）。
+		 *
+		 * 无时刻的消息若借到了锚点位置，日期就用锚点那条的日期 —— 否则时间轴中间
+		 * 会突然冒出一条「时间未知的消息」分隔，把一次来回劈成两半。真的连锚点都
+		 * 没有（它排在最前）时，才单列一档如实说明。
 		 */
-		function dayLabel(m) {
-			if (!m.time) return '时间未知的消息';
-			var day = String(m.time).split(',')[0];
+		function dayLabel(m, keyOf) {
+			var k = keyOf && keyOf[m];
+			var timeStr = m.time || (k && k.anchorTime) || null;
+			if (!timeStr) return '时间未知的消息';
+			var day = String(timeStr).split(',')[0];
 			var seg = day.split('/');
 			if (seg.length === 3) return '20' + seg[0] + '-' + seg[1] + '-' + seg[2];
 			return day;
@@ -216,11 +221,12 @@ return L.view.extend({
 				convBody.appendChild(Mt5700.empty('暂无消息，输入内容发送'));
 				return;
 			}
-			var list = state.messages.slice().sort(compareAsc);
+			var ordered = conversationOrder(state.messages);
+			var list = ordered.sorted;
 			var lastDay = null;
 			for (var i = 0; i < list.length; i++) {
 				var m = list[i];
-				var day = dayLabel(m);
+				var day = dayLabel(m, ordered.keyOf);
 				if (day !== lastDay) {
 					convBody.appendChild(E('div', { 'class': 'mt5700-sms-date' }, day));
 					lastDay = day;
@@ -280,7 +286,7 @@ return L.view.extend({
 				 * 与浏览器缓存（localStorage）。解析器支持 SUBMIT 之后两边会撞车，
 				 * 直接 concat 就会显示两条一样的已发消息，所以先去重。
 				 */
-				buildContacts(parsed.concat(dedupCachedSent(parsed, Parse.getCachedSentMessages())));
+				buildContacts(parsed.concat(mergeCachedSent(parsed, Parse.getCachedSentMessages())));
 			}).catch(function () {
 				Mt5700.error('获取短信列表失败');
 			});
@@ -295,45 +301,109 @@ return L.view.extend({
 		}
 
 		/*
-		 * 时间升序比较（会话内两种分区都用它）。
+		 * 会话内排序。
 		 *
-		 * 时间未知的消息一律排在最后 —— 界面会标注「时间未知」，
-		 * 但绝不能把它们混在时间轴里：那会让「不知道什么时候收到的」
-		 * 看起来像「最新收到的」。同一时刻（或都未知）用存储序号兜底，
-		 * 保证同样的输入每次渲染顺序一致，列表不会来回跳。
+		 * 时间轴成立的前提是每条消息都有时刻。收到短信没问题（PDU 的 TP-SCTS 一定
+		 * 有），但**发出短信按 3GPP TS 23.040 就没有发送时刻**，只有 TP-VP 有效期 ——
+		 * 模组存下来再读回去，时间是真的不知道。早先的实现把这类消息一律排到会话
+		 * 末尾，后果是「对面两句挤在一起、自己那句跑到最后」，一次来回被打散，
+		 * 看起来根本不像对话。
+		 *
+		 * 这里改为借**存储顺序**给它找位置：AT+CMGL 的序号就是存储先后，取该条
+		 * 前面最近那条有确切时刻的消息的时刻作锚点，让它落在那个位置附近。
+		 * 锚点只用于排序与日期分隔，气泡里照旧如实标「时间未知」——借位置，不伪造时刻。
+		 *
+		 * 返回 { sorted, keyOf }；keyOf 交给日期分隔条复用，免得「排序用的锚点」
+		 * 与「显示的日期」各算一套、互相对不上。
 		 */
-		function compareAsc(a, b) {
-			var ta = Parse.messageTimeMs(a.time);
-			var tb = Parse.messageTimeMs(b.time);
-			if (ta !== null && tb !== null) {
-				if (ta !== tb) return ta - tb;
-				return sortIndex(a) - sortIndex(b);
+		function conversationOrder(msgs) {
+			var keyOf = {};
+			var stored = [];
+			for (var i = 0; i < msgs.length; i++) {
+				if (msgs[i].index != null && msgs[i].index >= 0) stored.push(msgs[i]);
 			}
-			if (ta !== null) return -1;
-			if (tb !== null) return 1;
-			return sortIndex(a) - sortIndex(b);
+			stored.sort(function (a, b) { return sortIndex(a) - sortIndex(b); });
+
+			var anchorMs = null, anchorTime = null;
+			for (var s = 0; s < stored.length; s++) {
+				var t = Parse.messageTimeMs(stored[s].time);
+				if (t !== null) { anchorMs = t; anchorTime = stored[s].time; }
+				keyOf[stored[s]] = { ms: anchorMs, anchorTime: anchorTime, relaxed: t === null };
+			}
+			/* 缓存条目（index 为负）自带本机发送时刻，不参与存储顺序这条线索 */
+			for (var j = 0; j < msgs.length; j++) {
+				if (keyOf[msgs[j]]) continue;
+				var tj = Parse.messageTimeMs(msgs[j].time);
+				keyOf[msgs[j]] = { ms: tj, anchorTime: tj === null ? null : msgs[j].time, relaxed: tj === null };
+			}
+
+			var sorted = msgs.slice().sort(function (x, y) {
+				var kx = keyOf[x], ky = keyOf[y];
+				if (kx.ms !== ky.ms) {
+					if (kx.ms === null) return -1;      /* 连锚点都没有 → 排最前 */
+					if (ky.ms === null) return 1;
+					return kx.ms - ky.ms;
+				}
+				/* 同一位置：有确切时刻的在前，借位置的紧随其后 */
+				if (kx.relaxed !== ky.relaxed) return kx.relaxed ? 1 : -1;
+				return sortIndex(x) - sortIndex(y);
+			});
+			return { sorted: sorted, keyOf: keyOf };
 		}
 
 		/*
-		 * 去掉「模组里已经有的」已发缓存副本。
+		 * 把浏览器缓存里的「已发」记录与模组返回的合并（同一条则去重）。
 		 *
-		 * 判定：号码 + 正文相同，且两边都有时间时时间相差不超过 10 分钟。
-		 * 模组是权威来源，冲突时丢缓存那份；模组那份没有时间时按号码+正文去重
-		 * （此时无法用时间区分，宁可少一条缓存副本，也不让用户看到重复气泡）。
+		 * 判定：号码 + 正文相同即视为同一条；两边都有时间时，还要求时间相差不超过
+		 * 10 分钟（否则只是内容恰好相同的另一条短信）。
+		 *
+		 * 关键点：模组存回来的 SMS-SUBMIT 按规范**不含发送时刻**，只有 TP-VP 有效期，
+		 * 而缓存那条是本机发送当时打的时间戳 —— **缓存那条才是唯一带准确时间的**。
+		 * 早先的实现在去重时保留模组那份、丢掉缓存那份，等于把唯一的时间信息一并
+		 * 扔了，于是自己发的消息全部变成「时间未知」并沉到会话末尾。现在改为反向
+		 * 吸收：把缓存的时间戳补给模组那条。模组的 index 仍然保留 —— 删除要走
+		 * AT+CMGD，不能换成缓存的负数 index。
 		 */
-		function dedupCachedSent(modemList, cached) {
+		function mergeCachedSent(modemList, cached) {
 			function keyOf(m) { return normalizeNumber(m.number) + '|' + (m.content || ''); }
-			var seen = {};
+			/*
+			 * 同一个「号码+正文」在模组里可能有不止一条（同内容重复发送），
+			 * 所以按 key 分桶后用游标逐条配对，避免一条缓存把多条模组记录都
+			 * 当成自己的副本而误消。
+			 */
+			var buckets = {};
 			for (var i = 0; i < modemList.length; i++) {
-				if (modemList[i].type === 'sent') seen[keyOf(modemList[i])] = Parse.messageTimeMs(modemList[i].time);
+				var m = modemList[i];
+				if (m.type !== 'sent') continue;
+				var k = keyOf(m);
+				if (!buckets[k]) buckets[k] = [];
+				buckets[k].push(m);
 			}
+
+			var cursor = {};
 			return cached.filter(function (c) {
 				var k = keyOf(c);
-				if (!(k in seen)) return true;
-				var tModem = seen[k];
+				var arr = buckets[k];
+				if (!arr) return true;              /* 模组里没有 → 缓存这条独立保留 */
+
 				var tCached = Parse.messageTimeMs(c.time);
-				if (tModem === null || tCached === null) return false;
-				return Math.abs(tModem - tCached) > 10 * 60 * 1000;
+				for (var i = cursor[k] || 0; i < arr.length; i++) {
+					var tModem = Parse.messageTimeMs(arr[i].time);
+					if (tModem !== null && !(tCached !== null && Math.abs(tModem - tCached) <= 10 * 60 * 1000)) {
+						continue;                   /* 两边都有时间且差得远 → 是另一条 */
+					}
+					if (tModem === null && tCached !== null) {
+						/*
+						 * 模组那条没有时刻，把本机记录的时刻补上 ——
+						 * 这是这条消息唯一的准确时间来源。
+						 */
+						arr[i].time = c.time;
+						arr[i].timeApprox = false;
+					}
+					cursor[k] = i + 1;
+					return false;                   /* 缓存这条已被模组记录吸收 */
+				}
+				return true;
 			});
 		}
 
@@ -352,7 +422,7 @@ return L.view.extend({
 			var list2 = [];
 			for (var key in map) {
 				var c = map[key];
-				c.messages.sort(compareAsc);
+				c.messages = conversationOrder(c.messages).sorted;
 				/*
 				 * 联系人列表里的「最近一条」取**时间最新**的那条，而不是数组末尾那条
 				 * —— 排序把时间未知的消息放在了末尾，直接取末尾会拿错。

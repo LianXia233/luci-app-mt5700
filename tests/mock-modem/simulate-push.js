@@ -43,6 +43,8 @@ const MODEM_PORT = 20249;
    立刻用同一端口重启会 bind 失败，换端口比 sleep 赌运气可靠 */
 const RPC_PORT = 8765;
 const RPC_PORT_2 = 8766;
+/* 阶段三：开信号巡检后专用端口，避免与前两阶段抢监听 */
+const RPC_PORT_3 = 8767;
 const HOOK_PORT = 8899;
 /* 合并窗口设 5 秒（下限）：短信/来电若真的走窗口，就会明显晚于这个时间才到 */
 const MERGE_WINDOW_MS = 5000;
@@ -267,6 +269,30 @@ function setUciTimezone(value) {
 	}
 }
 
+
+/*
+ * 写信号巡检配置（阶段三用）。
+ * mock-uci 本身没有 notify_poll_* 键，buildUciConfig() 会追加一个「关闭」，
+ * 这里按同样的「有则替换、无则追加」规则改成开启。
+ */
+function setUciPoll(opts) {
+	const file = path.join(UCI_BIN_DIR, 'mock-uci.out');
+	let txt = fs.readFileSync(file, 'utf8');
+	const kv = {
+		notify_poll_enabled: opts.enabled,
+		notify_poll_all: opts.all,
+		notify_poll_interval: opts.interval,
+		notify_poll_start: '00:00',
+		notify_poll_end: '23:59'
+	};
+	Object.keys(kv).forEach(function (k) {
+		const line = "at-webserver.config." + k + "='" + kv[k] + "'";
+		const re = new RegExp('^at-webserver\\.config\\.' + k + '=.*$', 'm');
+		if (re.test(txt)) txt = txt.replace(re, line);
+		else txt = txt.replace(/\s*$/, '\n') + line + '\n';
+	});
+	fs.writeFileSync(file, txt);
+}
 /*
  * 目录只清「会变的内容」，**不删 uci.exe**。
  *
@@ -278,8 +304,8 @@ function setUciTimezone(value) {
 /* 每次运行清掉的产物（不含 bin/：uci.exe 与 stub 源码在那里，编译结果要复用） */
 const SIM_FILES = [
 	'hook-received.jsonl', 'dbg.js', 'uci-out.txt', 'uci-err.txt',
-	'at-webserver-stage1.log', 'at-webserver-stage2.log',
-	'mock-modem.log', 'mock-modem-stage2.log',
+	'at-webserver-stage1.log', 'at-webserver-stage2.log', 'at-webserver-stage3.log',
+	'mock-modem.log', 'mock-modem-stage2.log', 'mock-modem-stage3.log',
 	/* 早期版本在顶层留下的假 uci 与数据文件 */
 	'uci-stub.js', 'mock-uci.out', 'mock-uci-tz.txt', 'uci'
 ];
@@ -383,7 +409,7 @@ function readLog(logFile) {
  */
 function auditModemCommands() {
 	const all = [];
-	['mock-modem.log', 'mock-modem-stage2.log'].forEach((f) => {
+	['mock-modem.log', 'mock-modem-stage2.log', 'mock-modem-stage3.log'].forEach((f) => {
 		readLog(path.join(SIM_DIR, f)).split('\n').forEach((line) => {
 			const m = /\[mock\][^\n]*?<\s(.+)$/.exec(line);
 			if (m) all.push(m[1].trim());
@@ -404,17 +430,17 @@ async function main() {
 		throw new Error('未找到后端二进制 ' + RUST_BIN + '，请先执行：cd src/rust && cargo build --release');
 	}
 
-	console.log('==> 0/6 准备本地模拟环境（编译假 uci + 派生配置）');
+	console.log('==> 0/7 准备本地模拟环境（编译假 uci + 派生配置）');
 	await prepareSimDir();
 	console.log('    ' + SIM_DIR);
 	/* 先清掉时区文件：本机没有 /etc/TZ，uci 也读不到 → 走「默认北京时间」回退 */
 	setUciTimezone(null);
 
-	console.log('==> 1/6 启动本地 webhook 接收端 (127.0.0.1:' + HOOK_PORT + ')');
+	console.log('==> 1/7 启动本地 webhook 接收端 (127.0.0.1:' + HOOK_PORT + ')');
 	const hook = createHookServer({ outFile: path.join(SIM_DIR, 'hook-received.jsonl') });
 	await hook.listen(HOOK_PORT);
 
-	console.log('==> 2/6 启动 mock 模组 (TCP ' + MODEM_PORT + '，MOCK_QUIET=1)');
+	console.log('==> 2/7 启动 mock 模组 (TCP ' + MODEM_PORT + '，MOCK_QUIET=1)');
 	const mockLog = fs.createWriteStream(path.join(SIM_DIR, 'mock-modem.log'));
 	const mock = track(spawn(process.execPath, [path.join(HERE, 'mock-modem.js'), String(MODEM_PORT)], {
 		cwd: HERE,
@@ -437,7 +463,7 @@ async function main() {
 	check('只读命令（读 IMEI）仍然可用，后端识别设备不受影响',
 		okRead.indexOf('OK') >= 0, okRead.indexOf('OK') >= 0 ? 'OK（返回模拟值，非真实 IMEI）' : okRead.trim().slice(0, 40));
 
-	console.log('==> 3/6 启动 Rust 后端 (RPC 127.0.0.1:' + RPC_PORT + ')');
+	console.log('==> 3/7 启动 Rust 后端 (RPC 127.0.0.1:' + RPC_PORT + ')');
 	const be = await startBackend('stage1');
 	const rpcConn = await waitPort(RPC_PORT, 15000).then(() => createRpc(RPC_PORT));
 	const at = (cmd) => { assertSafe(cmd); return rpcConn.rpc('at', { cmd: cmd, auth_key: AUTH }); };
@@ -589,13 +615,71 @@ async function main() {
 		testRec ? testRec.content.replace(/\n/g, '\\n').slice(0, 70) : '');
 	check('测试通知不含插件名', !!testRec && testRec.content.indexOf('mt5700') < 0);
 
-	console.log('\n=== 6. 安全审计：整轮测试下发过的 AT 命令 ===');
+	/* ---------- 8. 信号巡检推送 ---------- */
+	console.log('\n=== 6. 信号巡检推送（具体频段 + 网络代际 + 完整评估）===');
+	/*
+	 * signalwatch::run() 是「先 sleep 再 tick」，所以第一轮推送要等满一个巡检
+	 * 间隔；后端把间隔夹取在 30~3600 秒，这里取 30 秒。时段设为全天，避免
+	 * 用例在边界时刻（比如刚好跨过 23:59）被时段判定挡掉而偶发失败。
+	 */
+	rpcConn2.close();
+	killAll();
+	await sleep(600);
+
+	setUciTimezone(null);
+	rewriteUciPort(RPC_PORT_3);
+	setUciPoll({ enabled: 1, all: 1, interval: 30 });
+	const mock3Log = fs.createWriteStream(path.join(SIM_DIR, 'mock-modem-stage3.log'));
+	const mock3 = track(spawn(process.execPath, [path.join(HERE, 'mock-modem.js'), String(MODEM_PORT)], {
+		cwd: HERE,
+		env: Object.assign({}, process.env, { MOCK_QUIET: '1' }),
+		stdio: ['ignore', 'pipe', 'pipe']
+	}));
+	mock3.stdout.pipe(mock3Log);
+	mock3.stderr.pipe(mock3Log);
+	await waitPort(MODEM_PORT, 8000);
+
+	const be3 = await startBackend('stage3');
+	const rpcConn3 = await waitPort(RPC_PORT_3, 15000).then(() => createRpc(RPC_PORT_3));
+	await waitFor(async () => {
+		const r = await rpcConn3.rpc('at', { cmd: 'ATI', auth_key: AUTH });
+		return r && r.result && r.result.success ? true : null;
+	}, 20000, '后端就绪（stage3）');
+	console.log('    等待首轮信号巡检（间隔 30 秒，走 5 秒合并窗口）...');
+
+	const markSig = hook.received.length;
+	const sigRec = await waitFor(() => {
+		const m = hook.received.slice(markSig).filter((r) => r.content && r.content.indexOf('信号巡检') >= 0)[0];
+		return m || null;
+	}, 90000, '收到信号巡检推送');
+
+	check('信号巡检推送已送达 webhook', !!sigRec);
+	const sig = sigRec ? sigRec.content : '';
+	console.log('    ── 推送正文 ──');
+	sig.split('\n').forEach((l) => console.log('    ' + l));
+	check('标题带网络代际（5G / 4G）', /📶\s*(5G|4G)\s*信号巡检/.test(sig), sig.split('\n')[0] || '');
+	check('给出具体频段号（NR 用 n 前缀）', sig.indexOf('n41') >= 0, 'n41');
+	check('给出下行频点与带宽', sig.indexOf('2565 MHz') >= 0 && sig.indexOf('100 MHz') >= 0,
+		'2565 MHz / 100 MHz');
+	/* ^MONSC 的 sysmode 与 ^HFREQINFO 的不是同一张表；混用会把 NR 当成 LTE */
+	check('未把 NR 误判成 LTE（两张 sysmode 表不可混用）', /频段：n\d/.test(sig) && sig.indexOf('4G') < 0,
+		(sig.split('\n').filter((l) => l.indexOf('频段') >= 0)[0] || ''));
+	check('四项指标齐全', ['RSRP', 'RSRQ', 'SINR', 'SIGNAL'].every((k) => sig.indexOf(k) >= 0));
+	check('文案已压缩（正文 ≤ 9 行）', sig.split('\n').length <= 9, sig.split('\n').length + ' 行');
+	check('推送不含插件名', sig.indexOf('mt5700') < 0);
+	/*
+	 * 借位置的消息（无发送时刻的发出短信）只调顺序、不造时刻 —— 这里顺带确认
+	 * 信号推送没有把推断出来的位置写成真实时刻。
+	 */
+	check('信号推送含完整评估结论', sig.indexOf('网络能力') >= 0 && sig.indexOf('·') >= 0);
+
+	console.log('\n=== 7. 安全审计：整轮测试下发过的 AT 命令 ===');
 	const audit = auditModemCommands();
 	check('未下发任何危险命令（IMEI 写入 / 恢复出厂 / 复位）', audit.dangerous.length === 0,
 		audit.dangerous.length ? audit.dangerous.join(' | ') : '扫描 ' + audit.total + ' 条命令，全部安全');
 	check('危险命令均被 mock 拒绝', audit.rejected >= 3, '拒绝 ' + audit.rejected + ' 次（含自检）');
 
-	rpcConn2.close();
+	rpcConn3.close();
 	return { smsRec: smsRec, ring: ring, hang: hang, hook: hook, simDir: SIM_DIR, audit: audit };
 }
 

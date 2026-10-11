@@ -78,7 +78,13 @@ var AtWs = {
 	client: {
 		sendCommand: function (cmd) {
 			if (cmd === 'AT+CMGL=4') return Promise.resolve({ success: true, data: window.CMGL_TEXT });
-			if (cmd === 'AT^CPMS?') return Promise.resolve({ success: true, data: '^CPMS: "SM",6,50,"SM",6,50,"MT",0,50' });
+			/*
+			 * 实机（MT5700M-CN）只认**标准** `AT+CPMS?`；私有前缀 `AT^CPMS?` 直接回 ERROR。
+			 * 这里刻意让私有写法失败，截图才与真机同一个口径 —— 否则前端退回错误前缀后，
+			 * 截图仍然会「看起来正常」，反而掩盖问题。
+			 */
+			if (cmd === 'AT+CPMS?') return Promise.resolve({ success: true, data: '+CPMS: "SM",6,50,"SM",6,50,"MT",0,50' });
+			if (cmd === 'AT^CPMS?') return Promise.resolve({ success: false, error: 'ERROR' });
 			return Promise.resolve({ success: true, data: 'OK' });
 		},
 		subscribe: function () {},
