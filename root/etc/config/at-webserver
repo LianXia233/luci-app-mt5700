@@ -35,6 +35,10 @@ config at-webserver 'config'
 	option qq_target_id ''                 # group_openid / 用户 openid / channel_id（bind 模式由后端自动写回，勿手填）
 	option qq_bind_qq ''                   # 绑定模式下你的 QQ 号（仅日志标签；绑定后给机器人发条消息即自动完成）
 	option log_file '/tmp/at-notifications.log'
+
+	# 自动推送总开关。关闭后所有事件都不推送（仅写本地日志文件，便于事后追溯），
+	# 同时停掉信号定时轮询（不再周期性占用串口）。默认开启。
+	option notify_enabled '1'
 	option notify_sms '1'
 	option notify_call '1'
 	option notify_memory_full '1'
@@ -45,6 +49,18 @@ config at-webserver 'config'
 	# 范围 5-3600，默认 60。调小更实时；调大更省推送配额
 	# （QQ 机器人主动消息频控：单关系 20 条/分钟）。
 	option notify_interval '60'
+
+	# 定时轮询推送（信号巡检）。
+	# 本模组不会主动上报 ^HCSQ / ^CERSSI，因此上面的 notify_signal 开关必须靠
+	# 后端在下面这个时段内主动查询才会生效；时段外一条 AT 都不发，也不推送。
+	# 时段写法：HH:MM，两端都算在时段内。起点大于终点即视为跨零点
+	# （如 start=22:00 / end=06:00）；起止相同（如 00:00/00:00）或格式非法时按「全天」处理。
+	option notify_poll_enabled '1'        # 是否启用信号定时巡检
+	option notify_poll_start '00:00'      # 时段起点 HH:MM（含）
+	option notify_poll_end '23:59'        # 时段终点 HH:MM（含，即默认全天）
+	option notify_poll_interval '300'     # 轮询间隔（秒），范围 30-3600
+	option notify_poll_all '0'            # 0=仅信号变化时推送 / 1=每次轮询都推送当前状态
+	option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅 notify_poll_all=0 时生效
 
 	# 自定义推送文案。留空 = 使用内置默认文案（升级后未被改动的项仍跟随版本更新）。
 	# UCI 的 option 值是单行的，多行文案统一写成 \n 转义，LuCI 页面会自动转换；

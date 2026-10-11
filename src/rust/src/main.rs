@@ -22,6 +22,7 @@ mod schedule;
 mod serial_linux;
 #[cfg(target_os = "linux")]
 mod serialdetect;
+mod signalwatch;
 mod state;
 mod state_cfg;
 mod transport;
@@ -31,6 +32,7 @@ use crate::config::Config;
 use crate::notify::Notifier;
 use crate::rpcserver::RpcServer;
 use crate::schedule::Scheduler;
+use crate::signalwatch::SignalWatcher;
 use crate::urc::{Broadcaster, Dispatcher};
 use std::sync::Arc;
 use std::time::Duration;
@@ -150,6 +152,17 @@ async fn run(verbose: bool) -> Result<(), String> {
         let scheduler = scheduler.clone();
         async move { scheduler.run().await }
     });
+    // 定时轮询推送：本模组不会主动上报 ^HCSQ / ^CERSSI，「信号变化通知」开关
+    // 只能靠后端在用户指定时段内主动查询才会生效（时段外不发任何 AT）。
+    let signalwatch_task = tokio::spawn({
+        let watcher = SignalWatcher::new(
+            client.clone(),
+            notifier.clone(),
+            cfg.notification.poll.clone(),
+        );
+        let ctx = ctx_rx.clone();
+        async move { watcher.run(ctx).await }
+    });
     let cache_task = tokio::spawn({
         let cache = cache.clone();
         let ctx = ctx_rx.clone();
@@ -196,6 +209,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = notify_task.await;
         let _ = dispatch_task.await;
         let _ = sched_task.await;
+        let _ = signalwatch_task.await;
         let _ = cache_task.await;
         let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
@@ -297,12 +311,35 @@ fn log_config(cfg: &Config) {
     }
 
     log_info!(
+        "自动推送: {}（短信/来电实时直发，其余按合并窗口批量发送）",
+        if cfg.notification.enabled { "已开启" } else { "已关闭（事件只写本地日志）" }
+    );
+    log_info!(
         "推送开关: 短信={} 来电={} 存储满={} 信号={}",
         on_off(cfg.notification.types.sms),
         on_off(cfg.notification.types.call),
         on_off(cfg.notification.types.memory_full),
         on_off(cfg.notification.types.signal)
     );
+    {
+        let p = &cfg.notification.poll;
+        if p.enabled {
+            let strategy = if p.always {
+                "每次轮询都推送".to_string()
+            } else {
+                format!("仅变化 ≥{:.0} dB 时推送", p.delta)
+            };
+            log_info!(
+                "信号轮询推送: {}~{} 每 {} 秒一次，{}",
+                p.start,
+                p.end,
+                p.interval.as_secs(),
+                strategy
+            );
+        } else {
+            log_info!("信号轮询推送: 未启用");
+        }
+    }
     log_info!("定时锁频: {}", if cfg.schedule.enabled { "启用" } else { "禁用" });
 }
 

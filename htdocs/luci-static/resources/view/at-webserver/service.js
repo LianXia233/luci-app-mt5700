@@ -8,8 +8,12 @@
  * 服务配置页面，覆盖以下配置项：
  * - connection_type / network_host / network_port / serial_port / baud_rate
  * - websocket_host / websocket_port / websocket_auth_key
+ * - 通知总开关：notify_enabled（关闭后仅写本地通知日志，外发全部停止）
  * - 通知开关：notify_*（来电/短信/信号/内存满/WebHook URL 与企业微信）
- * - 推送频率：notify_interval（事件合并窗口秒数，默认 60）
+ * - 推送频率：notify_interval（事件合并窗口秒数，默认 60；短信/来电实时直发，不受其影响）
+ * - 信号定时巡检：notify_poll_enabled / notify_poll_start / notify_poll_end /
+ *   notify_poll_interval / notify_poll_all / notify_poll_delta
+ *   （本模组不会主动上报信号，必须由后端在时段内主动轮询才会产生信号通知）
  * - 自定义推送文案：notify_tpl_prefix / notify_tpl_sms / notify_tpl_call /
  *   notify_tpl_signal / notify_tpl_memory / notify_tpl_batch（多行按 `\n` 转义存储）
  * - 定时锁频总开关 schedule_enabled
@@ -385,14 +389,21 @@ return L.view.extend({
 			return { wrap: wrap, input: input };
 		}
 
+		/* 自动推送总开关：放在通知卡片最前 —— 它是「所有推送」的总闸门。
+		 * 关闭后后端不再外发任何消息（仅保留本地通知日志），并停止信号定时巡检。 */
+		var notifyMaster = mkCheck();
+		notifBody.appendChild(Mt5700.formGroup('自动推送总开关', notifyMaster.wrap,
+			'关闭后所有事件都不再推送，仅写入本地通知日志；信号定时巡检也会一并停止。'));
+
 		var notifyCalls = mkCheck();
 		var notifySms = mkCheck();
 		var notifySignal = mkCheck();
 		var notifyMem = mkCheck();
 
-		notifBody.appendChild(Mt5700.formGroup('来电通知', notifyCalls.wrap));
-		notifBody.appendChild(Mt5700.formGroup('新短信通知', notifySms.wrap));
-		notifBody.appendChild(Mt5700.formGroup('信号变化通知', notifySignal.wrap));
+		notifBody.appendChild(Mt5700.formGroup('来电通知', notifyCalls.wrap, '实时推送，不等合并窗口'));
+		notifBody.appendChild(Mt5700.formGroup('新短信通知', notifySms.wrap, '实时推送，不等合并窗口'));
+		notifBody.appendChild(Mt5700.formGroup('信号变化通知', notifySignal.wrap,
+			'需配合下方「信号定时巡检」才会产生数据：模组不会主动上报信号读数'));
 		notifBody.appendChild(Mt5700.formGroup('短信存储满通知', notifyMem.wrap));
 
 		var webhookInput = Mt5700.input('text', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx', '');
@@ -406,8 +417,84 @@ return L.view.extend({
 		notifyIntervalInput.min = 5;
 		notifyIntervalInput.max = 3600;
 		notifBody.appendChild(Mt5700.formGroup('推送频率（合并窗口）', notifyIntervalInput,
-			'单位秒，范围 5-3600，默认 60。该窗口内到达的短信/来电/信号事件会合并成一条推送；' +
-			'窗口内没有事件则不发送。窗口越长越省推送配额，越短越实时。'));
+			'单位秒，范围 5-3600，默认 60。该窗口内到达的信号与存储满事件会合并成一条推送；' +
+			'窗口内没有事件则不发送。窗口越长越省推送配额，越短越实时。短信与来电不受此窗口影响，始终实时发出。'));
+
+		/* ---------- 信号定时巡检 ----------
+		 *
+		 * 为什么必须有它：本模组（TDTECH / Fibocom 系）不会主动上报 ^HCSQ / ^CERSSI
+		 * —— 实机 1200 条 AT 记录里自发信号上报为 0 条，因此「信号变化通知」开关
+		 * 若没有后端主动查询就永远是死的。这里由后端在指定时段内定期查询。
+		 *
+		 * 时段外一条 AT 都不发：既不占串口，也不会在半夜无意义地打扰用户。 */
+		var pollEnable = mkCheck();
+		var pollStartInput = Mt5700.input('time', '', '00:00');
+		var pollEndInput = Mt5700.input('time', '', '23:59');
+		var pollIntervalInput = Mt5700.input('number', '300', '');
+		pollIntervalInput.min = 30;
+		pollIntervalInput.max = 3600;
+		var pollModeSel = Mt5700.select([
+			{ label: '仅信号变化时推送（推荐）', value: 'change' },
+			{ label: '每次巡检都推送当前状态', value: 'always' }
+		], 'change');
+		var pollDeltaInput = Mt5700.input('number', '3', '');
+		pollDeltaInput.min = 1;
+		pollDeltaInput.max = 30;
+
+		/* 巡检子区块整体加一层轻边框，视觉上与其它通知项区分开：
+		 * 它是「信号类通知」的专属数据源，而不是又一组平级开关。 */
+		notifBody.appendChild(E('style', {},
+			'.mt5700-poll-box{border:1px solid rgba(127,127,127,.25);border-radius:8px;' +
+			'padding:10px 12px 2px;margin:4px 0 10px;background:rgba(127,127,127,.05)}' +
+			'.mt5700-poll-title{font-size:13px;font-weight:600;opacity:.85;margin-bottom:8px}' +
+			'.mt5700-poll-row{display:flex;align-items:center;gap:8px}' +
+			'.mt5700-poll-row input{flex:1 1 0;min-width:0}' +
+			'.mt5700-poll-sep{opacity:.7;font-size:12px}' +
+			'.mt5700-poll-box input:disabled,.mt5700-poll-box select:disabled{opacity:.45;cursor:not-allowed}'));
+
+		var pollRow = E('div', { 'class': 'mt5700-poll-row' });
+		pollRow.appendChild(pollStartInput);
+		pollRow.appendChild(E('span', { 'class': 'mt5700-poll-sep' }, '至'));
+		pollRow.appendChild(pollEndInput);
+
+		var pollBox = E('div', { 'class': 'mt5700-poll-box' });
+		pollBox.appendChild(E('div', { 'class': 'mt5700-poll-title' }, '信号定时巡检'));
+		pollBox.appendChild(Mt5700.formGroup('启用信号定时巡检', pollEnable.wrap,
+			'仅「信号变化通知」依赖它；短信与来电由模组主动上报，不受影响'));
+		pollBox.appendChild(Mt5700.formGroup('巡检时段', pollRow,
+			'该时段内按间隔查询信号，时段外不查询也不推送。起点晚于终点表示跨零点（如 22:00 至 06:00）；' +
+			'两端相同视为全天。'));
+		pollBox.appendChild(Mt5700.formGroup('巡检间隔', pollIntervalInput,
+			'单位秒，范围 30-3600，默认 300。间隔越短越灵敏，也越占串口与推送配额。'));
+		pollBox.appendChild(Mt5700.formGroup('推送策略', pollModeSel,
+			'「仅变化时推送」只在信号明显变化时通知；「每次巡检都推送」会按间隔持续发送当前状态。'));
+		pollBox.appendChild(Mt5700.formGroup('变化阈值', pollDeltaInput,
+			'单位 dB，范围 1-30，默认 3，仅在「仅变化时推送」下生效。1=任何一档变化都推，30=只推剧烈变化。'));
+		notifBody.appendChild(pollBox);
+
+		/* 控件联动：总开关是根，巡检开关次之，阈值只对「仅变化时推送」有意义。
+		 * 置灰后控件不再响应输入，用户一眼能看出哪些项当前不起作用。 */
+		function syncPollState() {
+			var masterOn = notifyMaster.input.checked;
+			var pollOn = masterOn && pollEnable.input.checked;
+			[pollStartInput, pollEndInput, pollIntervalInput, pollModeSel].forEach(function (el) {
+				el.disabled = !pollOn;
+			});
+			pollDeltaInput.disabled = !pollOn || pollModeSel.value !== 'change';
+		}
+
+		function syncNotifyState() {
+			var on = notifyMaster.input.checked;
+			[notifyCalls.input, notifySms.input, notifySignal.input, notifyMem.input].forEach(function (el) {
+				el.disabled = !on;
+			});
+			pollEnable.input.disabled = !on;
+			syncPollState();
+		}
+
+		notifyMaster.input.addEventListener('change', syncNotifyState);
+		pollEnable.input.addEventListener('change', syncPollState);
+		pollModeSel.addEventListener('change', syncPollState);
 
 		/* QQ 机器人（官方 API v2）：AppID+AppSecret+目标 ID 全部填写后启用 */
 		var qqAppIdInput = Mt5700.input('text', 'QQ 开放平台 AppID（纯数字）', '');
@@ -587,6 +674,19 @@ return L.view.extend({
 			return v === '' ? def : tplFromUci(v);
 		}
 
+		/* <input type="time"> 只接受 HH:MM 且会静默清空非法值：用户手改 UCI 写成
+		 * "8:30" 或 "8:7" 这类格式时，浏览器会让输入框变空且不报错，看起来像配置丢了。
+		 * 这里统一校验并补零，非法/越界一律回落到默认值，与后端 load_config 的
+		 * 回落策略保持一致（后端也会把非法值换成默认并按告警记录一条日志）。 */
+		function setTimeInput(el, raw, def) {
+			var m = /^(\d{1,2}):(\d{1,2})$/.exec(String(raw == null ? '' : raw).trim());
+			if (!m) { el.value = def; return; }
+			var h = parseInt(m[1], 10);
+			var mi = parseInt(m[2], 10);
+			if (!(h >= 0 && h <= 23) || !(mi >= 0 && mi <= 59)) { el.value = def; return; }
+			el.value = (h < 10 ? '0' + h : String(h)) + ':' + (mi < 10 ? '0' + mi : String(mi));
+		}
+
 		/* ---------- 载入 UCI（单 section `config` + 扁平键，与 Rust/ucode 一致） ---------- */
 		var get = function (key, def) {
 			var v = L.uci.get('at-webserver', 'config', key);
@@ -606,6 +706,7 @@ return L.view.extend({
 		wsBindSel.value = bindCur === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
 		authKeyInput.value = String(get('websocket_auth_key', ''));
 		schedChk.checked = get('schedule_enabled', '0') === '1';
+		notifyMaster.input.checked = get('notify_enabled', '1') === '1';
 		notifyCalls.input.checked = get('notify_call', '1') === '1';
 		notifySms.input.checked = get('notify_sms', '1') === '1';
 		notifySignal.input.checked = get('notify_signal', '1') === '1';
@@ -617,6 +718,14 @@ return L.view.extend({
 		qqBindInput.value = String(get('qq_bind_qq', ''));
 		qqTargetIdInput.value = String(get('qq_target_id', ''));
 		notifyIntervalInput.value = String(get('notify_interval', '60'));
+		pollEnable.input.checked = get('notify_poll_enabled', '1') === '1';
+		setTimeInput(pollStartInput, get('notify_poll_start', '00:00'), '00:00');
+		setTimeInput(pollEndInput, get('notify_poll_end', '23:59'), '23:59');
+		pollIntervalInput.value = String(parseInt(get('notify_poll_interval', '300'), 10) || 300);
+		pollModeSel.value = get('notify_poll_all', '0') === '1' ? 'always' : 'change';
+		pollDeltaInput.value = String(parseInt(get('notify_poll_delta', '3'), 10) || 3);
+		/* 载入完成后按当前值同步一次置灰状态 */
+		syncNotifyState();
 		tplPrefixInput.value = tplFromUci(String(get('notify_tpl_prefix', '')));
 		tplSmsInput.value = tplLoad('notify_tpl_sms', TPL_DEFAULTS.sms);
 		tplCallInput.value = tplLoad('notify_tpl_call', TPL_DEFAULTS.call);
@@ -652,6 +761,7 @@ return L.view.extend({
 			set('websocket_allow_wan', bind === '0.0.0.0' ? '1' : '0');
 			set('websocket_auth_key', authKeyInput.value.trim());
 			set('schedule_enabled', schedChk.checked ? '1' : '0');
+			set('notify_enabled', notifyMaster.input.checked ? '1' : '0');
 			set('notify_call', notifyCalls.input.checked ? '1' : '0');
 			set('notify_sms', notifySms.input.checked ? '1' : '0');
 			set('notify_signal', notifySignal.input.checked ? '1' : '0');
@@ -663,6 +773,15 @@ return L.view.extend({
 			set('qq_bind_qq', qqBindInput.value.trim());
 			set('qq_target_id', qqTargetIdInput.value.trim());
 			set('notify_interval', String(parseInt(notifyIntervalInput.value, 10) || 60));
+			set('notify_poll_enabled', pollEnable.input.checked ? '1' : '0');
+			/* time 输入在部分浏览器上允许留空，留空时回落到默认时段而不是写空值：
+			 * 空值会让后端走「格式非法 → 全天」的回落路径，虽然结果相同，
+			 * 但界面上会留下一个空输入框，下次打开容易被误读成「没配置」。 */
+			set('notify_poll_start', pollStartInput.value || '00:00');
+			set('notify_poll_end', pollEndInput.value || '23:59');
+			set('notify_poll_interval', String(parseInt(pollIntervalInput.value, 10) || 300));
+			set('notify_poll_all', pollModeSel.value === 'always' ? '1' : '0');
+			set('notify_poll_delta', String(parseInt(pollDeltaInput.value, 10) || 3));
 			set('notify_tpl_prefix', tplToUci(tplPrefixInput.value));
 			set('notify_tpl_sms', tplToUci(tplSmsInput.value));
 			set('notify_tpl_call', tplToUci(tplCallInput.value));
