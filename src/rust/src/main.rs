@@ -10,6 +10,7 @@ mod at_queue;
 mod atclient;
 mod config;
 mod logger;
+mod localtime;
 mod notify;
 mod pdu;
 mod qqbind;
@@ -22,6 +23,7 @@ mod schedule;
 mod serial_linux;
 #[cfg(target_os = "linux")]
 mod serialdetect;
+mod signalgrade;
 mod signalwatch;
 mod state;
 mod state_cfg;
@@ -67,6 +69,10 @@ fn rustc_version() -> &'static str {
 
 async fn run(verbose: bool) -> Result<(), String> {
     log_info!("at-webserver {} 启动中 (pid {})", VERSION, std::process::id());
+    // 时间源必须最早初始化：它会按系统时区设置（/etc/TZ → uci）确定本地偏移，
+    // 并写回 TZ 环境变量，供后续 libc / 子进程一致使用。
+    // 必须在 spawn 任何线程之前调用，故放在这里、而非各任务内部懒加载。
+    crate::localtime::init();
 
     let cfg = config::load_config().await;
     if !cfg.enabled {
@@ -311,8 +317,12 @@ fn log_config(cfg: &Config) {
     }
 
     log_info!(
-        "自动推送: {}（短信/来电实时直发，其余按合并窗口批量发送）",
-        if cfg.notification.enabled { "已开启" } else { "已关闭（事件只写本地日志）" }
+        "自动推送: {}",
+        if cfg.notification.enabled {
+            "已开启（短信/来电实时直发，其余按合并窗口批量发送）"
+        } else {
+            "已关闭（事件只写本地通知日志，不再外发）"
+        }
     );
     log_info!(
         "推送开关: 短信={} 来电={} 存储满={} 信号={}",

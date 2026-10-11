@@ -320,7 +320,7 @@ pub async fn write_schedule_uci(d: &SchedConfigDto) -> Result<(), String> {
 }
 
 /// 下一次时段切换的时刻（HH:MM），夜间时段的两个端点就是切换点。
-pub fn next_switch_at(cfg: &ScheduleConfig, now: chrono::DateTime<chrono::Local>) -> String {
+pub fn next_switch_at(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> String {
     let cur = now.hour() as i64 * 60 + now.minute() as i64;
     let mut best: i64 = -1;
     for v in [&cfg.night_start, &cfg.night_end] {

@@ -327,7 +327,7 @@ impl Notifier {
     /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过合并窗口直接发送。
     /// 测试消息不携带任何插件名字样，同样套用全局前缀，便于一次性验证前缀配置是否生效。
     pub async fn notify_test(&self, channel: &str) -> Result<(), String> {
-        let base = "测试通知：推送通道链路正常";
+        let base = "喵～测试通知来啦！推送通道一切正常，链路畅通无阻喵！";
         let now = now_string();
         let prefix = render_prefix(&self.cfg.templates.prefix, 1, &now);
         let content = if prefix.trim().is_empty() {
@@ -464,10 +464,47 @@ fn post_webhook(hook: &str, body: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 本机当前时刻字符串（`%Y-%m-%d %H:%M:%S`）。事件产生侧用它填充
+/// 本机当前时刻字符串（`%Y-%m-%d %H:%M:%S`，系统时区）。事件产生侧用它填充
 /// [`Notification::time`]，保证推送文案里的 `{time}` 是事件时刻而非推送时刻。
+///
+/// 时区口径统一交给 [`crate::localtime`]：**系统怎么设就怎么显示**，
+/// 系统没设时默认北京时间。此处曾经直接用 `chrono::Local`，
+/// 在无 tzdata 的固件上静默变成 UTC，推送时间比现实早 8 小时。
 pub fn now_string() -> String {
-    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+    crate::localtime::now_string()
+}
+
+/// 号码归一化：剥掉前导 `+` 与国家码 `86`，与前端 `Parse.normalizePhoneNumber`
+/// （`htdocs/.../at-webserver/parse.js`）**保持同一规则**。
+///
+/// 为什么必须统一：同一个联系人会以三种面貌出现 ——
+/// 短信 PDU 里的 `8613800138000`、`+CLIP` 里的 `+8613800138000`、
+/// 而短信中心界面显示的是 `13800138000`（前端已归一化）。
+/// 推送若原样透出，用户看到的号码就和界面上对不上，同一个联系人像两个人。
+///
+/// 只处理「看起来像国内号码」的情形：`86` 之后全是数字才剥国家码；
+/// `+1...` 这类国际号码只剥 `+`，不动国家码；
+/// 完全不像号码的（含字母等）最后只留数字，与前端 `replace(/\D/g, '')` 相同。
+pub fn normalize_phone_number(raw: &str) -> String {
+    if raw.is_empty() {
+        return String::new();
+    }
+    let n = raw.strip_prefix('+').unwrap_or(raw);
+    if let Some(rest) = n.strip_prefix("86") {
+        if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) {
+            return rest.to_string();
+        }
+    }
+    if n.bytes().all(|b| b.is_ascii_digit()) {
+        return n.to_string();
+    }
+    // 兜底：夹杂了分隔符（如 138-0013-8000）时只留数字
+    let digits: String = n.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        n.to_string()
+    } else {
+        digits
+    }
 }
 
 /// 按事件类型选出对应的文案模板。
@@ -760,6 +797,35 @@ mod tests {
             memory_full: false,
             time: "2026-10-11 12:00:00".into(),
         }
+    }
+
+    /// 号码归一化的规则必须与前端 `Parse.normalizePhoneNumber` 完全一致：
+    /// 任何一侧单独改动，推送与界面就会重新对不上。
+    #[test]
+    fn phone_normalization_matches_frontend_rules() {
+        // 国内号码：三种写法都收敛到同一串
+        assert_eq!(normalize_phone_number("8613800138000"), "13800138000");
+        assert_eq!(normalize_phone_number("+8613800138000"), "13800138000");
+        assert_eq!(normalize_phone_number("13800138000"), "13800138000");
+        // 已是归一化形态时幂等（WS 事件里会二次处理）
+        assert_eq!(normalize_phone_number("13800138000"), normalize_phone_number("+8613800138000"));
+        // 国际号码：只剥 `+`，不动国家码
+        assert_eq!(normalize_phone_number("+14155550100"), "14155550100");
+        // 不以 86 开头 → 原样保留；86 之后非数字 → 落到「只留数字」兜底（与前端一致）
+        assert_eq!(normalize_phone_number("10086"), "10086");
+        assert_eq!(normalize_phone_number("86abc"), "86");
+        // 带分隔符
+        assert_eq!(normalize_phone_number("138-0013-8000"), "13800138000");
+        // 空串
+        assert_eq!(normalize_phone_number(""), "");
+    }
+
+    /// 短号与特殊号码不能被误伤：`86` 后没有数字时按原样处理。
+    #[test]
+    fn phone_normalization_keeps_short_codes() {
+        /* `+86` 只剩国家码时保留国家码本身（只剥 `+`），与前端一致 */
+        assert_eq!(normalize_phone_number("+86"), "86");
+        assert_eq!(normalize_phone_number("+8610"), "10");
     }
 
     #[test]
