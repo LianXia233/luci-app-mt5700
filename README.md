@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.14-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.14.15-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -159,11 +159,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.14.14-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.14.15-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.14.14_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.14.15_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -268,13 +268,41 @@ config at-webserver 'config'
 
 ## 事件通知配置
 
-事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件，事件先经 60 秒合并窗口去重汇总后发送：
+事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件，事件先经合并窗口去重汇总后发送（窗口时长可配置，默认 60 秒）：
 
 | 通道 | 配置项 | 说明 |
 |:--|:--|:--|
 | 企业微信 | `wechat_webhook` | 群机器人 WebHook 地址 |
-| QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道） |
+| QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道）/ `bind`（自动绑定） |
+| 合并窗口 | `notify_interval` | 推送频率（秒），取值区间 5~3600，默认 60；窗口内多条事件合并为一条推送 |
+| 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀 + 五类事件文案模板，支持占位符 |
 | 日志文件 | `log_file` | 本地逐条落盘 |
+
+### 推送频率与自定义文案
+
+- **推送频率**：`notify_interval` 控制合并窗口长度（5~3600 秒，越界会被自动夹取）。窗口内到达的多条事件合并为一条推送，避免短时间内刷屏。
+- **文案模板**：留空表示使用内置默认文案。可用占位符：
+
+| 占位符 | 含义 |
+|:--|:--|
+| `{sender}` | 事件来源（发送号码 / 来电号码 / `信号监控`） |
+| `{content}` | 事件正文（短信内容 / 来电号码 / 信号摘要 / 存储满提示） |
+| `{time}` | 事件发生时刻 |
+| `{kind}` | 事件类型（`新短信` / `来电` / `信号变化` / `存储空间已满`） |
+| `{count}` | 合并消息条数（仅全局前缀与批量标题有意义） |
+
+  未知占位符会原样保留，便于发现拼写错误。默认文案为：
+
+```uci
+option notify_tpl_prefix ''                 # 全局前缀，每条推送首行；如 '[MyRouter] {time}'
+option notify_tpl_sms    '📱 新短信通知\n发送者: {sender}\n内容: {content}'
+option notify_tpl_call   '📞 来电提醒\n{content}'
+option notify_tpl_signal '{content}'
+option notify_tpl_memory '⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信'
+option notify_tpl_batch  '📑 批量通知汇总'
+```
+
+  UCI 单个 option 不支持真实换行，模板中的换行以 `\n` 转义写入（LuCI 页面会自动转换，手改 UCI 需自行写 `\n`）。
 
 ### QQ 机器人通道说明
 
@@ -294,7 +322,7 @@ config at-webserver 'config'
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.14)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.15)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / ui.js / at.css)

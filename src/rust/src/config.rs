@@ -62,6 +62,97 @@ pub struct NotifyTypes {
     pub signal: bool,
 }
 
+/// 事件合并窗口的默认值（秒）。窗口内到达的事件合并成一条推送。
+pub const DEFAULT_NOTIFY_INTERVAL_SECS: u64 = 60;
+/// 合并窗口下限。低于 5 秒时事件几乎无法合并，且会顶到 QQ 主动消息频控
+/// （单关系 20 条/分钟）上沿，故在此设硬下限。
+pub const MIN_NOTIFY_INTERVAL_SECS: u64 = 5;
+/// 合并窗口上限（1 小时）。再长会让通知失去时效性。
+pub const MAX_NOTIFY_INTERVAL_SECS: u64 = 3600;
+
+// ---------------------------------------------------------------------------
+// 自定义推送文案模板
+//
+// 采用「UCI 存单行文本 + 反斜杠转义换行」的约定：UCI 的 option 值是单行的，
+// 无法直接存多行文本，因此模板里的换行统一写成 `\n`（两个字符），由本模块在
+// 读取时还原为真实换行。LuCI 页面在保存时把真实换行转回 `\n`，来回一趟无损。
+//
+// 可用占位符（渲染时替换，未识别的占位符原样保留）：
+//   {sender}  发送者（短信为号码/名称；来电与信号为内部来源标识）
+//   {content} 事件正文（短信内容、来电的号码与状态、信号的完整明细）
+//   {time}    本条消息的推送时刻（本地时间 %Y-%m-%d %H:%M:%S）
+//   {kind}    事件类型中文名（新短信 / 来电 / 信号变化 / 存储空间已满）
+//   {count}   本条消息合并的事件条数（单条为 1）
+// ---------------------------------------------------------------------------
+
+/// 单条短信通知的默认文案。
+pub const DEFAULT_TPL_SMS: &str = "📱 新短信通知\n发送者: {sender}\n内容: {content}";
+/// 来电通知的默认文案。
+pub const DEFAULT_TPL_CALL: &str = "📞 来电提醒\n{content}";
+/// 短信存储满通知的默认文案。
+pub const DEFAULT_TPL_MEMORY: &str = "⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信";
+/// 信号变化通知的默认文案（正文由后端组装，模板默认直接透出）。
+pub const DEFAULT_TPL_SIGNAL: &str = "{content}";
+/// 批量汇总的默认标题。
+pub const DEFAULT_TPL_BATCH: &str = "📑 批量通知汇总";
+
+#[derive(Debug, Clone)]
+pub struct NotifyTemplates {
+    /// 全局前缀：附加在每条推送消息（含测试消息）的最前面，留空则不添加。
+    pub prefix: String,
+    /// 新短信文案模板。
+    pub sms: String,
+    /// 来电文案模板。
+    pub call: String,
+    /// 短信存储满文案模板。
+    pub memory_full: String,
+    /// 信号变化文案模板。
+    pub signal: String,
+    /// 批量汇总标题（合并窗口内多于一条时使用）。
+    pub batch: String,
+}
+
+impl Default for NotifyTemplates {
+    fn default() -> Self {
+        NotifyTemplates {
+            prefix: String::new(),
+            sms: DEFAULT_TPL_SMS.into(),
+            call: DEFAULT_TPL_CALL.into(),
+            memory_full: DEFAULT_TPL_MEMORY.into(),
+            signal: DEFAULT_TPL_SIGNAL.into(),
+            batch: DEFAULT_TPL_BATCH.into(),
+        }
+    }
+}
+
+/// 模板值的转义还原：把 `\n` / `\t` / `\r` / `\\` 还原为真实字符。
+/// 其它反斜杠序列原样保留（避免把用户写的正则或路径吃掉）。
+///
+/// 反方向的转义（真实换行 → `\n`）由写配置的一方负责：LuCI 页面在保存前
+/// 完成转换，后端只读不写，因此这里不提供 Rust 侧的 `escape` 实现。
+pub fn unescape_template(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct NotificationConfig {
     pub wechat_webhook: String,
@@ -69,6 +160,10 @@ pub struct NotificationConfig {
     pub types: NotifyTypes,
     /// QQ 机器人（官方 API v2）推送配置；AppSecret 建议走环境变量 QQ_BOT_APP_SECRET。
     pub qq: QqNotifyConfig,
+    /// 事件合并窗口（推送频率）：窗口内到达的事件合并为一条推送，空队列不触发发送。
+    pub interval: Duration,
+    /// 自定义推送文案模板。
+    pub templates: NotifyTemplates,
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +253,8 @@ pub fn default_config() -> Config {
                 target_id: String::new(),
                 bind_qq: String::new(),
             },
+            interval: Duration::from_secs(DEFAULT_NOTIFY_INTERVAL_SECS),
+            templates: NotifyTemplates::default(),
         },
         websocket: WebSocketConfig {
             port: 8765,
@@ -353,6 +450,32 @@ pub async fn load_config() -> Config {
         bind_qq: values.str("qq_bind_qq", ""),
     };
 
+    // 推送频率：合并窗口秒数（下限 5s 防频控/忙循环，上限 1h 保时效）。
+    let interval = values.seconds(
+        "notify_interval",
+        Duration::from_secs(DEFAULT_NOTIFY_INTERVAL_SECS),
+        Duration::from_secs(MIN_NOTIFY_INTERVAL_SECS),
+    );
+    cfg.notification.interval = interval.min(Duration::from_secs(MAX_NOTIFY_INTERVAL_SECS));
+
+    // 自定义推送文案：UCI 存单行转义文本，空值回落内置默认，保证升级后行为不变。
+    let tpl = |key: &str, def: &str| -> String {
+        let v = values.str(key, "");
+        if v.trim().is_empty() {
+            def.to_string()
+        } else {
+            unescape_template(&v)
+        }
+    };
+    cfg.notification.templates = NotifyTemplates {
+        prefix: unescape_template(&values.str("notify_tpl_prefix", "")),
+        sms: tpl("notify_tpl_sms", DEFAULT_TPL_SMS),
+        call: tpl("notify_tpl_call", DEFAULT_TPL_CALL),
+        memory_full: tpl("notify_tpl_memory", DEFAULT_TPL_MEMORY),
+        signal: tpl("notify_tpl_signal", DEFAULT_TPL_SIGNAL),
+        batch: tpl("notify_tpl_batch", DEFAULT_TPL_BATCH),
+    };
+
     let s = &mut cfg.schedule;
     s.enabled = values.bool("schedule_enabled", false);
     s.check_interval = values.seconds("schedule_check_interval", s.check_interval, Duration::from_secs(10));
@@ -372,4 +495,49 @@ pub async fn load_config() -> Config {
     s.day_nr = values.band_lock("schedule_day_nr");
 
     cfg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unescape_template_restores_known_escapes() {
+        // UCI 里存的是单行转义文本，读取时必须还原为真实换行/制表/反斜杠
+        assert_eq!(
+            unescape_template("第一行\\n第二行\\t\\\\ 结束"),
+            "第一行\n第二行\t\\ 结束"
+        );
+    }
+
+    #[test]
+    fn unescape_template_keeps_unknown_sequences() {
+        // 未知转义（如 \d）必须原样保留，避免把用户写的正则或路径吃掉
+        assert_eq!(unescape_template("\\d+\\n"), "\\d+\n");
+        // 末尾孤立的反斜杠不能吞掉
+        assert_eq!(unescape_template("abc\\"), "abc\\");
+    }
+
+    #[test]
+    fn unescape_template_leaves_plain_text_untouched() {
+        assert_eq!(unescape_template("📱 新短信通知"), "📱 新短信通知");
+        assert_eq!(unescape_template(""), "");
+    }
+
+    #[test]
+    fn default_templates_expose_expected_placeholders() {
+        let t = NotifyTemplates::default();
+        assert!(t.sms.contains("{sender}") && t.sms.contains("{content}"));
+        assert!(t.call.contains("{content}"));
+        assert!(t.signal.contains("{content}"));
+        assert!(!t.memory_full.is_empty());
+        assert!(!t.batch.is_empty());
+        assert!(t.prefix.is_empty(), "默认不添加前缀");
+    }
+
+    #[test]
+    fn notify_interval_bounds_are_ordered() {
+        assert!(MIN_NOTIFY_INTERVAL_SECS <= DEFAULT_NOTIFY_INTERVAL_SECS);
+        assert!(DEFAULT_NOTIFY_INTERVAL_SECS <= MAX_NOTIFY_INTERVAL_SECS);
+    }
 }
