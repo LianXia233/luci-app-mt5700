@@ -124,7 +124,13 @@ function replyFor(cmd) {
 	 * 都按这个字段顺序取值，占位数字会让 RSRP 解析不出来（回落成 -140 dBm）。
 	 * 行内是实机抓到的样本（NR n41、RSRP -65 / RSRQ -10 / SINR 28）。
 	 */
-	if (c === 'AT^MONSC?') return '^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-10,28\r\nOK';
+	/*
+	 * 命令名同样要与后端对齐：Rust `urc::query_monsc` 与前端 network_status.js
+	 * 发的都是 `AT^MONSC`（**不带问号**）。夹具早先写成 `AT^MONSC?`，后端拿不到
+	 * 应答便静默回落到 HCSQ，于是巡检报出 -140 dBm 这种假读数（页面也一起错），
+	 * 掩盖了真正的信号值。两种写法都认，避免再踩。
+	 */
+	if (c === 'AT^MONSC' || c === 'AT^MONSC?') return '^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-10,28\r\nOK';
 	if (c === 'AT^HFREQINFO?') return '^HFREQINFO: 0,7,41,513000,2565000,100000,0,0,0\r\nOK';
 	if (c === 'AT^LENDC?') return '^LENDC: 0,1,10,0,0\r\nOK';
 	if (c === 'AT^TXPOWER?') return '^TXPOWER: 0,15,23\r\nOK';

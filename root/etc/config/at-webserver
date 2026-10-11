@@ -73,8 +73,8 @@ config at-webserver 'config'
 	#   {count}   本条消息合并的事件条数（单条为 1）
 	# 未识别的占位符原样保留。
 	option notify_tpl_prefix ''             # 全局前缀，附加在所有推送消息最前面（测试通知也会带上）；支持 {time} {count}
-	option notify_tpl_sms ''                # 例：'📱 {sender}\n{content}\n({time})'
-	option notify_tpl_call ''               # 例：'来电 {content}'
+	option notify_tpl_sms ''                # 例：'喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n{sender}\n{content}\n({time})'
+	option notify_tpl_call ''               # 例：'喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}'
 	option notify_tpl_signal ''             # 例：'{content}'
 	option notify_tpl_memory ''             # 例：'短信存储已满，请及时清理'
 	option notify_tpl_batch ''              # 批量汇总时的首行标题

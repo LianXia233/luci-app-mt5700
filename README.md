@@ -338,8 +338,8 @@ option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅
 
 ```uci
 option notify_tpl_prefix ''                 # 全局前缀，每条推送首行；如 '[MyRouter] {time}'
-option notify_tpl_sms    '📱 新短信通知\n发送者: {sender}\n内容: {content}'
-option notify_tpl_call   '📞 来电提醒\n{content}'
+option notify_tpl_sms    '喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: {sender}\n内容: {content}'
+option notify_tpl_call   '喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}'
 option notify_tpl_signal '{content}'
 option notify_tpl_memory '⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信'
 option notify_tpl_batch  '📑 批量通知汇总'
