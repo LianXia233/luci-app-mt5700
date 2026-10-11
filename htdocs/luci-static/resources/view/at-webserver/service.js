@@ -519,11 +519,17 @@ return L.view.extend({
 		notifBody.appendChild(Mt5700.formGroup('绑定 QQ 号', qqBindInput, '仅用于日志标识（平台事件里拿不到 QQ 号），openid 由后端自动抓取'));
 		notifBody.appendChild(Mt5700.formGroup('QQ 推送目标 ID', qqTargetIdInput, '绑定模式留空即可；手动模式填 openid（非 QQ 号）'));
 
-		/* 测试通知通道：经 rpcd 代理直发一条测试消息，绕过 60 秒合并窗口 */
+		/* 测试推送：两种粒度，回答两个不同的问题
+		 *   通道连通性（企业微信 / QQ）—— 这条通道到底通不通，不看事件类型；
+		 *   事件类型（短信 / 来电）—— 这两类只能由模组 URC 触发，想验证文案与实时性
+		 *   就得等一条真短信或一通真电话。故提供同形状事件的注入入口：它走的是与真实
+		 *   事件完全相同的链路（总开关 → 类型开关 → 实时直发 → 文案模板 → 通道投递），
+		 *   收到的文本与真实短信/来电一字不差。 */
 		var notifyTest = L.rpc.declare({
 			object: 'mt5700', method: 'notify_test',
 			params: ['channel', '_rid'], expect: {}
 		});
+		var testStatus = E('span', { 'class': 'mt5700-hint' }, '');
 		var testBtn = Mt5700.button('发送测试通知', function () {
 			testBtn.disabled = true;
 			testStatus.textContent = '正在发送测试通知…';
@@ -554,8 +560,33 @@ return L.view.extend({
 				testBtn.disabled = false;
 			});
 		});
-		var testStatus = E('span', { 'class': 'mt5700-hint' }, '');
-		notifBody.appendChild(E('div', { 'class': 'mt5700-form-group' }, testBtn, testStatus));
+		/* 按事件类型测试：开关没开时后端会明确报错，这里原样转述，避免「显示成功却没收到」 */
+		var smsTestBtn = Mt5700.button('测试短信推送', function () {
+			runKindTest(smsTestBtn, 'sms', '短信');
+		});
+		var callTestBtn = Mt5700.button('测试来电推送', function () {
+			runKindTest(callTestBtn, 'call', '来电');
+		});
+		function runKindTest(btn, channel, label) {
+			btn.disabled = true;
+			testStatus.textContent = '正在发送测试' + label + '推送…';
+			notifyTest(channel, 'test-' + channel + '-' + Date.now()).then(function (res) {
+				if (res && res.success) {
+					testStatus.textContent = label + '测试推送已发送（走的是与真实' + label + '相同的链路）';
+					Mt5700.success(label + '测试推送已发送');
+				} else {
+					var why = (res && res.error) || '未知原因';
+					testStatus.textContent = label + '测试推送未发送：' + why;
+					Mt5700.error(label + '测试推送未发送：' + why);
+				}
+			}).catch(function (err) {
+				testStatus.textContent = label + '测试推送失败：' + ((err && err.message) || 'RPC 调用失败');
+				Mt5700.error(label + '测试推送失败');
+			}).finally(function () {
+				btn.disabled = false;
+			});
+		}
+		notifBody.appendChild(E('div', { 'class': 'mt5700-form-group' }, testBtn, smsTestBtn, callTestBtn, testStatus));
 
 		/* 绑定进度：轮询后端 qq_bind_status，展示状态与 600 秒窗口倒计时 */
 		var qqBindStatus = L.rpc.declare({

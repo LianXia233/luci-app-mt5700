@@ -41,6 +41,15 @@ pub enum NotifyKind {
 pub const SENDER_CALL: &str = "来电提醒";
 pub const SENDER_SIGNAL: &str = "信号监控";
 
+/// 测试事件的虚拟号码。
+///
+/// 刻意用掩码形式而不是 `13800138000` 这类看起来像真号的号码：测试推送是给用户
+/// 自己看的，若显示成完整号码，用户可能真的回拨过去。掩码一眼就能看出是假的。
+pub const TEST_SENDER_NUMBER: &str = "138****0000";
+
+/// 测试短信的正文。写在正文里的（测试消息）标注与掩码号码同理：让接收端一眼分辨。
+pub const TEST_SMS_CONTENT: &str = "这是一条模拟短信，用于验证推送通道与文案模板";
+
 #[derive(Debug, Clone)]
 pub struct Notification {
     pub sender: String,
@@ -353,6 +362,62 @@ impl Notifier {
             }
             other => Err(format!("未知通道: {other}")),
         }
+    }
+
+    /// 按事件类型直发一条**合成测试事件**（LuCI「测试短信推送 / 测试来电推送」按钮）。
+    ///
+    /// 与 [`Notifier::notify_test`] 的分工：
+    /// - `notify_test` 只验证**通道连通性**：固定文案、不经过事件链路，任何类型都测得到；
+    /// - 本方法验证**某一类的完整链路**：构造一条与真实事件**同形状**的事件交给
+    ///   [`Notifier::notify`]，于是走的是完全相同的判定与渲染路径
+    ///   （总开关 → 该类型开关 → 短信/来电实时直发 → 文案模板 → 通道投递），
+    ///   收到的文本与真实短信/来电一字不差。短信与来电这两类只能由模组 URC 触发，
+    ///   想验证「新文案长什么样、是不是实时」不必真的等一条短信或一通电话。
+    ///
+    /// 开关未开启时**显式返回错误**，而不是照直调用 `notify()` 后返回 Ok：
+    /// `notify()` 在总开关/类型开关关闭时是静默 return 的，若照直调用，界面会显示
+    /// 「发送成功」而手机毫无动静 —— 这是最难排查的一种失败（发送侧一切正常）。
+    pub async fn notify_test_event(&self, kind: NotifyKind) -> Result<(), String> {
+        let (sender, content) = match kind {
+            NotifyKind::Sms => (
+                TEST_SENDER_NUMBER.to_string(),
+                format!("{TEST_SMS_CONTENT}（测试消息，非真实短信）"),
+            ),
+            NotifyKind::Call => (
+                SENDER_CALL.to_string(),
+                format!(
+                    "时间：{now}\n号码：{num}\n状态：来电振铃（测试消息，非真实来电）",
+                    now = now_string(),
+                    num = TEST_SENDER_NUMBER
+                ),
+            ),
+            other => {
+                return Err(format!(
+                    "「{}」不支持测试推送（只有短信与来电需要按类型验证，其余走合并窗口）",
+                    kind_label(other)
+                ))
+            }
+        };
+
+        if !self.cfg.enabled {
+            return Err("自动推送总开关已关闭，事件不会推送（当前只记本地日志）".into());
+        }
+        if !self.enabled(kind) {
+            return Err(format!("「{}」的事件推送开关已关闭", kind_label(kind)));
+        }
+        if !self.dispatch_enabled() {
+            return Err("没有已启用的推送通道（企业微信 WebHook 或 QQ 机器人）".into());
+        }
+
+        self.notify(Notification {
+            sender,
+            content,
+            kind,
+            memory_full: false,
+            time: now_string(),
+        })
+        .await;
+        Ok(())
     }
 
     fn wechat_enabled(&self) -> bool {
@@ -1327,5 +1392,120 @@ mod tests {
             raw.contains("巡检|RSRP -95 dBm"),
             "合并推送的信号内容不符合模板: {raw}"
         );
+    }
+
+    /// 类型化测试推送（短信）：走的是真实事件的完整链路，所以渲染结果必须与
+    /// 真实短信一字不差 —— 这正是它存在的意义，也是它与「通道连通性测试」的区别。
+    #[tokio::test]
+    async fn test_event_sms_renders_real_template() {
+        let (port, server) = one_shot_webhook().await;
+
+        let mut cfg = webhook_only_cfg(port);
+        cfg.templates.prefix = String::new();
+        cfg.templates.sms = "短信|{sender}|{content}".into();
+
+        let (notifier, rx) = Notifier::new(cfg);
+        let notifier = std::sync::Arc::new(notifier);
+        let (_ctx_tx, ctx_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn({
+            let notifier = notifier.clone();
+            async move { notifier.run(rx, ctx_rx).await }
+        });
+
+        notifier
+            .notify_test_event(NotifyKind::Sms)
+            .await
+            .expect("短信测试推送应成功");
+
+        let raw = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("短信测试推送应实时直发，不该等合并窗口")
+            .expect("接收任务不应 panic");
+        assert!(
+            raw.contains(&format!("短信|{TEST_SENDER_NUMBER}|{TEST_SMS_CONTENT}")),
+            "测试短信应套用真实短信模板（含虚号与正文占位符）: {raw}"
+        );
+    }
+
+    /// 类型化测试推送（来电）：与真实来电一样实时直发，且正文携带号码与振铃状态。
+    #[tokio::test]
+    async fn test_event_call_is_realtime_and_carries_number() {
+        let (port, server) = one_shot_webhook().await;
+
+        let mut cfg = webhook_only_cfg(port);
+        cfg.templates.prefix = String::new();
+        cfg.templates.call = "来电|{content}".into();
+
+        let (notifier, rx) = Notifier::new(cfg);
+        let notifier = std::sync::Arc::new(notifier);
+        let (_ctx_tx, ctx_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn({
+            let notifier = notifier.clone();
+            async move { notifier.run(rx, ctx_rx).await }
+        });
+
+        notifier
+            .notify_test_event(NotifyKind::Call)
+            .await
+            .expect("来电测试推送应成功");
+
+        let raw = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("来电测试推送应实时直发，不该等合并窗口")
+            .expect("接收任务不应 panic");
+        assert!(
+            raw.contains("来电|时间：") && raw.contains(TEST_SENDER_NUMBER) && raw.contains("来电振铃"),
+            "测试来电正文结构应与真实来电一致（时间/号码/状态）: {raw}"
+        );
+    }
+
+    /// 开关未开启时必须**报错**而不是返回成功。
+    ///
+    /// 这是本方法最关键的契约：`notify()` 在关闭时是静默 return 的，若照直调用后
+    /// 返回 Ok，界面会显示「发送成功」而手机毫无动静 —— 发送侧全绿、接收侧全无，
+    /// 是最难排查的一类失败。四种「发不出去」的原因必须各自可辨。
+    #[tokio::test]
+    async fn test_event_explains_why_nothing_would_be_sent() {
+        // 1) 总开关关闭
+        let mut cfg = webhook_only_cfg(1);
+        cfg.enabled = false;
+        let (notifier, _rx) = Notifier::new(cfg);
+        let err = notifier
+            .notify_test_event(NotifyKind::Sms)
+            .await
+            .expect_err("总开关关闭时不应返回成功");
+        assert!(err.contains("总开关"), "错误应指明总开关: {err}");
+
+        // 2) 该事件类型的开关关闭
+        let mut cfg = webhook_only_cfg(1);
+        cfg.types.sms = false;
+        let (notifier, _rx) = Notifier::new(cfg);
+        let err = notifier
+            .notify_test_event(NotifyKind::Sms)
+            .await
+            .expect_err("短信开关关闭时不应返回成功");
+        assert!(
+            err.contains("新短信") && err.contains("开关"),
+            "错误应指明是哪一类的开关: {err}"
+        );
+
+        // 3) 一个可用通道都没有
+        let mut cfg = webhook_only_cfg(1);
+        cfg.wechat_webhook = String::new();
+        let (notifier, _rx) = Notifier::new(cfg);
+        let err = notifier
+            .notify_test_event(NotifyKind::Sms)
+            .await
+            .expect_err("没有通道时不应返回成功");
+        assert!(err.contains("推送通道"), "错误应指明没有可用通道: {err}");
+
+        // 4) 不支持的事件类型（信号走合并窗口，另有真实巡检可验证）
+        let cfg = webhook_only_cfg(1);
+        let (notifier, _rx) = Notifier::new(cfg);
+        let err = notifier
+            .notify_test_event(NotifyKind::Signal)
+            .await
+            .expect_err("信号不应支持类型化测试推送");
+        assert!(err.contains("不支持测试推送"), "错误应说明类型不受支持: {err}");
     }
 }
