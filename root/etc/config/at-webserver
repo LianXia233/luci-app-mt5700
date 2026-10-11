@@ -40,6 +40,29 @@ config at-webserver 'config'
 	option notify_memory_full '1'
 	option notify_signal '1'
 
+	# 推送频率 = 事件合并窗口（秒）。窗口内到达的事件合并成一条推送；
+	# 窗口内没有事件则不发送（语义是「攒一起发」，不是「固定每 N 秒必发一条」）。
+	# 范围 5-3600，默认 60。调小更实时；调大更省推送配额
+	# （QQ 机器人主动消息频控：单关系 20 条/分钟）。
+	option notify_interval '60'
+
+	# 自定义推送文案。留空 = 使用内置默认文案（升级后未被改动的项仍跟随版本更新）。
+	# UCI 的 option 值是单行的，多行文案统一写成 \n 转义，LuCI 页面会自动转换；
+	# 直接手改 UCI 时也按同样的转义写（后端按 \n / \t / \r / \\ 还原）。
+	# 可用占位符：
+	#   {sender}  发送者（短信为号码/名称）
+	#   {content} 事件正文（短信内容、来电号码与状态、信号完整明细）
+	#   {time}    事件时刻（本地时间 %Y-%m-%d %H:%M:%S）
+	#   {kind}    事件类型中文名（新短信 / 来电 / 信号变化 / 存储空间已满）
+	#   {count}   本条消息合并的事件条数（单条为 1）
+	# 未识别的占位符原样保留。
+	option notify_tpl_prefix ''             # 全局前缀，附加在所有推送消息最前面（测试通知也会带上）；支持 {time} {count}
+	option notify_tpl_sms ''                # 例：'📱 {sender}\n{content}\n({time})'
+	option notify_tpl_call ''               # 例：'来电 {content}'
+	option notify_tpl_signal ''             # 例：'{content}'
+	option notify_tpl_memory ''             # 例：'短信存储已满，请及时清理'
+	option notify_tpl_batch ''              # 批量汇总时的首行标题
+
 	# 定时锁频配置
 	option schedule_enabled '0'              # 启用定时锁频
 	option schedule_check_interval '60'      # 检测间隔（秒）

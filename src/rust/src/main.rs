@@ -240,7 +240,8 @@ async fn run_qq_bind(
                 } else {
                     format!("（QQ 号标签: {}）", bind_tag)
                 };
-                let content = format!("[luci-app-mt5700] 绑定成功{}：后续通知将推送到本会话", tag);
+                // 绑定确认消息同样不携带插件名字样，保持与业务通知一致的观感
+                let content = format!("绑定成功{}：后续通知将推送到本会话", tag);
                 match sender.send(&content).await {
                     Ok(()) => log_info!("QQ 绑定确认消息已发送"),
                     Err(e) => log_error!("QQ 绑定确认消息发送失败（不影响绑定生效）: {}", e),

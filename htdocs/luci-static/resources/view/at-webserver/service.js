@@ -9,6 +9,9 @@
  * - connection_type / network_host / network_port / serial_port / baud_rate
  * - websocket_host / websocket_port / websocket_auth_key
  * - 通知开关：notify_*（来电/短信/信号/内存满/WebHook URL 与企业微信）
+ * - 推送频率：notify_interval（事件合并窗口秒数，默认 60）
+ * - 自定义推送文案：notify_tpl_prefix / notify_tpl_sms / notify_tpl_call /
+ *   notify_tpl_signal / notify_tpl_memory / notify_tpl_batch（多行按 `\n` 转义存储）
  * - 定时锁频总开关 schedule_enabled
  * - 保存后通过 ubus 重载服务（等价 /etc/init.d/at-webserver reload）
  *
@@ -395,6 +398,17 @@ return L.view.extend({
 		var webhookInput = Mt5700.input('text', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx', '');
 		notifBody.appendChild(Mt5700.formGroup('企业微信 WebHook', webhookInput, '通知将推送到该 WebHook 地址'));
 
+		/* 推送频率 = 事件合并窗口。
+		 * 语义是「窗口内到达的事件合并成一条推送」，而不是「固定每 N 秒发一条」：
+		 * 窗口内没有事件时不会产生任何消息，因此调小不会把空消息刷出去。
+		 * 下限 5 秒由后端再次夹取（QQ 单关系主动消息频控为 20 条/分钟）。 */
+		var notifyIntervalInput = Mt5700.input('number', '60', '');
+		notifyIntervalInput.min = 5;
+		notifyIntervalInput.max = 3600;
+		notifBody.appendChild(Mt5700.formGroup('推送频率（合并窗口）', notifyIntervalInput,
+			'单位秒，范围 5-3600，默认 60。该窗口内到达的短信/来电/信号事件会合并成一条推送；' +
+			'窗口内没有事件则不发送。窗口越长越省推送配额，越短越实时。'));
+
 		/* QQ 机器人（官方 API v2）：AppID+AppSecret+目标 ID 全部填写后启用 */
 		var qqAppIdInput = Mt5700.input('text', 'QQ 开放平台 AppID（纯数字）', '');
 		var qqSecretInput = Mt5700.input('password', '留空则回退环境变量 QQ_BOT_APP_SECRET', '');
@@ -482,6 +496,97 @@ return L.view.extend({
 			}).catch(function () { /* RPC 暂不可用时静默，下个周期重试 */ });
 		}, 2000);
 
+		/* ---------- 自定义推送文案 ----------
+		 *
+		 * UCI 的 option 值是单行的，多行模板统一按 `\n` 转义存储
+		 * （与 Rust 侧 config::escape_template / unescape_template 一一对应）。
+		 * 页面在此做「真实换行 <-> \n」双向转换，用户只管在文本框里正常换行。
+		 *
+		 * 文本框留空表示沿用内置默认文案：后端在配置读取阶段回落，
+		 * 因此升级后未被改动过的文案仍会跟随版本更新。
+		 */
+		var tplCard = Mt5700.card('推送文案', '四类事件各自的推送正文；留空则使用内置默认文案');
+		var tplBody = E('div');
+		tplCard._body.appendChild(tplBody);
+		body.appendChild(tplCard);
+
+		/* 模板是多行文本，等宽字体 + 保留空白更便于校对 */
+		tplBody.appendChild(E('style', {},
+			'.mt5700-tpl-area{width:100%;box-sizing:border-box;min-height:74px;padding:8px 10px;' +
+			'resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;' +
+			'font-size:12.5px;line-height:1.5;white-space:pre-wrap;}'));
+
+		function mkTplArea(rows) {
+			var ta = E('textarea', { 'class': 'mt5700-input mt5700-tpl-area', rows: String(rows || 3) });
+			ta.spellcheck = false;
+			return ta;
+		}
+
+		var tplPrefixInput = mkTplArea(2);
+		var tplSmsInput = mkTplArea(3);
+		var tplCallInput = mkTplArea(3);
+		var tplSignalInput = mkTplArea(3);
+		var tplMemInput = mkTplArea(3);
+		var tplBatchInput = Mt5700.input('text', '批量通知汇总', '');
+
+		var PLACEHOLDER_HINT =
+			'可用占位符：{sender} 发送者 · {content} 事件正文 · {time} 事件时刻 · ' +
+			'{kind} 事件类型（新短信 / 来电 / 信号变化 / 存储空间已满） · {count} 本条消息合并的条数；' +
+			'未识别的占位符会原样保留。';
+
+		tplBody.appendChild(Mt5700.formGroup('前缀（所有推送消息最前面）', tplPrefixInput,
+			'支持 {time} 与 {count}；留空则不添加前缀。测试通知也会带上它，便于一次性验证。'));
+		tplBody.appendChild(Mt5700.formGroup('新短信', tplSmsInput, PLACEHOLDER_HINT));
+		tplBody.appendChild(Mt5700.formGroup('来电', tplCallInput, PLACEHOLDER_HINT));
+		tplBody.appendChild(Mt5700.formGroup('信号变化', tplSignalInput, PLACEHOLDER_HINT));
+		tplBody.appendChild(Mt5700.formGroup('短信存储满', tplMemInput, PLACEHOLDER_HINT));
+		tplBody.appendChild(Mt5700.formGroup('批量汇总标题', tplBatchInput,
+			'同一合并窗口内出现多条事件时，作为汇总消息的首行标题。'));
+
+		/* 内置默认文案：必须与 Rust 侧 config.rs 的 DEFAULT_TPL_* 保持一致。
+		 * 仅用于「恢复默认文案」按钮与初始回填，后端始终以自己的默认为准。 */
+		var TPL_DEFAULTS = {
+			prefix: '',
+			sms: '📱 新短信通知\n发送者: {sender}\n内容: {content}',
+			call: '📞 来电提醒\n{content}',
+			signal: '{content}',
+			memory: '⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信',
+			batch: '📑 批量通知汇总'
+		};
+
+		var tplStatus = E('span', { 'class': 'mt5700-hint' }, '');
+		var tplResetBtn = Mt5700.button('恢复默认文案', function () {
+			tplPrefixInput.value = TPL_DEFAULTS.prefix;
+			tplSmsInput.value = TPL_DEFAULTS.sms;
+			tplCallInput.value = TPL_DEFAULTS.call;
+			tplSignalInput.value = TPL_DEFAULTS.signal;
+			tplMemInput.value = TPL_DEFAULTS.memory;
+			tplBatchInput.value = TPL_DEFAULTS.batch;
+			AtWs.uci.markDirty();
+			tplStatus.textContent = '已填入默认文案，点击「保存并应用」后生效';
+		});
+		tplBody.appendChild(E('div', { 'class': 'mt5700-form-group' }, tplResetBtn, tplStatus));
+
+		/* 真实换行 <-> `\n` 转义。转义必须先处理反斜杠，
+		 * 否则用户文本里的 `\n` 会被二次解释；还原用单遍扫描保证可逆。 */
+		function tplToUci(v) {
+			return String(v == null ? '' : v)
+				.replace(/\\/g, '\\\\')
+				.replace(/\n/g, '\\n')
+				.replace(/\r/g, '\\r')
+				.replace(/\t/g, '\\t');
+		}
+		function tplFromUci(v) {
+			return String(v == null ? '' : v).replace(/\\([ntr\\])/g, function (m, c) {
+				return c === 'n' ? '\n' : (c === 't' ? '\t' : (c === 'r' ? '\r' : '\\'));
+			});
+		}
+		/* 读配置：UCI 为空时回填内置默认，让输入框自带文档性 */
+		function tplLoad(key, def) {
+			var v = String(get(key, ''));
+			return v === '' ? def : tplFromUci(v);
+		}
+
 		/* ---------- 载入 UCI（单 section `config` + 扁平键，与 Rust/ucode 一致） ---------- */
 		var get = function (key, def) {
 			var v = L.uci.get('at-webserver', 'config', key);
@@ -511,6 +616,13 @@ return L.view.extend({
 		qqTargetSel.value = String(get('qq_target_type', 'group'));
 		qqBindInput.value = String(get('qq_bind_qq', ''));
 		qqTargetIdInput.value = String(get('qq_target_id', ''));
+		notifyIntervalInput.value = String(get('notify_interval', '60'));
+		tplPrefixInput.value = tplFromUci(String(get('notify_tpl_prefix', '')));
+		tplSmsInput.value = tplLoad('notify_tpl_sms', TPL_DEFAULTS.sms);
+		tplCallInput.value = tplLoad('notify_tpl_call', TPL_DEFAULTS.call);
+		tplSignalInput.value = tplLoad('notify_tpl_signal', TPL_DEFAULTS.signal);
+		tplMemInput.value = tplLoad('notify_tpl_memory', TPL_DEFAULTS.memory);
+		tplBatchInput.value = tplLoad('notify_tpl_batch', TPL_DEFAULTS.batch);
 
 		/* ---------- 保存（OpenWrt 标准「保存并应用」流程） ----------
 		 *
@@ -550,6 +662,13 @@ return L.view.extend({
 			set('qq_target_type', qqTargetSel.value);
 			set('qq_bind_qq', qqBindInput.value.trim());
 			set('qq_target_id', qqTargetIdInput.value.trim());
+			set('notify_interval', String(parseInt(notifyIntervalInput.value, 10) || 60));
+			set('notify_tpl_prefix', tplToUci(tplPrefixInput.value));
+			set('notify_tpl_sms', tplToUci(tplSmsInput.value));
+			set('notify_tpl_call', tplToUci(tplCallInput.value));
+			set('notify_tpl_signal', tplToUci(tplSignalInput.value));
+			set('notify_tpl_memory', tplToUci(tplMemInput.value));
+			set('notify_tpl_batch', tplToUci(tplBatchInput.value));
 
 			// 写内存后立刻标脏，未点保存就离开会被浏览器拦截
 			AtWs.uci.markDirty();

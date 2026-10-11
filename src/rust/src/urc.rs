@@ -147,6 +147,7 @@ impl Dispatcher {
                     content: format!("时间：{ts}\n号码：{number}\n状态：来电振铃"),
                     kind: NotifyKind::Call,
                     memory_full: false,
+                    time: ts.clone(),
                 })
                 .await;
             self.ws(serde_json::json!({
@@ -163,6 +164,7 @@ impl Dispatcher {
                         content: format!("时间：{ts}\n号码：{number}\n状态：通话结束"),
                         kind: NotifyKind::Call,
                         memory_full: false,
+                        time: ts.clone(),
                     })
                     .await;
                 self.ws(serde_json::json!({
@@ -191,6 +193,7 @@ impl Dispatcher {
                     content: String::new(),
                     kind: NotifyKind::MemoryFull,
                     memory_full: true,
+                    time: crate::notify::now_string(),
                 })
                 .await;
         });
@@ -220,6 +223,7 @@ impl Dispatcher {
                     content: sms.content.clone(),
                     kind: NotifyKind::Sms,
                     memory_full: false,
+                    time: sms.date.format("%Y-%m-%d %H:%M:%S").to_string(),
                 })
                 .await;
             self.ws(serde_json::json!({
@@ -298,6 +302,7 @@ impl Dispatcher {
                     content,
                     kind: NotifyKind::Sms,
                     memory_full: false,
+                    time: date.format("%Y-%m-%d %H:%M:%S").to_string(),
                 })
                 .await;
         });
@@ -369,6 +374,7 @@ impl Dispatcher {
 
     async fn notify_signal(&mut self, rsrp: f64, mode_switched: bool) {
         let info = self.query_monsc().await;
+        let now = crate::notify::now_string();
 
         let mut b = String::new();
         if mode_switched {
@@ -376,7 +382,7 @@ impl Dispatcher {
         }
         b.push_str(&format!(
             "📶 信号变动通知\n时间: {}\n制式: {}\n信号: {}\n",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            now,
             info.rat,
             signal_level(rsrp)
         ));
@@ -415,6 +421,7 @@ impl Dispatcher {
                         content: b,
                         kind: NotifyKind::Signal,
                         memory_full: false,
+                        time: now.clone(),
                     })
                     .await;
                 return;
@@ -427,6 +434,7 @@ impl Dispatcher {
                 content,
                 kind: NotifyKind::Signal,
                 memory_full: false,
+                time: now,
             })
             .await;
     }
