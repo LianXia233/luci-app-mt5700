@@ -187,7 +187,13 @@ function loadView(Parse) {
 			sendCommand: (cmd) => {
 				calls.cmds.push(cmd);
 				if (cmd === 'AT+CMGL=4') return Promise.resolve({ success: true, data: cmgl });
-				if (cmd === 'AT^CPMS?') return Promise.resolve({ success: true, data: '^CPMS: "SM",6,50,"SM",6,50,"MT",0,50' });
+				/*
+				 * 实机（MT5700M-CN）只认**标准** `AT+CPMS?`；发私有前缀的
+				 * `AT^CPMS?` 直接回 ERROR。这里刻意让私有写法失败 ——
+				 * 前端一旦退回 `^` 前缀，存储用量断言就会立刻挂掉。
+				 */
+				if (cmd === 'AT+CPMS?') return Promise.resolve({ success: true, data: '+CPMS: "SM",6,50,"SM",6,50,"MT",0,50' });
+				if (cmd === 'AT^CPMS?') return Promise.resolve({ success: false, error: 'ERROR' });
 				return Promise.resolve({ success: true, data: 'OK' });
 			},
 			subscribe: (fn) => { calls.subscribed.push(fn); },
@@ -234,10 +240,12 @@ async function main() {
 	check('确实请求了短信列表', calls.cmds.indexOf('AT+CMGL=4') >= 0, true);
 	check('订阅了新短信事件', calls.subscribed.length, 1);
 
-	/* 存储用量：夹具里的 ^CPMS 应答是 `^CPMS: "SM",6,50,...`，
-	   前端若只匹配 `+CPMS` 就会一直显示 0 / 0（模拟环境已复现该缺陷） */
+	/* 存储用量：实机只认标准 `AT+CPMS?`（私有 `AT^CPMS?` 回 ERROR 导致用量永远 0 / 0）。
+	   这里同时断言「用了标准写法」与「没用私有写法」，防止前缀再次写错 */
 	const hints = findAll(page._body, 'mt5700-hint');
-	check('存储用量按 ^CPMS 应答解析', hints.length ? hints[0].textContent : null, '存储：6 / 50');
+	check('请求了标准 CPMS 命令', calls.cmds.indexOf('AT+CPMS?') >= 0, true);
+	check('未使用私有 ^CPMS 前缀', calls.cmds.indexOf('AT^CPMS?') < 0, true);
+	check('存储用量按 +CPMS 应答解析', hints.length ? hints[0].textContent : null, '存储：6 / 50');
 
 	const contactItems = findAll(page._body, 'mt5700-sms-item');
 	const contactNumbers = contactItems.map((n) => n.childNodes[0].textContent);
@@ -245,55 +253,55 @@ async function main() {
 	check('会话数量', contactItems.length, 3);
 	check('会话顺序（最近的在前）', contactNumbers, ['10690000000', '13900139000', '13800138000']);
 
-	console.log('\n=== 2. 会话 A：收到 2 条 + 发出 1 条（时间交错，必须分区）===');
+	console.log('\n=== 2. 会话 A：聊天式单时间轴（收发混排，左右气泡区分方向）===');
 	const idxA = contactNumbers.indexOf('13800138000');
 	contactItems[idxA].dispatch('click');
 
-	let sections = findAll(page._body, 'mt5700-sms-section');
-	check('分区数量', sections.length, 2);
-	check('上区是「收到」', sections[0].className.indexOf('mt5700-sms-section-recv') >= 0, true);
-	check('下区是「发出」', sections[1].className.indexOf('mt5700-sms-section-sent') >= 0, true);
-	check('上区标题与条数', sections[0].childNodes[0].textContent, '收到2 条');
-	check('下区标题与条数', sections[1].childNodes[0].textContent, '发出1 条');
+	check('不再使用分区结构', findAll(page._body, 'mt5700-sms-section').length, 0);
+	const days = findAll(page._body, 'mt5700-sms-date');
+	check('存在日期分隔条', days.length >= 1, true);
+	check('日期条格式', /^20\d{2}-\d{2}-\d{2}$/.test(days[0].textContent), true);
 
-	const recvA = findAll(sections[0], 'mt5700-sms-bubble');
-	const sentA = findAll(sections[1], 'mt5700-sms-bubble');
-	check('上区气泡数量', recvA.length, 2);
-	check('下区气泡数量', sentA.length, 1);
-	check('上区内容按时间升序', textsOf(recvA.map((b) => b.childNodes[0])),
-		['明天上午的评审改到十点，方便吗？', '好，会议室在 3 号楼 502。']);
-	check('下区内容', textsOf(sentA.map((b) => b.childNodes[0])), ['方便，我九点半到会议室。']);
-	check('下区气泡有 sent 样式', sentA[0].className.indexOf('mt5700-sms-bubble-sent') >= 0, true);
-	check('上区气泡有 recv 样式', recvA[0].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
-	check('未知时间如实标注', sentA[0].childNodes[1].textContent, '时间未知');
-	check('收到的时间戳可读', /^\d{2}\/\d{2}\/\d{2},\d{2}:\d{2}:\d{2}$/.test(recvA[0].childNodes[1].textContent), true);
+	let bubbles = findAll(page._body, 'mt5700-sms-bubble');
+	check('气泡总数（收发混排，不再拆两块）', bubbles.length, 3);
+	check('内容按时间升序（时间未知的排最后）', textsOf(bubbles.map((b) => b.childNodes[0])), [
+		'明天上午的评审改到十点，方便吗？',
+		'好，会议室在 3 号楼 502。',
+		'方便，我九点半到会议室。'
+	]);
+	check('第 1 条是收到的气泡（左）', bubbles[0].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
+	check('第 2 条是收到的气泡（左）', bubbles[1].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
+	check('第 3 条是发出的气泡（右）', bubbles[2].className.indexOf('mt5700-sms-bubble-sent') >= 0, true);
+	check('未知时间如实标注', bubbles[2].childNodes[1].textContent, '时间未知');
+	check('气泡内只留时刻（日期由分隔条承担）', /^\d{2}:\d{2}:\d{2}$/.test(bubbles[0].childNodes[1].textContent), true);
+	const recvA = [bubbles[0]];
 
-	console.log('\n=== 3. 会话 B：只有收到 → 发出区显示空态 ===');
+	console.log('\n=== 3. 会话 B：只有收到 ===');
 	contactItems[contactNumbers.indexOf('13900139000')].dispatch('click');
-	sections = findAll(page._body, 'mt5700-sms-section');
-	check('分区仍然两块都有', sections.length, 2);
-	check('收到区条数', sections[0].childNodes[0].textContent, '收到1 条');
-	check('发出区条数', sections[1].childNodes[0].textContent, '发出0 条');
-	const emptyB = findAll(sections[1], 'mt5700-sms-section-empty');
-	check('发出区空态文案', emptyB.length === 1 ? emptyB[0].textContent : null, '还没有发给该联系人的消息');
+	bubbles = findAll(page._body, 'mt5700-sms-bubble');
+	check('气泡数量', bubbles.length, 1);
+	check('是收到的气泡（左）', bubbles[0].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
+	check('无分区空态残留', findAll(page._body, 'mt5700-sms-section-empty').length, 0);
 
 	console.log('\n=== 4. 会话 C：发出的短信带绝对有效期 → 标注为近似时间 ===');
 	contactItems[contactNumbers.indexOf('10690000000')].dispatch('click');
-	sections = findAll(page._body, 'mt5700-sms-section');
-	const sentC = findAll(sections[1], 'mt5700-sms-bubble');
-	check('发出区 1 条', sentC.length, 1);
+	bubbles = findAll(page._body, 'mt5700-sms-bubble');
+	check('气泡数量', bubbles.length, 2);
+	const sentC = bubbles.filter((b) => b.className.indexOf('mt5700-sms-bubble-sent') >= 0);
+	check('发出气泡 1 条', sentC.length, 1);
 	check('内容', sentC[0].childNodes[0].textContent, '收到，谢谢。');
 	check('时间带「非发送时刻」标注',
 		sentC[0].childNodes[1].textContent.slice(-6), '非发送时刻）');
 	check('近似时间文案完整',
-		sentC[0].childNodes[1].textContent.indexOf('（有效期时间，非发送时刻）') > 0, true);
+		sentC[0].childNodes[1].textContent.indexOf('（有效期，非发送时刻）') > 0, true);
 
 	console.log('\n=== 5. 与推送链路口径一致：短信时间就是 PDU 时间戳（北京时间）===');
 	/* 收到短信的时刻在夹具里是「现在 − 32 分钟」，SCTS 按 UTC+8 生成；
 	   解析后显示的日历时间必须与生成时算好的期望值逐字一致 */
-	check('上区第一条时间 == 夹具生成的北京时间',
-		recvA[0].childNodes[1].textContent, pduList[0].display);
-	check('夹具期望值确实是北京时间口径', pduList[0].display.slice(0, 2), String(fixtures.beijingParts(-32).year).padStart(2, '0'));
+	check('第一条时间 == 夹具生成的北京时间（时刻部分）',
+		recvA[0].childNodes[1].textContent, pduList[0].display.split(',')[1]);
+	check('夹具期望值确实是北京时间口径', pduList[0].display.slice(0, 2),
+		String(fixtures.beijingParts(-32).year).padStart(2, '0'));
 
 	console.log(`\n合计: ${pass} 通过, ${fail} 失败`);
 	process.exit(fail ? 1 : 0);
