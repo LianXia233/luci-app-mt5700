@@ -1,7 +1,7 @@
 //! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
 //! 键名与 LuCI 页面约定完全一致。
 
-use crate::log_warn;
+use crate::{log_info, log_warn};
 use crate::logger::{self, Level};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -63,13 +63,24 @@ pub struct NotifyTypes {
     pub signal: bool,
 }
 
-/// 事件合并窗口的默认值（秒）。窗口内到达的事件合并成一条推送。
-pub const DEFAULT_NOTIFY_INTERVAL_SECS: u64 = 60;
-/// 合并窗口下限。低于 5 秒时事件几乎无法合并，且会顶到 QQ 主动消息频控
-/// （单关系 20 条/分钟）上沿，故在此设硬下限。
-pub const MIN_NOTIFY_INTERVAL_SECS: u64 = 5;
-/// 合并窗口上限（1 小时）。再长会让通知失去时效性。
-pub const MAX_NOTIFY_INTERVAL_SECS: u64 = 3600;
+/// 定时推送间隔的默认值（分钟）：到点主动推一次「当前实际情况」。
+///
+/// 10 分钟的由来：定时推送是**主动推送当前状态**，不是等事件来了才发，
+/// 太密就成了噪音；10 分钟既能及时反映信号与存储的变化，又不至于让人想关掉。
+pub const DEFAULT_NOTIFY_TIMER_INTERVAL_MIN: u64 = 10;
+/// 定时推送间隔下限（1 分钟）：分钟粒度下的最小值。
+pub const MIN_NOTIFY_TIMER_INTERVAL_MIN: u64 = 1;
+/// 定时推送间隔上限（1440 分钟 = 24 小时）。
+pub const MAX_NOTIFY_TIMER_INTERVAL_MIN: u64 = 1440;
+
+/// 旧键 `notify_interval`（合并窗口秒数）迁移：秒 → 分钟，向上取整。
+///
+/// 单独成函数是为了让「60 秒 → 1 分钟」「1 秒 → 1 分钟」「超大值 → 24 小时封顶」
+/// 这些边界在单测里能被直接钉住，而不是散落在读取逻辑里靠人脑推演。
+pub fn secs_to_timer_minutes(secs: u64) -> u64 {
+    let m = (secs + 59) / 60;
+    m.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN)
+}
 
 // ---------------------------------------------------------------------------
 // 定时轮询推送（信号采样）
@@ -201,7 +212,8 @@ pub struct NotifyTemplates {
     pub memory_full: String,
     /// 信号变化文案模板。
     pub signal: String,
-    /// 批量汇总标题（合并窗口内多于一条时使用）。
+    /// 批量汇总标题（多条合并时使用）。v1.14.20 起生产路径逐条直发，
+    /// 该标题当前不会被触发，保留仅为兼容已有配置。
     pub batch: String,
 }
 
@@ -256,9 +268,9 @@ pub struct NotificationConfig {
     pub types: NotifyTypes,
     /// QQ 机器人（官方 API v2）推送配置；AppSecret 建议走环境变量 QQ_BOT_APP_SECRET。
     pub qq: QqNotifyConfig,
-    /// 事件合并窗口（推送频率）：窗口内到达的事件合并为一条推送，空队列不触发发送。
-    /// 注意：短信与来电**不走**该窗口（实时直发），见 `notify.rs`。
-    pub interval: Duration,
+    /// 定时推送间隔：每隔这么久主动推一次「当前实际情况」（信号读数 + 存储状态）。
+    /// 与 `poll`（信号巡检）是两条独立的周期线，互不覆盖。
+    pub timer_interval: Duration,
     /// 定时轮询推送（信号采样）。
     pub poll: PollConfig,
     /// 自定义推送文案模板。
@@ -353,7 +365,7 @@ pub fn default_config() -> Config {
                 target_id: String::new(),
                 bind_qq: String::new(),
             },
-            interval: Duration::from_secs(DEFAULT_NOTIFY_INTERVAL_SECS),
+            timer_interval: Duration::from_secs(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN * 60),
             poll: PollConfig::default(),
             templates: NotifyTemplates::default(),
         },
@@ -482,6 +494,36 @@ pub async fn uci_values() -> Result<UciReader, String> {
 }
 
 /// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
+
+/// 解析定时推送间隔：UCI 以**分钟**为单位，内部换算成 [`Duration`]。
+///
+/// 单独成函数的理由：`load_config()` 自己会去调 `uci show`，单测无法注入值；
+/// 而这里的规则（默认值、上下限夹取、旧键迁移）恰恰是最容易写错又最难在实机上
+/// 逐个试的部分，必须能被单测直接覆盖。
+///
+/// 旧键 `notify_interval` 是「合并窗口秒数」，语义已废弃；**仅在未配置新键时**
+/// 迁移一次，否则老设备升级后会静默退回默认值，用户会以为自己填过的频率丢了。
+fn timer_interval_from(values: &UciReader) -> Duration {
+    let raw = values.str("notify_timer_interval", "");
+    let raw = raw.trim().to_string();
+    let minutes = if raw.is_empty() {
+        let legacy = values.int("notify_interval", 0);
+        if legacy > 0 {
+            let migrated = secs_to_timer_minutes(legacy as u64);
+            log_info!("旧配置 notify_interval={legacy}s 已迁移为 notify_timer_interval={migrated} 分钟");
+            migrated
+        } else {
+            DEFAULT_NOTIFY_TIMER_INTERVAL_MIN
+        }
+    } else {
+        raw.parse::<u64>().unwrap_or_else(|_| {
+            log_warn!("notify_timer_interval 不是数字（{raw}），已回落默认 {DEFAULT_NOTIFY_TIMER_INTERVAL_MIN} 分钟");
+            DEFAULT_NOTIFY_TIMER_INTERVAL_MIN
+        })
+    };
+    Duration::from_secs(minutes.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN) * 60)
+}
+
 pub async fn load_config() -> Config {
     let mut cfg = default_config();
     let values = match uci_values().await {
@@ -551,13 +593,8 @@ pub async fn load_config() -> Config {
         bind_qq: values.str("qq_bind_qq", ""),
     };
 
-    // 推送频率：合并窗口秒数（下限 5s 防频控/忙循环，上限 1h 保时效）。
-    let interval = values.seconds(
-        "notify_interval",
-        Duration::from_secs(DEFAULT_NOTIFY_INTERVAL_SECS),
-        Duration::from_secs(MIN_NOTIFY_INTERVAL_SECS),
-    );
-    cfg.notification.interval = interval.min(Duration::from_secs(MAX_NOTIFY_INTERVAL_SECS));
+    // 定时推送间隔（分钟）：到点主动推一次当前实际情况。
+    cfg.notification.timer_interval = timer_interval_from(&values);
 
     // 自定义推送文案：UCI 存单行转义文本，空值回落内置默认，保证升级后行为不变。
     let tpl = |key: &str, def: &str| -> String {
@@ -670,9 +707,53 @@ mod tests {
     }
 
     #[test]
-    fn notify_interval_bounds_are_ordered() {
-        assert!(MIN_NOTIFY_INTERVAL_SECS <= DEFAULT_NOTIFY_INTERVAL_SECS);
-        assert!(DEFAULT_NOTIFY_INTERVAL_SECS <= MAX_NOTIFY_INTERVAL_SECS);
+    fn notify_timer_interval_bounds_are_ordered() {
+        assert!(MIN_NOTIFY_TIMER_INTERVAL_MIN <= DEFAULT_NOTIFY_TIMER_INTERVAL_MIN);
+        assert!(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN <= MAX_NOTIFY_TIMER_INTERVAL_MIN);
+        // 默认 10 分钟：定时推送是主动推送，太密会变成噪音
+        assert_eq!(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN, 10);
+        // 上限 24 小时 = 1440 分钟
+        assert_eq!(MAX_NOTIFY_TIMER_INTERVAL_MIN, 1440);
+    }
+
+    #[test]
+    fn legacy_seconds_interval_migrates_to_minutes() {
+        // 旧默认 60 秒 → 1 分钟
+        assert_eq!(secs_to_timer_minutes(60), 1);
+        // 向上取整：61 秒也是 1 分钟？不 —— 61 秒超过 1 分钟，进位为 2
+        assert_eq!(secs_to_timer_minutes(61), 2);
+        // 旧下限 5 秒在分钟粒度下无法表达，收敛到 1 分钟
+        assert_eq!(secs_to_timer_minutes(5), 1);
+        assert_eq!(secs_to_timer_minutes(0), 1);
+        // 超过 24 小时一律封顶，避免「填错成 99999 分钟」后永远不推
+        assert_eq!(secs_to_timer_minutes(999_999), MAX_NOTIFY_TIMER_INTERVAL_MIN);
+    }
+
+    #[test]
+    fn timer_interval_reads_minutes_and_clamps() {
+        let mk = |pairs: &[(&str, &str)]| {
+            let mut m = HashMap::new();
+            for (k, v) in pairs {
+                m.insert(k.to_string(), v.to_string());
+            }
+            UciReader(m)
+        };
+        assert_eq!(timer_interval_from(&mk(&[("notify_timer_interval", "30")])).as_secs(), 30 * 60);
+        // 超出上限：夹到 24 小时
+        assert_eq!(timer_interval_from(&mk(&[("notify_timer_interval", "99999")])).as_secs(), 1440 * 60);
+        // 低于下限：夹到 1 分钟（填 0 不该退化成「不推送」或「每 0 分钟推一次」）
+        assert_eq!(timer_interval_from(&mk(&[("notify_timer_interval", "0")])).as_secs(), 60);
+        // 两个键都没配：默认 10 分钟
+        assert_eq!(timer_interval_from(&mk(&[])).as_secs(), 10 * 60);
+        // 旧键迁移：未配置新键时才生效
+        assert_eq!(timer_interval_from(&mk(&[("notify_interval", "300")])).as_secs(), 5 * 60);
+        // 新旧键同时存在：以新键为准，旧键不再覆盖用户的新选择
+        assert_eq!(
+            timer_interval_from(&mk(&[("notify_interval", "300"), ("notify_timer_interval", "15")])).as_secs(),
+            15 * 60
+        );
+        // 非数字：回落默认，而不是解析成 0
+        assert_eq!(timer_interval_from(&mk(&[("notify_timer_interval", "abc")])).as_secs(), 10 * 60);
     }
 
     #[test]

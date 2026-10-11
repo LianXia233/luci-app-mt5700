@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.19-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.14.20-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -159,11 +159,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.14.19-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.14.20-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.14.19_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.14.20_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -268,14 +268,14 @@ config at-webserver 'config'
 
 ## 事件通知配置
 
-事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件。**短信与来电实时直发**（不等合并窗口），信号与存储满先经合并窗口去重汇总后发送（窗口时长可配置，默认 60 秒）：
+事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件。**短信与来电实时直发**（事件一到就发），**信号与存储满同样即时直发**；此外还有一个独立定时器，每到一个间隔就推送一次**当前实际情况**（间隔可配置，单位分钟，默认 10）：
 
 | 通道 | 配置项 | 说明 |
 |:--|:--|:--|
 | 总开关 | `notify_enabled` | 自动推送总开关，默认 `1`；关闭后仅写本地日志、外发全部停止 |
 | 企业微信 | `wechat_webhook` | 群机器人 WebHook 地址 |
 | QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道）/ `bind`（自动绑定） |
-| 合并窗口 | `notify_interval` | 推送频率（秒），取值区间 5~3600，默认 60；窗口内多条**信号/存储满**事件合并为一条推送 |
+| 定时推送间隔 | `notify_timer_interval` | 定时推送周期（**分钟**），取值 1~1440（1 分钟 ~ 24 小时），默认 10；每到一个间隔推送一次**当前实际情况**。旧键 `notify_interval`（秒，5~3600）由后端向上取整换算成分钟后自动迁移 |
 | 信号巡检 | `notify_poll_enabled` / `notify_poll_start` / `notify_poll_end` / `notify_poll_interval` / `notify_poll_all` / `notify_poll_delta` | 时段内主动轮询信号（本模组不主动上报信号读数） |
 | 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀 + 五类事件文案模板，支持占位符 |
 | 日志文件 | `log_file` | 本地逐条落盘（总开关关闭时仍写） |
@@ -286,8 +286,9 @@ config at-webserver 'config'
 |:--|:--|:--|
 | 新短信 | 模组主动上报 `+CMTI:` | **实时直发** |
 | 来电 | 模组主动上报 `RING` | **实时直发** |
-| 存储满 | 模组主动上报 `^SMMEMFULL` | 合并窗口 |
-| 信号 | 后端定时巡检（`notify_poll_*`） | 合并窗口 |
+| 存储满 | 模组主动上报 `^SMMEMFULL` | **实时直发** |
+| 信号 | 后端定时巡检（`notify_poll_*`） | **实时直发**（巡检命中即发） |
+| 当前状态 | 定时器（`notify_timer_interval`） | **周期性推送**：到点推送此刻真实状态，与「期间有没有事件发生」无关 |
 
 ### 自动推送总开关
 
@@ -321,9 +322,13 @@ option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅
 - **基线只在推送时刷新** —— 否则信号从 -80 缓慢漂移到 -95（每次仅差 2 dB）将永远越不过阈值，用户反而收不到「信号持续变差」这个最该知道的通知。
 - **推送内容**：巡检推送携带与网页「射频信号质量」卡片**等价的完整评估** —— 网络能力结论与其场景说明、信号强度 / 信号质量 / 信噪比 / 综合四项评级，以及 RSRP / RSRQ / SINR / SIGNAL 四行「基准 ≥ 阈值 → 实测值 → 结论」对照。标题给出网络代际（`5G` / `4G`），另有「频段」行给出具体频段号与带宽（如 `n41 · 2565 MHz / 100 MHz`，取自 `AT^HFREQINFO?` 的 `<band>`）。只报一个 RSRP 数字不足以判断链路是否真的可用。
 
-### 推送频率与自定义文案
+### 定时推送间隔与自定义文案
 
-- **推送频率**：`notify_interval` 控制合并窗口长度（5~3600 秒，越界会被自动夹取）。窗口内到达的多条事件合并为一条推送，避免短时间内刷屏。
+- **定时推送间隔**：`notify_timer_interval` 单位是**分钟**，取值 1~1440（1 分钟 ~ 24 小时），越界会被自动夹取，默认 **10 分钟**。每到一个间隔后端就推送一次**当前实际情况**（最新信号读数 + 短信存储占用），不再看窗口内有没有事件 —— 这一轮风平浪静也照发。
+- **间隔怎么选（权衡）**：间隔越短，状态越新鲜，但推送条数越多、越容易打扰，也更容易撞上 QQ 官方主动消息频控；间隔越长越安静，可**两次之间发生的变化只能等到下一个整点才被看到**，且单次推送要承载的内容更满（状态快照含信号与存储两块），读起来更费劲。日常建议 5~30 分钟；只在需要长期静默时才调到小时级。
+- **为什么默认从 60 秒改成 10 分钟**：原「合并窗口」语义下 60 秒只决定「攒多久发一次」，窗口内没事件就一条都不发；改成定时推送后**每一轮必定发一条**，仍按 60 秒就是每天 1440 条，远超 QQ 频控（单关系 20 条/分钟、群 30~60 条/分钟、1000 条/群/天）。默认上调到 10 分钟（每天 144 条）是在「状态新鲜」与「不刷屏」之间取的平衡点；想要更实时，把间隔调小即可（最小 1 分钟）。
+- **与信号巡检的关系**：两者**并存互不影响**。信号巡检（`notify_poll_*`）只在设定时段内跑，负责抓**突变**；定时推送负责**保底**，到点就报一次当前状态，让你确认链路还在。只想保留突变通知的话，把间隔拉到最大（1440 分钟 = 24 小时）即可近似关闭。
+- **不受此配置影响**：短信与来电始终实时直发，与定时推送间隔无关。
 - **文案模板**：留空表示使用内置默认文案。可用占位符：
 
 | 占位符 | 含义 |
@@ -386,7 +391,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
   2. 在 QQ 里给机器人发一条消息（单聊任意内容，或群里 @机器人）；
   3. 脚本输出 openid 与现成的 UCI 配置命令，粘贴执行即可。凭据与 openid 不经手第三方。
 - **鉴权**：`POST https://api.bot.qq.com/app/getAppAccessToken` 换取 `access_token`（7200 秒），服务自动缓存并在过期前 120 秒刷新。
-- **已知限制**：本服务为单向推送、不连 WebSocket，所有消息均为**主动消息**（不带 `msg_id`），受官方频控约束（群 30~60 条/分钟、单关系 20 条/分钟、1000 条/群/天，未认证/认证档不同），且 QQ 用户关闭「允许主动发送」后推送会失败；频道主动推送官方要求机器人保持 WebSocket 在线，`channel` 模式可能被平台拒绝。60 秒合并窗口天然适配上述频控。
+- **已知限制**：本服务为单向推送、不连 WebSocket，所有消息均为**主动消息**（不带 `msg_id`），受官方频控约束（群 30~60 条/分钟、单关系 20 条/分钟、1000 条/群/天，未认证/认证档不同），且 QQ 用户关闭「允许主动发送」后推送会失败；频道主动推送官方要求机器人保持 WebSocket 在线，`channel` 模式可能被平台拒绝。默认 10 分钟的定时推送间隔（每天 144 条）远低于上述频控；若把间隔调到 1 分钟（每天 1440 条），请先确认不会撞上限。
 
 ---
 
@@ -394,7 +399,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.19)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.20)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / ui.js / at.css)

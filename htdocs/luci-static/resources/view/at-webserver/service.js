@@ -10,7 +10,7 @@
  * - websocket_host / websocket_port / websocket_auth_key
  * - 通知总开关：notify_enabled（关闭后仅写本地通知日志，外发全部停止）
  * - 通知开关：notify_*（来电/短信/信号/内存满/WebHook URL 与企业微信）
- * - 推送频率：notify_interval（事件合并窗口秒数，默认 60；短信/来电实时直发，不受其影响）
+ * - 定时推送间隔：notify_timer_interval（分钟，默认 10；到点推送当前实际情况）
  * - 信号定时巡检：notify_poll_enabled / notify_poll_start / notify_poll_end /
  *   notify_poll_interval / notify_poll_all / notify_poll_delta
  *   （本模组不会主动上报信号，必须由后端在时段内主动轮询才会产生信号通知）
@@ -406,8 +406,8 @@ return L.view.extend({
 		var notifySignal = mkCheck();
 		var notifyMem = mkCheck();
 
-		notifBody.appendChild(Mt5700.formGroup('来电通知', notifyCalls.wrap, '实时推送，不等合并窗口'));
-		notifBody.appendChild(Mt5700.formGroup('新短信通知', notifySms.wrap, '实时推送，不等合并窗口'));
+		notifBody.appendChild(Mt5700.formGroup('来电通知', notifyCalls.wrap, '实时推送，不受定时推送间隔影响'));
+		notifBody.appendChild(Mt5700.formGroup('新短信通知', notifySms.wrap, '实时推送，不受定时推送间隔影响'));
 		notifBody.appendChild(Mt5700.formGroup('信号变化通知', notifySignal.wrap,
 			'需配合下方「信号定时巡检」才会产生数据：模组不会主动上报信号读数'));
 		notifBody.appendChild(Mt5700.formGroup('短信存储满通知', notifyMem.wrap));
@@ -415,16 +415,54 @@ return L.view.extend({
 		var webhookInput = Mt5700.input('text', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx', '');
 		notifBody.appendChild(Mt5700.formGroup('企业微信 WebHook', webhookInput, '通知将推送到该 WebHook 地址'));
 
-		/* 推送频率 = 事件合并窗口。
-		 * 语义是「窗口内到达的事件合并成一条推送」，而不是「固定每 N 秒发一条」：
-		 * 窗口内没有事件时不会产生任何消息，因此调小不会把空消息刷出去。
-		 * 下限 5 秒由后端再次夹取（QQ 单关系主动消息频控为 20 条/分钟）。 */
-		var notifyIntervalInput = Mt5700.input('number', '60', '');
-		notifyIntervalInput.min = 5;
-		notifyIntervalInput.max = 3600;
-		notifBody.appendChild(Mt5700.formGroup('推送频率（合并窗口）', notifyIntervalInput,
-			'单位秒，范围 5-3600，默认 60。该窗口内到达的信号与存储满事件会合并成一条推送；' +
-			'窗口内没有事件则不发送。窗口越长越省推送配额，越短越实时。短信与来电不受此窗口影响，始终实时发出。'));
+		/* 定时推送间隔。
+		 * 语义是「每 N 分钟主动推一次当前实际情况」（信号读数 + 短信存储用量），
+		 * 不是「事件攒够一批再发」 —— 后者（合并窗口、秒）已在 v1.14.20 移除：
+		 * 用户想知道的是「现在怎么样」，而不是「刚才发生了什么」。
+		 * 单位用分钟：这个间隔的合理量级是几分钟到几小时，秒级既没必要也容易误填
+		 * （60 秒和 60 分钟只差一个字，写错就是 60 倍）。
+		 * 与下面的「信号定时巡检」是两条独立的周期线，各自按自己的节奏推。 */
+		var notifyTimerInput = Mt5700.input('number', '10', '');
+		notifyTimerInput.min = 1;
+		notifyTimerInput.max = 1440;
+		notifyTimerInput.step = 1;
+		/* 快捷时长：填数字前先给几个常见量级，顺带把「分钟」这个单位讲清楚 */
+		var timerQuick = Mt5700.select([
+			{ label: '自定义（手动填上面）', value: '' },
+			{ label: '1 分钟', value: '1' },
+			{ label: '5 分钟', value: '5' },
+			{ label: '10 分钟（默认）', value: '10' },
+			{ label: '30 分钟', value: '30' },
+			{ label: '1 小时', value: '60' },
+			{ label: '3 小时', value: '180' },
+			{ label: '12 小时', value: '720' },
+			{ label: '24 小时', value: '1440' }
+		], '');
+		var timerHuman = E('span', { 'class': 'mt5700-hint' }, '');
+		function timerText(min) {
+			var n = parseInt(min, 10);
+			if (!n || n < 1 || n > 1440) {
+				return '当前值无效，保存后会被夹取到 1-1440 之间（无效时取默认 10 分钟）';
+			}
+			var tail = '推送一次当前实际情况（信号读数 + 短信存储用量）';
+			if (n < 60) return '每 ' + n + ' 分钟' + tail;
+			var h = Math.floor(n / 60), m = n % 60;
+			return '每 ' + (m ? h + ' 小时 ' + m + ' 分钟' : h + ' 小时') + tail;
+		}
+		function timerSync() {
+			timerQuick.value = notifyTimerInput.value;
+			timerHuman.textContent = timerText(notifyTimerInput.value);
+		}
+		timerQuick.addEventListener('change', function () {
+			if (timerQuick.value) notifyTimerInput.value = timerQuick.value;
+			timerHuman.textContent = timerText(notifyTimerInput.value);
+		});
+		notifyTimerInput.addEventListener('input', timerSync);
+		notifBody.appendChild(Mt5700.formGroup('定时推送间隔（分钟）', notifyTimerInput,
+			'范围 1-1440（即最长 24 小时），默认 10。到点主动推送当前实际情况，' +
+			'不管期间有没有事件发生；下面的信号巡检是另一条独立周期线。' +
+			'短信与来电仍是实时推送，不受此间隔影响。'));
+		notifBody.appendChild(Mt5700.formGroup('快捷时长', timerQuick, timerHuman));
 
 		/* ---------- 信号定时巡检 ----------
 		 *
@@ -665,7 +703,8 @@ return L.view.extend({
 		tplBody.appendChild(Mt5700.formGroup('信号变化', tplSignalInput, PLACEHOLDER_HINT));
 		tplBody.appendChild(Mt5700.formGroup('短信存储满', tplMemInput, PLACEHOLDER_HINT));
 		tplBody.appendChild(Mt5700.formGroup('批量汇总标题', tplBatchInput,
-			'同一合并窗口内出现多条事件时，作为汇总消息的首行标题。'));
+			'合并窗口已于 v1.14.20 移除，不再有「多条事件合并成一条」的场景；' +
+			'此项保留仅为兼容已有配置，当前不会被触发。'));
 
 		/* 内置默认文案：必须与 Rust 侧 config.rs 的 DEFAULT_TPL_* 保持一致。
 		 * 仅用于「恢复默认文案」按钮与初始回填，后端始终以自己的默认为准。 */
@@ -754,7 +793,19 @@ return L.view.extend({
 		qqTargetSel.value = String(get('qq_target_type', 'group'));
 		qqBindInput.value = String(get('qq_bind_qq', ''));
 		qqTargetIdInput.value = String(get('qq_target_id', ''));
-		notifyIntervalInput.value = String(get('notify_interval', '60'));
+		/* 定时推送间隔（分钟）。旧的 notify_interval（秒）由后端换算迁移，
+		 * 这里把换算结果显示出来并说明一句，避免用户以为自己填过的频率丢了。 */
+		var timerRaw = String(get('notify_timer_interval', ''));
+		var legacySecs = parseInt(get('notify_interval', ''), 10) || 0;
+		if (timerRaw === '' && legacySecs > 0) {
+			notifyTimerInput.value = String(Math.max(1, Math.ceil(legacySecs / 60)));
+			timerHuman.textContent = timerText(notifyTimerInput.value) +
+				'（由旧的 ' + legacySecs + ' 秒换算而来，保存后写入新字段）';
+		} else {
+			notifyTimerInput.value = timerRaw || '10';
+			timerHuman.textContent = timerText(notifyTimerInput.value);
+		}
+		timerQuick.value = notifyTimerInput.value;
 		pollEnable.input.checked = get('notify_poll_enabled', '1') === '1';
 		setTimeInput(pollStartInput, get('notify_poll_start', '00:00'), '00:00');
 		setTimeInput(pollEndInput, get('notify_poll_end', '23:59'), '23:59');
@@ -809,7 +860,12 @@ return L.view.extend({
 			set('qq_target_type', qqTargetSel.value);
 			set('qq_bind_qq', qqBindInput.value.trim());
 			set('qq_target_id', qqTargetIdInput.value.trim());
-			set('notify_interval', String(parseInt(notifyIntervalInput.value, 10) || 60));
+			var timerMin = parseInt(notifyTimerInput.value, 10) || 10;
+			timerMin = Math.min(1440, Math.max(1, timerMin));
+			set('notify_timer_interval', String(timerMin));
+			/* 旧键 notify_interval（合并窗口秒数）已废弃：置空，
+			 * 免得 UCI 里留着一个不再生效的「推送频率」让人以为它还在控制推送。 */
+			set('notify_interval', '');
 			set('notify_poll_enabled', pollEnable.input.checked ? '1' : '0');
 			/* time 输入在部分浏览器上允许留空，留空时回落到默认时段而不是写空值：
 			 * 空值会让后端走「格式非法 → 全天」的回落路径，虽然结果相同，

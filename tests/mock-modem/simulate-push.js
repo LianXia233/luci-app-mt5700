@@ -10,7 +10,7 @@
  * 验证项：
  *   1. 短信推送     —— AT+TESTPUSH=2,<索引> 触发 +CMTI，后端读 PDU 后推送
  *   2. 来电推送     —— AT+TESTPUSH=1 触发 +CLIP（振铃）、=4 触发 NO CARRIER（挂断）
- *   3. 实时性       —— 短信与来电必须**不等合并窗口**就发出（实时直发）
+ *   3. 实时性       —— 短信与来电必须**不等攒批**就发出（实时直发）
  *   4. 北京时间     —— 推送里的时间戳按系统时区（uci system.@system[0].timezone）
  *                      解析；本机没有 TZ 配置时回落北京时间 UTC+8
  *   5. 文案洁净     —— 推送文本里不出现插件名（用户明确要求）
@@ -46,7 +46,7 @@ const RPC_PORT_2 = 8766;
 /* 阶段三：开信号巡检后专用端口，避免与前两阶段抢监听 */
 const RPC_PORT_3 = 8767;
 const HOOK_PORT = 8899;
-/* 合并窗口设 5 秒（下限）：短信/来电若真的走窗口，就会明显晚于这个时间才到 */
+/* 实时直发的时间上限取 5 秒：短信/来电若走的是入队攒批路径，就会明显晚于这个时间才到 */
 const MERGE_WINDOW_MS = 5000;
 
 /*
@@ -239,7 +239,10 @@ function buildUciConfig() {
 		websocket_port: "'" + RPC_PORT + "'",
 		wechat_webhook: "'http://127.0.0.1:" + HOOK_PORT + "/hook'",
 		notify_enabled: "'1'",
-		notify_interval: "'5'",
+		/* 定时推送调到最大（1440 分钟 = 24 小时）：它到点必发一条，
+		 * 若按默认 10 分钟跑，长用例里会混进与断言无关的周期性推送。
+		 * 阶段三会单独把它调小并验证。 */
+		notify_timer_interval: "'1440'",
 		/* 关掉信号定时巡检：它会周期发推送，混进断言结果 */
 		notify_poll_enabled: "'0'"
 	};
@@ -291,6 +294,24 @@ function setUciPoll(opts) {
 		if (re.test(txt)) txt = txt.replace(re, line);
 		else txt = txt.replace(/\s*$/, '\n') + line + '\n';
 	});
+	fs.writeFileSync(file, txt);
+}
+
+/*
+ * 写定时推送配置（阶段三用）。
+ * 刻意**只写旧键** notify_interval（秒）并删掉新键 —— 顺带验证老设备升级时
+ * 「秒 → 分钟」的自动迁移是否真的生效：60 秒应换算成 1 分钟，
+ * 这样既验证了迁移，又让首轮推送落在 60 秒处（最短间隔），不必等满 10 分钟。
+ */
+function setUciTimerLegacySeconds() {
+	const file = path.join(UCI_BIN_DIR, 'mock-uci.out');
+	let txt = fs.readFileSync(file, 'utf8');
+	/* 删掉新键：新键优先，留着就测不到旧键迁移 */
+	txt = txt.replace(/^at-webserver\.config\.notify_timer_interval=.*\n?/m, '');
+	const line = "at-webserver.config.notify_interval='60'";
+	const re = /^at-webserver\.config\.notify_interval=.*$/m;
+	if (re.test(txt)) txt = txt.replace(re, line);
+	else txt = txt.replace(/\s*$/, '\n') + line + '\n';
 	fs.writeFileSync(file, txt);
 }
 /*
@@ -488,7 +509,7 @@ async function main() {
 	);
 	const smsElapsed = Date.now() - t0;
 	check('推送已到达 webhook', !!smsRec);
-	check('不等待合并窗口（实时直发）', smsElapsed < MERGE_WINDOW_MS,
+	check('短信实时直发（不进攒批队列）', smsElapsed < MERGE_WINDOW_MS,
 		smsElapsed + ' ms < ' + MERGE_WINDOW_MS + ' ms');
 	check('推送号码正确', smsRec.content.indexOf(FIRST_RECV.number) >= 0, FIRST_RECV.number);
 	check('推送正文正确', smsRec.content.indexOf(FIRST_RECV.content) >= 0);
@@ -522,7 +543,7 @@ async function main() {
 	}, 10000, '收到来电振铃推送');
 	const ringElapsed = Date.now() - tc0;
 	check('振铃推送已到达', !!ring);
-	check('振铃不等待合并窗口', ringElapsed < MERGE_WINDOW_MS, ringElapsed + ' ms');
+	check('振铃实时直发（不进攒批队列）', ringElapsed < MERGE_WINDOW_MS, ringElapsed + ' ms');
 
 	await sleep(400);
 	await at('AT+TESTPUSH=4');
@@ -622,7 +643,7 @@ async function main() {
 	 *
 	 * 短信与来电只能由模组 URC 触发，没有注入入口就没法在设备上验证「新文案长什么样、
 	 * 是不是真的实时」。这里断言它确实是**同形状事件走完整链路**，而不是另一段固定文案：
-	 * 输出必须套用真实短信/来电模板（发送者/内容占位符被真实填上），且不等合并窗口。
+	 * 输出必须套用真实短信/来电模板（发送者/内容占位符被真实填上），且不等攒批。
 	 */
 	const markKind = hook.received.length;
 	const tk = Date.now();
@@ -634,7 +655,7 @@ async function main() {
 		return m || null;
 	}, 8000, '收到短信测试推送');
 	check('短信测试推送已送达 webhook', !!smsTestRec);
-	check('短信测试不等合并窗口（与真实短信同为实时直发）', Date.now() - tk < MERGE_WINDOW_MS,
+	check('短信测试实时直发（与真实短信同一路径）', Date.now() - tk < MERGE_WINDOW_MS,
 		(Date.now() - tk) + ' ms < ' + MERGE_WINDOW_MS + ' ms');
 	const smsTestText = smsTestRec ? smsTestRec.content : '';
 	check('套用真实短信模板（发送者占位符被填）', smsTestText.indexOf('发送者: 138****0000') >= 0,
@@ -652,7 +673,7 @@ async function main() {
 		return m || null;
 	}, 8000, '收到来电测试推送');
 	check('来电测试推送已送达 webhook', !!callTestRec);
-	check('来电测试不等合并窗口', Date.now() - tk2 < MERGE_WINDOW_MS, (Date.now() - tk2) + ' ms');
+	check('来电测试实时直发（与真实来电同一路径）', Date.now() - tk2 < MERGE_WINDOW_MS, (Date.now() - tk2) + ' ms');
 	const callTestText = callTestRec ? callTestRec.content : '';
 	check('套用真实来电模板（标题与真实来电一致）', callTestText.indexOf('有电话打进来啦') >= 0,
 		callTestText.split('\n')[0] || '');
@@ -683,6 +704,8 @@ async function main() {
 	setUciTimezone(null);
 	rewriteUciPort(RPC_PORT_3);
 	setUciPoll({ enabled: 1, all: 1, interval: 30 });
+	/* 定时推送单独开到 1 分钟（用旧键 60 秒触发迁移） */
+	setUciTimerLegacySeconds();
 	const mock3Log = fs.createWriteStream(path.join(SIM_DIR, 'mock-modem-stage3.log'));
 	const mock3 = track(spawn(process.execPath, [path.join(HERE, 'mock-modem.js'), String(MODEM_PORT)], {
 		cwd: HERE,
@@ -699,7 +722,7 @@ async function main() {
 		const r = await rpcConn3.rpc('at', { cmd: 'ATI', auth_key: AUTH });
 		return r && r.result && r.result.success ? true : null;
 	}, 20000, '后端就绪（stage3）');
-	console.log('    等待首轮信号巡检（间隔 30 秒，走 5 秒合并窗口）...');
+	console.log('    等待首轮信号巡检（间隔 30 秒）...');
 
 	const markSig = hook.received.length;
 	const sigRec = await waitFor(() => {
@@ -726,6 +749,40 @@ async function main() {
 	 * 信号推送没有把推断出来的位置写成真实时刻。
 	 */
 	check('信号推送含完整评估结论', sig.indexOf('网络能力') >= 0 && sig.indexOf('·') >= 0);
+
+	/* ---------- 8b. 定时推送：到点就推当前状态，与有没有事件无关 ---------- */
+	console.log('\n=== 6b. 定时推送（旧键 notify_interval=60 秒 → 迁移为 1 分钟）===');
+	/*
+	 * 迁移是否生效要看启动日志：后端按分钟打印间隔。旧键 60 秒 → 1 分钟，
+	 * 首轮推送因此落在 60 秒处 —— 既验证了迁移，也不用等满默认 10 分钟。
+	 */
+	const be3Log = readLog(path.join(SIM_DIR, 'at-webserver-stage3.log'));
+	check('旧键 notify_interval（秒）已迁移为分钟并按新值启动',
+		be3Log.indexOf('定时推送已启动：每 1 分钟') >= 0,
+		(be3Log.split('\n').filter((l) => l.indexOf('定时推送已启动') >= 0)[0] || '未找到启动日志').trim());
+
+	/*
+	 * 「与有没有事件无关」这条怎么验证：本阶段从后端启动起**没有触发任何短信/来电**，
+	 * 信号巡检走的是自己的 30 秒线。能在 60 秒处收到一条状态快照，
+	 * 说明它是定时器推的，而不是被某条事件捎带出来的。
+	 */
+	const timerRec = await waitFor(() => {
+		const m = hook.received.slice(markSig)
+			.filter((r) => r.content && r.content.indexOf('当前状态（定时推送）') >= 0)[0];
+		return m || null;
+	}, 90000, '收到定时推送（当前状态快照）');
+
+	check('定时推送已送达 webhook（期间未触发任何事件）', !!timerRec);
+	const tp = timerRec ? timerRec.content : '';
+	console.log('    ── 推送正文 ──');
+	tp.split('\n').forEach((l) => console.log('    ' + l));
+	check('标题标明是定时推送的状态快照', tp.indexOf('🕒 当前状态（定时推送）') >= 0, tp.split('\n')[0] || '');
+	check('状态快照含网络代际与具体频段', /📶\s*(5G|4G)/.test(tp) && tp.indexOf('n41') >= 0,
+		tp.split('\n').filter((l) => l.indexOf('📶') >= 0)[0] || '');
+	check('状态快照含短信存储用量（现读，非沿用旧状态）', tp.indexOf('短信存储') >= 0,
+		tp.split('\n').filter((l) => l.indexOf('💾') >= 0)[0] || '');
+	check('与巡检推送可区分（不会被当成重复推送）', tp.indexOf('信号巡检') < 0);
+	check('定时推送不含插件名', tp.indexOf('mt5700') < 0);
 
 	console.log('\n=== 7. 安全审计：整轮测试下发过的 AT 命令 ===');
 	const audit = auditModemCommands();
