@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.18-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.14.19-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -159,11 +159,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.14.18-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.14.19-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.14.18_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.14.19_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -347,6 +347,21 @@ option notify_tpl_batch  '📑 批量通知汇总'
 
   UCI 单个 option 不支持真实换行，模板中的换行以 `\n` 转义写入（LuCI 页面会自动转换，手改 UCI 需自行写 `\n`）。
 
+### 推送自检（测试推送）
+
+通知卡片提供两个粒度的自检入口，回答的是两个不同的问题：
+
+| 按钮 | 回答的问题 | 发送方式 |
+|:--|:--|:--|
+| 发送测试通知 | 这条通道**通不通** | 固定文案，直接投递，不经过事件链路 |
+| 测试短信推送 / 测试来电推送 | 该类型事件的**完整链路**对不对 | 构造同形状事件走 `notify()`：总开关 → 分类开关 → 实时直发 → 文案模板 → 通道投递 |
+
+第二组的价值在于：短信与来电**只能由模组 URC 触发**，否则想验证文案与实时性就得真收一条短信。它构造的事件与真实事件同形状，所以收到的文本一字不差；号码用掩码 `138****0000`、正文带「（测试消息，非真实…）」标注，不会被误当成真事。
+
+- 开关没开时**不会假装成功**：后端明确返回原因（总开关关闭 / 该类型开关关闭 / 没有可用通道），页面原样转述；
+- **信号不走类型化测试**：信号指标是真实读数，造一条假的「RSRP -xx dBm」测不出任何东西。验证请用真实巡检 —— 把 `notify_poll_interval` 临时调小（下限 30 秒）等一轮，或直接看通知日志里的历史巡检记录；
+- 等价的 RPC 调用（供脚本化自检）：`{"method":"notify_test","params":{"channel":"sms"}}`，`channel` 可取 `qq` / `wechat` / `sms` / `call`。
+
 ### 时区与时间口径
 
 **所有对外时间一律使用本机系统时区** —— 即 LuCI「系统 → 时间同步 → 时区」写下的 UCI `system.@system[0].timezone`；系统未配置时默认**北京时间（UTC+08:00）**。覆盖范围：通知日志时间戳、推送正文里的 `{time}`、短信中心每条短信的时刻、定时锁频的「下一次切换时刻」。
@@ -379,7 +394,7 @@ option notify_tpl_batch  '📑 批量通知汇总'
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.18)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.19)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / ui.js / at.css)
