@@ -1,6 +1,7 @@
 //! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
 //! 键名与 LuCI 页面约定完全一致。
 
+use crate::log_warn;
 use crate::logger::{self, Level};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -69,6 +70,98 @@ pub const DEFAULT_NOTIFY_INTERVAL_SECS: u64 = 60;
 pub const MIN_NOTIFY_INTERVAL_SECS: u64 = 5;
 /// 合并窗口上限（1 小时）。再长会让通知失去时效性。
 pub const MAX_NOTIFY_INTERVAL_SECS: u64 = 3600;
+
+// ---------------------------------------------------------------------------
+// 定时轮询推送（信号采样）
+//
+// 为什么需要它：本模组（TDTECH/Fibocom 系）不会主动上报 ^HCSQ / ^CERSSI，
+// 实机 1200 条 AT 记录里自发信号上报为 0 条，`Dispatcher::handle_signal`
+// 因而永远不会被调用，「信号变化通知」开关实际处于失效状态。
+// 这里由后端在**用户指定的时段**内自己轮询，让该开关真正生效；
+// 时段外完全不发 AT，避免无意义的串口占用与推送打扰。
+// ---------------------------------------------------------------------------
+
+/// 轮询间隔默认值（秒）。
+pub const DEFAULT_NOTIFY_POLL_INTERVAL_SECS: u64 = 300;
+/// 轮询间隔下限（30 秒）：再密就是拿串口和推送配额开玩笑。
+pub const MIN_NOTIFY_POLL_INTERVAL_SECS: u64 = 30;
+/// 轮询间隔上限（1 小时）。
+pub const MAX_NOTIFY_POLL_INTERVAL_SECS: u64 = 3600;
+/// 时段默认起点/终点（全天）。
+pub const DEFAULT_NOTIFY_POLL_START: &str = "00:00";
+pub const DEFAULT_NOTIFY_POLL_END: &str = "23:59";
+/// 「仅变化时推送」模式下触发推送的最小 RSRP 变化量（dB）。
+///
+/// 不复用 URC 路径 1 dB 的阈值：那是为「模组主动上报的即时变化」设计的，
+/// 用于分钟级轮询时任何一次读数抖动都会越过 1 dB，等于每次轮询都推。
+/// 3 dB 在 RSRP 上已是一档明显的信号质量变化，既能反映真实变化又不打扰。
+pub const DEFAULT_SIGNAL_DELTA_DB: f64 = 3.0;
+/// 变化阈值允许的范围（dB）。下限 1 = 任何一档变化都推；上限 30 = 只推剧烈变化。
+pub const MIN_NOTIFY_POLL_DELTA_DB: i64 = 1;
+pub const MAX_NOTIFY_POLL_DELTA_DB: i64 = 30;
+
+/// 定时轮询推送配置。
+#[derive(Debug, Clone)]
+pub struct PollConfig {
+    /// 是否启用定时轮询推送（总开关关闭时同样不轮询）。
+    pub enabled: bool,
+    /// 时段起点 `HH:MM`（含）。
+    pub start: String,
+    /// 时段终点 `HH:MM`（含，闭区间）；小于起点表示**跨零点**（如 22:00-06:00）。
+    pub end: String,
+    /// 轮询间隔。
+    pub interval: Duration,
+    /// true = 每次轮询都推送当前信号状态；false = 仅在信号显著变化时推送。
+    pub always: bool,
+    /// 「仅变化时推送」模式下的最小变化量（dB）。
+    pub delta: f64,
+}
+
+impl Default for PollConfig {
+    fn default() -> Self {
+        PollConfig {
+            enabled: true,
+            start: DEFAULT_NOTIFY_POLL_START.into(),
+            end: DEFAULT_NOTIFY_POLL_END.into(),
+            interval: Duration::from_secs(DEFAULT_NOTIFY_POLL_INTERVAL_SECS),
+            always: false,
+            delta: DEFAULT_SIGNAL_DELTA_DB,
+        }
+    }
+}
+
+/// 判断某个「当天分钟数」（0..=1439）是否落在 `[start, end]` 时段内。
+///
+/// 区间取**闭区间**（两端都算在时段内），因为用户写「18:00」想表达的是
+/// 「到 18:00 为止」，半开区间会让 18:00:00~18:00:59 这段落在窗外，
+/// 更关键的是默认全天时段 `00:00-23:59` 会漏掉当天最后一分钟。
+///
+/// - `start < end`：普通时段，直接区间比较；
+/// - `start > end`：跨零点时段（如 22:00-06:00），落在 `[start, 1439] ∪ [0, end]`；
+/// - `start == end`：按「全天」处理（否则会变成只命中一分钟，用户会以为坏了）；
+/// - 任一时间格式非法：按「全天」处理并交由调用方记录一次告警，避免因笔误彻底静默。
+pub fn in_poll_window(start: &str, end: &str, minute_of_day: i64) -> bool {
+    let (s, e) = match (
+        crate::schedconfig::parse_hhmm(start),
+        crate::schedconfig::parse_hhmm(end),
+    ) {
+        (Some(s), Some(e)) => (s, e),
+        _ => return true,
+    };
+    if s == e {
+        return true;
+    }
+    if s < e {
+        minute_of_day >= s && minute_of_day <= e
+    } else {
+        minute_of_day >= s || minute_of_day <= e
+    }
+}
+
+/// 时段字符串是否合法（供配置校验与单测使用）。
+pub fn valid_hhmm(v: &str) -> bool {
+    crate::schedconfig::parse_hhmm(v).is_some()
+}
 
 // ---------------------------------------------------------------------------
 // 自定义推送文案模板
@@ -155,13 +248,19 @@ pub fn unescape_template(raw: &str) -> String {
 
 #[derive(Debug, Clone)]
 pub struct NotificationConfig {
+    /// 自动推送总开关。关闭时事件不再推送（仅保留本地通知日志），
+    /// 便于用户在不改动分类开关的前提下整体静音。
+    pub enabled: bool,
     pub wechat_webhook: String,
     pub log_file: String,
     pub types: NotifyTypes,
     /// QQ 机器人（官方 API v2）推送配置；AppSecret 建议走环境变量 QQ_BOT_APP_SECRET。
     pub qq: QqNotifyConfig,
     /// 事件合并窗口（推送频率）：窗口内到达的事件合并为一条推送，空队列不触发发送。
+    /// 注意：短信与来电**不走**该窗口（实时直发），见 `notify.rs`。
     pub interval: Duration,
+    /// 定时轮询推送（信号采样）。
+    pub poll: PollConfig,
     /// 自定义推送文案模板。
     pub templates: NotifyTemplates,
 }
@@ -238,6 +337,7 @@ pub fn default_config() -> Config {
             autodial_mode: 1,
         },
         notification: NotificationConfig {
+            enabled: true,
             wechat_webhook: String::new(),
             log_file: String::new(),
             types: NotifyTypes {
@@ -254,6 +354,7 @@ pub fn default_config() -> Config {
                 bind_qq: String::new(),
             },
             interval: Duration::from_secs(DEFAULT_NOTIFY_INTERVAL_SECS),
+            poll: PollConfig::default(),
             templates: NotifyTemplates::default(),
         },
         websocket: WebSocketConfig {
@@ -476,6 +577,39 @@ pub async fn load_config() -> Config {
         batch: tpl("notify_tpl_batch", DEFAULT_TPL_BATCH),
     };
 
+    // 自动推送总开关：默认开启，保证升级后行为不变。
+    cfg.notification.enabled = values.bool("notify_enabled", true);
+
+    // 定时轮询推送：时段内周期采样信号，按策略推送。
+    let poll_start = values.str("notify_poll_start", DEFAULT_NOTIFY_POLL_START);
+    let poll_end = values.str("notify_poll_end", DEFAULT_NOTIFY_POLL_END);
+    let poll_interval = values.seconds(
+        "notify_poll_interval",
+        Duration::from_secs(DEFAULT_NOTIFY_POLL_INTERVAL_SECS),
+        Duration::from_secs(MIN_NOTIFY_POLL_INTERVAL_SECS),
+    );
+    cfg.notification.poll = PollConfig {
+        enabled: values.bool("notify_poll_enabled", true),
+        // 时间格式非法时回落「全天」并留痕：宁可多推也别让笔误把功能变成静默失效。
+        start: if valid_hhmm(&poll_start) {
+            poll_start
+        } else {
+            log_warn!("notify_poll_start 格式非法（{}），已回落 {}", poll_start, DEFAULT_NOTIFY_POLL_START);
+            DEFAULT_NOTIFY_POLL_START.into()
+        },
+        end: if valid_hhmm(&poll_end) {
+            poll_end
+        } else {
+            log_warn!("notify_poll_end 格式非法（{}），已回落 {}", poll_end, DEFAULT_NOTIFY_POLL_END);
+            DEFAULT_NOTIFY_POLL_END.into()
+        },
+        interval: poll_interval.min(Duration::from_secs(MAX_NOTIFY_POLL_INTERVAL_SECS)),
+        always: values.bool("notify_poll_all", false),
+        delta: values
+            .int("notify_poll_delta", DEFAULT_SIGNAL_DELTA_DB as i64)
+            .clamp(MIN_NOTIFY_POLL_DELTA_DB, MAX_NOTIFY_POLL_DELTA_DB) as f64,
+    };
+
     let s = &mut cfg.schedule;
     s.enabled = values.bool("schedule_enabled", false);
     s.check_interval = values.seconds("schedule_check_interval", s.check_interval, Duration::from_secs(10));
@@ -539,5 +673,73 @@ mod tests {
     fn notify_interval_bounds_are_ordered() {
         assert!(MIN_NOTIFY_INTERVAL_SECS <= DEFAULT_NOTIFY_INTERVAL_SECS);
         assert!(DEFAULT_NOTIFY_INTERVAL_SECS <= MAX_NOTIFY_INTERVAL_SECS);
+    }
+
+    #[test]
+    fn default_config_has_auto_push_on_and_full_day_poll() {
+        let cfg = default_config();
+        // 总开关默认开启：升级后行为与旧版一致，不会静默停掉用户已有的推送
+        assert!(cfg.notification.enabled, "自动推送总开关应默认开启");
+        // 总开关关闭必须是「只停推送」，不能顺手把某类事件开关也改掉
+        assert!(cfg.notification.types.sms);
+        assert!(cfg.notification.types.call);
+
+        let p = &cfg.notification.poll;
+        assert!(p.enabled, "信号轮询默认启用，否则信号类开关在实机永远是死的");
+        assert!(!p.always, "默认仅变化时推送，避免每轮都刷一条");
+        assert_eq!(p.start, DEFAULT_NOTIFY_POLL_START);
+        assert_eq!(p.end, DEFAULT_NOTIFY_POLL_END);
+        assert_eq!(p.delta, DEFAULT_SIGNAL_DELTA_DB);
+    }
+
+    #[test]
+    fn poll_bounds_are_ordered() {
+        assert!(MIN_NOTIFY_POLL_INTERVAL_SECS <= DEFAULT_NOTIFY_POLL_INTERVAL_SECS);
+        assert!(DEFAULT_NOTIFY_POLL_INTERVAL_SECS <= MAX_NOTIFY_POLL_INTERVAL_SECS);
+        // 30 秒下限的意义：QQ 主动消息频控是单关系 20 条/分钟，
+        // 间隔比这更密就算每次都推也发不出去，只会被频控拦掉。
+        assert!(MIN_NOTIFY_POLL_INTERVAL_SECS >= 30);
+        assert!(MIN_NOTIFY_POLL_DELTA_DB <= DEFAULT_SIGNAL_DELTA_DB as i64);
+        assert!(DEFAULT_SIGNAL_DELTA_DB as i64 <= MAX_NOTIFY_POLL_DELTA_DB);
+    }
+
+    #[test]
+    fn uci_reader_parses_poll_keys() {
+        // 模拟 uci show 的结果，覆盖轮询各键的读取与夹取
+        let mut m = HashMap::new();
+        m.insert("notify_enabled".to_string(), "0".to_string());
+        m.insert("notify_poll_enabled".to_string(), "1".to_string());
+        m.insert("notify_poll_start".to_string(), "22:00".to_string());
+        m.insert("notify_poll_end".to_string(), "06:00".to_string());
+        m.insert("notify_poll_interval".to_string(), "1".to_string());   // 低于下限 30
+        m.insert("notify_poll_all".to_string(), "1".to_string());
+        m.insert("notify_poll_delta".to_string(), "99".to_string());     // 高于上限 30
+        let v = UciReader(m);
+
+        assert!(!v.bool("notify_enabled", true));
+        assert!(v.bool("notify_poll_enabled", false));
+        assert!(valid_hhmm(&v.str("notify_poll_start", DEFAULT_NOTIFY_POLL_START)));
+        assert!(valid_hhmm(&v.str("notify_poll_end", DEFAULT_NOTIFY_POLL_END)));
+        // seconds() 只夹下限，上限由 load_config 再夹一次
+        let iv = v.seconds(
+            "notify_poll_interval",
+            Duration::from_secs(DEFAULT_NOTIFY_POLL_INTERVAL_SECS),
+            Duration::from_secs(MIN_NOTIFY_POLL_INTERVAL_SECS),
+        );
+        assert_eq!(iv.as_secs(), MIN_NOTIFY_POLL_INTERVAL_SECS);
+        let delta = v
+            .int("notify_poll_delta", DEFAULT_SIGNAL_DELTA_DB as i64)
+            .clamp(MIN_NOTIFY_POLL_DELTA_DB, MAX_NOTIFY_POLL_DELTA_DB);
+        assert_eq!(delta, MAX_NOTIFY_POLL_DELTA_DB);
+    }
+
+    #[test]
+    fn poll_time_slot_survives_invalid_uci_value() {
+        // 用户手改 UCI 写错了时段，必须回落默认而不是让轮询彻底不工作
+        assert!(!valid_hhmm("8:7:60"));
+        assert!(!valid_hhmm("late"));
+        // 合法但跨零点的写法要保留
+        assert!(valid_hhmm("22:00"));
+        assert!(valid_hhmm("06:00"));
     }
 }

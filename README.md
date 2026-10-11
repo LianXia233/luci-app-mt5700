@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.15-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.14.16-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -268,15 +268,57 @@ config at-webserver 'config'
 
 ## 事件通知配置
 
-事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件，事件先经合并窗口去重汇总后发送（窗口时长可配置，默认 60 秒）：
+事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件。**短信与来电实时直发**（不等合并窗口），信号与存储满先经合并窗口去重汇总后发送（窗口时长可配置，默认 60 秒）：
 
 | 通道 | 配置项 | 说明 |
 |:--|:--|:--|
+| 总开关 | `notify_enabled` | 自动推送总开关，默认 `1`；关闭后仅写本地日志、外发全部停止 |
 | 企业微信 | `wechat_webhook` | 群机器人 WebHook 地址 |
 | QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道）/ `bind`（自动绑定） |
-| 合并窗口 | `notify_interval` | 推送频率（秒），取值区间 5~3600，默认 60；窗口内多条事件合并为一条推送 |
+| 合并窗口 | `notify_interval` | 推送频率（秒），取值区间 5~3600，默认 60；窗口内多条**信号/存储满**事件合并为一条推送 |
+| 信号巡检 | `notify_poll_enabled` / `notify_poll_start` / `notify_poll_end` / `notify_poll_interval` / `notify_poll_all` / `notify_poll_delta` | 时段内主动轮询信号（本模组不主动上报信号读数） |
 | 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀 + 五类事件文案模板，支持占位符 |
-| 日志文件 | `log_file` | 本地逐条落盘 |
+| 日志文件 | `log_file` | 本地逐条落盘（总开关关闭时仍写） |
+
+### 事件类型与推送路径
+
+| 事件 | 来源 | 推送路径 |
+|:--|:--|:--|
+| 新短信 | 模组主动上报 `+CMTI:` | **实时直发** |
+| 来电 | 模组主动上报 `RING` | **实时直发** |
+| 存储满 | 模组主动上报 `^SMMEMFULL` | 合并窗口 |
+| 信号 | 后端定时巡检（`notify_poll_*`） | 合并窗口 |
+
+### 自动推送总开关
+
+`notify_enabled` 是全部推送的**总闸门**，默认开启。关闭后：
+
+- 不再外发任何消息（企业微信 / QQ 均静默）；
+- **仍然写本地通知日志** —— 关的是「推送」而不是「记录」，留着事后追溯；
+- **停止信号定时巡检** —— 否则关了开关后台仍在周期性占用串口，看起来像开关无效。
+
+LuCI 页面在关闭时会联动置灰四个事件类型开关与整块巡检子区块。
+
+### 信号定时巡检
+
+**为什么需要它**：本模组（TDTECH / Fibocom 系）**不会主动上报** `^HCSQ` / `^CERSSI` —— 实机 1200 条 AT 记录里自发信号上报为 **0 条**，因此「信号变化通知」若没有后端主动查询就永远是死的。开启巡检后，后端在指定时段内按间隔查询信号；**时段外一条 AT 都不发**。
+
+```uci
+option notify_poll_enabled '1'        # 是否启用信号定时巡检
+option notify_poll_start '00:00'      # 时段起点 HH:MM（含，默认全天）
+option notify_poll_end '23:59'        # 时段终点 HH:MM（含）
+option notify_poll_interval '300'     # 巡检间隔（秒），范围 30-3600
+option notify_poll_all '0'            # 0=仅信号变化时推送 / 1=每次巡检都推送当前状态
+option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅 notify_poll_all=0 时生效
+```
+
+时段写法：起点晚于终点表示**跨零点**（如 `22:00` 至 `06:00`）；起止相同视为**全天**；格式非法时回落全天并记一条告警。区间为闭区间（两端都算在时段内）。
+
+「仅信号变化时推送」策略的细节：
+
+- **首次读数恒定推送一次**，让用户立刻确认功能在工作；
+- **制式切换（LTE ↔ NR）必定推送**，即便 RSRP 数值没变；
+- **基线只在推送时刷新** —— 否则信号从 -80 缓慢漂移到 -95（每次仅差 2 dB）将永远越不过阈值，用户反而收不到「信号持续变差」这个最该知道的通知。
 
 ### 推送频率与自定义文案
 

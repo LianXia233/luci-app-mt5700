@@ -321,42 +321,11 @@ impl Dispatcher {
 
     async fn handle_signal(&mut self, line: &str) {
         let line = line.split('\n').next().unwrap_or(line);
-
-        let mut rsrp: f64 = 0.0;
-        let mut sys_mode = String::new();
-        let mut ok = false;
-
-        if line.contains("^CERSSI:") {
-            let parts = split_fields(line, "^CERSSI:");
-            // 第 19/20/21 个字段是 RSRP/RSRQ/SINR
-            if parts.len() >= 20 {
-                if let Ok(v) = parts[18].parse::<f64>() {
-                    rsrp = v;
-                    sys_mode = "4G/5G".into();
-                    ok = true;
-                }
-            }
-        } else if line.contains("^HCSQ:") {
-            let parts = split_fields(line, "^HCSQ:");
-            // 手册 13.5 字段表：LTE 为 <rssi>,<rsrp>,<sinr>,<rsrq>；NR 为 <rsrp>,<sinr>,<rsrq>。
-            // LTE 前面多一个 RSSI，RSRP 在下标 2；其余制式（NR 等）RSRP 在下标 1。
-            // 255 表示"未知或不可测"，不参与换算。
-            let mode = parts[0].trim_matches('"').to_string();
-            let rsrp_idx = if mode.eq_ignore_ascii_case("LTE") { 2 } else { 1 };
-            if let Some(field) = parts.get(rsrp_idx) {
-                if let Ok(raw) = field.parse::<f64>() {
-                    if raw != 255.0 {
-                        rsrp = -140.0 + raw;
-                        sys_mode = mode;
-                        ok = true;
-                    }
-                }
-            }
-        }
-
-        if !ok {
+        // 解析逻辑抽成纯函数，供「定时轮询推送」复用同一套换算规则
+        // （见 crate::signalwatch），避免两条路径各写一份导致读数口径不一致。
+        let Some((rsrp, sys_mode)) = parse_signal_reading(line) else {
             return;
-        }
+        };
 
         let changed = !self.have_rsrp
             || (rsrp - self.last_rsrp).abs() >= SIGNAL_CHANGE_THRESHOLD
@@ -614,7 +583,43 @@ pub fn split_fields(line: &str, prefix: &str) -> Vec<String> {
         .collect()
 }
 
-fn signal_level(rsrp: f64) -> &'static str {
+/// 从一行上报文本里解析信号读数 → `(RSRP dBm, 制式)`。
+///
+/// 同时支持两条模组上报：
+/// - `^HCSQ:` —— 手册 13.5 字段表：LTE 为 `<rssi>,<rsrp>,<sinr>,<rsrq>`，
+///   NR 等制式为 `<rsrp>,<sinr>,<rsrq>`。故 LTE 的 RSRP 下标为 2、其余为 1；
+///   255 表示「未知或不可测」，此时视为无有效读数。换算：`RSRP = raw - 140`。
+/// - `^CERSSI:` —— 第 19 个字段（下标 18）为 RSRP，单位已是 dBm，制式未知记为 `4G/5G`。
+///
+/// 返回 `None` 表示这一行不含可用读数（字段缺失 / 非数字 / 不可测）。
+///
+/// 抽成纯函数的原因：URC 分发（本模块）与「定时轮询推送」（signalwatch）
+/// 必须用**同一套**换算规则，否则同一信号会出现两个不同的 dBm 值。
+pub fn parse_signal_reading(line: &str) -> Option<(f64, String)> {
+    if line.contains("^CERSSI:") {
+        let parts = split_fields(line, "^CERSSI:");
+        // 第 19/20/21 个字段是 RSRP/RSRQ/SINR
+        if parts.len() >= 20 {
+            if let Ok(v) = parts[18].parse::<f64>() {
+                return Some((v, "4G/5G".into()));
+            }
+        }
+        return None;
+    }
+    if line.contains("^HCSQ:") {
+        let parts = split_fields(line, "^HCSQ:");
+        let mode = parts.first()?.trim_matches('"').to_string();
+        let rsrp_idx = if mode.eq_ignore_ascii_case("LTE") { 2 } else { 1 };
+        let raw = parts.get(rsrp_idx)?.parse::<f64>().ok()?;
+        if raw != 255.0 {
+            return Some((-140.0 + raw, mode));
+        }
+    }
+    None
+}
+
+/// RSRP → 中文信号等级。轮询推送与 URC 通知共用，保证文案口径一致。
+pub(crate) fn signal_level(rsrp: f64) -> &'static str {
     match rsrp {
         _ if rsrp >= -85.0 => "优秀",
         _ if rsrp >= -95.0 => "良好",
@@ -636,5 +641,68 @@ fn or_unknown(s: &str) -> &str {
         "未知"
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hcsq_lte_reads_rsrp_from_third_field() {
+        // LTE 字段序为 <rssi>,<rsrp>,<sinr>,<rsrq> → RSRP 下标 2，换算 raw - 140
+        let (rsrp, mode) = parse_signal_reading("^HCSQ: \"LTE\",60,44,53,15").expect("应解析成功");
+        assert_eq!(rsrp, -96.0);
+        assert_eq!(mode, "LTE");
+    }
+
+    #[test]
+    fn hcsq_nr_reads_rsrp_from_second_field() {
+        // NR 等制式为 <rsrp>,<sinr>,<rsrq> → RSRP 下标 1
+        let (rsrp, mode) = parse_signal_reading("^HCSQ: \"NR\",60,44,53").expect("应解析成功");
+        assert_eq!(rsrp, -80.0);
+        assert_eq!(mode, "NR");
+    }
+
+    #[test]
+    fn hcsq_255_means_unmeasurable() {
+        // 255 是手册定义的「未知或不可测」，不能当成一个有效读数算成 -115 dBm
+        assert!(parse_signal_reading("^HCSQ: \"LTE\",60,255,53,15").is_none());
+    }
+
+    #[test]
+    fn hcsq_tolerates_line_prefix_and_trailing_cr() {
+        // 实机上报行常带行首 \r\n 与行尾 \r，不能要求整行以 ^HCSQ 开头
+        assert!(parse_signal_reading("\r\n^HCSQ: \"LTE\",60,50,53,15\r").is_some());
+    }
+
+    #[test]
+    fn cerssi_reads_field_19_as_dbm() {
+        let line = "^CERSSI: \"LTE\",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,-95,19,20";
+        let (rsrp, mode) = parse_signal_reading(line).expect("应解析成功");
+        assert_eq!(rsrp, -95.0, "CERSSI 的下标 18 已是 dBm，不应再减 140");
+        assert_eq!(mode, "4G/5G");
+    }
+
+    #[test]
+    fn cerssi_too_few_fields_is_ignored() {
+        // 字段不足时若不去校验长度，会拿到错位的值冒充 RSRP
+        assert!(parse_signal_reading("^CERSSI: \"LTE\",1,2,3").is_none());
+    }
+
+    #[test]
+    fn unrelated_lines_yield_nothing() {
+        assert!(parse_signal_reading("OK").is_none());
+        assert!(parse_signal_reading("+CMTI: \"SM\",3").is_none());
+        assert!(parse_signal_reading("").is_none());
+    }
+
+    #[test]
+    fn signal_level_thresholds_are_monotonic() {
+        assert_eq!(signal_level(-70.0), "优秀");
+        assert_eq!(signal_level(-85.0), "优秀", "边界值应归入更高一档");
+        assert_eq!(signal_level(-90.0), "良好");
+        assert_eq!(signal_level(-100.0), "一般");
+        assert_eq!(signal_level(-110.0), "较差");
     }
 }
