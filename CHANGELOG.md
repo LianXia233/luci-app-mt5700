@@ -33,7 +33,7 @@
 
 ### 验证与影响面
 
-- **verify**: `cargo test` **55 passed / 0 failed / 2 ignored**（新增 `unescape_template` 三例、默认模板占位符、间隔上下界、模板渲染占位符替换、未知占位符保留、存储满正文回落、批量标题拼装、空前缀输出等用例）；`node --check service.js` 通过；`cargo zigbuild --release --target aarch64-unknown-linux-musl` 交叉编译通过，实机（ImmortalWrt SNAPSHOT / mediatek filologic / aarch64_cortex-a53）部署后 md5 一致、服务正常重启。
+- **verify**: `cargo test` **56 passed / 0 failed / 2 ignored**（新增 `unescape_template` 三例、默认模板占位符、间隔上下界、模板渲染占位符替换、未知占位符保留、存储满正文回落、批量标题拼装、空前缀输出，以及 `merged_push_renders_template_and_posts_to_webhook` —— 本地 TCP 监听模拟 WebHook 接收端，断言「事件 → 入队 → 合并窗口 → 模板渲染 → HTTP 投递」整条链路**真正发出的报文内容**，是该缺陷的直接回归保护）；`node --check service.js` 通过；`cargo zigbuild --release --target aarch64-unknown-linux-musl` 交叉编译通过，实机（ImmortalWrt SNAPSHOT / mediatek filogic / aarch64_cortex-a53）部署后 md5 一致、服务正常重启。
 - **未触碰**：IMEI 相关代码与数据流、`AT+EGMR` 等身份类指令，全部保持原样。
 
 ## v1.14.14 (2026-10-10)
