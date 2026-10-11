@@ -1,13 +1,23 @@
 //! 通知：短信/来电/信号/内存满四类事件，经企业微信 webhook、QQ 机器人（官方 API v2）
-//! 与本地日志文件输出（60 秒合并、重试 3 次）。
+//! 与本地日志文件输出（可配置合并窗口、重试 3 次）。
+//!
+//! 数据流（本模块是推送链路的中枢）：
+//!   urc.rs / schedule.rs 产生事件
+//!     → `Notifier::notify()`    过滤事件类型 → 立即写本地日志文件 → 入合并队列
+//!     → `Notifier::run()`       常驻任务，按合并窗口（UCI `notify_interval`）批量出队
+//!     → `Notifier::flush_all()` 按自定义文案模板渲染，广播到所有已启用通道
+//!     → 企业微信 webhook / QQ 机器人（`QqSender`）
+//!
+//! 关于「QQ 绑定模式」：绑定前 QQ 通道为空（`QqSender::from_config` 返回 None），
+//! 但事件**必须照常入队并保留**，否则用户按推荐流程绑定成功后拿不到任何数据。
+//! 因此本模块的队列恒定运行，通道状态只在发送那一刻判定（见 `flush_all`）。
 
-use crate::{log_error, log_info, log_warn};
-use crate::config::NotificationConfig;
+use crate::{log_debug, log_error, log_info, log_warn};
+use crate::config::{NotificationConfig, NotifyTemplates};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-const NOTIFY_INTERVAL: Duration = Duration::from_secs(60);
 const NOTIFY_QUEUE_SIZE: usize = 256;
 const NOTIFY_MAX_PENDING: usize = 1000;
 const NOTIFY_MAX_RETRIES: u32 = 3;
@@ -27,7 +37,7 @@ pub enum NotifyKind {
     Signal,
 }
 
-/// 两个特殊发送方名字，决定消息的排版样式。
+/// 两个特殊发送方名字，用于区分事件来源。
 pub const SENDER_CALL: &str = "来电提醒";
 pub const SENDER_SIGNAL: &str = "信号监控";
 
@@ -37,6 +47,19 @@ pub struct Notification {
     pub content: String,
     pub kind: NotifyKind,
     pub memory_full: bool,
+    /// 事件发生时刻（本地时间 `%Y-%m-%d %H:%M:%S`），供文案模板的 `{time}` 占位符使用。
+    /// 空串时渲染阶段回落到推送时刻。
+    pub time: String,
+}
+
+/// 事件类型的中文标签，供文案模板的 `{kind}` 占位符使用。
+pub fn kind_label(kind: NotifyKind) -> &'static str {
+    match kind {
+        NotifyKind::Sms => "新短信",
+        NotifyKind::Call => "来电",
+        NotifyKind::MemoryFull => "存储空间已满",
+        NotifyKind::Signal => "信号变化",
+    }
 }
 
 pub struct Notifier {
@@ -46,6 +69,9 @@ pub struct Notifier {
     qq: std::sync::RwLock<Option<std::sync::Arc<QqSender>>>,
     tx: mpsc::Sender<Notification>,
     log_file: Option<String>,
+    /// 本进程启动时处于 QQ「绑定模式」：绑定完成前通道为空，但事件必须照常入队，
+    /// 否则绑定成功后拿不到任何后续推送（通道变了，队列入口却已关闭）。
+    qq_bind_pending: bool,
 }
 
 #[allow(dead_code)] // 通知事件类型与来源标识
@@ -77,12 +103,19 @@ impl Notifier {
         }
         let qq = qq.map(std::sync::Arc::new);
 
+        let qq_bind_pending = cfg.qq.target_type == "bind";
+        log_info!(
+            "通知合并窗口: {} 秒（事件在该窗口内合并为一条推送）",
+            cfg.interval.as_secs()
+        );
+
         (
             Notifier {
                 cfg,
                 qq: std::sync::RwLock::new(qq),
                 tx,
                 log_file,
+                qq_bind_pending,
             },
             rx,
         )
@@ -101,7 +134,30 @@ impl Notifier {
         }
     }
 
-    /// 记录一条事件。日志立即落盘，企业微信进入合并队列。
+    /// 合并窗口：下限防忙循环与频控，上限 1 小时保时效。
+    fn interval(&self) -> Duration {
+        let min = Duration::from_secs(crate::config::MIN_NOTIFY_INTERVAL_SECS);
+        let max = Duration::from_secs(crate::config::MAX_NOTIFY_INTERVAL_SECS);
+        let d = self.cfg.interval;
+        if d < min {
+            min
+        } else if d > max {
+            max
+        } else {
+            d
+        }
+    }
+
+    /// 是否存在「可能送达」的推送通道。
+    ///
+    /// 注意这里把「绑定模式待绑定」也算作可用：此时通道虽然为空，
+    /// 但事件必须继续入队（绑定成功后由 `flush_all` 补发），
+    /// 否则就是「机器人推送未接入任何推送数据」那个缺陷。
+    fn dispatch_enabled(&self) -> bool {
+        self.wechat_enabled() || self.qq_enabled() || self.qq_bind_pending
+    }
+
+    /// 记录一条事件。日志立即落盘，推送进入合并队列。
     pub async fn notify(&self, msg: Notification) {
         if !self.enabled(msg.kind) {
             return;
@@ -113,28 +169,40 @@ impl Notifier {
             }
         }
 
-        if !self.wechat_enabled() && !self.qq_enabled() {
+        if !self.dispatch_enabled() {
             return;
         }
         let sender = msg.sender.clone();
-        if self.tx.try_send(msg).is_err() {
-            log_warn!("通知队列已满，丢弃一条: {}", sender);
+        let kind = msg.kind;
+        if let Err(e) = self.tx.try_send(msg) {
+            // 区分「队列满」与「接收端已退出」：后者的原文案会严重误导排障方向。
+            match e {
+                mpsc::error::TrySendError::Full(_) => {
+                    log_warn!("通知队列已满，丢弃一条: {}（{:?}）", sender, kind)
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    log_error!("通知合并任务未在运行，事件已丢弃: {}（{:?}）", sender, kind)
+                }
+            }
         }
     }
 
     /// 驱动推送通道（企业微信 + QQ 机器人）的合并发送，直到 ctx 结束。
-    /// 合并窗口 60 秒：窗口内到达的事件合并成一条发送；空队列不触发发送。
+    ///
+    /// 合并窗口由 UCI `notify_interval` 决定：窗口内到达的事件合并成一条发送；
+    /// 空队列不触发发送。
+    ///
+    /// 本任务**恒定运行**，不因「启动时还没有可用通道」而退出：QQ 绑定模式下
+    /// 通道要等用户给机器人发消息后才热替换进来，若这里提前 return，`rx` 会随
+    /// 任务结束被丢弃，此后 `notify()` 的 `try_send` 全部失败——表现为
+    /// 「绑定成功却收不到任何推送数据」。通道状态交给 `flush_all` 在发送时判定。
     pub async fn run(&self, mut rx: mpsc::Receiver<Notification>, mut ctx: tokio::sync::watch::Receiver<bool>) {
-        if !self.wechat_enabled() && !self.qq_enabled() {
-            while ctx.changed().await.is_ok() {}
-            return;
-        }
-
+        let interval = self.interval();
         let mut pending: Vec<Notification> = Vec::new();
-        let mut last_send = Instant::now() - NOTIFY_INTERVAL;
+        let mut last_send = Instant::now() - interval;
 
         loop {
-            let wait = NOTIFY_INTERVAL.saturating_sub(last_send.elapsed());
+            let wait = interval.saturating_sub(last_send.elapsed());
             tokio::select! {
                 _ = ctx.changed() => {
                     self.flush_all(&mut pending);
@@ -164,38 +232,63 @@ impl Notifier {
     }
 
     /// 把合并窗口内积累的事件广播到所有已启用的推送通道。
+    ///
+    /// 一个通道都没有时**保留队列**而不是清空：QQ 绑定模式下绑定完成前没有通道，
+    /// 保留下来才能在绑定成功的那一刻把窗口内的积压事件发出去，做到不丢事件。
     fn flush_all(&self, pending: &mut Vec<Notification>) {
         if pending.is_empty() {
             return;
         }
-        let body = combine_messages(pending);
-        pending.clear();
+        let wechat = self.wechat_enabled();
+        let qq = self.current_qq();
+        if !wechat && qq.is_none() {
+            log_debug!("通知通道尚未就绪（QQ 绑定模式等待绑定），保留 {} 条待发事件", pending.len());
+            return;
+        }
 
-        if self.wechat_enabled() {
+        let count = pending.len();
+        let body = combine_messages(pending, &self.cfg.templates);
+        pending.clear();
+        // 记录实际推送文本：这是「文案模板到底渲染成了什么」的唯一权威观测点，
+        // 排障时不至于只能看「发送成功」却不知道发了什么。
+        log_debug!("推送内容（合并 {} 条）: {}", count, body);
+
+        if wechat {
             let hook = self.cfg.wechat_webhook.clone();
             let body = body.clone();
             tokio::spawn(async move { let _ = send_webhook(&hook, &body).await; });
         }
-        if let Some(qq) = self.current_qq() {
+        if let Some(qq) = qq {
             tokio::spawn(async move { let _ = qq.send(&body).await; });
         }
     }
 
-    /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过 60 秒合并窗口直接发送。
+    /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过合并窗口直接发送。
+    /// 测试消息不携带任何插件名字样，同样套用全局前缀，便于一次性验证前缀配置是否生效。
     pub async fn notify_test(&self, channel: &str) -> Result<(), String> {
-        let content = "[luci-app-mt5700] 测试通知：推送通道链路正常";
+        let base = "测试通知：推送通道链路正常";
+        let now = now_string();
+        let prefix = render_prefix(&self.cfg.templates.prefix, 1, &now);
+        let content = if prefix.trim().is_empty() {
+            base.to_string()
+        } else {
+            format!("{prefix}\n{base}")
+        };
+        // 与合并推送一致地记录「实际发出的文本」：测试通道是排障入口，
+        // 只有看到真实出站内容才能判断前缀/文案是否按预期生效。
+        log_debug!("推送内容（测试通道 {}）: {}", channel, content);
         match channel {
             "qq" => {
                 let qq = self
                     .current_qq()
                     .ok_or_else(|| "QQ 通道未启用（检查 AppID/AppSecret/目标 ID；绑定模式需先完成绑定）".to_string())?;
-                qq.send(content).await
+                qq.send(&content).await
             }
             "wechat" => {
                 if self.cfg.wechat_webhook.is_empty() {
                     return Err("企业微信 WebHook 未配置".into());
                 }
-                send_webhook(&self.cfg.wechat_webhook.clone(), content).await
+                send_webhook(&self.cfg.wechat_webhook.clone(), &content).await
             }
             other => Err(format!("未知通道: {other}")),
         }
@@ -242,7 +335,7 @@ fn prepare_log_file(path: &str) -> Result<String, String> {
 }
 
 fn append_log(path: &str, msg: &Notification) -> std::io::Result<()> {
-    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let ts = if msg.time.is_empty() { now_string() } else { msg.time.clone() };
     let mut b = String::new();
     if msg.memory_full {
         b.push_str(&format!("[{ts}] 存储空间已满警告\n"));
@@ -310,35 +403,82 @@ fn post_webhook(hook: &str, body: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 单条与多条消息走不同排版格式。
-pub fn combine_messages(msgs: &[Notification]) -> String {
+/// 本机当前时刻字符串（`%Y-%m-%d %H:%M:%S`）。事件产生侧用它填充
+/// [`Notification::time`]，保证推送文案里的 `{time}` 是事件时刻而非推送时刻。
+pub fn now_string() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// 按事件类型选出对应的文案模板。
+pub fn template_for<'a>(tpl: &'a NotifyTemplates, kind: NotifyKind) -> &'a str {
+    match kind {
+        NotifyKind::Sms => &tpl.sms,
+        NotifyKind::Call => &tpl.call,
+        NotifyKind::MemoryFull => &tpl.memory_full,
+        NotifyKind::Signal => &tpl.signal,
+    }
+}
+
+/// 渲染单条事件的文案模板。
+///
+/// 占位符：`{sender}` `{content}` `{time}` `{kind}` `{count}`；
+/// 未识别的占位符原样保留（不清空，避免用户写错的变量把整段文案吃掉）。
+pub fn render_template(tpl: &str, msg: &Notification, count: usize, fallback_now: &str) -> String {
+    // 存储满事件的 content 天生为空，这里补一个可读的默认正文，
+    // 使用户在模板里写 {content} 时不会得到一段空白。
+    let content = if msg.content.is_empty() && msg.kind == NotifyKind::MemoryFull {
+        "短信存储空间已满"
+    } else {
+        msg.content.as_str()
+    };
+    let time = if msg.time.is_empty() { fallback_now } else { msg.time.as_str() };
+    tpl.replace("{sender}", &msg.sender)
+        .replace("{content}", content)
+        .replace("{time}", time)
+        .replace("{kind}", kind_label(msg.kind))
+        .replace("{count}", &count.to_string())
+}
+
+/// 渲染全局前缀（仅支持 `{count}` 与 `{time}`：前缀不属于某一条事件，
+/// `{sender}` / `{content}` 在这里没有明确取值，保持原样由用户自行判断）。
+pub fn render_prefix(prefix: &str, count: usize, now: &str) -> String {
+    prefix.replace("{count}", &count.to_string()).replace("{time}", now)
+}
+
+/// 合并窗口内的事件渲染为最终推送文本。
+///
+/// 单条：直接套用该事件类型的模板。
+/// 多条：`{batch}` 标题 + 分隔线 + 逐条「序号 + 该事件类型的模板渲染结果」。
+/// 两种形态都会在最前面加全局前缀（若配置了）。
+pub fn combine_messages(msgs: &[Notification], tpl: &NotifyTemplates) -> String {
     if msgs.is_empty() {
         return String::new();
     }
-    if msgs.len() == 1 {
-        let m = &msgs[0];
-        return match (m.memory_full, m.sender.as_str(), m.kind) {
-            (true, _, _) => "⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信".into(),
-            (_, SENDER_CALL, _) => format!("📞 来电提醒\n{}", m.content),
-            (_, SENDER_SIGNAL, _) => m.content.clone(),
-            _ => format!("📱 新短信通知\n发送者: {}\n内容: {}", m.sender, m.content),
-        };
-    }
+    let now = now_string();
 
-    let mut b = String::from("📑 批量通知汇总\n");
-    b.push_str(&"=".repeat(20));
-    b.push('\n');
-    for (i, m) in msgs.iter().enumerate() {
-        match (m.memory_full, m.sender.as_str()) {
-            (true, _) => b.push_str(&format!("\n{}. ⚠️ 存储空间已满警告", i + 1)),
-            (_, SENDER_CALL) => b.push_str(&format!("\n{}. 📞 {}", i + 1, m.content)),
-            (_, SENDER_SIGNAL) => b.push_str(&format!("\n{}. 📶 {}", i + 1, m.content)),
-            _ => b.push_str(&format!("\n{}. 📱 来自 {} 的短信:\n{}", i + 1, m.sender, m.content)),
-        }
+    let mut body = if msgs.len() == 1 {
+        let m = &msgs[0];
+        render_template(template_for(tpl, m.kind), m, 1, &now)
+    } else {
+        let mut b = String::new();
+        b.push_str(&tpl.batch);
         b.push('\n');
-        b.push_str(&"-".repeat(20));
+        b.push_str(&"=".repeat(20));
+        b.push('\n');
+        for (i, m) in msgs.iter().enumerate() {
+            b.push('\n');
+            b.push_str(&format!("{}. ", i + 1));
+            b.push_str(&render_template(template_for(tpl, m.kind), m, msgs.len(), &now));
+            b.push('\n');
+            b.push_str(&"-".repeat(20));
+        }
+        b
+    };
+
+    if !tpl.prefix.trim().is_empty() {
+        body = format!("{}\n{}", render_prefix(&tpl.prefix, msgs.len(), &now), body);
     }
-    b
+    body
 }
 
 // ==================== QQ 机器人通道（官方 API v2） ====================
@@ -551,6 +691,16 @@ mod tests {
         }
     }
 
+    fn sms(sender: &str, content: &str) -> Notification {
+        Notification {
+            sender: sender.into(),
+            content: content.into(),
+            kind: NotifyKind::Sms,
+            memory_full: false,
+            time: "2026-10-11 12:00:00".into(),
+        }
+    }
+
     #[test]
     fn qq_message_url_routes_by_target_type() {
         let base = "https://api.bot.qq.com";
@@ -611,6 +761,70 @@ mod tests {
         assert!(err.contains("invalid appid or secret"), "错误信息应包含 message: {err}");
     }
 
+    // ---------- 文案模板渲染 ----------
+
+    #[test]
+    fn default_single_sms_keeps_legacy_layout() {
+        let tpl = NotifyTemplates::default();
+        let out = combine_messages(&[sms("10086", "验证码 1234")], &tpl);
+        assert_eq!(out, "📱 新短信通知\n发送者: 10086\n内容: 验证码 1234");
+    }
+
+    #[test]
+    fn custom_template_renders_all_placeholders() {
+        let mut tpl = NotifyTemplates::default();
+        tpl.prefix = "[监控]".into();
+        tpl.sms = "来自 {sender} 的{kind}（{time}）：{content}".into();
+        let out = combine_messages(&[sms("10086", "hi")], &tpl);
+        assert_eq!(out, "[监控]\n来自 10086 的新短信（2026-10-11 12:00:00）：hi");
+    }
+
+    #[test]
+    fn unknown_placeholder_is_preserved() {
+        let mut tpl = NotifyTemplates::default();
+        tpl.sms = "{sender}/{unknown}".into();
+        assert_eq!(combine_messages(&[sms("A", "B")], &tpl), "A/{unknown}");
+    }
+
+    #[test]
+    fn memory_full_content_falls_back_to_readable_text() {
+        let mut tpl = NotifyTemplates::default();
+        tpl.memory_full = "{content}".into();
+        let m = Notification {
+            sender: String::new(),
+            content: String::new(),
+            kind: NotifyKind::MemoryFull,
+            memory_full: true,
+            time: String::new(),
+        };
+        assert_eq!(combine_messages(&[m], &tpl), "短信存储空间已满");
+    }
+
+    #[test]
+    fn batch_uses_header_index_and_template() {
+        let mut tpl = NotifyTemplates::default();
+        tpl.batch = "汇总".into();
+        tpl.sms = "S:{content}".into();
+        let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
+        assert!(out.starts_with("汇总\n====================\n"));
+        assert!(out.contains("1. S:1"));
+        assert!(out.contains("2. S:2"));
+    }
+
+    #[test]
+    fn prefix_supports_count_and_time() {
+        let mut tpl = NotifyTemplates::default();
+        tpl.prefix = "共 {count} 条".into();
+        let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
+        assert!(out.starts_with("共 2 条\n"), "实际: {out}");
+    }
+
+    #[test]
+    fn empty_input_yields_empty_output() {
+        let tpl = NotifyTemplates::default();
+        assert_eq!(combine_messages(&[], &tpl), "");
+    }
+
     /// 真实接口冒烟测试（默认跳过）：
     ///   QQ_BOT_APP_ID=xxx QQ_BOT_APP_SECRET=xxx cargo test -- --ignored qq_real_api
     /// 凭据只经环境变量传入，严禁写死在代码里。
@@ -650,7 +864,7 @@ mod tests {
         .expect("配置应完整");
         tokio::runtime::Runtime::new()
             .expect("runtime")
-            .block_on(sender.send("[luci-app-mt5700] QQ 机器人通知通道冒烟测试（QqSender 生产链路）"));
+            .block_on(sender.send("QQ 机器人通知通道冒烟测试（QqSender 生产链路）"));
     }
 
     #[test]
