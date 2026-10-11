@@ -492,7 +492,9 @@ async function main() {
 		smsElapsed + ' ms < ' + MERGE_WINDOW_MS + ' ms');
 	check('推送号码正确', smsRec.content.indexOf(FIRST_RECV.number) >= 0, FIRST_RECV.number);
 	check('推送正文正确', smsRec.content.indexOf(FIRST_RECV.content) >= 0);
-	check('未走批量汇总形态', smsRec.content.indexOf('批量通知汇总') < 0);
+	/* 判据必须跟着文案走：拿旧标题原文当判据的话，改一次文案这条断言就永久通过，
+	 * 无论是否真的走了汇总形态都显示绿色。 */
+	check('未走批量汇总形态', smsRec.content.indexOf('有一批新通知') < 0);
 	check('推送文案不含插件名', smsRec.content.indexOf('luci-app-mt5700') < 0 && smsRec.content.indexOf('mt5700') < 0);
 	check('内容字段是字符串（企业微信文本格式）', typeof smsRec.content === 'string');
 

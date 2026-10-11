@@ -76,8 +76,8 @@ config at-webserver 'config'
 	option notify_tpl_sms ''                # 例：'喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n{sender}\n{content}\n({time})'
 	option notify_tpl_call ''               # 例：'喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}'
 	option notify_tpl_signal ''             # 例：'{content}'
-	option notify_tpl_memory ''             # 例：'短信存储已满，请及时清理'
-	option notify_tpl_batch ''              # 批量汇总时的首行标题
+	option notify_tpl_memory ''             # 例：'喵呜～短信存储空间已经满啦，请尽快清理一下喵，不然可能收不到新的短信了哦！'
+	option notify_tpl_batch ''              # 批量汇总时的首行标题（例：'喵～有一批新通知需要查看哦，快来看看都有哪些消息吧！'）
 
 	# 定时锁频配置
 	option schedule_enabled '0'              # 启用定时锁频
