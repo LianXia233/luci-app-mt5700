@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.20-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.14.21-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -159,11 +159,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.14.20-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.14.21-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.14.20_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.14.21_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -275,7 +275,7 @@ config at-webserver 'config'
 | 总开关 | `notify_enabled` | 自动推送总开关，默认 `1`；关闭后仅写本地日志、外发全部停止 |
 | 企业微信 | `wechat_webhook` | 群机器人 WebHook 地址 |
 | QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道）/ `bind`（自动绑定） |
-| 定时推送间隔 | `notify_timer_interval` | 定时推送周期（**分钟**），取值 1~1440（1 分钟 ~ 24 小时），默认 10；每到一个间隔推送一次**当前实际情况**。旧键 `notify_interval`（秒，5~3600）由后端向上取整换算成分钟后自动迁移 |
+| 定时推送间隔 | `notify_timer_interval` | 定时推送周期（**分钟**），取值 1~1440（1 分钟 ~ 24 小时），默认 10；每到一个间隔推送一次**当前实际情况**。旧键 `notify_interval`（秒，5~3600）自动迁移：**出厂默认值 60 秒落到新默认值 10 分钟**，被改过的值才按「向上取整到分钟」换算 |
 | 信号巡检 | `notify_poll_enabled` / `notify_poll_start` / `notify_poll_end` / `notify_poll_interval` / `notify_poll_all` / `notify_poll_delta` | 时段内主动轮询信号（本模组不主动上报信号读数） |
 | 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀 + 五类事件文案模板，支持占位符 |
 | 日志文件 | `log_file` | 本地逐条落盘（总开关关闭时仍写） |
@@ -329,6 +329,7 @@ option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅
 - **为什么默认从 60 秒改成 10 分钟**：原「合并窗口」语义下 60 秒只决定「攒多久发一次」，窗口内没事件就一条都不发；改成定时推送后**每一轮必定发一条**，仍按 60 秒就是每天 1440 条，远超 QQ 频控（单关系 20 条/分钟、群 30~60 条/分钟、1000 条/群/天）。默认上调到 10 分钟（每天 144 条）是在「状态新鲜」与「不刷屏」之间取的平衡点；想要更实时，把间隔调小即可（最小 1 分钟）。
 - **与信号巡检的关系**：两者**并存互不影响**。信号巡检（`notify_poll_*`）只在设定时段内跑，负责抓**突变**；定时推送负责**保底**，到点就报一次当前状态，让你确认链路还在。只想保留突变通知的话，把间隔拉到最大（1440 分钟 = 24 小时）即可近似关闭。
 - **不受此配置影响**：短信与来电始终实时直发，与定时推送间隔无关。
+- **老设备升级怎么迁移**：旧键 `notify_interval` 无需手工改，但** 60 秒是出厂默认值而不是你的选择** —— 包内配置原本就写死 60，若一律换算成 1 分钟，升级后每台设备都会每分钟推一条（每天 1440 条，远超 QQ 频控）。因此 60 秒落到新的默认值 10 分钟；**被你改过的值**（如 300 秒）才按「向上取整到分钟」换算成 5 分钟。
 - **文案模板**：留空表示使用内置默认文案。可用占位符：
 
 | 占位符 | 含义 |
@@ -399,7 +400,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.20)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.21)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / ui.js / at.css)

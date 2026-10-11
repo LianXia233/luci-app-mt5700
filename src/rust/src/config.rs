@@ -72,11 +72,20 @@ pub const DEFAULT_NOTIFY_TIMER_INTERVAL_MIN: u64 = 10;
 pub const MIN_NOTIFY_TIMER_INTERVAL_MIN: u64 = 1;
 /// 定时推送间隔上限（1440 分钟 = 24 小时）。
 pub const MAX_NOTIFY_TIMER_INTERVAL_MIN: u64 = 1440;
+/// 旧键 `notify_interval` 的**出厂默认值**（秒）。
+///
+/// 迁移时要单独认它：包内 `root/etc/config` 原本就写死 60，所以实机上看到
+/// `notify_interval='60'` 绝大多数是「用户从没改过」，而不是「用户刻意选了
+/// 60 秒」。若一律按公式换算成 1 分钟，升级后每台设备都会每分钟推一条
+/// （每天 1440 条）—— 远超 QQ 主动消息频控，等于把语义升级变成推送轰炸。
+pub const LEGACY_DEFAULT_NOTIFY_INTERVAL_SECS: u64 = 60;
 
 /// 旧键 `notify_interval`（合并窗口秒数）迁移：秒 → 分钟，向上取整。
 ///
 /// 单独成函数是为了让「60 秒 → 1 分钟」「1 秒 → 1 分钟」「超大值 → 24 小时封顶」
 /// 这些边界在单测里能被直接钉住，而不是散落在读取逻辑里靠人脑推演。
+///
+/// 注意：这个函数只在「旧值不是出厂默认值」时才被调用（见 `timer_interval_from`）。
 pub fn secs_to_timer_minutes(secs: u64) -> u64 {
     let m = (secs + 59) / 60;
     m.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN)
@@ -509,9 +518,19 @@ fn timer_interval_from(values: &UciReader) -> Duration {
     let minutes = if raw.is_empty() {
         let legacy = values.int("notify_interval", 0);
         if legacy > 0 {
-            let migrated = secs_to_timer_minutes(legacy as u64);
-            log_info!("旧配置 notify_interval={legacy}s 已迁移为 notify_timer_interval={migrated} 分钟");
-            migrated
+            if legacy as u64 == LEGACY_DEFAULT_NOTIFY_INTERVAL_SECS {
+                // 出厂默认值：不是用户的选择，迁移到新的默认值而不是换算后的 1 分钟，
+                // 否则每台升级的设备都会变成每分钟推一条。
+                log_info!(
+                    "旧配置 notify_interval={legacy}s 是出厂默认值，已迁移为 notify_timer_interval={} 分钟",
+                    DEFAULT_NOTIFY_TIMER_INTERVAL_MIN
+                );
+                DEFAULT_NOTIFY_TIMER_INTERVAL_MIN
+            } else {
+                let migrated = secs_to_timer_minutes(legacy as u64);
+                log_info!("旧配置 notify_interval={legacy}s 已迁移为 notify_timer_interval={migrated} 分钟");
+                migrated
+            }
         } else {
             DEFAULT_NOTIFY_TIMER_INTERVAL_MIN
         }
@@ -718,7 +737,8 @@ mod tests {
 
     #[test]
     fn legacy_seconds_interval_migrates_to_minutes() {
-        // 旧默认 60 秒 → 1 分钟
+        // 换算函数本身仍是纯公式（60 秒 → 1 分钟）；
+        // 「出厂默认值不换算」的判断在 timer_interval_from 里，另有单测覆盖
         assert_eq!(secs_to_timer_minutes(60), 1);
         // 向上取整：61 秒也是 1 分钟？不 —— 61 秒超过 1 分钟，进位为 2
         assert_eq!(secs_to_timer_minutes(61), 2);
@@ -727,6 +747,27 @@ mod tests {
         assert_eq!(secs_to_timer_minutes(0), 1);
         // 超过 24 小时一律封顶，避免「填错成 99999 分钟」后永远不推
         assert_eq!(secs_to_timer_minutes(999_999), MAX_NOTIFY_TIMER_INTERVAL_MIN);
+    }
+
+    #[test]
+    fn legacy_default_seconds_falls_to_new_default_not_one_minute() {
+        // 关键点：60 秒是**出厂默认值**，不是用户的选择。迁移成 1 分钟会让
+        // 每台升级的设备每分钟推一条（每天 1440 条），必须落到新默认值 10 分钟。
+        let mk = |pairs: &[(&str, &str)]| {
+            let mut m = HashMap::new();
+            for (k, v) in pairs {
+                m.insert(k.to_string(), v.to_string());
+            }
+            UciReader(m)
+        };
+        assert_eq!(
+            timer_interval_from(&mk(&[("notify_interval", "60")])).as_secs(),
+            10 * 60,
+            "旧默认值 60 秒应迁移为新默认值 10 分钟，而不是 1 分钟"
+        );
+        // 真正被改过的值才按秒→分钟换算
+        assert_eq!(timer_interval_from(&mk(&[("notify_interval", "300")])).as_secs(), 5 * 60);
+        assert_eq!(timer_interval_from(&mk(&[("notify_interval", "30")])).as_secs(), 60);
     }
 
     #[test]
@@ -745,7 +786,7 @@ mod tests {
         assert_eq!(timer_interval_from(&mk(&[("notify_timer_interval", "0")])).as_secs(), 60);
         // 两个键都没配：默认 10 分钟
         assert_eq!(timer_interval_from(&mk(&[])).as_secs(), 10 * 60);
-        // 旧键迁移：未配置新键时才生效
+        // 旧键迁移：未配置新键时才生效（300 秒不是出厂默认值，按公式换算）
         assert_eq!(timer_interval_from(&mk(&[("notify_interval", "300")])).as_secs(), 5 * 60);
         // 新旧键同时存在：以新键为准，旧键不再覆盖用户的新选择
         assert_eq!(

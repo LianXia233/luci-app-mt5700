@@ -300,15 +300,18 @@ function setUciPoll(opts) {
 /*
  * 写定时推送配置（阶段三用）。
  * 刻意**只写旧键** notify_interval（秒）并删掉新键 —— 顺带验证老设备升级时
- * 「秒 → 分钟」的自动迁移是否真的生效：60 秒应换算成 1 分钟，
- * 这样既验证了迁移，又让首轮推送落在 60 秒处（最短间隔），不必等满 10 分钟。
+ * 「秒 → 分钟」的自动迁移是否真的生效。
+ *
+ * 这里填 30 秒而不是 30 秒以外的 60：60 是**旧出厂默认值**，走的是
+ * 「落到新默认值 10 分钟」分支（另有单测覆盖），换算不出可观测的短间隔。
+ * 30 秒会换算成 1 分钟，首轮推送落在 60 秒处，用例等得起。
  */
 function setUciTimerLegacySeconds() {
 	const file = path.join(UCI_BIN_DIR, 'mock-uci.out');
 	let txt = fs.readFileSync(file, 'utf8');
 	/* 删掉新键：新键优先，留着就测不到旧键迁移 */
 	txt = txt.replace(/^at-webserver\.config\.notify_timer_interval=.*\n?/m, '');
-	const line = "at-webserver.config.notify_interval='60'";
+	const line = "at-webserver.config.notify_interval='30'";
 	const re = /^at-webserver\.config\.notify_interval=.*$/m;
 	if (re.test(txt)) txt = txt.replace(re, line);
 	else txt = txt.replace(/\s*$/, '\n') + line + '\n';
@@ -751,7 +754,7 @@ async function main() {
 	check('信号推送含完整评估结论', sig.indexOf('网络能力') >= 0 && sig.indexOf('·') >= 0);
 
 	/* ---------- 8b. 定时推送：到点就推当前状态，与有没有事件无关 ---------- */
-	console.log('\n=== 6b. 定时推送（旧键 notify_interval=60 秒 → 迁移为 1 分钟）===');
+	console.log('\n=== 6b. 定时推送（旧键 notify_interval=30 秒 → 迁移为 1 分钟）===');
 	/*
 	 * 迁移是否生效要看启动日志：后端按分钟打印间隔。旧键 60 秒 → 1 分钟，
 	 * 首轮推送因此落在 60 秒处 —— 既验证了迁移，也不用等满默认 10 分钟。

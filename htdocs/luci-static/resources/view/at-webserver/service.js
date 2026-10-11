@@ -798,9 +798,17 @@ return L.view.extend({
 		var timerRaw = String(get('notify_timer_interval', ''));
 		var legacySecs = parseInt(get('notify_interval', ''), 10) || 0;
 		if (timerRaw === '' && legacySecs > 0) {
-			notifyTimerInput.value = String(Math.max(1, Math.ceil(legacySecs / 60)));
-			timerHuman.textContent = timerText(notifyTimerInput.value) +
-				'（由旧的 ' + legacySecs + ' 秒换算而来，保存后写入新字段）';
+			/* 60 秒是旧出厂默认值，不是用户的选择：与后端一致地落到新默认值 10 分钟，
+			 * 而不是换算成 1 分钟 —— 否则升级后每台设备都会每分钟推一条。 */
+			if (legacySecs === 60) {
+				notifyTimerInput.value = '10';
+				timerHuman.textContent = timerText('10') +
+					'（旧值 60 秒是出厂默认值，已按新默认值 10 分钟迁移，保存后写入新字段）';
+			} else {
+				notifyTimerInput.value = String(Math.max(1, Math.ceil(legacySecs / 60)));
+				timerHuman.textContent = timerText(notifyTimerInput.value) +
+					'（由旧的 ' + legacySecs + ' 秒换算而来，保存后写入新字段）';
+			}
 		} else {
 			notifyTimerInput.value = timerRaw || '10';
 			timerHuman.textContent = timerText(notifyTimerInput.value);
