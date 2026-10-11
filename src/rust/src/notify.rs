@@ -1,16 +1,18 @@
 //! 通知：短信/来电/信号/内存满四类事件，经企业微信 webhook、QQ 机器人（官方 API v2）
-//! 与本地日志文件输出（可配置合并窗口、重试 3 次）。
+//! 与本地日志文件输出（可配置定时推送间隔、重试 3 次）。
 //!
 //! 数据流（本模块是推送链路的中枢）：
 //!   urc.rs / schedule.rs 产生事件
-//!     → `Notifier::notify()`    过滤事件类型 → 立即写本地日志文件 → 入合并队列
-//!     → `Notifier::run()`       常驻任务，按合并窗口（UCI `notify_interval`）批量出队
-//!     → `Notifier::flush_all()` 按自定义文案模板渲染，广播到所有已启用通道
+//!     → `Notifier::notify()`    过滤事件类型 → 立即写本地日志文件 → **直接渲染并投递**
 //!     → 企业微信 webhook / QQ 机器人（`QqSender`）
 //!
-//! 关于「QQ 绑定模式」：绑定前 QQ 通道为空（`QqSender::from_config` 返回 None），
-//! 但事件**必须照常入队并保留**，否则用户按推荐流程绑定成功后拿不到任何数据。
-//! 因此本模块的队列恒定运行，通道状态只在发送那一刻判定（见 `flush_all`）。
+//! **没有合并窗口**：v1.14.20 起「推送频率」改为「定时推送间隔」
+//! （UCI `notify_timer_interval`，分钟），由 `timerpush.rs` 按它周期性推送
+//! **当前实际情况**；事件到达时一律即刻发送，不再攒成批量。
+//!
+//! 队列只保留一个用途：**通道尚未就绪时暂存**。QQ「绑定模式」下绑定完成前没有
+//! 通道，此时事件入队，`Notifier::run()` 每 10 秒扫一次，通道就绪即逐条补发
+//! （不合并）。若照直发路径丢弃，用户绑定成功后会永久失去绑定期间的事件。
 
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::{NotificationConfig, NotifyTemplates};
@@ -114,8 +116,8 @@ impl Notifier {
 
         let qq_bind_pending = cfg.qq.target_type == "bind";
         log_info!(
-            "通知合并窗口: {} 秒（事件在该窗口内合并为一条推送）",
-            cfg.interval.as_secs()
+            "定时推送间隔: {} 分钟（周期性推送当前实际情况；信号巡检另有一套间隔）",
+            cfg.timer_interval.as_secs() / 60
         );
 
         (
@@ -143,27 +145,21 @@ impl Notifier {
         }
     }
 
-    /// 合并窗口：下限防忙循环与频控，上限 1 小时保时效。
-    fn interval(&self) -> Duration {
-        let min = Duration::from_secs(crate::config::MIN_NOTIFY_INTERVAL_SECS);
-        let max = Duration::from_secs(crate::config::MAX_NOTIFY_INTERVAL_SECS);
-        let d = self.cfg.interval;
-        if d < min {
-            min
-        } else if d > max {
-            max
-        } else {
-            d
-        }
-    }
-
     /// 是否存在「可能送达」的推送通道。
     ///
     /// 注意这里把「绑定模式待绑定」也算作可用：此时通道虽然为空，
-    /// 但事件必须继续入队（绑定成功后由 `flush_all` 补发），
+    /// 但事件必须继续走（入队暂存，绑定成功后补发），
     /// 否则就是「机器人推送未接入任何推送数据」那个缺陷。
     fn dispatch_enabled(&self) -> bool {
         self.wechat_enabled() || self.qq_enabled() || self.qq_bind_pending
+    }
+
+    /// 此刻是否**真的**有可投递的通道（不含「绑定模式待绑定」）。
+    ///
+    /// 与 [`Notifier::dispatch_enabled`] 的分工：后者决定「事件要不要继续走」，
+    /// 这里决定「现在能不能发出去」。混用会让待绑定状态下的事件被当成已送达而丢弃。
+    fn has_channel(&self) -> bool {
+        self.wechat_enabled() || self.qq_enabled()
     }
 
     /// 记录一条事件。
@@ -171,8 +167,9 @@ impl Notifier {
     /// 三条路径，按优先级判定：
     /// 1. **总开关关闭**（`notify_enabled=0`）：不入队、不推送，但仍写本地通知日志
     ///    （关的是「推送」而不是「记录」，留着事后追溯）；
-    /// 2. **实时事件**（短信 / 来电）：绕过合并窗口**立即直发**，用户要求这两类必须实时；
-    /// 3. 其余事件（信号 / 存储满）：进入合并窗口，窗口内多条合并成一条推送。
+    /// 2. **实时事件**（短信 / 来电）：绕过任何攒批逻辑**立即直发**，用户要求这两类必须实时；
+    /// 3. 其余事件（信号 / 存储满）：v1.14.20 起同样**立即直发** —— 定时推送已独立成
+    ///    `timerpush` 模块，不再需要靠攒批来控制节奏。
     pub async fn notify(&self, msg: Notification) {
         if !self.cfg.enabled {
             log_debug!("自动推送已关闭，事件仅记本地日志不推送: {}（{:?}）", msg.sender, msg.kind);
@@ -199,30 +196,32 @@ impl Notifier {
             return;
         }
 
-        // 短信与来电要求实时：直发，不进合并窗口。
-        // 若此刻正好没有可用通道（例如 bind 模式尚未绑定），仍走队列，
-        // 由 flush_all 在通道就绪后补发，避免实时性把事件直接丢掉。
-        if matches!(msg.kind, NotifyKind::Sms | NotifyKind::Call) {
+        // 有可用通道 → 立刻渲染并投递。**所有事件类型都直发**，不再攒合并窗口：
+        // 短信/来电的实时性自不必说，信号与存储满也没有理由被压着等到窗口结束。
+        if self.has_channel() {
             self.send_realtime(&msg);
             return;
         }
 
+        // 没有可用通道（典型是 QQ「绑定模式」尚未完成绑定）：入队暂存，
+        // 由 run() 在通道就绪后逐条补发。此刻直接丢弃的话，用户会永久失去
+        // 绑定这段时间里发生的事件 —— 而绑定恰恰只在首次使用时发生一次。
         let sender = msg.sender.clone();
         let kind = msg.kind;
         if let Err(e) = self.tx.try_send(msg) {
             // 区分「队列满」与「接收端已退出」：后者的原文案会严重误导排障方向。
             match e {
                 mpsc::error::TrySendError::Full(_) => {
-                    log_warn!("通知队列已满，丢弃一条: {}（{:?}）", sender, kind)
+                    log_warn!("待发通知队列已满，丢弃一条: {}（{:?}）", sender, kind)
                 }
                 mpsc::error::TrySendError::Closed(_) => {
-                    log_error!("通知合并任务未在运行，事件已丢弃: {}（{:?}）", sender, kind)
+                    log_error!("通知补发任务未在运行，事件已丢弃: {}（{:?}）", sender, kind)
                 }
             }
         }
     }
 
-    /// 实时直发：单条事件立即渲染并投递到所有通道，不经过合并窗口。
+    /// 实时直发：单条事件立即渲染并投递到所有通道，不经过任何攒批。
     fn send_realtime(&self, msg: &Notification) {
         let body = combine_messages(std::slice::from_ref(msg), &self.cfg.templates);
         log_debug!("推送内容（实时直发）: {}", body);
@@ -232,7 +231,7 @@ impl Notifier {
     /// 把渲染好的正文投递到所有已启用通道。
     ///
     /// 通道可用性在此刻同步判定、发送异步进行：投递失败由各自的重试与日志负责，
-    /// 不阻塞调用方（URC 分发循环与合并窗口都跑在关键路径上）。
+    /// 不阻塞调用方（URC 分发循环与定时推送都跑在关键路径上）。
     fn dispatch_body(&self, body: String) {
         let wechat = self.wechat_enabled();
         let qq = self.current_qq();
@@ -250,25 +249,28 @@ impl Notifier {
         }
     }
 
-    /// 驱动推送通道（企业微信 + QQ 机器人）的合并发送，直到 ctx 结束。
+    /// 驱动「通道未就绪时暂存事件」的补发，直到 ctx 结束。
     ///
-    /// 合并窗口由 UCI `notify_interval` 决定：窗口内到达的事件合并成一条发送；
-    /// 空队列不触发发送。
+    /// v1.14.20 起这里**不再做合并窗口**：正常路径上事件已经直发，队列只剩一个
+    /// 用途 —— QQ 绑定模式下绑定完成前没有通道，事件先暂存，绑定成功（通道热
+    /// 替换进来）后逐条补发。
     ///
-    /// 本任务**恒定运行**，不因「启动时还没有可用通道」而退出：QQ 绑定模式下
-    /// 通道要等用户给机器人发消息后才热替换进来，若这里提前 return，`rx` 会随
-    /// 任务结束被丢弃，此后 `notify()` 的 `try_send` 全部失败——表现为
-    /// 「绑定成功却收不到任何推送数据」。通道状态交给 `flush_all` 在发送时判定。
+    /// 为什么还要 10 秒扫一次：绑定是外部事件（用户在 QQ 里给机器人发消息），
+    /// 不会唤醒本循环。没有定时扫描的话，pending 里的事件要等到下一条新事件到达
+    /// 才被捎带发出，表现为「明明绑定成功了，可刚才那条短信推送再也没来过」。
+    ///
+    /// 本任务**恒定运行**，不因「启动时还没有可用通道」而退出：`rx` 若随任务结束
+    /// 被丢弃，此后 `notify()` 的 `try_send` 会全部失败——那就是
+    /// 「绑定成功却收不到任何推送数据」这个老缺陷。
     pub async fn run(&self, mut rx: mpsc::Receiver<Notification>, mut ctx: tokio::sync::watch::Receiver<bool>) {
-        let interval = self.interval();
+        /// 补发扫描周期：仅在有待发事件时才挂这个定时器。
+        const SWEEP: Duration = Duration::from_secs(10);
         let mut pending: Vec<Notification> = Vec::new();
-        let mut last_send = Instant::now() - interval;
 
         loop {
-            let wait = interval.saturating_sub(last_send.elapsed());
             tokio::select! {
                 _ = ctx.changed() => {
-                    self.flush_all(&mut pending);
+                    self.drain_pending(&mut pending);
                     return;
                 }
                 msg = rx.recv() => {
@@ -281,29 +283,28 @@ impl Notifier {
                             pending.push(msg);
                         }
                         None => {
-                            self.flush_all(&mut pending);
+                            self.drain_pending(&mut pending);
                             return;
                         }
                     }
                 }
-                _ = tokio::time::sleep(wait), if !pending.is_empty() => {
-                    self.flush_all(&mut pending);
-                    last_send = Instant::now();
-                }
+                _ = tokio::time::sleep(SWEEP), if !pending.is_empty() => {}
             }
+            // 无论被哪个分支唤醒都尝试补发一次：新事件到达与定时扫描都会走到这里，
+            // 通道一旦就绪就把积压事件按原顺序逐条发出。
+            self.drain_pending(&mut pending);
         }
     }
 
-    /// 把合并窗口内积累的事件广播到所有已启用的推送通道。
+    /// 把暂存的事件**逐条**发送到已启用的推送通道（不再合并成批量）。
     ///
-    /// 一个通道都没有时**保留队列**而不是清空：QQ 绑定模式下绑定完成前没有通道，
-    /// 保留下来才能在绑定成功的那一刻把窗口内的积压事件发出去，做到不丢事件。
-    fn flush_all(&self, pending: &mut Vec<Notification>) {
+    /// 一个通道都没有时保留队列；总开关被关掉时丢弃并留痕。
+    fn drain_pending(&self, pending: &mut Vec<Notification>) {
         if pending.is_empty() {
             return;
         }
-        if !self.dispatch_enabled() {
-            log_debug!("通知通道尚未就绪（QQ 绑定模式等待绑定），保留 {} 条待发事件", pending.len());
+        if !self.has_channel() {
+            log_debug!("推送通道尚未就绪（QQ 绑定模式等待绑定），保留 {} 条待发事件", pending.len());
             return;
         }
         // 总开关可能在事件入队后被关掉：此时保留队列无意义，直接丢弃并留痕。
@@ -313,14 +314,11 @@ impl Notifier {
             return;
         }
 
-        let count = pending.len();
-        let body = combine_messages(pending, &self.cfg.templates);
-        pending.clear();
-        // 记录实际推送文本：这是「文案模板到底渲染成了什么」的唯一权威观测点，
-        // 排障时不至于只能看「发送成功」却不知道发了什么。
-        log_debug!("推送内容（合并 {} 条）: {}", count, body);
-
-        self.dispatch_body(body);
+        let taken = std::mem::take(pending);
+        log_info!("推送通道已就绪，补发 {} 条暂存事件", taken.len());
+        for msg in &taken {
+            self.send_realtime(msg);
+        }
     }
 
     /// 是否有可用的推送通道（供状态展示与测试）。
@@ -333,7 +331,7 @@ impl Notifier {
         self.cfg.enabled
     }
 
-    /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过合并窗口直接发送。
+    /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过事件链路直接发送。
     /// 测试消息不携带任何插件名字样，同样套用全局前缀，便于一次性验证前缀配置是否生效。
     pub async fn notify_test(&self, channel: &str) -> Result<(), String> {
         let base = "喵～测试通知来啦！推送通道一切正常，链路畅通无阻喵！";
@@ -393,7 +391,7 @@ impl Notifier {
             ),
             other => {
                 return Err(format!(
-                    "「{}」不支持测试推送（只有短信与来电需要按类型验证，其余走合并窗口）",
+                    "「{}」不支持测试推送（只有短信与来电需要按类型验证；信号请等定时推送或真实巡检）",
                     kind_label(other)
                 ))
             }
@@ -608,7 +606,7 @@ pub fn render_prefix(prefix: &str, count: usize, now: &str) -> String {
     prefix.replace("{count}", &count.to_string()).replace("{time}", now)
 }
 
-/// 合并窗口内的事件渲染为最终推送文本。
+/// 把一批事件渲染为最终推送文本（单条即只渲染该条）。
 ///
 /// 单条：直接套用该事件类型的模板。
 /// 多条：`{batch}` 标题 + 分隔线 + 逐条「序号 + 该事件类型的模板渲染结果」。
@@ -1070,7 +1068,7 @@ mod tests {
         QqSender::from_config(&qq_cfg(target_type)).expect("应构造成功")
     }
 
-    /// 「事件 → 入队 → 合并窗口 → 文案模板渲染 → HTTP 投递」整条链路的回归用例。
+    /// 「事件 → 入队（通道未就绪时）→ 补发 → 文案模板渲染 → HTTP 投递」整条链路的回归用例。
     ///
     /// 用本地 TCP 监听充当 WebHook 接收端，断言**真正发出的报文内容**。
     /// 这是「机器人推送未接入任何推送数据」缺陷最直接的回归保护：一旦
@@ -1134,8 +1132,7 @@ mod tests {
             target_id: String::new(),
             bind_qq: String::new(),
         };
-        // 合并窗口压到 150ms，测试不必等 60 秒；模板换成可精确断言的固定格式
-        cfg.interval = Duration::from_millis(150);
+        // 模板换成可精确断言的固定格式；事件走实时直发，测试不必等任何攒批窗口
         cfg.templates.prefix = "[测试]".into();
         cfg.templates.sms = "{kind}|{sender}|{content}|{time}|{count}".into();
 
@@ -1246,7 +1243,6 @@ mod tests {
         let log_path = std::env::temp_dir().join(format!("at-notify-off-{port}.log"));
         let _ = std::fs::remove_file(&log_path);
         cfg.log_file = log_path.to_string_lossy().into_owned();
-        cfg.interval = Duration::from_millis(150);
 
         let (notifier, rx) = Notifier::new(cfg);
         let notifier = std::sync::Arc::new(notifier);
@@ -1276,16 +1272,15 @@ mod tests {
         let _ = std::fs::remove_file(&log_path);
     }
 
-    /// 短信 / 来电必须**实时**推送：不能等合并窗口攒够。
+    /// 短信 / 来电必须**实时**推送：不能进队列等攒批。
     ///
-    /// 合并窗口设成 10 秒。若这两类事件走的是入队路径，2 秒内绝不可能收到
+    /// 把兜底扫描周期设成 10 秒。若这两类事件走的是入队路径，2 秒内绝不可能收到
     /// WebHook 请求，用例会因此失败——这正是「短信和来电需要实时推送」的回归保护。
     #[tokio::test]
     async fn sms_is_sent_immediately_bypassing_merge_window() {
         let (port, server) = one_shot_webhook().await;
 
         let mut cfg = webhook_only_cfg(port);
-        cfg.interval = Duration::from_secs(10);
         cfg.templates.prefix = String::new();
         cfg.templates.sms = "实时|{sender}|{content}".into();
 
@@ -1309,7 +1304,7 @@ mod tests {
 
         let raw = tokio::time::timeout(Duration::from_secs(2), server)
             .await
-            .expect("短信应实时直发，不该等 10 秒合并窗口")
+            .expect("短信应实时直发，不该走攒批入队路径")
             .expect("接收任务不应 panic");
         assert!(
             raw.contains("实时|10086|验证码 4321"),
@@ -1322,7 +1317,6 @@ mod tests {
         let (port, server) = one_shot_webhook().await;
 
         let mut cfg = webhook_only_cfg(port);
-        cfg.interval = Duration::from_secs(10);
         cfg.templates.prefix = String::new();
         cfg.templates.call = "来电实时|{content}".into();
 
@@ -1346,7 +1340,7 @@ mod tests {
 
         let raw = tokio::time::timeout(Duration::from_secs(2), server)
             .await
-            .expect("来电应实时直发，不该等 10 秒合并窗口")
+            .expect("来电应实时直发，不该走攒批入队路径")
             .expect("接收任务不应 panic");
         assert!(
             raw.contains("来电实时|13800138000 来电"),
@@ -1354,15 +1348,14 @@ mod tests {
         );
     }
 
-    /// 信号类事件仍应走合并窗口：它由定时轮询产生，频率可控且不需要秒级时效，
-    /// 走合并窗口才不会把 QQ 主动消息频控打满。
+    /// 信号类事件同样立即直发：攒批合并已在 v1.14.20 移除，
+    /// 信号由巡检与定时推送两条周期线产生，本来就不会高频刷屏，
+    /// 没有理由再压着它等窗口结束。
     #[tokio::test]
-    async fn signal_still_uses_merge_window() {
+    async fn signal_is_sent_immediately() {
         let (port, server) = one_shot_webhook().await;
 
         let mut cfg = webhook_only_cfg(port);
-        // 窗口 300ms：事件入队后要等窗口到期才发出，能证明它不是直发路径
-        cfg.interval = Duration::from_millis(300);
         cfg.templates.prefix = String::new();
         cfg.templates.signal = "巡检|{content}".into();
 
@@ -1386,11 +1379,11 @@ mod tests {
 
         let raw = tokio::time::timeout(Duration::from_secs(5), server)
             .await
-            .expect("信号事件应在合并窗口到期后发出")
+            .expect("信号事件应立即直发，不再走攒批")
             .expect("接收任务不应 panic");
         assert!(
             raw.contains("巡检|RSRP -95 dBm"),
-            "合并推送的信号内容不符合模板: {raw}"
+            "信号内容不符合模板: {raw}"
         );
     }
 
@@ -1419,7 +1412,7 @@ mod tests {
 
         let raw = tokio::time::timeout(Duration::from_secs(2), server)
             .await
-            .expect("短信测试推送应实时直发，不该等合并窗口")
+            .expect("短信测试推送应实时直发，不该走攒批")
             .expect("接收任务不应 panic");
         assert!(
             raw.contains(&format!("短信|{TEST_SENDER_NUMBER}|{TEST_SMS_CONTENT}")),
@@ -1451,7 +1444,7 @@ mod tests {
 
         let raw = tokio::time::timeout(Duration::from_secs(2), server)
             .await
-            .expect("来电测试推送应实时直发，不该等合并窗口")
+            .expect("来电测试推送应实时直发，不该走攒批")
             .expect("接收任务不应 panic");
         assert!(
             raw.contains("来电|时间：") && raw.contains(TEST_SENDER_NUMBER) && raw.contains("来电振铃"),
@@ -1499,7 +1492,7 @@ mod tests {
             .expect_err("没有通道时不应返回成功");
         assert!(err.contains("推送通道"), "错误应指明没有可用通道: {err}");
 
-        // 4) 不支持的事件类型（信号走合并窗口，另有真实巡检可验证）
+        // 4) 不支持的事件类型（信号靠定时推送与真实巡检验证，不造假读数）
         let cfg = webhook_only_cfg(1);
         let (notifier, _rx) = Notifier::new(cfg);
         let err = notifier

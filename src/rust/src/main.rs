@@ -27,6 +27,7 @@ mod signalgrade;
 mod signalwatch;
 mod state;
 mod state_cfg;
+mod timerpush;
 mod transport;
 mod urc;
 
@@ -35,6 +36,7 @@ use crate::notify::Notifier;
 use crate::rpcserver::RpcServer;
 use crate::schedule::Scheduler;
 use crate::signalwatch::SignalWatcher;
+use crate::timerpush::TimerPusher;
 use crate::urc::{Broadcaster, Dispatcher};
 use std::sync::Arc;
 use std::time::Duration;
@@ -169,6 +171,18 @@ async fn run(verbose: bool) -> Result<(), String> {
         let ctx = ctx_rx.clone();
         async move { watcher.run(ctx).await }
     });
+    // 定时推送：按 notify_timer_interval（分钟）周期性推送「当前实际情况」
+    // （信号读数 + 存储用量）。与上面的巡检是两条独立周期线：巡检按「变化阈值」
+    // 决定推不推，这里是到点就推当前状态。
+    let timerpush_task = tokio::spawn({
+        let pusher = TimerPusher::new(
+            client.clone(),
+            notifier.clone(),
+            cfg.notification.timer_interval,
+        );
+        let ctx = ctx_rx.clone();
+        async move { pusher.run(ctx).await }
+    });
     let cache_task = tokio::spawn({
         let cache = cache.clone();
         let ctx = ctx_rx.clone();
@@ -216,6 +230,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = dispatch_task.await;
         let _ = sched_task.await;
         let _ = signalwatch_task.await;
+        let _ = timerpush_task.await;
         let _ = cache_task.await;
         let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
@@ -319,7 +334,7 @@ fn log_config(cfg: &Config) {
     log_info!(
         "自动推送: {}",
         if cfg.notification.enabled {
-            "已开启（短信/来电实时直发，其余按合并窗口批量发送）"
+            "已开启（短信/来电/信号/存储满均实时直发，另有定时推送按间隔推送当前状态）"
         } else {
             "已关闭（事件只写本地通知日志，不再外发）"
         }

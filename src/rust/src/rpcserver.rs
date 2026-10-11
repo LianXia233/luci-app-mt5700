@@ -305,7 +305,7 @@ impl RpcServer {
                 let (seq, events) = self.hub.bus.since(since);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "events": events } })
             }
-            // 通知通道测试（LuCI「发送测试通知」按钮）：绕过合并窗口直发一条测试消息。
+            // 通知通道测试（LuCI「发送测试通知」按钮）：绕过事件链路直发一条测试消息。
             // channel 分两组语义：
             //   qq / wechat —— 只测**通道连通性**（固定文案，不走事件链路）；
             //   sms / call  —— 测**某一类的完整链路**，构造同形状事件走 notify()，

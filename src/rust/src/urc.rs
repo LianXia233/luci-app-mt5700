@@ -553,6 +553,47 @@ pub fn split_fields(line: &str, prefix: &str) -> Vec<String> {
 ///
 /// 抽成自由函数的原因：URC 分发（收到信号上报时补全明细）与定时巡检
 /// （主动取样）都要用它，而巡检并不持有 `Dispatcher`。
+/// 解析 `AT+CPMS?` 应答里的短信存储用量 → (已用, 容量)。
+///
+/// 响应形如 `+CPMS: "ME",3,50,"ME",3,50,"ME",3,50`：每三段一组，依次是
+/// 存储区名、已用、容量。只取**第一组**（首选存储区），与前端短信中心的
+/// 「存储用量」同一口径。
+fn parse_storage_line(line: &str) -> Option<(u64, u64)> {
+    let line = line.trim();
+    // 个别固件回私有前缀 ^CPMS，两种都认（与前端短信中心的做法一致）
+    let body = line.strip_prefix("+CPMS:").or_else(|| line.strip_prefix("^CPMS:"))?;
+    // 存储区名（"ME" / "SM"）不是数字，会被过滤掉，剩下的就是 used,total,...
+    let mut nums = body
+        .split(',')
+        .filter_map(|p| p.trim().trim_matches('"').parse::<u64>().ok());
+    let used = nums.next()?;
+    let total = nums.next()?;
+    // 容量 0 是「没读到」而不是「满了」：当成满会误报存储已满
+    if total == 0 {
+        return None;
+    }
+    Some((used, total))
+}
+
+/// 查询短信存储用量：`AT+CPMS?` → (已用, 容量)。
+///
+/// 为什么定时推送要用它，而不是等模组上报 `^SMMEMFULL`：后者只在**恰好收满**
+/// 的那一刻来一次，此后即便用户清理过也不会再来 —— 拿事件当状态，推送会永远
+/// 卡在「已满」。存储用量是**可以主动读到的真实状态**，满没满由当前读数判定。
+pub(crate) async fn query_storage(
+    client: &AtClient,
+    ctx: &tokio::sync::watch::Receiver<bool>,
+) -> Option<(u64, u64)> {
+    let resp = match client
+        .send_command(ctx, "AT+CPMS?", crate::atclient::COMMAND_TIMEOUT, None)
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return None,
+    };
+    resp.lines.iter().filter_map(|l| parse_storage_line(l)).next()
+}
+
 pub(crate) async fn query_monsc(
     client: &AtClient,
     ctx: &tokio::sync::watch::Receiver<bool>,
@@ -814,6 +855,17 @@ mod tests {
         assert_eq!(c.band, Some(41), "band_classN 必须取到，否则推送显示不出 n41");
         assert_eq!(c.dl_freq_khz, 2_565_000.0);
         assert_eq!(c.dl_bw_khz, 100_000.0);
+    }
+
+    #[test]
+    fn storage_line_reads_used_and_total() {
+        assert_eq!(parse_storage_line("+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"), Some((3, 50)));
+        assert_eq!(parse_storage_line("+CPMS: \"SM\",0,50"), Some((0, 50)));
+        // 私有前缀同样认（个别固件回 ^CPMS）
+        assert_eq!(parse_storage_line("^CPMS: \"ME\",10,50"), Some((10, 50)));
+        // 容量 0 = 没读到，不是「满了」
+        assert_eq!(parse_storage_line("+CPMS: \"ME\",0,0"), None);
+        assert_eq!(parse_storage_line("OK"), None);
     }
 
     #[test]
