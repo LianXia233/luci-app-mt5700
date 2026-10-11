@@ -31,6 +31,12 @@ on:
     branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      keep_releases:
+        description: '发布后保留最近几个 v* Release，更早的自动删除（仅清理 Release 与资产，不动 git tag）'
+        required: false
+        default: '1'
+        type: string
 
 permissions:
   contents: write
@@ -91,7 +97,7 @@ jobs:
 
     steps:
       - name: 检出仓库代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 环境准备（输出目录与构建参数）
         run: |
@@ -172,11 +178,15 @@ jobs:
           echo "==> 体积校验通过（单包策略）"
 
       - name: 产物归档（上传 Actions 构件）
-        uses: actions/upload-artifact@v4
+        # v5：与 v4 的差异之一是同名构件默认覆盖（overwrite=true），此处每个矩阵组合
+        # 的名称唯一，用不到该行为；升级的主因是 v4 仍跑在 Node 20，runner 已弃用。
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.fmt }}-${{ matrix.arch }}
           path: out/
           if-no-files-found: error
+          # 构件只在一次发布内流转（release job 立刻下载并发布），留 90 天是白占存储
+          retention-days: 7
 
   # ---- 统一发布：每次编译成功后运行一次，汇总全部架构产物并上传 Release ----
   # 不能放在 build job 内：多个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
@@ -191,7 +201,7 @@ jobs:
       contents: write
     steps:
       - name: 检出仓库代码（读取版本号）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 解析发布版本号
         id: ver
@@ -207,7 +217,7 @@ jobs:
           echo "==> 发布版本: ${TAG} (ref=${GITHUB_REF})"
 
       - name: 下载全部构建产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: '*'
           path: out/
@@ -475,3 +485,39 @@ jobs:
               --title "AT WebServer ${TAG}"
           fi
           echo "==> Release ${TAG} 已发布，资产 ${#FILES[@]} 个"
+
+      # 每个版本 13 个资产、约 9 MB，历史 Release 会一路堆积。
+      # 只删 **Release 与其资产**，不动 git tag —— tag 指向提交，删了会让
+      # 「某版本对应哪次提交」无从追溯，而 Release 只是可重发的下载入口。
+      # 两条保护：① 只认 v<数字> 前缀（debian-v2.0.1 这类另一条发布线的产物不参与）；
+      #           ② latest 那个即使超出保留数也保留（它可能不是时间上最新的）。
+      - name: 清理历史 Release（保留最近若干个）
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_RELEASES: ${{ github.event.inputs.keep_releases || '1' }}
+        run: |
+          set -e
+          mapfile -t ROWS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
+            --json tagName,isLatest,createdAt \
+            --jq 'map(select(.tagName | test("^v[0-9]")))
+                  | sort_by(.createdAt) | reverse
+                  | .[] | "\(.tagName)\t\(.isLatest)"')
+          echo "==> 现有 v* Release ${#ROWS[@]} 个，本轮保留最近 ${KEEP_RELEASES} 个"
+          idx=0
+          for row in "${ROWS[@]}"; do
+            idx=$((idx + 1))
+            tag="${row%%$'\t'*}"
+            is_latest="${row##*$'\t'}"
+            if [ "$idx" -le "$KEEP_RELEASES" ]; then
+              echo "  [保留] ${tag}（第 ${idx} 新的，在保留数内）"
+              continue
+            fi
+            if [ "$is_latest" = "true" ]; then
+              echo "  [保留] ${tag}（当前 latest，即使超出保留数）"
+              continue
+            fi
+            echo "  [删除] ${tag}"
+            gh release delete "$tag" --yes --repo "${GITHUB_REPOSITORY}" \
+              || echo "::warning::删除 ${tag} 失败，已跳过不影响发布"
+          done
