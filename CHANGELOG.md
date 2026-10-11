@@ -1,5 +1,50 @@
 # Changelog
 
+## v1.14.17 (2026-10-12)
+
+### 时间口径统一为系统时区（默认北京时间）
+
+- **fix(time)**: **推送与日志时间整体早 8 小时** —— 根因有两层，缺一不可：① `TZ` 环境变量只由 `/etc/profile` 为**登录 shell** 导出，procd 拉起的守护进程拿不到；② 本固件不打包 tzdata（实机 `/usr/share/zoneinfo` 不存在），musl 的 `localtime_r` 在无 `TZ` 时**不报错、静默退化成 UTC**。表现为 SSH 里 `date` 是 `CST`、服务日志却是 UTC。
+- **feat(localtime)**: 新增 `crate::localtime` 模块，三级回退解析本地偏移 —— `TZ` 环境变量 → `/etc/TZ` → `uci -q get system.@system[0].timezone` → 默认 `CST-8`（北京时间 UTC+08:00）。启动即打一条「时区: CST-8 → UTC+08:00」，未配置时打「未配置时区，使用默认北京时间 UTC+08:00（默认）」，让口径在日志里可见而非靠猜。
+- **feat(initd)**: `/etc/init.d/at-webserver` 按**完全相同的顺序**取值，并通过 `procd_set_param env TZ=...` 注入给后端，保证服务内外口径一致。
+- **refactor(time)**: 后端所有 `chrono::Local` 调用点改走 `localtime::now()` / `chrono::DateTime<localtime::Tz>` —— `pdu`（短信时间戳解码）、`logger`（通知日志时间戳）、`schedule` + `schedconfig`（定时锁频判定与「下一次切换时刻」）。不再有任何一处隐式依赖进程环境。
+- **docs**: README 新增「时区与时间口径」小节，写明取值顺序，并特别标注 **POSIX TZ 串符号与直觉相反**（`CST-8` = UTC+8，写成 `CST+8` 会得到 UTC−8，比不设时区更糟）。
+- **verify**: 模拟环境两段断言形成闭环 —— ① 不给任何时区配置时，通知时间戳 == `Date.now() + 8h`（防「默认值不是北京时间」）；② 注入 `system.@system[0].timezone=UTC0` 后重启，时间戳整体回落 UTC（防「把默认值写死、无视系统设置」）。
+
+### 巡检推送携带完整射频信号评估
+
+- **feat(signalgrade)**: 新增 `signalgrade` 模块，把网页「射频信号质量」卡片的评估逻辑**完整搬到推送侧** —— 网络能力结论 + 场景说明、信号强度 / 信号质量 / 信噪比 / 综合四项评级，以及 RSRP / RSRQ / SINR / SIGNAL 四行「基准 ≥ 阈值 → 实测值 → 结论」对照。原来只报一个 RSRP 数值，不足以判断链路是否真的可用。
+- **refactor(urc)**: `parse_signal_reading()` 与评估模块**共用同一套换算与分级规则**，否则同一组读数会在网页与推送里给出两个不同的结论。
+- **docs**: README 巡检小节补充推送内容说明。
+
+### 短信中心：会话内收发分区排列
+
+- **feat(sms)**: 同一联系人的对话改为**两块分区**渲染 —— 上区只放收到的短信、下区只放发出的短信，各自按时间升序，中间以分隔标题（「收到 N 条」/「发出 N 条」）区分；会话列表按最近联系时间**倒序**。原实现收发交错，会让「哪条是自己发的」难以辨认，群发场景下更会与对面的消息挤在一起。
+- **fix(sms)**: **存储用量永远显示 0 / 0** —— 前端请求的是私有命令 `AT^CPMS?`，模组按惯例回 `^CPMS: "SM",<used>,<total>,...`，而原正则只匹配标准前缀 `+CPMS`。改为 `[\^+]CPMS` 后正常显示（模拟环境已复现并回归）。
+- **fix(notify)**: **号码三处口径不一致** —— 推送侧 `8613800138000`、来电 `+8613800138000`、界面 `13800138000`。新增 `notify::normalize_phone_number()`，与前端 `Parse.normalizePhoneNumber` **同规则**（剥 `+`、去国家码 `86`、只留数字），三处归一。
+- **feat(sms)**: 时间标注按证据强度分档 —— 发出短信的 PDU（SMS-SUBMIT）**没有发送时刻**，只有相对有效期时标「时间未知」，有绝对有效期时标「（有效期时间，非发送时刻）」，收到的短信有 TP-SCTS 才显示时刻。不编造时间。
+- **verify**: 新增 `tests/mock-modem/sms-center-render.js`（极简 DOM 桩 + 真实前端代码 + 真实 PDU 夹具）**32 通过 / 0 失败**，覆盖分区顺序、区块标题、空态、时间未知标注、存储用量、会话排序。
+
+### 测试通知文案
+
+- **chore(notify)**: 「发送测试通知」文案改为 `喵～测试通知来啦！推送通道一切正常，链路畅通无阻喵！`。
+
+### 测试基建（仓库内可复现，不依赖实机）
+
+- **test**: 新增 `tests/mock-modem/` 离线模拟链路 —— mock 模组（TCP AT 口）→ 真实 Rust 后端 → 假 `uci`（**用 rustc 编译的独立可执行文件**，规避 Windows 上 `Command::new("uci")` 只补 `.exe`、`.cmd`/`.bat` 找不到的问题）→ 本地 WebHook 服务器。
+- **test**: 配套 `sms-fixtures.js`（**唯一来源**的 PDU 夹具，mock 模组与前端渲染测试共用，避免样本漂移）、`hook-server.js`、`simulate-push.js`、`run-sim.sh`、`render-shot.py`（Playwright 截图）。
+- **test**: `simulate-push.js` **31 通过 / 0 失败**，覆盖短信实时直发（实测 434~453 ms，远小于 5000 ms 合并窗口）、来电振铃/挂断、两段时区口径、测试通知文案，以及事后安全审计。
+- **fix(test)**: PDU 夹具修正一处规范细节 —— `3GPP TS 23.040` 里**地址长度字节是普通二进制（半字节计数），不是 BCD**，只有 TP-SCTS / 绝对 TP-VP 的时间字段才是交换半字节 BCD。夹具最初把地址长度也写成 BCD，导致首个 PDU 解析整体失败；这类错误在实机上只表现为「短信列表空白」，排查成本极高。
+
+### 安全约束：IMEI 与恢复出厂设置不可触碰
+
+- **security**: 针对该硬约束落地**三层护栏** —— ① mock 模组 `FORBIDDEN` 命令表（IMEI/序列号写入、恢复出厂、复位一律回 `ERROR` 并留日志）；② 测试脚本 `assertSafe()` 在下发**前**拦截；③ 事后 `auditModemCommands()` 扫描整轮全部下发命令。当前审计结果：**扫描 23 条，危险命令 0 条**（被拒 3 次均为护栏自检）。只读的 `AT+CGSN` / `ATI` 保留，后端设备识别不受影响。
+
+### 其它
+
+- **test**: `cargo test` **126 passed / 0 failed / 2 ignored**；`cargo build --release` 成功（仅 2 条既有 `dead_code` 告警，原 `render_report` 告警已清零）。
+- **docs**: 新增 `docs/release-notes/v1.14.17.md`；README 同步版本号并补充上述能力的配置说明。
+
 ## v1.14.16 (2026-10-11)
 
 ### 信号定时巡检（本轮核心修复）

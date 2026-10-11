@@ -442,6 +442,17 @@ start_service() {
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_set_param pidfile /var/run/at-webserver-rust.pid
+	# TZ：必须显式传，否则后端拿不到时区。
+	# OpenWrt 把时区设置（LuCI 系统 → 时间同步 → 时区）写成 UCI
+	# system.@system[0].timezone，并派生出 /etc/TZ；而 TZ 环境变量**只由
+	# /etc/profile 为登录 shell 导出**，procd 拉起守护进程时不会带上。
+	# 后果实测：SSH 里 `date` 是 CST，服务日志却早 8 小时（静默退化成 UTC）。
+	# 这里按「/etc/TZ → uci → CST-8(北京时间)」取值注入，与后端
+	# crate::localtime 的三级回退完全同序，保证内外口径一致。
+	TZ_VALUE="$(cat /etc/TZ 2>/dev/null)"
+	[ -n "$TZ_VALUE" ] || TZ_VALUE="$(uci -q get system.@system[0].timezone)"
+	[ -n "$TZ_VALUE" ] || TZ_VALUE="CST-8"
+	procd_set_param env TZ="$TZ_VALUE"
 	procd_close_instance
 
 	logger -t at-webserver "服务启动配置完成"

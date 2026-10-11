@@ -1,6 +1,7 @@
 //! SMS PDU 解码（SMS-DELIVER），GSM7/UCS2/8bit + UDH 长短信。
 
-use chrono::{DateTime, Local, TimeZone};
+use crate::localtime;
+use chrono::DateTime;
 
 /// 3GPP TS 23.038 默认字母表（按码位索引）。
 const GSM7_ALPHABET: &str = concat!(
@@ -36,7 +37,7 @@ pub struct PartialInfo {
 pub struct Sms {
     pub sender: String,
     pub content: String,
-    pub date: DateTime<Local>,
+    pub date: DateTime<localtime::Tz>,
     pub partial: Option<PartialInfo>,
 }
 
@@ -102,9 +103,9 @@ fn bcd_digit(b: u8) -> i32 {
     (b & 0x0F) as i32 * 10 + (b >> 4) as i32
 }
 
-fn decode_timestamp(ts: &[u8]) -> DateTime<Local> {
+fn decode_timestamp(ts: &[u8]) -> DateTime<localtime::Tz> {
     if ts.len() < 7 {
-        return Local::now();
+        return localtime::now();
     }
     let year = 2000 + bcd_digit(ts[0]);
     let month = bcd_digit(ts[1]);
@@ -114,13 +115,11 @@ fn decode_timestamp(ts: &[u8]) -> DateTime<Local> {
     let second = bcd_digit(ts[5]);
 
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
-        return Local::now();
+        return localtime::now();
     }
-    // 时区字节存在但沿用本地时区解释。
-    match Local.with_ymd_and_hms(year, month as u32, day as u32, hour as u32, minute as u32, second as u32) {
-        chrono::LocalResult::Single(dt) => dt,
-        _ => Local::now(),
-    }
+    // 时区字节存在但沿用本机时区解释（PDU 时间戳不带时区，协议惯例即如此）。
+    localtime::from_ymdhms(year, month as u32, day as u32, hour as u32, minute as u32, second as u32)
+        .unwrap_or_else(localtime::now)
 }
 
 /// 解码 BCD 电话号码，digits 为号码位数。
@@ -266,7 +265,7 @@ mod tests {
         let sms = decode_incoming_pdu(UCS2_PDU).unwrap();
         assert_eq!(sms.sender, "13800138000");
         assert_eq!(sms.content, "测试");
-        let want = Local.with_ymd_and_hms(2025, 8, 25, 12, 0, 0).single().unwrap();
+        let want = localtime::from_ymdhms(2025, 8, 25, 12, 0, 0).unwrap();
         assert_eq!(sms.date.timestamp(), want.timestamp());
         assert!(sms.partial.is_none());
     }

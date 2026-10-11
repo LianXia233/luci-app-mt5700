@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.16-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.14.17-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -82,7 +82,7 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 | **数据与链路** | **拨号设置** | USB NDIS 拨号 / 转网口模式切换，承载网络链路状态守护与自动对账 |
 | | **模组设置** | 模组核心元数据查询（含自动识别的 USB 链路速率，sysfs 读取、不发 AT 命令）、软硬件复位重启、出厂配置重置 |
 | | **模组升级** | 模组新固件远程推送检测与本地固件包上传刷写 |
-| **消息与运维** | **短信中心** | 支持 PDU / Text 短信收发、长短信自动分段重组、SIM 卡短信池查看 |
+| **消息与运维** | **短信中心** | 支持 PDU / Text 短信收发、长短信自动分段重组、SIM 卡短信池查看；同一联系人的对话内**收发分区排列**（收到在上、发出在下，各自按时间升序），不再让对面与自己的消息交错挤压 |
 | | **短信设置** | 自定义短信中心号（SMSC）、自动化短信转发与容量自清理策略 |
 | | **AT 调试终端** | Web 原生交互式控制台，支持常用指令自动补全、历史回溯与原语调试 |
 | | **通知日志** | 掉线告警、频段漂移记录，支持企业微信机器人、QQ 机器人（API v2）与 Webhook 实时推送 |
@@ -159,11 +159,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.14.15-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.14.17-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.14.15_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.14.17_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -319,6 +319,7 @@ option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅
 - **首次读数恒定推送一次**，让用户立刻确认功能在工作；
 - **制式切换（LTE ↔ NR）必定推送**，即便 RSRP 数值没变；
 - **基线只在推送时刷新** —— 否则信号从 -80 缓慢漂移到 -95（每次仅差 2 dB）将永远越不过阈值，用户反而收不到「信号持续变差」这个最该知道的通知。
+- **推送内容**：巡检推送携带与网页「射频信号质量」卡片**等价的完整评估** —— 网络能力结论与其场景说明、信号强度 / 信号质量 / 信噪比 / 综合四项评级（优秀 / 良好 / 一般 / 较差），以及 RSRP / RSRQ / SINR / SIGNAL 四行「基准 ≥ 阈值 → 实测值 → 结论」对照。只报一个 RSRP 数字不足以判断链路是否真的可用。
 
 ### 推送频率与自定义文案
 
@@ -346,6 +347,20 @@ option notify_tpl_batch  '📑 批量通知汇总'
 
   UCI 单个 option 不支持真实换行，模板中的换行以 `\n` 转义写入（LuCI 页面会自动转换，手改 UCI 需自行写 `\n`）。
 
+### 时区与时间口径
+
+**所有对外时间一律使用本机系统时区** —— 即 LuCI「系统 → 时间同步 → 时区」写下的 UCI `system.@system[0].timezone`；系统未配置时默认**北京时间（UTC+08:00）**。覆盖范围：通知日志时间戳、推送正文里的 `{time}`、短信中心每条短信的时刻、定时锁频的「下一次切换时刻」。
+
+取值顺序（`/etc/init.d/at-webserver` 与后端 `crate::localtime` **完全同序**，保证服务内外口径一致）：
+
+1. `/etc/TZ` —— 由系统时区派生的 POSIX TZ 串（如 `CST-8`）；
+2. `uci -q get system.@system[0].timezone`；
+3. 回落到 `CST-8`（北京时间）。
+
+> **注意 POSIX TZ 的符号与直觉相反**：`CST-8` 表示 **UTC+8**（POSIX 中符号代表「本地时间 = UTC − 偏移」），写成 `CST+8` 会得到 UTC−8。
+
+**为什么必须显式注入**：`TZ` 环境变量只由 `/etc/profile` 为**登录 shell** 导出，procd 拉起的守护进程拿不到；本固件又不打包 tzdata（`/usr/share/zoneinfo` 不存在），musl 的 `localtime_r` 在无 `TZ` 时会**静默退化成 UTC**。故 init.d 在启动时按上述顺序取值，并通过 `procd_set_param env TZ=...` 注入给后端。
+
 ### QQ 机器人通道说明
 
 - **启用条件**：AppID、AppSecret、目标 ID 三项全部非空。
@@ -364,7 +379,7 @@ option notify_tpl_batch  '📑 批量通知汇总'
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.15)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.17)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / ui.js / at.css)
