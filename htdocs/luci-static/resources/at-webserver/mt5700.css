@@ -2035,6 +2035,9 @@
 }
 
 .mt5700-sms-bubble {
+  /* 宽度必须随内容收缩：否则块级元素会占满 80%，
+     发出的消息靠 margin-left:auto 也「贴不到右边」，看起来与收到的没区别 */
+  width: fit-content;
   max-width: 80%;
   padding: var(--mt5700-space-sm) var(--mt5700-space-md);
   border-radius: var(--mt5700-radius-lg);
@@ -2056,50 +2059,49 @@
   border-bottom-left-radius: var(--mt5700-radius-sm);
 }
 
-/* ---------- 会话分区：收到 / 发出 各自成块 ---------- */
-/* 两块之间用「横线 + 居中标签」做视觉分隔，避免眼睛把上块的最后一条
-   和下块的第一条误读成同一条时间轴上的前后关系。 */
-.mt5700-sms-section {
-  padding-bottom: var(--mt5700-space-sm);
-}
+/* ---------- 聊天式时间轴：日期分隔与气泡内时刻 ---------- */
 
-.mt5700-sms-section + .mt5700-sms-section {
-  border-top: 1px dashed var(--mt5700-divider);
-  margin-top: var(--mt5700-space-md);
-  padding-top: var(--mt5700-space-sm);
-}
-
-.mt5700-sms-section-title {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--mt5700-space-sm);
-  margin: var(--mt5700-space-sm) 0 var(--mt5700-space-md);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--mt5700-text-secondary);
-  letter-spacing: 0.04em;
-}
-
-.mt5700-sms-section-title::before,
-.mt5700-sms-section-title::after {
-  content: '';
-  flex: 1;
-  height: 1px;
+/* 日期条：跨天处居中显示，形如 2026-10-12 */
+.mt5700-sms-date {
+  width: fit-content;
+  margin: var(--mt5700-space-md) auto var(--mt5700-space-sm);
+  padding: 2px 10px;
+  border-radius: 10px;
   background: var(--mt5700-divider);
-}
-
-.mt5700-sms-section-count {
-  font-weight: 400;
-  opacity: 0.72;
-}
-
-.mt5700-sms-section-empty {
-  padding: var(--mt5700-space-md) 0;
-  text-align: center;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.6;
   color: var(--mt5700-text-secondary);
-  opacity: 0.75;
+}
+
+/* 气泡内的时刻：右对齐小字，弱化到不抢正文 */
+.mt5700-sms-time {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  opacity: 0.68;
+  text-align: right;
+}
+
+/* 删除按钮：默认隐去，鼠标移到气泡上才出现 —— 聊天界面里每条消息都挂一颗
+   红按钮会盖过正文本身；触屏设备没有 hover，故常显以免删不掉 */
+.mt5700-sms-del {
+  margin-top: 4px;
+  padding: 1px 8px;
+  font-size: 10px;
+  line-height: 1.6;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.mt5700-sms-bubble:hover .mt5700-sms-del,
+.mt5700-sms-bubble:focus-within .mt5700-sms-del {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .mt5700-sms-del {
+    opacity: 1;
+  }
 }
 
 .mt5700-sms-input {

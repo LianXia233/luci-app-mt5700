@@ -167,11 +167,13 @@ return L.view.extend({
 			 * 空白会让人以为渲染丢了，直接不显示又会让人默认它是刚刚。
 			 * 近似时间（来自 TP-VP 有效期）额外标注，避免被当成精确发送时刻。
 			 */
-			var timeText = m.time || '时间未知';
-			if (m.time && m.timeApprox) timeText += '（有效期时间，非发送时刻）';
-			bubble.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' }, timeText));
+			/* 日期已由分隔条给出，气泡内只留时刻，
+			   否则每条消息都把年月日重复一遍，读起来很吵 */
+			var timeText = m.time ? (String(m.time).split(',')[1] || m.time) : '时间未知';
+			if (m.time && m.timeApprox) timeText += '（有效期，非发送时刻）';
+			bubble.appendChild(E('div', { 'class': 'mt5700-sms-time' }, timeText));
 			if (m.partsExpected != null && m.partsCount != null && m.partsCount < m.partsExpected) {
-				bubble.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' },
+				bubble.appendChild(E('div', { 'class': 'mt5700-sms-time' },
 					'长短信已合并 ' + m.partsCount + '/' + m.partsExpected + ' 段（部分缺失）'));
 			}
 			var del = Mt5700.button('删除', function (mm) {
@@ -185,29 +187,26 @@ return L.view.extend({
 		}
 
 		/*
-		 * 会话分区：收到的在上、发出的在下，两块各自按时间升序。
-		 *
-		 * 为什么不是单条时间轴（用户明确要求「对面的消息和自己的消息不能挤在一起」）：
-		 * 聊天式单轴的读法是「一条来一条回」交替出现，用来回顾对话很自然，
-		 * 但「对方一共说了什么」「我到底回了哪些」这两个诉求要逐条翻。
-		 * 分区之后两块各自连续，按时间一眼扫完，找起来是线性的。
-		 * 代价是失去「来一回一」的对应关系 —— 所以保留了两块标题与各自条数，
-		 * 需要看上下文时仍可对照时间戳。
+		 * 消息时刻（`YY/MM/DD,HH:MM:SS`）→ 日期分隔条文案。
+		 * 「时间未知」自成一档：不能把它并进某一天，否则会被误读成当天的消息。
 		 */
-		function appendSection(label, list, kind) {
-			var section = E('div', { 'class': 'mt5700-sms-section mt5700-sms-section-' + kind });
-			section.appendChild(E('div', { 'class': 'mt5700-sms-section-title' }, [
-				E('span', {}, label),
-				E('span', { 'class': 'mt5700-sms-section-count' }, list.length + ' 条')
-			]));
-			if (!list.length) {
-				section.appendChild(E('div', { 'class': 'mt5700-sms-section-empty' },
-					kind === 'recv' ? '该联系人还没有来消息' : '还没有发给该联系人的消息'));
-			}
-			for (var i = 0; i < list.length; i++) section.appendChild(buildBubble(list[i], kind === 'sent'));
-			convBody.appendChild(section);
+		function dayLabel(m) {
+			if (!m.time) return '时间未知的消息';
+			var day = String(m.time).split(',')[0];
+			var seg = day.split('/');
+			if (seg.length === 3) return '20' + seg[0] + '-' + seg[1] + '-' + seg[2];
+			return day;
 		}
 
+		/*
+		 * 聊天式单条时间轴（用户要求「像 QQ 那样显示」）：
+		 * 收发消息按时间顺序**混排在同一条轴上**，靠气泡左右位置区分方向 ——
+		 * 对方在左、自己在右，跨天处插一条日期分隔条。
+		 *
+		 * 早期版本为了「对面的消息和自己的消息不能挤在一起」改成上下分区，
+		 * 代价是丢失「来一回一」的对话对应关系；现按用户要求回到聊天式排布，
+		 * 分区所需的块标题与空态一并去掉。
+		 */
 		function renderConversation() {
 			convHead.innerHTML = '';
 			convHead.appendChild(E('div', { 'class': 'mt5700-sms-item-number' },
@@ -217,15 +216,17 @@ return L.view.extend({
 				convBody.appendChild(Mt5700.empty('暂无消息，输入内容发送'));
 				return;
 			}
-			var received = [];
-			var sent = [];
-			for (var i = 0; i < state.messages.length; i++) {
-				(state.messages[i].type === 'sent' ? sent : received).push(state.messages[i]);
+			var list = state.messages.slice().sort(compareAsc);
+			var lastDay = null;
+			for (var i = 0; i < list.length; i++) {
+				var m = list[i];
+				var day = dayLabel(m);
+				if (day !== lastDay) {
+					convBody.appendChild(E('div', { 'class': 'mt5700-sms-date' }, day));
+					lastDay = day;
+				}
+				convBody.appendChild(buildBubble(m, m.type === 'sent'));
 			}
-			received.sort(compareAsc);
-			sent.sort(compareAsc);
-			appendSection('收到', received, 'recv');
-			appendSection('发出', sent, 'sent');
 			convBody.scrollTop = convBody.scrollHeight;
 		}
 
@@ -241,13 +242,17 @@ return L.view.extend({
 		/* ---------- 数据 ---------- */
 
 		function refreshStorage() {
-			return AtWs.client.sendCommand('AT^CPMS?').then(function (res) {
+			/*
+			 * 必须用**标准** `AT+CPMS?`：本模组（MT5700M-CN）不认私有前缀的
+			 * `AT^CPMS?`，实测直接回 ERROR，存储用量会永远停在 0 / 0。
+			 * 同项目的「短信设置」页用的也是 `AT+CPMS?`，此处曾误写成 `^` 前缀。
+			 */
+			return AtWs.client.sendCommand('AT+CPMS?').then(function (res) {
 				if (res.success && res.data) {
 					/*
-					 * 前缀必须同时接受 `+CPMS` 与 `^CPMS`：
-					 * 请求用的是私有命令 `AT^CPMS?`，模组按惯例回 `^CPMS: "SM",<used>,<total>,...`，
-					 * 只匹配 `\+CPMS` 会让存储用量永远停在 0 / 0（模拟环境下已复现）。
-					 * 少数固件回标准 `+CPMS`，所以两种都要收。
+					 * 应答前缀两种都要收：标准 `+CPMS: "SM",<used>,<total>,...`，
+					 * 少数固件（如 SIMCom 系）回私有 `^CPMS:`。只匹配 `\+CPMS`
+					 * 会在那些固件上让用量永远停在 0 / 0。
 					 */
 					var m = String(res.data).match(/[\^+]CPMS: "\w+",(\d+),(\d+)/);
 					if (m) {
