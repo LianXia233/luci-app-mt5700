@@ -183,11 +183,11 @@ pub const DEFAULT_TPL_SMS: &str = "喵呜～，有新短信到啦！快来看看
 /// 来电通知的默认文案。
 pub const DEFAULT_TPL_CALL: &str = "喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}";
 /// 短信存储满通知的默认文案。
-pub const DEFAULT_TPL_MEMORY: &str = "⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信";
+pub const DEFAULT_TPL_MEMORY: &str = "喵呜～短信存储空间已经满啦，请尽快清理一下喵，不然可能收不到新的短信了哦！";
 /// 信号变化通知的默认文案（正文由后端组装，模板默认直接透出）。
 pub const DEFAULT_TPL_SIGNAL: &str = "{content}";
 /// 批量汇总的默认标题。
-pub const DEFAULT_TPL_BATCH: &str = "📑 批量通知汇总";
+pub const DEFAULT_TPL_BATCH: &str = "喵～有一批新通知需要查看哦，快来看看都有哪些消息吧！";
 
 #[derive(Debug, Clone)]
 pub struct NotifyTemplates {
