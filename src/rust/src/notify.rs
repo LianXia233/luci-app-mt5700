@@ -862,7 +862,7 @@ mod tests {
             bind_qq: String::new(),
         })
         .expect("配置应完整");
-        tokio::runtime::Runtime::new()
+        let _ = tokio::runtime::Runtime::new()
             .expect("runtime")
             .block_on(sender.send("QQ 机器人通知通道冒烟测试（QqSender 生产链路）"));
     }
@@ -876,5 +876,105 @@ mod tests {
 
     fn sender_of(target_type: &str) -> QqSender {
         QqSender::from_config(&qq_cfg(target_type)).expect("应构造成功")
+    }
+
+    /// 「事件 → 入队 → 合并窗口 → 文案模板渲染 → HTTP 投递」整条链路的回归用例。
+    ///
+    /// 用本地 TCP 监听充当 WebHook 接收端，断言**真正发出的报文内容**。
+    /// 这是「机器人推送未接入任何推送数据」缺陷最直接的回归保护：一旦
+    /// `run()` 又被改成「启动时无通道就退出」，或事件不再入队，本用例会因
+    /// 收不到请求而超时失败，而不会静默「通过」。
+    #[tokio::test]
+    async fn merged_push_renders_template_and_posts_to_webhook() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("监听应成功");
+        let port = listener.local_addr().expect("取端口").port();
+
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.expect("应收到 WebHook 请求");
+            let mut buf: Vec<u8> = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let n = match sock.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                buf.extend_from_slice(&chunk[..n]);
+                // 收到完整请求（头 + Content-Length 指定的正文）即停止读取
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&buf[..pos]).to_string();
+                    let len = head
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            if k.eq_ignore_ascii_case("content-length") {
+                                v.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if buf.len() >= pos + 4 + len {
+                        break;
+                    }
+                }
+            }
+            // post_webhook 要求 HTTP 200 且正文 errcode=0，否则会重试并判失败
+            let reply = r#"{"errcode":0,"errmsg":"ok"}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                reply.len(),
+                reply
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.flush().await;
+            String::from_utf8_lossy(&buf).to_string()
+        });
+
+        let mut cfg = crate::config::default_config().notification;
+        cfg.log_file = String::new();
+        cfg.wechat_webhook = format!("http://127.0.0.1:{port}/hook");
+        cfg.qq = QqNotifyConfig {
+            app_id: String::new(),
+            app_secret: String::new(),
+            target_type: "c2c".into(),
+            target_id: String::new(),
+            bind_qq: String::new(),
+        };
+        // 合并窗口压到 150ms，测试不必等 60 秒；模板换成可精确断言的固定格式
+        cfg.interval = Duration::from_millis(150);
+        cfg.templates.prefix = "[测试]".into();
+        cfg.templates.sms = "{kind}|{sender}|{content}|{time}|{count}".into();
+
+        let (notifier, rx) = Notifier::new(cfg);
+        let notifier = std::sync::Arc::new(notifier);
+        let (_ctx_tx, ctx_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn({
+            let notifier = notifier.clone();
+            async move { notifier.run(rx, ctx_rx).await }
+        });
+
+        notifier
+            .notify(Notification {
+                sender: "10086".into(),
+                content: "余额不足".into(),
+                kind: NotifyKind::Sms,
+                memory_full: false,
+                time: "2026-10-11 23:00:00".into(),
+            })
+            .await;
+
+        let raw = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("5 秒内应收到 WebHook 请求（事件未入队，或合并任务已提前退出）")
+            .expect("接收任务不应 panic");
+
+        assert!(raw.contains(r#""msgtype":"text""#), "报文缺少企业微信文本消息结构: {raw}");
+        assert!(
+            raw.contains("新短信|10086|余额不足|2026-10-11 23:00:00|1"),
+            "合并推送未按自定义模板渲染（占位符未替换或文案未生效）: {raw}"
+        );
+        assert!(raw.contains("[测试]"), "全局前缀未出现在推送内容中: {raw}");
     }
 }
