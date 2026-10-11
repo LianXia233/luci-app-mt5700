@@ -579,7 +579,9 @@ fn lock_summary(kind: &str, l: &BandLock) -> String {
     }
 }
 
-async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
+/// 可被关闭信号打断的睡眠。返回 `false` 表示收到关闭信号，调用方应退出。
+/// 供定时锁频与定时轮询推送（signalwatch）共用。
+pub(crate) async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
     let mut ctx_c = ctx.clone();
     tokio::select! {
         _ = tokio::time::sleep(d) => true,

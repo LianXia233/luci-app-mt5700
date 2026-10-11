@@ -157,9 +157,26 @@ impl Notifier {
         self.wechat_enabled() || self.qq_enabled() || self.qq_bind_pending
     }
 
-    /// 记录一条事件。日志立即落盘，推送进入合并队列。
+    /// 记录一条事件。
+    ///
+    /// 三条路径，按优先级判定：
+    /// 1. **总开关关闭**（`notify_enabled=0`）：不入队、不推送，但仍写本地通知日志
+    ///    （关的是「推送」而不是「记录」，留着事后追溯）；
+    /// 2. **实时事件**（短信 / 来电）：绕过合并窗口**立即直发**，用户要求这两类必须实时；
+    /// 3. 其余事件（信号 / 存储满）：进入合并窗口，窗口内多条合并成一条推送。
     pub async fn notify(&self, msg: Notification) {
+        if !self.cfg.enabled {
+            log_debug!("自动推送已关闭，事件仅记本地日志不推送: {}（{:?}）", msg.sender, msg.kind);
+            if let Some(path) = &self.log_file {
+                if let Err(e) = append_log(path, &msg) {
+                    log_error!("写入通知日志失败: {}", e);
+                }
+            }
+            return;
+        }
+
         if !self.enabled(msg.kind) {
+            log_debug!("该事件类型的推送开关已关闭，丢弃: {}（{:?}）", msg.sender, msg.kind);
             return;
         }
 
@@ -172,6 +189,15 @@ impl Notifier {
         if !self.dispatch_enabled() {
             return;
         }
+
+        // 短信与来电要求实时：直发，不进合并窗口。
+        // 若此刻正好没有可用通道（例如 bind 模式尚未绑定），仍走队列，
+        // 由 flush_all 在通道就绪后补发，避免实时性把事件直接丢掉。
+        if matches!(msg.kind, NotifyKind::Sms | NotifyKind::Call) {
+            self.send_realtime(&msg);
+            return;
+        }
+
         let sender = msg.sender.clone();
         let kind = msg.kind;
         if let Err(e) = self.tx.try_send(msg) {
@@ -184,6 +210,34 @@ impl Notifier {
                     log_error!("通知合并任务未在运行，事件已丢弃: {}（{:?}）", sender, kind)
                 }
             }
+        }
+    }
+
+    /// 实时直发：单条事件立即渲染并投递到所有通道，不经过合并窗口。
+    fn send_realtime(&self, msg: &Notification) {
+        let body = combine_messages(std::slice::from_ref(msg), &self.cfg.templates);
+        log_debug!("推送内容（实时直发）: {}", body);
+        self.dispatch_body(body);
+    }
+
+    /// 把渲染好的正文投递到所有已启用通道。
+    ///
+    /// 通道可用性在此刻同步判定、发送异步进行：投递失败由各自的重试与日志负责，
+    /// 不阻塞调用方（URC 分发循环与合并窗口都跑在关键路径上）。
+    fn dispatch_body(&self, body: String) {
+        let wechat = self.wechat_enabled();
+        let qq = self.current_qq();
+        if wechat {
+            let hook = self.cfg.wechat_webhook.clone();
+            let text = body.clone();
+            tokio::spawn(async move {
+                let _ = send_webhook(&hook, &text).await;
+            });
+        }
+        if let Some(qq) = qq {
+            tokio::spawn(async move {
+                let _ = qq.send(&body).await;
+            });
         }
     }
 
@@ -239,10 +293,14 @@ impl Notifier {
         if pending.is_empty() {
             return;
         }
-        let wechat = self.wechat_enabled();
-        let qq = self.current_qq();
-        if !wechat && qq.is_none() {
+        if !self.dispatch_enabled() {
             log_debug!("通知通道尚未就绪（QQ 绑定模式等待绑定），保留 {} 条待发事件", pending.len());
+            return;
+        }
+        // 总开关可能在事件入队后被关掉：此时保留队列无意义，直接丢弃并留痕。
+        if !self.cfg.enabled {
+            log_debug!("自动推送已关闭，丢弃 {} 条待发事件", pending.len());
+            pending.clear();
             return;
         }
 
@@ -253,14 +311,17 @@ impl Notifier {
         // 排障时不至于只能看「发送成功」却不知道发了什么。
         log_debug!("推送内容（合并 {} 条）: {}", count, body);
 
-        if wechat {
-            let hook = self.cfg.wechat_webhook.clone();
-            let body = body.clone();
-            tokio::spawn(async move { let _ = send_webhook(&hook, &body).await; });
-        }
-        if let Some(qq) = qq {
-            tokio::spawn(async move { let _ = qq.send(&body).await; });
-        }
+        self.dispatch_body(body);
+    }
+
+    /// 是否有可用的推送通道（供状态展示与测试）。
+    pub fn ready(&self) -> bool {
+        self.dispatch_enabled()
+    }
+
+    /// 自动推送总开关是否开启。
+    pub fn master_enabled(&self) -> bool {
+        self.cfg.enabled
     }
 
     /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过合并窗口直接发送。
@@ -976,5 +1037,229 @@ mod tests {
             "合并推送未按自定义模板渲染（占位符未替换或文案未生效）: {raw}"
         );
         assert!(raw.contains("[测试]"), "全局前缀未出现在推送内容中: {raw}");
+    }
+
+    /// 起一个「只接收一次请求」的本地 WebHook 接收端。
+    /// 返回端口与接收任务；接收任务在拿到完整请求（头 + 正文）后返回原始报文。
+    async fn one_shot_webhook() -> (u16, tokio::task::JoinHandle<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("监听应成功");
+        let port = listener.local_addr().expect("取端口").port();
+        let task = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.expect("应收到 WebHook 请求");
+            let mut buf: Vec<u8> = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let n = match sock.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&buf[..pos]).to_string();
+                    let len = head
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            if k.eq_ignore_ascii_case("content-length") {
+                                v.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if buf.len() >= pos + 4 + len {
+                        break;
+                    }
+                }
+            }
+            let reply = r#"{"errcode":0,"errmsg":"ok"}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                reply.len(),
+                reply
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.flush().await;
+            String::from_utf8_lossy(&buf).to_string()
+        });
+        (port, task)
+    }
+
+    /// 只配 WebHook、关掉 QQ 与日志文件的测试基线配置。
+    fn webhook_only_cfg(port: u16) -> NotificationConfig {
+        let mut cfg = crate::config::default_config().notification;
+        cfg.log_file = String::new();
+        cfg.wechat_webhook = format!("http://127.0.0.1:{port}/hook");
+        cfg.qq = QqNotifyConfig {
+            app_id: String::new(),
+            app_secret: String::new(),
+            target_type: "c2c".into(),
+            target_id: String::new(),
+            bind_qq: String::new(),
+        };
+        cfg
+    }
+
+    /// 总开关关闭：**只写本地日志，绝不外发**。
+    ///
+    /// 「关掉自动推送」不等于「关掉记录」——事后追溯仍需要日志，所以这里
+    /// 同时断言两件事：网络侧静默、磁盘侧留痕。
+    #[tokio::test]
+    async fn master_switch_off_logs_but_never_sends() {
+        let (port, server) = one_shot_webhook().await;
+
+        let mut cfg = webhook_only_cfg(port);
+        cfg.enabled = false;
+        let log_path = std::env::temp_dir().join(format!("at-notify-off-{port}.log"));
+        let _ = std::fs::remove_file(&log_path);
+        cfg.log_file = log_path.to_string_lossy().into_owned();
+        cfg.interval = Duration::from_millis(150);
+
+        let (notifier, rx) = Notifier::new(cfg);
+        let notifier = std::sync::Arc::new(notifier);
+        assert!(!notifier.master_enabled(), "总开关关闭时 master_enabled 应为 false");
+        let (_ctx_tx, ctx_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn({
+            let notifier = notifier.clone();
+            async move { notifier.run(rx, ctx_rx).await }
+        });
+
+        notifier
+            .notify(Notification {
+                sender: "10086".into(),
+                content: "总开关关闭时不应外发".into(),
+                kind: NotifyKind::Sms,
+                memory_full: false,
+                time: "2026-10-11 23:10:00".into(),
+            })
+            .await;
+
+        // 短信是「实时直发」路径，若总开关没有优先判定，这里必然会被连上
+        let got = tokio::time::timeout(Duration::from_millis(1200), server).await;
+        assert!(got.is_err(), "总开关关闭时不应发出任何推送请求");
+
+        let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(text.contains("10086"), "总开关关闭时仍应写本地通知日志，实际内容: {text}");
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    /// 短信 / 来电必须**实时**推送：不能等合并窗口攒够。
+    ///
+    /// 合并窗口设成 10 秒。若这两类事件走的是入队路径，2 秒内绝不可能收到
+    /// WebHook 请求，用例会因此失败——这正是「短信和来电需要实时推送」的回归保护。
+    #[tokio::test]
+    async fn sms_is_sent_immediately_bypassing_merge_window() {
+        let (port, server) = one_shot_webhook().await;
+
+        let mut cfg = webhook_only_cfg(port);
+        cfg.interval = Duration::from_secs(10);
+        cfg.templates.prefix = String::new();
+        cfg.templates.sms = "实时|{sender}|{content}".into();
+
+        let (notifier, rx) = Notifier::new(cfg);
+        let notifier = std::sync::Arc::new(notifier);
+        let (_ctx_tx, ctx_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn({
+            let notifier = notifier.clone();
+            async move { notifier.run(rx, ctx_rx).await }
+        });
+
+        notifier
+            .notify(Notification {
+                sender: "10086".into(),
+                content: "验证码 4321".into(),
+                kind: NotifyKind::Sms,
+                memory_full: false,
+                time: "2026-10-11 23:20:00".into(),
+            })
+            .await;
+
+        let raw = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("短信应实时直发，不该等 10 秒合并窗口")
+            .expect("接收任务不应 panic");
+        assert!(
+            raw.contains("实时|10086|验证码 4321"),
+            "实时推送的短信内容不符合模板: {raw}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_is_sent_immediately_bypassing_merge_window() {
+        let (port, server) = one_shot_webhook().await;
+
+        let mut cfg = webhook_only_cfg(port);
+        cfg.interval = Duration::from_secs(10);
+        cfg.templates.prefix = String::new();
+        cfg.templates.call = "来电实时|{content}".into();
+
+        let (notifier, rx) = Notifier::new(cfg);
+        let notifier = std::sync::Arc::new(notifier);
+        let (_ctx_tx, ctx_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn({
+            let notifier = notifier.clone();
+            async move { notifier.run(rx, ctx_rx).await }
+        });
+
+        notifier
+            .notify(Notification {
+                sender: SENDER_CALL.into(),
+                content: "13800138000 来电".into(),
+                kind: NotifyKind::Call,
+                memory_full: false,
+                time: "2026-10-11 23:21:00".into(),
+            })
+            .await;
+
+        let raw = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("来电应实时直发，不该等 10 秒合并窗口")
+            .expect("接收任务不应 panic");
+        assert!(
+            raw.contains("来电实时|13800138000 来电"),
+            "实时推送的来电内容不符合模板: {raw}"
+        );
+    }
+
+    /// 信号类事件仍应走合并窗口：它由定时轮询产生，频率可控且不需要秒级时效，
+    /// 走合并窗口才不会把 QQ 主动消息频控打满。
+    #[tokio::test]
+    async fn signal_still_uses_merge_window() {
+        let (port, server) = one_shot_webhook().await;
+
+        let mut cfg = webhook_only_cfg(port);
+        // 窗口 300ms：事件入队后要等窗口到期才发出，能证明它不是直发路径
+        cfg.interval = Duration::from_millis(300);
+        cfg.templates.prefix = String::new();
+        cfg.templates.signal = "巡检|{content}".into();
+
+        let (notifier, rx) = Notifier::new(cfg);
+        let notifier = std::sync::Arc::new(notifier);
+        let (_ctx_tx, ctx_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn({
+            let notifier = notifier.clone();
+            async move { notifier.run(rx, ctx_rx).await }
+        });
+
+        notifier
+            .notify(Notification {
+                sender: SENDER_SIGNAL.into(),
+                content: "RSRP -95 dBm".into(),
+                kind: NotifyKind::Signal,
+                memory_full: false,
+                time: "2026-10-11 23:22:00".into(),
+            })
+            .await;
+
+        let raw = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("信号事件应在合并窗口到期后发出")
+            .expect("接收任务不应 panic");
+        assert!(
+            raw.contains("巡检|RSRP -95 dBm"),
+            "合并推送的信号内容不符合模板: {raw}"
+        );
     }
 }
