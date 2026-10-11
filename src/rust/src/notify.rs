@@ -894,7 +894,7 @@ mod tests {
     fn default_single_sms_keeps_legacy_layout() {
         let tpl = NotifyTemplates::default();
         let out = combine_messages(&[sms("10086", "验证码 1234")], &tpl);
-        assert_eq!(out, "📱 新短信通知\n发送者: 10086\n内容: 验证码 1234");
+        assert_eq!(out, "喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: 10086\n内容: 验证码 1234");
     }
 
     #[test]

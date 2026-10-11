@@ -23,6 +23,10 @@ const fixtures = require(path.join(HERE, 'sms-fixtures.js'));
 let pass = 0;
 let fail = 0;
 
+function dirsOf(bubbles) {
+	return bubbles.map((b) => (b.className.indexOf('mt5700-sms-bubble-sent') >= 0 ? 'S' : 'R')).join('');
+}
+
 function check(name, actual, expected) {
 	const a = JSON.stringify(actual);
 	const e = JSON.stringify(expected);
@@ -37,21 +41,22 @@ function check(name, actual, expected) {
 
 /* ==================== 1. 装载 parse.js（剥 LuCI 语法糖） ==================== */
 
-function loadParse() {
+function loadParse(ls) {
 	const src = fs.readFileSync(path.join(RES, 'at-webserver/parse.js'), 'utf8');
 	let code = src.replace("'require baseclass';", '');
 	const tail = code.indexOf('var ParseClass = L.Class.extend(Parse);');
 	if (tail < 0) throw new Error('parse.js 尾部包装未找到，剥离逻辑需要更新');
 	code = code.slice(0, tail) + '\nmodule.exports = Parse;\n';
 
-	const sandbox = { module: { exports: {} }, console: console, localStorage: makeLocalStorage() };
+	const sandbox = { module: { exports: {} }, console: console, localStorage: ls || makeLocalStorage() };
 	vm.createContext(sandbox);
 	vm.runInContext(code, sandbox, { filename: 'parse.js' });
 	return sandbox.module.exports;
 }
 
-function makeLocalStorage() {
-	const store = {};
+	function makeLocalStorage(initial) {
+	/* 允许预置内容：验证「模组有该条、缓存也有」时时间戳是否被正确吸收 */
+	const store = Object.assign({}, initial);
 	return {
 		getItem: (k) => (k in store ? store[k] : null),
 		setItem: (k, v) => { store[k] = String(v); },
@@ -147,7 +152,7 @@ function textsOf(nodes) {
 const pduList = fixtures.buildConversations();
 const cmgl = fixtures.cmglText(pduList);
 
-function loadView(Parse) {
+function loadView(Parse, ls) {
 	const src = fs.readFileSync(path.join(RES, 'view/at-webserver/sms_center.js'), 'utf8');
 	/* 去掉 LuCI 的 `'require x/y';` 头部与 'use strict'，剩下就是标准 JS */
 	const body = src
@@ -212,7 +217,7 @@ function loadView(Parse) {
 
 	const L = { view: { extend: (def) => def } };
 	const view = factory(
-		L, E, Mt5700, Ui, Parse, AtWs, SmsEncode, documentStub, makeLocalStorage(), {}, console
+		L, E, Mt5700, Ui, Parse, AtWs, SmsEncode, documentStub, ls || makeLocalStorage(), {}, console
 	);
 	const page = view.render.call(view);
 	return { page, calls };
@@ -221,7 +226,13 @@ function loadView(Parse) {
 /* ==================== 4. 断言 ==================== */
 
 async function main() {
-	const Parse = loadParse();
+	/*
+	 * parse.js（vm 沙箱）与 sms_center.js 必须共用同一个 localStorage ——
+	 * 已发短信缓存就存在里面，两边各拿一个空 store 的话缓存永远读不到，
+	 * 「模组那条没有时刻、由缓存补上」这条路径就测不到。
+	 */
+	const ls = makeLocalStorage();
+	const Parse = loadParse(ls);
 
 	console.log('=== 0. 夹具自检：PDU 能被解析出方向与时间 ===');
 	const parsedDirect = pduList.map((it) => Parse.decodeIncomingPdu(it.pdu));
@@ -232,7 +243,7 @@ async function main() {
 	check('绝对 VP 的 SUBMIT 标记为近似时间', parsedDirect[5].timeApprox, true);
 
 	console.log('\n=== 1. 渲染（refresh → parseCMGL → 聚合 → 分区）===');
-	const { page, calls } = loadView(Parse);
+	const { page, calls } = loadView(Parse, ls);
 	/* refresh 走 Promise，等微任务队列清空后再读 DOM */
 	await new Promise((r) => setImmediate(r));
 	await new Promise((r) => setImmediate(r));
@@ -260,19 +271,32 @@ async function main() {
 	check('不再使用分区结构', findAll(page._body, 'mt5700-sms-section').length, 0);
 	const days = findAll(page._body, 'mt5700-sms-date');
 	check('存在日期分隔条', days.length >= 1, true);
+	/*
+	 * 借位置的那条（无发送时刻的发出短信）日期并入当天，不再单独起一档
+	 * 「时间未知的消息」—— 否则一次来回会被劈成两半，就不像对话了。
+	 */
+	check('没有插入「时间未知的消息」分隔条',
+		days.map((d) => d.textContent).indexOf('时间未知的消息'), -1);
 	check('日期条格式', /^20\d{2}-\d{2}-\d{2}$/.test(days[0].textContent), true);
 
 	let bubbles = findAll(page._body, 'mt5700-sms-bubble');
 	check('气泡总数（收发混排，不再拆两块）', bubbles.length, 3);
-	check('内容按时间升序（时间未知的排最后）', textsOf(bubbles.map((b) => b.childNodes[0])), [
+	/*
+	 * 真实时间线是「对面问 → 我答 → 对面再答」。发出短信的 SUBMIT PDU 按规范
+	 * 不含发送时刻，早先的实现会把它沉到会话末尾，渲染成「左、左、右」——
+	 * 一次来回被打散。现在借模组存储序号就近插入，才是真正的你一句我一句。
+	 */
+	check('收发按对话顺序交替（你一句我一句）', textsOf(bubbles.map((b) => b.childNodes[0])), [
 		'明天上午的评审改到十点，方便吗？',
-		'好，会议室在 3 号楼 502。',
-		'方便，我九点半到会议室。'
+		'方便，我九点半到会议室。',
+		'好，会议室在 3 号楼 502。'
 	]);
+	check('方向序列 = 收-发-收', dirsOf(bubbles), 'RSR');
 	check('第 1 条是收到的气泡（左）', bubbles[0].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
-	check('第 2 条是收到的气泡（左）', bubbles[1].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
-	check('第 3 条是发出的气泡（右）', bubbles[2].className.indexOf('mt5700-sms-bubble-sent') >= 0, true);
-	check('未知时间如实标注', bubbles[2].childNodes[1].textContent, '时间未知');
+	check('第 2 条是发出的气泡（右）', bubbles[1].className.indexOf('mt5700-sms-bubble-sent') >= 0, true);
+	check('第 3 条是收到的气泡（左）', bubbles[2].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
+	/* 借位置只借顺序，时刻照旧如实标注，不把推断出来的位置伪装成真实时刻 */
+	check('借位置的那条仍如实标「时间未知」', bubbles[1].childNodes[1].textContent, '时间未知');
 	check('气泡内只留时刻（日期由分隔条承担）', /^\d{2}:\d{2}:\d{2}$/.test(bubbles[0].childNodes[1].textContent), true);
 	const recvA = [bubbles[0]];
 
@@ -302,6 +326,43 @@ async function main() {
 		recvA[0].childNodes[1].textContent, pduList[0].display.split(',')[1]);
 	check('夹具期望值确实是北京时间口径', pduList[0].display.slice(0, 2),
 		String(fixtures.beijingParts(-32).year).padStart(2, '0'));
+
+	console.log('\n=== 6. 缓存里有本机发送时刻 → 补给模组那条（不丢时间信息）===');
+	/*
+	 * 模组存回来的 SMS-SUBMIT 不含发送时刻，而缓存那条是本机发送当时打的时间戳
+	 * —— 缓存才是唯一带准确时间的一份。早先的实现去重时保留模组那份、丢掉缓存
+	 * 那份，等于把时间信息一并扔了。这里预置一条缓存记录验证它被「吸收」：
+	 * 气泡仍是 3 条（不重复），且发出那条拿到了本机时刻。
+	 */
+	/*
+	 * 夹具里这条发出的短信实际发生在「现在 − 30 分钟」（见 sms-fixtures.js 的
+	 * defs 里 index 2 的 offset），而它的 SUBMIT PDU 不带发送时刻 ——
+	 * 这个真实时刻正是本机缓存要补上去的那份信息。
+	 */
+	const bp = fixtures.beijingParts(-30);
+	const pad2 = (n) => String(n).padStart(2, '0');
+	const cachedTime = `${pad2(bp.year)}/${pad2(bp.month)}/${pad2(bp.day)},`
+		+ `${pad2(bp.hour)}:${pad2(bp.minute)}:${pad2(bp.second)}`;
+	const ls2 = makeLocalStorage();
+	ls2.setItem(Parse.SMS_CACHE_KEY, JSON.stringify([{
+		index: -Date.now(),
+		content: pduList[1].content,
+		number: pduList[1].number,
+		time: cachedTime,
+		type: 'sent'
+	}]));
+	const Parse2 = loadParse(ls2);
+	const r2 = loadView(Parse2, ls2);
+	await new Promise((r) => setImmediate(r));
+	await new Promise((r) => setImmediate(r));
+	const items2 = findAll(r2.page._body, 'mt5700-sms-item');
+	const nums2 = items2.map((n) => n.childNodes[0].textContent);
+	items2[nums2.indexOf(pduList[1].number)].dispatch('click');
+	const b2 = findAll(r2.page._body, 'mt5700-sms-bubble');
+	check('缓存被吸收，气泡仍是 3 条（不重复显示）', b2.length, 3);
+	check('方向序列仍是 收-发-收', dirsOf(b2), 'RSR');
+	check('发出那条拿到了本机发送时刻（不再是「时间未知」）',
+		b2[1].childNodes[1].textContent, cachedTime.split(',')[1]);
 
 	console.log(`\n合计: ${pass} 通过, ${fail} 失败`);
 	process.exit(fail ? 1 : 0);

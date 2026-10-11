@@ -179,9 +179,9 @@ pub fn valid_hhmm(v: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// 单条短信通知的默认文案。
-pub const DEFAULT_TPL_SMS: &str = "📱 新短信通知\n发送者: {sender}\n内容: {content}";
+pub const DEFAULT_TPL_SMS: &str = "喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: {sender}\n内容: {content}";
 /// 来电通知的默认文案。
-pub const DEFAULT_TPL_CALL: &str = "📞 来电提醒\n{content}";
+pub const DEFAULT_TPL_CALL: &str = "喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}";
 /// 短信存储满通知的默认文案。
 pub const DEFAULT_TPL_MEMORY: &str = "⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信";
 /// 信号变化通知的默认文案（正文由后端组装，模板默认直接透出）。
@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn unescape_template_leaves_plain_text_untouched() {
-        assert_eq!(unescape_template("📱 新短信通知"), "📱 新短信通知");
+        assert_eq!(unescape_template("喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~"), "喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~");
         assert_eq!(unescape_template(""), "");
     }
 

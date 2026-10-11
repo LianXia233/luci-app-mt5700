@@ -640,8 +640,8 @@ return L.view.extend({
 		 * 仅用于「恢复默认文案」按钮与初始回填，后端始终以自己的默认为准。 */
 		var TPL_DEFAULTS = {
 			prefix: '',
-			sms: '📱 新短信通知\n发送者: {sender}\n内容: {content}',
-			call: '📞 来电提醒\n{content}',
+			sms: '喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: {sender}\n内容: {content}',
+			call: '喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}',
 			signal: '{content}',
 			memory: '⚠️ 警告：短信存储空间已满\n请及时处理，否则可能无法接收新短信',
 			batch: '📑 批量通知汇总'
