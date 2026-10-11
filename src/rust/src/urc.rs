@@ -601,35 +601,83 @@ pub(crate) async fn query_monsc(
     info
 }
 
-/// 查询服务载波的下行频点与带宽（`AT^HFREQINFO?`）→ `(dl_freq_khz, dl_bw_khz)`。
+/// `^HFREQINFO?` 解析出的主载波信息（手册 13.16.3）。
+#[derive(Debug, Clone)]
+pub(crate) struct HfreqCarrier {
+    /// 制式名（`NR` / `LTE` / `WCDMA` / `GSM`），由 `<sysmode>` 编码翻译而来。
+    pub sysmode: String,
+    /// 频段号 `<band>`：NR 记 n 号、LTE 记 B 号（此处只存数字，前缀由渲染侧按制式补）。
+    pub band: Option<u32>,
+    /// 下行频点（kHz）。
+    pub dl_freq_khz: f64,
+    /// 下行带宽（kHz）；0 表示模组未给出。
+    pub dl_bw_khz: f64,
+}
+
+/// 查询服务载波信息（`AT^HFREQINFO?`）。
 ///
 /// 手册 13.16.3 字段顺序（实测 NR n41）：
 /// `^HFREQINFO:<n>,<sysmode>,<band>,<dl_fcn>,<dl_freq>,<dl_bw>,<ul_fcn>,<ul_freq>,<ul_bw>`
-/// 例如 `0,7,41,513000,2565000,100000,...` → 下行 2565 MHz / 100 MHz。
+/// 例如 `0,7,41,513000,2565000,100000,...` → 制式 NR、**band 41**、
+/// 下行 2565 MHz / 100 MHz。
+///
+/// `<band>` 就是推送里要显示的「具体频段」，此前只取了频点与带宽、把它丢掉了，
+/// 于是文案只能笼统写「中频 2565 MHz」，用户看不到 n41 / B3 这样的频段号。
+///
 /// 多载波时取第一个（主载波）——推送文案不需要逐载波展开。
 pub(crate) async fn query_hfreqinfo(
     client: &AtClient,
     ctx: &tokio::sync::watch::Receiver<bool>,
-) -> Option<(f64, f64)> {
+) -> Option<HfreqCarrier> {
     let resp = client
         .send_command(ctx, "AT^HFREQINFO?", crate::atclient::COMMAND_TIMEOUT, None)
         .await
         .ok()?;
     for line in &resp.lines {
-        if !line.contains("^HFREQINFO:") {
-            continue;
-        }
-        let parts = split_fields(line, "^HFREQINFO:");
-        if parts.len() < 6 {
-            continue;
-        }
-        let dl_freq = parts[4].parse::<f64>().ok()?;
-        let dl_bw = parts[5].parse::<f64>().ok()?;
-        if dl_freq > 0.0 {
-            return Some((dl_freq, dl_bw));
+        if let Some(c) = parse_hfreq_line(line) {
+            return Some(c);
         }
     }
     None
+}
+
+/// 解析一行 `^HFREQINFO:` 文本。
+///
+/// 抽成纯函数是为了能用**实机原始应答**做回归 —— 频段号此前被整段忽略，
+/// 这类「字段取错下标」的缺陷只有对着真包才看得出来。
+fn parse_hfreq_line(line: &str) -> Option<HfreqCarrier> {
+    if !line.contains("^HFREQINFO:") {
+        return None;
+    }
+    let parts = split_fields(line, "^HFREQINFO:");
+    if parts.len() < 6 {
+        return None;
+    }
+    let dl_freq = parts[4].parse::<f64>().ok()?;
+    // 未注册 / 无服务时模组把频点填 0，这不是「0 Hz」而是「没有读数」
+    if dl_freq <= 0.0 {
+        return None;
+    }
+    Some(HfreqCarrier {
+        sysmode: hfreq_sysmode_name(&parts[1]),
+        band: parts[2].trim().parse::<u32>().ok().filter(|v| *v > 0),
+        dl_freq_khz: dl_freq,
+        dl_bw_khz: parts[5].parse::<f64>().unwrap_or(0.0),
+    })
+}
+
+/// `^HFREQINFO` 的 `<sysmode>` 编码（手册 13.16.3）：`1` GSM / `3` WCDMA / `6` LTE / `7` NR。
+///
+/// 注意：这与 `^SYSINFOEX` 的 `<sysmode>`（`6`=LTE、`11`=NR-5GC）**不是同一张表**，
+/// 两者数值含义不同，不可混用。
+fn hfreq_sysmode_name(code: &str) -> String {
+    match code.trim().trim_matches('"') {
+        "1" => "GSM".into(),
+        "3" => "WCDMA".into(),
+        "6" => "LTE".into(),
+        "7" => "NR".into(),
+        other => other.to_string(),
+    }
 }
 
 /// 从一行上报文本里解析信号读数 → `(RSRP dBm, 制式)`。
@@ -753,5 +801,37 @@ mod tests {
         assert_eq!(signal_level(-90.0), "良好");
         assert_eq!(signal_level(-100.0), "一般");
         assert_eq!(signal_level(-110.0), "较差");
+    }
+
+    // ---- ^HFREQINFO 载波解析 ----
+
+    #[test]
+    fn hfreq_line_parses_band_and_sysmode() {
+        // 实机原始应答（MT5700M-CN，NR n41，下行 100 MHz）
+        let line = "^HFREQINFO: 0,7,41,513000,2565000,100000,513000,2565000,100000";
+        let c = parse_hfreq_line(line).expect("应解析成功");
+        assert_eq!(c.sysmode, "NR", "sysmode=7 应译为 NR（手册 13.16.3）");
+        assert_eq!(c.band, Some(41), "band_classN 必须取到，否则推送显示不出 n41");
+        assert_eq!(c.dl_freq_khz, 2_565_000.0);
+        assert_eq!(c.dl_bw_khz, 100_000.0);
+    }
+
+    #[test]
+    fn hfreq_sysmode_codes_differ_from_sysinfoex() {
+        // ^HFREQINFO：6=LTE / 7=NR；^SYSINFOEX：6=LTE / 11=NR-5GC。
+        // 两张表不是一回事，混用会把 LTE 误判成 NR 之类。
+        assert_eq!(hfreq_sysmode_name("1"), "GSM");
+        assert_eq!(hfreq_sysmode_name("3"), "WCDMA");
+        assert_eq!(hfreq_sysmode_name("6"), "LTE");
+        assert_eq!(hfreq_sysmode_name("7"), "NR");
+        assert_eq!(hfreq_sysmode_name("11"), "11", "11 不在本表内，应原样保留");
+    }
+
+    #[test]
+    fn hfreq_line_rejects_missing_or_zero_freq() {
+        assert!(parse_hfreq_line("OK").is_none());
+        assert!(parse_hfreq_line("^HFREQINFO: 0,7,41,513000").is_none(), "字段不足应拒绝");
+        // 未注册时频点为 0，若当成合法读数就会渲染出「0 MHz」这种假信息
+        assert!(parse_hfreq_line("^HFREQINFO: 0,7,41,0,0,0,0,0,0").is_none());
     }
 }

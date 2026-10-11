@@ -157,12 +157,26 @@ impl SignalWatcher {
             }
         }
 
-        let (dl_freq_khz, dl_bw_khz) = match query_hfreqinfo(&self.client, ctx).await {
-            Some((f, b)) => (Some(f), if b > 0.0 { Some(b) } else { None }),
-            None => (None, None),
+        let hf = query_hfreqinfo(&self.client, ctx).await;
+        // 制式优先信 MONSC；它没给出时用 HFREQINFO 的 sysmode 兜底，
+        // 否则会出现「拿到了频段号、却不知道该写成 n41 还是 B41」的尴尬。
+        if rat.trim().is_empty() || rat == "未知" {
+            if let Some(info) = &hf {
+                if !info.sysmode.is_empty() {
+                    rat = info.sysmode.clone();
+                }
+            }
+        }
+        let (dl_freq_khz, dl_bw_khz, band) = match &hf {
+            Some(info) => (
+                Some(info.dl_freq_khz),
+                if info.dl_bw_khz > 0.0 { Some(info.dl_bw_khz) } else { None },
+                info.band,
+            ),
+            None => (None, None, None),
         };
 
-        Some(Sample { rat, rsrp: rsrp?, rsrq, sinr, dl_freq_khz, dl_bw_khz })
+        Some(Sample { rat, rsrp: rsrp?, rsrq, sinr, dl_freq_khz, dl_bw_khz, band })
     }
 
     /// 回退路径：`AT^HCSQ?` 只给强度，但字段位置随制式不同，解析复用 URC 那套。
@@ -215,6 +229,9 @@ pub struct Sample {
     pub sinr: Option<f64>,
     pub dl_freq_khz: Option<f64>,
     pub dl_bw_khz: Option<f64>,
+    /// 频段号，取自 `AT^HFREQINFO?` 的 `<band>`（NR 为 n 号、LTE 为 B 号）。
+    /// 这是推送里要显示「具体频段」的唯一来源——按频率反查频段会在边界上猜错。
+    pub band: Option<u32>,
 }
 
 /// 把 MONSC 的字符串字段解析成数值；空串、非数字、0 都视为「无读数」。
@@ -257,62 +274,97 @@ pub fn render_report(sample: &Sample, now: &str) -> String {
 }
 
 /// 用已算好的评估渲染推送文案。
+///
+/// 两条硬约束：
+/// 1. **与网页「射频信号质量」卡片同源同口径** —— 等级、状态短语、网络能力总评必须
+///    一致，否则同一时刻两处结论不同会直接损害可信度；
+/// 2. **排布要紧凑** —— 推送是纯文本、手机上要一眼看完，因此制式进标题、
+///    频段与带宽合成一行、总评一行、四个指标各一行，不再分「制式」「载波」两段。
 pub fn render_report_with(assessment: &Assessment, sample: &Sample, now: &str) -> String {
-    let mut out = String::from("📶 信号巡检\n");
-    out.push_str(&format!("时间: {now}\n"));
+    // 代际标签（5G / 4G）沿用能力档里「网络制式」的取值，保证与总评同一口径
+    let gen = assessment
+        .capability
+        .iter()
+        .find(|c| c.label == "网络制式")
+        .map(|c| c.value.clone())
+        .unwrap_or_default();
+
+    let mut out = if gen.is_empty() {
+        String::from("📶 信号巡检\n")
+    } else {
+        format!("📶 {gen} 信号巡检\n")
+    };
+    out.push_str(&format!("时间：{now}\n"));
+
+    // 频段行：频段号 · 下行频点 / 带宽（缺哪项就少哪项，不写占位符）
+    let band = band_label(&sample.rat, sample.band);
+    let mut freq_part = String::new();
+    if let Some(freq) = sample.dl_freq_khz {
+        freq_part = format!("{} MHz", fmt_num(freq / 1000.0));
+        if let Some(bw) = sample.dl_bw_khz {
+            freq_part.push_str(&format!(" / {} MHz", fmt_num(bw / 1000.0)));
+        }
+    } else if let Some(bw) = sample.dl_bw_khz {
+        freq_part = format!("带宽 {} MHz", fmt_num(bw / 1000.0));
+    }
+    let bw_note = assessment
+        .capability
+        .iter()
+        .find(|c| c.label == "载波带宽")
+        .map(|c| format!("（{}）", c.note))
+        .unwrap_or_default();
+    let mut parts: Vec<String> = Vec::new();
+    if !band.is_empty() {
+        parts.push(band);
+    }
+    if !freq_part.is_empty() {
+        parts.push(freq_part);
+    }
+    if !parts.is_empty() {
+        out.push_str(&format!("频段：{}{bw_note}\n", parts.join(" · ")));
+    }
 
     if let Some(v) = &assessment.verdict {
-        // title 形如「网络能力优秀」，此处已在上文标了「网络能力:」，去掉重复前缀
+        // title 形如「网络能力优秀」，去掉重复前缀后与建议并成一行
         let short = v.title.strip_prefix("网络能力").unwrap_or(v.title);
-        out.push_str(&format!("网络能力: {short}\n{}\n", v.advice));
+        out.push_str(&format!("网络能力：{short} —— {}\n", v.advice));
     }
     out.push('\n');
 
     out.push_str(&format!(
-        "信号强度 RSRP（基准 ≥ -80）: {} dBm  {}（{}）\n",
+        "RSRP {} dBm（≥ -80）  {} · {}\n",
         fmt_num(sample.rsrp),
         grade_text(assessment.rsrp),
         grade_status(assessment.rsrp)
     ));
     if let (Some(v), Some(g)) = (sample.rsrq, assessment.rsrq) {
-        out.push_str(&format!("信号质量 RSRQ（基准 ≥ -10）: {} dB  {}（{}）\n", fmt_num(v), g.text, g.status));
+        out.push_str(&format!("RSRQ {} dB（≥ -10）  {} · {}\n", fmt_num(v), g.text, g.status));
     }
     if let (Some(v), Some(g)) = (sample.sinr, assessment.sinr) {
-        out.push_str(&format!("信噪比 SINR（基准 ≥ 20）: {} dB  {}（{}）\n", fmt_num(v), g.text, g.status));
+        out.push_str(&format!("SINR {} dB（≥ 20）  {} · {}\n", fmt_num(v), g.text, g.status));
     }
     if let (Some(pct), Some(g)) = (assessment.signal_percent, assessment.pct) {
-        out.push_str(&format!("综合信号 SIGNAL（满分 100%）: {pct} %  {}（{}）\n", g.text, g.status));
-    }
-
-    // 制式与载波：总评的第二层证据（能力档），写出来用户才知道总评是怎么来的
-    if !sample.rat.trim().is_empty() {
-        let gen = assessment
-            .capability
-            .iter()
-            .find(|c| c.label == "网络制式")
-            .map(|c| format!("（{}）", c.value))
-            .unwrap_or_default();
-        out.push_str(&format!("\n制式: {}{gen}\n", sample.rat));
-    }
-    if let Some(freq) = sample.dl_freq_khz {
-        let band = assessment.capability.iter().find(|c| c.label == "频段特性");
-        let bw = sample
-            .dl_bw_khz
-            .map(|b| format!(" · 带宽 {} MHz", fmt_num(b / 1000.0)))
-            .unwrap_or_default();
-        let note = assessment
-            .capability
-            .iter()
-            .find(|c| c.label == "载波带宽")
-            .map(|c| format!("（{}）", c.note))
-            .unwrap_or_default();
-        match band {
-            Some(c) => out.push_str(&format!("载波: {}{bw}{note}\n", c.value)),
-            None => out.push_str(&format!("载波: {} MHz{bw}{note}\n", fmt_num(freq / 1000.0))),
-        }
+        out.push_str(&format!("SIGNAL {pct}%（满分）  {} · {}\n", g.text, g.status));
     }
 
     out.trim_end().to_string()
+}
+
+/// 频段号显示：NR 用 `n` 前缀、LTE 用 `B` 前缀（3GPP 书写惯例）；
+/// 制式未知时退回中性的 `Band <n>`，不去猜它到底是 4G 还是 5G。
+fn band_label(rat: &str, band: Option<u32>) -> String {
+    let b = match band {
+        Some(v) if v > 0 => v,
+        _ => return String::new(),
+    };
+    let r = rat.trim().to_ascii_uppercase();
+    if r.contains("NR") {
+        format!("n{b}")
+    } else if r.contains("LTE") {
+        format!("B{b}")
+    } else {
+        format!("Band {b}")
+    }
 }
 
 /// 指标值格式化：整数不带小数点，非整数保留一位（-10 → "-10"，-9.5 → "-9.5"）。
@@ -520,6 +572,7 @@ mod tests {
             sinr: Some(28.0),
             dl_freq_khz: Some(2_565_000.0),
             dl_bw_khz: Some(100_000.0),
+            band: Some(41),
         }
     }
 
@@ -528,17 +581,16 @@ mod tests {
         // 推送内容必须与网页「射频信号质量」卡片逐项对齐：
         // 指标名 + 基准 + 实测值 + 档位 + 状态短语 + 网络能力总评
         let text = render_report(&full_sample(), "2026-10-11 23:43:12");
-        assert!(text.starts_with("📶 信号巡检"), "实际: {text}");
-        assert!(text.contains("时间: 2026-10-11 23:43:12"));
-        assert!(text.contains("网络能力: 优秀"), "总评缺少档位: {text}");
-        assert!(text.contains("信号与频段带宽俱佳"), "总评缺少可执行建议: {text}");
-        assert!(text.contains("信号强度 RSRP（基准 ≥ -80）: -62 dBm  极佳（覆盖极佳）"), "实际: {text}");
-        assert!(text.contains("信号质量 RSRQ（基准 ≥ -10）: -10 dB  极佳（纯净通畅）"), "实际: {text}");
-        assert!(text.contains("信噪比 SINR（基准 ≥ 20）: 28 dB  极佳（顶速阶数）"), "实际: {text}");
-        assert!(text.contains("综合信号 SIGNAL（满分 100%）: 100 %  极佳（满格服务）"), "实际: {text}");
-        assert!(text.contains("制式: NR（5G）"), "实际: {text}");
-        assert!(text.contains("载波: 中频 2565 MHz · 带宽 100 MHz"), "实际: {text}");
-        assert!(text.ends_with("）"), "报告末尾不应留多余空行: {text:?}");
+        // 制式（4G/5G）进标题，频段号与带宽合并在「频段」行 —— 这是本版新增的信息
+        assert!(text.starts_with("📶 5G 信号巡检"), "标题缺少 5G 代际: {text}");
+        assert!(text.contains("时间：2026-10-11 23:43:12"));
+        assert!(text.contains("频段：n41 · 2565 MHz / 100 MHz"), "缺少具体频段号: {text}");
+        assert!(text.contains("网络能力：优秀 —— 信号与频段带宽俱佳"), "总评缺少档位或建议: {text}");
+        assert!(text.contains("RSRP -62 dBm（≥ -80）  极佳 · 覆盖极佳"), "实际: {text}");
+        assert!(text.contains("RSRQ -10 dB（≥ -10）  极佳 · 纯净通畅"), "实际: {text}");
+        assert!(text.contains("SINR 28 dB（≥ 20）  极佳 · 顶速阶数"), "实际: {text}");
+        assert!(text.contains("SIGNAL 100%（满分）  极佳 · 满格服务"), "实际: {text}");
+        assert!(!text.ends_with('\n'), "报告末尾不应留多余空行: {text:?}");
     }
 
     #[test]
@@ -552,14 +604,15 @@ mod tests {
             sinr: None,
             dl_freq_khz: None,
             dl_bw_khz: None,
+            band: None,
         };
         let text = render_report(&s, "t");
-        assert!(text.contains("信号强度 RSRP"));
-        assert!(text.contains("信号质量 RSRQ"));
-        assert!(!text.contains("信噪比 SINR"), "无读数时不该输出该行: {text}");
-        assert!(!text.contains("载波:"), "无频点信息时不该输出载波行: {text}");
-        assert!(text.contains("制式: LTE（4G）"));
-        assert!(text.contains("网络能力: 良好"), "缺失项不应把总评压成极差: {text}");
+        assert!(text.starts_with("📶 4G 信号巡检"), "LTE 应显示为 4G: {text}");
+        assert!(text.contains("RSRP -75 dBm"));
+        assert!(text.contains("RSRQ -9 dB"));
+        assert!(!text.contains("SINR"), "无读数时不该输出该行: {text}");
+        assert!(!text.contains("频段："), "无频点信息时不该输出频段行: {text}");
+        assert!(text.contains("网络能力：良好"), "缺失项不应把总评压成极差: {text}");
     }
 
     #[test]
@@ -567,9 +620,11 @@ mod tests {
         let mut s = full_sample();
         s.rat = "  ".into();
         let text = render_report(&s, "t");
-        assert!(!text.contains("制式:"), "制式未知时不该输出制式行: {text}");
+        assert!(text.starts_with("📶 信号巡检"), "制式未知时标题不该带代际: {text}");
+        // 频段号仍要显示，但不能猜前缀 —— 未知制式用中性的 Band 41
+        assert!(text.contains("频段：Band 41"), "实际: {text}");
         // 能力档仍由频段与带宽支撑，总评不受影响
-        assert!(text.contains("网络能力: 优秀"), "实际: {text}");
+        assert!(text.contains("网络能力：优秀"), "实际: {text}");
     }
 
     #[test]
@@ -589,5 +644,16 @@ mod tests {
         assert_eq!(parse_db("0"), None);
         assert_eq!(parse_db("--"), None);
         assert_eq!(parse_db("\"\"") , None);
+    }
+
+    #[test]
+    fn band_label_uses_rat_specific_prefix() {
+        // NR 记 n 号、LTE 记 B 号（3GPP 书写惯例）；
+        // 制式未知时不猜代际，退回中性的 Band <n>
+        assert_eq!(band_label("NR", Some(41)), "n41");
+        assert_eq!(band_label("LTE", Some(3)), "B3");
+        assert_eq!(band_label("  ", Some(41)), "Band 41");
+        assert_eq!(band_label("NR", None), "", "没有频段号就不该编造前缀");
+        assert_eq!(band_label("NR", Some(0)), "", "0 不是合法频段号");
     }
 }
