@@ -9,8 +9,11 @@
 //! 四类事件的分工（决定了谁实时、谁轮询）：
 //! - 短信：模组主动上报 `+CMTI:` → urc.rs → **实时直发**
 //! - 来电：模组主动上报 `RING` → urc.rs → **实时直发**
-//! - 存储满：模组主动上报 `^SMMEMFULL` → urc.rs → 合并窗口
-//! - 信号：模组**不**上报 → 本模块定时轮询 → 合并窗口
+//! - 存储满：模组主动上报 `^SMMEMFULL` → urc.rs → 实时直发
+//! - 信号：模组**不**上报 → 本模块定时轮询 → 实时直发
+//!
+//! 另有 `timerpush` 按 `notify_timer_interval`（分钟）周期性推送当前状态快照，
+//! 与本模块是两条独立周期线：本模块抓突变，它做保底。
 //!
 //! 读数换算复用 `urc::parse_signal_reading`：轮询与 URC 两条路径必须是同一套
 //! 规则，否则同一信号会出现两个不同的 dBm 值。
@@ -139,64 +142,16 @@ impl SignalWatcher {
     /// 状态卡同源）；`AT^HFREQINFO?` 补上频点与带宽，供网络能力总评使用。
     /// 若 MONSC 没给出可用 RSRP（个别制式或未注册时为空/0），回退 `AT^HCSQ?`
     /// ——它至少能给一个强度读数，宁可少几项明细也不要整轮不出声。
+    /// 采样一次完整信号状态。
+    ///
+    /// 薄包装：真正的实现是 [`sample_signal`]。定时推送（timerpush.rs）要复用
+    /// **同一套采样规则** —— 两条周期线若各采各的，同一时刻的 RSRP 可能差几个
+    /// dB，用户会以为设备在骗人。
     async fn sample(&self, ctx: &watch::Receiver<bool>) -> Option<Sample> {
-        let monsc = query_monsc(&self.client, ctx).await;
-        let mut rat = monsc.rat.clone();
-        // RSRP/RSRQ 恒为负值；0 与空串都表示「无有效读数」而不是真实值
-        let mut rsrp = parse_db(&monsc.rsrp).filter(|v| *v < 0.0 && *v > -200.0);
-        let rsrq = parse_db(&monsc.rsrq).filter(|v| *v < 0.0 && *v > -50.0);
-        // SINR 可以为 0（对应「频发重传」档），故这里不能按「非零」过滤
-        let sinr = parse_db(&monsc.sinr).filter(|v| *v >= -30.0 && *v <= 50.0);
-
-        if rsrp.is_none() {
-            if let Some((v, m)) = self.read_hcsq(ctx).await {
-                rsrp = Some(v);
-                if rat.trim().is_empty() || rat == "未知" {
-                    rat = m;
-                }
-            }
-        }
-
-        let hf = query_hfreqinfo(&self.client, ctx).await;
-        // 制式优先信 MONSC；它没给出时用 HFREQINFO 的 sysmode 兜底，
-        // 否则会出现「拿到了频段号、却不知道该写成 n41 还是 B41」的尴尬。
-        if rat.trim().is_empty() || rat == "未知" {
-            if let Some(info) = &hf {
-                if !info.sysmode.is_empty() {
-                    rat = info.sysmode.clone();
-                }
-            }
-        }
-        let (dl_freq_khz, dl_bw_khz, band) = match &hf {
-            Some(info) => (
-                Some(info.dl_freq_khz),
-                if info.dl_bw_khz > 0.0 { Some(info.dl_bw_khz) } else { None },
-                info.band,
-            ),
-            None => (None, None, None),
-        };
-
-        Some(Sample { rat, rsrp: rsrp?, rsrq, sinr, dl_freq_khz, dl_bw_khz, band })
+        sample_signal(&self.client, ctx).await
     }
 
-    /// 回退路径：`AT^HCSQ?` 只给强度，但字段位置随制式不同，解析复用 URC 那套。
-    async fn read_hcsq(&self, ctx: &watch::Receiver<bool>) -> Option<(f64, String)> {
-        let resp = match self.client.send_command(ctx, "AT^HCSQ?", COMMAND_TIMEOUT, None).await {
-            Ok(r) => r,
-            Err(e) => {
-                log_debug!("信号巡检 AT^HCSQ? 失败: {}", e);
-                return None;
-            }
-        };
-        for line in &resp.lines {
-            if let Some(reading) = parse_signal_reading(line) {
-                return Some(reading);
-            }
-        }
-        None
-    }
-
-    /// 渲染完整巡检报告并交给通知中枢（模板、通道、合并窗口都由它统一处理）。
+    /// 渲染完整巡检报告并交给通知中枢（模板与通道由它统一处理，并立即直发）。
 async fn notify_signal(&self, sample: &Sample) {
         let now = crate::notify::now_string();
         let assessment = assess(sample);
@@ -253,6 +208,70 @@ fn parse_db(s: &str) -> Option<f64> {
 ///
 /// 报告渲染与推送日志共用同一份评估结果，避免两处各算一遍导致口径走偏
 /// （评估里含「木桶两层取更差」这类逻辑，重复实现迟早不一致）。
+/// 采样一次完整信号状态（自由函数版本：巡检与定时推送共用）。
+///
+/// 主数据源是 `AT^MONSC`（一条命令同时给出制式与 RSRP/RSRQ/SINR，且与页面
+/// 状态卡同源）；`AT^HFREQINFO?` 补上频点与带宽，供网络能力总评使用。
+/// 若 MONSC 没给出可用 RSRP（个别制式或未注册时为空/0），回退 `AT^HCSQ?`
+/// ——它至少能给一个强度读数，宁可少几项明细也不要整轮不出声。
+pub async fn sample_signal(client: &Arc<AtClient>, ctx: &watch::Receiver<bool>) -> Option<Sample> {
+    let monsc = query_monsc(client, ctx).await;
+    let mut rat = monsc.rat.clone();
+    // RSRP/RSRQ 恒为负值；0 与空串都表示「无有效读数」而不是真实值
+    let mut rsrp = parse_db(&monsc.rsrp).filter(|v| *v < 0.0 && *v > -200.0);
+    let rsrq = parse_db(&monsc.rsrq).filter(|v| *v < 0.0 && *v > -50.0);
+    // SINR 可以为 0（对应「频发重传」档），故这里不能按「非零」过滤
+    let sinr = parse_db(&monsc.sinr).filter(|v| *v >= -30.0 && *v <= 50.0);
+
+    if rsrp.is_none() {
+        if let Some((v, m)) = read_hcsq(client, ctx).await {
+            rsrp = Some(v);
+            if rat.trim().is_empty() || rat == "未知" {
+                rat = m;
+            }
+        }
+    }
+
+    let hf = query_hfreqinfo(client, ctx).await;
+    // 制式优先信 MONSC；它没给出时用 HFREQINFO 的 sysmode 兜底，
+    // 否则会出现「拿到了频段号、却不知道该写成 n41 还是 B41」的尴尬。
+    if rat.trim().is_empty() || rat == "未知" {
+        if let Some(info) = &hf {
+            if !info.sysmode.is_empty() {
+                rat = info.sysmode.clone();
+            }
+        }
+    }
+    let (dl_freq_khz, dl_bw_khz, band) = match &hf {
+        Some(info) => (
+            Some(info.dl_freq_khz),
+            if info.dl_bw_khz > 0.0 { Some(info.dl_bw_khz) } else { None },
+            info.band,
+        ),
+        None => (None, None, None),
+    };
+
+    Some(Sample { rat, rsrp: rsrp?, rsrq, sinr, dl_freq_khz, dl_bw_khz, band })
+}
+
+/// 回退路径：`AT^HCSQ?` 只给强度，但字段位置随制式不同，解析复用 URC 那套。
+pub async fn read_hcsq(client: &Arc<AtClient>, ctx: &watch::Receiver<bool>) -> Option<(f64, String)> {
+    let resp = match client.send_command(ctx, "AT^HCSQ?", COMMAND_TIMEOUT, None).await {
+        Ok(r) => r,
+        Err(e) => {
+            log_debug!("信号采样 AT^HCSQ? 失败: {}", e);
+            return None;
+        }
+    };
+    for line in &resp.lines {
+        if let Some(reading) = parse_signal_reading(line) {
+            return Some(reading);
+        }
+    }
+    None
+}
+
+/// 把采样结果交给评估器（与网页「射频信号质量」卡片同一口径）。
 pub fn assess(sample: &Sample) -> Assessment {
     Assessment::new(&SignalInput {
         rat: sample.rat.clone(),
@@ -352,7 +371,7 @@ pub fn render_report_with(assessment: &Assessment, sample: &Sample, now: &str) -
 
 /// 频段号显示：NR 用 `n` 前缀、LTE 用 `B` 前缀（3GPP 书写惯例）；
 /// 制式未知时退回中性的 `Band <n>`，不去猜它到底是 4G 还是 5G。
-fn band_label(rat: &str, band: Option<u32>) -> String {
+pub(crate) fn band_label(rat: &str, band: Option<u32>) -> String {
     let b = match band {
         Some(v) if v > 0 => v,
         _ => return String::new(),
@@ -368,7 +387,7 @@ fn band_label(rat: &str, band: Option<u32>) -> String {
 }
 
 /// 指标值格式化：整数不带小数点，非整数保留一位（-10 → "-10"，-9.5 → "-9.5"）。
-fn fmt_num(v: f64) -> String {
+pub(crate) fn fmt_num(v: f64) -> String {
     if (v - v.round()).abs() < 0.05 {
         format!("{}", v.round() as i64)
     } else {
@@ -422,7 +441,7 @@ pub fn should_push(
 
 /// 把一段总时长切成不超过 [`MAX_SLEEP_SLICE`] 的片段依次睡眠。
 /// 返回 `false` 表示期间收到了关闭信号，调用方应退出。
-async fn sleep_in_slices(ctx: &watch::Receiver<bool>, mut total: Duration) -> bool {
+pub(crate) async fn sleep_in_slices(ctx: &watch::Receiver<bool>, mut total: Duration) -> bool {
     if total.is_zero() {
         return true;
     }
