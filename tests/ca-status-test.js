@@ -161,6 +161,58 @@ try {
 		check('数据过期 15 秒判定 expired (绝不假装单载波)', state.caStatus.state === 'expired', 'state=' + state.caStatus.state);
 	}
 
+	// Case 6: 主载波频点查询失败时，只有 1 个载波也不得判定为单载波
+	{
+		const state = {
+			rawHfreq: [],
+			secondaryNR: [],
+			secondaryLTE: [],
+			cell: { channel: '504990', pci: 128, rsrp: -64, rsrq: -10, sinr: 25, sysMode: 'NR' },
+			hfreqSuccess: false,
+			secondarySuccess: true,
+			caStatus: { state: 'pending', lastSuccessTime: Date.now() - 2000 }
+		};
+		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		env.syncCarriers();
+		check('主频点查询失败时判定 error (绝不假装单载波)', state.caStatus.state === 'error', 'state=' + state.caStatus.state);
+
+		state.caStatus.lastSuccessTime = Date.now() - 20000;
+		env.syncCarriers();
+		check('主频点查询失败且数据过期判定 expired', state.caStatus.state === 'expired', 'state=' + state.caStatus.state);
+	}
+
+	// Case 7: 两次查询都成功但模组未上报任何载波 → 明确未驻网 (none)
+	{
+		const state = {
+			rawHfreq: [],
+			secondaryNR: [],
+			secondaryLTE: [],
+			cell: {},
+			hfreqSuccess: true,
+			secondarySuccess: true,
+			caStatus: { state: 'pending', lastSuccessTime: 0 }
+		};
+		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		env.syncCarriers();
+		check('查询成功但无载波判定 none (未驻网，而非单载波)', state.caStatus.state === 'none', 'state=' + state.caStatus.state);
+	}
+
+	// Case 8: 尚未查询 (初值 null) 时不得被当成查询成功
+	{
+		const state = {
+			rawHfreq: [],
+			secondaryNR: [],
+			secondaryLTE: [],
+			cell: {},
+			hfreqSuccess: null,
+			secondarySuccess: null,
+			caStatus: { state: 'pending', lastSuccessTime: 0 }
+		};
+		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		env.syncCarriers();
+		check('未查询状态 (null) 判定 pending 而非 none/single', state.caStatus.state === 'pending', 'state=' + state.caStatus.state);
+	}
+
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));
 }
