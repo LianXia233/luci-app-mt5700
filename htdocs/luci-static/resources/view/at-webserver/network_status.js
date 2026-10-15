@@ -26,6 +26,13 @@ return L.view.extend({
 			diag: { reg: null, tx: null, nrTx: [], endc: null, addrs: [] },
 			secondaryNR: [],
 			secondaryLTE: [],
+			rawHfreq: [],
+			hfreqSuccess: null,
+			secondarySuccess: null,
+			caStatus: {
+				state: 'pending', // 'pending' | 'single' | 'ca' | 'error' | 'expired'
+				lastSuccessTime: 0
+			},
 			carriers: [],
 			rtDown: 0,
 			rtUp: 0,
@@ -491,6 +498,13 @@ return L.view.extend({
 				}
 				if (tags.length > 0) return tags.join(' + ');
 			}
+			var caSt = state.caStatus || {};
+			if (caSt.state === 'pending' && (!state.cell || !state.cell.channel)) {
+				return '待刷新...';
+			}
+			if (caSt.state === 'error' && (!state.cell || !state.cell.channel)) {
+				return '未知 (待刷新)';
+			}
 			// 回退到主小区信道/频段（真实解析，不伪造默认频点或固定带宽）
 			var c = state.cell;
 			if (c.channel) {
@@ -841,8 +855,17 @@ return L.view.extend({
 
 			var caEl = document.getElementById('net-val-ca');
 			if (caEl) {
-				if (state.carriers && state.carriers.length > 1) {
+				var caSt = state.caStatus || {};
+				if (caSt.state === 'pending') {
+					caEl.textContent = '待刷新...';
+				} else if (caSt.state === 'error') {
+					caEl.textContent = '未知 (待刷新)';
+				} else if (caSt.state === 'expired') {
+					caEl.textContent = '待刷新 (已过期)';
+				} else if (state.carriers && state.carriers.length > 1) {
 					caEl.textContent = 'CA ' + state.carriers.length + 'CC 聚合';
+				} else if (state.carriers && state.carriers.length === 1) {
+					caEl.textContent = '单载波 (PCC)';
 				} else if (state.cell && state.cell.channel) {
 					caEl.textContent = '单载波 (PCC)';
 				} else {
@@ -931,57 +954,113 @@ return L.view.extend({
 			if (!carrierBox) return;
 			carrierBox.innerHTML = '';
 			var list = state.carriers || [];
+			var caSt = state.caStatus || { state: 'pending' };
 
-			// 若未检测到 carriers，绝不注入假载波，而是展示真实单载波主小区信息或未聚合提示
-			if (!list.length) {
-				if (state.cell && state.cell.channel) {
-					var pccBand = getBandCombinationStr();
-					carrierBox.innerHTML = 
-						'<div style="padding:14px 16px; background:rgba(139,92,246,0.04); border-radius:10px; border:1px solid rgba(139,92,246,0.15); font-size:12.5px; color:var(--mt5700-text-secondary);">' +
-						'  <div style="font-weight:600; color:var(--mt5700-text); margin-bottom:4px;">单载波主小区 (PCC) · 未启用载波聚合 (CA)</div>' +
-						'  <div>主载波：' + pccBand + ' · 信号 RSRP: ' + (state.cell.rsrp != null ? state.cell.rsrp + ' dBm' : '—') + '</div>' +
-						'</div>';
-				} else {
-					carrierBox.innerHTML = 
-						'<div style="padding:14px 16px; background:rgba(128,128,128,0.04); border-radius:10px; border:1px dashed rgba(128,128,128,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-muted);">' +
-						'  未检测到载波聚合信息（模组未上报或当前基站未配置多载波聚合）' +
-						'</div>';
-				}
+			// 1. 查询待刷新状态 (避免直接当作单载波)
+			if (caSt.state === 'pending') {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(59,130,246,0.04); border-radius:10px; border:1px dashed rgba(59,130,246,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-secondary);">' +
+					'  <span class="mt-pill-tag mt-pill-cyan" style="margin-right:8px;">待刷新</span> 正在获取模组载波聚合配置与分量波遥测数据，请稍候...' +
+					'</div>';
 				return;
 			}
 
+			// 2. 查询失败状态 (避免直接当作单载波)
+			if (caSt.state === 'error') {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(239,68,68,0.04); border-radius:10px; border:1px dashed rgba(239,68,68,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-secondary);">' +
+					'  <span class="mt-pill-tag" style="background:rgba(239,68,68,0.15); color:#ef4444; margin-right:8px;">未知</span> 模组载波信息读取异常（待下轮重试，未确认单/多载波）' +
+					'</div>';
+				return;
+			}
+
+			// 3. 数据过期状态
+			if (caSt.state === 'expired') {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(234,179,8,0.04); border-radius:10px; border:1px dashed rgba(234,179,8,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-secondary);">' +
+					'  <span class="mt-pill-tag" style="background:rgba(234,179,8,0.15); color:#eab308; margin-right:8px;">待刷新</span> 载波遥测数据已过期（等待重新同步，未判定单载波）' +
+					'</div>';
+				return;
+			}
+
+			// 4. 未驻网
+			if (!list.length) {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(128,128,128,0.04); border-radius:10px; border:1px dashed rgba(128,128,128,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-muted);">' +
+					'  模组未驻留蜂窝网络，暂无活动分量载波' +
+					'</div>';
+				return;
+			}
+
+			// 5. 渲染各分量载波卡片（区分 PCC 与 SCC，信号指标取值与单位严格与 AT 响应一致）
+			var isCA = list.length > 1;
 			var caHtml = '<div style="display:flex; flex-direction:column; gap:10px;">';
+
+			if (isCA) {
+				caHtml +=
+					'<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 4px 6px;">' +
+					'  <div style="font-size:13px; font-weight:600; color:var(--mt5700-green); display:flex; align-items:center; gap:6px;">' +
+					'    <span class="mt-beacon-dot" style="background:var(--mt5700-green);"></span>' +
+					'    载波聚合已激活 · 共 ' + list.length + ' 个活动分量波 (PCC + ' + (list.length - 1) + ' 个 SCC)' +
+					'  </div>' +
+					'</div>';
+			}
+
 			list.forEach(function (c, i) {
-				var isPcc = (i === 0);
+				var isPcc = c.isPcc || (i === 0);
+				var roleTitle = isPcc ? '主载波 (PCC)' : ('辅载波 (SCC' + (c.sccIndex || i) + ')');
 				var tag = formatBandTag(c.sysMode, c.band);
 				var freqStr = getCarrierFreq(c);
 				var bwStr = getCarrierBw(c);
-				var fcn = c.dlFcn || '-';
-				var rsrpVal = (c.rsrp != null && !isNaN(c.rsrp)) ? (c.rsrp + ' dBm') : ((state.cell.rsrp != null && !isNaN(state.cell.rsrp)) ? state.cell.rsrp + ' dBm' : '-');
+				var fcn = c.dlFcn || '—';
+				var pciStr = c.pci != null ? String(c.pci) : '—';
+
+				// 信号指标：严格与模组 AT 原始响应一致，未上报显示 '—'，绝不拿主载波值冒充辅载波
+				var rsrpStr = (c.rsrp != null && !isNaN(c.rsrp)) ? (c.rsrp + ' dBm') : '—';
+				var rsrqStr = (c.rsrq != null && !isNaN(c.rsrq)) ? (c.rsrq + ' dB') : '—';
+				var sinrStr = (c.sinr != null && !isNaN(c.sinr)) ? (c.sinr + ' dB') : (c.rssi != null ? ('RSSI ' + c.rssi + ' dBm') : '—');
+				var measExtra = c.measType && c.measType !== '—' && c.measType !== 'Serving' ? (' · ' + c.measType) : '';
 
 				caHtml +=
-					'<div class="mt-carrier-card-item" style="padding:12px 16px; background:var(--mt5700-subtle-bg); border-radius:10px; border:1px solid var(--mt5700-border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">' +
-					'  <div style="display:flex; align-items:center; gap:10px;">' +
+					'<div class="mt-carrier-card-item" style="padding:12px 16px; background:var(--mt5700-subtle-bg); border-radius:10px; border:1px solid var(--mt5700-border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">' +
+					'  <div style="display:flex; align-items:center; gap:10px; min-width:240px;">' +
 					'    <span class="mt-beacon-dot" style="background:' + (isPcc ? 'var(--mt5700-accent)' : 'var(--mt5700-green)') + ';"></span>' +
 					'    <div>' +
 					'      <div style="display:flex; align-items:center; gap:6px;">' +
-					'        <strong style="color:var(--mt5700-text); font-size:13px;">' + (isPcc ? '主载波 (PCC)' : '辅载波 (SCC' + i + ')') + '</strong>' +
+					'        <strong style="color:var(--mt5700-text); font-size:13px;">' + roleTitle + '</strong>' +
 					'        <span class="mt-pill-tag ' + (isPcc ? 'mt-pill-cyan' : 'mt-pill-purple') + '">' + tag + '</span>' +
 					'      </div>' +
 					'      <div style="font-size:12px; color:var(--mt5700-text-secondary); margin-top:3px;">' +
 					'        ' + (freqStr ? ('中心频率: <span style="color:var(--mt5700-text); font-weight:600;">' + freqStr + '</span> · ') : '') +
-					'        ' + (bwStr ? ('带宽: ' + bwStr + ' · ') : '') + '频点 (ARFCN): ' + fcn +
+					'        ' + (bwStr ? ('带宽: ' + bwStr + ' · ') : '') +
+					'        频点: ' + fcn + ' · PCI: ' + pciStr + measExtra +
 					'      </div>' +
 					'    </div>' +
 					'  </div>' +
-					'  <div style="display:flex; align-items:center; gap:12px;">' +
-					'    <div style="text-align:right;">' +
-					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">信号电平 (RSRP)</div>' +
-					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:var(--mt5700-cyan);">' + rsrpVal + '</div>' +
+					'  <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">' +
+					'    <div style="text-align:right; min-width:68px;">' +
+					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">RSRP</div>' +
+					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:' + (c.rsrp != null ? 'var(--mt5700-cyan)' : 'var(--mt5700-text-muted)') + ';">' + rsrpStr + '</div>' +
+					'    </div>' +
+					'    <div style="text-align:right; min-width:58px;">' +
+					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">RSRQ</div>' +
+					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:' + (c.rsrq != null ? 'var(--mt5700-purple)' : 'var(--mt5700-text-muted)') + ';">' + rsrqStr + '</div>' +
+					'    </div>' +
+					'    <div style="text-align:right; min-width:58px;">' +
+					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">SINR</div>' +
+					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:' + (c.sinr != null ? 'var(--mt5700-green)' : 'var(--mt5700-text-muted)') + ';">' + sinrStr + '</div>' +
 					'    </div>' +
 					'  </div>' +
 					'</div>';
 			});
+
+			if (!isCA) {
+				caHtml +=
+					'<div style="padding:10px 14px; background:rgba(139,92,246,0.04); border-radius:8px; border:1px solid rgba(139,92,246,0.15); font-size:12px; color:var(--mt5700-text-secondary); margin-top:2px;">' +
+					'  <strong style="color:var(--mt5700-text);">当前处于单载波运行模式</strong> · 模组或基站当前未激活辅分量载波 (SCC) 聚合' +
+					'</div>';
+			}
+
 			caHtml += '</div>';
 			carrierBox.innerHTML = caHtml;
 		}
@@ -1108,18 +1187,194 @@ return L.view.extend({
 		   6. 周期轮询与数据刷新 (完全保持原有后端 RPC 接口不变)
 		   ========================================================================== */
 
+		function getBandFromNrArfcn(arfcn) {
+			if (!arfcn) return '';
+			var ch = parseInt(arfcn, 10);
+			if (isNaN(ch)) return '';
+			if (ch >= 499200 && ch <= 537999) return '41';
+			if (ch >= 620000 && ch <= 680000) return '78';
+			if (ch >= 693334 && ch <= 733333) return '79';
+			if (ch >= 151600 && ch <= 160600) return '28';
+			if (ch >= 422000 && ch <= 434000) return '1';
+			if (ch >= 376000 && ch <= 396000) return '3';
+			if (ch >= 173800 && ch <= 175000) return '5';
+			if (ch >= 185000 && ch <= 192000) return '8';
+			return '';
+		}
+
+		function getBandFromLteArfcn(arfcn) {
+			if (!arfcn) return '';
+			var ch = parseInt(arfcn, 10);
+			if (isNaN(ch)) return '';
+			if (ch >= 0 && ch <= 599) return '1';
+			if (ch >= 1200 && ch <= 1949) return '3';
+			if (ch >= 2400 && ch <= 2649) return '5';
+			if (ch >= 3450 && ch <= 3799) return '8';
+			if (ch >= 36200 && ch <= 36349) return '34';
+			if (ch >= 37750 && ch <= 38249) return '38';
+			if (ch >= 38250 && ch <= 38649) return '39';
+			if (ch >= 38650 && ch <= 39649) return '40';
+			if (ch >= 39650 && ch <= 41589) return '41';
+			return '';
+		}
+
+		function syncCarriers() {
+			var now = Date.now();
+			var rawHfreq = state.rawHfreq || [];
+			var secNR = state.secondaryNR || [];
+			var secLTE = state.secondaryLTE || [];
+			var cell = state.cell || {};
+
+			// 数据过期保护：15 秒未更新则标记过期，避免直接按单载波展示
+			var isExpired = state.caStatus.lastSuccessTime > 0 && (now - state.caStatus.lastSuccessTime > 15000);
+
+			// 查询失败或命令未响应保护
+			if (state.hfreqSuccess === false && state.secondarySuccess === false && !cell.channel) {
+				if (isExpired) {
+					state.caStatus.state = 'expired';
+				} else {
+					state.caStatus.state = state.caStatus.lastSuccessTime > 0 ? 'error' : 'pending';
+				}
+				state.carriers = [];
+				return;
+			}
+
+			var merged = [];
+
+			// 1. 主载波 (PCC) 组装
+			if (rawHfreq.length > 0) {
+				var p0 = rawHfreq[0];
+				var p0Band = p0.band || cell.band || (p0.sysMode === 'NR' ? getBandFromNrArfcn(p0.dlFcn) : getBandFromLteArfcn(p0.dlFcn));
+				merged.push({
+					isPcc: true,
+					carrierRole: 'PCC',
+					sysMode: p0.sysMode || cell.sysMode || 'NR',
+					band: p0Band,
+					dlFcn: p0.dlFcn || cell.channel || '',
+					dlFreqKHz: p0.dlFreqKHz || 0,
+					dlBwKHz: p0.dlBwKHz || 0,
+					pci: cell.pci != null && cell.pci !== '' ? cell.pci : null,
+					rsrp: cell.rsrp != null ? cell.rsrp : null,
+					rsrq: cell.rsrq != null ? cell.rsrq : null,
+					sinr: cell.sinr != null ? cell.sinr : null,
+					measType: 'Serving'
+				});
+			} else if (cell.channel) {
+				var pccBand = cell.band || (cell.sysMode === 'NR' ? getBandFromNrArfcn(cell.channel) : getBandFromLteArfcn(cell.channel));
+				merged.push({
+					isPcc: true,
+					carrierRole: 'PCC',
+					sysMode: cell.sysMode || 'NR',
+					band: pccBand,
+					dlFcn: cell.channel,
+					dlFreqKHz: (cell.sysMode === 'NR' && pccBand === '41') ? parseInt(cell.channel, 10) * 5 : 0,
+					dlBwKHz: 0,
+					pci: cell.pci != null && cell.pci !== '' ? cell.pci : null,
+					rsrp: cell.rsrp != null ? cell.rsrp : null,
+					rsrq: cell.rsrq != null ? cell.rsrq : null,
+					sinr: cell.sinr != null ? cell.sinr : null,
+					measType: 'Serving'
+				});
+			}
+
+			// 2. 匹配与扩展辅载波 (SCC)
+			var sccCounter = 1;
+			for (var hi = 1; hi < rawHfreq.length; hi++) {
+				var h = rawHfreq[hi];
+				var sig = Parse.carrierSignalFor(h, secNR, secLTE);
+				var hBand = h.band || (h.sysMode === 'NR' ? getBandFromNrArfcn(h.dlFcn) : getBandFromLteArfcn(h.dlFcn));
+				merged.push({
+					isPcc: false,
+					carrierRole: 'SCC',
+					sccIndex: sccCounter++,
+					sysMode: h.sysMode || 'NR',
+					band: hBand,
+					dlFcn: h.dlFcn || '',
+					dlFreqKHz: h.dlFreqKHz || 0,
+					dlBwKHz: h.dlBwKHz || 0,
+					pci: sig ? sig.pci : null,
+					rsrp: sig ? sig.rsrp : null,
+					rsrq: sig ? sig.rsrq : null,
+					sinr: sig ? sig.sinr : null,
+					measType: sig ? sig.measType : null
+				});
+			}
+
+			// 3. 找出 HFREQINFO 未覆盖但 MONSSC / CASCELLINFO 已上报的活动辅载波（确保辅载波不丢）
+			var orphan = Parse.unmatchedSecondaries(rawHfreq, secNR, secLTE);
+			if (orphan.nr && orphan.nr.length > 0) {
+				orphan.nr.forEach(function (nCell) {
+					var nBand = getBandFromNrArfcn(nCell.arfcn);
+					var freqKHz = (nBand === '41') ? nCell.arfcn * 5 : 0;
+					merged.push({
+						isPcc: false,
+						carrierRole: 'SCC',
+						sccIndex: sccCounter++,
+						sysMode: 'NR',
+						band: nBand,
+						dlFcn: String(nCell.arfcn),
+						dlFreqKHz: freqKHz,
+						dlBwKHz: 0,
+						pci: nCell.pci != null ? nCell.pci : null,
+						rsrp: nCell.rsrp != null ? nCell.rsrp : null,
+						rsrq: nCell.rsrq != null ? nCell.rsrq : null,
+						sinr: nCell.sinr != null ? nCell.sinr : null,
+						measType: nCell.measType || 'SSB'
+					});
+				});
+			}
+
+			if (orphan.lte && orphan.lte.length > 0) {
+				orphan.lte.forEach(function (lCell) {
+					var lBand = lCell.band ? String(lCell.band) : (getBandFromLteArfcn(lCell.dlArfcn) || '');
+					var freqKHz = lCell.dlFreq ? Math.round(lCell.dlFreq * 1000) : 0;
+					var bwKHz = lCell.dlBandwidth ? Math.round(lCell.dlBandwidth * 1000) : 0;
+					merged.push({
+						isPcc: false,
+						carrierRole: 'SCC',
+						sccIndex: sccCounter++,
+						sysMode: 'LTE',
+						band: lBand,
+						dlFcn: lCell.dlArfcn != null ? String(lCell.dlArfcn) : '',
+						dlFreqKHz: freqKHz,
+						dlBwKHz: bwKHz,
+						pci: lCell.pci != null ? lCell.pci : null,
+						rsrp: lCell.rsrp != null ? lCell.rsrp : null,
+						rsrq: lCell.rsrq != null ? lCell.rsrq : null,
+						sinr: null,
+						rssi: lCell.rssi != null ? lCell.rssi : null
+					});
+				});
+			}
+
+			state.carriers = merged;
+
+			// 状态判定：根据真实活动载波数量判断单/多载波
+			if (merged.length > 1) {
+				state.caStatus.state = 'ca';
+				state.caStatus.lastSuccessTime = now;
+			} else if (merged.length === 1) {
+				state.caStatus.state = 'single';
+				state.caStatus.lastSuccessTime = now;
+			} else {
+				if (state.hfreqSuccess || state.secondarySuccess) {
+					state.caStatus.state = 'single';
+					state.caStatus.lastSuccessTime = now;
+				} else {
+					state.caStatus.state = state.caStatus.lastSuccessTime > 0 ? 'error' : 'pending';
+				}
+			}
+		}
+
 		function updateNetworkInfo() {
-			var carriers = [];
 			var serving = null;
 
 			return AtWs.client.sendCommand('AT^MONSC').then(function (monsc) {
 				serving = (monsc.success && monsc.data) ? AtWs.parseMONSC(monsc.data) : null;
 				return AtWs.client.sendCommand('AT^HFREQINFO?');
 			}).then(function (hfreq) {
-				carriers = (hfreq.success && hfreq.data) ? AtWs.parseHFREQINFO(hfreq.data) : [];
-				if (carriers.length > 0 && serving && serving.rsrp != null) {
-					if (carriers[0].rsrp == null) carriers[0].rsrp = serving.rsrp;
-				}
+				state.hfreqSuccess = hfreq.success;
+				state.rawHfreq = (hfreq.success && hfreq.data) ? AtWs.parseHFREQINFO(hfreq.data) : [];
 				if (serving) {
 					state.cell.mcc = serving.mcc; state.cell.mnc = serving.mnc;
 					state.cell.lac = serving.lac; state.cell.cid = serving.cid;
@@ -1145,11 +1400,15 @@ return L.view.extend({
 					return null;
 				});
 			}).then(function () {
-				state.carriers = carriers;
+				syncCarriers();
 				renderSignalUI();
 				renderTabsUI();
 				renderCarriersAdv();
 			}).catch(function (e) {
+				state.hfreqSuccess = false;
+				syncCarriers();
+				renderCarriersAdv();
+				renderTabsUI();
 				console.warn('Network info update error:', e);
 			});
 		}
@@ -1157,10 +1416,19 @@ return L.view.extend({
 		function loadSecondary() {
 			return AtWs.client.sendCommand('AT^MONSSC').then(function (monssc) {
 				state.secondaryNR = (monssc.success && monssc.data) ? Parse.parseMonsscAll(String(monssc.data)) : [];
+				state.secondarySuccess = monssc.success;
 				return AtWs.client.sendCommand('AT^CASCELLINFO?');
 			}).then(function (cascell) {
 				state.secondaryLTE = (cascell.success && cascell.data) ? Parse.parseCascellAll(String(cascell.data)) : [];
-			}).catch(function () {});
+				if (cascell.success) state.secondarySuccess = true;
+				syncCarriers();
+				renderCarriersAdv();
+				renderTabsUI();
+			}).catch(function () {
+				syncCarriers();
+				renderCarriersAdv();
+				renderTabsUI();
+			});
 		}
 
 		function loadDiagnostics() {
@@ -1421,6 +1689,7 @@ return L.view.extend({
 
 			var tasks = [
 				updateNetworkInfo,
+				loadSecondary,
 				loadDeviceInfo,
 				getPSReg,
 				getOperator,
@@ -1428,7 +1697,6 @@ return L.view.extend({
 				getFlow,
 				getTemp,
 				getMCS,
-				loadSecondary,
 				loadDiagnostics
 			];
 
