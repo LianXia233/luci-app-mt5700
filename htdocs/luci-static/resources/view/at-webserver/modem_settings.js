@@ -109,10 +109,33 @@ return L.view.extend({
 		body.appendChild(modemStyle);
 
 		/* ---------- 通用小工具 ---------- */
+		/*
+		 * 开关回滚约定（Codex P2：模组拒绝 AT 指令时必须还原勾选状态）。
+		 *
+		 * - onChange 返回 Promise 时，以 resolve 值判定成败：false 代表模组拒绝、
+		 *   超时或请求异常，此时统一把 checkbox 恢复到操作前的状态；
+		 * - handler 内部只负责「发指令 + 提示」，不再各自写回滚，避免漏写；
+		 * - 返回 undefined 的老式 handler 不触发回滚，保持向后兼容。
+		 */
 		function makeSwitch(onChange) {
 			var wrap = E('div', { 'class': 'mt5700-switch' });
 			var input = E('input', { type: 'checkbox' });
-			input.addEventListener('change', function () { onChange(input.checked, input); });
+			input.addEventListener('change', function () {
+				var checked = input.checked;
+				var result;
+				try {
+					result = onChange(checked, input);
+				} catch (e) {
+					input.checked = !checked;
+					return;
+				}
+				if (!result || typeof result.then !== 'function') return;
+				result.then(function (ok) {
+					if (ok === false) input.checked = !checked;
+				}).catch(function () {
+					input.checked = !checked;
+				});
+			});
 			wrap.appendChild(input);
 			return wrap;
 		}
@@ -302,7 +325,7 @@ return L.view.extend({
 		});
 		simCard._body.appendChild(Mt5700.formGroup('SIM 槽位切换', simSlotSel, '切换卡槽将自动重置模组射频'));
 
-		var hpSwitch = makeSwitch(function (checked, input) { handleSimHotPlug(checked, input); });
+		var hpSwitch = makeSwitch(function (checked) { return handleSimHotPlug(checked); });
 		var hpChk = hpSwitch.querySelector('input');
 		simCard._body.appendChild(Mt5700.formGroup('SIM 卡热插拔', hpSwitch, '开启后模组支持不关机插拔 SIM 卡即时识别'));
 
@@ -360,15 +383,18 @@ return L.view.extend({
 			});
 		}
 
-		function handleSimHotPlug(checked, input) {
-			send('AT^TDSIMHP=' + (checked ? '1' : '0')).then(function (res) {
+		function handleSimHotPlug(checked) {
+			return send('AT^TDSIMHP=' + (checked ? '1' : '0')).then(function (res) {
 				if (res.success) {
 					Mt5700.success((checked ? '开启' : '关闭') + ' SIM 卡热插拔成功');
-				} else {
-					Mt5700.error((checked ? '开启' : '关闭') + ' SIM 卡热插拔失败');
-					if (input) input.checked = !checked;
+					return true;
 				}
-			}).catch(function () { Mt5700.error('SIM 卡热插拔设置失败'); });
+				Mt5700.error((checked ? '开启' : '关闭') + ' SIM 卡热插拔失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('SIM 卡热插拔设置失败');
+				return false;
+			});
 		}
 
 		function fetchPinStatus() {
@@ -402,38 +428,50 @@ return L.view.extend({
 		var rfCard = Mt5700.card('射频控制与 5G 增强', '飞行模式、载波聚合 (CA)、动态频谱共享与 VoNR');
 		rowSimRf.appendChild(rfCard);
 
-		var airplaneSwitch = makeSwitch(function (checked, input) {
-			send('AT+CFUN=' + (checked ? '0' : '1')).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '飞行模式成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '飞行模式失败');
-					input.checked = !checked;
+		var airplaneSwitch = makeSwitch(function (checked) {
+			return send('AT+CFUN=' + (checked ? '0' : '1')).then(function (res) {
+				if (res.success) {
+					Mt5700.success((checked ? '开启' : '关闭') + '飞行模式成功');
+					return true;
 				}
-			}).catch(function () { Mt5700.error('飞行模式设置失败'); });
+				Mt5700.error((checked ? '开启' : '关闭') + '飞行模式失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('飞行模式设置失败');
+				return false;
+			});
 		});
 		var airplaneChk = airplaneSwitch.querySelector('input');
 		rfCard._body.appendChild(Mt5700.formGroup('飞行模式 (CFUN)', airplaneSwitch, '开启后彻底关断射频，适合应急断网排障或重连基站'));
 
-		var caSwitch = makeSwitch(function (checked, input) {
-			send('AT^NRRCCAPCFG=3,' + (checked ? 1 : 0)).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '载波聚合成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '载波聚合失败');
-					input.checked = !checked;
+		var caSwitch = makeSwitch(function (checked) {
+			return send('AT^NRRCCAPCFG=3,' + (checked ? 1 : 0)).then(function (res) {
+				if (res.success) {
+					Mt5700.success((checked ? '开启' : '关闭') + '载波聚合成功');
+					return true;
 				}
-			}).catch(function () { Mt5700.error('载波聚合设置失败'); });
+				Mt5700.error((checked ? '开启' : '关闭') + '载波聚合失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('载波聚合设置失败');
+				return false;
+			});
 		});
 		var caChk = caSwitch.querySelector('input');
 		rfCard._body.appendChild(Mt5700.formGroup('NR 载波聚合 (CA)', caSwitch, '开启后允许多个 5G 载波聚合成倍提升吞吐'));
 
-		var dssSwitch = makeSwitch(function (checked, input) {
-			send('AT^NRRCCAPCFG=5,' + (checked ? 1 : 0) + ',0').then(function (res) {
-				if (res.success) Mt5700.success('DSS 配置成功');
-				else {
-					Mt5700.error('DSS 配置失败');
-					input.checked = !checked;
+		var dssSwitch = makeSwitch(function (checked) {
+			return send('AT^NRRCCAPCFG=5,' + (checked ? 1 : 0) + ',0').then(function (res) {
+				if (res.success) {
+					Mt5700.success('DSS 配置成功');
+					return true;
 				}
-			}).catch(function () { Mt5700.error('DSS 配置失败'); });
+				Mt5700.error('DSS 配置失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('DSS 配置失败');
+				return false;
+			});
 		});
 		var dssChk = dssSwitch.querySelector('input');
 		rfCard._body.appendChild(Mt5700.formGroup('NR 动态频谱共享 (DSS)', dssSwitch, '允许 4G LTE 与 5G NR 动态共用同一频谱'));
@@ -489,14 +527,18 @@ return L.view.extend({
 		nicSel.addEventListener('change', function () { handleSetNic(parseInt(nicSel.value, 10)); });
 		ctrlGrid.appendChild(Mt5700.formGroup('网卡协商速率', nicSel, '修改后需要重启模组生效'));
 
-		var pwrSwitch = makeSwitch(function (checked, input) {
-			send('AT^TDPMCFG=' + (checked ? '1' : '0')).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '电源管理成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '电源管理失败');
-					input.checked = !checked;
+		var pwrSwitch = makeSwitch(function (checked) {
+			return send('AT^TDPMCFG=' + (checked ? '1' : '0')).then(function (res) {
+				if (res.success) {
+					Mt5700.success((checked ? '开启' : '关闭') + '电源管理成功');
+					return true;
 				}
-			}).catch(function () { Mt5700.error('电源管理设置失败'); });
+				Mt5700.error((checked ? '开启' : '关闭') + '电源管理失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('电源管理设置失败');
+				return false;
+			});
 		});
 		var pwrChk = pwrSwitch.querySelector('input');
 		ctrlGrid.appendChild(Mt5700.formGroup('动态电源管理', pwrSwitch, '开启后模组在无业务数据时自动进入低功耗待机模式'));
@@ -812,34 +854,62 @@ return L.view.extend({
 			return 'AT^THERMAUTOFUN=' + (thermChk.checked ? 1 : 0) + ',' + (thermCaChk.checked ? 1 : 0) + ',' + (thermIntervalInput.value || 5);
 		}
 
-		var thermSwitch = makeSwitch(function (checked, input) {
-			send(thermCmd()).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '温度保护功能成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '温度保护功能失败');
-					input.checked = !checked;
+		/* 采样间隔取值范围：手册未给上限，这里按 1s~1h 收敛，避免把非法值送进模组 */
+		var THERM_INTERVAL_MIN = 1;
+		var THERM_INTERVAL_MAX = 3600;
+		/* 最近一次被模组确认接受的间隔值，写入失败时用它回滚输入框 */
+		var thermIntervalLastOk = '5';
+
+		/* 温控三参数共用同一条 AT^THERMAUTOFUN 写指令，成功/失败一律回传布尔值 */
+		function applyThermConfig(okMsg, failMsg) {
+			return send(thermCmd()).then(function (res) {
+				if (res.success) {
+					Mt5700.success(okMsg);
+					return true;
 				}
-			}).catch(function () { Mt5700.error('温度保护设置失败'); });
+				Mt5700.error(failMsg);
+				return false;
+			}).catch(function () {
+				Mt5700.error(failMsg);
+				return false;
+			});
+		}
+
+		var thermSwitch = makeSwitch(function (checked) {
+			return applyThermConfig(
+				(checked ? '开启' : '关闭') + '温度保护功能成功',
+				(checked ? '开启' : '关闭') + '温度保护功能失败'
+			);
 		});
 		var thermChk = thermSwitch.querySelector('input');
 		thermBody.appendChild(Mt5700.formGroup('自动温度保护开关', thermSwitch, '芯片过热时自动采取阶梯降频与功率保护'));
 
 		var thermCaSwitch = makeSwitch(function () {
-			send(thermCmd()).then(function (res) {
-				if (res.success) Mt5700.success('高温策略已更新');
-				else Mt5700.error('高温策略更新失败');
-			});
+			return applyThermConfig('高温策略已更新', '高温策略更新失败');
 		});
 		var thermCaChk = thermCaSwitch.querySelector('input');
 		thermBody.appendChild(Mt5700.formGroup('高温时关闭 CA/MIMO', thermCaSwitch, '高温状态下自动降级为单载波以减少功耗'));
 
 		var thermIntervalInput = Mt5700.input('number', '5', '5');
-		thermIntervalInput.min = 1;
+		thermIntervalInput.min = THERM_INTERVAL_MIN;
+		thermIntervalInput.max = THERM_INTERVAL_MAX;
 		thermIntervalInput.addEventListener('change', function () {
-			send(thermCmd()).then(function (res) {
-				if (res.success) Mt5700.success('温度检测间隔设置成功');
-				else Mt5700.error('温度检测间隔设置失败');
-			}).catch(function () { Mt5700.error('温度检测间隔设置失败'); });
+			var txt = String(thermIntervalInput.value || '').trim();
+			if (!/^\d+$/.test(txt)) {
+				thermIntervalInput.value = thermIntervalLastOk;
+				Mt5700.error('温度检测间隔必须为正整数，已还原为 ' + thermIntervalLastOk + ' 秒');
+				return;
+			}
+			var val = parseInt(txt, 10);
+			if (val < THERM_INTERVAL_MIN || val > THERM_INTERVAL_MAX) {
+				val = val < THERM_INTERVAL_MIN ? THERM_INTERVAL_MIN : THERM_INTERVAL_MAX;
+				thermIntervalInput.value = String(val);
+				Mt5700.error('温度检测间隔需在 ' + THERM_INTERVAL_MIN + '~' + THERM_INTERVAL_MAX + ' 秒之间，已修正为 ' + val);
+			}
+			applyThermConfig('温度检测间隔设置成功', '温度检测间隔设置失败').then(function (ok) {
+				if (ok) thermIntervalLastOk = String(val);
+				else thermIntervalInput.value = thermIntervalLastOk;
+			});
 		});
 		thermBody.appendChild(Mt5700.formGroup('采样检测间隔 (秒)', thermIntervalInput));
 
@@ -851,6 +921,7 @@ return L.view.extend({
 						thermChk.checked = m[1] === '1';
 						thermCaChk.checked = m[2] === '1';
 						thermIntervalInput.value = String(m[3]);
+						thermIntervalLastOk = String(m[3]);
 					}
 				}
 				return send('AT^THERMLDLOGSW?');
