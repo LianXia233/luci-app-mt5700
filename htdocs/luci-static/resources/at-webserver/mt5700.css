@@ -239,41 +239,6 @@
   gap: 12px;
 }
 
-.mt-speech-bubble {
-  background: var(--mt5700-card-bg);
-  border: 1.5px solid var(--mt5700-border-focus);
-  border-radius: 14px;
-  padding: 8px 14px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--mt5700-accent);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.12);
-  position: relative;
-  white-space: nowrap;
-  animation: mt-bubble-breathe 4s ease-in-out infinite;
-  cursor: pointer;
-  user-select: none;
-}
-.mt-speech-bubble::after {
-  content: "";
-  position: absolute;
-  right: -7px;
-  top: 50%;
-  transform: translateY(-50%);
-  border-width: 6px 0 6px 8px;
-  border-style: solid;
-  border-color: transparent transparent transparent var(--mt5700-card-bg);
-}
-.mt-speech-bubble::before {
-  content: "";
-  position: absolute;
-  right: -9px;
-  top: 50%;
-  transform: translateY(-50%);
-  border-width: 7px 0 7px 9px;
-  border-style: solid;
-  border-color: transparent transparent transparent var(--mt5700-border-focus);
-}
 
 @keyframes mt-bubble-breathe {
   0%, 100% { transform: translateY(0); }
@@ -4660,28 +4625,7 @@ select.mt5700-select {
   gap: 10px !important;
 }
 
-.mt-speech-bubble {
-  background: rgba(255, 255, 255, 0.95) !important;
-  border: 1.5px solid rgba(199, 210, 254, 0.9) !important;
-  border-radius: 16px !important;
-  border-bottom-right-radius: 4px !important;
-  padding: 8px 14px !important;
-  font-size: 12.5px !important;
-  color: #4338ca !important;
-  font-weight: 600 !important;
-  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.1) !important;
-  white-space: nowrap !important;
-  cursor: pointer !important;
-  user-select: none !important;
-  position: relative !important;
-  transition: all 0.2s ease !important;
-}
 
-.mt-speech-bubble:hover {
-  transform: scale(1.03) !important;
-  border-color: #8b5cf6 !important;
-  color: #6366f1 !important;
-}
 
 .mt-mascot-avatar {
   flex-shrink: 0 !important;
@@ -5028,11 +4972,6 @@ select.cbi-input-select:focus {
   color: #94a3b8 !important;
 }
 
-[data-theme="dark"] .mt-speech-bubble {
-  background: rgba(30, 41, 59, 0.95) !important;
-  border-color: rgba(148, 163, 184, 0.3) !important;
-  color: #c4b5fd !important;
-}
 
 
 [data-theme="dark"] .mt5700-input,
@@ -5081,13 +5020,6 @@ select.cbi-input-select:focus {
 
   /* 手机端隐藏中间多余插画，优先保留看板娘与主题切换 */
 
-  .mt-speech-bubble {
-    font-size: 11.5px !important;
-    padding: 6px 10px !important;
-    max-width: 160px !important;
-    white-space: normal !important;
-    line-height: 1.3 !important;
-  }
 
   .mt-mascot-avatar {
     width: 75px !important;
