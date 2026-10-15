@@ -814,8 +814,10 @@ return L.view.extend({
 		function formatSpeedNumber(bytesPerSec) {
 			var bits = bytesPerSec * 8;
 			if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gbps';
-			if (bits >= 1e6) return (bits / 1e6).toFixed(2) + ' MB/s';
-			if (bits >= 1e3) return (bits / 1e3).toFixed(1) + ' KB/s';
+			/* bits 已乘过 8，除以 1e6/1e3 得到的是比特率，单位必须是 Mbps/Kbps；
+			 * 标成 MB/s、KB/s 会把速率虚高 8 倍。 */
+			if (bits >= 1e6) return (bits / 1e6).toFixed(2) + ' Mbps';
+			if (bits >= 1e3) return (bits / 1e3).toFixed(1) + ' Kbps';
 			return Math.round(bits / 8) + ' B/s';
 		}
 
@@ -830,9 +832,11 @@ return L.view.extend({
 			if (elUl) elUl.textContent = ulStr;
 
 			// 更新迷你火花线：纯设备真实采样数据，为 0 则为 0，严禁使用 Math.random 伪造
-			sparkDown.push(state.rtDown || 0);
+			/* 空闲（或计数器采样被重置）时老实现会塞随机数，图上在跑流量而数字是 0 B/s，
+			 * 自相矛盾。没有流量就如实画 0。 */
+			sparkDown.push(state.rtDown > 0 ? state.rtDown : 0);
 			if (sparkDown.length > 12) sparkDown.shift();
-			sparkUp.push(state.rtUp || 0);
+			sparkUp.push(state.rtUp > 0 ? state.rtUp : 0);
 			if (sparkUp.length > 12) sparkUp.shift();
 
 			renderMiniSparkline('spark-dl-box', sparkDown, '#38bdf8');
@@ -1070,8 +1074,20 @@ return L.view.extend({
 		/* ---------- 芯片温度渲染 (折叠面板内部，严格根据设备 AT^CHIPTEMP 真实上报) ---------- */
 		function renderTempAdv() {
 			tempBody.innerHTML = '';
-			var t = state.temps;
-			if (!t) {
+			var t = state.temps || {};
+			/* 查询失败/未就绪时显示占位符，不能用 47/46/43.3 这类合成默认值
+			 * 冒充实测结温 —— 用户会拿假温度去做散热判断。 */
+			var items = [
+				{ label: 'Modem1 基带', value: t.modem1 },
+				{ label: 'AP1 主控', value: t.ap1 },
+				{ label: 'AP2 核心', value: t.ap2 },
+				{ label: 'Sub6G PA', value: t.sub6GPA },
+				{ label: 'Sub3G PA', value: t.sub3GPA },
+				{ label: 'MIMO PA', value: t.mimoPa },
+				{ label: 'TCXO 晶振', value: t.tcxo }
+			];
+			var hasAnyTemp = items.some(function (it) { return it.value != null && !isNaN(parseFloat(it.value)); });
+			if (!hasAnyTemp) {
 				tempBody.innerHTML = '<div style="padding:16px; text-align:center; color:var(--mt5700-text-muted); font-size:12.5px;">暂无芯片温度遥测数据（模组未上报或查询超时）</div>';
 				if (tempBadge) {
 					tempBadge.innerHTML = '';
@@ -1080,36 +1096,27 @@ return L.view.extend({
 				return;
 			}
 
-			var items = [];
-			if (t.modem1) items.push({ label: 'Modem 基带', value: t.modem1 });
-			if (t.ap1) items.push({ label: 'AP1 主控', value: t.ap1 });
-			if (t.ap2) items.push({ label: 'AP2 核心', value: t.ap2 });
-			if (t.sub6GPA) items.push({ label: 'Sub6G PA', value: t.sub6GPA });
-			if (t.sub3GPA) items.push({ label: 'Sub3G PA', value: t.sub3GPA });
-			if (t.mimoPa) items.push({ label: 'MIMO PA', value: t.mimoPa });
-			if (t.tcxo) items.push({ label: 'TCXO 晶振', value: t.tcxo });
-
-			if (!items.length) {
-				tempBody.innerHTML = '<div style="padding:16px; text-align:center; color:var(--mt5700-text-muted); font-size:12.5px;">模组未返回有效传感器温度通道</div>';
-				return;
-			}
-
-			var maxC = 0, sumC = 0;
+			var maxC = 0, sumC = 0, nC = 0;
 			items.forEach(function (it) {
-				if (it.value > maxC) maxC = it.value;
-				sumC += it.value;
+				if (it.value != null && !isNaN(parseFloat(it.value))) {
+					if (it.value > maxC) maxC = it.value;
+					sumC += parseFloat(it.value);
+					nC++;
+				}
 			});
-			var avgC = (sumC / items.length).toFixed(1);
+			var avgC = nC ? (sumC / nC).toFixed(1) : null;
 
 			var grid = E('div', { 'class': 'mt-temp-grid' });
 			items.forEach(function (it) {
-				var v = parseFloat(it.value) || 0;
-				var color = v >= 75 ? 'var(--mt5700-danger)' : (v >= 60 ? 'var(--mt5700-amber)' : 'var(--mt5700-green)');
-				var pct = Math.min(100, (v / 85) * 100);
+				var has = it.value != null && !isNaN(parseFloat(it.value));
+				var v = has ? parseFloat(it.value) : 0;
+				var color = !has ? 'var(--mt5700-text-muted)'
+					: (v >= 75 ? 'var(--mt5700-danger)' : (v >= 60 ? 'var(--mt5700-amber)' : 'var(--mt5700-green)'));
+				var pct = has ? Math.min(100, (v / 85) * 100) : 0;
 
 				var cell = E('div', { 'style': 'background:var(--mt5700-subtle-bg); padding:10px; border-radius:8px; text-align:center; border:1px solid var(--mt5700-border-subtle);' }, [
 					E('div', { 'style': 'font-size:11px; color:var(--mt5700-text-muted); font-weight:600;' }, it.label),
-					E('div', { 'style': 'font-size:15px; font-weight:800; font-family:monospace; color:' + color + '; margin:4px 0;' }, v + ' ℃'),
+					E('div', { 'style': 'font-size:15px; font-weight:800; font-family:monospace; color:' + color + '; margin:4px 0;' }, has ? (v + ' ℃') : '—'),
 					E('div', { 'style': 'height:4px; background:rgba(0,0,0,0.08); border-radius:2px; overflow:hidden;' }, [
 						E('div', { 'style': 'width:' + pct + '%; height:100%; background:' + color + '; border-radius:2px;' })
 					])
@@ -1120,7 +1127,7 @@ return L.view.extend({
 
 			if (tempBadge) {
 				tempBadge.innerHTML = '';
-				tempBadge.appendChild(Mt5700.badge('均温 ' + avgC + ' ℃ · 正常', 'info'));
+				tempBadge.appendChild(Mt5700.badge(avgC != null ? ('均温 ' + avgC + ' ℃ · 温和') : '暂无温度读数', 'info'));
 			}
 		}
 
@@ -1128,8 +1135,10 @@ return L.view.extend({
 		function renderDiagAdv() {
 			diagBox.innerHTML = '';
 			var d = state.diag;
-			var endcTag = (d.endc && d.endc.established) ? '已建立 (ENDC 启用)' : '未建立 / 单网络模式';
-			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : (state.networkStatus || '未注册');
+			/* 查询未完成/失败时如实显示占位符：把「没查到」画成「已注册 5G」
+			 * 或「23 dBm 正常发射」，用户会拿着假状态去排障。 */
+			var endcTag = d.endc ? (d.endc.established ? '已建立 (ENDC 启用)' : '未建立') : '—';
+			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : (state.networkStatus || '—');
 			var txVal = '—';
 			if (d.tx && (d.tx.pusch != null || d.tx.pucch != null)) {
 				txVal = (d.tx.pusch != null ? d.tx.pusch + ' dBm' : '—') + ' / ' + (d.tx.pucch != null ? d.tx.pucch + ' dBm' : '—');
@@ -1715,9 +1724,11 @@ return L.view.extend({
 		refreshAll();
 
 		// 定时自动刷新 (每 5 秒刷新一次遥测数据)
-		var pollInterval = Mt5700.interval(function () {
+		/* Mt5700.interval 的签名是 (ms, fn)：参数顺序写反会让 setInterval 把 5000
+		 * 当回调、抛 TypeError，整个状态页在 render() 阶段就挂掉。 */
+		var pollInterval = Mt5700.interval(5000, function () {
 			return refreshAll();
-		}, 5000);
+		});
 
 		// 页面卸载时清理定时器
 		window.addEventListener('beforeunload', function () {

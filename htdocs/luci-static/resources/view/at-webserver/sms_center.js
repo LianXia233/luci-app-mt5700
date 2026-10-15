@@ -55,6 +55,9 @@ return L.view.extend({
 			}, td.title);
 			smsTabHeader.appendChild(tb);
 		});
+		/* 必须先挂载：只填充不 append 的话，三个筛选按钮根本不会出现在页面上 */
+		left.appendChild(smsTabHeader);
+
 		var leftHead = E('div', { 'class': 'mt5700-sms-list-header' });
 		var storageEl = E('div', { 'class': 'mt5700-hint' }, '存储：—');
 		leftHead.appendChild(storageEl);
@@ -155,13 +158,37 @@ return L.view.extend({
 			storageEl.textContent = '存储：' + state.storage.used + ' / ' + state.storage.total;
 		}
 
+		/*
+		 * 按当前 Tab 过滤会话。
+		 * 说明：后端没有"已读/未读"标志位，未读只能按「会话里最新一条是收到的、
+		 * 且本次页面会话中还没点开过」来判断；刷新页面后该状态会重置，
+		 * 所以这里只当作本页的快捷筛选，不冒充持久未读状态。
+		 */
+		function latestMsg(c) {
+			return c.messages && c.messages.length ? c.messages[c.messages.length - 1] : null;
+		}
+
+		function matchTab(c) {
+			if (currentTab === 'all') return true;
+			var m = latestMsg(c);
+			if (!m) return false;
+			if (currentTab === 'sent') return m.type === 'sent';
+			if (currentTab === 'unread') {
+				return m.type === 'received' && c.number !== state.selectedContact;
+			}
+			return true;
+		}
+
 		function renderContacts() {
 			contactList.innerHTML = '';
-			if (!state.contacts.length) {
-				contactList.appendChild(Mt5700.empty('暂无短信'));
+			var shown = (state.contacts || []).filter(matchTab);
+			if (!shown.length) {
+				contactList.appendChild(Mt5700.empty(
+					state.contacts.length ? '当前筛选下没有会话' : '暂无短信'));
+				return;
 			}
-			for (var i = 0; i < state.contacts.length; i++) {
-				var c = state.contacts[i];
+			for (var i = 0; i < shown.length; i++) {
+				var c = shown[i];
 				var item = E('div', {
 					'class': 'mt5700-sms-item' + (c.number === state.selectedContact ? ' active' : '')
 				});
