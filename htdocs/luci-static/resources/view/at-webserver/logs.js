@@ -245,14 +245,15 @@ return L.view.extend({
 		/* ---------------- 顶部：视图切换 + 工具栏 ---------------- */
 		var tabs = E('div', { 'class': 'mt5700-logtabs' });
 		var TAB_DEFS = [
-			{ id: 'dial', label: '模组拨号' },
-			{ id: 'iface', label: '接口与网络' },
-			{ id: 'notify', label: '通知记录' }
+			{ id: 'dial', label: '模组拨号', icon: '📡' },
+			{ id: 'iface', label: '接口与网络', icon: '🌐' },
+			{ id: 'notify', label: '通知记录', icon: '🔔' }
 		];
 		TAB_DEFS.forEach(function (t) {
-			/* 用 div 而非 button：主题对原生 button 有较强的全局样式（白底、方框、阴影），
-			 * 会被继承进来破坏分段控件的观感 —— 实测就是这个问题。div 完全可控。 */
-			var b = E('div', { 'class': 'mt5700-logtab', 'data-tab': t.id, role: 'tab', tabindex: '0' }, t.label);
+			var b = E('div', { 'class': 'mt5700-logtab', 'data-tab': t.id, role: 'tab', tabindex: '0' }, [
+				E('span', { 'class': 'mt5700-logtab-icon' }, t.icon),
+				E('span', { 'class': 'mt5700-logtab-text' }, t.label)
+			]);
 			b.addEventListener('click', function () { state.tab = t.id; renderAll(); });
 			tabs.appendChild(b);
 		});
@@ -265,29 +266,26 @@ return L.view.extend({
 			{ label: '仅错误', value: 'ERR' }
 		], 'all');
 
-		/* 下拉的外观用**内联样式**设置。
-		 * 原因：主题对原生 select 的规则特异性很高且在其样式表之后加载，
-		 * 外链 CSS 即使加 !important 也会被它吃掉（实测背景变白、自绘箭头消失）。
-		 * 内联 + important 是除用户样式表外优先级最高的，稳定生效。 */
+		/* 下拉的外观用内联样式确保稳定生效，并契合 Soft Anime 紫色调调色板 */
 		(function styleSelect(el) {
 			if (!el) return;
 			var ARROW = "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%2317a67f' "
-				+ "stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
-			var BG_CLOSED = 'rgba(23,166,127,0.10)';
-			var BG_HOVER = 'rgba(23,166,127,0.19)';
+				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%238b5cf6' "
+				+ "stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
+			var BG_CLOSED = 'rgba(139,92,246,0.08)';
+			var BG_HOVER = 'rgba(139,92,246,0.15)';
 			var base = {
 				'-webkit-appearance': 'none', '-moz-appearance': 'none', 'appearance': 'none',
 				'background': BG_CLOSED + ' ' + ARROW + ' no-repeat right 10px center',
 				'background-size': '12px 12px',
-				'padding': '0 32px 0 12px',
-				'border': '1px solid rgba(23,166,127,0.38)',
-				'border-radius': '8px',
-				'color': '#17a67f',
+				'padding': '0 32px 0 14px',
+				'border': '1px solid rgba(139,92,246,0.28)',
+				'border-radius': '10px',
+				'color': '#8b5cf6',
 				'font-weight': '500',
 				'font-size': '13px',
-				'height': '32px',
-				'line-height': '32px',
+				'height': '36px',
+				'line-height': '36px',
 				'box-shadow': 'none',
 				'text-shadow': 'none',
 				'cursor': 'pointer'
@@ -296,11 +294,11 @@ return L.view.extend({
 			el.addEventListener('mouseenter', function () { el.style.setProperty('background-color', BG_HOVER, 'important'); });
 			el.addEventListener('mouseleave', function () { el.style.setProperty('background-color', BG_CLOSED, 'important'); });
 			el.addEventListener('focus', function () {
-				el.style.setProperty('border-color', '#17a67f', 'important');
-				el.style.setProperty('box-shadow', '0 0 0 3px rgba(23,166,127,0.20)', 'important');
+				el.style.setProperty('border-color', '#8b5cf6', 'important');
+				el.style.setProperty('box-shadow', '0 0 0 3px rgba(139,92,246,0.20)', 'important');
 			});
 			el.addEventListener('blur', function () {
-				el.style.setProperty('border-color', 'rgba(23,166,127,0.38)', 'important');
+				el.style.setProperty('border-color', 'rgba(139,92,246,0.28)', 'important');
 				el.style.setProperty('box-shadow', 'none', 'important');
 			});
 		})(levelSel);
@@ -317,9 +315,12 @@ return L.view.extend({
 		});
 
 		/* 自写按钮：不依赖主题的 button / ghostButton，避免被全局样式改变观感 */
-		function logButton(label, onClick, variant) {
+		function logButton(label, onClick, variant, icon) {
 			var cls = 'mt5700-logbtn' + (variant ? ' mt5700-logbtn-' + variant : '');
-			var b = E('div', { 'class': cls, role: 'button', tabindex: '0', title: label }, label);
+			var content = [];
+			if (icon) content.push(E('span', { 'class': 'mt5700-logbtn-icon' }, icon));
+			content.push(E('span', {}, label));
+			var b = E('div', { 'class': cls, role: 'button', tabindex: '0', title: label }, content);
 			b.addEventListener('click', onClick);
 			b.addEventListener('keydown', function (ev) {
 				if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onClick(ev); }
@@ -328,12 +329,12 @@ return L.view.extend({
 		}
 
 		var toolbar = E('div', { 'class': 'mt5700-logtoolbar' });
-		toolbar.appendChild(E('div', { 'class': 'mt5700-logselect' }, [levelSel]));
 		toolbar.appendChild(E('div', { 'class': 'mt5700-logsearch' }, [searchInput]));
+		toolbar.appendChild(E('div', { 'class': 'mt5700-logselect' }, [levelSel]));
 		var autoWrap = E('label', { 'class': 'mt5700-logauto' }, [autoChk, E('span', {}, '自动刷新')]);
 		toolbar.appendChild(autoWrap);
-		toolbar.appendChild(logButton('刷新', function () { refresh(true); }, 'primary'));
-		toolbar.appendChild(logButton('导出', function () { exportLog(); }, 'accent'));
+		toolbar.appendChild(logButton('刷新', function () { refresh(true); }, 'primary', '↻'));
+		toolbar.appendChild(logButton('导出', function () { exportLog(); }, 'accent', '⤓'));
 		body.appendChild(toolbar);
 
 		/* ---------------- 日志主体 ---------------- */
@@ -352,7 +353,7 @@ return L.view.extend({
 		panel.appendChild(footer);
 
 		var clearRow = E('div', { 'class': 'mt5700-logactions' });
-		var clearBtn = logButton('清空通知日志', function () { clearNotify(); }, 'danger');
+		var clearBtn = logButton('清空通知日志', function () { clearNotify(); }, 'danger', '🗑️');
 		clearRow.appendChild(clearBtn);
 		panel.appendChild(clearRow);
 
@@ -404,7 +405,7 @@ return L.view.extend({
 
 		function renderList() {
 			listEl.innerHTML = '';
-			footer.textContent = '';
+			footer.innerHTML = '';
 
 			if (state.tab === 'notify') { renderNotify(); return; }
 
@@ -431,7 +432,24 @@ return L.view.extend({
 			if (list.length !== all.length) text += '（过滤后 ' + list.length + ' 条）';
 			if (list.length > 400) text += '，仅显示最新 400 条';
 			if (state.tab === 'iface' && !state.syslogOk) text += ' · syslog 不可读（仅显示后端日志）';
-			footer.textContent = text;
+
+			var footerStats = E('span', { 'class': 'mt5700-logfooter-text' }, text);
+			var scrollActions = E('span', { 'class': 'mt5700-logfooter-actions' }, [
+				E('button', {
+					'class': 'mt5700-logscroll-btn',
+					'type': 'button',
+					'title': '滚动到顶部',
+					'click': function () { listEl.scrollTo({ top: 0, behavior: 'smooth' }); }
+				}, '↑ 顶部'),
+				E('button', {
+					'class': 'mt5700-logscroll-btn',
+					'type': 'button',
+					'title': '滚动到底部',
+					'click': function () { listEl.scrollTo({ top: listEl.scrollHeight, behavior: 'smooth' }); }
+				}, '↓ 底部')
+			]);
+			footer.appendChild(footerStats);
+			footer.appendChild(scrollActions);
 		}
 
 		function emptyBox(title, desc) {
@@ -445,16 +463,31 @@ return L.view.extend({
 			var lv = e.level || 'INF';
 			var cls = lv === 'ERR' ? 'err' : (lv === 'WRN' ? 'warn' : (lv === 'DBG' ? 'dbg' : 'info'));
 			var row = E('div', { 'class': 'mt5700-logrow mt5700-logrow-' + cls });
-			row.appendChild(E('span', { 'class': 'mt5700-logtime', title: fmtFull(e.ts) }, fmtClock(e.ts)));
+			var d = new Date(e.ts);
+			var timeEl = E('span', { 'class': 'mt5700-logtime', title: fmtFull(e.ts) }, [
+				pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2),
+				E('span', { 'class': 'mt5700-logms' }, '.' + pad(d.getMilliseconds(), 3))
+			]);
+			row.appendChild(timeEl);
 			row.appendChild(E('span', { 'class': 'mt5700-loglv', title: lv }, LEVEL_LABEL[lv] || lv));
 
 			var dir = detectDirection(e.msg);
 			if (dir) {
-				row.appendChild(E('span', { 'class': 'mt5700-logdir mt5700-logdir-' + dir.kind, title: dir.kind === 'tx' ? '本机发给模组' : (dir.kind === 'rx' ? '模组回给本机' : '页面发给后端') }, dir.label));
+				var dirIcon = dir.kind === 'tx' ? '↑ ' : (dir.kind === 'rx' ? '↓ ' : '→ ');
+				row.appendChild(E('span', { 'class': 'mt5700-logdir mt5700-logdir-' + dir.kind, title: dir.kind === 'tx' ? '本机发给模组' : (dir.kind === 'rx' ? '模组回给本机' : '页面发给后端') }, dirIcon + dir.label));
 			}
 
 			var msg = E('span', { 'class': 'mt5700-logmsg' });
-			msg.appendChild(highlight(displayText(dir ? dir.rest : e.msg)));
+			var textToRender = displayText(dir ? dir.rest : e.msg);
+			var pIdx = textToRender.indexOf('　（');
+			if (pIdx > 0 && textToRender.slice(-1) === '）') {
+				var mainText = textToRender.slice(0, pIdx);
+				var purposeText = textToRender.slice(pIdx);
+				msg.appendChild(highlight(mainText));
+				msg.appendChild(E('span', { 'class': 'mt5700-logpurpose' }, purposeText));
+			} else {
+				msg.appendChild(highlight(textToRender));
+			}
 			row.appendChild(msg);
 			if (e.src === 'syslog') row.appendChild(E('span', { 'class': 'mt5700-logsrc', title: '来自 syslog（init.d / 内核）' }, '系统'));
 			return row;
@@ -465,7 +498,7 @@ return L.view.extend({
 			var lines = content.replace(/\s+$/, '').split('\n').filter(function (l) { return l.trim() !== ''; });
 			if (!lines.length) {
 				listEl.appendChild(emptyBox('暂无通知记录', '短信、来电、信号变化与存储告警会写入此文件。'));
-				footer.textContent = '文件：' + notifyPath;
+				footer.appendChild(E('span', { 'class': 'mt5700-logfooter-text' }, '文件：' + notifyPath));
 				return;
 			}
 			var frag = document.createDocumentFragment();
@@ -482,7 +515,24 @@ return L.view.extend({
 				frag.appendChild(row);
 			}
 			listEl.appendChild(frag);
-			footer.textContent = '共 ' + lines.length + ' 条 · 文件：' + notifyPath;
+
+			var footerStats = E('span', { 'class': 'mt5700-logfooter-text' }, '共 ' + lines.length + ' 条 · 文件：' + notifyPath);
+			var scrollActions = E('span', { 'class': 'mt5700-logfooter-actions' }, [
+				E('button', {
+					'class': 'mt5700-logscroll-btn',
+					'type': 'button',
+					'title': '滚动到顶部',
+					'click': function () { listEl.scrollTo({ top: 0, behavior: 'smooth' }); }
+				}, '↑ 顶部'),
+				E('button', {
+					'class': 'mt5700-logscroll-btn',
+					'type': 'button',
+					'title': '滚动到底部',
+					'click': function () { listEl.scrollTo({ top: listEl.scrollHeight, behavior: 'smooth' }); }
+				}, '↓ 底部')
+			]);
+			footer.appendChild(footerStats);
+			footer.appendChild(scrollActions);
 		}
 
 		function renderAll() {

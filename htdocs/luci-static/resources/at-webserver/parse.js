@@ -950,27 +950,53 @@ var Parse = (function () {
 		return String(text).split(/\r?\n/).map(api.parseCascell).filter(Boolean);
 	};
 
+	/*
+	 * 频点归一化：^HFREQINFO 的 dl_fcn 与 ^MONSSC 的 arfcn 都是字符串，
+	 * 空串会被 Number() 变成 0，进而把 arfcn=0 的辅小区误判成「已匹配」。
+	 * 这里统一把空值/非法值折成 null，让调用方显式处理。
+	 */
+	function normalizeArfcn(value) {
+		if (value === undefined || value === null) return null;
+		var txt = String(value).trim();
+		if (txt === '') return null;
+		var n = Number(txt);
+		return isFinite(n) ? n : null;
+	}
+
 	// 把 ^MONSSC / ^CASCELLINFO 的信号质量对应到 ^HFREQINFO 报出来的某个载波上。
 	api.carrierSignalFor = function (carrier, nr, lte) {
-		var arfcn = Number(carrier.dlFcn);
-		if (!isFinite(arfcn)) return null;
+		if (!carrier) return null;
+		var arfcn = normalizeArfcn(carrier.dlFcn);
+		if (arfcn === null) return null;
+		var nrList = nr || [];
+		var lteList = lte || [];
 		if (carrier.sysMode === 'NR') {
-			var hit = nr.find(function (c) { return c.arfcn === arfcn; });
+			var hit = nrList.find(function (c) { return normalizeArfcn(c && c.arfcn) === arfcn; });
 			return hit
 				? { pci: hit.pci, rsrp: hit.rsrp, rsrq: hit.rsrq, sinr: hit.sinr, measType: hit.measType }
 				: null;
 		}
-		var lHit = lte.find(function (c) { return c.dlArfcn === arfcn; });
+		var lHit = lteList.find(function (c) { return normalizeArfcn(c && c.dlArfcn) === arfcn; });
 		return lHit ? { pci: lHit.pci, rsrp: lHit.rsrp, rsrq: lHit.rsrq, sinr: null, rssi: lHit.rssi } : null;
 	};
 
 	// 找出没能对应到任何载波的辅小区，合并后不把数据悄悄丢掉。
 	api.unmatchedSecondaries = function (carriers, nr, lte) {
 		var arfcns = {};
-		carriers.forEach(function (c) { arfcns[Number(c.dlFcn)] = true; });
+		(carriers || []).forEach(function (c) {
+			var a = normalizeArfcn(c && c.dlFcn);
+			if (a !== null) arfcns[a] = true;
+		});
+		var inList = function (a) { return a !== null && arfcns[a] === true; };
 		return {
-			nr: nr.filter(function (c) { return !arfcns[c.arfcn]; }),
-			lte: lte.filter(function (c) { return c.dlArfcn === null || !arfcns[c.dlArfcn]; })
+			nr: (nr || []).filter(function (c) {
+				var a = normalizeArfcn(c && c.arfcn);
+				return a === null || !inList(a);
+			}),
+			lte: (lte || []).filter(function (c) {
+				var a = normalizeArfcn(c && c.dlArfcn);
+				return a === null || !inList(a);
+			})
 		};
 	};
 

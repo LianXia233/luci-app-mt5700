@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.17.0';
+var MT5700_CSS_VERSION = '2.18.6';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -76,191 +76,6 @@ var Mt5700 = (function () {
 		}
 		return el;
 	}
-
-	/* ================= 动态 SVG 动效组件系统 ================= */
-
-	/**
-	 * 生成带 CSS 动画的现代化动态矢量插画 (160x120 viewBox)
-	 * 为每个页面呈现定制的高科技白色毛玻璃动态图形
-	 */
-	api.heroIllustration = function (pageKey) {
-		var svg = svgEl('svg', {
-			'class': 'mt5700-hero-svg',
-			viewBox: '0 0 160 120',
-			fill: 'none',
-			xmlns: 'http://www.w3.org/2000/svg'
-		});
-
-		var defs = svgEl('defs');
-		// 柔和二次元渐变 1：薰衣草紫/靛蓝 (主色)
-		var g1 = svgEl('linearGradient', { id: 'mt-g-accent', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		g1.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#a78bfa' }));
-		g1.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#7c3aed' }));
-		defs.appendChild(g1);
-
-		// 柔和二次元渐变 2：青空蓝/薄荷绿
-		var g2 = svgEl('linearGradient', { id: 'mt-g-cyan', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		g2.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#38bdf8' }));
-		g2.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#06b6d4' }));
-		defs.appendChild(g2);
-
-		// 柔和二次元渐变 3：樱花粉/蜜桃红
-		var g3 = svgEl('linearGradient', { id: 'mt-g-pink', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		g3.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f472b6' }));
-		g3.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#ec4899' }));
-		defs.appendChild(g3);
-
-		// 柔和二次元渐变 4：毛玻璃光晕底
-		var g4 = svgEl('linearGradient', { id: 'mt-g-glass', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
-		g4.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#ffffff', 'stop-opacity': '0.9' }));
-		g4.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#ede9fe', 'stop-opacity': '0.45' }));
-		defs.appendChild(g4);
-
-		svg.appendChild(defs);
-
-		// 二次元软萌外环星轨背景
-		svg.appendChild(svgEl('circle', {
-			cx: 80, cy: 60, r: 48,
-			fill: 'url(#mt-g-glass)',
-			stroke: 'rgba(199, 210, 254, 0.75)',
-			'stroke-width': 1.5,
-			'stroke-dasharray': '6 3'
-		}));
-
-		// 浮动小星芒
-		svg.appendChild(svgEl('path', {
-			d: 'M40 32 L42 26 L44 32 L50 34 L44 36 L42 42 L40 36 L34 34 Z',
-			fill: '#fbbf24', 'class': 'mt-anim-pulse'
-		}));
-		svg.appendChild(svgEl('path', {
-			d: 'M126 84 L127.5 79 L129 84 L134 85.5 L129 87 L127.5 92 L126 87 L121 85.5 Z',
-			fill: '#f472b6', 'class': 'mt-anim-pulse'
-		}));
-
-		if (pageKey === 'network_status') {
-			// 5G 实时遥测：基站信号波与二次元星环
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 10, 'class': 'mt-anim-wave1', stroke: '#8b5cf6', 'stroke-width': '1.5', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 10, 'class': 'mt-anim-wave2', stroke: '#38bdf8', 'stroke-width': '1.5', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 10, 'class': 'mt-anim-wave3', stroke: '#f472b6', 'stroke-width': '1.5', fill: 'none' }));
-			// 信号塔
-			svg.appendChild(svgEl('path', { d: 'M70 94L80 44L90 94M74 76H86M77 62H83', stroke: '#6366f1', 'stroke-width': '2.2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 42, r: 4.5, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-pulse' }));
-			// 5G 柔和气泡徽标
-			svg.appendChild(svgEl('rect', { x: 104, y: 28, width: 32, height: 18, rx: 7, fill: 'url(#mt-g-accent)' }));
-			var t = svgEl('text', { x: 120, y: 41, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '10', 'font-weight': 'bold', 'font-family': 'sans-serif' });
-			t.textContent = '5G';
-			svg.appendChild(t);
-		} else if (pageKey === 'network_settings') {
-			// 锁频与射频策略：科技陀螺仪与萌系锁头
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 36, stroke: '#a78bfa', 'stroke-width': '1.5', 'stroke-dasharray': '5 3', 'class': 'mt-anim-spin' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 24, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
-			// 锁扣
-			svg.appendChild(svgEl('rect', { x: 73, y: 55, width: 14, height: 13, rx: 3, fill: '#ffffff' }));
-			svg.appendChild(svgEl('path', { d: 'M76 55V49C76 46.8 77.8 45 80 45C82.2 45 84 46.8 84 49V55', stroke: '#ffffff', 'stroke-width': '2.2', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 61, r: 2, fill: '#6366f1' }));
-			// 卫星频点节点
-			svg.appendChild(svgEl('circle', { cx: 112, cy: 44, r: 4.5, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 48, cy: 76, r: 4.5, fill: '#38bdf8', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'dial') {
-			// 拨号高速隧道：流动萌光火箭与数据泡
-			svg.appendChild(svgEl('path', { d: 'M34 60C50 35 110 35 126 60C110 85 50 85 34 60Z', stroke: 'rgba(167, 139, 250, 0.35)', 'stroke-width': '2', fill: 'none' }));
-			svg.appendChild(svgEl('path', { d: 'M34 60C50 35 110 35 126 60', stroke: '#8b5cf6', 'stroke-width': '2.8', fill: 'none', 'class': 'mt-anim-stream' }));
-			svg.appendChild(svgEl('circle', { cx: 42, cy: 60, r: 7.5, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 118, cy: 60, r: 7.5, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 5.5, fill: '#0ea5e9' }));
-		} else if (pageKey === 'scan') {
-			// 全网扫频：360° 萌彩雷达与星图
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 38, stroke: 'rgba(139, 92, 246, 0.25)', 'stroke-width': '1.5', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 24, stroke: 'rgba(56, 189, 248, 0.35)', 'stroke-width': '1', fill: 'none' }));
-			svg.appendChild(svgEl('line', { x1: 42, y1: 60, x2: 118, y2: 60, stroke: 'rgba(167, 139, 250, 0.3)', 'stroke-width': '1' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 22, x2: 80, y2: 98, stroke: 'rgba(167, 139, 250, 0.3)', 'stroke-width': '1' }));
-			var sweepG = svgEl('g', { 'class': 'mt-anim-sweep', style: 'transform-origin: 80px 60px;' });
-			sweepG.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 114, y2: 36, stroke: '#38bdf8', 'stroke-width': '2.5', 'stroke-linecap': 'round' }));
-			sweepG.appendChild(svgEl('polygon', { points: '80,60 114,36 100,24', fill: 'rgba(167,139,250,0.3)' }));
-			svg.appendChild(sweepG);
-			svg.appendChild(svgEl('circle', { cx: 96, cy: 46, r: 3.5, fill: '#10b981', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 64, cy: 72, r: 3, fill: '#ec4899', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'schedule') {
-			// 定时调度：二次元星月怀表
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 34, stroke: '#8b5cf6', 'stroke-width': '2', fill: 'none' }));
-			svg.appendChild(svgEl('path', { d: 'M80 32A28 28 0 0 1 108 60', stroke: '#f472b6', 'stroke-width': '4', fill: 'none', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 80, y2: 40, stroke: '#6366f1', 'stroke-width': '2.5', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 98, y2: 60, stroke: '#38bdf8', 'stroke-width': '2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 4.5, fill: '#8b5cf6', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('path', { d: 'M62 46 C60 42 66 38 70 42 C67 44 64 45 62 46 Z', fill: '#fbbf24' }));
-		} else if (pageKey === 'modem_settings') {
-			// 模组核心 SoC：猫耳芯片与总线
-			svg.appendChild(svgEl('path', { d: 'M62 38 L54 26 L68 32 Z', fill: 'url(#mt-g-pink)' }));
-			svg.appendChild(svgEl('path', { d: 'M98 38 L106 26 L92 32 Z', fill: 'url(#mt-g-pink)' }));
-			svg.appendChild(svgEl('rect', { x: 56, y: 36, width: 48, height: 48, rx: 10, fill: 'url(#mt-g-accent)', stroke: '#ffffff', 'stroke-width': '2', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('rect', { x: 67, y: 47, width: 26, height: 26, rx: 6, fill: '#ffffff', 'fill-opacity': '0.92' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 4, fill: '#ec4899' }));
-			[44, 52, 60, 68, 76].forEach(function (y) {
-				svg.appendChild(svgEl('line', { x1: 44, y1: y, x2: 56, y2: y, stroke: '#a78bfa', 'stroke-width': '2', 'stroke-linecap': 'round' }));
-				svg.appendChild(svgEl('line', { x1: 104, y1: y, x2: 116, y2: y, stroke: '#a78bfa', 'stroke-width': '2', 'stroke-linecap': 'round' }));
-			});
-		} else if (pageKey === 'upgrade') {
-			// 固件升级：云端胶囊与上升光芒
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 36, stroke: '#8b5cf6', 'stroke-width': '2', 'stroke-dasharray': '8 4', fill: 'none', 'class': 'mt-anim-spin' }));
-			svg.appendChild(svgEl('path', { d: 'M62 66C60 62 62 55 68 53C70 45 80 43 85 47C90 44 98 48 97 55C102 58 101 66 96 68H64', fill: 'url(#mt-g-accent)', opacity: '0.88' }));
-			var upArrow = svgEl('path', { d: 'M80 80V58M72 66L80 58L88 66', stroke: '#ffffff', 'stroke-width': '2.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'class': 'mt-anim-float' });
-			svg.appendChild(upArrow);
-		} else if (pageKey === 'sms_center') {
-			// 短信中心：爱心信笺与浮动气泡
-			svg.appendChild(svgEl('rect', { x: 44, y: 36, width: 52, height: 34, rx: 10, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('line', { x1: 54, y1: 47, x2: 86, y2: 47, stroke: '#ffffff', 'stroke-width': '2.2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('line', { x1: 54, y1: 55, x2: 76, y2: 55, stroke: 'rgba(255,255,255,0.75)', 'stroke-width': '2.2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('rect', { x: 74, y: 56, width: 46, height: 30, rx: 10, fill: '#ffffff', stroke: 'rgba(167,139,250,0.5)', 'stroke-width': '1.5', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('path', { d: 'M97 66 C95 62 90 64 92 68 C94 72 97 75 97 75 C97 75 100 72 102 68 C104 64 99 62 97 66 Z', fill: '#f43f5e' }));
-		} else if (pageKey === 'sms_settings') {
-			// 短信设置：萌信封与齿轮星标
-			svg.appendChild(svgEl('rect', { x: 48, y: 44, width: 64, height: 42, rx: 8, fill: 'url(#mt-g-glass)', stroke: '#8b5cf6', 'stroke-width': '2' }));
-			svg.appendChild(svgEl('path', { d: 'M48 48L80 70L112 48', stroke: '#8b5cf6', 'stroke-width': '2.2', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 108, cy: 44, r: 12, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 108, cy: 44, r: 5, fill: '#ffffff' }));
-		} else if (pageKey === 'terminal') {
-			// 终端：二次元毛玻璃赛博控制台
-			svg.appendChild(svgEl('rect', { x: 40, y: 34, width: 80, height: 52, rx: 9, fill: '#1e1b4b', stroke: 'rgba(167,139,250,0.4)', 'stroke-width': '1.5' }));
-			svg.appendChild(svgEl('circle', { cx: 48, cy: 42, r: 2.5, fill: '#f43f5e' }));
-			svg.appendChild(svgEl('circle', { cx: 56, cy: 42, r: 2.5, fill: '#fbbf24' }));
-			svg.appendChild(svgEl('circle', { cx: 64, cy: 42, r: 2.5, fill: '#34d399' }));
-			var p = svgEl('text', { x: 48, y: 60, fill: '#38bdf8', 'font-size': '8.5', 'font-family': 'monospace', 'font-weight': 'bold' });
-			p.textContent = '> AT+CSQ';
-			svg.appendChild(p);
-			svg.appendChild(svgEl('rect', { x: 90, y: 53, width: 5, height: 9, fill: '#a78bfa', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'logs') {
-			// 日志：心跳星波图
-			svg.appendChild(svgEl('rect', { x: 38, y: 36, width: 84, height: 48, rx: 8, fill: '#1e1b4b', stroke: 'rgba(167,139,250,0.3)', 'stroke-width': '1.5' }));
-			svg.appendChild(svgEl('path', {
-				d: 'M44 60H56L62 48L68 72L74 54L80 64L86 60H116',
-				stroke: '#34d399', 'stroke-width': '2.2', fill: 'none',
-				'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-				'class': 'mt-anim-stream'
-			}));
-			svg.appendChild(svgEl('circle', { cx: 114, cy: 60, r: 3.5, fill: '#ec4899', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'service') {
-			// 后台服务：机柜与旋转护盾光环
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 38, stroke: '#8b5cf6', 'stroke-width': '1.5', 'stroke-dasharray': '6 4', 'class': 'mt-anim-spin' }));
-			svg.appendChild(svgEl('rect', { x: 56, y: 34, width: 48, height: 52, rx: 8, fill: 'url(#mt-g-accent)', stroke: '#ffffff', 'stroke-width': '1.5' }));
-			svg.appendChild(svgEl('rect', { x: 62, y: 40, width: 36, height: 10, rx: 3, fill: 'rgba(255,255,255,0.88)' }));
-			svg.appendChild(svgEl('rect', { x: 62, y: 55, width: 36, height: 10, rx: 3, fill: 'rgba(255,255,255,0.88)' }));
-			svg.appendChild(svgEl('rect', { x: 62, y: 70, width: 36, height: 10, rx: 3, fill: 'rgba(255,255,255,0.88)' }));
-			svg.appendChild(svgEl('circle', { cx: 90, cy: 45, r: 2.2, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 90, cy: 60, r: 2.2, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 90, cy: 75, r: 2.2, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-		} else {
-			// 默认互联水晶节点
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 16, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 48, cy: 42, r: 9, fill: 'url(#mt-g-cyan)', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('circle', { cx: 112, cy: 78, r: 11, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('line', { x1: 48, y1: 42, x2: 80, y2: 60, stroke: '#a78bfa', 'stroke-width': '1.8' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 112, y2: 78, stroke: '#a78bfa', 'stroke-width': '1.8' }));
-		}
-
-		return svg;
-	};
-
-		/* ================= 调制方式星座图与 MIMO 空间流 SVG ================= */
 
 	api.constellationSvg = function (modType) {
 		var svg = svgEl('svg', {
@@ -390,169 +205,14 @@ var Mt5700 = (function () {
 		return svg;
 	};
 
-api.mascotSvg = function () {
-		var svg = svgEl('svg', {
-			'class': 'mt-anime-mascot-svg',
-			viewBox: '0 0 200 160',
-			width: '100%',
-			height: '100%',
-			fill: 'none',
-			xmlns: 'http://www.w3.org/2000/svg'
-		});
-
-		var defs = svgEl('defs');
-		var gHair = svgEl('linearGradient', { id: 'm-hair-grad', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		gHair.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f8f9ff' }));
-		gHair.appendChild(svgEl('stop', { offset: '50%', 'stop-color': '#e0e7ff' }));
-		gHair.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#c7d2fe' }));
-		defs.appendChild(gHair);
-
-		var gEar = svgEl('linearGradient', { id: 'm-ear-inner', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		gEar.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#fbcfe8' }));
-		gEar.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#f472b6' }));
-		defs.appendChild(gEar);
-
-		var gEye = svgEl('linearGradient', { id: 'm-eye-grad', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
-		gEye.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#4f46e5' }));
-		gEye.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#6366f1' }));
-		gEye.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#38bdf8' }));
-		defs.appendChild(gEye);
-
-		svg.appendChild(defs);
-
-		var g = svgEl('g', { style: 'transform-origin: 100px 140px;' });
-		// Ears
-		g.appendChild(svgEl('path', { d: 'M 62 48 Q 45 10 75 16 Z', fill: 'url(#m-hair-grad)', stroke: '#a5b4fc', 'stroke-width': '1.5' }));
-		g.appendChild(svgEl('path', { d: 'M 64 42 Q 52 18 72 23 Z', fill: 'url(#m-ear-inner)', opacity: '0.85' }));
-		g.appendChild(svgEl('path', { d: 'M 138 48 Q 155 10 125 16 Z', fill: 'url(#m-hair-grad)', stroke: '#a5b4fc', 'stroke-width': '1.5' }));
-		g.appendChild(svgEl('path', { d: 'M 136 42 Q 148 18 128 23 Z', fill: 'url(#m-ear-inner)', opacity: '0.85' }));
-
-		// Back Hair
-		g.appendChild(svgEl('path', { d: 'M 52 65 C 40 95 48 135 58 145 C 65 130 68 110 70 85 Z', fill: '#c7d2fe' }));
-		g.appendChild(svgEl('path', { d: 'M 148 65 C 160 95 152 135 142 145 C 135 130 132 110 130 85 Z', fill: '#c7d2fe' }));
-
-		// Clothes
-		g.appendChild(svgEl('path', { d: 'M 68 120 C 60 135 50 152 46 160 L 154 160 C 150 152 140 135 132 120 Z', fill: '#ffffff', stroke: '#c7d2fe', 'stroke-width': '1.5' }));
-		g.appendChild(svgEl('path', { d: 'M 85 125 L 100 136 L 115 125 L 100 120 Z', fill: '#e0e7ff', stroke: '#a5b4fc', 'stroke-width': '1' }));
-		g.appendChild(svgEl('circle', { cx: '100', cy: '136', r: '3', fill: '#fbbf24' }));
-
-		// Face
-		g.appendChild(svgEl('path', { d: 'M 68 62 C 68 95 82 112 100 112 C 118 112 132 95 132 62 C 132 40 118 36 100 36 C 82 36 68 40 68 62 Z', fill: '#fffdfa' }));
-		// Blushes
-		g.appendChild(svgEl('ellipse', { cx: '80', cy: '85', rx: '7', ry: '4', fill: '#f472b6', opacity: '0.4' }));
-		g.appendChild(svgEl('ellipse', { cx: '120', cy: '85', rx: '7', ry: '4', fill: '#f472b6', opacity: '0.4' }));
-
-		// Eyes
-		g.appendChild(svgEl('path', { d: 'M 77 68 C 81 65 89 65 92 68', stroke: '#312e81', 'stroke-width': '2.6', 'stroke-linecap': 'round' }));
-		g.appendChild(svgEl('ellipse', { cx: '85', cy: '74', rx: '5.5', ry: '7', fill: 'url(#m-eye-grad)' }));
-		g.appendChild(svgEl('circle', { cx: '83.5', cy: '71.5', r: '2.2', fill: '#ffffff' }));
-		g.appendChild(svgEl('circle', { cx: '87.5', cy: '77', r: '1.2', fill: '#a5f3fc' }));
-
-		g.appendChild(svgEl('path', { d: 'M 123 68 C 119 65 111 65 108 68', stroke: '#312e81', 'stroke-width': '2.6', 'stroke-linecap': 'round' }));
-		g.appendChild(svgEl('ellipse', { cx: '115', cy: '74', rx: '5.5', ry: '7', fill: 'url(#m-eye-grad)' }));
-		g.appendChild(svgEl('circle', { cx: '113.5', cy: '71.5', r: '2.2', fill: '#ffffff' }));
-		g.appendChild(svgEl('circle', { cx: '117.5', cy: '77', r: '1.2', fill: '#a5f3fc' }));
-
-		// Smile
-		g.appendChild(svgEl('path', { d: 'M 96 92 Q 100 95 104 92', stroke: '#4338ca', 'stroke-width': '1.5', 'stroke-linecap': 'round', fill: 'none' }));
-		g.appendChild(svgEl('path', { d: 'M 98 93 Q 100 96 102 93', fill: '#f43f5e', opacity: '0.6' }));
-
-		// Bangs
-		g.appendChild(svgEl('path', { d: 'M 68 56 C 65 72 68 88 74 92 C 75 84 76 72 78 58 Z', fill: 'url(#m-hair-grad)' }));
-		g.appendChild(svgEl('path', { d: 'M 76 45 C 80 58 84 66 87 68 C 88 60 90 52 92 45 Z', fill: 'url(#m-hair-grad)' }));
-		g.appendChild(svgEl('path', { d: 'M 90 45 C 93 58 97 68 100 70 C 103 68 107 58 110 45 Z', fill: 'url(#m-hair-grad)' }));
-		g.appendChild(svgEl('path', { d: 'M 108 45 C 110 52 112 60 113 68 C 116 66 120 58 124 45 Z', fill: 'url(#m-hair-grad)' }));
-		g.appendChild(svgEl('path', { d: 'M 132 56 C 135 72 132 88 126 92 C 125 84 124 72 122 58 Z', fill: 'url(#m-hair-grad)' }));
-
-		// Ahoge
-		g.appendChild(svgEl('path', { d: 'M 100 28 Q 108 14 114 18 Q 112 24 102 28 Z', fill: 'url(#m-hair-grad)', stroke: '#a5b4fc', 'stroke-width': '1' }));
-
-		svg.appendChild(g);
-		return svg;
-	};
-
-	api.mascot = function (defaultText, pageKey) {
+	/*
+	 * 看板娘：保留头像本体（图片 + 悬浮动效），对话气泡功能已移除。
+	 * 之前的气泡会挤占英雄栏标题并在窄屏下遮挡内容，按需求不再提供。
+	 */
+	api.mascot = function () {
 		var wrap = E('div', { 'class': 'mt-mascot-speech-wrap' });
 
-		// 优化看板娘文案：亲切称呼用户为「可可」
-		var voiceMap = {
-			network_status: [
-				'可可，5G 信号满格，冲浪快如闪电喵！⚡',
-				'无线链路超健康，随时为可可服务喵~ 🐾',
-				'网络已连接~ 正在全力守护可可的信号喵~ ♡',
-				'可可辛苦啦~ 今天我也在认真巡检网络呢！♡',
-				'喵呜~ 可可，有我在，网络绝对不掉线喵！✨'
-			],
-			network_settings: [
-				'可可，锁定高速 5G 频段，告别拥堵喵！✨',
-				'SA / NSA 模式已就绪，听从可可的指令喵~ 🛰️',
-				'射频通道状态极佳，正在帮可可锁定最佳基站喵！📶',
-				'可可放心，频段锁定策略随时为您待命喵~ ♡'
-			],
-			dial: [
-				'可可，APN 高速通道已就绪，一键起飞喵！🚀',
-				'双栈 IPv4/IPv6 隧道全速畅通，可可冲浪超丝滑喵~ 🌐',
-				'守护进程全天候待命，为可可保驾护航喵！🐾',
-				'数据链路稳如磐石，可可尽管畅享高速喵~ ♡'
-			],
-			scan: [
-				'雷达全向扫描启动！周边基站正在向可可汇报喵~ 📡',
-				'正在为可可探索更优质的载波与小区喵！✨',
-				'扫频完成啦，可可想锁定哪个小区呢喵？🐾'
-			],
-			schedule: [
-				'智能定时调度已排班，准时为可可执行喵~ ⏰',
-				'夜间闲时智能倒换，帮可可省心又省电喵！💤',
-				'定时优化模组状态，让可可的网速永远飞起喵~ ♡'
-			],
-			modem_settings: [
-				'MT5700 核心 SoC 运转正常，温度刚刚好，可可请放心喵~ 💻',
-				'PCI 物理小区锁定已生效，为可可开启最强抗干扰喵！🛡️',
-				'硬件状态优异，全心全意服务可可喵~ 🐾'
-			],
-			upgrade: [
-				'固件升级防护盾已开启，守护可可的设备安全喵！☁️',
-				'完整性校验中，可可请放心升级喵~ ⚡',
-				'保持最新版本，让可可体验最强 5G 性能喵！♡'
-			],
-			sms_center: [
-				'信箱整理得井井有条，新短信第一时间汇报给可可喵！💌',
-				'支持长短信无损合并，可可的消息一条都不漏喵~ 💬',
-				'重要验证码我帮可可盯得紧紧的喵！🐾'
-			],
-			sms_settings: [
-				'短信自动化转发与 Webhook 已为可可配置妥当喵！📮',
-				'钉钉/飞书/Telegram 实时推送，绝不让可可漏信喵~ 🔔',
-				'存储空间充足，随收随转，可可超省心喵~ ♡'
-			],
-			terminal: [
-				'AT 交互控制台就绪，请可可下发调试指令喵！💻',
-				'底层指令审计中，保证可可的操作安全无虞喵~ ✨',
-				'回车即发，高阶命令我随时陪可可测试喵！🐾'
-			],
-			logs: [
-				'事件日志流实时追踪，异常波动立刻汇报给可可喵~ 📜',
-				'全天候日志审计，透明可视，可可一目了然喵！🔍',
-				'运行健康度优异，一切尽在可可掌握中喵~ ♡'
-			],
-			service: [
-				'后台守护进程全天候巡检中，随时响应可可喵！🛡️',
-				'服务健康度 100%，内存超轻量，可可放心喵~ ⚡',
-				'模组通信守护就绪，陪伴可可每一秒喵！♡'
-			]
-		};
-
-		var voices = voiceMap[pageKey] || [
-			'可可，5G 信号满格，冲浪快如闪电喵！⚡',
-			'可可辛苦啦~ 今天我也在认真巡检网络呢！♡',
-			'网络已连接~ 正在全力守护可可的信号喵~ ♡',
-			'喵呜~ 可可，有我在，网络绝对不掉线喵！✨'
-		];
-
-		var initText = defaultText || voices[0];
-		var bubble = E('div', { 'class': 'mt-speech-bubble' }, initText);
-
-		// 采用用户指定的二次元蓝发猫耳看板娘头像图片，外圈带光环与悬浮动效
+		// 二次元蓝发猫耳看板娘头像图片，外圈带光环与悬浮动效
 		var avatar = E('div', { 'class': 'mt-mascot-avatar' });
 		var img = E('img', {
 			'class': 'mt-mascot-img',
@@ -560,73 +220,92 @@ api.mascotSvg = function () {
 			'alt': '可可的看板娘'
 		});
 		avatar.appendChild(img);
-
-		var idx = 0;
-		function nextVoice() {
-			idx = (idx + 1) % voices.length;
-			bubble.textContent = voices[idx];
-		}
-		bubble.addEventListener('click', nextVoice);
-		avatar.addEventListener('click', nextVoice);
-
-		wrap.appendChild(bubble);
 		wrap.appendChild(avatar);
 
-		return {
-			el: wrap,
-			bubble: bubble,
-			setBubble: function (t) { if (t) bubble.textContent = t; }
-		};
+		return { el: wrap };
 	};
 
-	api.themeToggle = function () {
-		var btn = E('div', { 'class': 'mt-theme-toggle' });
-		var icon = E('span', {}, '🌓');
-		var txt = E('span', {}, '主题切换');
-		btn.appendChild(icon);
-		btn.appendChild(txt);
+	/* ================= 四格动态信号图标 (cellular signal) =================
+	 *
+	 * 移植自 cellular-signal-preview.html：状态由 data-state 属性驱动，
+	 * 颜色与动画全部交给 mt5700.css 的 .cellular[data-state=...] 规则。
+	 *
+	 * 状态语义（与 CSS 一一对应，页面必须按真实数据选择，不得凭空指定）：
+	 *   none          无信号（0 格 + 斜杠）
+	 *   weak/medium/strong/full   1 / 2 / 3 / 4 格
+	 *   searching     正在搜索网络（信号格依次扫描）
+	 *   connecting    正在连接网络（右上角圆点闪烁）
+	 *   disconnected  网络已断开（0 格 + 斜杠）
+	 *   error         连接错误（感叹号角标）
+	 */
+	var CELLULAR_LEVELS = {
+		none: 0, weak: 1, medium: 2, strong: 3, full: 4,
+		searching: 0, connecting: 0, disconnected: 0, error: 0
+	};
 
-		function updateBtnState() {
-			var isDark = document.body.classList.contains('mt-theme-dark') || 
-			            (document.documentElement.getAttribute('data-theme') === 'dark') ||
-			            (!document.body.classList.contains('mt-theme-light') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-			if (isDark) {
-				icon.textContent = '🌙';
-				txt.textContent = '暗色模式';
-			} else {
-				icon.textContent = '☀️';
-				txt.textContent = '浅色模式';
-			}
-		}
+	var CELLULAR_LABELS = {
+		none: '无信号', weak: '弱信号', medium: '中等信号', strong: '强信号', full: '信号满格',
+		searching: '正在搜索网络', connecting: '正在连接网络',
+		disconnected: '网络已断开', error: '网络连接错误'
+	};
 
-		// Init from saved pref
-		try {
-			var saved = localStorage.getItem('mt5700_theme');
-			if (saved === 'dark') {
-				document.body.classList.add('mt-theme-dark');
-				document.body.classList.remove('mt-theme-light');
-			} else if (saved === 'light') {
-				document.body.classList.add('mt-theme-light');
-				document.body.classList.remove('mt-theme-dark');
-			}
-		} catch (e) {}
-		updateBtnState();
+	api.CELLULAR_LEVELS = CELLULAR_LEVELS;
+	api.CELLULAR_LABELS = CELLULAR_LABELS;
 
-		btn.addEventListener('click', function () {
-			var isDark = document.body.classList.contains('mt-theme-dark');
-			if (isDark) {
-				document.body.classList.remove('mt-theme-dark');
-				document.body.classList.add('mt-theme-light');
-				try { localStorage.setItem('mt5700_theme', 'light'); } catch (e) {}
-			} else {
-				document.body.classList.add('mt-theme-dark');
-				document.body.classList.remove('mt-theme-light');
-				try { localStorage.setItem('mt5700_theme', 'dark'); } catch (e) {}
-			}
-			updateBtnState();
+	api.cellularSignal = function () {
+		var wrap = E('span', {
+			'class': 'cellular',
+			'data-state': 'searching',
+			'role': 'img',
+			'aria-label': CELLULAR_LABELS.searching
 		});
 
-		return btn;
+		var svg = svgEl('svg', {
+			viewBox: '0 0 32 32',
+			xmlns: 'http://www.w3.org/2000/svg',
+			'aria-hidden': 'true'
+		});
+
+		/* 四格信号柱（高度递增） */
+		[[3, 22, 5, 7], [10, 17, 5, 12], [17, 11, 5, 18], [24, 5, 5, 24]].forEach(function (b) {
+			svg.appendChild(svgEl('rect', { 'class': 'bar', x: b[0], y: b[1], width: b[2], height: b[3], rx: 1 }));
+		});
+
+		/* 无信号 / 已断开：斜杠 */
+		var slash = svgEl('g', {
+			'class': 'overlay slash', fill: 'none', stroke: 'currentColor',
+			'stroke-width': '2.4', 'stroke-linecap': 'round'
+		});
+		slash.appendChild(svgEl('path', { d: 'M5 5 L27 27' }));
+		svg.appendChild(slash);
+
+		/* 连接中：右上角圆点 */
+		svg.appendChild(svgEl('circle', { 'class': 'overlay connecting-dot', cx: 26, cy: 5, r: 3, fill: 'currentColor' }));
+
+		/* 错误：感叹号角标 */
+		var errMark = svgEl('g', { 'class': 'overlay error-mark' });
+		errMark.appendChild(svgEl('circle', { cx: 25, cy: 7, r: 6, fill: 'currentColor' }));
+		errMark.appendChild(svgEl('path', { d: 'M25 3.8 V7.5 M25 10 V10.1', stroke: '#ffffff', 'stroke-width': '1.6', 'stroke-linecap': 'round' }));
+		svg.appendChild(errMark);
+
+		wrap.appendChild(svg);
+
+		var bars = svg.querySelectorAll('.bar');
+
+		/* 按状态更新格数与可访问标签；未知状态退到 searching，绝不静默留空 */
+		wrap.setCellularState = function (state) {
+			if (!Object.prototype.hasOwnProperty.call(CELLULAR_LEVELS, state)) state = 'searching';
+			wrap.setAttribute('data-state', state);
+			var level = CELLULAR_LEVELS[state];
+			for (var i = 0; i < bars.length; i++) {
+				if (i < level) bars[i].classList.add('active');
+				else bars[i].classList.remove('active');
+			}
+			wrap.setAttribute('aria-label', CELLULAR_LABELS[state]);
+			return state;
+		};
+
+		return wrap;
 	};
 
 	api.page = function (title, subtitle, pageKey, badgeText) {
@@ -685,14 +364,9 @@ api.mascotSvg = function () {
 		hero.appendChild(content);
 
 		var art = E('div', { 'class': 'mt5700-hero-art' });
-		var toggle = api.themeToggle();
-		art.appendChild(toggle);
 
-		// 专属动态矢量插画 (160x120 viewBox)
-		var illuWrap = E('div', { 'class': 'mt5700-hero-illu-box' }, [api.heroIllustration(pageKey)]);
-		art.appendChild(illuWrap);
-
-		var mascot = api.mascot(null, pageKey);
+		/* 看板娘完整保留（含图片、气泡、点击换台词与动画） */
+		var mascot = api.mascot();
 		art.appendChild(mascot.el);
 		hero.appendChild(art);
 		node._mascot = mascot;

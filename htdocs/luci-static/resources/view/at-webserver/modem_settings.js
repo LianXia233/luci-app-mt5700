@@ -6,17 +6,14 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 模组设置页面，覆盖以下可操作功能：
- * - 设备信息（ATI / IMEI / 连接模式 AT+CONNECT?）
+ * 模组设置页面：
+ * - 设备信息（ATI / IMEI / 连接模式 AT+CONNECT? / USB 速率）
  * - SIM 卡：槽位切换（SCICHG + HVSST + CFUN 重启）、热插拔（TDSIMHP）、PIN 状态/操作
- * - 飞行模式（CFUN）
- * - 网卡速率（TDPCIELANCFG）、电源管理（TDPMCFG）
- * - NR 能力：载波聚合 / VoNR / DSS（NRRCCAPQRY=3/2/5 + NRRCCAPCFG）
+ * - 射频与 5G 增强：飞行模式（CFUN）、NR 载波聚合 / VoNR / DSS（NRRCCAPQRY/CFG）
+ * - 设备控制：网卡速率（TDPCIELANCFG）、电源管理（TDPMCFG）
  * - 网络系统配置（SYSCFGEX）
  * - 温度保护（THERMAUTOFUN / THERMLD*）
- * - 重启（RESET）、恢复出厂（AT&F）
- *
- * 注意：IMEI 读写沿用既有 AT 命令（读取 AT+CGSN、写入 AT^PHYNUM）不改；仅将 IMEI 拆分为独立卡片，入口由「点击 5 次」改为四重验证确认流程。
+ * - 系统控制：重启（RESET）、恢复出厂（AT&F）
  */
 
 return L.view.extend({
@@ -24,13 +21,121 @@ return L.view.extend({
 		var page = Mt5700.page('模组设置', '硬件信息遥测、SIM/USIM 状态、射频模式与系统重置控制', 'modem_settings', '模组核心 · 硬件控制');
 		var body = page._body;
 
+		/* 局部美化样式注入 */
+		var modemStyle = E('style', {}, [
+			'/* 模组样式增强 */',
+			'.mt-modem-grid-compact { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 12px; }',
+			'.mt-imei-box { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--mt5700-border); border-radius: 12px; background: rgba(125, 125, 125, 0.03); margin-bottom: 12px; }',
+			'.mt-imei-code { font-size: 17px; font-weight: 700; font-family: var(--mt5700-font-mono); letter-spacing: 0.08em; color: var(--mt5700-text); }',
+			'.mt-pin-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }',
+			'.mt-pin-actions .mt5700-btn { width: 100%; justify-content: center; }',
+			'.mt-spec-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--mt5700-divider); }',
+			'.mt-spec-row:last-child { border-bottom: none; }',
+			'.mt-spec-label { font-size: 13px; color: var(--mt5700-text-secondary); font-weight: 500; flex-shrink: 0; white-space: nowrap; }',
+			'.mt-spec-val { font-size: 13.5px; font-weight: 600; color: var(--mt5700-text); text-align: right; }',
+			'@media (max-width: 600px) {',
+			'  .mt-spec-row { flex-direction: column; align-items: flex-start; gap: 5px; }',
+			'  .mt-spec-val { text-align: left; }',
+			'}',
+			'.mt-therm-badge-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }',
+			'.mt-therm-stat-chip { font-size: 12px; padding: 4px 10px; border-radius: 8px; background: rgba(125, 125, 125, 0.06); border: 1px solid var(--mt5700-border); color: var(--mt5700-text-secondary); }',
+			/* 网络系统配置 (SYSCFGEX) 紧凑排版优化 */
+			'.mt-sys-overview { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(14, 165, 233, 0.04)); border: 1px solid rgba(139, 92, 246, 0.16); border-radius: 10px; margin-bottom: 8px; }',
+			'.mt-sys-stat-item { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; }',
+			'.mt-sys-stat-label { color: var(--mt5700-text-secondary); font-size: 11px; }',
+			'.mt-sys-tip { font-size: 11.5px; color: var(--mt5700-text-secondary); padding: 5px 10px; border-radius: 8px; background: rgba(14, 165, 233, 0.05); border: 1px solid rgba(14, 165, 233, 0.15); margin-bottom: 8px; line-height: 1.45; }',
+			'/* 接入顺序 12 列对称紧凑响应式网格 */',
+			'.mt-sys-acq-cards { display: grid; gap: 8px; margin-bottom: 8px; }',
+			'@media (min-width: 900px) {',
+			'  .mt-sys-acq-cards { grid-template-columns: repeat(12, 1fr); }',
+			'  .mt-sys-acq-cards > label:nth-child(1), .mt-sys-acq-cards > label:nth-child(2), .mt-sys-acq-cards > label:nth-child(3), .mt-sys-acq-cards > label:nth-child(4) { grid-column: span 3; }',
+			'  .mt-sys-acq-cards > label:nth-child(5), .mt-sys-acq-cards > label:nth-child(6), .mt-sys-acq-cards > label:nth-child(7) { grid-column: span 4; }',
+			'}',
+			'@media (max-width: 899px) and (min-width: 601px) {',
+			'  .mt-sys-acq-cards { grid-template-columns: repeat(2, 1fr); }',
+			'  .mt-sys-acq-cards > label:nth-child(7) { grid-column: span 2; }',
+			'}',
+			'@media (max-width: 600px) {',
+			'  .mt-sys-acq-cards { grid-template-columns: 1fr; gap: 6px; }',
+			'}',
+			'.mt-sys-acq-cards .mt5700-radio-card { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--mt5700-card-bg); border: 1px solid var(--mt5700-border); transition: all 0.2s ease; min-height: 38px; }',
+			'.mt-sys-acq-cards .mt5700-radio-card:hover { transform: translateY(-1px); border-color: rgba(139, 92, 246, 0.4); box-shadow: 0 3px 10px rgba(139, 92, 246, 0.08); }',
+			'.mt-sys-acq-cards .mt5700-radio-card.mt5700-radio-card-active, .mt-sys-acq-cards .mt5700-radio-card:has(input[type="radio"]:checked) { border-color: #8b5cf6; background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(14, 165, 233, 0.03)); box-shadow: 0 3px 10px rgba(139, 92, 246, 0.12); }',
+			'.mt-sys-acq-cards .mt5700-radio-card-dot { margin-top: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-body { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 1 1 auto; min-width: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-head { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; min-width: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-title { font-size: 12.5px; font-weight: 600; color: var(--mt5700-text); white-space: nowrap; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-badge { font-size: 10px; padding: 0 5px; border-radius: 999px; background: rgba(139, 92, 246, 0.15); color: #7c3aed; font-weight: 600; flex-shrink: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-code { font-size: 10px; font-family: var(--mt5700-font-mono); padding: 1px 5px; border-radius: 4px; background: rgba(125, 125, 125, 0.08); color: var(--mt5700-text-secondary); margin-top: 0; flex-shrink: 0; white-space: nowrap; }',
+			'/* 左右对称双面板紧凑布局 */',
+			'.mt-sys-subpanel { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; background: rgba(125, 125, 125, 0.025); border: 1px solid var(--mt5700-border); border-radius: 10px; }',
+			'.mt-sys-subpanel-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 13px; font-weight: 700; color: var(--mt5700-text); padding-bottom: 6px; border-bottom: 1px solid var(--mt5700-divider); margin-bottom: 0; }',
+			'/* 漫游卡片极简药丸排版 */',
+			'.mt-sys-roam-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }',
+			'@media (max-width: 600px) { .mt-sys-roam-cards { grid-template-columns: 1fr; } }',
+			'.mt-sys-roam-cards .mt5700-radio-card { padding: 6px 10px; border-radius: 8px; min-height: 38px; align-items: center; }',
+			'.mt-sys-roam-cards .mt5700-radio-card.mt5700-radio-card-active, .mt-sys-roam-cards .mt5700-radio-card:has(input[type="radio"]:checked) { border-color: #10b981; background: rgba(16, 185, 129, 0.06); }',
+			'.mt-sys-roam-cards .mt5700-radio-card-title { font-size: 12px; font-weight: 600; }',
+			'/* 服务域卡片极简药丸排版 */',
+			'.mt-sys-srv-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }',
+			'.mt-sys-srv-cards > label:nth-child(5) { grid-column: span 2; }',
+			'@media (max-width: 600px) { .mt-sys-srv-cards { grid-template-columns: 1fr; } .mt-sys-srv-cards > label:nth-child(5) { grid-column: span 1; } }',
+			'.mt-sys-srv-cards .mt5700-radio-card { padding: 6px 10px; border-radius: 8px; min-height: 38px; align-items: center; }',
+			'.mt-sys-srv-cards .mt5700-radio-card.mt5700-radio-card-active, .mt-sys-srv-cards .mt5700-radio-card:has(input[type="radio"]:checked) { border-color: #0284c7; background: rgba(2, 132, 199, 0.06); }',
+			'.mt-sys-srv-cards .mt5700-radio-card-title { font-size: 12px; font-weight: 600; }',
+			'/* 约束提示紧凑化 */',
+			'.mt-sys-srv-note { display: flex; align-items: flex-start; gap: 6px; padding: 6px 10px; border-radius: 6px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); color: #b45309; font-size: 11px; line-height: 1.4; margin-top: 4px; }',
+			'.mt-sys-srv-note-tag { flex-shrink: 0; font-weight: 700; }',
+			'/* 原始参数面板 */',
+			'.mt-sys-raw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; margin-top: 8px; padding: 10px 12px; border-radius: 8px; background: rgba(125, 125, 125, 0.03); border: 1px dashed var(--mt5700-border); }',
+			'/* 系统控制 */',
+			'.mt-sysctl { display: flex; flex-direction: column; gap: 12px; }',
+			'.mt-sysctl-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--mt5700-border); border-radius: 12px; background: rgba(125, 125, 125, 0.03); transition: border-color .2s ease, box-shadow .2s ease; }',
+			'.mt-sysctl-item:hover { border-color: rgba(41, 169, 225, 0.3); }',
+			'.mt-sysctl-item.is-warn { border-color: rgba(245, 158, 11, 0.28); background: linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.02)); }',
+			'.mt-sysctl-item.is-warn:hover { border-color: rgba(245, 158, 11, 0.5); }',
+			'.mt-sysctl-item.is-danger { border-color: rgba(239, 68, 68, 0.28); background: linear-gradient(135deg, rgba(239, 68, 68, 0.06), rgba(239, 68, 68, 0.02)); }',
+			'.mt-sysctl-item.is-danger:hover { border-color: rgba(239, 68, 68, 0.5); }',
+			'.mt-sysctl-info { flex: 1 1 auto; min-width: 0; }',
+			'.mt-sysctl-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; color: var(--mt5700-text); }',
+			'.mt-sysctl-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }',
+			'.mt-sysctl-item.is-warn .mt-sysctl-dot { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }',
+			'.mt-sysctl-item.is-danger .mt-sysctl-dot { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15); }',
+			'.mt-sysctl-desc { font-size: 12px; color: var(--mt5700-text-secondary); line-height: 1.55; margin-top: 4px; }',
+			'.mt-sysctl-item .mt5700-btn { flex: 0 0 auto; min-width: 120px; }',
+			'.mt5700-btn-warn { color: #b45309; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.4); }',
+			'.mt5700-btn-warn:hover:not(:disabled) { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.6); }'
+		].join('\n'));
+		body.appendChild(modemStyle);
 
 		/* ---------- 通用小工具 ---------- */
-
+		/*
+		 * 开关回滚约定（Codex P2：模组拒绝 AT 指令时必须还原勾选状态）。
+		 *
+		 * - onChange 返回 Promise 时，以 resolve 值判定成败：false 代表模组拒绝、
+		 *   超时或请求异常，此时统一把 checkbox 恢复到操作前的状态；
+		 * - handler 内部只负责「发指令 + 提示」，不再各自写回滚，避免漏写；
+		 * - 返回 undefined 的老式 handler 不触发回滚，保持向后兼容。
+		 */
 		function makeSwitch(onChange) {
 			var wrap = E('div', { 'class': 'mt5700-switch' });
 			var input = E('input', { type: 'checkbox' });
-			input.addEventListener('change', function () { onChange(input.checked, input); });
+			input.addEventListener('change', function () {
+				var checked = input.checked;
+				var result;
+				try {
+					result = onChange(checked, input);
+				} catch (e) {
+					input.checked = !checked;
+					return;
+				}
+				if (!result || typeof result.then !== 'function') return;
+				result.then(function (ok) {
+					if (ok === false) input.checked = !checked;
+				}).catch(function () {
+					input.checked = !checked;
+				});
+			});
 			wrap.appendChild(input);
 			return wrap;
 		}
@@ -46,13 +151,12 @@ return L.view.extend({
 			return AtWs.client.sendCommand(cmd);
 		}
 
-		/* ================= 设备信息 ================= */
-
-		/* 设备信息 + 设备标识(IMEI)：双列并排 */
+		/* ================= 第一行：设备信息 + 设备标识 (IMEI) ================= */
 		var rowDev = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
 		body.appendChild(rowDev);
 
-		var devCard = Mt5700.card('设备信息', '');
+		/* 卡片 1-1：设备信息 */
+		var devCard = Mt5700.card('硬件规格与链路信息', '模组核心厂商、固件版本、总线模式与链路协商速率');
 		var devBody = E('div');
 		devCard._body.appendChild(devBody);
 		rowDev.appendChild(devCard);
@@ -61,75 +165,86 @@ return L.view.extend({
 
 		function renderDev() {
 			devBody.innerHTML = '';
-			devBody.appendChild(Mt5700.table(
-				['项目', '值'],
-				[
-					['制造商', dev.manufacturer || '—'],
-					['型号', dev.model || '—'],
-					['版本', dev.revision || '—'],
-					['连接模式', dev.connectMode || '—'],
-					['USB 速率', dev.usb || '—']
-				]
-			));
+			var list = E('div', { style: 'display:flex; flex-direction:column;' });
+
+			function addRow(label, valNode) {
+				var row = E('div', { 'class': 'mt-spec-row' });
+				row.appendChild(E('span', { 'class': 'mt-spec-label' }, label));
+				if (typeof valNode === 'string') {
+					row.appendChild(E('span', { 'class': 'mt-spec-val' }, valNode || '—'));
+				} else {
+					row.appendChild(valNode);
+				}
+				list.appendChild(row);
+			}
+
+			addRow('设备制造商', dev.manufacturer || '—');
+			addRow('模组型号', dev.model || '—');
+			addRow('固件版本', E('code', { 'class': 'mt5700-mono', style: 'font-weight:600;' }, dev.revision || '—'));
+
+			var connNode = dev.connectMode
+				? Mt5700.badge(dev.connectMode, dev.connectMode === '网络连接' ? 'success' : 'info')
+				: E('span', { 'class': 'mt-spec-val' }, '—');
+			addRow('连接工作模式', connNode);
+
+			var usbNode = dev.usb
+				? Mt5700.badge(dev.usb, 'info')
+				: E('span', { 'class': 'mt-spec-val' }, '—');
+			addRow('USB 链路速率', usbNode);
+
+			devBody.appendChild(list);
 		}
 		renderDev();
 
-		/* ================= 设备标识（IMEI，独立卡片） ================= */
-
-		/*
-		 * IMEI 独立卡片：入口不再使用连续点击 5 次触发，改为四重验证确认流程。
-		 * 写入命令固定为 AT^PHYNUM，本页仅重构 UI 交互层，
-		 * 不改动 IMEI 相关命令与数据流。
-		 */
-
-		/* 区域样式（作用域前缀 mt-imei-，仅本页注入一次） */
-		var imeiStyle = E('style', {}, [
-			'.mt-imei { display: flex; flex-direction: column; gap: 12px; }',
-			'.mt-imei-value { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--mt5700-border); border-radius: 10px; background: rgba(125, 125, 125, 0.03); }',
-			'.mt-imei-label { font-size: 12.5px; font-weight: 600; color: var(--mt5700-text-secondary); white-space: nowrap; }',
-			'.mt-imei-value .mt5700-mono { font-size: 16px; font-weight: 700; letter-spacing: 0.06em; color: var(--mt5700-text); word-break: break-all; }'
-		].join('\n'));
-		body.appendChild(imeiStyle);
-
-		var imeiCard = Mt5700.card('设备标识（IMEI）', '模组唯一身份标识，读取自 AT+CGSN');
+		/* 卡片 1-2：设备标识 (IMEI) */
+		var imeiCard = Mt5700.card('设备标识（IMEI）', '模组唯一身份硬件标识，读取自 AT+CGSN');
 		var imeiBody = E('div');
 		imeiCard._body.appendChild(imeiBody);
 		rowDev.appendChild(imeiCard);
 
-		/* imeiEl 节点保持不变：仍由 AT+CGSN 读取回填与写入成功后的更新逻辑驱动 */
-		var imeiEl = E('span', { 'class': 'mt5700-mono' }, '—');
+		var imeiEl = E('span', { 'class': 'mt-imei-code' }, '—');
 
-		var imeiZone = E('div', { 'class': 'mt-imei' });
+		var imeiBox = E('div', { 'class': 'mt-imei-box' });
+		var imeiLeft = E('div', { style: 'display:flex; flex-direction:column; gap:4px;' });
+		imeiLeft.appendChild(E('span', { style: 'font-size:12px; color:var(--mt5700-text-secondary);' }, '当前设备 IMEI:'));
+		imeiLeft.appendChild(imeiEl);
+		imeiBox.appendChild(imeiLeft);
 
-		/* 当前 IMEI 取值展示（视觉焦点置顶） */
-		var imeiValueRow = E('div', { 'class': 'mt-imei-value' });
-		imeiValueRow.appendChild(E('span', { 'class': 'mt-imei-label' }, '当前 IMEI'));
-		imeiValueRow.appendChild(imeiEl);
-		imeiZone.appendChild(imeiValueRow);
+		var copyBtn = Mt5700.ghostButton('复制', function () {
+			if (!dev.imei) { Mt5700.warning('当前尚未读取到 IMEI'); return; }
+			if (navigator.clipboard && navigator.clipboard.writeText) {
+				navigator.clipboard.writeText(dev.imei).then(function () {
+					Mt5700.success('IMEI 已成功复制到剪贴板');
+				});
+			} else {
+				Mt5700.info('IMEI: ' + dev.imei);
+			}
+		});
+		imeiBox.appendChild(copyBtn);
+		imeiBody.appendChild(imeiBox);
 
-		/* 操作条：复用「系统控制」的 mt-sysctl-item is-danger 结构，按钮样式与排版完全对齐 */
-		var imeiActions = E('div', { 'class': 'mt-sysctl-item is-danger' });
+		/* 操作条：修改 IMEI (四重验证) */
+		var imeiActions = E('div', { 'class': 'mt-sysctl-item is-danger', style: 'margin-bottom:12px;' });
 		var imeiInfo = E('div', { 'class': 'mt-sysctl-info' });
 		var imeiNameRow = E('div', { 'class': 'mt-sysctl-name' });
 		imeiNameRow.appendChild(E('span', { 'class': 'mt-sysctl-dot' }));
-		imeiNameRow.appendChild(E('span', {}, '修改 IMEI'));
+		imeiNameRow.appendChild(E('span', {}, '修改设备 IMEI'));
 		imeiInfo.appendChild(imeiNameRow);
-		imeiInfo.appendChild(E('div', { 'class': 'mt-sysctl-desc' }, '四重验证确认后执行（AT^PHYNUM），需具备合法依据。'));
+		imeiInfo.appendChild(E('div', { 'class': 'mt-sysctl-desc' }, '四重验证安全确认后执行（AT^PHYNUM），需具备合法依据。'));
 		imeiActions.appendChild(imeiInfo);
 		imeiActions.appendChild(Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); }));
-		imeiZone.appendChild(imeiActions);
+		imeiBody.appendChild(imeiActions);
 
-		/* 说明与风险提示作为次级信息置底 */
-		imeiZone.appendChild(Mt5700.fieldNote(
-			'修改 IMEI 采用四重验证：输入新 IMEI（含 Luhn 校验位验证）、再次输入确认一致性、输入当前 IMEI 后 6 位验证设备归属、最终确认后执行。',
+		/* 说明与风险提示 */
+		imeiBody.appendChild(Mt5700.fieldNote(
+			'修改 IMEI 采用四重安全验证机制，输入新 IMEI（含 Luhn 校验）、二次校验、原机后 6 位归属校验及最终执行确认。',
 			[
-				'写入命令与基准实现完全一致（AT^PHYNUM），本页仅重构验证流程，不改动命令本身。',
-				'擅自修改 IMEI 可能违反当地法律法规，请确认操作具备合法依据。'
+				'写入命令固定为 AT^PHYNUM，修改后请重启模组使系统网络彻底对齐。',
+				'擅自修改 IMEI 可能违反当地无线电通信法律法规，请确认具备合法测试依据。'
 			]
 		));
-		imeiBody.appendChild(imeiZone);
 
-		/* Luhn 校验：IMEI 第 15 位为校验位（纯前端验证，不影响写入命令） */
+		/* Luhn 校验 */
 		function luhnValid(s) {
 			var sum = 0, dbl = false, i, d;
 			for (i = s.length - 1; i >= 0; i--) {
@@ -142,7 +257,6 @@ return L.view.extend({
 		}
 
 		function startImeiChangeFlow() {
-			/* 第一重：输入新 IMEI，格式 + Luhn 校验位验证 */
 			Ui.promptModal('修改 IMEI（第 1/4 步）· 输入新 IMEI', [
 				{ key: 'imei', label: '新 IMEI（15 位数字）', value: '', placeholder: '仅数字，第 15 位须通过 Luhn 校验' }
 			], function (values) {
@@ -151,7 +265,6 @@ return L.view.extend({
 				if (!luhnValid(newImei)) { Mt5700.error('校验位（第 15 位）未通过 Luhn 验证，请核对后重新输入'); return; }
 				if (dev.imei && newImei === dev.imei) { Mt5700.error('新 IMEI 与当前 IMEI 相同'); return; }
 
-				/* 第二重：再次输入，验证一致性 */
 				Ui.promptModal('修改 IMEI（第 2/4 步）· 再次输入确认', [
 					{ key: 'imei2', label: '再次输入新 IMEI', type: 'password', placeholder: '须与上一步完全一致' }
 				], function (v2) {
@@ -162,9 +275,7 @@ return L.view.extend({
 		}
 
 		function verifyImeiOwner(newImei) {
-			/* 第三重：输入当前 IMEI 后 6 位，验证操作者知晓当前设备标识 */
 			if (!dev.imei) {
-				/* 当前 IMEI 读取失败时无法做归属验证，跳过本重，直接进入最终确认 */
 				finalImeiConfirm(newImei);
 				return;
 			}
@@ -177,7 +288,6 @@ return L.view.extend({
 		}
 
 		function finalImeiConfirm(newImei) {
-			/* 第四重：最终确认；写入命令固定为 AT^PHYNUM */
 			Mt5700.confirm('最终确认：IMEI 将由 ' + (dev.imei || '（未知）') + ' 变更为 ' + newImei + '。此操作影响设备合法性，请谨慎。', function () {
 				send('AT^PHYNUM=IMEI,' + newImei).then(function (res) {
 					if (res.success) {
@@ -191,54 +301,54 @@ return L.view.extend({
 			}, '确认修改');
 		}
 
-		/* ================= SIM 卡 + 飞行模式（双列并排） ================= */
+		/* ================= 第二行：SIM 卡管理 + 射频与 5G 增强 ================= */
+		var rowSimRf = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowSimRf);
 
-		var rowSim = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
-		body.appendChild(rowSim);
+		/* 卡片 2-1：SIM 卡管理 */
+		var simCard = Mt5700.card('SIM / USIM 卡管理', '物理卡槽切换、热插拔支持与 PIN 码安全锁');
+		rowSimRf.appendChild(simCard);
 
-		var simCard = Mt5700.card('SIM 卡', '槽位切换、热插拔与 PIN');
-		var simBody = E('div');
-		simCard._body.appendChild(simBody);
-		rowSim.appendChild(simCard);
-
-		var simStatusRow = E('div', { 'class': 'mt5700-inline' });
-		var simSqEl = E('span', { 'class': 'mt5700-hint' }, 'SIM 状态：—');
-		var pinStatusEl = E('span', { 'class': 'mt5700-hint' }, 'PIN 状态：—');
-		simStatusRow.appendChild(simSqEl);
-		simStatusRow.appendChild(pinStatusEl);
-		simBody.appendChild(simStatusRow);
+		var simStatusRow = E('div', { 'class': 'mt5700-inline', style: 'margin-bottom:12px; gap:8px;' });
+		var simSqBadge = Mt5700.badge('SIM: 检查中…', 'neutral');
+		var pinStatusBadge = Mt5700.badge('PIN: 检查中…', 'neutral');
+		simStatusRow.appendChild(simSqBadge);
+		simStatusRow.appendChild(pinStatusBadge);
+		simCard._body.appendChild(simStatusRow);
 
 		var simSlotSel = Mt5700.select([
-			{ label: '外置 SIM', value: '0' },
-			{ label: '内置 SIM', value: '1' }
+			{ label: '外置 SIM 卡槽 (Slot 0)', value: '0' },
+			{ label: '内置 SIM 卡槽 (Slot 1)', value: '1' }
 		], '0');
-		var simSlotSelProxy = simSlotSel;
-		simSlotSelProxy.addEventListener('change', function () {
-			handleSimSwitch(parseInt(simSlotSelProxy.value, 10));
+		simSlotSel.addEventListener('change', function () {
+			handleSimSwitch(parseInt(simSlotSel.value, 10));
 		});
-		simBody.appendChild(Mt5700.formGroup('SIM 槽位', simSlotSelProxy));
+		simCard._body.appendChild(Mt5700.formGroup('SIM 槽位切换', simSlotSel, '切换卡槽将自动重置模组射频'));
 
-		var hpSwitch = makeSwitch(function (checked, input) { handleSimHotPlug(checked, input); });
-		simBody.appendChild(Mt5700.formGroup('SIM 卡热插拔', hpSwitch));
+		var hpSwitch = makeSwitch(function (checked) { return handleSimHotPlug(checked); });
 		var hpChk = hpSwitch.querySelector('input');
+		simCard._body.appendChild(Mt5700.formGroup('SIM 卡热插拔', hpSwitch, '开启后模组支持不关机插拔 SIM 卡即时识别'));
 
-		var pinOps = Mt5700.panelActions(
-			Mt5700.button('输入 PIN', function () { pinModal('verify'); }, 'primary'),
-			Mt5700.button('修改 PIN', function () { pinModal('change'); }, 'primary'),
-			Mt5700.button('禁用 PIN', function () { pinModal('disable'); }, 'primary'),
-			Mt5700.button('启用 PIN', function () { pinModal('enable'); }, 'primary')
-		);
-		simBody.appendChild(pinOps);
+		// PIN 码操作按钮组（2x2 网格）
+		var pinGroup = E('div', { 'class': 'mt5700-form-group' });
+		pinGroup.appendChild(E('label', { 'class': 'mt5700-label' }, 'PIN 安全码操作'));
+		var pinGrid = E('div', { 'class': 'mt-pin-actions' });
+		pinGrid.appendChild(Mt5700.button('输入 PIN 解锁', function () { pinModal('verify'); }, 'primary'));
+		pinGrid.appendChild(Mt5700.button('修改 PIN 码', function () { pinModal('change'); }, 'secondary'));
+		pinGrid.appendChild(Mt5700.button('启用 PIN 锁', function () { pinModal('enable'); }, 'secondary'));
+		pinGrid.appendChild(Mt5700.button('停用 PIN 锁', function () { pinModal('disable'); }, 'ghost'));
+		pinGroup.appendChild(pinGrid);
+		simCard._body.appendChild(pinGroup);
 
 		function pinModal(op) {
-			var titles = { verify: '输入 PIN', change: '修改 PIN', disable: '禁用 PIN', enable: '启用 PIN' };
+			var titles = { verify: '输入 PIN 码解锁', change: '修改当前 PIN 码', disable: '停用 PIN 码验证', enable: '启用 PIN 码保护' };
 			var fields = [];
 			if (op === 'change') {
-				fields.push({ key: 'old', label: '当前 PIN', type: 'password' });
-				fields.push({ key: 'new', label: '新 PIN', type: 'password' });
+				fields.push({ key: 'old', label: '当前旧 PIN', type: 'password' });
+				fields.push({ key: 'new', label: '新 PIN 码 (4~8位)', type: 'password' });
 				fields.push({ key: 'confirm', label: '确认新 PIN', type: 'password' });
 			} else {
-				fields.push({ key: 'pin', label: 'PIN', type: 'password' });
+				fields.push({ key: 'pin', label: '请输入 PIN 码', type: 'password' });
 			}
 			Ui.promptModal(titles[op], fields, function (values) {
 				var cmd;
@@ -250,7 +360,7 @@ return L.view.extend({
 				else cmd = 'AT+CLCK="SC",1,"' + values.pin + '"';
 				send(cmd).then(function (res) {
 					if (res.success) {
-						Mt5700.success('操作成功');
+						Mt5700.success('PIN 操作成功');
 						fetchPinStatus();
 					} else {
 						Mt5700.error(Ui.atErrorText(res, 'PIN 码操作失败'));
@@ -273,15 +383,18 @@ return L.view.extend({
 			});
 		}
 
-		function handleSimHotPlug(checked, input) {
-			send('AT^TDSIMHP=' + (checked ? '1' : '0')).then(function (res) {
+		function handleSimHotPlug(checked) {
+			return send('AT^TDSIMHP=' + (checked ? '1' : '0')).then(function (res) {
 				if (res.success) {
 					Mt5700.success((checked ? '开启' : '关闭') + ' SIM 卡热插拔成功');
-				} else {
-					Mt5700.error((checked ? '开启' : '关闭') + ' SIM 卡热插拔失败');
-					if (input) input.checked = !checked;
+					return true;
 				}
-			}).catch(function () { Mt5700.error('SIM 卡热插拔设置失败'); });
+				Mt5700.error((checked ? '开启' : '关闭') + ' SIM 卡热插拔失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('SIM 卡热插拔设置失败');
+				return false;
+			});
 		}
 
 		function fetchPinStatus() {
@@ -289,108 +402,85 @@ return L.view.extend({
 				var ready = false;
 				if (res.success && res.data) {
 					var m = atText(res).match(/\+CPIN:\s*(\w+)/);
-					if (m) { ready = m[1] === 'READY'; pinStatusEl.textContent = 'PIN 状态：' + m[1]; }
+					if (m) {
+						ready = m[1] === 'READY';
+						pinStatusBadge.textContent = 'PIN: ' + m[1];
+						pinStatusBadge.className = 'mt5700-badge ' + (ready ? 'mt5700-badge-success' : 'mt5700-badge-warning');
+					}
 				}
-				if (!ready) pinStatusEl.textContent = 'PIN 状态：READY';
+				if (!ready) {
+					pinStatusBadge.textContent = 'PIN: READY';
+					pinStatusBadge.className = 'mt5700-badge mt5700-badge-success';
+				}
 				return send('AT+CLCK="SC",2');
 			}).then(function (res) {
 				if (res.success && res.data) {
 					var m = atText(res).match(/,(\d+)/);
 					if (m) {
 						var enabled = m[1] === '1';
-						pinStatusEl.textContent = 'PIN 状态：READY，' + (enabled ? '已启用' : '未启用');
+						pinStatusBadge.textContent = 'PIN: ' + (enabled ? '已开启锁保护' : '未上锁 (READY)');
 					}
 				}
 			}).catch(function () {});
 		}
 
-		/* ================= 飞行模式 ================= */
+		/* 卡片 2-2：射频控制与 5G 增强特性 */
+		var rfCard = Mt5700.card('射频控制与 5G 增强', '飞行模式、载波聚合 (CA)、动态频谱共享与 VoNR');
+		rowSimRf.appendChild(rfCard);
 
-		var rfCard = Mt5700.card('射频控制', '飞行模式');
-		var rfBody = E('div');
-		rfCard._body.appendChild(rfBody);
-		rowSim.appendChild(rfCard);
-
-		var airplaneSwitch = makeSwitch(function (checked, input) {
-			send('AT+CFUN=' + (checked ? '0' : '1')).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '飞行模式成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '飞行模式失败');
-					input.checked = !checked;
+		var airplaneSwitch = makeSwitch(function (checked) {
+			return send('AT+CFUN=' + (checked ? '0' : '1')).then(function (res) {
+				if (res.success) {
+					Mt5700.success((checked ? '开启' : '关闭') + '飞行模式成功');
+					return true;
 				}
-			}).catch(function () { Mt5700.error('飞行模式设置失败'); });
+				Mt5700.error((checked ? '开启' : '关闭') + '飞行模式失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('飞行模式设置失败');
+				return false;
+			});
 		});
-		rfBody.appendChild(Mt5700.formGroup('飞行模式', airplaneSwitch, '开启后关闭射频，恢复网络连接'));
 		var airplaneChk = airplaneSwitch.querySelector('input');
+		rfCard._body.appendChild(Mt5700.formGroup('飞行模式 (CFUN)', airplaneSwitch, '开启后彻底关断射频，适合应急断网排障或重连基站'));
 
-		/* ================= 设备控制 + NR 能力（双列并排） ================= */
-
-		var rowCtrl = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
-		body.appendChild(rowCtrl);
-
-		var ctrlCard = Mt5700.card('设备控制', '网卡速率与电源管理');
-		var ctrlBody = E('div');
-		ctrlCard._body.appendChild(ctrlBody);
-		rowCtrl.appendChild(ctrlCard);
-
-		var nicSel = Mt5700.select([
-			{ label: '自动协商', value: '0' },
-			{ label: '1000Mbps 全双工', value: '1' },
-			{ label: '100Mbps 全双工', value: '2' },
-			{ label: '10Mbps 全双工', value: '3' }
-		], '0');
-		nicSel.addEventListener('change', function () { handleSetNic(parseInt(nicSel.value, 10)); });
-		ctrlBody.appendChild(Mt5700.formGroup('网卡速率', nicSel));
-
-		var pwrSwitch = makeSwitch(function (checked, input) {
-			send('AT^TDPMCFG=' + (checked ? '1' : '0')).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '电源管理成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '电源管理失败');
-					input.checked = !checked;
+		var caSwitch = makeSwitch(function (checked) {
+			return send('AT^NRRCCAPCFG=3,' + (checked ? 1 : 0)).then(function (res) {
+				if (res.success) {
+					Mt5700.success((checked ? '开启' : '关闭') + '载波聚合成功');
+					return true;
 				}
-			}).catch(function () { Mt5700.error('电源管理设置失败'); });
+				Mt5700.error((checked ? '开启' : '关闭') + '载波聚合失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('载波聚合设置失败');
+				return false;
+			});
 		});
-		ctrlBody.appendChild(Mt5700.formGroup('电源管理', pwrSwitch, '开启后模组在无业务时进入低功耗'));
-		var pwrChk = pwrSwitch.querySelector('input');
-
-		function handleSetNic(value) {
-			send('AT^TDPCIELANCFG=' + value).then(function (res) {
-				if (!res.success) { Mt5700.error('网卡速率设置失败'); return; }
-				Mt5700.success('网卡速率设置成功，重启后生效');
-				Mt5700.confirm('是否立即重启模组使配置生效？', function () {
-					send('AT^RESET').then(function (r) {
-						if (r.success) Mt5700.success('重启指令已发送');
-						else Mt5700.error('重启指令发送失败');
-					});
-				}, '立即重启');
-			}).catch(function () { Mt5700.error('网卡速率设置失败'); });
-		}
-
-		/* ================= NR 能力 ================= */
-
-		var nrCard = Mt5700.card('NR 能力', '载波聚合、VoNR 与 DSS');
-		var nrBody = E('div');
-		nrCard._body.appendChild(nrBody);
-		rowCtrl.appendChild(nrCard);
-
-		var caSwitch = makeSwitch(function (checked, input) {
-			send('AT^NRRCCAPCFG=3,' + (checked ? 1 : 0)).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '载波聚合成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '载波聚合失败');
-					input.checked = !checked;
-				}
-			}).catch(function () { Mt5700.error('载波聚合设置失败'); });
-		});
-		nrBody.appendChild(Mt5700.formGroup('NR 载波聚合', caSwitch));
 		var caChk = caSwitch.querySelector('input');
+		rfCard._body.appendChild(Mt5700.formGroup('NR 载波聚合 (CA)', caSwitch, '开启后允许多个 5G 载波聚合成倍提升吞吐'));
+
+		var dssSwitch = makeSwitch(function (checked) {
+			return send('AT^NRRCCAPCFG=5,' + (checked ? 1 : 0) + ',0').then(function (res) {
+				if (res.success) {
+					Mt5700.success('DSS 配置成功');
+					return true;
+				}
+				Mt5700.error('DSS 配置失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('DSS 配置失败');
+				return false;
+			});
+		});
+		var dssChk = dssSwitch.querySelector('input');
+		rfCard._body.appendChild(Mt5700.formGroup('NR 动态频谱共享 (DSS)', dssSwitch, '允许 4G LTE 与 5G NR 动态共用同一频谱'));
 
 		var vonrSel = Mt5700.select([
-			{ label: '关闭', value: '0' },
-			{ label: 'FR1-VoNR', value: '1' },
-			{ label: 'FR2-VoNR', value: '2' },
-			{ label: 'FR1+FR2-VoNR', value: '3' }
+			{ label: '关闭 VoNR (回落 EPS FB)', value: '0' },
+			{ label: 'FR1-VoNR (Sub-6G 超清语音)', value: '1' },
+			{ label: 'FR2-VoNR (毫米波超清语音)', value: '2' },
+			{ label: 'FR1 + FR2 全频段 VoNR', value: '3' }
 		], '0');
 		vonrSel.addEventListener('change', function () {
 			send('AT^NRRCCAPCFG=2,' + parseInt(vonrSel.value, 10)).then(function (res) {
@@ -398,19 +488,7 @@ return L.view.extend({
 				else Mt5700.error('VoNR 配置失败');
 			}).catch(function () { Mt5700.error('VoNR 配置失败'); });
 		});
-		nrBody.appendChild(Mt5700.formGroup('VoNR', vonrSel));
-
-		var dssSwitch = makeSwitch(function (checked, input) {
-			send('AT^NRRCCAPCFG=5,' + (checked ? 1 : 0) + ',0').then(function (res) {
-				if (res.success) Mt5700.success('DSS 配置成功');
-				else {
-					Mt5700.error('DSS 配置失败');
-					input.checked = !checked;
-				}
-			}).catch(function () { Mt5700.error('DSS 配置失败'); });
-		});
-		nrBody.appendChild(Mt5700.formGroup('NR DSS', dssSwitch, 'LTE/NR 动态频谱共享'));
-		var dssChk = dssSwitch.querySelector('input');
+		rfCard._body.appendChild(Mt5700.formGroup('VoNR 超清语音通话', vonrSel, '5G 原生语音通道，开启后无需回落 4G'));
 
 		function fetchNRCapability() {
 			return send('AT^NRRCCAPQRY=3').then(function (res) {
@@ -433,157 +511,176 @@ return L.view.extend({
 			}).catch(function () {});
 		}
 
-		/* ================= 网络系统配置 SYSCFGEX ================= */
+		/* ================= 第三行：硬件控制与低功耗节能 ================= */
+		var ctrlCard = Mt5700.card('硬件控制与能耗管理', '网卡 PCIe 物理协商速率与芯片低功耗节能策略');
+		body.appendChild(ctrlCard);
 
-		var sysCard = Mt5700.card('网络系统配置', '选择模组搜索和驻留网络的方式');
+		var ctrlGrid = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		ctrlCard._body.appendChild(ctrlGrid);
+
+		var nicSel = Mt5700.select([
+			{ label: '自动协商速率', value: '0' },
+			{ label: '1000Mbps 全双工 (千兆)', value: '1' },
+			{ label: '100Mbps 全双工 (百兆)', value: '2' },
+			{ label: '10Mbps 全双工 (十兆)', value: '3' }
+		], '0');
+		nicSel.addEventListener('change', function () { handleSetNic(parseInt(nicSel.value, 10)); });
+		ctrlGrid.appendChild(Mt5700.formGroup('网卡协商速率', nicSel, '修改后需要重启模组生效'));
+
+		var pwrSwitch = makeSwitch(function (checked) {
+			return send('AT^TDPMCFG=' + (checked ? '1' : '0')).then(function (res) {
+				if (res.success) {
+					Mt5700.success((checked ? '开启' : '关闭') + '电源管理成功');
+					return true;
+				}
+				Mt5700.error((checked ? '开启' : '关闭') + '电源管理失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('电源管理设置失败');
+				return false;
+			});
+		});
+		var pwrChk = pwrSwitch.querySelector('input');
+		ctrlGrid.appendChild(Mt5700.formGroup('动态电源管理', pwrSwitch, '开启后模组在无业务数据时自动进入低功耗待机模式'));
+
+		function handleSetNic(value) {
+			send('AT^TDPCIELANCFG=' + value).then(function (res) {
+				if (!res.success) { Mt5700.error('网卡速率设置失败'); return; }
+				Mt5700.success('网卡速率设置成功，重启后生效');
+				Mt5700.confirm('是否立即重启模组使配置生效？', function () {
+					send('AT^RESET').then(function (r) {
+						if (r.success) Mt5700.success('重启指令已发送');
+						else Mt5700.error('重启指令发送失败');
+					});
+				}, '立即重启');
+			}).catch(function () { Mt5700.error('网卡速率设置失败'); });
+		}
+
+		/* ================= 第四行：网络系统配置 SYSCFGEX ================= */
+		var sysCard = Mt5700.card('网络系统配置 (SYSCFGEX)', '配置模组网络制式接入顺序、频段范围、漫游及服务域');
 		var sysBody = E('div');
 		sysCard._body.appendChild(sysBody);
 		body.appendChild(sysCard);
 
-		sysBody.appendChild(Mt5700.fieldNote(
-			'这一组设置决定模组用哪些制式、哪些频段去搜索网络。改错可能导致无法注册上网络，建议逐项修改后保存。',
-			[
-				'所有设置保存在模组侧，掉电不丢失。',
-				'保存后模组会重新搜索网络，约需 10~30 秒恢复。',
-				'如需在基站覆盖变差时保持通话可用，优先使用「优先」类选项而非「锁定」类。'
-			]
+		/* 顶部配置概览条 */
+		var sysOverview = E('div', { 'class': 'mt-sys-overview' });
+		sysBody.appendChild(sysOverview);
+
+		sysBody.appendChild(E('div', { 'class': 'mt-sys-tip' },
+			'💡 设置保存在模组 NVRAM 掉电不丢失，保存后模组将重新驻网（约 10~30 秒）；建议保持「5G 优先，逐级回落」。'
 		));
 
 		var sysCfg = { acqorder: '', band: '', roam: 1, srvdomain: 2, lteband: '' };
 
-		/*
-		 * 接入顺序：原始参数是制式代码拼接的字符串（如 "080302" = NR → LTE → WCDMA）。
-		 * 用户无法从码串理解含义，也无法自行组合，因此改为「按实际影响面选择」的卡片组，
-		 * 每个选项都写清「选了会怎样」。取值严格限定在 AT^SYSCFGEX=? 支持的制式代码
-		 * （01 GSM / 02 WCDMA / 03 LTE / 08 NR）之内，不会下发非法组合。
-		 */
 		var ACQ_OPTIONS = [
-			{
-				value: '080302', code: '08 → 03 → 02', label: '5G 优先，逐级回落', badge: '推荐',
-				desc: '有 5G 信号就用 5G；没有则自动落到 4G，再没有落到 3G。速度与覆盖兼顾。'
-			},
-			{
-				value: '08', code: '08', label: '仅 5G',
-				desc: '只搜索 5G 网络，搜不到会持续重搜。5G 覆盖不稳时会出现无服务。'
-			},
-			{
-				value: '0302', code: '03 → 02', label: '4G 优先，可回落 3G',
-				desc: '优先驻留 4G；无 4G 时落到 3G。适合 5G 覆盖差、又希望保速率的场景。'
-			},
-			{
-				value: '03', code: '03', label: '仅 4G',
-				desc: '只搜索 4G 网络。信号稳定、耗电较低，但离开 4G 覆盖会无服务。'
-			},
-			{
-				value: '0203', code: '02 → 03', label: '3G 优先，可回落 4G',
-				desc: '优先驻留 3G；无 3G 时落到 4G。适合 3G 覆盖优于 4G 的地区。'
-			},
-			{
-				value: '02', code: '02', label: '仅 3G',
-				desc: '只搜索 3G 网络。速率较低，仅在特殊排查场景使用。'
-			},
-			{
-				value: '99', code: '99', label: '保持当前设置',
-				desc: '不修改接入顺序，只保存本页其它项。'
-			}
+			{ value: '080302', code: '08→03→02', label: '5G 优先，逐级回落', badge: '推荐' },
+			{ value: '08', code: '08', label: '仅 5G (SA)' },
+			{ value: '0302', code: '03→02', label: '4G 优先，回落 3G' },
+			{ value: '03', code: '03', label: '仅 4G (LTE)' },
+			{ value: '0203', code: '02→03', label: '3G 优先，回落 4G' },
+			{ value: '02', code: '02', label: '仅 3G' },
+			{ value: '99', code: '99', label: '保持当前设置' }
 		];
 
 		var acqCards = Mt5700.radioCards('acq', ACQ_OPTIONS, '080302', function (v) {
 			sysCfg.acqorder = v;
 			sysRawAcq.setValue(v);
-			/* 接入顺序变了，服务域的可选范围随之变化，立即重算 */
 			applySrvConstraint();
+			updateSysOverview();
 		});
-		/* 兜底：当前值不在预设选项内（用户曾手工写入过），补一个只读提示项，避免静默丢值 */
-		var acqCustomEl = E('div', { 'class': 'mt5700-hint', 'style': 'display:none' });
+		acqCards.classList.add('mt-sys-acq-cards');
 
-		sysBody.appendChild(Mt5700.formGroup('网络接入顺序', acqCards,
-			'决定模组按什么先后顺序搜索网络制式。默认「5G 优先，逐级回落」适用于绝大多数场景。'));
+		var acqCustomEl = E('div', { 'class': 'mt5700-hint', style: 'display:none; margin-bottom:6px;' });
+
+		sysBody.appendChild(Mt5700.formGroup('网络接入顺序 (Acquisition Order)', acqCards));
 		sysBody.appendChild(acqCustomEl);
 
-		/*
-		 * 频段：原始值是十六进制位图（如 2000000680380），手写极易出错。
-		 * 常规用户只需要「自动」或「全部」，因此改为预设档位；原始值单独只读展示，便于排障时对标。
-		 */
+		/* 左右两栏布局：左侧频段限制，右侧漫游与服务域 */
+		var sysDualGrid = E('div', { 'class': 'mt5700-grid mt5700-grid-2', style: 'margin-top: 8px;' });
+		sysBody.appendChild(sysDualGrid);
+
+		/* 左栏：频段范围限制 */
+		var bandPanel = E('div', { 'class': 'mt-sys-subpanel' });
+		var bandTitle = E('div', { 'class': 'mt-sys-subpanel-title' }, [
+			E('span', {}, '📶 频段掩码限制'),
+			Mt5700.badge('硬件射频过滤', 'neutral')
+		]);
+		bandPanel.appendChild(bandTitle);
+
 		var BAND_PRESETS = [
 			{ value: '', label: '不修改（保持模组当前设置）' },
 			{ value: '00680380', label: '自动（由模组按运营商选择）' },
 			{ value: '3FFFFFFF', label: '全部频段（GSM / WCDMA 全频段）' },
 			{ value: '2000000680380', label: 'WCDMA 900 + WCDMA 1700 + 自动' }
 		];
-
 		var bandSel = Mt5700.select(BAND_PRESETS, '');
 		bandSel.addEventListener('change', function () {
 			sysCfg.band = bandSel.value;
 			sysRawBand.setValue(bandSel.value);
+			updateSysOverview();
 		});
-		sysBody.appendChild(Mt5700.formGroup('2G / 3G 频段', bandSel,
-			'模组在 2G / 3G 制式下允许使用的频段范围。一般保持「自动」即可。'));
+		bandPanel.appendChild(Mt5700.formGroup('2G / 3G 频段设置', bandSel, '模组 2G/3G 频段范围，建议保持「自动」'));
 
-		/*
-		 * 漫游：0 不支持 / 1 支持 / 2 无变化（官方手册 13.2.3）。
-		 * 界面缺少 0 档，且文案「仅本网」与「自动漫游」没讲清「本网」指什么。
-		 */
-		var ROAM_OPTIONS = [
-			{
-				value: '1', label: '允许漫游', badge: '推荐',
-				desc: '离开本地运营商网络后，可以使用合作运营商的网络，保持联网。'
-			},
-			{
-				value: '0', label: '禁止漫游',
-				desc: '只使用本地运营商网络。离开覆盖范围后不接入其它运营商，可避免漫游费用。'
-			},
-			{
-				value: '2', label: '不修改',
-				desc: '保持模组当前漫游设置不变。'
-			}
+		var LTE_PRESETS = [
+			{ value: '', label: '不修改（保持模组当前设置）' },
+			{ value: '1E200000095', label: '常用频段（BC1/3/5/8/34/38/39/40/41）' },
+			{ value: '7FFFFFFFFFFFFFFF', label: '全部 LTE 频段' }
 		];
+		var lteBandSel = Mt5700.select(LTE_PRESETS, '');
+		lteBandSel.addEventListener('change', function () {
+			sysCfg.lteband = lteBandSel.value;
+			sysRawLte.setValue(lteBandSel.value);
+			updateSysOverview();
+		});
+		bandPanel.appendChild(Mt5700.formGroup('4G / LTE 频段设置', lteBandSel, '建议选择「常用频段」，全频段会延长首次搜网时间'));
+		sysDualGrid.appendChild(bandPanel);
 
+		/* 右栏：漫游策略与服务域 */
+		var srvPanel = E('div', { 'class': 'mt-sys-subpanel' });
+		var srvTitle = E('div', { 'class': 'mt-sys-subpanel-title' }, [
+			E('span', {}, '🌐 漫游与服务域策略'),
+			Mt5700.badge('核心网策略', 'info')
+		]);
+		srvPanel.appendChild(srvTitle);
+
+		/* 漫游卡片 */
+		var ROAM_OPTIONS = [
+			{ value: '1', label: '允许漫游', badge: '推荐' },
+			{ value: '0', label: '禁止漫游' },
+			{ value: '2', label: '不修改' }
+		];
 		var roamCards = Mt5700.radioCards('roam', ROAM_OPTIONS, '1', function (v) {
 			sysCfg.roam = parseInt(v, 10);
+			sysRawRoam.setValue(v);
+			updateSysOverview();
 		});
-		sysBody.appendChild(Mt5700.formGroup('漫游', roamCards,
-			'控制模组是否允许接入非本地运营商的网络。'));
+		roamCards.classList.add('mt-sys-roam-cards');
+		srvPanel.appendChild(Mt5700.formGroup('网络漫游控制 (Roaming)', roamCards));
 
-		/*
-		 * 服务域：0 CS_ONLY / 1 PS_ONLY / 2 CS_PS / 3 ANY / 4 无变化。
-		 * 官方约束（手册 13.2.3 注 2）：接入制式含 LTE 或 NR 时，不允许设置为 0 或 3。
-		 * 界面按此动态禁用，把原本仅见于文档的约束显性化。
-		 */
+		/* 服务域卡片 */
 		var SRV_OPTIONS = [
-			{
-				value: '2', label: '语音 + 数据', badge: '推荐',
-				desc: '同时注册语音（打电话）和数据（上网）网络，功能最完整。'
-			},
-			{
-				value: '1', label: '仅数据',
-				desc: '只注册数据网络，无法接打电话和收发短信。适合纯上网设备。'
-			},
-			{
-				value: '0', label: '仅语音',
-				desc: '只注册语音网络，无法上网。当前接入制式含 4G / 5G 时不可选。'
-			},
-			{
-				value: '3', label: '不限（由网络决定）',
-				desc: '由网络侧决定注册方式。当前接入制式含 4G / 5G 时不可选。'
-			},
-			{
-				value: '4', label: '不修改',
-				desc: '保持模组当前服务域设置不变。'
-			}
+			{ value: '2', label: '语音 + 数据', badge: '推荐' },
+			{ value: '1', label: '仅数据 (纯上网)' },
+			{ value: '0', label: '仅语音 (受限)' },
+			{ value: '3', label: '不限 (网络决定)' },
+			{ value: '4', label: '不修改' }
 		];
-
-		var srvNote = E('div', { 'class': 'mt5700-hint', 'style': 'display:none; margin-top: 0; margin-bottom: var(--mt5700-space-md);' },
-			'当前接入顺序包含 4G 或 5G，模组不允许使用「仅语音」和「不限」，已自动禁用。');
+		var srvNote = E('div', { 'class': 'mt-sys-srv-note', style: 'display:none;' }, [
+			E('span', { 'class': 'mt-sys-srv-note-tag' }, '⚠️ 约束提示:'),
+			E('span', {}, '当前接入制式包含 4G 或 5G，官方规范已自动禁用「仅语音」和「不限」。')
+		]);
 
 		var srvCards = Mt5700.radioCards('srv', SRV_OPTIONS, '2', function (v) {
 			sysCfg.srvdomain = parseInt(v, 10);
+			sysRawSrv.setValue(v);
+			updateSysOverview();
 		});
-		sysBody.appendChild(Mt5700.formGroup('服务域', srvCards,
-			'控制模组注册到语音域、数据域还是两者。'));
-		sysBody.appendChild(srvNote);
+		srvCards.classList.add('mt-sys-srv-cards');
+		srvPanel.appendChild(Mt5700.formGroup('服务域选择 (Service Domain)', srvCards));
+		srvPanel.appendChild(srvNote);
 
-		/* 依当前接入顺序动态施加官方约束：含 LTE(03) 或 NR(08) 时禁用 CS_ONLY / ANY */
+		sysDualGrid.appendChild(srvPanel);
+
 		function applySrvConstraint() {
 			var acq = sysCfg.acqorder || '';
 			var hasLteOrNr = acq.indexOf('03') >= 0 || acq.indexOf('08') >= 0;
@@ -596,28 +693,48 @@ return L.view.extend({
 			srvNote.style.display = hasLteOrNr ? '' : 'none';
 		}
 
-		/*
-		 * LTE 频段：同样是十六进制位图。实机值 1E200000095 = BC1+BC3+BC5+BC8+
-		 * BC34+BC38+BC39+BC40+BC41 叠加，用户在文本框里根本无从判断。
-		 */
-		var LTE_PRESETS = [
-			{ value: '', label: '不修改（保持模组当前设置）' },
-			{ value: '1E200000095', label: '常用频段（BC1/3/5/8/34/38/39/40/41）' },
-			{ value: '7FFFFFFFFFFFFFFF', label: '全部 LTE 频段' }
-		];
+		function getAcqLabel(val) {
+			var opt = ACQ_OPTIONS.find(function (o) { return o.value === val; });
+			if (opt) return opt.label;
+			return val ? '自定义 (' + val + ')' : '未获取';
+		}
+		function getRoamLabel(val) {
+			var opt = ROAM_OPTIONS.find(function (o) { return String(o.value) === String(val); });
+			return opt ? opt.label : (val != null ? String(val) : '—');
+		}
+		function getSrvLabel(val) {
+			var opt = SRV_OPTIONS.find(function (o) { return String(o.value) === String(val); });
+			return opt ? opt.label : (val != null ? String(val) : '—');
+		}
+		function getBandPresetLabel(val) {
+			var opt = BAND_PRESETS.find(function (o) { return o.value === val; });
+			return opt ? opt.label.split('（')[0] : (val ? '自定义' : '保持当前');
+		}
+		function getLteBandPresetLabel(val) {
+			var opt = LTE_PRESETS.find(function (o) { return o.value === val; });
+			return opt ? opt.label.split('（')[0] : (val ? '自定义' : '保持当前');
+		}
 
-		var lteBandSel = Mt5700.select(LTE_PRESETS, '');
-		lteBandSel.addEventListener('change', function () {
-			sysCfg.lteband = lteBandSel.value;
-			sysRawLte.setValue(lteBandSel.value);
-		});
-		sysBody.appendChild(Mt5700.formGroup('4G / LTE 频段', lteBandSel,
-			'模组在 4G 制式下允许使用的频段范围。更改为「全部」会增加搜网时间。'));
+		function updateSysOverview() {
+			sysOverview.innerHTML = '';
+			var items = [
+				{ label: '首选制式', value: getAcqLabel(sysCfg.acqorder), type: 'info' },
+				{ label: '漫游策略', value: getRoamLabel(sysCfg.roam), type: sysCfg.roam === 1 ? 'success' : 'neutral' },
+				{ label: '服务域', value: getSrvLabel(sysCfg.srvdomain), type: sysCfg.srvdomain === 2 ? 'accent' : 'neutral' },
+				{ label: '4G 频段', value: getLteBandPresetLabel(sysCfg.lteband), type: 'neutral' },
+				{ label: '2G/3G 频段', value: getBandPresetLabel(sysCfg.band), type: 'neutral' }
+			];
+			items.forEach(function (it) {
+				var el = E('div', { 'class': 'mt-sys-stat-item' }, [
+					E('span', { 'class': 'mt-sys-stat-label' }, it.label + ':'),
+					Mt5700.badge(it.value, it.type)
+				]);
+				sysOverview.appendChild(el);
+			});
+		}
 
-		/* ---------- 原始参数（只读，供排障对标 AT 手册） ---------- */
-
-		var rawPanel = E('div', { 'class': 'mt5700-raw-panel' });
-		rawPanel.appendChild(E('div', { 'class': 'mt5700-raw-panel-title' }, '当前原始参数（只读，来自模组）'));
+		/* 原始参数面板（只读） */
+		var rawPanel = E('div', { 'class': 'mt-sys-raw-grid' });
 		var sysRawAcq = Mt5700.rawValue('接入顺序', '');
 		var sysRawBand = Mt5700.rawValue('2G/3G 频段', '');
 		var sysRawRoam = Mt5700.rawValue('漫游', '');
@@ -631,17 +748,15 @@ return L.view.extend({
 
 		var rawToggle = Mt5700.ghostButton('显示原始参数', function () {
 			var shown = rawPanel.style.display !== 'none';
-			rawPanel.style.display = shown ? 'none' : '';
+			rawPanel.style.display = shown ? 'none' : 'grid';
 			rawToggle.textContent = shown ? '显示原始参数' : '隐藏原始参数';
 		});
 		rawPanel.style.display = 'none';
 
-		/* 先挂载面板，再挂操作按钮——否则面板是游离节点，开关点了也没反应 */
 		sysBody.appendChild(rawPanel);
 
 		sysBody.appendChild(Mt5700.panelActions(
-			Mt5700.primaryButton('保存网络配置', function () {
-				/* 命令格式与后端契约保持不变：AT^SYSCFGEX="acq",band,roam,srv,lte,, */
+			Mt5700.primaryButton('保存网络系统配置', function () {
 				var cmd = 'AT^SYSCFGEX="' + sysCfg.acqorder + '",' + sysCfg.band + ',' + sysCfg.roam + ',' + sysCfg.srvdomain + ',' + sysCfg.lteband + ',,';
 				send(cmd).then(function (res) {
 					if (res.success) {
@@ -657,7 +772,6 @@ return L.view.extend({
 		function fetchSysCfg() {
 			return send('AT^SYSCFGEX?').then(function (res) {
 				if (res.success && res.data) {
-					/* 先剥离 "OK" 回显，否则正则的 ([^,]*) 会把尾部 OK 一起吃进 LTE 频段值 */
 					var txt = atText(res).replace(/\bOK\b/g, '').replace(/\r/g, '').replace(/\n/g, '');
 					var m = txt.match(/\^SYSCFGEX:\s*"?([^",]*)"?\s*,\s*([^,]*?)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9A-Fa-f]*(?:\s|$))/);
 					if (m) {
@@ -667,12 +781,11 @@ return L.view.extend({
 						sysCfg.srvdomain = Number(m[4]);
 						sysCfg.lteband = m[5].trim();
 
-						/* 回填控件；若当前值不在预设内，则保留当前值并提示，绝不静默改写 */
 						applyAcqValue(sysCfg.acqorder);
 						applyPreset(bandSel, sysCfg.band);
 						applyPreset(lteBandSel, sysCfg.lteband);
-						applyCards(roamCards, String(sysCfg.roam));
-						applyCards(srvCards, String(sysCfg.srvdomain));
+						roamCards.setValue(String(sysCfg.roam), true);
+						srvCards.setValue(String(sysCfg.srvdomain), true);
 
 						sysRawAcq.setValue(sysCfg.acqorder);
 						sysRawBand.setValue(sysCfg.band);
@@ -681,12 +794,12 @@ return L.view.extend({
 						sysRawLte.setValue(sysCfg.lteband);
 
 						applySrvConstraint();
+						updateSysOverview();
 					}
 				}
 			}).catch(function () {});
 		}
 
-		/* 下拉回填：命中预设则选中；未命中则注入一条「当前值」临时项，避免用户看到错误档位 */
 		function applyPreset(sel, val) {
 			var hit = false;
 			for (var i = 0; i < sel.options.length; i++) {
@@ -703,11 +816,6 @@ return L.view.extend({
 			sel.value = val;
 		}
 
-		/* 卡片组回填：命中则选中；未命中则清空选中（不擅自替用户改值） */
-		function applyCards(cards, val) {
-			cards.setValue(val, true);
-		}
-
 		function applyAcqValue(val) {
 			var known = ACQ_OPTIONS.some(function (o) { return o.value === val; });
 			acqCards.setValue(val, true);
@@ -720,57 +828,90 @@ return L.view.extend({
 				acqCards.setAllDisabled(false);
 			}
 			sysRawAcq.setValue(val);
+			updateSysOverview();
 		}
 
-		/* ================= 温度保护 ================= */
-
-		/* 温度保护 + 系统控制：双列并排 */
+		/* ================= 第五行：温度保护 + 系统控制 ================= */
 		var rowSys = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
 		body.appendChild(rowSys);
 
-		var thermCard = Mt5700.card('温度保护', '自动温度保护与检测参数（THERM）');
+		/* 卡片 5-1：温度保护 */
+		var thermCard = Mt5700.card('温度监控与保护 (THERM)', '自动温控保护、高温限制 CA/MIMO 与采样参数');
 		var thermBody = E('div');
 		thermCard._body.appendChild(thermBody);
 		rowSys.appendChild(thermCard);
 
-		var thermStatus = E('div', { 'class': 'mt5700-hint' }, '温度保护：—');
-		thermBody.appendChild(thermStatus);
-
-		var thermLogsEl = E('div', { 'class': 'mt5700-hint' }, '');
-		var thermThresholdsEl = E('div', { 'class': 'mt5700-hint' }, '');
+		var thermBadgeRow = E('div', { 'class': 'mt-therm-badge-row' });
+		var thermLevelBadge = Mt5700.badge('温控状态: 检查中…', 'neutral');
+		var thermThresholdChip = E('span', { 'class': 'mt-therm-stat-chip' }, '温保阈值: —');
+		var thermLogChip = E('span', { 'class': 'mt-therm-stat-chip' }, '热抑制日志: —');
+		thermBadgeRow.appendChild(thermLevelBadge);
+		thermBadgeRow.appendChild(thermThresholdChip);
+		thermBadgeRow.appendChild(thermLogChip);
+		thermBody.appendChild(thermBadgeRow);
 
 		function thermCmd() {
 			return 'AT^THERMAUTOFUN=' + (thermChk.checked ? 1 : 0) + ',' + (thermCaChk.checked ? 1 : 0) + ',' + (thermIntervalInput.value || 5);
 		}
 
-		var thermSwitch = makeSwitch(function (checked, input) {
-			send(thermCmd()).then(function (res) {
-				if (res.success) Mt5700.success((checked ? '开启' : '关闭') + '温度保护功能成功');
-				else {
-					Mt5700.error((checked ? '开启' : '关闭') + '温度保护功能失败');
-					input.checked = !checked;
-				}
-			}).catch(function () { Mt5700.error('温度保护设置失败'); });
-		});
-		thermBody.appendChild(Mt5700.formGroup('温度保护功能', thermSwitch));
-		var thermChk = thermSwitch.querySelector('input');
+		/* 采样间隔取值范围：手册未给上限，这里按 1s~1h 收敛，避免把非法值送进模组 */
+		var THERM_INTERVAL_MIN = 1;
+		var THERM_INTERVAL_MAX = 3600;
+		/* 最近一次被模组确认接受的间隔值，写入失败时用它回滚输入框 */
+		var thermIntervalLastOk = '5';
 
-		var thermCaSwitch = makeSwitch(function () {});
-		thermBody.appendChild(Mt5700.formGroup('高温时关闭 CA/MIMO', thermCaSwitch));
+		/* 温控三参数共用同一条 AT^THERMAUTOFUN 写指令，成功/失败一律回传布尔值 */
+		function applyThermConfig(okMsg, failMsg) {
+			return send(thermCmd()).then(function (res) {
+				if (res.success) {
+					Mt5700.success(okMsg);
+					return true;
+				}
+				Mt5700.error(failMsg);
+				return false;
+			}).catch(function () {
+				Mt5700.error(failMsg);
+				return false;
+			});
+		}
+
+		var thermSwitch = makeSwitch(function (checked) {
+			return applyThermConfig(
+				(checked ? '开启' : '关闭') + '温度保护功能成功',
+				(checked ? '开启' : '关闭') + '温度保护功能失败'
+			);
+		});
+		var thermChk = thermSwitch.querySelector('input');
+		thermBody.appendChild(Mt5700.formGroup('自动温度保护开关', thermSwitch, '芯片过热时自动采取阶梯降频与功率保护'));
+
+		var thermCaSwitch = makeSwitch(function () {
+			return applyThermConfig('高温策略已更新', '高温策略更新失败');
+		});
 		var thermCaChk = thermCaSwitch.querySelector('input');
+		thermBody.appendChild(Mt5700.formGroup('高温时关闭 CA/MIMO', thermCaSwitch, '高温状态下自动降级为单载波以减少功耗'));
 
 		var thermIntervalInput = Mt5700.input('number', '5', '5');
-		thermIntervalInput.min = 1;
-		thermIntervalInput.addEventListener('input', function () {
-			send(thermCmd()).then(function (res) {
-				if (res.success) Mt5700.success('温度检测间隔设置成功');
-				else Mt5700.error('温度检测间隔设置失败');
-			}).catch(function () { Mt5700.error('温度检测间隔设置失败'); });
+		thermIntervalInput.min = THERM_INTERVAL_MIN;
+		thermIntervalInput.max = THERM_INTERVAL_MAX;
+		thermIntervalInput.addEventListener('change', function () {
+			var txt = String(thermIntervalInput.value || '').trim();
+			if (!/^\d+$/.test(txt)) {
+				thermIntervalInput.value = thermIntervalLastOk;
+				Mt5700.error('温度检测间隔必须为正整数，已还原为 ' + thermIntervalLastOk + ' 秒');
+				return;
+			}
+			var val = parseInt(txt, 10);
+			if (val < THERM_INTERVAL_MIN || val > THERM_INTERVAL_MAX) {
+				val = val < THERM_INTERVAL_MIN ? THERM_INTERVAL_MIN : THERM_INTERVAL_MAX;
+				thermIntervalInput.value = String(val);
+				Mt5700.error('温度检测间隔需在 ' + THERM_INTERVAL_MIN + '~' + THERM_INTERVAL_MAX + ' 秒之间，已修正为 ' + val);
+			}
+			applyThermConfig('温度检测间隔设置成功', '温度检测间隔设置失败').then(function (ok) {
+				if (ok) thermIntervalLastOk = String(val);
+				else thermIntervalInput.value = thermIntervalLastOk;
+			});
 		});
-		thermBody.appendChild(Mt5700.formGroup('检测间隔（秒）', thermIntervalInput));
-
-		thermBody.appendChild(thermLogsEl);
-		thermBody.appendChild(thermThresholdsEl);
+		thermBody.appendChild(Mt5700.formGroup('采样检测间隔 (秒)', thermIntervalInput));
 
 		function fetchThermConfig() {
 			return send('AT^THERMAUTOFUN?').then(function (res) {
@@ -780,19 +921,24 @@ return L.view.extend({
 						thermChk.checked = m[1] === '1';
 						thermCaChk.checked = m[2] === '1';
 						thermIntervalInput.value = String(m[3]);
+						thermIntervalLastOk = String(m[3]);
 					}
 				}
 				return send('AT^THERMLDLOGSW?');
 			}).then(function (res) {
 				if (res.success && res.data) {
 					var m = atText(res).match(/\^THERMLDLOGSW:\s*(\d+)\s+(\d+)/);
-					if (m) thermLogsEl.textContent = '热抑制日志开关：' + (m[1] === '1' ? '开' : '关') + '，当前日志等级：' + m[2];
+					if (m) {
+						thermLogChip.textContent = '热抑制日志: ' + (m[1] === '1' ? '开 (等级 ' + m[2] + ')' : '关');
+					}
 				}
 				return send('AT^THERMLDAUTOPARA?');
 			}).then(function (res) {
 				if (res.success && res.data) {
 					var m = atText(res).match(/\^THERMLDAUTOPARA:\s*([\d,]+)/);
-					if (m) thermThresholdsEl.textContent = '温保阈值参数：' + m[1];
+					if (m) {
+						thermThresholdChip.textContent = '温保阈值: ' + m[1].replace(/,+$/, '') + '°C';
+					}
 				}
 				return send('AT^THERMLDAUTOSTATUS?');
 			}).then(function (res) {
@@ -800,40 +946,22 @@ return L.view.extend({
 					var m = atText(res).match(/\^THERMLDAUTOSTATUS:\s*([\d,]+)/);
 					if (m) {
 						var nums = m[1].split(',').map(Number);
-						var levelText = '温度保护状态（1 正常 / 2 一级 / 3 二级 / 4 三级 / 5 四级温保）：' + m[1];
-						if (nums.length >= 6) levelText += '，当前等级：' + nums[5];
-						thermStatus.textContent = levelText;
+						var cur = nums.length >= 6 ? nums[5] : nums[0];
+						var label = '运行正常 · 舒适';
+						var variant = 'success';
+						if (cur === 2) { label = '一级温保 · 适度降频'; variant = 'warning'; }
+						else if (cur === 3) { label = '二级温保 · 功率限制'; variant = 'warning'; }
+						else if (cur === 4) { label = '三级温保 · 深度保护'; variant = 'danger'; }
+						else if (cur >= 5) { label = '四级温保 · 关断射频'; variant = 'danger'; }
+						thermLevelBadge.textContent = '温控: ' + label + ' (状态 ' + cur + ')';
+						thermLevelBadge.className = 'mt5700-badge mt5700-badge-' + variant;
 					}
 				}
 			}).catch(function () {});
 		}
 
-		/* ================= 系统控制 ================= */
-
-		/* 区域样式（作用域前缀 mt-sysctl-，仅本页注入一次） */
-		var sysCtlStyle = E('style', {}, [
-			'.mt-sysctl { display: flex; flex-direction: column; gap: 12px; }',
-			'.mt-sysctl-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--mt5700-border); border-radius: 12px; background: rgba(125, 125, 125, 0.03); transition: border-color .2s ease, box-shadow .2s ease; }',
-			'.mt-sysctl-item:hover { border-color: rgba(41, 169, 225, 0.3); }',
-			'.mt-sysctl-item.is-warn { border-color: rgba(245, 158, 11, 0.28); background: linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.02)); }',
-			'.mt-sysctl-item.is-warn:hover { border-color: rgba(245, 158, 11, 0.5); }',
-			'.mt-sysctl-item.is-danger { border-color: rgba(239, 68, 68, 0.28); background: linear-gradient(135deg, rgba(239, 68, 68, 0.06), rgba(239, 68, 68, 0.02)); }',
-			'.mt-sysctl-item.is-danger:hover { border-color: rgba(239, 68, 68, 0.5); }',
-			'.mt-sysctl-info { flex: 1 1 auto; min-width: 0; }',
-			'.mt-sysctl-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; color: var(--mt5700-text); }',
-			'.mt-sysctl-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }',
-			'.mt-sysctl-item.is-warn .mt-sysctl-dot { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }',
-			'.mt-sysctl-item.is-danger .mt-sysctl-dot { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15); }',
-			'.mt-sysctl-desc { font-size: 12px; color: var(--mt5700-text-secondary); line-height: 1.55; margin-top: 4px; }',
-			'.mt-sysctl-item .mt5700-btn { flex: 0 0 auto; min-width: 128px; }',
-			/* 警戒级按钮：琥珀色描边，介于普通操作与危险操作之间 */
-			'.mt5700-btn-warn { color: #b45309; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.4); }',
-			'.mt5700-btn-warn:hover:not(:disabled) { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.6); }',
-			'.mt5700-btn-danger { position: relative; }'
-		].join('\n'));
-		body.appendChild(sysCtlStyle);
-
-		var sysCtrlCard = Mt5700.card('系统控制', '重启与恢复出厂（高危操作，需逐级确认）');
+		/* 卡片 5-2：系统控制 (重启 / 恢复出厂) */
+		var sysCtrlCard = Mt5700.card('系统维护与硬件重置', '模组软重启与恢复出厂设置（高危操作，需逐级验证）');
 		var sysCtrlBody = E('div');
 		sysCtrlCard._body.appendChild(sysCtrlBody);
 		rowSys.appendChild(sysCtrlCard);
@@ -855,23 +983,21 @@ return L.view.extend({
 			return item;
 		}
 
-		/* 重启模组：一次确认 */
 		sysCtlZone.appendChild(sysCtlItem(
-			'is-warn', '重启模组', '模组将重新初始化并注网，期间数据业务中断约 1~2 分钟。',
+			'is-warn', '重启模组芯片', '模组将重新初始化并重新搜网注网，期间数据业务将中断约 1~2 分钟。',
 			'重启模组', 'warn',
 			function () {
 				Mt5700.confirm('确定重启模组？执行后网络将暂时中断约 1~2 分钟。', function () {
 					send('AT^RESET').then(function (res) {
-						if (res.success) Mt5700.success('重启指令已发送');
+						if (res.success) Mt5700.success('重启指令已发送，模组正在重启');
 						else Mt5700.error('重启指令发送失败');
 					}).catch(function () { Mt5700.error('重启指令发送失败'); });
 				}, '确认重启');
 			}
 		));
 
-		/* 恢复出厂设置：三重连续警告确认 */
 		sysCtlZone.appendChild(sysCtlItem(
-			'is-danger', '恢复出厂设置', '清空全部用户配置（APN、频段锁频、SIM 设置等），且不可轻易撤销。需连续 3 次确认。',
+			'is-danger', '恢复模组出厂设置', '清空全部用户配置（APN、频段锁频、SIM 设置等），且不可撤销。需连续 3 次确认。',
 			'恢复出厂设置', 'danger',
 			function () {
 				var steps = [
@@ -894,7 +1020,6 @@ return L.view.extend({
 		));
 
 		/* ================= 数据加载 ================= */
-
 		function fetchDeviceInfo() {
 			return send('ATI').then(function (res) {
 				if (res.success && res.data) {
@@ -930,7 +1055,6 @@ return L.view.extend({
 			}).catch(function () { renderDev(); });
 		}
 
-		/* 自动识别模组与路由器之间的 USB 链路速率（sysfs，不发 AT 命令） */
 		function fetchUsb() {
 			return AtWs.usb().then(function (res) {
 				if (res && res.success && res.found) {
@@ -950,7 +1074,7 @@ return L.view.extend({
 			return send('AT^SCICHG?').then(function (res) {
 				if (res.success && res.data) {
 					var m = atText(res).match(/\^SCICHG:\s*(\d+),\s*(\d+)/);
-					if (m) simSlotSelProxy.value = String(m[1]);
+					if (m) simSlotSel.value = String(m[1]);
 				}
 				return send('AT^TDSIMHP?');
 			}).then(function (res) {
@@ -963,7 +1087,8 @@ return L.view.extend({
 				if (res.success && res.data) {
 					var sq = Parse.parseSimsq(res.data);
 					if (sq) {
-						simSqEl.textContent = 'SIM 状态：' + sq.label + (sq.dead ? '（卡已失效，无法恢复）' : '');
+						simSqBadge.textContent = 'SIM: ' + sq.label + (sq.dead ? '（失效）' : '');
+						simSqBadge.className = 'mt5700-badge ' + (sq.dead ? 'mt5700-badge-danger' : 'mt5700-badge-success');
 					}
 				}
 				return fetchPinStatus();
@@ -994,20 +1119,6 @@ return L.view.extend({
 			}).catch(function () {});
 		}
 
-		/*
-		 * 加载全部数据。
-		 *
-		 * 原实现是 8 个 fetch 全串行（Promise.resolve().then(f)....），
-		 * 其中 fetchDeviceInfo 内部又有 3 条串行 AT、fetchSimConfig 内部
-		 * 有 4 条串行 AT，折算下来单次 loadAll 要串行跑近 20 条 AT。
-		 * 模组未就绪时每条都会耗满超时预算，页面表现为长时间空白。
-		 *
-		 * 改法：拆成 4 组，**组内串行、组间并发**。
-		 *   - 依赖同一命令族的（设备信息 / USB 速率）放一组，保证顺序语义；
-		 *   - 互不依赖的配置族分散到不同组，让往返延迟重叠；
-		 *   - 每组各自 catch，任何一组失败都不影响其它组渲染
-		 *     （即「单个接口失败不影响其他区块」）。
-		 */
 		function loadAll() {
 			var groups = [
 				[fetchDeviceInfo, fetchUsb],
@@ -1027,22 +1138,17 @@ return L.view.extend({
 			return Promise.all(runners);
 		}
 
+		/* 底部操作条 */
 		var bottomActions = Mt5700.panelActions(
-			Mt5700.primaryButton('刷新', function () { loadAll(); })
+			Mt5700.primaryButton('刷新模组全部数据', function () {
+				Mt5700.info('正在刷新模组配置与硬件状态…');
+				loadAll().then(function () {
+					Mt5700.success('模组数据已刷新');
+				});
+			})
 		);
 		body.appendChild(bottomActions);
 
-		/*
-		 * 启动：页面骨架已经渲染完毕（上面的控件都是同步创建的），
-		 * 这里只负责「填充数据」，且**不阻塞页面可用性**。
-		 *
-		 * 原实现把 loadAll 挂在 connect().then 上，而 connect 只要 reject
-		 * 就整条 then 链跳过 —— 后端没起来时数据永远不加载，页面停在
-		 * 空控件状态，用户看不到任何原因。
-		 *
-		 * 改法：connect() 已保证永不 reject（降级走 state 回调），
-		 * 统一由 Ui.startup 处理「降级提示 + 恢复后自动加载」。
-		 */
 		Ui.startup(body, function () { loadAll(); });
 
 		return page;
