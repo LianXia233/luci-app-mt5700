@@ -42,6 +42,8 @@ return L.view.extend({
 			operator: '读取中...',
 			apn: '',
 			pdpType: '',
+			apnCid: '',
+			imsApn: '',
 			simStatus: '检测中...',
 			deviceInterface: '',
 			qci: '',
@@ -947,6 +949,7 @@ return L.view.extend({
 			tabPanes['tab-apn'].innerHTML =
 				'<table class="mt-info-table">' +
 				'  <tr><td>APN 接入点</td><td>' + apnName + '</td></tr>' +
+				'  <tr><td>数据通道 (CID)</td><td>' + (state.apnCid ? ('CID ' + state.apnCid + '（数据承载）') : '—') + '</td></tr>' +
 				'  <tr><td>协议类型</td><td>' + protoType + '</td></tr>' +
 				'  <tr><td>本机 IPv4</td><td>' + ipv4 + '</td></tr>' +
 				'  <tr><td>本机 IPv6</td><td>' + ipv6 + '</td></tr>' +
@@ -1560,6 +1563,49 @@ return L.view.extend({
 			});
 		}
 
+		/*
+		 * 判断 APN 是否属于**非数据**专用承载（IMS / 紧急 / MMS / SUPL 等）。
+		 * 这些上下文由模组为 IMS 等业务预留，不能拿来当「数据通道 APN」展示。
+		 */
+		function isNonDataApn(apn) {
+			var a = String(apn || '').trim().toLowerCase();
+			if (!a) return false;
+			if (/^(ims|xcap|sos|emergency|mms|supl|dun|fota|cbs|ia)([.\-_]|$)/.test(a)) return true;
+			/* 形如 ims.mnc000.mcc460.3gppnetwork.org 的完整域名形态 */
+			if (/(^|[.\-_])ims([.\-_]|$)/.test(a)) return true;
+			return false;
+		}
+
+		/*
+		 * 从 AT+CGDCONT? 的原始响应里挑出**数据通道**上下文。
+		 * 实机响应示例（含 IMS 专用承载 cid=5）：
+		 *   +CGDCONT: 1,"IPV4V6","",...
+		 *   +CGDCONT: 5,"IPV4V6","ims",...
+		 * 规则：剔除 IMS/紧急等专用承载 → 优先 CID 1 → 命中即锁定，
+		 * 保证数据通道 APN 为空（由核心网分配）时也不会被后面的 ims 顶掉。
+		 */
+		function pickDataContext(text) {
+			var picked = null;
+			var imsApn = '';
+			var lines = String(text || '').split('\n');
+			for (var i = 0; i < lines.length; i++) {
+				var m = lines[i].trim().match(/\+CGDCONT:\s*(\d+),\s*"([^"]*)",\s*"([^"]*)"/);
+				if (!m) continue;
+				var cid = m[1];
+				var ptype = m[2];
+				var apn = m[3] || '';
+				if (isNonDataApn(apn)) {
+					if (!imsApn) imsApn = apn;
+					continue;
+				}
+				/* CID 1 优先级最高；已锁定 CID 1 后不再被后续上下文覆盖 */
+				if (!picked || (picked.cid !== '1' && cid === '1')) {
+					picked = { cid: cid, ptype: ptype, apn: apn };
+				}
+			}
+			return { data: picked, imsApn: imsApn };
+		}
+
 		/* 设备与 SIM 卡信息读取：实际获取模组 ATI, CGMM, CGSN, CPIN, CIMI, ICCID, CGMR, CGDCONT 上报 */
 		function loadDeviceInfo() {
 			return AtWs.client.sendCommand('ATI').then(function (res) {
@@ -1631,19 +1677,13 @@ return L.view.extend({
 				return AtWs.client.sendCommand('AT+CGDCONT?');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
-					var lines = String(res.data).split('\n');
-					for (var i = 0; i < lines.length; i++) {
-						var l = lines[i].trim();
-						var m = l.match(/\+CGDCONT:\s*(\d+),\s*"([^"]*)",\s*"([^"]*)"/);
-						if (m) {
-							var cid = m[1];
-							var ptype = m[2];
-							var apn = m[3];
-							if (cid === '1' || (!state.apn && apn)) {
-								state.pdpType = ptype;
-								state.apn = apn;
-							}
-						}
+					/* 只认数据通道：详见 pickDataContext 的说明 */
+					var ctx = pickDataContext(res.data);
+					if (ctx.imsApn) state.imsApn = ctx.imsApn;
+					if (ctx.data) {
+						state.pdpType = ctx.data.ptype;
+						state.apn = ctx.data.apn;
+						state.apnCid = ctx.data.cid;
 					}
 				}
 				renderTabsUI();
