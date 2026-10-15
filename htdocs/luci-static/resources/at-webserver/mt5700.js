@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.13.0';
+var MT5700_CSS_VERSION = '2.14.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -251,6 +251,170 @@ var Mt5700 = (function () {
 	/* ================= 页面结构 (白色毛玻璃 + 动态 SVG Hero) ================= */
 
 	// 页面容器
+	
+	/* ================= 柔和二次元吉祥物与动态 SVG ================= */
+
+	api.mascotSvg = function () {
+		var svg = svgEl('svg', {
+			'class': 'mt-anime-mascot-svg',
+			viewBox: '0 0 200 160',
+			width: '100%',
+			height: '100%',
+			fill: 'none',
+			xmlns: 'http://www.w3.org/2000/svg'
+		});
+
+		var defs = svgEl('defs');
+		var gHair = svgEl('linearGradient', { id: 'm-hair-grad', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
+		gHair.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f8f9ff' }));
+		gHair.appendChild(svgEl('stop', { offset: '50%', 'stop-color': '#e0e7ff' }));
+		gHair.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#c7d2fe' }));
+		defs.appendChild(gHair);
+
+		var gEar = svgEl('linearGradient', { id: 'm-ear-inner', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
+		gEar.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#fbcfe8' }));
+		gEar.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#f472b6' }));
+		defs.appendChild(gEar);
+
+		var gEye = svgEl('linearGradient', { id: 'm-eye-grad', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
+		gEye.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#4f46e5' }));
+		gEye.appendChild(svgEl('stop', { offset: '60%', 'stop-color': '#6366f1' }));
+		gEye.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#38bdf8' }));
+		defs.appendChild(gEye);
+
+		svg.appendChild(defs);
+
+		var g = svgEl('g', { style: 'transform-origin: 100px 140px;' });
+		// Ears
+		g.appendChild(svgEl('path', { d: 'M 62 48 Q 45 10 75 16 Z', fill: 'url(#m-hair-grad)', stroke: '#a5b4fc', 'stroke-width': '1.5' }));
+		g.appendChild(svgEl('path', { d: 'M 64 42 Q 52 18 72 23 Z', fill: 'url(#m-ear-inner)', opacity: '0.85' }));
+		g.appendChild(svgEl('path', { d: 'M 138 48 Q 155 10 125 16 Z', fill: 'url(#m-hair-grad)', stroke: '#a5b4fc', 'stroke-width': '1.5' }));
+		g.appendChild(svgEl('path', { d: 'M 136 42 Q 148 18 128 23 Z', fill: 'url(#m-ear-inner)', opacity: '0.85' }));
+
+		// Back Hair
+		g.appendChild(svgEl('path', { d: 'M 52 65 C 40 95 48 135 58 145 C 65 130 68 110 70 85 Z', fill: '#c7d2fe' }));
+		g.appendChild(svgEl('path', { d: 'M 148 65 C 160 95 152 135 142 145 C 135 130 132 110 130 85 Z', fill: '#c7d2fe' }));
+
+		// Clothes
+		g.appendChild(svgEl('path', { d: 'M 68 120 C 60 135 50 152 46 160 L 154 160 C 150 152 140 135 132 120 Z', fill: '#ffffff', stroke: '#c7d2fe', 'stroke-width': '1.5' }));
+		g.appendChild(svgEl('path', { d: 'M 85 125 L 100 136 L 115 125 L 100 120 Z', fill: '#e0e7ff', stroke: '#a5b4fc', 'stroke-width': '1' }));
+		g.appendChild(svgEl('circle', { cx: '100', cy: '136', r: '3', fill: '#fbbf24' }));
+
+		// Face
+		g.appendChild(svgEl('path', { d: 'M 68 62 C 68 95 82 112 100 112 C 118 112 132 95 132 62 C 132 40 118 36 100 36 C 82 36 68 40 68 62 Z', fill: '#fffdfa' }));
+		// Blushes
+		g.appendChild(svgEl('ellipse', { cx: '80', cy: '85', rx: '7', ry: '4', fill: '#f472b6', opacity: '0.4' }));
+		g.appendChild(svgEl('ellipse', { cx: '120', cy: '85', rx: '7', ry: '4', fill: '#f472b6', opacity: '0.4' }));
+
+		// Eyes
+		g.appendChild(svgEl('path', { d: 'M 77 68 C 81 65 89 65 92 68', stroke: '#312e81', 'stroke-width': '2.6', 'stroke-linecap': 'round' }));
+		g.appendChild(svgEl('ellipse', { cx: '85', cy: '74', rx: '5.5', ry: '7', fill: 'url(#m-eye-grad)' }));
+		g.appendChild(svgEl('circle', { cx: '83.5', cy: '71.5', r: '2.2', fill: '#ffffff' }));
+		g.appendChild(svgEl('circle', { cx: '87.5', cy: '77', r: '1.2', fill: '#a5f3fc' }));
+
+		g.appendChild(svgEl('path', { d: 'M 123 68 C 119 65 111 65 108 68', stroke: '#312e81', 'stroke-width': '2.6', 'stroke-linecap': 'round' }));
+		g.appendChild(svgEl('ellipse', { cx: '115', cy: '74', rx: '5.5', ry: '7', fill: 'url(#m-eye-grad)' }));
+		g.appendChild(svgEl('circle', { cx: '113.5', cy: '71.5', r: '2.2', fill: '#ffffff' }));
+		g.appendChild(svgEl('circle', { cx: '117.5', cy: '77', r: '1.2', fill: '#a5f3fc' }));
+
+		// Smile
+		g.appendChild(svgEl('path', { d: 'M 96 92 Q 100 95 104 92', stroke: '#4338ca', 'stroke-width': '1.5', 'stroke-linecap': 'round', fill: 'none' }));
+		g.appendChild(svgEl('path', { d: 'M 98 93 Q 100 96 102 93', fill: '#f43f5e', opacity: '0.6' }));
+
+		// Bangs
+		g.appendChild(svgEl('path', { d: 'M 68 56 C 65 72 68 88 74 92 C 75 84 76 72 78 58 Z', fill: 'url(#m-hair-grad)' }));
+		g.appendChild(svgEl('path', { d: 'M 76 45 C 80 58 84 66 87 68 C 88 60 90 52 92 45 Z', fill: 'url(#m-hair-grad)' }));
+		g.appendChild(svgEl('path', { d: 'M 90 45 C 93 58 97 68 100 70 C 103 68 107 58 110 45 Z', fill: 'url(#m-hair-grad)' }));
+		g.appendChild(svgEl('path', { d: 'M 108 45 C 110 52 112 60 113 68 C 116 66 120 58 124 45 Z', fill: 'url(#m-hair-grad)' }));
+		g.appendChild(svgEl('path', { d: 'M 132 56 C 135 72 132 88 126 92 C 125 84 124 72 122 58 Z', fill: 'url(#m-hair-grad)' }));
+
+		// Ahoge
+		g.appendChild(svgEl('path', { d: 'M 100 28 Q 108 14 114 18 Q 112 24 102 28 Z', fill: 'url(#m-hair-grad)', stroke: '#a5b4fc', 'stroke-width': '1' }));
+
+		svg.appendChild(g);
+		return svg;
+	};
+
+	api.mascot = function (defaultText) {
+		var wrap = E('div', { 'class': 'mt-mascot-speech-wrap' });
+		var bubble = E('div', { 'class': 'mt-speech-bubble' }, defaultText || '网络已连接~ 一切正常喵~ ♡');
+		var avatar = E('div', { 'class': 'mt-mascot-avatar' }, [api.mascotSvg()]);
+
+		var voices = [
+			'网络已连接~ 一切正常喵~ ♡',
+			'5G 信号满格，冲浪快如闪电喵！⚡',
+			'主人辛苦啦~ 路由器今天也在努力工作中！♡',
+			'无线链路超健康，随时为主人服务喵~ 🐾',
+			'喵呜~ 软萌二次元，让管理更有温度 ♡'
+		];
+		var idx = 0;
+		function nextVoice() {
+			idx = (idx + 1) % voices.length;
+			bubble.textContent = voices[idx];
+		}
+		bubble.addEventListener('click', nextVoice);
+		avatar.addEventListener('click', nextVoice);
+
+		wrap.appendChild(bubble);
+		wrap.appendChild(avatar);
+
+		return {
+			el: wrap,
+			bubble: bubble,
+			setBubble: function (t) { if (t) bubble.textContent = t; }
+		};
+	};
+
+	api.themeToggle = function () {
+		var btn = E('div', { 'class': 'mt-theme-toggle' });
+		var icon = E('span', {}, '🌓');
+		var txt = E('span', {}, '主题切换');
+		btn.appendChild(icon);
+		btn.appendChild(txt);
+
+		function updateBtnState() {
+			var isDark = document.body.classList.contains('mt-theme-dark') || 
+			            (document.documentElement.getAttribute('data-theme') === 'dark') ||
+			            (!document.body.classList.contains('mt-theme-light') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+			if (isDark) {
+				icon.textContent = '🌙';
+				txt.textContent = '暗色模式';
+			} else {
+				icon.textContent = '☀️';
+				txt.textContent = '浅色模式';
+			}
+		}
+
+		// Init from saved pref
+		try {
+			var saved = localStorage.getItem('mt5700_theme');
+			if (saved === 'dark') {
+				document.body.classList.add('mt-theme-dark');
+				document.body.classList.remove('mt-theme-light');
+			} else if (saved === 'light') {
+				document.body.classList.add('mt-theme-light');
+				document.body.classList.remove('mt-theme-dark');
+			}
+		} catch (e) {}
+		updateBtnState();
+
+		btn.addEventListener('click', function () {
+			var isDark = document.body.classList.contains('mt-theme-dark');
+			if (isDark) {
+				document.body.classList.remove('mt-theme-dark');
+				document.body.classList.add('mt-theme-light');
+				try { localStorage.setItem('mt5700_theme', 'light'); } catch (e) {}
+			} else {
+				document.body.classList.add('mt-theme-dark');
+				document.body.classList.remove('mt-theme-light');
+				try { localStorage.setItem('mt5700_theme', 'dark'); } catch (e) {}
+			}
+			updateBtnState();
+		});
+
+		return btn;
+	};
+
 	api.page = function (title, subtitle, pageKey, badgeText) {
 		var node = E('div', { 'class': 'mt5700-page' });
 
@@ -307,8 +471,12 @@ var Mt5700 = (function () {
 		hero.appendChild(content);
 
 		var art = E('div', { 'class': 'mt5700-hero-art' });
-		art.appendChild(api.heroIllustration(pageKey));
+		var toggle = api.themeToggle();
+		art.appendChild(toggle);
+		var mascot = api.mascot();
+		art.appendChild(mascot.el);
 		hero.appendChild(art);
+		node._mascot = mascot;
 
 		node.appendChild(hero);
 
