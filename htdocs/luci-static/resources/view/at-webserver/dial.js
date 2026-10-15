@@ -40,8 +40,28 @@ return L.view.extend({
 			'/* 提示条美化 */',
 			'.mt-pdp-note { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 10px; background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(139, 92, 246, 0.05)); border: 1px solid rgba(56, 189, 248, 0.25); font-size: 12.5px; line-height: 1.6; color: var(--mt5700-text); margin-bottom: 16px; }',
 			'.mt-pdp-note-icon { font-size: 16px; flex-shrink: 0; line-height: 1.2; }',
-			'/* 表格微调 */',
-			'.mt-pdp-cid { font-weight: 700; font-family: var(--mt5700-font-mono); color: var(--mt5700-accent); }',
+			'/* PDP 卡片网格与视图优化 */',
+			'.mt-pdp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }',
+			'.mt-pdp-card { display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; border-radius: 12px; background: rgba(125, 125, 125, 0.03); border: 1px solid var(--mt5700-border); transition: all 0.2s ease; }',
+			'.mt-pdp-card:hover { transform: translateY(-2px); border-color: rgba(139, 92, 246, 0.35); box-shadow: 0 4px 12px rgba(139, 92, 246, 0.08); }',
+			'.mt-pdp-card.is-active { border-color: rgba(16, 185, 129, 0.35); background: linear-gradient(135deg, rgba(16, 185, 129, 0.04), rgba(125, 125, 125, 0.02)); }',
+			'.mt-pdp-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }',
+			'.mt-pdp-card-tags { display: flex; align-items: center; gap: 6px; }',
+			'.mt-pdp-cid { font-size: 13px; font-weight: 700; font-family: var(--mt5700-font-mono); color: #7c3aed; background: rgba(139, 92, 246, 0.1); padding: 2px 8px; border-radius: 6px; }',
+			'.mt-pdp-card-body { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }',
+			'.mt-pdp-field { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }',
+			'.mt-pdp-field-k { color: var(--mt5700-text-secondary); }',
+			'.mt-pdp-field-v { font-weight: 600; color: var(--mt5700-text); }',
+			'.mt-pdp-card-actions { display: flex; gap: 6px; padding-top: 10px; border-top: 1px dashed var(--mt5700-divider); }',
+			'.mt-pdp-card-actions .mt5700-btn { flex: 1; padding: 6px 4px; font-size: 12px; justify-content: center; text-align: center; }',
+			'.mt-pdp-card-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px 16px; border-radius: 12px; border: 2px dashed rgba(139, 92, 246, 0.3); background: rgba(139, 92, 246, 0.02); cursor: pointer; transition: all 0.2s ease; min-height: 130px; }',
+			'.mt-pdp-card-add:hover { border-color: #8b5cf6; background: rgba(139, 92, 246, 0.07); transform: translateY(-2px); }',
+			'/* 紧凑表格视图约束 */',
+			'.mt-pdp-table-wrap { max-width: 960px; margin: 0 auto; }',
+			'.mt-pdp-table-wrap .mt5700-table th:nth-child(1), .mt-pdp-table-wrap .mt5700-table td:nth-child(1) { width: 70px; text-align: center; }',
+			'.mt-pdp-table-wrap .mt5700-table th:nth-child(2), .mt-pdp-table-wrap .mt5700-table td:nth-child(2) { width: 120px; }',
+			'.mt-pdp-table-wrap .mt5700-table th:nth-child(4), .mt-pdp-table-wrap .mt5700-table td:nth-child(4) { width: 90px; text-align: center; }',
+			'.mt-pdp-table-wrap .mt5700-table th:nth-child(5), .mt-pdp-table-wrap .mt5700-table td:nth-child(5) { width: 190px; text-align: right; }',
 			'/* 底部暂存条适配 */',
 			'.mt5700-applybar { z-index: 100; }'
 		].join('\n'));
@@ -303,19 +323,27 @@ return L.view.extend({
 		));
 
 		/* ---------- 卡片 4：PDP 上下文 ---------- */
-		var pdpCard = Mt5700.card('PDP 上下文管理', 'CGDCONT 列表：新增、编辑、删除、激活 / 去激活');
-		body.appendChild(pdpCard);
+		var pdpViewMode = 'card'; // 'card' | 'table'
 
-		var pdpHeaderActions = Mt5700.panelActions(
-			Mt5700.primaryButton('+ 新增上下文', function () { openEdit(null); }),
-			Mt5700.ghostButton('刷新列表', function () { fetchPDPContexts(); })
-		);
-		pdpCard._body.appendChild(pdpHeaderActions);
+		var viewToggleBtn = Mt5700.ghostButton('切换表格视图', function () {
+			pdpViewMode = (pdpViewMode === 'card') ? 'table' : 'card';
+			viewToggleBtn.textContent = (pdpViewMode === 'card') ? '切换表格视图' : '切换卡片视图';
+			renderPDP();
+		});
+
+		var pdpHeaderActions = E('div', { 'class': 'mt5700-inline', style: 'gap:8px;' }, [
+			viewToggleBtn,
+			Mt5700.ghostButton('刷新', function () { fetchPDPContexts(); }),
+			Mt5700.primaryButton('+ 新增', function () { openEdit(null); })
+		]);
+
+		var pdpCard = Mt5700.card('PDP 上下文管理', 'CGDCONT 列表：通道参数与数据激活', pdpHeaderActions);
+		body.appendChild(pdpCard);
 
 		var pdpNoteBox = E('div');
 		pdpCard._body.appendChild(pdpNoteBox);
 
-		var pdpBody = E('div', { style: 'margin-top:12px;' });
+		var pdpBody = E('div');
 		pdpCard._body.appendChild(pdpBody);
 
 		/* ---------- 渲染函数 ---------- */
@@ -387,43 +415,109 @@ return L.view.extend({
 				return;
 			}
 
-			var rows = pdpList.map(function (ctx) {
-				var opWrap = E('div', { 'class': 'mt5700-inline', style: 'gap:6px;' });
-				opWrap.appendChild(Mt5700.button('编辑', function () { openEdit(ctx); }, 'secondary'));
-				opWrap.appendChild(Mt5700.dangerButton('删除', function () {
-					Mt5700.confirm('确定删除 CID ' + ctx.cid + ' 的 PDP 上下文？', function () {
-						handleDeletePdp(ctx.cid);
-					}, '确认删除');
-				}));
-				var autodialOn = settings.enable === 1;
-				var actBtn = Mt5700.button(ctx.active ? '去激活' : '激活', function () {
+			var autodialOn = settings.enable === 1;
+
+			if (pdpViewMode === 'card') {
+				// 卡片网格视图：自适应长宽，桌面端多列均摊、移动端紧凑对齐
+				var grid = E('div', { 'class': 'mt-pdp-grid' });
+				pdpList.forEach(function (ctx) {
+					var item = E('div', { 'class': 'mt-pdp-card' + (ctx.active ? ' is-active' : '') });
+
+					// 头部
+					var head = E('div', { 'class': 'mt-pdp-card-head' });
+					var tags = E('div', { 'class': 'mt-pdp-card-tags' });
+					tags.appendChild(E('span', { 'class': 'mt-pdp-cid' }, 'CID #' + ctx.cid));
+					tags.appendChild(Mt5700.badge(getPdpTypeText(ctx.type), ctx.type === 'IPV4V6' ? 'info' : 'neutral'));
+					head.appendChild(tags);
+					head.appendChild(Mt5700.badge(ctx.active ? '已激活' : '未激活', ctx.active ? 'success' : 'neutral'));
+					item.appendChild(head);
+
+					var cleanApn = (ctx.apn && ctx.apn.replace(/^"|"$/g, '').trim()) || '';
+					var cleanAddr = (ctx.pdp_addr && ctx.pdp_addr.replace(/^"|"$/g, '').trim()) || '';
+
+					var bodyBox = E('div', { 'class': 'mt-pdp-card-body' });
+					var apnRow = E('div', { 'class': 'mt-pdp-field' });
+					apnRow.appendChild(E('span', { 'class': 'mt-pdp-field-k' }, 'APN 接入点:'));
+					apnRow.appendChild(E('span', { 'class': 'mt-pdp-field-v mt5700-mono' }, cleanApn || '— (默认接入点)'));
+					bodyBox.appendChild(apnRow);
+
+					var addrRow = E('div', { 'class': 'mt-pdp-field' });
+					addrRow.appendChild(E('span', { 'class': 'mt-pdp-field-k' }, 'PDP 地址:'));
+					addrRow.appendChild(E('span', { 'class': 'mt-pdp-field-v', style: 'font-size:12px; color:var(--mt5700-text-secondary);' }, cleanAddr || '动态分配 (留空)'));
+					bodyBox.appendChild(addrRow);
+					item.appendChild(bodyBox);
+
+					// 底部操作区（三按钮均分，不挤压）
+					var acts = E('div', { 'class': 'mt-pdp-card-actions' });
+					acts.appendChild(Mt5700.button('编辑', function () { openEdit(ctx); }, 'secondary'));
+
+					var actBtn = Mt5700.button(ctx.active ? '去激活' : '激活', function () {
+						if (autodialOn) {
+							Mt5700.warning('自动拨号开启时由模组维护 PDP，手工激活/去激活会与之冲突，请先关闭自动拨号');
+							return;
+						}
+						handleActivePdp(ctx.cid, !ctx.active);
+					}, ctx.active ? 'ghost' : 'secondary');
 					if (autodialOn) {
-						Mt5700.warning('自动拨号开启时 PDP 由模组维护，手工激活/去激活会与之冲突，请先关闭自动拨号');
-						return;
+						actBtn.disabled = true;
+						actBtn.title = '自动拨号开启时由模组自主维护 PDP，禁止手工切换';
 					}
-					handleActivePdp(ctx.cid, !ctx.active);
-				}, ctx.active ? 'ghost' : 'secondary');
+					acts.appendChild(actBtn);
 
-				if (autodialOn) {
-					actBtn.disabled = true;
-					actBtn.title = '自动拨号开启时由模组维护 PDP，禁止手工切换';
-				}
-				opWrap.appendChild(actBtn);
+					acts.appendChild(Mt5700.dangerButton('删除', function () {
+						Mt5700.confirm('确定删除 CID ' + ctx.cid + ' 的 PDP 上下文？', function () {
+							handleDeletePdp(ctx.cid);
+						}, '确认删除');
+					}));
+					item.appendChild(acts);
 
-				var cidEl = E('span', { 'class': 'mt-pdp-cid' }, '#' + ctx.cid);
-				var typeEl = Mt5700.badge(getPdpTypeText(ctx.type), ctx.type === 'IPV4V6' ? 'info' : 'neutral');
-				var apnEl = E('span', { 'class': 'mt5700-mono', style: 'font-size:12.5px;' }, ctx.apn || '—');
-				var statusEl = Mt5700.badge(ctx.active ? '已激活' : '未激活', ctx.active ? 'success' : 'neutral');
+					grid.appendChild(item);
+				});
 
-				return [
-					cidEl,
-					typeEl,
-					apnEl,
-					statusEl,
-					opWrap
-				];
-			});
-			pdpBody.appendChild(Mt5700.table(['CID', '协议类型', 'APN', '状态', '操作'], rows, { striped: true }));
+				// 末尾添加 "+ 新增 PDP 上下文" 快捷卡片
+				var addCard = E('div', { 'class': 'mt-pdp-card-add' });
+				addCard.appendChild(E('span', { style: 'font-size:26px; line-height:1; color:#8b5cf6; font-weight:bold;' }, '+'));
+				addCard.appendChild(E('span', { style: 'font-size:13.5px; font-weight:600; color:var(--mt5700-text);' }, '新增 PDP 上下文'));
+				addCard.appendChild(E('span', { style: 'font-size:11.5px; color:var(--mt5700-text-secondary);' }, '配置新的 CGDCONT 数据通道'));
+				addCard.addEventListener('click', function () { openEdit(null); });
+				grid.appendChild(addCard);
+
+				pdpBody.appendChild(grid);
+			} else {
+				// 紧凑表格视图：居中限宽 960px，固定列宽，杜绝 1400px 无效横向拉伸
+				var wrap = E('div', { 'class': 'mt-pdp-table-wrap' });
+				var rows = pdpList.map(function (ctx) {
+					var opWrap = E('div', { 'class': 'mt5700-inline', style: 'gap:6px;' });
+					opWrap.appendChild(Mt5700.button('编辑', function () { openEdit(ctx); }, 'secondary'));
+					opWrap.appendChild(Mt5700.dangerButton('删除', function () {
+						Mt5700.confirm('确定删除 CID ' + ctx.cid + ' 的 PDP 上下文？', function () {
+							handleDeletePdp(ctx.cid);
+						}, '确认删除');
+					}));
+					var actBtn = Mt5700.button(ctx.active ? '去激活' : '激活', function () {
+						if (autodialOn) {
+							Mt5700.warning('自动拨号开启时 PDP 由模组维护，手工激活/去激活会与之冲突，请先关闭自动拨号');
+							return;
+						}
+						handleActivePdp(ctx.cid, !ctx.active);
+					}, ctx.active ? 'ghost' : 'secondary');
+
+					if (autodialOn) {
+						actBtn.disabled = true;
+						actBtn.title = '自动拨号开启时由模组维护 PDP，禁止手工切换';
+					}
+					opWrap.appendChild(actBtn);
+
+					var cidEl = E('span', { 'class': 'mt-pdp-cid' }, '#' + ctx.cid);
+					var typeEl = Mt5700.badge(getPdpTypeText(ctx.type), ctx.type === 'IPV4V6' ? 'info' : 'neutral');
+					var apnEl = E('span', { 'class': 'mt5700-mono', style: 'font-size:12.5px;' }, ctx.apn || '— (默认)');
+					var statusEl = Mt5700.badge(ctx.active ? '已激活' : '未激活', ctx.active ? 'success' : 'neutral');
+
+					return [cidEl, typeEl, apnEl, statusEl, opWrap];
+				});
+				wrap.appendChild(Mt5700.table(['CID', '协议类型', 'APN', '状态', '操作'], rows, { striped: true }));
+				pdpBody.appendChild(wrap);
+			}
 		}
 
 		/* ---------- 动作 ---------- */
@@ -596,7 +690,12 @@ return L.view.extend({
 						String(resp1.data).replace(/\r/g, '').split('\n').forEach(function (line) {
 							if (line.indexOf('+CGDCONT:') !== 0) return;
 							var match = line.match(/\+CGDCONT: (\d+),"([^"]*)","([^"]*)",([^,]*),?(\d*),?(\d*)/);
-							if (match) list.push({ cid: Number(match[1]), type: match[2], apn: match[3], pdp_addr: match[4] || '' });
+							if (match) list.push({
+								cid: Number(match[1]),
+								type: match[2],
+								apn: (match[3] || '').replace(/^"|"$/g, '').trim(),
+								pdp_addr: (match[4] || '').replace(/^"|"$/g, '').trim()
+							});
 						});
 					}
 					var actives = {};
