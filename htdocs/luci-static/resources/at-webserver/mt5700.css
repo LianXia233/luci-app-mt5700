@@ -5095,3 +5095,364 @@ body.mt-theme-dark .mt5700-table td {
     font-size: 12.5px !important;
   }
 }
+
+/* ==========================================================================
+   Soft Anime v2.16.0: 全局弹窗、输入框、下拉菜单优化与紧凑排版
+   ========================================================================== */
+
+/* ---------- 看板娘头像定制 (用户提供蓝发猫耳二次元头像) ---------- */
+.mt-mascot-avatar {
+  flex-shrink: 0 !important;
+  width: 76px !important;
+  height: 76px !important;
+  border-radius: 50% !important;
+  position: relative !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: linear-gradient(135deg, #a78bfa 0%, #f472b6 100%) !important;
+  padding: 3px !important;
+  box-shadow: 0 6px 18px rgba(139, 92, 246, 0.3) !important;
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  animation: mt-mascot-float 3.6s ease-in-out infinite !important;
+}
+
+.mt-mascot-avatar:hover {
+  transform: translateY(-4px) scale(1.08) !important;
+  box-shadow: 0 10px 24px rgba(139, 92, 246, 0.45) !important;
+}
+
+.mt-mascot-img {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 50% !important;
+  object-fit: cover !important;
+  display: block !important;
+  background: #fbbf24 !important;
+}
+
+/* ---------- 紧凑排版优化 (减少冗余留白与长页面下拉) ---------- */
+.mt5700-page-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 14px !important;
+}
+
+.mt5700-card {
+  margin-bottom: 14px !important;
+}
+
+.mt5700-card-header {
+  padding: 12px 20px !important;
+}
+
+.mt5700-card-body {
+  padding: 14px 20px !important;
+}
+
+.mt5700-hero-card {
+  padding: 16px 22px !important;
+  margin-bottom: 14px !important;
+}
+
+.mt5700-form-group {
+  margin-bottom: 10px !important;
+}
+
+.mt5700-grid {
+  gap: 14px !important;
+}
+
+/* ---------- 全局弹窗样式优化 (Modal Dialogs) ---------- */
+.mt5700-modal-mask,
+.cbi-modal,
+.modal-overlay,
+.modal-backdrop,
+.at-modal-mask {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 1000 !important;
+  padding: 20px !important;
+  animation: mt-modal-fade 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.mt5700-modal,
+.cbi-modal-dialog,
+.modal-dialog,
+.at-modal-dialog,
+.modal {
+  background: var(--mt5700-card-bg) !important;
+  backdrop-filter: blur(28px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
+  border-radius: var(--mt5700-radius-xl) !important;
+  border: 1.5px solid var(--mt5700-border) !important;
+  box-shadow: 0 25px 60px rgba(124, 58, 237, 0.25) !important;
+  max-width: 540px !important;
+  width: 100% !important;
+  padding: 24px 26px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  animation: mt-modal-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+
+.mt5700-modal-title,
+.cbi-modal-title,
+.modal-title {
+  font-size: 17.5px !important;
+  font-weight: 700 !important;
+  color: #1e1b4b !important;
+  margin: 0 0 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.mt5700-modal-title::before {
+  content: '' !important;
+  display: inline-block !important;
+  width: 4px !important;
+  height: 16px !important;
+  border-radius: 4px !important;
+  background: linear-gradient(180deg, #a78bfa 0%, #8b5cf6 100%) !important;
+}
+
+.mt5700-modal-body,
+.cbi-modal-body,
+.modal-body {
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+  color: #475569 !important;
+  margin-bottom: 20px !important;
+}
+
+.mt5700-modal-footer,
+.cbi-modal-actions,
+.modal-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 12px !important;
+  padding-top: 14px !important;
+  border-top: 1px solid rgba(139, 92, 246, 0.1) !important;
+}
+
+@keyframes mt-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes mt-modal-pop {
+  from { opacity: 0; transform: scale(0.92) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ---------- 文字输入框深度美化 ---------- */
+.mt5700-input,
+.cbi-input-text,
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+textarea {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1.5px solid rgba(199, 210, 254, 0.85) !important;
+  border-radius: var(--mt5700-radius-sm) !important;
+  color: #1e1b4b !important;
+  padding: 8px 14px !important;
+  font-size: 13.5px !important;
+  line-height: 1.4 !important;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  box-sizing: border-box !important;
+  box-shadow: inset 0 1px 2px rgba(124, 58, 237, 0.04) !important;
+}
+
+.mt5700-input:hover,
+.cbi-input-text:hover,
+input[type="text"]:hover,
+textarea:hover {
+  border-color: #a78bfa !important;
+  background: #ffffff !important;
+}
+
+.mt5700-input:focus,
+.cbi-input-text:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+textarea:focus {
+  border-color: #8b5cf6 !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.22), inset 0 1px 2px rgba(124, 58, 237, 0.04) !important;
+  outline: none !important;
+  background: #ffffff !important;
+}
+
+/* ---------- 下拉选择菜单深度美化 ---------- */
+.mt5700-select,
+.cbi-input-select,
+select {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%238b5cf6'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  background-size: 15px 15px !important;
+  border: 1.5px solid rgba(199, 210, 254, 0.85) !important;
+  border-radius: var(--mt5700-radius-sm) !important;
+  color: #1e1b4b !important;
+  padding: 8px 36px 8px 14px !important;
+  font-size: 13.5px !important;
+  line-height: 1.4 !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.mt5700-select:hover,
+.cbi-input-select:hover,
+select:hover {
+  border-color: #a78bfa !important;
+  background-color: #ffffff !important;
+}
+
+.mt5700-select:focus,
+.cbi-input-select:focus,
+select:focus {
+  border-color: #8b5cf6 !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.22) !important;
+  outline: none !important;
+  background-color: #ffffff !important;
+}
+
+.mt5700-select option,
+select option {
+  background: #ffffff !important;
+  color: #1e1b4b !important;
+  padding: 8px !important;
+}
+
+/* ---------- 调制方式与空间流 SVG 专属视觉网格 ---------- */
+.mt-mcs-visual-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 16px !important;
+  margin-bottom: 16px !important;
+}
+
+.mt-mcs-box {
+  background: rgba(255, 255, 255, 0.82) !important;
+  border: 1px solid rgba(199, 210, 254, 0.6) !important;
+  border-radius: var(--mt5700-radius-lg) !important;
+  padding: 14px 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.05) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.mt-mcs-box:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 20px rgba(139, 92, 246, 0.12) !important;
+}
+
+.mt-mcs-header {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-bottom: 10px !important;
+  font-size: 12px !important;
+}
+
+.mt-mcs-tag {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 3px 9px !important;
+  border-radius: 9999px !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+}
+
+.mt-tag-cyan {
+  background: rgba(56, 189, 248, 0.18) !important;
+  color: #0284c7 !important;
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+}
+
+.mt-tag-purple {
+  background: rgba(167, 139, 250, 0.18) !important;
+  color: #7c3aed !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+}
+
+.mt-mcs-desc {
+  color: #64748b !important;
+  font-size: 11.5px !important;
+}
+
+.mt-constellation-svg,
+.mt-mimo-svg {
+  width: 100% !important;
+  max-width: 220px !important;
+  height: auto !important;
+  display: block !important;
+  overflow: visible !important;
+  filter: drop-shadow(0 4px 12px rgba(139, 92, 246, 0.12)) !important;
+}
+
+.mt-pill-tag {
+  display: inline-flex !important;
+  padding: 2px 8px !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  margin-right: 6px !important;
+}
+
+.mt-pill-cyan {
+  background: rgba(56, 189, 248, 0.2) !important;
+  color: #0284c7 !important;
+}
+
+.mt-pill-purple {
+  background: rgba(167, 139, 250, 0.2) !important;
+  color: #7c3aed !important;
+}
+
+/* ---------- 暗色模式补充 ---------- */
+body.mt-theme-dark .mt-mcs-box {
+  background: rgba(15, 23, 42, 0.75) !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
+}
+
+body.mt-theme-dark .mt5700-modal,
+body.mt-theme-dark .cbi-modal-dialog {
+  background: rgba(30, 41, 59, 0.96) !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+}
+
+body.mt-theme-dark .mt5700-modal-title,
+body.mt-theme-dark .cbi-modal-title {
+  color: #f8fafc !important;
+}
+
+body.mt-theme-dark .mt5700-modal-body,
+body.mt-theme-dark .cbi-modal-body {
+  color: #cbd5e1 !important;
+}
+
+@media (max-width: 768px) {
+  .mt-mcs-visual-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
