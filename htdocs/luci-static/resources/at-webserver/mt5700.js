@@ -286,88 +286,14 @@ api.mascotSvg = function () {
 		return svg;
 	};
 
-	api.mascot = function (defaultText, pageKey) {
+	/*
+	 * 看板娘：保留头像本体（图片 + 悬浮动效），对话气泡功能已移除。
+	 * 之前的气泡会挤占英雄栏标题并在窄屏下遮挡内容，按需求不再提供。
+	 */
+	api.mascot = function () {
 		var wrap = E('div', { 'class': 'mt-mascot-speech-wrap' });
 
-		// 优化看板娘文案：亲切称呼用户为「可可」
-		var voiceMap = {
-			network_status: [
-				'可可，5G 信号满格，冲浪快如闪电喵！⚡',
-				'无线链路超健康，随时为可可服务喵~ 🐾',
-				'网络已连接~ 正在全力守护可可的信号喵~ ♡',
-				'可可辛苦啦~ 今天我也在认真巡检网络呢！♡',
-				'喵呜~ 可可，有我在，网络绝对不掉线喵！✨'
-			],
-			network_settings: [
-				'可可，锁定高速 5G 频段，告别拥堵喵！✨',
-				'SA / NSA 模式已就绪，听从可可的指令喵~ 🛰️',
-				'射频通道状态极佳，正在帮可可锁定最佳基站喵！📶',
-				'可可放心，频段锁定策略随时为您待命喵~ ♡'
-			],
-			dial: [
-				'可可，APN 高速通道已就绪，一键起飞喵！🚀',
-				'双栈 IPv4/IPv6 隧道全速畅通，可可冲浪超丝滑喵~ 🌐',
-				'守护进程全天候待命，为可可保驾护航喵！🐾',
-				'数据链路稳如磐石，可可尽管畅享高速喵~ ♡'
-			],
-			scan: [
-				'雷达全向扫描启动！周边基站正在向可可汇报喵~ 📡',
-				'正在为可可探索更优质的载波与小区喵！✨',
-				'扫频完成啦，可可想锁定哪个小区呢喵？🐾'
-			],
-			schedule: [
-				'智能定时调度已排班，准时为可可执行喵~ ⏰',
-				'夜间闲时智能倒换，帮可可省心又省电喵！💤',
-				'定时优化模组状态，让可可的网速永远飞起喵~ ♡'
-			],
-			modem_settings: [
-				'MT5700 核心 SoC 运转正常，温度刚刚好，可可请放心喵~ 💻',
-				'PCI 物理小区锁定已生效，为可可开启最强抗干扰喵！🛡️',
-				'硬件状态优异，全心全意服务可可喵~ 🐾'
-			],
-			upgrade: [
-				'固件升级防护盾已开启，守护可可的设备安全喵！☁️',
-				'完整性校验中，可可请放心升级喵~ ⚡',
-				'保持最新版本，让可可体验最强 5G 性能喵！♡'
-			],
-			sms_center: [
-				'信箱整理得井井有条，新短信第一时间汇报给可可喵！💌',
-				'支持长短信无损合并，可可的消息一条都不漏喵~ 💬',
-				'重要验证码我帮可可盯得紧紧的喵！🐾'
-			],
-			sms_settings: [
-				'短信自动化转发与 Webhook 已为可可配置妥当喵！📮',
-				'钉钉/飞书/Telegram 实时推送，绝不让可可漏信喵~ 🔔',
-				'存储空间充足，随收随转，可可超省心喵~ ♡'
-			],
-			terminal: [
-				'AT 交互控制台就绪，请可可下发调试指令喵！💻',
-				'底层指令审计中，保证可可的操作安全无虞喵~ ✨',
-				'回车即发，高阶命令我随时陪可可测试喵！🐾'
-			],
-			logs: [
-				'事件日志流实时追踪，异常波动立刻汇报给可可喵~ 📜',
-				'全天候日志审计，透明可视，可可一目了然喵！🔍',
-				'运行健康度优异，一切尽在可可掌握中喵~ ♡'
-			],
-			service: [
-				'后台守护进程全天候巡检中，随时响应可可喵！🛡️',
-				'服务健康度 100%，内存超轻量，可可放心喵~ ⚡',
-				'模组通信守护就绪，陪伴可可每一秒喵！♡'
-			]
-		};
-
-		var voices = voiceMap[pageKey] || [
-			'可可，5G 信号满格，冲浪快如闪电喵！⚡',
-			'可可辛苦啦~ 今天我也在认真巡检网络呢！♡',
-			'网络已连接~ 正在全力守护可可的信号喵~ ♡',
-			'喵呜~ 可可，有我在，网络绝对不掉线喵！✨'
-		];
-
-		var initText = defaultText || voices[0];
-		var bubble = E('div', { 'class': 'mt-speech-bubble' }, initText);
-
-		// 采用用户指定的二次元蓝发猫耳看板娘头像图片，外圈带光环与悬浮动效
+		// 二次元蓝发猫耳看板娘头像图片，外圈带光环与悬浮动效
 		var avatar = E('div', { 'class': 'mt-mascot-avatar' });
 		var img = E('img', {
 			'class': 'mt-mascot-img',
@@ -375,23 +301,9 @@ api.mascotSvg = function () {
 			'alt': '可可的看板娘'
 		});
 		avatar.appendChild(img);
-
-		var idx = 0;
-		function nextVoice() {
-			idx = (idx + 1) % voices.length;
-			bubble.textContent = voices[idx];
-		}
-		bubble.addEventListener('click', nextVoice);
-		avatar.addEventListener('click', nextVoice);
-
-		wrap.appendChild(bubble);
 		wrap.appendChild(avatar);
 
-		return {
-			el: wrap,
-			bubble: bubble,
-			setBubble: function (t) { if (t) bubble.textContent = t; }
-		};
+		return { el: wrap };
 	};
 
 	api.page = function (title, subtitle, pageKey, badgeText) {
@@ -452,7 +364,7 @@ api.mascotSvg = function () {
 		var art = E('div', { 'class': 'mt5700-hero-art' });
 
 		/* 看板娘完整保留（含图片、气泡、点击换台词与动画） */
-		var mascot = api.mascot(null, pageKey);
+		var mascot = api.mascot();
 		art.appendChild(mascot.el);
 		hero.appendChild(art);
 		node._mascot = mascot;

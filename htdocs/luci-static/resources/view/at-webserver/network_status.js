@@ -15,7 +15,6 @@ return L.view.extend({
 		var self = this;
 		var page = Mt5700.page('MT5700 设备状态', '5G 蜂窝网络 · 射频链路与硬件遥测', 'network_status', '在线');
 		var body = page._body;
-		var mascot = page._mascot;
 
 		// 页面状态聚合（纯设备真实数据，未获取前严禁硬编码伪造）
 		var state = {

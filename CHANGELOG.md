@@ -4,6 +4,7 @@
 
 ### LuCI 原生化改造：移除独立夜间模式与英雄栏动态 SVG
 
+- **refactor(ui)**: 移除看板娘的对话气泡功能（气泡 DOM、逐页台词表、点击换台词交互与 `setBubble()` 接口，以及 `.mt-speech-bubble` 专用样式）；看板娘头像本体（`mascot.png` 与悬浮动效）完整保留。气泡会挤占英雄栏标题并在窄屏下遮挡内容。
 - **refactor(ui)**: 移除插件自带的夜间模式按钮 `Mt5700.themeToggle()` 及 `mt5700_theme` 存储键；英雄栏动态 SVG 插画 `Mt5700.heroIllustration()` 连同专用 CSS（`.mt5700-hero-illu-box` / `.mt5700-hero-svg` / `mt-anim-wave*` / `@keyframes mt-wave-expand`）一并删除。**看板娘完整保留**（`mascot.png`、气泡、点击换台词与浮动动画）；`constellationSvg` / `mimoSvg`（MCS 面板使用）原样保留。
 - **style(css)**: 删除插件独立的 `mt-theme-dark` / `mt-theme-light` 明暗模式类，暗色配色改为跟随全局主题的 `[data-theme="dark"]` 与系统 `prefers-color-scheme`；核心观感变量（背景/卡片/文字/边框）改为优先继承当前 LuCI 主题的 CSS 变量（`--background-color` 等，未定义时回落插件配色），不同主题下自动适配。
 - **fix(status)**: 修复 APN 信息误显示 IMS 的问题 —— 实机 `AT+CGDCONT?` 会同时报出 cid=5 的 `ims` 专用承载，旧逻辑在数据通道 APN 为空（核心网分配）时被后面的 ims 顶掉。现抽取 `pickDataContext()`：剔除 IMS/紧急等专用承载、优先锁定 CID 1 且不再被覆盖，并在 APN 页新增「数据通道 (CID)」行。
