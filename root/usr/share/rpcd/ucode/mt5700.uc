@@ -30,6 +30,34 @@ function getStr(obj, key) {
 	return v;
 }
 
+/*
+ * 白名单校验客户端传入的 _rid。
+ *
+ * 安全背景（必须过滤，不能信任客户端）：
+ *   _rid 会被拼进临时文件路径与 shell 重定向命令：
+ *     tmp = '/tmp/mt5700-rpc-' + _rid + '.json'
+ *     raw = '... nc 127.0.0.1 < ' + tmp   （经 fs.popen 交给 /bin/sh，root 身份）
+ *   未校验时，任何拥有本插件 ACL 的 LuCI 会话都可以：
+ *     1) 命令注入：_rid = 'x; touch /tmp/pwned; #' → 拼出的 shell 里
+ *        '; ' 分隔出第二条命令，以 root 执行；
+ *     2) /tmp 内文件名注入：写/删到意料之外的文件，配合符号链接
+ *        可能扩大影响。
+ *   因此只接受 [A-Za-z0-9_-]{1,64}；其余一律视为未提供，
+ *   退回服务端生成的唯一号（时间戳 + 自增），功能不受影响。
+ */
+function safeRid(v) {
+	if (v == null) {
+		return null;
+	}
+	if (length(v) == 0 || length(v) > 64) {
+		return null;
+	}
+	if (match(v, /^[A-Za-z0-9_-]+$/) == null) {
+		return null;
+	}
+	return v;
+}
+
 /* 迷你 JSON 解析：ucode 无 s[i]、嵌套函数不提升，用 substr + 前置声明 */
 function jsonParse(s) {
 	let i = 0;
@@ -437,6 +465,11 @@ function readCounter(path) {
 function netrateCall(req) {
 	let a = req.args;
 	let dev = getStr(a, 'device');
+	/* device 会拼进 sysfs 只读路径：只接受接口名字符（明确排除 '/'，
+	 * 阻断 ../ 穿越）；非法值忽略并回落自动探测，不报错。 */
+	if (dev != null && dev != '' && match(dev, /^[A-Za-z0-9._@:-]+$/) == null) {
+		dev = null;
+	}
 	if (dev == null || dev == '') {
 		dev = detectModemDevice();
 	}
@@ -645,8 +678,8 @@ function rpcCall(method, params) {
 	 * 唯一性由调用方传入的 _rid 提供；没传时退化为「时间戳 + 自增」，
 	 * 同一秒内的多次调用也能区分（ucode 的 time() 只有秒级）。
 	 */
-	let rid = getStr(params, '_rid');
-	if (rid == null || rid == '') {
+	let rid = safeRid(getStr(params, '_rid'));
+	if (rid == null) {
 		rid = sprintf('%d-%d', time(), rpcFallbackSeq++);
 	}
 	const tmp = '/tmp/mt5700-rpc-' + rid + '.json';
@@ -679,7 +712,9 @@ function rpcCall(method, params) {
 	 * 略大，保证「后端确实在干活」的请求不会被误杀，同时把最坏耗时
 	 * 从「不可控」压缩到 12s。
 	 */
-	let raw = ncBin + ' 127.0.0.1 ' + port + ' < ' + tmp;
+	/* 重定向目标加单引号包裹（纵深防御：rid 已过白名单，这里再挡一层
+	 * 意外引入的空白/元字符拼接问题），busybox sh 支持单引号。 */
+	let raw = ncBin + " 127.0.0.1 " + port + " < '" + tmp + "'";
 	let timedOut = false;
 	if (timeoutBin != '') {
 		raw = timeoutBin + ' ' + RPCCALL_TIMEOUT_SEC + ' ' + raw;
