@@ -28,6 +28,7 @@ return L.view.extend({
 			rawHfreq: [],
 			hfreqSuccess: null,
 			secondarySuccess: null,
+			telemetryError: false,
 			caStatus: {
 				state: 'pending', // 'pending' | 'single' | 'ca' | 'none' | 'error' | 'expired'
 				lastSuccessTime: 0
@@ -528,14 +529,14 @@ return L.view.extend({
 		};
 
 		/*
-		 * 真实数据 → 四格信号图标状态。判据全部来自模组上报，不得凭空指定：
-		 *   hfreqSuccess === false  主载波频点查询失败 → error（不猜格数）
-		 *   SIM 未就绪（非"正常"/非"检测中"）        → disconnected
-		 *   注册状态含"未注册"                       → searching
-		 *   注册被拒绝 / 注册状态未知                 → error
-		 *   尚未拿到注册结论                         → searching
-		 *   已注册但无 RSRP 读数（首轮采集中）        → connecting
-		 *   已注册且有 RSRP                          → 按 RSRP 分档
+		 * 真实数据 → 四格信号图标状态。判定优先级（顺序即语义）：
+		 *   1) SIM 未就绪（明确非"正常"且非"检测中"）→ disconnected
+		 *   2) **已有 RSRP 读数 → 直接按电平分档**：信号本身正常时绝不显示异常，
+		 *      不受 HFREQINFO / HCSQ 等辅助遥测命令偶发失败的影响；
+		 *   3) 注册状态：含"未注册" → searching；"注册被拒绝"/"未知" → error；
+		 *      空 / 检测中 / 等待状态 → searching；
+		 *   4) 已注册但尚无读数：仅当主载波查询明确失败才 → error，
+		 *      否则 → connecting（首轮采集中）。
 		 */
 		function computeCellularState() {
 			var c = state.cell || {};
@@ -544,17 +545,21 @@ return L.view.extend({
 			var reg = String(state.networkStatus || '');
 			var sim = String(state.simStatus || '');
 
-			if (state.hfreqSuccess === false) return 'error';
 			if (sim !== '' && sim.indexOf('检测中') < 0 && sim.indexOf('正常') < 0) return 'disconnected';
+
+			if (rsrp !== null) {
+				if (rsrp >= -80) return 'full';
+				if (rsrp >= -95) return 'strong';
+				if (rsrp >= -110) return 'medium';
+				if (rsrp > -140) return 'weak';
+				return 'none';
+			}
+
 			if (reg.indexOf('未注册') >= 0) return 'searching';
 			if (reg.indexOf('注册被拒绝') >= 0 || reg.indexOf('未知') >= 0) return 'error';
 			if (reg === '' || reg.indexOf('检测中') >= 0 || reg.indexOf('等待状态') >= 0) return 'searching';
-			if (rsrp === null) return 'connecting';
-			if (rsrp >= -80) return 'full';
-			if (rsrp >= -95) return 'strong';
-			if (rsrp >= -110) return 'medium';
-			if (rsrp > -140) return 'weak';
-			return 'none';
+
+			return state.hfreqSuccess === false ? 'error' : 'connecting';
 		}
 
 		function renderSignalUI() {
@@ -1402,12 +1407,19 @@ return L.view.extend({
 					return null;
 				});
 			}).then(function () {
+				state.telemetryError = false;
 				syncCarriers();
 				renderSignalUI();
 				renderTabsUI();
 				renderCarriersAdv();
 			}).catch(function (e) {
-				state.hfreqSuccess = false;
+				/*
+				 * 这里无法判断是哪一步失败（MONSC / HFREQINFO / HCSQ / 渲染），
+				 * 因此不再无条件把 hfreqSuccess 置 false —— 那样会让「信号正常、
+				 * 只是辅助遥测偶发失败」的情况被误判成信号读取异常。
+				 * HFREQINFO 自身的成败已在上一级 then 中如实记录。
+				 */
+				state.telemetryError = true;
 				syncCarriers();
 				renderCarriersAdv();
 				renderTabsUI();
