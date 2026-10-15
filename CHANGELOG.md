@@ -26,7 +26,7 @@
 - **fix(parse)**: `carrierSignalFor` / `unmatchedSecondaries` 空频点健壮性 —— 空 `dlFcn` 原先被 `Number('')` 折成 `0`，既会把 `arfcn=0` 的辅小区误判为「已匹配」而丢掉，也可能把主载波信号错配给空频点载波。现统一折成 `null` 并跳过匹配。
 - **fix(status)**: 载波状态判定收口为唯一出口 —— `AT^HFREQINFO?` 查询失败时，即使只解析出 1 个载波也不再判定为「单载波」（改为 `error`，数据过期则 `expired`）；两次查询都成功却没有任何载波时判定 `none`（未驻网），不再是自相矛盾的「单载波」；`hfreqSuccess` 初值 `null`（尚未查询）不再被当作成功。
 - **test**: 新增 `tests/switch-rollback-test.js`（6 项开关回滚）与 `tests/parse-regression-test.js`（15 项 PCI 进制与载波匹配回归）；`tests/ca-status-test.js` 由 13 项扩到 17 项。全量前端单测 **85 项 100% 通过**（17 + 28 + 19 + 15 + 6）。
-- **verify**: 实机（192.168.88.1，中国移动 NSA/NR n41）抓 `AT^MONSC` / `AT^HFREQINFO?` / `AT^MONSSC` / `AT^CASCELLINFO?` 原始响应后用修复后的解析层复算：PCI `0x80 → 128`、基站 `C2840C002 (TAC 149002)`、ARFCN `504990`、辅载波 0 个（MONSSC NONE / CASCELLINFO ERROR）→ 状态 `single`，与模组实际上报一致。
+- **verify**: 实机（192.168.88.1，中国移动 NSA/NR n41）抓 `AT^MONSC` / `AT^HFREQINFO?` / `AT^MONSSC` / `AT^CASCELLINFO?` 原始响应后用修复后的解析层复算：PCI `0x80 → 128`、基站 `C2840C002 (TAC 149002)`、ARFCN `504990`、辅载波 0 个（MONSSC NONE / CASCELLINFO ERROR）→ 状态 `single`，与模组实际上报一致。前端热部署到真机后 Playwright 抓取渲染结果：网络状态页 PCI **128**、基站标识带 TAC、CA 状态「单载波 (PCC)」、温控开关与 `^THERMAUTOFUN: 1 0 2` 一致，无页面报错。
 
 ### 载波聚合 (CA) 多分量波生命周期识别与信号指标对齐
 
