@@ -1070,15 +1070,35 @@ function parseMONSC(data) {
 			sinr: null,
 			rssi: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null
 		};
+	} else if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'NR') {
+		/*
+		 * 手册 13.9.3/13.9.5：NR 的 <cell_paras>
+		 * 实测: ^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-64,-10,25
+		 *   NR,<mcc>,<mnc>,<arfcn>,<flag>,<cid_hex>,<pci_hex>,<tac_hex>,<rsrp>,<rsrq>,<sinr>
+		 * PCI 为十六进制（0x80 -> 128，与手册 13.27.3 取值 0~0x3EF 一致）
+		 * 频点 ARFCN 为 p[3]，小区 ID 为 p[5]，TAC 为 p[7]
+		 */
+		d = {
+			sysMode: 'NR',
+			mcc: p[1] || '',
+			mnc: p[2] || '',
+			channel: p[3] || '',
+			cid: p[5] || '',
+			pci: p[6] !== undefined && p[6] !== '' ? parseInt(p[6], 16) : 0,
+			lac: p[7] || '',
+			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
+			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
+			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
+		};
 	} else if (hasLeadingMode) {
 		d = {
 			sysMode: p[0] || '',
 			mcc: p[1] || '',
 			mnc: p[2] || '',
-			lac: p[3] || '',
+			channel: p[3] || '',
 			cid: p[5] || '',
-			pci: p[6] !== undefined ? parseInt(p[6], 10) : 0,
-			channel: p[7] || '',
+			pci: p[6] !== undefined && p[6] !== '' ? parseInt(p[6], 16) : 0,
+			lac: p[7] || '',
 			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
 			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
 			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
@@ -1089,7 +1109,7 @@ function parseMONSC(data) {
 			mnc: p[1] || '',
 			lac: p[2] || '',
 			cid: p[3] || '',
-			pci: p[4] ? parseInt(p[4], 10) : 0,
+			pci: p[4] !== undefined && p[4] !== '' ? parseInt(p[4], 16) : 0,
 			channel: p[5] ? p[5].trim() : '',
 			rsrp: p[6] !== undefined ? convertRsrp(parseInt(p[6], 10)) : null,
 			rsrq: p[7] !== undefined ? convertRsrq(parseInt(p[7], 10)) : null,

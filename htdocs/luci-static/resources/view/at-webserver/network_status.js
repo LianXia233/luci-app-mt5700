@@ -17,7 +17,7 @@ return L.view.extend({
 		var body = page._body;
 		var mascot = page._mascot;
 
-		// 页面状态聚合
+		// 页面状态聚合（纯设备真实数据，未获取前严禁硬编码伪造）
 		var state = {
 			cell: {
 				mcc: '', mnc: '', lac: '', cid: '', channel: '', pci: '',
@@ -32,9 +32,12 @@ return L.view.extend({
 			ambrDown: 0,
 			ambrUp: 0,
 			networkStatus: '检测中...',
-			operator: '正在读取...',
-			apn: 'cmiot5g',
-			qci: '未知',
+			operator: '读取中...',
+			apn: '',
+			pdpType: '',
+			simStatus: '检测中...',
+			deviceInterface: '',
+			qci: '',
 			flow: {
 				currentConnectTime: '',
 				currentDownloadFlow: '',
@@ -43,14 +46,12 @@ return L.view.extend({
 				totalUploadFlow: '',
 				totalConnectTime: ''
 			},
-			temps: {
-				modem1: 0, ap1: 0, ap2: 0, sub6GPA: 0, sub3GPA: 0, mimoPa: 0, tcxo: 0
-			},
+			temps: null,
 			dhcpv4: { ipv4Address: '', subnetMask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
 			dhcpv6: { ipv6Address: '', netmask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
 			ipv6Cap: { capValue: 0, description: '' },
-			mcs: { dlMod: '64QAM', ulMod: '64QAM', dlRank: 4, ulRank: 1, dlMcs: 18, ulMcs: 20, dlEff: 0, ulEff: 0 },
-			modemInfo: { model: 'RM551E-GL', fw: '', imei: '', imsi: '', iccid: '' },
+			mcs: { dlMod: '', ulMod: '', dlRank: null, ulRank: null, dlMcs: null, ulMcs: null, dlEff: 0, ulEff: 0 },
+			modemInfo: { manufacturer: '', model: '', fw: '', imei: '', imsi: '', iccid: '' },
 			dataBearer: null
 		};
 
@@ -61,9 +62,9 @@ return L.view.extend({
 		var sigHistory = [];
 		var MAX_SIG_POINTS = 30;
 
-		// 流量趋势微型火花线数据
-		var sparkDown = [12, 18, 15, 24, 20, 28, 22, 35, 30, 42];
-		var sparkUp = [8, 12, 10, 15, 14, 18, 16, 22, 19, 25];
+		// 流量趋势微型火花线数据（初始为真实空/0采样点，绝不伪造随机数）
+		var sparkDown = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+		var sparkUp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 		// DOM 根容器
 		var layout = E('div', { 'class': 'mt-anime-container' });
@@ -135,7 +136,7 @@ return L.view.extend({
 				E('div', { 'class': 'mt-net-info-grid' }, [
 					E('div', { 'class': 'mt-net-info-cell' }, [
 						E('span', { 'class': 'mt-net-lbl' }, '运营商'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-operator' }, '中国移动')
+						E('span', { 'class': 'mt-net-val', 'id': 'net-val-operator' }, '读取中...')
 					]),
 					E('div', { 'class': 'mt-net-info-cell' }, [
 						E('span', { 'class': 'mt-net-lbl' }, '频段'),
@@ -490,20 +491,29 @@ return L.view.extend({
 				}
 				if (tags.length > 0) return tags.join(' + ');
 			}
-			// 回退到主小区信道/频段
+			// 回退到主小区信道/频段（真实解析，不伪造默认频点或固定带宽）
 			var c = state.cell;
 			if (c.channel) {
 				var isNr = (c.sysMode === 'NR' || c.sysMode === '7' || c.sysMode === '5G' || !c.sysMode);
 				var prefix = isNr ? 'N' : 'B';
-				var bandNum = c.channel;
-				// 若信道号大于 100000 则为 5G NR-ARFCN (如 513000 -> 2565 MHz)
-				var freqVal = '2565 MHz';
-				if (parseInt(bandNum, 10) > 1000) {
-					bandNum = '41';
+				var bandNum = c.band || '';
+				if (!bandNum) {
+					var ch = parseInt(c.channel, 10);
+					if (ch >= 500000 && ch <= 540000) bandNum = '41';
+					else if (ch >= 620000 && ch <= 680000) bandNum = '78';
+					else if (ch >= 690000 && ch <= 730000) bandNum = '79';
+					else if (ch >= 150000 && ch <= 170000) bandNum = '28';
+					else if (ch >= 420000 && ch <= 440000) bandNum = '1';
+					else if (ch >= 360000 && ch <= 380000) bandNum = '3';
+					else bandNum = 'CH ' + c.channel;
 				}
-				return prefix + bandNum + ' (' + freqVal + ' · 100MHz)';
+				var resTag = prefix + bandNum;
+				if (c.channel && bandNum !== 'CH ' + c.channel) {
+					resTag += ' (ARFCN ' + c.channel + ')';
+				}
+				return resTag;
 			}
-			return 'N41 (2565 MHz · 100MHz)';
+			return '未驻网 / 无信号';
 		}
 
 		/* ==========================================================================
@@ -805,10 +815,10 @@ return L.view.extend({
 			var elUl = document.getElementById('traffic-ul-val');
 			if (elUl) elUl.textContent = ulStr;
 
-			// 更新迷你火花线
-			sparkDown.push(state.rtDown > 0 ? state.rtDown : Math.random() * 50000);
+			// 更新迷你火花线：纯设备真实采样数据，为 0 则为 0，严禁使用 Math.random 伪造
+			sparkDown.push(state.rtDown || 0);
 			if (sparkDown.length > 12) sparkDown.shift();
-			sparkUp.push(state.rtUp > 0 ? state.rtUp : Math.random() * 15000);
+			sparkUp.push(state.rtUp || 0);
 			if (sparkUp.length > 12) sparkUp.shift();
 
 			renderMiniSparkline('spark-dl-box', sparkDown, '#38bdf8');
@@ -820,18 +830,25 @@ return L.view.extend({
 			var prim = (state.carriers && state.carriers[0]) || {};
 			var primRat = AtWs.ratLabel ? AtWs.ratLabel(c.sysMode || prim.sysMode) : (c.sysMode || '5G NR');
 			var bandCombo = getBandCombinationStr();
-			var primBw = prim.dlBwKHz ? (prim.dlBwKHz / 1000) + ' MHz' : (prim.bandwidth ? (prim.bandwidth / 1000) + ' MHz' : '100 MHz');
-			var duration = state.flow.currentConnectTime || '运行中';
+			var duration = state.flow.currentConnectTime || '—';
 
-			// 更新 Card 2 中的简要信息
+			// 更新 Card 2 中的简要信息（严禁回退假运营商）
 			var opEl = document.getElementById('net-val-operator');
-			if (opEl) opEl.textContent = state.operator || '中国移动';
+			if (opEl) opEl.textContent = state.operator || '—';
 
 			var bandEl = document.getElementById('net-val-band');
 			if (bandEl) bandEl.textContent = bandCombo;
 
 			var caEl = document.getElementById('net-val-ca');
-			if (caEl) caEl.textContent = state.carriers.length > 1 ? ('CA ' + state.carriers.length + 'CC 聚合') : '单载波 (PCC)';
+			if (caEl) {
+				if (state.carriers && state.carriers.length > 1) {
+					caEl.textContent = 'CA ' + state.carriers.length + 'CC 聚合';
+				} else if (state.cell && state.cell.channel) {
+					caEl.textContent = '单载波 (PCC)';
+				} else {
+					caEl.textContent = '未驻网';
+				}
+			}
 
 			var ipEl = document.getElementById('net-val-ip');
 			if (ipEl) {
@@ -840,85 +857,105 @@ return L.view.extend({
 			}
 
 			// Tab 1: 网络信息
+			var dlModText = state.mcs.dlMod ? state.mcs.dlMod + ' (DL)' : '—';
+			var ulModText = state.mcs.ulMod ? state.mcs.ulMod + ' (UL)' : '—';
+			var dlRankText = state.mcs.dlRank != null ? state.mcs.dlRank + ' 层并发 (DL)' : '—';
+			var ulRankText = state.mcs.ulRank != null ? state.mcs.ulRank + ' 层 (UL)' : '—';
+
 			tabPanes['tab-net'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>网络制式</td><td>' + primRat + '</td></tr>' +
+				'  <tr><td>网络制式</td><td>' + (c.sysMode ? primRat : '—') + '</td></tr>' +
 				'  <tr><td>频段组合</td><td>' + bandCombo + '</td></tr>' +
-				'  <tr><td>运营商</td><td>' + state.operator + '</td></tr>' +
+				'  <tr><td>运营商</td><td>' + (state.operator || '—') + '</td></tr>' +
 				'  <tr><td>连接时长</td><td>' + duration + '</td></tr>' +
-				'  <tr><td>调制方式</td><td><span class="mt-pill-tag mt-pill-cyan">QAM</span> ' + (state.mcs.dlMod || '64QAM') + ' (DL) / ' + (state.mcs.ulMod || '64QAM') + ' (UL)</td></tr>' +
-				'  <tr><td>空间流 (MIMO)</td><td><span class="mt-pill-tag mt-pill-purple">MIMO 4×4</span> ' + (state.mcs.dlRank || 4) + ' 层并发 (DL) / ' + (state.mcs.ulRank || 1) + ' 层 (UL)</td></tr>' +
-				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci || '—') + '</td></tr>' +
+				'  <tr><td>调制方式</td><td><span class="mt-pill-tag mt-pill-cyan">QAM</span> ' + (state.mcs.dlMod ? (dlModText + ' / ' + ulModText) : '— (模组未上报)') + '</td></tr>' +
+				'  <tr><td>空间流 (MIMO)</td><td><span class="mt-pill-tag mt-pill-purple">MIMO</span> ' + (state.mcs.dlRank != null ? (dlRankText + ' / ' + ulRankText) : '— (模组未上报)') + '</td></tr>' +
+				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci != null && c.pci !== '' ? c.pci : '—') + '</td></tr>' +
 				'  <tr><td>基站标识 (eNB/gNB)</td><td>' + (c.cid || '—') + (c.lac ? ' (TAC ' + c.lac + ')' : '') + '</td></tr>' +
 				'</table>';
 
-			// Tab 2: 设备信息
-			var avgT = '44.8 ℃';
+			// Tab 2: 设备信息（根据 ATI 真实模组上报，绝不写死 RM551E-GL）
+			var avgT = '—';
 			if (state.temps && state.temps.modem1) {
-				avgT = state.temps.modem1 + ' ℃ (基带 ' + state.temps.modem1 + '℃, PA ' + (state.temps.sub6GPA || 43) + '℃)';
+				avgT = state.temps.modem1 + ' ℃' + (state.temps.sub6GPA ? ' (基带 ' + state.temps.modem1 + '℃, PA ' + state.temps.sub6GPA + '℃)' : '');
 			}
+			var devIface = state.deviceInterface || (rateSample && rateSample.device) || '—';
 			tabPanes['tab-dev'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>模组型号</td><td>' + state.modemInfo.model + '</td></tr>' +
+				'  <tr><td>模组型号</td><td>' + (state.modemInfo.model || '读取中...') + '</td></tr>' +
+				'  <tr><td>制造厂商</td><td>' + (state.modemInfo.manufacturer || 'TD Tech Ltd.') + '</td></tr>' +
 				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || '—') + '</td></tr>' +
+				'  <tr><td>模组 IMEI</td><td>' + (state.modemInfo.imei || '—') + '</td></tr>' +
 				'  <tr><td>芯片温度概览</td><td>' + avgT + '</td></tr>' +
-				'  <tr><td>承载接口</td><td>eth2 (自动管理)</td></tr>' +
-				'  <tr><td>供电状态</td><td>正常就绪</td></tr>' +
-				'  <tr><td>通信通道</td><td>PCIe / USB 3.0</td></tr>' +
+				'  <tr><td>数据通信接口</td><td>' + devIface + '</td></tr>' +
 				'</table>';
 
-			// Tab 3: SIM 卡信息 (完整真实显示 IMSI 与 ICCID，严禁任何星号遮挡)
+			// Tab 3: SIM 卡信息 (完整真实显示 IMSI 与 ICCID，真实读取 AT+CPIN?)
+			var simStat = state.simStatus || '读取中...';
+			var plmnStr = (c.mcc && c.mnc) ? (c.mcc + ' ' + c.mnc) : '—';
+			var roamStr = '未检测';
+			if (state.diag && state.diag.reg) {
+				roamStr = state.diag.reg.stat === 5 ? '已漫游' : (state.diag.reg.stat === 1 ? '非漫游 (本地网络)' : state.diag.reg.statText);
+			} else if (state.networkStatus) {
+				roamStr = state.networkStatus.indexOf('漫游') >= 0 ? '已漫游' : '非漫游 (本地网络)';
+			}
 			tabPanes['tab-sim'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>SIM 卡状态</td><td>正常就绪</td></tr>' +
-				'  <tr><td>运营商代码 (PLMN)</td><td>' + ((c.mcc || '460') + ' ' + (c.mnc || '00')) + '</td></tr>' +
-				'  <tr><td>漫游状态</td><td>非漫游 (本地网络)</td></tr>' +
+				'  <tr><td>SIM 卡状态</td><td>' + simStat + '</td></tr>' +
+				'  <tr><td>运营商代码 (PLMN)</td><td>' + plmnStr + '</td></tr>' +
+				'  <tr><td>网络注册与漫游</td><td>' + roamStr + '</td></tr>' +
 				'  <tr><td>IMSI</td><td>' + (state.modemInfo.imsi || '读取中...') + '</td></tr>' +
 				'  <tr><td>ICCID</td><td>' + (state.modemInfo.iccid || '读取中...') + '</td></tr>' +
 				'</table>';
 
-			// Tab 4: APN 信息
-			var ipv4 = state.dhcpv4.ipv4Address || '—';
+			// Tab 4: APN 信息（读取 AT+CGDCONT 真实配置，绝不假写 cmiot5g）
+			var ipv4 = state.dhcpv4.ipv4Address || (state.diag.addrs[0] ? state.diag.addrs[0].address : '—');
 			var ipv6 = state.dhcpv6.ipv6Address || '—';
 			var gw = state.dhcpv4.gateway || '—';
-			var dns = (state.dhcpv4.primaryDNS || '—') + ' / ' + (state.dhcpv4.secondaryDNS || '—');
+			var dns = (state.dhcpv4.primaryDNS || '—') + (state.dhcpv4.secondaryDNS ? ' / ' + state.dhcpv4.secondaryDNS : '');
+			var apnName = state.apn || '默认 (核心网自动分配)';
+			var protoType = state.pdpType ? (state.pdpType === 'IPV4V6' ? 'IPv4 / IPv6 双栈' : (state.pdpType === 'IP' ? '仅 IPv4' : state.pdpType)) : 'IPv4 / IPv6 双栈';
 			tabPanes['tab-apn'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>APN 名称</td><td>' + (state.apn || 'cmiot5g') + '</td></tr>' +
-				'  <tr><td>协议类型</td><td>IPv4 / IPv6 双栈</td></tr>' +
+				'  <tr><td>APN 接入点</td><td>' + apnName + '</td></tr>' +
+				'  <tr><td>协议类型</td><td>' + protoType + '</td></tr>' +
 				'  <tr><td>本机 IPv4</td><td>' + ipv4 + '</td></tr>' +
 				'  <tr><td>本机 IPv6</td><td>' + ipv6 + '</td></tr>' +
 				'  <tr><td>网关地址</td><td>' + gw + '</td></tr>' +
-				'  <tr><td>首选 / 备用 DNS</td><td>' + dns + '</td></tr>' +
+				'  <tr><td>DNS 服务器</td><td>' + dns + '</td></tr>' +
 				'</table>';
 		}
 
-		/* ---------- 载波聚合渲染 (折叠面板内部) ---------- */
+		/* ---------- 载波聚合渲染 (折叠面板内部，严格根据设备上报真实数据) ---------- */
 		function renderCarriersAdv() {
 			if (!carrierBox) return;
 			carrierBox.innerHTML = '';
 			var list = state.carriers || [];
 
-			// 若未检测到 carriers，基于主小区状态构造 PCC 基础载波对象
+			// 若未检测到 carriers，绝不注入假载波，而是展示真实单载波主小区信息或未聚合提示
 			if (!list.length) {
-				var defBand = state.cell.channel && parseInt(state.cell.channel, 10) < 1000 ? state.cell.channel : '41';
-				list = [{
-					n: 0,
-					sysMode: state.cell.sysMode || 'NR',
-					band: defBand,
-					dlFcn: state.cell.channel || '513000',
-					dlFreqKHz: 2565000,
-					dlBwKHz: 100000,
-					rsrp: state.cell.rsrp
-				}];
+				if (state.cell && state.cell.channel) {
+					var pccBand = getBandCombinationStr();
+					carrierBox.innerHTML = 
+						'<div style="padding:14px 16px; background:rgba(139,92,246,0.04); border-radius:10px; border:1px solid rgba(139,92,246,0.15); font-size:12.5px; color:var(--mt5700-text-secondary);">' +
+						'  <div style="font-weight:600; color:var(--mt5700-text); margin-bottom:4px;">单载波主小区 (PCC) · 未启用载波聚合 (CA)</div>' +
+						'  <div>主载波：' + pccBand + ' · 信号 RSRP: ' + (state.cell.rsrp != null ? state.cell.rsrp + ' dBm' : '—') + '</div>' +
+						'</div>';
+				} else {
+					carrierBox.innerHTML = 
+						'<div style="padding:14px 16px; background:rgba(128,128,128,0.04); border-radius:10px; border:1px dashed rgba(128,128,128,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-muted);">' +
+						'  未检测到载波聚合信息（模组未上报或当前基站未配置多载波聚合）' +
+						'</div>';
+				}
+				return;
 			}
 
 			var caHtml = '<div style="display:flex; flex-direction:column; gap:10px;">';
 			list.forEach(function (c, i) {
 				var isPcc = (i === 0);
 				var tag = formatBandTag(c.sysMode, c.band);
-				var freqStr = getCarrierFreq(c) || '2565 MHz';
-				var bwStr = getCarrierBw(c) || '100MHz';
+				var freqStr = getCarrierFreq(c);
+				var bwStr = getCarrierBw(c);
 				var fcn = c.dlFcn || '-';
 				var rsrpVal = (c.rsrp != null && !isNaN(c.rsrp)) ? (c.rsrp + ' dBm') : ((state.cell.rsrp != null && !isNaN(state.cell.rsrp)) ? state.cell.rsrp + ' dBm' : '-');
 
@@ -932,7 +969,8 @@ return L.view.extend({
 					'        <span class="mt-pill-tag ' + (isPcc ? 'mt-pill-cyan' : 'mt-pill-purple') + '">' + tag + '</span>' +
 					'      </div>' +
 					'      <div style="font-size:12px; color:var(--mt5700-text-secondary); margin-top:3px;">' +
-					'        中心频率: <span style="color:var(--mt5700-text); font-weight:600;">' + freqStr + '</span> · 带宽: ' + bwStr + ' · 频点 (ARFCN): ' + fcn +
+					'        ' + (freqStr ? ('中心频率: <span style="color:var(--mt5700-text); font-weight:600;">' + freqStr + '</span> · ') : '') +
+					'        ' + (bwStr ? ('带宽: ' + bwStr + ' · ') : '') + '频点 (ARFCN): ' + fcn +
 					'      </div>' +
 					'    </div>' +
 					'  </div>' +
@@ -944,27 +982,36 @@ return L.view.extend({
 					'  </div>' +
 					'</div>';
 			});
-
-			if (list.length === 1) {
-				caHtml += '<div style="font-size:11.5px; color:var(--mt5700-text-muted); padding:4px 6px;">💡 当前运行于单载波模式 (PCC)，检测到活动频段 ' + formatBandTag(list[0].sysMode, list[0].band) + '。当网络下行高负载时将自动触发 CA 辅载波聚合。</div>';
-			}
 			caHtml += '</div>';
 			carrierBox.innerHTML = caHtml;
 		}
 
-		/* ---------- 芯片温度渲染 (折叠面板内部) ---------- */
+		/* ---------- 芯片温度渲染 (折叠面板内部，严格根据设备 AT^CHIPTEMP 真实上报) ---------- */
 		function renderTempAdv() {
 			tempBody.innerHTML = '';
 			var t = state.temps;
-			var items = [
-				{ label: 'Modem1 基带', value: t.modem1 || 47 },
-				{ label: 'AP1 主控', value: t.ap1 || 46 },
-				{ label: 'AP2 核心', value: t.ap2 || 46 },
-				{ label: 'Sub6G PA', value: t.sub6GPA || 43.3 },
-				{ label: 'Sub3G PA', value: t.sub3GPA || 43.3 },
-				{ label: 'MIMO PA', value: t.mimoPa || 41.3 },
-				{ label: 'TCXO 晶振', value: t.tcxo || 45.6 }
-			];
+			if (!t) {
+				tempBody.innerHTML = '<div style="padding:16px; text-align:center; color:var(--mt5700-text-muted); font-size:12.5px;">暂无芯片温度遥测数据（模组未上报或查询超时）</div>';
+				if (tempBadge) {
+					tempBadge.innerHTML = '';
+					tempBadge.appendChild(Mt5700.badge('温度未获取', 'neutral'));
+				}
+				return;
+			}
+
+			var items = [];
+			if (t.modem1) items.push({ label: 'Modem 基带', value: t.modem1 });
+			if (t.ap1) items.push({ label: 'AP1 主控', value: t.ap1 });
+			if (t.ap2) items.push({ label: 'AP2 核心', value: t.ap2 });
+			if (t.sub6GPA) items.push({ label: 'Sub6G PA', value: t.sub6GPA });
+			if (t.sub3GPA) items.push({ label: 'Sub3G PA', value: t.sub3GPA });
+			if (t.mimoPa) items.push({ label: 'MIMO PA', value: t.mimoPa });
+			if (t.tcxo) items.push({ label: 'TCXO 晶振', value: t.tcxo });
+
+			if (!items.length) {
+				tempBody.innerHTML = '<div style="padding:16px; text-align:center; color:var(--mt5700-text-muted); font-size:12.5px;">模组未返回有效传感器温度通道</div>';
+				return;
+			}
 
 			var maxC = 0, sumC = 0;
 			items.forEach(function (it) {
@@ -992,31 +1039,38 @@ return L.view.extend({
 
 			if (tempBadge) {
 				tempBadge.innerHTML = '';
-				tempBadge.appendChild(Mt5700.badge('均温 ' + avgC + ' ℃ · 温和', 'info'));
+				tempBadge.appendChild(Mt5700.badge('均温 ' + avgC + ' ℃ · 正常', 'info'));
 			}
 		}
 
-		/* ---------- 深度网络诊断渲染 (折叠面板内部) ---------- */
+		/* ---------- 深度网络诊断渲染 (折叠面板内部，真实设备遥测) ---------- */
 		function renderDiagAdv() {
 			diagBox.innerHTML = '';
 			var d = state.diag;
-			var endcTag = (d.endc && d.endc.established) ? '已建立' : '不适用 / 未建立';
-			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : '已注册 5G (SA/NSA)';
-			var txVal = d.tx ? (d.tx.pusch + ' dBm / ' + d.tx.pucch + ' dBm') : '23 dBm (正常发射)';
+			var endcTag = (d.endc && d.endc.established) ? '已建立 (ENDC 启用)' : '未建立 / 单网络模式';
+			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : (state.networkStatus || '未注册');
+			var txVal = '—';
+			if (d.tx && (d.tx.pusch != null || d.tx.pucch != null)) {
+				txVal = (d.tx.pusch != null ? d.tx.pusch + ' dBm' : '—') + ' / ' + (d.tx.pucch != null ? d.tx.pucch + ' dBm' : '—');
+			}
 
 			var rows = [
-				['ENDC 双连接', endcTag],
-				['5GC 核心网注册', regVal],
-				['TAC / 小区标识', (d.reg && d.reg.tac ? d.reg.tac : '—') + ' / ' + (state.cell.cid || '—')],
-				['上行发射功率 PUSCH', txVal]
+				['ENDC 双连接状态', endcTag],
+				['5GC 分组网络注册', regVal],
+				['TAC / 物理小区', (d.reg && d.reg.tac ? d.reg.tac : (state.cell.lac || '—')) + ' / ' + (state.cell.cid || '—')],
+				['上行发射功率 (PUSCH / PUCCH)', txVal]
 			];
-			diagBox.appendChild(Mt5700.table(['项目', '参数状态'], rows, { striped: true }));
+			diagBox.appendChild(Mt5700.table(['诊断项目', '当前设备状态'], rows, { striped: true }));
 		}
 
-		/* ---------- 调制方式与空间流动态 SVG 渲染 (折叠面板内部) ---------- */
+		/* ---------- 调制方式与空间流动态 SVG 渲染 (折叠面板内部，真实读取 AT^MCS) ---------- */
 		function renderMcsAdv() {
 			mcsBody.innerHTML = '';
 			var m = state.mcs;
+			var dlMod = m.dlMod || '';
+			var ulMod = m.ulMod || '';
+			var dlRank = m.dlRank;
+			var ulRank = m.ulRank;
 
 			var visualWrap = E('div', { 'class': 'mt-mcs-visual-grid' });
 
@@ -1024,28 +1078,28 @@ return L.view.extend({
 			var qamBox = E('div', { 'class': 'mt-mcs-box' });
 			var qamTitle = E('div', { 'class': 'mt-mcs-header' }, [
 				E('span', { 'class': 'mt-mcs-tag mt-tag-cyan' }, 'QAM 星座图'),
-				E('span', { 'class': 'mt-mcs-desc' }, '下行 ' + (m.dlMod || '16QAM') + ' · 上行 ' + (m.ulMod || '64QAM'))
+				E('span', { 'class': 'mt-mcs-desc' }, dlMod ? ('下行 ' + dlMod + (ulMod ? ' · 上行 ' + ulMod : '')) : '模组上报读取中...')
 			]);
 			qamBox.appendChild(qamTitle);
-			qamBox.appendChild(Mt5700.constellationSvg(m.dlMod || '16QAM'));
+			qamBox.appendChild(Mt5700.constellationSvg(dlMod || 'QPSK'));
 			visualWrap.appendChild(qamBox);
 
 			// 2. 空间流 (MIMO 空间天线与波束动态矢量 SVG)
 			var mimoBox = E('div', { 'class': 'mt-mcs-box' });
 			var mimoTitle = E('div', { 'class': 'mt-mcs-header' }, [
 				E('span', { 'class': 'mt-mcs-tag mt-tag-purple' }, 'MIMO 空间流'),
-				E('span', { 'class': 'mt-mcs-desc' }, (m.dlRank || 4) + '×4 MIMO (DL) / 1×1 SISO (UL)')
+				E('span', { 'class': 'mt-mcs-desc' }, dlRank ? (dlRank + '×' + dlRank + ' MIMO (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '空间流读取中...')
 			]);
 			mimoBox.appendChild(mimoTitle);
-			mimoBox.appendChild(Mt5700.mimoSvg(m.dlRank || 4));
+			mimoBox.appendChild(Mt5700.mimoSvg(dlRank || 1));
 			visualWrap.appendChild(mimoBox);
 
 			mcsBody.appendChild(visualWrap);
 
 			var rows = [
-				['下行调制 (DL)', (m.dlMod || '16QAM') + ' · MCS ' + (m.dlRank || 14) + ' (高阶自适应调制使能)'],
-				['上行调制 (UL)', (m.ulMod || '64QAM') + ' · MCS ' + (m.ulRank || 20) + ' (上行纠错编码)'],
-				['空间多路复用', (m.dlRank || 4) + ' 层空间复用流 (DL) / 1 层 (UL) · 空间分集增益']
+				['下行调制方式 (DL)', dlMod ? (dlMod + ' (MCS ' + (m.dlMcs != null ? m.dlMcs : '—') + ')') : '— (模组未上报)'],
+				['上行调制方式 (UL)', ulMod ? (ulMod + ' (MCS ' + (m.ulMcs != null ? m.ulMcs : '—') + ')') : '— (模组未上报)'],
+				['空间多路复用流', dlRank ? (dlRank + ' 层空间复用流 (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '— (模组未上报)']
 			];
 			mcsBody.appendChild(Mt5700.table(['链路参数', '当前工作状态'], rows, { striped: true }));
 		}
@@ -1232,9 +1286,52 @@ return L.view.extend({
 			});
 		}
 
-		/* SIM 卡信息读取：安全只读 AT+CIMI 与 AT^ICCID?，不带任何星号完全展现 */
-		function loadSimInfo() {
-			return AtWs.client.sendCommand('AT+CIMI').then(function (res) {
+		/* 设备与 SIM 卡信息读取：实际获取模组 ATI, CGMM, CGSN, CPIN, CIMI, ICCID, CGMR, CGDCONT 上报 */
+		function loadDeviceInfo() {
+			return AtWs.client.sendCommand('ATI').then(function (res) {
+				if (res && res.success && res.data) {
+					var s = String(res.data);
+					var mModel = s.match(/Model:\s*([^\r\n]+)/i);
+					if (mModel) state.modemInfo.model = mModel[1].trim();
+					var mManuf = s.match(/Manufacturer:\s*([^\r\n]+)/i);
+					if (mManuf) state.modemInfo.manufacturer = mManuf[1].trim();
+					var mRev = s.match(/Revision:\s*([^\r\n]+)/i);
+					if (mRev && !state.modemInfo.fw) state.modemInfo.fw = mRev[1].trim();
+					var mImei = s.match(/IMEI:\s*([0-9A-Za-z]+)/i);
+					if (mImei) state.modemInfo.imei = mImei[1].trim();
+				}
+				if (!state.modemInfo.model) {
+					return AtWs.client.sendCommand('AT+CGMM').then(function (res2) {
+						if (res2 && res2.success && res2.data) {
+							var lines = String(res2.data).split('\n');
+							for (var i = 0; i < lines.length; i++) {
+								var l = lines[i].trim();
+								if (l && l !== 'OK' && l.indexOf('ERROR') === -1) {
+									state.modemInfo.model = l;
+									break;
+								}
+							}
+						}
+					});
+				}
+			}).then(function () {
+				return AtWs.client.sendCommand('AT+CPIN?');
+			}).then(function (res) {
+				if (res && res.success && res.data) {
+					var m = String(res.data).match(/\+CPIN:\s*([^\r\n]+)/);
+					if (m) {
+						var st = m[1].trim();
+						state.simStatus = (st === 'READY') ? '正常 (READY)' : st;
+					}
+				}
+				return AtWs.client.sendCommand('AT+CGSN');
+			}).then(function (res) {
+				if (res && res.success && res.data) {
+					var m = String(res.data).match(/\b(\d{14,16})\b/);
+					if (m) state.modemInfo.imei = m[1];
+				}
+				return AtWs.client.sendCommand('AT+CIMI');
+			}).then(function (res) {
 				if (res && res.success && res.data) {
 					var m = String(res.data).match(/\b(\d{14,16})\b/);
 					if (m) state.modemInfo.imsi = m[1];
@@ -1257,8 +1354,28 @@ return L.view.extend({
 						}
 					}
 				}
+				return AtWs.client.sendCommand('AT+CGDCONT?');
+			}).then(function (res) {
+				if (res && res.success && res.data) {
+					var lines = String(res.data).split('\n');
+					for (var i = 0; i < lines.length; i++) {
+						var l = lines[i].trim();
+						var m = l.match(/\+CGDCONT:\s*(\d+),\s*"([^"]*)",\s*"([^"]*)"/);
+						if (m) {
+							var cid = m[1];
+							var ptype = m[2];
+							var apn = m[3];
+							if (cid === '1' || (!state.apn && apn)) {
+								state.pdpType = ptype;
+								state.apn = apn;
+							}
+						}
+					}
+				}
 				renderTabsUI();
-			}).catch(function () {});
+			}).catch(function (e) {
+				console.warn('loadDeviceInfo error:', e);
+			});
 		}
 
 		// 实时网络速率采样 (每 1000ms 采样一次接口统计)
@@ -1275,6 +1392,7 @@ return L.view.extend({
 					return;
 				}
 				var now = Date.now();
+				if (r.device) state.deviceInterface = r.device;
 				if (rateSample && rateSample.device === r.device) {
 					var dt = (now - rateSample.t) / 1000;
 					if (dt >= 0.2) {
@@ -1295,29 +1413,32 @@ return L.view.extend({
 		rateTimer = setInterval(sampleRate, 1000);
 		sampleRate();
 
-		// 全量状态轮询刷新
+		// 全量状态轮询刷新：纯串行执行，避免单通道 AT 串口并发阻塞冲突
 		var refreshing = false;
 		function refreshAll() {
 			if (refreshing) return Promise.resolve();
 			refreshing = true;
 
-			var groups = [
-				[getPSReg, getOperator, loadSimInfo],
-				[getDHCP, getFlow],
-				[getTemp, getMCS],
-				[updateNetworkInfo, loadSecondary, loadDiagnostics]
+			var tasks = [
+				updateNetworkInfo,
+				loadDeviceInfo,
+				getPSReg,
+				getOperator,
+				getDHCP,
+				getFlow,
+				getTemp,
+				getMCS,
+				loadSecondary,
+				loadDiagnostics
 			];
 
-			var chain = Promise.resolve();
-			groups.forEach(function (group) {
-				chain = chain.then(function () {
-					return Promise.all(group.map(function (fn) {
-						return Promise.resolve().then(fn).catch(function () {});
-					}));
+			return tasks.reduce(function (p, fn) {
+				return p.then(function () {
+					return Promise.resolve().then(fn).catch(function (e) {
+						console.warn('Poll task error:', e);
+					});
 				});
-			});
-
-			return chain.then(function () {
+			}, Promise.resolve()).then(function () {
 				refreshing = false;
 				renderTabsUI();
 			}).catch(function () {

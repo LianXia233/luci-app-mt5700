@@ -124,10 +124,10 @@ try {
 		'rsrp=' + mLte.rsrp + ' rsrq=' + mLte.rsrq);
 	check('MONSC LTE 末位是 RSSI 且无 SINR', mLte.rssi === -54 && mLte.sinr === null,
 		'rssi=' + mLte.rssi + ' sinr=' + mLte.sinr);
-	/* NR 布局回归护栏：行为保持不变 */
+	/* NR 布局回归护栏：PCI 走十六进制换算（0x80 -> 128），channel 为频点 504990，lac 为 TAC 149002 */
 	const mNr = AtWs.parseMONSC('^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-9,29');
-	check('MONSC NR 布局不受影响', mNr.rsrp === -65 && mNr.rsrq === -9 && mNr.sinr === 29 && mNr.pci === 80,
-		'rsrp=' + mNr.rsrp + ' sinr=' + mNr.sinr + ' pci=' + mNr.pci);
+	check('MONSC NR 布局与 PCI(hex)', mNr.rsrp === -65 && mNr.rsrq === -9 && mNr.sinr === 29 && mNr.pci === 128 && mNr.channel === '504990' && mNr.lac === '149002',
+		'rsrp=' + mNr.rsrp + ' sinr=' + mNr.sinr + ' pci=' + mNr.pci + ' ch=' + mNr.channel + ' tac=' + mNr.lac);
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));
 }
