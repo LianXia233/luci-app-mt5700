@@ -36,6 +36,25 @@ return L.view.extend({
 
 		// 左：联系人
 		var left = E('div', { 'class': 'mt5700-sms-list' });
+		var currentTab = 'all'; // all, unread, sent
+		var smsTabHeader = E('div', { 'class': 'mt-tab-header', 'style': 'margin-bottom:10px;' });
+		var tabDefs = [
+			{ id: 'all', title: '全部' },
+			{ id: 'unread', title: '未读' },
+			{ id: 'sent', title: '已发' }
+		];
+		tabDefs.forEach(function (td) {
+			var tb = E('button', {
+				'class': 'mt-tab-btn' + (td.id === 'all' ? ' active' : ''),
+				'click': function () {
+					currentTab = td.id;
+					smsTabHeader.querySelectorAll('.mt-tab-btn').forEach(function (b) { b.classList.remove('active'); });
+					tb.classList.add('active');
+					renderContacts();
+				}
+			}, td.title);
+			smsTabHeader.appendChild(tb);
+		});
 		var leftHead = E('div', { 'class': 'mt5700-sms-list-header' });
 		var storageEl = E('div', { 'class': 'mt5700-hint' }, '存储：—');
 		leftHead.appendChild(storageEl);
