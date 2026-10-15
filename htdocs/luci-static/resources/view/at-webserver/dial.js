@@ -26,11 +26,17 @@ return L.view.extend({
 			'.mt-dial-overview { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; background: rgba(139, 92, 246, 0.05); border: 1px solid rgba(139, 92, 246, 0.15); border-radius: 12px; margin-bottom: 16px; }',
 			'.mt-dial-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }',
 			'.mt-dial-label { color: var(--mt5700-text-secondary); font-size: 12px; }',
-			'/* 常用 APN 预设胶囊 */',
-			'.mt-apn-presets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }',
-			'.mt-apn-chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); color: #0284c7; cursor: pointer; transition: all 0.2s ease; user-select: none; }',
-			'.mt-apn-chip:hover { background: rgba(14, 165, 233, 0.18); border-color: #0284c7; transform: translateY(-1px); }',
+			'/* 常用 APN 预设胶囊（按「公众卡 / 物联网卡」分组） */',
+			'.mt-apn-presets { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }',
+			'.mt-apn-preset-title { font-size: 11px; color: var(--mt5700-text-secondary); }',
+			'.mt-apn-preset-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }',
+			'.mt-apn-preset-group { flex: 0 0 auto; min-width: 54px; font-size: 11px; color: var(--mt5700-text-secondary); }',
+			'.mt-apn-chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); color: var(--mt5700-cyan); cursor: pointer; transition: all 0.2s ease; user-select: none; white-space: nowrap; }',
+			'.mt-apn-chip:hover { background: rgba(14, 165, 233, 0.18); border-color: var(--mt5700-cyan); transform: translateY(-1px); }',
 			'.mt-apn-chip:active { transform: translateY(0); }',
+			'/* 需用户名/密码鉴权的预设（电信物联网卡）用琥珀色区分 */',
+			'.mt-apn-chip-auth { background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.38); color: var(--mt5700-amber); }',
+			'.mt-apn-chip-auth:hover { background: rgba(245, 158, 11, 0.20); border-color: var(--mt5700-amber); }',
 			'/* 开关行美化 */',
 			'.mt-switch-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(125, 125, 125, 0.03); border: 1px solid var(--mt5700-border); border-radius: 10px; margin-bottom: 14px; }',
 			'.mt-switch-info { display: flex; flex-direction: column; gap: 3px; }',
@@ -118,15 +124,47 @@ return L.view.extend({
 			{ label: 'IPv4', value: 'IP' }, { label: 'IPv6', value: 'IPV6' }, { label: 'IPv4/IPv6', value: 'IPV4V6' }
 		];
 
-		// 常用运营商 APN 预设胶囊
-		var COMMON_APNS = [
-			{ name: '中国移动', apn: 'cmnet' },
-			{ name: '移动物联', apn: 'cmiot' },
-			{ name: '中国联通', apn: '3gnet' },
-			{ name: '联通物联', apn: 'uninet' },
-			{ name: '中国电信', apn: 'ctnet' },
-			{ name: '电信用网', apn: 'ctiot' },
-			{ name: '中国广电', apn: 'cbnet' }
+		/*
+		 * 常用运营商 APN 预设（按国内四大运营商的公众卡 / 物联网卡实际接入点整理）
+		 *
+		 *   中国移动  公众 cmnet ｜ 物联网 cmiot（4G 通用）、cmiot5g（5G 物联）
+		 *   中国联通  公众 3gnet ｜ 物联网 unim2m.njm2mapn（备选 unim2m.gzm2mapn）
+		 *   中国电信  公众 ctnet ｜ 物联网 ctnet + 鉴权（ctnet@mycdma.cn / vnet.mobi）
+		 *   中国广电  公众 cbnet（700MHz，与中国移动共建共享）
+		 *
+		 * 仅收录 4G/5G 仍在用的接入点：移动 cmwap、联通 3gwap/uninet、电信 ctwap 等
+		 * 2G/3G 时代的 WAP 网关与旧入口已从现网退网，不作为预设（联通 3gnet 是特例——
+		 * 名字带 3G，但它就是联通 4G/5G 的标准互联网入口，仍在使用）。
+		 *
+		 * 三点注意：
+		 * - 公众卡一律无需用户名密码，点选时会一并清空这两项，避免上一次 APN 的残留凭据被误提交；
+		 * - 电信物联网卡走 ctnet 时需要 PAP/CHAP 鉴权，预设已连凭据一起填入，仍需与卡商核对；
+		 * - 物联网卡若由卡商分配了专属 APN（形如 CMIOT+自定义，或服务商私有值），以卡商提供的为准手填；
+		 *   物联网 APN 与公众 APN 不通用——普通手机卡填 cmiot 可能被限速甚至断网。
+		 */
+		var APN_PRESET_GROUPS = [
+			{
+				group: '公众卡',
+				items: [
+					{ label: '移动 cmnet', name: '中国移动', apn: 'cmnet', note: '4G/5G 通用最优，个人卡与 CPE 首选' },
+					{ label: '联通 3gnet', name: '中国联通', apn: '3gnet', note: '4G/5G 标准入口（名带 3G 但现网通用）；IPv6 优化通道为 wonet' },
+					{ label: '电信 ctnet', name: '中国电信', apn: 'ctnet', note: '4G/5G 通用' },
+					{ label: '广电 cbnet', name: '中国广电', apn: 'cbnet', note: '4G/5G，700MHz 与中国移动共建共享' }
+				]
+			},
+			{
+				group: '物联网卡',
+				items: [
+					{ label: '移动 cmiot', name: '中国移动物联网', apn: 'cmiot', note: '4G 物联通用' },
+					{ label: '移动 cmiot5g', name: '中国移动 5G 物联网', apn: 'cmiot5g', note: '5G 物联专用' },
+					{ label: '联通 unim2m.njm2mapn', name: '中国联通物联网', apn: 'unim2m.njm2mapn', note: '4G/5G 物联通用；备选 unim2m.gzm2mapn' },
+					{
+						label: '电信 ctnet', name: '中国电信物联网', apn: 'ctnet', authChip: true,
+						username: 'ctnet@mycdma.cn', password: 'vnet.mobi', auth: 2,
+						note: '需 PAP/CHAP 鉴权，已连用户名密码一并填入'
+					}
+				]
+			}
 		];
 
 		function getDialModeText(mode) {
@@ -237,17 +275,24 @@ return L.view.extend({
 		apnInput.addEventListener('input', function () { apnForm.apn = apnInput.value; });
 		apnWrap.appendChild(apnInput);
 
-		// 运营商预设胶囊
+		// 运营商预设胶囊：先渲染并收集，点击事件在下方用户名/密码/鉴权控件就绪后统一绑定
 		var presetBox = E('div', { 'class': 'mt-apn-presets' });
-		presetBox.appendChild(E('span', { style: 'font-size:11px;color:var(--mt5700-text-secondary);' }, '快捷填入:'));
-		COMMON_APNS.forEach(function (preset) {
-			var chip = E('span', { 'class': 'mt-apn-chip', title: '点击填入 ' + preset.name + ' (' + preset.apn + ')' }, preset.name);
-			chip.addEventListener('click', function () {
-				apnInput.value = preset.apn;
-				apnForm.apn = preset.apn;
-				Mt5700.info('已快速填入 ' + preset.name + ' APN: ' + preset.apn);
+		var presetChips = [];
+		presetBox.appendChild(E('div', { 'class': 'mt-apn-preset-title' }, '运营商预设（点击快速填入）'));
+		APN_PRESET_GROUPS.forEach(function (grp) {
+			var row = E('div', { 'class': 'mt-apn-preset-row' });
+			row.appendChild(E('span', { 'class': 'mt-apn-preset-group' }, grp.group));
+			grp.items.forEach(function (preset) {
+				var chip = E('span', {
+					'class': preset.authChip ? 'mt-apn-chip mt-apn-chip-auth' : 'mt-apn-chip',
+					title: preset.name + '\nAPN: ' + preset.apn
+						+ (preset.note ? '\n' + preset.note : '')
+						+ '\n点击填入'
+				}, preset.label);
+				row.appendChild(chip);
+				presetChips.push({ el: chip, preset: preset });
 			});
-			presetBox.appendChild(chip);
+			presetBox.appendChild(row);
 		});
 		apnWrap.appendChild(presetBox);
 
@@ -263,6 +308,31 @@ return L.view.extend({
 		var passInput = Mt5700.input('password', '请输入密码（可选）');
 		passInput.maxLength = 31;
 		passInput.addEventListener('input', function () { apnForm.password = passInput.value; });
+
+		// 预设胶囊：一并同步 APN / 用户名 / 密码 / 鉴权方式。
+		// 不带凭据的预设会把用户名与密码清空——否则从「电信物联网」切到「公众卡」时，
+		// 上一次填入的 ctnet@mycdma.cn / vnet.mobi 会残留并被一起下发，导致拨号鉴权失败。
+		presetChips.forEach(function (item) {
+			item.el.addEventListener('click', function () {
+				var p = item.preset;
+
+				apnInput.value = p.apn;
+				apnForm.apn = p.apn;
+
+				userInput.value = p.username || '';
+				apnForm.username = p.username || '';
+				passInput.value = p.password || '';
+				apnForm.password = p.password || '';
+
+				var auth = p.auth == null ? 0 : p.auth;
+				authSel.value = String(auth);
+				apnForm.authType = auth;
+
+				Mt5700.info('已填入 ' + p.name + '　APN: ' + p.apn
+					+ (p.auth ? '（含鉴权凭据，请与卡商核对）' : '')
+					+ '，确认后点「暂存 APN 更改」');
+			});
+		});
 
 		dialGrid.appendChild(Mt5700.formGroup('APN 接入点', apnWrap, '主数据通道 APN，留空时模组将使用默认接入点'));
 		dialGrid.appendChild(Mt5700.formGroup('认证方式', authSel, '运营商专网所需鉴权方式，公开互联网卡一般选「无认证」'));
