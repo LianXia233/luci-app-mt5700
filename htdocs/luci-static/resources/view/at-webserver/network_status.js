@@ -10,14 +10,41 @@
 'require at-webserver/mt5700';
 /* global L, AtWs, Parse, Mt5700, Ui */
 
+	/*
+	 * 网络状态卡的信号发射塔图标（用户指定图形，1024×1024 视口）。
+	 * 颜色统一走 currentColor，由 renderSignalUI 按真实网络状态动态切换，
+	 * 与四格信号图标、状态药丸保持同一套配色，不再写死颜色。
+	 */
+	var BROADCAST_TOWER_PATHS = [
+		'M531.131544 281.055965c11.863291-6.054469 20.424802-18.134507 20.424802-33.010584 0-19.601163-17.953885-35.279203-37.901843-35.279203s-37.901843 15.67804-37.901843 35.279203c0 14.883301 8.56151 26.956114 20.424802 33.010584-5.6282 21.168967-32.447041 122.050292-160.270031 602.896509-1.878475 7.557249 1.878475 17.007422 9.406824 20.786047l71.40372 32.027996c-0.180623 1.444981-0.288996 2.911636-0.288996 4.407191 0 20.020207 16.971298 36.254565 37.901843 36.254565 20.930545 0 37.901843-16.234358 37.901842-36.254565s-16.971298-36.254565-37.901842-36.254565c-6.206192 0-12.058364 1.437756-17.231395 3.966472-11.465922-5.519826-27.844777-13.402196-51.267914-24.68027 16.740101-9.992041 52.228826-31.168233 127.41117-76.034882 32.345892 19.44944 74.127508 44.570429 128.097537 77.017469l-50.588774 24.398499c-5.736573-2.969435-12.354585-4.674512-19.413315-4.674513-21.840883 0-39.549121 16.234358-39.549121 36.254565s17.708238 36.254565 39.549121 36.254565 39.549121-16.234358 39.549121-36.254565c0-1.076511-0.057799-2.138571-0.158948-3.186182 15.562442-7.261028 38.234188-17.838286 71.273672-33.249005 7.521124-3.778624 11.285299-13.228798 9.406824-20.786047-0.007225 0.01445-0.01445 0.007225-160.277256-602.889284z m-69.366297 263.875144c5.20193 3.576327 14.673779 10.100415 31.919623 21.963707-12.260661 8.503711-27.432958 19.02317-46.210482 32.035221 4.47944-16.949623 9.240651-34.925183 14.290859-53.998928z m16.111535-60.877035c4.255468 2.96221 9.789744 6.827534 17.000197 11.856066-7.246578 5.071882-15.446843 10.808455-24.709169 17.289194 2.499817-9.464623 5.071882-19.174893 7.708972-29.14526z m67.256625-23.307538l-31.486129 22.02873c-8.626535-6.032794-18.524652-12.961477-29.89665-20.916095 9.450174-35.683798 19.702311-74.423729 30.835887-116.494342 0 0 0.007225 0 30.546892 115.381707zM533.197866 567.183812c9.963142-6.856433 21.219541-14.60153 33.928146-23.350888 4.696187 17.729913 9.811419 37.049304 15.374595 58.095448-9.392374-6.618011-24.622471-17.354218-49.302741-34.74456z m37.901843 53.001891s-0.007225 0-57.452431 34.845708c-16.566703-10.049841-35.589874-21.588011-57.452431-34.845708 0 0 0.007225 0 57.452431-39.541896 14.97 10.302712 33.790873 23.249739 57.452431 39.541896z m-57.705303-66.960405c-9.385149-6.618011-19.81791-13.965738-31.413879-22.137103 0 0 0.007225-0.007225 31.673976-22.08653 8.886631 6.198967 19.341066 13.488895 31.673976 22.08653-0.007225 0.007225-0.007225 0.007225-31.934073 22.137103z m46.051534-38.407586c-5.837722-4.08207-14.413682-10.085965-27.021138-18.907572 5.555951-3.879773 11.733243-8.185815 18.582451-12.961476 2.62264 9.890893 5.433127 20.504276 8.438687 31.869048zM437.569046 636.326137c7.766771 4.674512 23.16304 13.944063 53.659357 32.302542l-74.105834 44.946124c5.960545-22.527249 12.737505-48.139531 20.446477-77.248666z m76.078232 45.798662c21.595236 13.004826 48.746423 29.347557 82.876866 49.895182 0 0-0.007225 0.007225-83.209212 49.237717-23.661558-14.110236-50.978918-30.409618-82.537295-49.237717 0 0 0-0.007225 82.869641-49.895182z m22.4261-13.49612c15.902012-9.572997 34.209917-20.598199 55.277735-33.277904 6.459064 24.412948 13.46722 50.884994 21.067819 79.58231-11.55262-7.008156-33.740299-20.460926-76.345554-46.304406z m-22.4261-432.34544c7.976293 0 13.965738 5.881071 13.965738 11.762142 0 7.83902-5.98222 13.720091-13.965738 13.720092s-13.965738-5.881071-13.965738-13.720092c0-5.881071 5.989445-11.762143 13.965738-11.762142zM378.006943 861.324076c4.428866-16.732876 13.228798-49.967431 30.705839-115.995823 8.94443 5.375328 30.416843 18.28623 81.995428 49.302741-28.928513 17.123021-65.782745 38.935004-112.701267 66.693082z m242.193209-116.985634c9.645246 36.427963 20.164705 76.179381 31.645077 119.5577-15.461293-9.218977-47.908334-28.581718-116.017498-69.207349 24.355149-14.529281 52.301075-31.211582 84.372421-50.350351z',
+		'M454.554794 310.685293c5.649874 7.557249 16.949623 7.557249 22.599497 0 7.535574-7.557249 7.535574-17.000198 0-24.557446-11.299749-9.442949-16.949623-22.671747-16.949623-37.786245 0-28.336071 24.485197-51.007818 52.734569-51.007817 28.249372 0 50.84887 22.671747 50.84887 51.007817 0 15.114498-5.649874 28.336071-16.949623 39.671945-7.535574 5.664324-7.535574 17.000198-1.8857 22.671746 3.764175 3.778624 9.414049 5.671549 13.185449 5.671549 3.764175 0 7.535574-1.8857 11.299749-3.778624 16.949623-17.000198 28.249372-39.671944 28.249372-64.229391 0-47.229193-37.670646-85.015438-84.755341-85.015437s-86.633816 37.786244-86.633816 85.015437c0.007225 24.550222 11.306974 47.221968 28.256597 62.336466z',
+		'M383.967488 354.041938c1.943499 1.878475 5.830497 3.749725 9.717495 3.749725 5.830497 0 11.660994-1.878475 13.604493-7.49945 5.830497-7.49945 3.886998-18.755849-3.886998-22.505573 0-1.878475-31.103209-22.505574-31.103209-78.765897 0-54.381847 29.15971-75.008946 31.103209-76.887421 7.773996-3.749725 9.717495-14.998899 3.886998-22.505574-3.886998-7.49945-15.547992-9.377925-23.321988-5.6282-1.943499 1.878475-46.651201 30.005024-46.651201 105.01397 0 73.152146 44.707702 105.02842 46.651201 105.02842z',
+		'M281.279937 249.027968c0 109.240538 62.155843 152.553834 64.034318 154.439534 3.764175 1.8857 5.649874 3.764175 9.414049 3.764175 5.649874 0 11.299749-3.764175 15.063924-7.535574 3.764175-7.535574 1.8857-18.835323-5.649875-24.485198-1.8857-1.8857-48.970395-35.784946-48.970395-126.190162s47.084695-122.418762 48.970395-124.304462c7.535574-5.649874 9.414049-16.949623 5.649875-24.485197-5.649874-7.535574-16.949623-9.414049-24.485198-3.764175-1.87125 1.8857-64.027093 43.32052-64.027093 152.561059z',
+		'M327.815539 421.211865s-68.376485-49.194367-68.376485-172.183897c0-124.882454 64.576186-170.290972 68.376485-172.183896 7.600598-3.785849 9.493523-15.136172 3.800299-22.707871-3.800299-7.571699-15.193972-9.457398-22.79457-5.678774-3.800299 3.785849-83.570457 56.766066-83.570457 200.563316 0 141.911551 79.770158 198.670392 83.570457 200.563317 1.90015 1.892925 5.700449 3.785849 9.493523 3.785849 5.700449 0 11.393673-3.785849 13.293822-7.571698 5.707674-7.557249 3.807524-18.914797-3.793074-24.586346zM620.178478 327.78664c-7.434426 3.749725-9.298451 14.998899-3.720826 22.505573 3.720825 5.6282 7.434426 7.49945 13.012051 7.49945 3.720825 0 7.434426-1.878475 9.298451-3.749725 1.8568 0 44.621003-31.876274 44.621003-105.01397 0-75.008946-42.764203-103.14272-44.621003-105.01397-7.434426-3.749725-16.732876-1.878475-22.310502 5.6282-5.577625 7.49945-3.720825 16.877374 3.720826 22.505574 1.8568 1.878475 29.744927 22.505574 29.744927 76.887421 0 56.245872-27.888127 76.880196-29.744927 78.751447z',
+		'M656.555866 124.716281c1.8857 0 48.970395 33.899246 48.970395 124.304462 0 90.405215-47.084695 124.304462-48.970395 126.190162-7.535574 5.649874-9.414049 16.949623-3.764175 24.485198 1.8857 3.764175 7.535574 7.535574 13.185449 7.535574 3.764175 0 7.535574-1.8857 9.414049-3.764175 3.764175-1.8857 64.034318-45.198995 64.034318-154.439534s-62.155843-150.675359-64.034318-152.553834c-7.535574-5.649874-18.835323-3.764175-22.599498 3.764175-5.657099 7.528349-3.7714 18.828098 3.764175 24.477972z',
+		'M712.722265 48.457427c-7.82457-3.785849-17.599865-1.892925-23.459262 5.678774-5.866622 7.571699-3.908673 18.922022 3.908673 22.707871 1.957949 1.892925 70.385008 47.301442 70.385008 172.183896 0 122.98953-66.476336 170.290972-70.385008 172.183897-7.82457 5.678774-9.775294 17.029097-3.908673 24.600796 3.908673 3.785849 9.775294 7.571699 13.683967 7.571698s7.82457-1.892925 11.733243-3.785849c1.957949-1.892925 84.0762-58.65899 84.076201-200.563317-0.007225-143.811701-82.125476-196.791917-86.034149-200.577766z',
+	];
+
+	/* 网络状态 → 图标配色（与 CELLULAR_UI 同源语义） */
+	var TOWER_COLORS = {
+		full: 'var(--mt5700-green)',
+		strong: 'var(--mt5700-cyan)',
+		medium: 'var(--mt5700-amber)',
+		weak: 'var(--mt5700-danger)',
+		none: 'var(--mt5700-text-muted)',
+		searching: 'var(--mt5700-cyan)',
+		connecting: 'var(--mt5700-accent)',
+		disconnected: 'var(--mt5700-text-muted)',
+		error: 'var(--mt5700-danger)'
+	};
+
 return L.view.extend({
 	render: function () {
 		var self = this;
 		var page = Mt5700.page('MT5700 设备状态', '5G 蜂窝网络 · 射频链路与硬件遥测', 'network_status', '在线');
 		var body = page._body;
-		var mascot = page._mascot;
 
-		// 页面状态聚合
+		// 页面状态聚合（纯设备真实数据，未获取前严禁硬编码伪造）
 		var state = {
 			cell: {
 				mcc: '', mnc: '', lac: '', cid: '', channel: '', pci: '',
@@ -26,15 +53,28 @@ return L.view.extend({
 			diag: { reg: null, tx: null, nrTx: [], endc: null, addrs: [] },
 			secondaryNR: [],
 			secondaryLTE: [],
+			rawHfreq: [],
+			hfreqSuccess: null,
+			secondarySuccess: null,
+			telemetryError: false,
+			caStatus: {
+				state: 'pending', // 'pending' | 'single' | 'ca' | 'none' | 'error' | 'expired'
+				lastSuccessTime: 0
+			},
 			carriers: [],
 			rtDown: 0,
 			rtUp: 0,
 			ambrDown: 0,
 			ambrUp: 0,
 			networkStatus: '检测中...',
-			operator: '正在读取...',
-			apn: 'cmiot5g',
-			qci: '未知',
+			operator: '读取中...',
+			apn: '',
+			pdpType: '',
+			apnCid: '',
+			imsApn: '',
+			simStatus: '检测中...',
+			deviceInterface: '',
+			qci: '',
 			flow: {
 				currentConnectTime: '',
 				currentDownloadFlow: '',
@@ -43,14 +83,12 @@ return L.view.extend({
 				totalUploadFlow: '',
 				totalConnectTime: ''
 			},
-			temps: {
-				modem1: 0, ap1: 0, ap2: 0, sub6GPA: 0, sub3GPA: 0, mimoPa: 0, tcxo: 0
-			},
+			temps: null,
 			dhcpv4: { ipv4Address: '', subnetMask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
 			dhcpv6: { ipv6Address: '', netmask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
 			ipv6Cap: { capValue: 0, description: '' },
-			mcs: { dlMod: '64QAM', ulMod: '64QAM', dlRank: 4, ulRank: 1, dlMcs: 18, ulMcs: 20, dlEff: 0, ulEff: 0 },
-			modemInfo: { model: 'RM551E-GL', fw: '', imei: '', imsi: '', iccid: '' },
+			mcs: { dlMod: '', ulMod: '', dlRank: null, ulRank: null, dlMcs: null, ulMcs: null, dlEff: 0, ulEff: 0 },
+			modemInfo: { manufacturer: '', model: '', fw: '', imei: '', imsi: '', iccid: '' },
 			dataBearer: null
 		};
 
@@ -61,9 +99,9 @@ return L.view.extend({
 		var sigHistory = [];
 		var MAX_SIG_POINTS = 30;
 
-		// 流量趋势微型火花线数据
-		var sparkDown = [12, 18, 15, 24, 20, 28, 22, 35, 30, 42];
-		var sparkUp = [8, 12, 10, 15, 14, 18, 16, 22, 19, 25];
+		// 流量趋势微型火花线数据（初始为真实空/0采样点，绝不伪造随机数）
+		var sparkDown = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+		var sparkUp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 		// DOM 根容器
 		var layout = E('div', { 'class': 'mt-anime-container' });
@@ -95,8 +133,8 @@ return L.view.extend({
 						E('span', { 'id': 'sig-quality-text' }, '检测中...')
 					])
 				]),
-				E('div', { 'class': 'mt-sig-gauge-box' }, [
-					createSignalCircularGauge()
+				E('div', { 'class': 'mt-sig-cellular-box', 'id': 'sig-cellular-box' }, [
+					Mt5700.cellularSignal()
 				])
 			]),
 			E('div', { 'class': 'mt-sig-sub-metrics' }, [
@@ -124,7 +162,7 @@ return L.view.extend({
 					E('span', {}, '网络状态')
 				]),
 				E('span', { 'class': 'mt-pill-tag', 'id': 'net-status-pill', 'style': 'background:var(--mt5700-green-pale); color:var(--mt5700-green);' }, [
-					E('span', { 'class': 'mt-beacon-dot', 'style': 'display:inline-block; margin-right:4px;' }),
+					E('span', { 'class': 'mt-beacon-dot' }),
 					E('span', { 'id': 'net-status-text' }, '已连接')
 				])
 			]),
@@ -135,7 +173,7 @@ return L.view.extend({
 				E('div', { 'class': 'mt-net-info-grid' }, [
 					E('div', { 'class': 'mt-net-info-cell' }, [
 						E('span', { 'class': 'mt-net-lbl' }, '运营商'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-operator' }, '中国移动')
+						E('span', { 'class': 'mt-net-val', 'id': 'net-val-operator' }, '读取中...')
 					]),
 					E('div', { 'class': 'mt-net-info-cell' }, [
 						E('span', { 'class': 'mt-net-lbl' }, '频段'),
@@ -162,7 +200,7 @@ return L.view.extend({
 					E('span', {}, '流量统计')
 				]),
 				E('span', { 'class': 'mt-pill-tag' }, [
-					E('span', { 'class': 'mt-beacon-dot', 'style': 'display:inline-block; margin-right:4px;' }),
+					E('span', { 'class': 'mt-beacon-dot' }),
 					E('span', {}, '实时')
 				])
 			]),
@@ -244,15 +282,15 @@ return L.view.extend({
 				E('div', { 'class': 'mt-chart-legends' }, [
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#38bdf8;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#38bdf8;' }),
-						E('span', {}, 'RSRP')
-					]),
-					E('div', { 'class': 'mt-legend-item', 'style': 'color:#a855f7;' }, [
-						E('span', { 'class': 'mt-legend-line', 'style': 'background:#a855f7;' }),
-						E('span', {}, 'RSRQ')
+						E('span', {}, 'RSRP · Left')
 					]),
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#10b981;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#10b981;' }),
-						E('span', {}, 'SINR')
+						E('span', {}, 'SINR · Right')
+					]),
+					E('div', { 'class': 'mt-legend-item', 'style': 'color:#a855f7;' }, [
+						E('span', { 'class': 'mt-legend-line', 'style': 'background:repeating-linear-gradient(90deg, #a855f7 0 4px, transparent 4px 7px);' }),
+						E('span', {}, 'RSRQ · Dashed')
 					])
 				])
 			]),
@@ -348,53 +386,14 @@ return L.view.extend({
 			return svg;
 		}
 
-		function createSignalCircularGauge() {
-			var wrap = E('div', { 'style': 'width:90px; height:90px; position:relative;' });
-			wrap.innerHTML =
-				'<svg viewBox="0 0 100 100" width="90" height="90">' +
-				'  <defs>' +
-				'    <linearGradient id="sig-gauge-grad" x1="0%" y1="0%" x2="100%" y2="100%">' +
-				'      <stop offset="0%" stop-color="#38bdf8"/>' +
-				'      <stop offset="100%" stop-color="#10b981"/>' +
-				'    </linearGradient>' +
-				'  </defs>' +
-				'  <circle cx="50" cy="50" r="40" stroke="rgba(148, 163, 184, 0.2)" stroke-width="7" fill="none" stroke-linecap="round"/>' +
-				'  <circle id="sig-gauge-circle" cx="50" cy="50" r="40" stroke="url(#sig-gauge-grad)" stroke-width="7" fill="none" stroke-linecap="round"' +
-				'          stroke-dasharray="251.2" stroke-dashoffset="50" style="transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset 0.6s ease;"/>' +
-				'  <g transform="translate(37, 36)">' +
-				'    <rect x="2" y="18" width="4" height="8" rx="1.5" fill="#10b981"/>' +
-				'    <rect x="9" y="12" width="4" height="14" rx="1.5" fill="#10b981"/>' +
-				'    <rect x="16" y="6" width="4" height="20" rx="1.5" fill="#10b981"/>' +
-				'    <rect x="23" y="0" width="4" height="26" rx="1.5" fill="#10b981"/>' +
-				'  </g>' +
-				'</svg>';
-			return wrap;
-		}
-
 		function createCellularTowerSvg() {
-			var wrap = E('div', { 'style': 'width:70px; height:70px;' });
-			wrap.innerHTML =
-				'<svg viewBox="0 0 80 80" width="70" height="70">' +
-				'  <style>' +
-				'    @keyframes tower-wave {' +
-				'      0% { r: 6px; opacity: 0.9; stroke-width: 2; }' +
-				'      100% { r: 32px; opacity: 0; stroke-width: 1; }' +
-				'    }' +
-				'    .mt-wave-1 { animation: tower-wave 2.4s infinite cubic-bezier(0.2, 0.8, 0.4, 1); }' +
-				'    .mt-wave-2 { animation: tower-wave 2.4s infinite cubic-bezier(0.2, 0.8, 0.4, 1); animation-delay: 0.8s; }' +
-				'    .mt-wave-3 { animation: tower-wave 2.4s infinite cubic-bezier(0.2, 0.8, 0.4, 1); animation-delay: 1.6s; }' +
-				'  </style>' +
-				'  <circle class="mt-wave-1" cx="40" cy="22" r="10" stroke="#8b5cf6" fill="none"/>' +
-				'  <circle class="mt-wave-2" cx="40" cy="22" r="10" stroke="#8b5cf6" fill="none"/>' +
-				'  <circle class="mt-wave-3" cx="40" cy="22" r="10" stroke="#8b5cf6" fill="none"/>' +
-				'  <path d="M40 22 L30 68 H50 L40 22 Z" stroke="#8b5cf6" stroke-width="2" fill="none"/>' +
-				'  <line x1="33" y1="52" x2="47" y2="52" stroke="#8b5cf6" stroke-width="1.5"/>' +
-				'  <line x1="36" y1="38" x2="44" y2="38" stroke="#8b5cf6" stroke-width="1.5"/>' +
-				'  <line x1="33" y1="52" x2="44" y2="38" stroke="#8b5cf6" stroke-width="1.2"/>' +
-				'  <line x1="47" y1="52" x2="36" y2="38" stroke="#8b5cf6" stroke-width="1.2"/>' +
-				'  <line x1="40" y1="14" x2="40" y2="22" stroke="#8b5cf6" stroke-width="2.5"/>' +
-				'  <circle cx="40" cy="14" r="3" fill="#10b981" class="mt-beacon-dot"/>' +
-				'</svg>';
+			var wrap = E('div', { 'class': 'mt-tower-svg-box' });
+			var svg = '<svg viewBox="0 0 1024 1024" width="72" height="72" fill="currentColor" aria-hidden="true">';
+			for (var i = 0; i < BROADCAST_TOWER_PATHS.length; i++) {
+				svg += '<path d="' + BROADCAST_TOWER_PATHS[i] + '"></path>';
+			}
+			svg += '</svg>';
+			wrap.innerHTML = svg;
 			return wrap;
 		}
 
@@ -490,25 +489,90 @@ return L.view.extend({
 				}
 				if (tags.length > 0) return tags.join(' + ');
 			}
-			// 回退到主小区信道/频段
+			var caSt = state.caStatus || {};
+			if (caSt.state === 'pending' && (!state.cell || !state.cell.channel)) {
+				return '待刷新...';
+			}
+			if (caSt.state === 'error' && (!state.cell || !state.cell.channel)) {
+				return '未知 (待刷新)';
+			}
+			// 回退到主小区信道/频段（真实解析，不伪造默认频点或固定带宽）
 			var c = state.cell;
 			if (c.channel) {
 				var isNr = (c.sysMode === 'NR' || c.sysMode === '7' || c.sysMode === '5G' || !c.sysMode);
 				var prefix = isNr ? 'N' : 'B';
-				var bandNum = c.channel;
-				// 若信道号大于 100000 则为 5G NR-ARFCN (如 513000 -> 2565 MHz)
-				var freqVal = '2565 MHz';
-				if (parseInt(bandNum, 10) > 1000) {
-					bandNum = '41';
+				var bandNum = c.band || '';
+				if (!bandNum) {
+					var ch = parseInt(c.channel, 10);
+					if (ch >= 500000 && ch <= 540000) bandNum = '41';
+					else if (ch >= 620000 && ch <= 680000) bandNum = '78';
+					else if (ch >= 690000 && ch <= 730000) bandNum = '79';
+					else if (ch >= 150000 && ch <= 170000) bandNum = '28';
+					else if (ch >= 420000 && ch <= 440000) bandNum = '1';
+					else if (ch >= 360000 && ch <= 380000) bandNum = '3';
+					else bandNum = 'CH ' + c.channel;
 				}
-				return prefix + bandNum + ' (' + freqVal + ' · 100MHz)';
+				var resTag = prefix + bandNum;
+				if (c.channel && bandNum !== 'CH ' + c.channel) {
+					resTag += ' (ARFCN ' + c.channel + ')';
+				}
+				return resTag;
 			}
-			return 'N41 (2565 MHz · 100MHz)';
+			return '未驻网 / 无信号';
 		}
 
 		/* ==========================================================================
 		   5. 状态刷新与视图更新逻辑
 		   ========================================================================== */
+
+		/*
+		 * 四格信号图标对应的品质文案与配色（与图标状态同源，避免图标和文字各说各话）
+		 */
+		var CELLULAR_UI = {
+			full: { text: '极佳 · 满格服务', color: 'var(--mt5700-green)', bg: 'var(--mt5700-green-pale)' },
+			strong: { text: '良好 · 信号稳定', color: 'var(--mt5700-cyan)', bg: 'var(--mt5700-cyan-pale)' },
+			medium: { text: '一般 · 信号稍弱', color: 'var(--mt5700-amber)', bg: 'rgba(245, 158, 11, 0.15)' },
+			weak: { text: '较差 · 边缘覆盖', color: 'var(--mt5700-danger)', bg: 'rgba(239, 68, 68, 0.15)' },
+			none: { text: '无信号', color: 'var(--mt5700-text-muted)', bg: 'rgba(148, 163, 184, 0.15)' },
+			searching: { text: '正在搜索网络', color: 'var(--mt5700-cyan)', bg: 'var(--mt5700-cyan-pale)' },
+			connecting: { text: '正在连接网络', color: 'var(--mt5700-accent)', bg: 'var(--mt5700-accent-pale)' },
+			disconnected: { text: '网络已断开', color: 'var(--mt5700-text-muted)', bg: 'rgba(148, 163, 184, 0.15)' },
+			error: { text: '信号读取异常', color: 'var(--mt5700-danger)', bg: 'rgba(239, 68, 68, 0.15)' }
+		};
+
+		/*
+		 * 真实数据 → 四格信号图标状态。判定优先级（顺序即语义）：
+		 *   1) SIM 未就绪（明确非"正常"且非"检测中"）→ disconnected
+		 *   2) **已有 RSRP 读数 → 直接按电平分档**：信号本身正常时绝不显示异常，
+		 *      不受 HFREQINFO / HCSQ 等辅助遥测命令偶发失败的影响；
+		 *   3) 注册状态：含"未注册" → searching；"注册被拒绝"/"未知" → error；
+		 *      空 / 检测中 / 等待状态 → searching；
+		 *   4) 已注册但尚无读数：仅当主载波查询明确失败才 → error，
+		 *      否则 → connecting（首轮采集中）。
+		 */
+		function computeCellularState() {
+			var c = state.cell || {};
+			var raw = c.rsrp;
+			var rsrp = (raw !== null && raw !== undefined && raw !== '' && !isNaN(raw)) ? Number(raw) : null;
+			var reg = String(state.networkStatus || '');
+			var sim = String(state.simStatus || '');
+
+			if (sim !== '' && sim.indexOf('检测中') < 0 && sim.indexOf('正常') < 0) return 'disconnected';
+
+			if (rsrp !== null) {
+				if (rsrp >= -80) return 'full';
+				if (rsrp >= -95) return 'strong';
+				if (rsrp >= -110) return 'medium';
+				if (rsrp > -140) return 'weak';
+				return 'none';
+			}
+
+			if (reg.indexOf('未注册') >= 0) return 'searching';
+			if (reg.indexOf('注册被拒绝') >= 0 || reg.indexOf('未知') >= 0) return 'error';
+			if (reg === '' || reg.indexOf('检测中') >= 0 || reg.indexOf('等待状态') >= 0) return 'searching';
+
+			return state.hfreqSuccess === false ? 'error' : 'connecting';
+		}
 
 		function renderSignalUI() {
 			var c = state.cell;
@@ -528,51 +592,27 @@ return L.view.extend({
 			var elSubSinr = document.getElementById('sig-sub-sinr');
 			if (elSubSinr) elSubSinr.textContent = (sinr != null && !isNaN(sinr)) ? sinr + ' dB' : '-';
 
-			// 评估信号质量
-			var qualText = '良好 · 服务正常';
-			var qualColor = 'var(--mt5700-cyan)';
-			var qualBg = 'var(--mt5700-cyan-pale)';
-			var pctClamped = 0.7;
-
-			if (rsrp != null) {
-				if (rsrp >= -80) {
-					qualText = '极佳 · 满格服务';
-					qualColor = 'var(--mt5700-green)';
-					qualBg = 'var(--mt5700-green-pale)';
-					pctClamped = 0.95;
-				} else if (rsrp >= -95) {
-					qualText = '良好 · 信号稳定';
-					qualColor = 'var(--mt5700-cyan)';
-					qualBg = 'var(--mt5700-cyan-pale)';
-					pctClamped = 0.75;
-				} else if (rsrp >= -105) {
-					qualText = '一般 · 信号稍弱';
-					qualColor = 'var(--mt5700-amber)';
-					qualBg = 'rgba(245, 158, 11, 0.15)';
-					pctClamped = 0.45;
-				} else {
-					qualText = '较差 · 边缘覆盖';
-					qualColor = 'var(--mt5700-danger)';
-					qualBg = 'rgba(239, 68, 68, 0.15)';
-					pctClamped = 0.2;
-				}
-			}
+			/* 信号图标状态与品质文案同源判定，保证图形与文字完全一致 */
+			var sigState = computeCellularState();
+			var sigUI = CELLULAR_UI[sigState] || CELLULAR_UI.searching;
 
 			var elPill = document.getElementById('sig-quality-pill');
 			var elText = document.getElementById('sig-quality-text');
 			if (elPill && elText) {
-				elPill.style.background = qualBg;
-				elPill.style.color = qualColor;
-				elText.textContent = qualText;
+				elPill.style.background = sigUI.bg;
+				elPill.style.color = sigUI.color;
+				elText.textContent = sigUI.text;
 			}
 
-			// 环形进度圈
-			var circle = document.getElementById('sig-gauge-circle');
-			if (circle) {
-				var totalArc = 251.2;
-				var offset = totalArc * (1 - pctClamped);
-				circle.style.strokeDashoffset = offset;
-			}
+			/* 更新四格信号图标（状态取自真实数据） */
+			var celBox = document.getElementById('sig-cellular-box');
+			var celEl = celBox ? celBox.querySelector('.cellular') : null;
+			if (celEl && typeof celEl.setCellularState === 'function') celEl.setCellularState(sigState);
+
+			/* 信号塔图标配色与状态同源（不再写死紫色） */
+			var towerBox = document.querySelector('.mt-tower-svg-box');
+			if (towerBox) towerBox.style.color = TOWER_COLORS[sigState] || TOWER_COLORS.searching;
+
 
 			// 更新趋势历史
 			var now = new Date();
@@ -615,176 +655,278 @@ return L.view.extend({
 			}
 		}
 
+		/* ==========================================================================
+		   信号趋势图（重绘版）
+		   --------------------------------------------------------------------------
+		   纯原生 SVG 绘制，双 Y 轴，避免三条不同量纲的曲线挤在同一坐标系里互相误读：
+		     · 左轴 RSRP (dBm, -125 ~ -55)：主曲线 + 面积渐变
+		     · 右轴 SINR (dB,  -5  ~ 35) ：副曲线
+		     · RSRQ (dB, -20 ~ -3)       ：细虚线（量纲独立，仅作参考，不参与双轴刻度）
+		   背景按 RSRP 质量分区着色（极佳 / 良好 / 一般 / 较差），一眼可判读链路质量。
+		   曲线经 Catmull-Rom → 三次贝塞尔平滑，末端点标注当前读数。
+		   ========================================================================== */
+
+		/* RSRP 质量分区（阈值与 computeCellularState 的分档保持一致） */
+		/* 档位标签用英文，保证图表区域文字风格统一（不含中文） */
+		var SIGNAL_TIERS = [
+			{ label: 'Poor', min: -125, max: -110, color: '#ef4444' },
+			{ label: 'Fair', min: -110, max: -95, color: '#f59e0b' },
+			{ label: 'Good', min: -95, max: -80, color: '#0ea5e9' },
+			{ label: 'Excellent', min: -80, max: -53, color: '#10b981' }
+		];
+
+		/* RSRP → 质量分区下标；无有效读数返回 -1 */
+		function signalTierIndex(rsrp) {
+			if (rsrp === null || rsrp === undefined || rsrp === '' || isNaN(rsrp)) return -1;
+			var v = Number(rsrp);
+			for (var i = 0; i < SIGNAL_TIERS.length; i++) {
+				if (v >= SIGNAL_TIERS[i].min && v < SIGNAL_TIERS[i].max) return i;
+			}
+			return v >= SIGNAL_TIERS[SIGNAL_TIERS.length - 1].max ? SIGNAL_TIERS.length - 1 : 0;
+		}
+
+		/* 折线点集 → 平滑路径（Catmull-Rom 转三次贝塞尔），y 超出绘图区时钳制 */
+		function smoothPathPoints(pts, top, bottom) {
+			if (!pts || !pts.length) return '';
+			function clampY(y) { return Math.max(top, Math.min(bottom, y)); }
+			var d = 'M ' + pts[0][0].toFixed(1) + ' ' + clampY(pts[0][1]).toFixed(1);
+			for (var i = 0; i < pts.length - 1; i++) {
+				var p0 = pts[i - 1] || pts[i];
+				var p1 = pts[i];
+				var p2 = pts[i + 1];
+				var p3 = pts[i + 2] || p2;
+				var c1x = p1[0] + (p2[0] - p0[0]) / 6;
+				var c1y = clampY(p1[1] + (p2[1] - p0[1]) / 6);
+				var c2x = p2[0] - (p3[0] - p1[0]) / 6;
+				var c2y = clampY(p2[1] - (p3[1] - p1[1]) / 6);
+				d += ' C ' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ', ' +
+					c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ', ' +
+					p2[0].toFixed(1) + ' ' + clampY(p2[1]).toFixed(1);
+			}
+			return d;
+		}
+
+		/* 线性映射：值域 [min, max] → 像素 [top, bottom]，越界钳制 */
+		function chartScale(value, min, max, top, bottom) {
+			var v = Number(value);
+			if (!isFinite(v)) v = min;
+			if (v < min) v = min;
+			if (v > max) v = max;
+			return top + (bottom - top) * (1 - (v - min) / (max - min));
+		}
+
+		/*
+		 * 双轴刻度表：y 为绘图区内相对位置（0 = 顶部），rsrp / sinr 为该位置对应的刻度值。
+		 * 值必须与 y 单调一致（自顶向下递减），否则轴标签会与实际位置不符。
+		 */
+		var CHART_TICKS = [
+			{ y: 0, rsrp: -53, sinr: 35 },
+			{ y: 0.25, rsrp: -71, sinr: 25 },
+			{ y: 0.5, rsrp: -89, sinr: 15 },
+			{ y: 0.75, rsrp: -107, sinr: 5 },
+			{ y: 1, rsrp: -125, sinr: -5 }
+		];
+
 		function renderSignalTrendChart() {
 			var box = document.getElementById('sig-trend-chart-box');
 			if (!box) return;
 			if (sigHistory.length < 2) {
-				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">正在采集实时信号趋势数据...</div>';
+				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">Collecting signal samples (need at least 2 points)...</div>';
 				return;
 			}
 
-			var w = 520, h = 330;
-			var padL = 44, padR = 20, padT = 25, padB = 32;
+			/*
+			 * 尺寸自适应：SVG 会按宽度等比缩放，若窄屏仍用 560 宽的 viewBox，
+			 * 文字会被压缩到原来的一半以下（手机上无法辨认）。
+			 * 因此窄屏改用更窄的 viewBox（380×300），让缩放比接近 1:1，
+			 * 同时把所有字号按 viewBox 单位放大到 11~13，桌面端实际渲染约 13px。
+			 */
+			var boxW = box.clientWidth || 560;
+			var narrow = boxW < 480;
+			var w = narrow ? 380 : 560;
+			var h = narrow ? 300 : 340;
+			var padL = narrow ? 40 : 52, padR = narrow ? 42 : 52, padT = 28, padB = 36;
 			var chartW = w - padL - padR;
 			var chartH = h - padT - padB;
+			/* 字号取「可读但不喧宾夺主」的中间值：
+			   桌面容器 ≈573 宽（viewBox 560）缩放约 1.02 → 刻度实际约 11.7px，与卡片正文 12~13px 协调；
+			   窄屏 viewBox 380、容器 ≈340 缩放约 0.9 → 刻度实际约 10.8px，保持可辨认。 */
+			var fsTick = narrow ? 12 : 11.5;      /* 轴刻度 */
+			var fsTier = narrow ? 11 : 10.5;      /* 质量档位 */
+			var fsTime = narrow ? 12 : 11.5;      /* 时间轴 */
+			var fsLabel = narrow ? 12.5 : 12;     /* 末端读数 / 质量 */
+			var fsAxis = narrow ? 11 : 10.5;      /* 轴单位 */
+			var tipFs = narrow ? 12 : 11.5;       /* 悬浮卡文字 */
+			var tipFsTitle = narrow ? 12.5 : 12;
 
-			// RSRP 范围: -125 ~ -55
-			function rsrpToY(val) {
-				var clamped = Math.max(-125, Math.min(-55, val));
-				return padT + chartH * (1 - (clamped - (-125)) / 70);
+			var RSRP_MIN = -125, RSRP_MAX = -53;
+			var SINR_MIN = -5, SINR_MAX = 35;
+			var RSRQ_MIN = -20, RSRQ_MAX = -3;
+
+			var n = sigHistory.length;
+			var rsrpPts = [], sinrPts = [], rsrqPts = [];
+			for (var i = 0; i < n; i++) {
+				var x = padL + (i / (n - 1)) * chartW;
+				var it = sigHistory[i];
+				rsrpPts.push([x, chartScale(it.rsrp, RSRP_MIN, RSRP_MAX, padT, padT + chartH)]);
+				sinrPts.push([x, chartScale(it.sinr, SINR_MIN, SINR_MAX, padT, padT + chartH)]);
+				rsrqPts.push([x, chartScale(it.rsrq, RSRQ_MIN, RSRQ_MAX, padT, padT + chartH)]);
 			}
 
-			// SINR 范围: -5 ~ 35
-			function sinrToY(val) {
-				var clamped = Math.max(-5, Math.min(35, val));
-				return padT + chartH * (1 - (clamped - (-5)) / 40);
+			var lastRsrp = rsrpPts[n - 1];
+			var lastSinr = sinrPts[n - 1];
+			var lastRsrq = rsrqPts[n - 1];
+			var lastItem = sigHistory[n - 1];
+			var tier = signalTierIndex(lastItem.rsrp);
+			var tierColor = tier >= 0 ? SIGNAL_TIERS[tier].color : 'var(--mt5700-text-muted)';
+			var tierText = tier >= 0 ? SIGNAL_TIERS[tier].label : '—';
+
+			/* ---- 背景质量分区带 ---- */
+			var bands = '';
+			for (var b = 0; b < SIGNAL_TIERS.length; b++) {
+				var t = SIGNAL_TIERS[b];
+				var y1 = chartScale(t.max, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
+				var y2 = chartScale(t.min, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
+				bands += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + chartW +
+					'" height="' + Math.max(1, y2 - y1).toFixed(1) + '" fill="' + t.color + '" opacity="0.05"/>';
+				/* 档位标签放在绘图区右端内侧，与右轴刻度（区外）分开，避免挤在一起 */
+				bands += '<text x="' + (w - padR - 6) + '" y="' + ((y1 + y2) / 2 + 3).toFixed(1) +
+					'" font-size="' + fsTier + '" fill="' + t.color + '" opacity="0.85" text-anchor="end">' + t.label + '</text>';
 			}
 
-			// RSRQ 范围: -20 ~ -3
-			function rsrqToY(val) {
-				var clamped = Math.max(-20, Math.min(-3, val));
-				return padT + chartH * (1 - (clamped - (-20)) / 17);
+			/* ---- 水平网格 + 左右双轴刻度 ---- */
+			var grid = '';
+			var ticks = CHART_TICKS;
+			for (var k = 0; k < ticks.length; k++) {
+				var gy = padT + chartH * ticks[k].y;
+				var dash = (ticks[k].y === 0 || ticks[k].y === 1) ? '' : ' stroke-dasharray="3 3"';
+				grid += '<line x1="' + padL + '" y1="' + gy.toFixed(1) + '" x2="' + (w - padR) +
+					'" y2="' + gy.toFixed(1) + '" stroke="var(--mt5700-border-subtle)"' + dash + '/>';
+				grid += '<text x="' + (padL - 7) + '" y="' + (gy + 3).toFixed(1) +
+					'" font-size="' + fsTick + '" font-family="monospace" fill="#0ea5e9" text-anchor="end">' + ticks[k].rsrp + '</text>';
+				grid += '<text x="' + (w - padR + 7) + '" y="' + (gy + 3).toFixed(1) +
+					'" font-size="' + fsTick + '" font-family="monospace" fill="#10b981" text-anchor="start">' + ticks[k].sinr + '</text>';
 			}
-
-			var ptsRsrp = [], ptsSinr = [], ptsRsrq = [];
-			for (var i = 0; i < sigHistory.length; i++) {
-				var x = padL + (i / (sigHistory.length - 1)) * chartW;
-				ptsRsrp.push(x.toFixed(1) + ' ' + rsrpToY(sigHistory[i].rsrp).toFixed(1));
-				ptsSinr.push(x.toFixed(1) + ' ' + sinrToY(sigHistory[i].sinr).toFixed(1));
-				ptsRsrq.push(x.toFixed(1) + ' ' + rsrqToY(sigHistory[i].rsrq).toFixed(1));
-			}
-
-			var pathRsrp = 'M ' + ptsRsrp.join(' L ');
-			var pathSinr = 'M ' + ptsSinr.join(' L ');
-			var pathRsrq = 'M ' + ptsRsrq.join(' L ');
-
-			var lastRsrp = ptsRsrp[ptsRsrp.length - 1].split(' ');
-			var lastSinr = ptsSinr[ptsSinr.length - 1].split(' ');
-			var lastRsrq = ptsRsrq[ptsRsrq.length - 1].split(' ');
 
 			var firstTime = sigHistory[0].time;
-			var midTime = sigHistory[Math.floor(sigHistory.length / 2)].time;
-			var lastTime = sigHistory[sigHistory.length - 1].time;
+			var midTime = sigHistory[Math.floor(n / 2)].time;
+			var lastTime = sigHistory[n - 1].time;
 
 			box.innerHTML =
-				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="100%" style="overflow:visible; display:block;">' +
+				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="overflow:visible; display:block;">' +
 				'  <defs>' +
 				'    <linearGradient id="rsrp-area" x1="0" y1="0" x2="0" y2="1">' +
-				'      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.32"/>' +
-				'      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0"/>' +
-				'    </linearGradient>' +
-				'    <linearGradient id="sinr-area" x1="0" y1="0" x2="0" y2="1">' +
-				'      <stop offset="0%" stop-color="#10b981" stop-opacity="0.25"/>' +
-				'      <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>' +
+				'      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>' +
+				'      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.02"/>' +
 				'    </linearGradient>' +
 				'  </defs>' +
-				'  <!-- 网格刻度线与 5 级垂直高度标尺 (宽裕间距) -->' +
-				'  <line x1="' + padL + '" y1="' + padT + '" x2="' + (w - padR) + '" y2="' + padT + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.25).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.25).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.50).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.50).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.75).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.75).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH) + '" stroke="var(--mt5700-border-subtle)"/>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + 3) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-55</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.25 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-72</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.50 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-90</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.75 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-107</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH + 3) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-125</text>' +
-				'  <!-- 曲线与区域 -->' +
-				'  <path d="' + pathRsrp + ' L ' + (w - padR) + ' ' + (padT + chartH) + ' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
-				'  <path d="' + pathRsrp + '" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>' +
-				'  <circle cx="' + lastRsrp[0] + '" cy="' + lastRsrp[1] + '" r="3.5" fill="#38bdf8" class="mt-beacon-dot"/>' +
-				'  <path d="' + pathSinr + ' L ' + (w - padR) + ' ' + (padT + chartH) + ' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#sinr-area)"/>' +
-				'  <path d="' + pathSinr + '" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round"/>' +
-				'  <circle cx="' + lastSinr[0] + '" cy="' + lastSinr[1] + '" r="3.5" fill="#10b981"/>' +
-				'  <path d="' + pathRsrq + '" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round"/>' +
-				'  <circle cx="' + lastRsrq[0] + '" cy="' + lastRsrq[1] + '" r="3" fill="#a855f7"/>' +
-				'  <!-- 时间横坐标 -->' +
-				'  <text x="' + padL + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="start">' + firstTime + '</text>' +
-				'  <text x="' + (w / 2) + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="middle">' + midTime + '</text>' +
-				'  <text x="' + (w - padR) + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">' + lastTime + '</text>' +
-				'  <!-- 鼠标悬浮交互指示层 (精确十字瞄准线 · 采样点徽标 · 动态数据卡) -->' +
+				/* 质量分区背景 */
+				bands +
+				/* 网格与双轴刻度 */
+				grid +
+				/* 轴标题 */
+				'  <text x="' + (padL - 7) + '" y="' + (padT - 10) + '" font-size="' + fsAxis + '" font-family="monospace" fill="#0ea5e9" text-anchor="end">dBm</text>' +
+				'  <text x="' + (w - padR + 7) + '" y="' + (padT - 10) + '" font-size="' + fsAxis + '" font-family="monospace" fill="#10b981" text-anchor="start">dB</text>' +
+				/* RSRP 面积 + 主曲线 */
+				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + ' L ' + (w - padR) + ' ' + (padT + chartH) +
+				' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
+				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + '" fill="none" stroke="#38bdf8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+				/* SINR 副曲线 */
+				'  <path d="' + smoothPathPoints(sinrPts, padT, padT + chartH) + '" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+				/* RSRQ 参考虚线 */
+				'  <path d="' + smoothPathPoints(rsrqPts, padT, padT + chartH) + '" fill="none" stroke="#a855f7" stroke-width="1.6" stroke-dasharray="5 4" stroke-linecap="round" opacity="0.85"/>' +
+				/* 末端采样点 */
+				'  <circle cx="' + lastRsrp[0].toFixed(1) + '" cy="' + lastRsrp[1].toFixed(1) + '" r="3.6" fill="#38bdf8" stroke="#ffffff" stroke-width="1.4"/>' +
+				'  <circle cx="' + lastSinr[0].toFixed(1) + '" cy="' + lastSinr[1].toFixed(1) + '" r="3.2" fill="#10b981" stroke="#ffffff" stroke-width="1.2"/>' +
+				'  <circle cx="' + lastRsrq[0].toFixed(1) + '" cy="' + lastRsrq[1].toFixed(1) + '" r="2.6" fill="#a855f7" opacity="0.85"/>' +
+				/* 末端读数标签 */
+				'  <text x="' + (padL + 2) + '" y="' + (padT + 12) + '" font-size="' + fsLabel + '" font-family="monospace" fill="#38bdf8">RSRP ' +
+				(lastItem.rsrp != null ? lastItem.rsrp : '—') + ' dBm</text>' +
+				'  <text x="' + (padL + 2) + '" y="' + (padT + 27) + '" font-size="' + fsLabel + '" font-family="monospace" fill="' + tierColor + '">Quality ' + tierText + '</text>' +
+				/* 时间横轴 */
+				'  <text x="' + padL + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="start">' + firstTime + '</text>' +
+				'  <text x="' + (w / 2) + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="middle">' + midTime + '</text>' +
+				'  <text x="' + (w - padR) + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">' + lastTime + '</text>' +
+				/* 悬浮层：十字准星 + 三点指示 + 数据卡 */
 				'  <g id="mt-trend-hover-layer" style="display:none; pointer-events:none;">' +
-				'    <line id="mt-hover-crosshair" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + chartH) + '" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="3 3"/>' +
+				'    <line id="mt-hover-crosshair" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + chartH) + '" stroke="#a78bfa" stroke-width="1.4" stroke-dasharray="3 3"/>' +
 				'    <circle id="mt-hover-dot-rsrp" r="4.5" fill="#38bdf8" stroke="#ffffff" stroke-width="2"/>' +
 				'    <circle id="mt-hover-dot-sinr" r="4.5" fill="#10b981" stroke="#ffffff" stroke-width="2"/>' +
-				'    <circle id="mt-hover-dot-rsrq" r="4" fill="#a855f7" stroke="#ffffff" stroke-width="2"/>' +
+				'    <circle id="mt-hover-dot-rsrq" r="3.8" fill="#a855f7" stroke="#ffffff" stroke-width="2"/>' +
 				'    <g id="mt-hover-tip-card" transform="translate(0, 0)">' +
-				'      <rect x="0" y="0" width="136" height="76" rx="8" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
-				'      <text id="mt-tip-val-time" x="12" y="18" fill="#f8fafc" font-size="9.5" font-weight="bold" font-family="sans-serif">时间: --:--:--</text>' +
-				'      <circle cx="16" cy="32" r="3.5" fill="#38bdf8"/>' +
-				'      <text id="mt-tip-val-rsrp" x="26" y="35" fill="#e2e8f0" font-size="9" font-family="monospace">RSRP: - dBm</text>' +
-				'      <circle cx="16" cy="48" r="3.5" fill="#10b981"/>' +
-				'      <text id="mt-tip-val-sinr" x="26" y="51" fill="#e2e8f0" font-size="9" font-family="monospace">SINR: - dB</text>' +
-				'      <circle cx="16" cy="64" r="3.5" fill="#a855f7"/>' +
-				'      <text id="mt-tip-val-rsrq" x="26" y="67" fill="#e2e8f0" font-size="9" font-family="monospace">RSRQ: - dB</text>' +
+				'      <rect x="0" y="0" width="190" height="116" rx="9" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
+				'      <text id="mt-tip-val-time" x="14" y="23" fill="#f8fafc" font-size="' + tipFsTitle + '" font-weight="bold" font-family="sans-serif">Time: --:--:--</text>' +
+				'      <circle cx="18" cy="43" r="4" fill="#38bdf8"/>' +
+				'      <text id="mt-tip-val-rsrp" x="30" y="47" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRP —</text>' +
+				'      <circle cx="18" cy="64" r="4" fill="#10b981"/>' +
+				'      <text id="mt-tip-val-sinr" x="30" y="68" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">SINR —</text>' +
+				'      <circle cx="18" cy="85" r="4" fill="#a855f7"/>' +
+				'      <text id="mt-tip-val-rsrq" x="30" y="89" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRQ —</text>' +
+				'      <text id="mt-tip-val-tier" x="14" y="108" fill="#94a3b8" font-size="' + tipFs + '" font-family="monospace">Quality: —</text>' +
 				'    </g>' +
 				'  </g>' +
-				'  <!-- 捕获鼠标事件的透明感应矩形 -->' +
 				'  <rect id="mt-chart-hitbox" x="' + padL + '" y="' + padT + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair;"/>' +
 				'</svg>';
 
-			// 绑定鼠标悬浮交互事件
 			var hitbox = document.getElementById('mt-chart-hitbox');
-			if (hitbox) {
-				hitbox.addEventListener('mousemove', function (e) {
-					var rect = hitbox.getBoundingClientRect();
-					var frac = (e.clientX - rect.left) / rect.width;
-					if (frac < 0) frac = 0;
-					if (frac > 1) frac = 1;
-					var idx = Math.round(frac * (sigHistory.length - 1));
-					idx = Math.max(0, Math.min(sigHistory.length - 1, idx));
-					var item = sigHistory[idx];
-					if (!item) return;
+			if (!hitbox) return;
 
-					var curX = padL + (idx / (sigHistory.length - 1)) * chartW;
-					var yR = rsrpToY(item.rsrp);
-					var yS = sinrToY(item.sinr);
-					var yQ = rsrqToY(item.rsrq);
+			hitbox.addEventListener('mousemove', function (e) {
+				var rect = hitbox.getBoundingClientRect();
+				var frac = (e.clientX - rect.left) / rect.width;
+				if (frac < 0) frac = 0;
+				if (frac > 1) frac = 1;
+				var idx = Math.round(frac * (n - 1));
+				idx = Math.max(0, Math.min(n - 1, idx));
+				var item = sigHistory[idx];
+				if (!item) return;
 
-					var layer = document.getElementById('mt-trend-hover-layer');
-					if (layer) layer.style.display = 'block';
+				var curX = padL + (idx / (n - 1)) * chartW;
+				var yR = chartScale(item.rsrp, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
+				var yS = chartScale(item.sinr, SINR_MIN, SINR_MAX, padT, padT + chartH);
+				var yQ = chartScale(item.rsrq, RSRQ_MIN, RSRQ_MAX, padT, padT + chartH);
 
-					var cross = document.getElementById('mt-hover-crosshair');
-					if (cross) {
-						cross.setAttribute('x1', curX.toFixed(1));
-						cross.setAttribute('x2', curX.toFixed(1));
-					}
+				var layer = document.getElementById('mt-trend-hover-layer');
+				if (layer) layer.style.display = 'block';
 
-					var dotR = document.getElementById('mt-hover-dot-rsrp');
-					if (dotR) { dotR.setAttribute('cx', curX.toFixed(1)); dotR.setAttribute('cy', yR.toFixed(1)); }
-					var dotS = document.getElementById('mt-hover-dot-sinr');
-					if (dotS) { dotS.setAttribute('cx', curX.toFixed(1)); dotS.setAttribute('cy', yS.toFixed(1)); }
-					var dotQ = document.getElementById('mt-hover-dot-rsrq');
-					if (dotQ) { dotQ.setAttribute('cx', curX.toFixed(1)); dotQ.setAttribute('cy', yQ.toFixed(1)); }
+				var cross = document.getElementById('mt-hover-crosshair');
+				if (cross) { cross.setAttribute('x1', curX.toFixed(1)); cross.setAttribute('x2', curX.toFixed(1)); }
 
-					var tipW = 136;
-					var tipH = 76;
-					var tipX = curX + 12;
-					if (tipX + tipW > w - 8) {
-						tipX = curX - tipW - 12;
-					}
-					var tipY = Math.min(yR, yS, yQ) - 10;
-					if (tipY < padT) tipY = padT;
-					if (tipY + tipH > h - 8) tipY = h - tipH - 8;
+				var dotR = document.getElementById('mt-hover-dot-rsrp');
+				if (dotR) { dotR.setAttribute('cx', curX.toFixed(1)); dotR.setAttribute('cy', yR.toFixed(1)); }
+				var dotS = document.getElementById('mt-hover-dot-sinr');
+				if (dotS) { dotS.setAttribute('cx', curX.toFixed(1)); dotS.setAttribute('cy', yS.toFixed(1)); }
+				var dotQ = document.getElementById('mt-hover-dot-rsrq');
+				if (dotQ) { dotQ.setAttribute('cx', curX.toFixed(1)); dotQ.setAttribute('cy', yQ.toFixed(1)); }
 
-					var tipCard = document.getElementById('mt-hover-tip-card');
-					if (tipCard) tipCard.setAttribute('transform', 'translate(' + tipX.toFixed(1) + ',' + tipY.toFixed(1) + ')');
+				var tipW = 190, tipH = 116;
+				var tipX = curX + 12;
+				if (tipX + tipW > w - 8) tipX = curX - tipW - 12;
+				if (tipX < 4) tipX = 4;
+				var tipY = Math.min(yR, yS) - 14;
+				if (tipY < padT) tipY = padT;
+				if (tipY + tipH > h - 6) tipY = h - tipH - 6;
 
-					var elTime = document.getElementById('mt-tip-val-time');
-					if (elTime) elTime.textContent = '时间: ' + item.time;
-					var elR = document.getElementById('mt-tip-val-rsrp');
-					if (elR) elR.textContent = 'RSRP: ' + item.rsrp + ' dBm';
-					var elS = document.getElementById('mt-tip-val-sinr');
-					if (elS) elS.textContent = 'SINR: ' + item.sinr + ' dB';
-					var elQ = document.getElementById('mt-tip-val-rsrq');
-					if (elQ) elQ.textContent = 'RSRQ: ' + item.rsrq + ' dB';
-				});
+				var tipCard = document.getElementById('mt-hover-tip-card');
+				if (tipCard) tipCard.setAttribute('transform', 'translate(' + tipX.toFixed(1) + ',' + tipY.toFixed(1) + ')');
 
-				hitbox.addEventListener('mouseleave', function () {
-					var layer = document.getElementById('mt-trend-hover-layer');
-					if (layer) layer.style.display = 'none';
-				});
-			}
+				var elTime = document.getElementById('mt-tip-val-time');
+				if (elTime) elTime.textContent = 'Time: ' + item.time;
+				var elR = document.getElementById('mt-tip-val-rsrp');
+				if (elR) elR.textContent = 'RSRP: ' + (item.rsrp != null ? item.rsrp + ' dBm' : '—');
+				var elS = document.getElementById('mt-tip-val-sinr');
+				if (elS) elS.textContent = 'SINR: ' + (item.sinr != null ? item.sinr + ' dB' : '—');
+				var elQ = document.getElementById('mt-tip-val-rsrq');
+				if (elQ) elQ.textContent = 'RSRQ: ' + (item.rsrq != null ? item.rsrq + ' dB' : '—');
+				var elT = document.getElementById('mt-tip-val-tier');
+				var ti = signalTierIndex(item.rsrp);
+				if (elT) elT.textContent = 'Quality: ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '—');
+			});
+
+			hitbox.addEventListener('mouseleave', function () {
+				var layer = document.getElementById('mt-trend-hover-layer');
+				if (layer) layer.style.display = 'none';
+			});
 		}
 
 		function formatSpeedNumber(bytesPerSec) {
@@ -807,7 +949,7 @@ return L.view.extend({
 			var elUl = document.getElementById('traffic-ul-val');
 			if (elUl) elUl.textContent = ulStr;
 
-			// 更新迷你火花线
+			// 更新迷你火花线：纯设备真实采样数据，为 0 则为 0，严禁使用 Math.random 伪造
 			/* 空闲（或计数器采样被重置）时老实现会塞随机数，图上在跑流量而数字是 0 B/s，
 			 * 自相矛盾。没有流量就如实画 0。 */
 			sparkDown.push(state.rtDown > 0 ? state.rtDown : 0);
@@ -824,18 +966,36 @@ return L.view.extend({
 			var prim = (state.carriers && state.carriers[0]) || {};
 			var primRat = AtWs.ratLabel ? AtWs.ratLabel(c.sysMode || prim.sysMode) : (c.sysMode || '5G NR');
 			var bandCombo = getBandCombinationStr();
-			var primBw = prim.dlBwKHz ? (prim.dlBwKHz / 1000) + ' MHz' : (prim.bandwidth ? (prim.bandwidth / 1000) + ' MHz' : '100 MHz');
-			var duration = state.flow.currentConnectTime || '运行中';
+			var duration = state.flow.currentConnectTime || '—';
 
-			// 更新 Card 2 中的简要信息
+			// 更新 Card 2 中的简要信息（严禁回退假运营商）
 			var opEl = document.getElementById('net-val-operator');
-			if (opEl) opEl.textContent = state.operator || '中国移动';
+			if (opEl) opEl.textContent = state.operator || '—';
 
 			var bandEl = document.getElementById('net-val-band');
 			if (bandEl) bandEl.textContent = bandCombo;
 
 			var caEl = document.getElementById('net-val-ca');
-			if (caEl) caEl.textContent = state.carriers.length > 1 ? ('CA ' + state.carriers.length + 'CC 聚合') : '单载波 (PCC)';
+			if (caEl) {
+				var caSt = state.caStatus || {};
+				if (caSt.state === 'pending') {
+					caEl.textContent = '待刷新...';
+				} else if (caSt.state === 'error') {
+					caEl.textContent = '未知 (待刷新)';
+				} else if (caSt.state === 'expired') {
+					caEl.textContent = '待刷新 (已过期)';
+				} else if (caSt.state === 'none') {
+					caEl.textContent = '未驻网';
+				} else if (state.carriers && state.carriers.length > 1) {
+					caEl.textContent = 'CA ' + state.carriers.length + 'CC 聚合';
+				} else if (state.carriers && state.carriers.length === 1) {
+					caEl.textContent = '单载波 (PCC)';
+				} else if (state.cell && state.cell.channel) {
+					caEl.textContent = '单载波 (PCC)';
+				} else {
+					caEl.textContent = '未驻网';
+				}
+			}
 
 			var ipEl = document.getElementById('net-val-ip');
 			if (ipEl) {
@@ -844,119 +1004,193 @@ return L.view.extend({
 			}
 
 			// Tab 1: 网络信息
+			var dlModText = state.mcs.dlMod ? state.mcs.dlMod + ' (DL)' : '—';
+			var ulModText = state.mcs.ulMod ? state.mcs.ulMod + ' (UL)' : '—';
+			var dlRankText = state.mcs.dlRank != null ? state.mcs.dlRank + ' 层并发 (DL)' : '—';
+			var ulRankText = state.mcs.ulRank != null ? state.mcs.ulRank + ' 层 (UL)' : '—';
+
 			tabPanes['tab-net'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>网络制式</td><td>' + primRat + '</td></tr>' +
+				'  <tr><td>网络制式</td><td>' + (c.sysMode ? primRat : '—') + '</td></tr>' +
 				'  <tr><td>频段组合</td><td>' + bandCombo + '</td></tr>' +
-				'  <tr><td>运营商</td><td>' + state.operator + '</td></tr>' +
+				'  <tr><td>运营商</td><td>' + (state.operator || '—') + '</td></tr>' +
 				'  <tr><td>连接时长</td><td>' + duration + '</td></tr>' +
-				'  <tr><td>调制方式</td><td><span class="mt-pill-tag mt-pill-cyan">QAM</span> ' + (state.mcs.dlMod || '64QAM') + ' (DL) / ' + (state.mcs.ulMod || '64QAM') + ' (UL)</td></tr>' +
-				'  <tr><td>空间流 (MIMO)</td><td><span class="mt-pill-tag mt-pill-purple">MIMO 4×4</span> ' + (state.mcs.dlRank || 4) + ' 层并发 (DL) / ' + (state.mcs.ulRank || 1) + ' 层 (UL)</td></tr>' +
-				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci || '—') + '</td></tr>' +
+				'  <tr><td>调制方式</td><td><span class="mt-pill-tag mt-pill-cyan">QAM</span> ' + (state.mcs.dlMod ? (dlModText + ' / ' + ulModText) : '— (模组未上报)') + '</td></tr>' +
+				'  <tr><td>空间流 (MIMO)</td><td><span class="mt-pill-tag mt-pill-purple">MIMO</span> ' + (state.mcs.dlRank != null ? (dlRankText + ' / ' + ulRankText) : '— (模组未上报)') + '</td></tr>' +
+				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci != null && c.pci !== '' ? c.pci : '—') + '</td></tr>' +
 				'  <tr><td>基站标识 (eNB/gNB)</td><td>' + (c.cid || '—') + (c.lac ? ' (TAC ' + c.lac + ')' : '') + '</td></tr>' +
 				'</table>';
 
-			// Tab 2: 设备信息
+			// Tab 2: 设备信息（根据 ATI 真实模组上报，绝不写死 RM551E-GL）
 			var avgT = '—';
 			if (state.temps && state.temps.modem1) {
-				avgT = state.temps.modem1 + ' ℃ (基带 ' + state.temps.modem1 + '℃, PA ' + (state.temps.sub6GPA || 43) + '℃)';
+				avgT = state.temps.modem1 + ' ℃' + (state.temps.sub6GPA ? ' (基带 ' + state.temps.modem1 + '℃, PA ' + state.temps.sub6GPA + '℃)' : '');
 			}
+			var devIface = state.deviceInterface || (rateSample && rateSample.device) || '—';
 			tabPanes['tab-dev'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>模组型号</td><td>' + state.modemInfo.model + '</td></tr>' +
-				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || 'V200R001C20B014') + '</td></tr>' +
+				'  <tr><td>模组型号</td><td>' + (state.modemInfo.model || '读取中...') + '</td></tr>' +
+				'  <tr><td>制造厂商</td><td>' + (state.modemInfo.manufacturer || 'TD Tech Ltd.') + '</td></tr>' +
+				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || '—') + '</td></tr>' +
+				'  <tr><td>模组 IMEI</td><td>' + (state.modemInfo.imei || '—') + '</td></tr>' +
 				'  <tr><td>芯片温度概览</td><td>' + avgT + '</td></tr>' +
-				'  <tr><td>承载接口</td><td>eth2 (自动管理)</td></tr>' +
-				'  <tr><td>供电状态</td><td>正常就绪</td></tr>' +
-				'  <tr><td>通信通道</td><td>PCIe / USB 3.0</td></tr>' +
+				'  <tr><td>数据通信接口</td><td>' + devIface + '</td></tr>' +
 				'</table>';
 
-			// Tab 3: SIM 卡信息 (完整真实显示 IMSI 与 ICCID，严禁任何星号遮挡)
+			// Tab 3: SIM 卡信息 (完整真实显示 IMSI 与 ICCID，真实读取 AT+CPIN?)
+			var simStat = state.simStatus || '读取中...';
+			var plmnStr = (c.mcc && c.mnc) ? (c.mcc + ' ' + c.mnc) : '—';
+			var roamStr = '未检测';
+			if (state.diag && state.diag.reg) {
+				roamStr = state.diag.reg.stat === 5 ? '已漫游' : (state.diag.reg.stat === 1 ? '非漫游 (本地网络)' : state.diag.reg.statText);
+			} else if (state.networkStatus) {
+				roamStr = state.networkStatus.indexOf('漫游') >= 0 ? '已漫游' : '非漫游 (本地网络)';
+			}
 			tabPanes['tab-sim'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>SIM 卡状态</td><td>正常就绪</td></tr>' +
-				'  <tr><td>运营商代码 (PLMN)</td><td>' + ((c.mcc || '460') + ' ' + (c.mnc || '00')) + '</td></tr>' +
-				'  <tr><td>漫游状态</td><td>非漫游 (本地网络)</td></tr>' +
+				'  <tr><td>SIM 卡状态</td><td>' + simStat + '</td></tr>' +
+				'  <tr><td>运营商代码 (PLMN)</td><td>' + plmnStr + '</td></tr>' +
+				'  <tr><td>网络注册与漫游</td><td>' + roamStr + '</td></tr>' +
 				'  <tr><td>IMSI</td><td>' + (state.modemInfo.imsi || '读取中...') + '</td></tr>' +
 				'  <tr><td>ICCID</td><td>' + (state.modemInfo.iccid || '读取中...') + '</td></tr>' +
 				'</table>';
 
-			// Tab 4: APN 信息
-			var ipv4 = state.dhcpv4.ipv4Address || '—';
+			// Tab 4: APN 信息（读取 AT+CGDCONT 真实配置，绝不假写 cmiot5g）
+			var ipv4 = state.dhcpv4.ipv4Address || (state.diag.addrs[0] ? state.diag.addrs[0].address : '—');
 			var ipv6 = state.dhcpv6.ipv6Address || '—';
-			var gw = state.dhcpv4.gateway || '10.0.0.1';
-			var dns = (state.dhcpv4.primaryDNS || '—') + ' / ' + (state.dhcpv4.secondaryDNS || '—');
+			var gw = state.dhcpv4.gateway || '—';
+			var dns = (state.dhcpv4.primaryDNS || '—') + (state.dhcpv4.secondaryDNS ? ' / ' + state.dhcpv4.secondaryDNS : '');
+			var apnName = state.apn || '默认 (核心网自动分配)';
+			var protoType = state.pdpType ? (state.pdpType === 'IPV4V6' ? 'IPv4 / IPv6 双栈' : (state.pdpType === 'IP' ? '仅 IPv4' : state.pdpType)) : 'IPv4 / IPv6 双栈';
 			tabPanes['tab-apn'].innerHTML =
 				'<table class="mt-info-table">' +
-				'  <tr><td>APN 名称</td><td>' + (state.apn || 'cmiot5g') + '</td></tr>' +
-				'  <tr><td>协议类型</td><td>IPv4 / IPv6 双栈</td></tr>' +
+				'  <tr><td>APN 接入点</td><td>' + apnName + '</td></tr>' +
+				'  <tr><td>数据通道 (CID)</td><td>' + (state.apnCid ? ('CID ' + state.apnCid + '（数据承载）') : '—') + '</td></tr>' +
+				'  <tr><td>协议类型</td><td>' + protoType + '</td></tr>' +
 				'  <tr><td>本机 IPv4</td><td>' + ipv4 + '</td></tr>' +
 				'  <tr><td>本机 IPv6</td><td>' + ipv6 + '</td></tr>' +
 				'  <tr><td>网关地址</td><td>' + gw + '</td></tr>' +
-				'  <tr><td>首选 / 备用 DNS</td><td>' + dns + '</td></tr>' +
+				'  <tr><td>DNS 服务器</td><td>' + dns + '</td></tr>' +
 				'</table>';
 		}
 
-		/* ---------- 载波聚合渲染 (折叠面板内部) ---------- */
+		/* ---------- 载波聚合渲染 (折叠面板内部，严格根据设备上报真实数据) ---------- */
 		function renderCarriersAdv() {
 			if (!carrierBox) return;
 			carrierBox.innerHTML = '';
 			var list = state.carriers || [];
+			var caSt = state.caStatus || { state: 'pending' };
 
-			// 若未检测到 carriers，基于主小区状态构造 PCC 基础载波对象
-			if (!list.length) {
-				var defBand = state.cell.channel && parseInt(state.cell.channel, 10) < 1000 ? state.cell.channel : '41';
-				list = [{
-					n: 0,
-					sysMode: state.cell.sysMode || 'NR',
-					band: defBand,
-					dlFcn: state.cell.channel || '513000',
-					dlFreqKHz: 2565000,
-					dlBwKHz: 100000,
-					rsrp: state.cell.rsrp
-				}];
+			// 1. 查询待刷新状态 (避免直接当作单载波)
+			if (caSt.state === 'pending') {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(59,130,246,0.04); border-radius:10px; border:1px dashed rgba(59,130,246,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-secondary);">' +
+					'  <span class="mt-pill-tag mt-pill-cyan" style="margin-right:8px;">待刷新</span> 正在获取模组载波聚合配置与分量波遥测数据，请稍候...' +
+					'</div>';
+				return;
 			}
 
+			// 2. 查询失败状态 (避免直接当作单载波)
+			if (caSt.state === 'error') {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(239,68,68,0.04); border-radius:10px; border:1px dashed rgba(239,68,68,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-secondary);">' +
+					'  <span class="mt-pill-tag" style="background:rgba(239,68,68,0.15); color:#ef4444; margin-right:8px;">未知</span> 模组载波信息读取异常（待下轮重试，未确认单/多载波）' +
+					'</div>';
+				return;
+			}
+
+			// 3. 数据过期状态
+			if (caSt.state === 'expired') {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(234,179,8,0.04); border-radius:10px; border:1px dashed rgba(234,179,8,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-secondary);">' +
+					'  <span class="mt-pill-tag" style="background:rgba(234,179,8,0.15); color:#eab308; margin-right:8px;">待刷新</span> 载波遥测数据已过期（等待重新同步，未判定单载波）' +
+					'</div>';
+				return;
+			}
+
+			// 4. 未驻网
+			if (!list.length) {
+				carrierBox.innerHTML =
+					'<div style="padding:14px 16px; background:rgba(128,128,128,0.04); border-radius:10px; border:1px dashed rgba(128,128,128,0.25); font-size:12.5px; text-align:center; color:var(--mt5700-text-muted);">' +
+					'  模组未驻留蜂窝网络，暂无活动分量载波' +
+					'</div>';
+				return;
+			}
+
+			// 5. 渲染各分量载波卡片（区分 PCC 与 SCC，信号指标取值与单位严格与 AT 响应一致）
+			var isCA = list.length > 1;
 			var caHtml = '<div style="display:flex; flex-direction:column; gap:10px;">';
+
+			if (isCA) {
+				caHtml +=
+					'<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 4px 6px;">' +
+					'  <div style="font-size:13px; font-weight:600; color:var(--mt5700-green); display:flex; align-items:center; gap:6px;">' +
+					'    <span class="mt-beacon-dot" style="background:var(--mt5700-green);"></span>' +
+					'    载波聚合已激活 · 共 ' + list.length + ' 个活动分量波 (PCC + ' + (list.length - 1) + ' 个 SCC)' +
+					'  </div>' +
+					'</div>';
+			}
+
 			list.forEach(function (c, i) {
-				var isPcc = (i === 0);
+				var isPcc = c.isPcc || (i === 0);
+				var roleTitle = isPcc ? '主载波 (PCC)' : ('辅载波 (SCC' + (c.sccIndex || i) + ')');
 				var tag = formatBandTag(c.sysMode, c.band);
-				var freqStr = getCarrierFreq(c) || '2565 MHz';
-				var bwStr = getCarrierBw(c) || '100MHz';
-				var fcn = c.dlFcn || '-';
-				var rsrpVal = (c.rsrp != null && !isNaN(c.rsrp)) ? (c.rsrp + ' dBm') : ((state.cell.rsrp != null && !isNaN(state.cell.rsrp)) ? state.cell.rsrp + ' dBm' : '-');
+				var freqStr = getCarrierFreq(c);
+				var bwStr = getCarrierBw(c);
+				var fcn = c.dlFcn || '—';
+				var pciStr = c.pci != null ? String(c.pci) : '—';
+
+				// 信号指标：严格与模组 AT 原始响应一致，未上报显示 '—'，绝不拿主载波值冒充辅载波
+				var rsrpStr = (c.rsrp != null && !isNaN(c.rsrp)) ? (c.rsrp + ' dBm') : '—';
+				var rsrqStr = (c.rsrq != null && !isNaN(c.rsrq)) ? (c.rsrq + ' dB') : '—';
+				var sinrStr = (c.sinr != null && !isNaN(c.sinr)) ? (c.sinr + ' dB') : (c.rssi != null ? ('RSSI ' + c.rssi + ' dBm') : '—');
+				var measExtra = c.measType && c.measType !== '—' && c.measType !== 'Serving' ? (' · ' + c.measType) : '';
 
 				caHtml +=
-					'<div class="mt-carrier-card-item" style="padding:12px 16px; background:var(--mt5700-subtle-bg); border-radius:10px; border:1px solid var(--mt5700-border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">' +
-					'  <div style="display:flex; align-items:center; gap:10px;">' +
+					'<div class="mt-carrier-card-item" style="padding:12px 16px; background:var(--mt5700-subtle-bg); border-radius:10px; border:1px solid var(--mt5700-border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">' +
+					'  <div style="display:flex; align-items:center; gap:10px; min-width:240px;">' +
 					'    <span class="mt-beacon-dot" style="background:' + (isPcc ? 'var(--mt5700-accent)' : 'var(--mt5700-green)') + ';"></span>' +
 					'    <div>' +
 					'      <div style="display:flex; align-items:center; gap:6px;">' +
-					'        <strong style="color:var(--mt5700-text); font-size:13px;">' + (isPcc ? '主载波 (PCC)' : '辅载波 (SCC' + i + ')') + '</strong>' +
+					'        <strong style="color:var(--mt5700-text); font-size:13px;">' + roleTitle + '</strong>' +
 					'        <span class="mt-pill-tag ' + (isPcc ? 'mt-pill-cyan' : 'mt-pill-purple') + '">' + tag + '</span>' +
 					'      </div>' +
 					'      <div style="font-size:12px; color:var(--mt5700-text-secondary); margin-top:3px;">' +
-					'        中心频率: <span style="color:var(--mt5700-text); font-weight:600;">' + freqStr + '</span> · 带宽: ' + bwStr + ' · 频点 (ARFCN): ' + fcn +
+					'        ' + (freqStr ? ('中心频率: <span style="color:var(--mt5700-text); font-weight:600;">' + freqStr + '</span> · ') : '') +
+					'        ' + (bwStr ? ('带宽: ' + bwStr + ' · ') : '') +
+					'        频点: ' + fcn + ' · PCI: ' + pciStr + measExtra +
 					'      </div>' +
 					'    </div>' +
 					'  </div>' +
-					'  <div style="display:flex; align-items:center; gap:12px;">' +
-					'    <div style="text-align:right;">' +
-					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">信号电平 (RSRP)</div>' +
-					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:var(--mt5700-cyan);">' + rsrpVal + '</div>' +
+					'  <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">' +
+					'    <div style="text-align:right; min-width:68px;">' +
+					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">RSRP</div>' +
+					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:' + (c.rsrp != null ? 'var(--mt5700-cyan)' : 'var(--mt5700-text-muted)') + ';">' + rsrpStr + '</div>' +
+					'    </div>' +
+					'    <div style="text-align:right; min-width:58px;">' +
+					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">RSRQ</div>' +
+					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:' + (c.rsrq != null ? 'var(--mt5700-purple)' : 'var(--mt5700-text-muted)') + ';">' + rsrqStr + '</div>' +
+					'    </div>' +
+					'    <div style="text-align:right; min-width:58px;">' +
+					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">SINR</div>' +
+					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:' + (c.sinr != null ? 'var(--mt5700-green)' : 'var(--mt5700-text-muted)') + ';">' + sinrStr + '</div>' +
 					'    </div>' +
 					'  </div>' +
 					'</div>';
 			});
 
-			if (list.length === 1) {
-				caHtml += '<div style="font-size:11.5px; color:var(--mt5700-text-muted); padding:4px 6px;">💡 当前运行于单载波模式 (PCC)，检测到活动频段 ' + formatBandTag(list[0].sysMode, list[0].band) + '。当网络下行高负载时将自动触发 CA 辅载波聚合。</div>';
+			if (!isCA) {
+				caHtml +=
+					'<div style="padding:10px 14px; background:rgba(139,92,246,0.04); border-radius:8px; border:1px solid rgba(139,92,246,0.15); font-size:12px; color:var(--mt5700-text-secondary); margin-top:2px;">' +
+					'  <strong style="color:var(--mt5700-text);">当前处于单载波运行模式</strong> · 模组或基站当前未激活辅分量载波 (SCC) 聚合' +
+					'</div>';
 			}
+
 			caHtml += '</div>';
 			carrierBox.innerHTML = caHtml;
 		}
 
-		/* ---------- 芯片温度渲染 (折叠面板内部) ---------- */
+		/* ---------- 芯片温度渲染 (折叠面板内部，严格根据设备 AT^CHIPTEMP 真实上报) ---------- */
 		function renderTempAdv() {
 			tempBody.innerHTML = '';
 			var t = state.temps || {};
@@ -971,6 +1205,15 @@ return L.view.extend({
 				{ label: 'MIMO PA', value: t.mimoPa },
 				{ label: 'TCXO 晶振', value: t.tcxo }
 			];
+			var hasAnyTemp = items.some(function (it) { return it.value != null && !isNaN(parseFloat(it.value)); });
+			if (!hasAnyTemp) {
+				tempBody.innerHTML = '<div style="padding:16px; text-align:center; color:var(--mt5700-text-muted); font-size:12.5px;">暂无芯片温度遥测数据（模组未上报或查询超时）</div>';
+				if (tempBadge) {
+					tempBadge.innerHTML = '';
+					tempBadge.appendChild(Mt5700.badge('温度未获取', 'neutral'));
+				}
+				return;
+			}
 
 			var maxC = 0, sumC = 0, nC = 0;
 			items.forEach(function (it) {
@@ -1007,29 +1250,36 @@ return L.view.extend({
 			}
 		}
 
-		/* ---------- 深度网络诊断渲染 (折叠面板内部) ---------- */
+		/* ---------- 深度网络诊断渲染 (折叠面板内部，真实设备遥测) ---------- */
 		function renderDiagAdv() {
 			diagBox.innerHTML = '';
 			var d = state.diag;
 			/* 查询未完成/失败时如实显示占位符：把「没查到」画成「已注册 5G」
 			 * 或「23 dBm 正常发射」，用户会拿着假状态去排障。 */
-			var endcTag = d.endc ? ((d.endc.established) ? '已建立' : '未建立') : '—';
-			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : '—';
-			var txVal = d.tx ? (d.tx.pusch + ' dBm / ' + d.tx.pucch + ' dBm') : '—';
+			var endcTag = d.endc ? (d.endc.established ? '已建立 (ENDC 启用)' : '未建立') : '—';
+			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : (state.networkStatus || '—');
+			var txVal = '—';
+			if (d.tx && (d.tx.pusch != null || d.tx.pucch != null)) {
+				txVal = (d.tx.pusch != null ? d.tx.pusch + ' dBm' : '—') + ' / ' + (d.tx.pucch != null ? d.tx.pucch + ' dBm' : '—');
+			}
 
 			var rows = [
-				['ENDC 双连接', endcTag],
-				['5GC 核心网注册', regVal],
-				['TAC / 小区标识', (d.reg && d.reg.tac ? d.reg.tac : '—') + ' / ' + (state.cell.cid || '—')],
-				['上行发射功率 PUSCH', txVal]
+				['ENDC 双连接状态', endcTag],
+				['5GC 分组网络注册', regVal],
+				['TAC / 物理小区', (d.reg && d.reg.tac ? d.reg.tac : (state.cell.lac || '—')) + ' / ' + (state.cell.cid || '—')],
+				['上行发射功率 (PUSCH / PUCCH)', txVal]
 			];
-			diagBox.appendChild(Mt5700.table(['项目', '参数状态'], rows, { striped: true }));
+			diagBox.appendChild(Mt5700.table(['诊断项目', '当前设备状态'], rows, { striped: true }));
 		}
 
-		/* ---------- 调制方式与空间流动态 SVG 渲染 (折叠面板内部) ---------- */
+		/* ---------- 调制方式与空间流动态 SVG 渲染 (折叠面板内部，真实读取 AT^MCS) ---------- */
 		function renderMcsAdv() {
 			mcsBody.innerHTML = '';
 			var m = state.mcs;
+			var dlMod = m.dlMod || '';
+			var ulMod = m.ulMod || '';
+			var dlRank = m.dlRank;
+			var ulRank = m.ulRank;
 
 			var visualWrap = E('div', { 'class': 'mt-mcs-visual-grid' });
 
@@ -1037,28 +1287,28 @@ return L.view.extend({
 			var qamBox = E('div', { 'class': 'mt-mcs-box' });
 			var qamTitle = E('div', { 'class': 'mt-mcs-header' }, [
 				E('span', { 'class': 'mt-mcs-tag mt-tag-cyan' }, 'QAM 星座图'),
-				E('span', { 'class': 'mt-mcs-desc' }, '下行 ' + (m.dlMod || '16QAM') + ' · 上行 ' + (m.ulMod || '64QAM'))
+				E('span', { 'class': 'mt-mcs-desc' }, dlMod ? ('下行 ' + dlMod + (ulMod ? ' · 上行 ' + ulMod : '')) : '模组上报读取中...')
 			]);
 			qamBox.appendChild(qamTitle);
-			qamBox.appendChild(Mt5700.constellationSvg(m.dlMod || '16QAM'));
+			qamBox.appendChild(Mt5700.constellationSvg(dlMod || 'QPSK'));
 			visualWrap.appendChild(qamBox);
 
 			// 2. 空间流 (MIMO 空间天线与波束动态矢量 SVG)
 			var mimoBox = E('div', { 'class': 'mt-mcs-box' });
 			var mimoTitle = E('div', { 'class': 'mt-mcs-header' }, [
 				E('span', { 'class': 'mt-mcs-tag mt-tag-purple' }, 'MIMO 空间流'),
-				E('span', { 'class': 'mt-mcs-desc' }, (m.dlRank || 4) + '×4 MIMO (DL) / 1×1 SISO (UL)')
+				E('span', { 'class': 'mt-mcs-desc' }, dlRank ? (dlRank + '×' + dlRank + ' MIMO (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '空间流读取中...')
 			]);
 			mimoBox.appendChild(mimoTitle);
-			mimoBox.appendChild(Mt5700.mimoSvg(m.dlRank || 4));
+			mimoBox.appendChild(Mt5700.mimoSvg(dlRank || 1));
 			visualWrap.appendChild(mimoBox);
 
 			mcsBody.appendChild(visualWrap);
 
 			var rows = [
-				['下行调制 (DL)', (m.dlMod || '16QAM') + ' · MCS ' + (m.dlRank || 14) + ' (高阶自适应调制使能)'],
-				['上行调制 (UL)', (m.ulMod || '64QAM') + ' · MCS ' + (m.ulRank || 20) + ' (上行纠错编码)'],
-				['空间多路复用', (m.dlRank || 4) + ' 层空间复用流 (DL) / 1 层 (UL) · 空间分集增益']
+				['下行调制方式 (DL)', dlMod ? (dlMod + ' (MCS ' + (m.dlMcs != null ? m.dlMcs : '—') + ')') : '— (模组未上报)'],
+				['上行调制方式 (UL)', ulMod ? (ulMod + ' (MCS ' + (m.ulMcs != null ? m.ulMcs : '—') + ')') : '— (模组未上报)'],
+				['空间多路复用流', dlRank ? (dlRank + ' 层空间复用流 (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '— (模组未上报)']
 			];
 			mcsBody.appendChild(Mt5700.table(['链路参数', '当前工作状态'], rows, { striped: true }));
 		}
@@ -1067,18 +1317,189 @@ return L.view.extend({
 		   6. 周期轮询与数据刷新 (完全保持原有后端 RPC 接口不变)
 		   ========================================================================== */
 
+		function getBandFromNrArfcn(arfcn) {
+			if (!arfcn) return '';
+			var ch = parseInt(arfcn, 10);
+			if (isNaN(ch)) return '';
+			if (ch >= 499200 && ch <= 537999) return '41';
+			if (ch >= 620000 && ch <= 680000) return '78';
+			if (ch >= 693334 && ch <= 733333) return '79';
+			if (ch >= 151600 && ch <= 160600) return '28';
+			if (ch >= 422000 && ch <= 434000) return '1';
+			if (ch >= 376000 && ch <= 396000) return '3';
+			if (ch >= 173800 && ch <= 175000) return '5';
+			if (ch >= 185000 && ch <= 192000) return '8';
+			return '';
+		}
+
+		function getBandFromLteArfcn(arfcn) {
+			if (!arfcn) return '';
+			var ch = parseInt(arfcn, 10);
+			if (isNaN(ch)) return '';
+			if (ch >= 0 && ch <= 599) return '1';
+			if (ch >= 1200 && ch <= 1949) return '3';
+			if (ch >= 2400 && ch <= 2649) return '5';
+			if (ch >= 3450 && ch <= 3799) return '8';
+			if (ch >= 36200 && ch <= 36349) return '34';
+			if (ch >= 37750 && ch <= 38249) return '38';
+			if (ch >= 38250 && ch <= 38649) return '39';
+			if (ch >= 38650 && ch <= 39649) return '40';
+			if (ch >= 39650 && ch <= 41589) return '41';
+			return '';
+		}
+
+		function syncCarriers() {
+			var now = Date.now();
+			var rawHfreq = state.rawHfreq || [];
+			var secNR = state.secondaryNR || [];
+			var secLTE = state.secondaryLTE || [];
+			var cell = state.cell || {};
+
+		var merged = [];
+
+			// 1. 主载波 (PCC) 组装
+			if (rawHfreq.length > 0) {
+				var p0 = rawHfreq[0];
+				var p0Band = p0.band || cell.band || (p0.sysMode === 'NR' ? getBandFromNrArfcn(p0.dlFcn) : getBandFromLteArfcn(p0.dlFcn));
+				merged.push({
+					isPcc: true,
+					carrierRole: 'PCC',
+					sysMode: p0.sysMode || cell.sysMode || 'NR',
+					band: p0Band,
+					dlFcn: p0.dlFcn || cell.channel || '',
+					dlFreqKHz: p0.dlFreqKHz || 0,
+					dlBwKHz: p0.dlBwKHz || 0,
+					pci: cell.pci != null && cell.pci !== '' ? cell.pci : null,
+					rsrp: cell.rsrp != null ? cell.rsrp : null,
+					rsrq: cell.rsrq != null ? cell.rsrq : null,
+					sinr: cell.sinr != null ? cell.sinr : null,
+					measType: 'Serving'
+				});
+			} else if (cell.channel) {
+				var pccBand = cell.band || (cell.sysMode === 'NR' ? getBandFromNrArfcn(cell.channel) : getBandFromLteArfcn(cell.channel));
+				merged.push({
+					isPcc: true,
+					carrierRole: 'PCC',
+					sysMode: cell.sysMode || 'NR',
+					band: pccBand,
+					dlFcn: cell.channel,
+					dlFreqKHz: (cell.sysMode === 'NR' && pccBand === '41') ? parseInt(cell.channel, 10) * 5 : 0,
+					dlBwKHz: 0,
+					pci: cell.pci != null && cell.pci !== '' ? cell.pci : null,
+					rsrp: cell.rsrp != null ? cell.rsrp : null,
+					rsrq: cell.rsrq != null ? cell.rsrq : null,
+					sinr: cell.sinr != null ? cell.sinr : null,
+					measType: 'Serving'
+				});
+			}
+
+			// 2. 匹配与扩展辅载波 (SCC)
+			var sccCounter = 1;
+			for (var hi = 1; hi < rawHfreq.length; hi++) {
+				var h = rawHfreq[hi];
+				var sig = Parse.carrierSignalFor(h, secNR, secLTE);
+				var hBand = h.band || (h.sysMode === 'NR' ? getBandFromNrArfcn(h.dlFcn) : getBandFromLteArfcn(h.dlFcn));
+				merged.push({
+					isPcc: false,
+					carrierRole: 'SCC',
+					sccIndex: sccCounter++,
+					sysMode: h.sysMode || 'NR',
+					band: hBand,
+					dlFcn: h.dlFcn || '',
+					dlFreqKHz: h.dlFreqKHz || 0,
+					dlBwKHz: h.dlBwKHz || 0,
+					pci: sig ? sig.pci : null,
+					rsrp: sig ? sig.rsrp : null,
+					rsrq: sig ? sig.rsrq : null,
+					sinr: sig ? sig.sinr : null,
+					measType: sig ? sig.measType : null
+				});
+			}
+
+			// 3. 找出 HFREQINFO 未覆盖但 MONSSC / CASCELLINFO 已上报的活动辅载波（确保辅载波不丢）
+			var orphan = Parse.unmatchedSecondaries(rawHfreq, secNR, secLTE);
+			if (orphan.nr && orphan.nr.length > 0) {
+				orphan.nr.forEach(function (nCell) {
+					var nBand = getBandFromNrArfcn(nCell.arfcn);
+					var freqKHz = (nBand === '41') ? nCell.arfcn * 5 : 0;
+					merged.push({
+						isPcc: false,
+						carrierRole: 'SCC',
+						sccIndex: sccCounter++,
+						sysMode: 'NR',
+						band: nBand,
+						dlFcn: String(nCell.arfcn),
+						dlFreqKHz: freqKHz,
+						dlBwKHz: 0,
+						pci: nCell.pci != null ? nCell.pci : null,
+						rsrp: nCell.rsrp != null ? nCell.rsrp : null,
+						rsrq: nCell.rsrq != null ? nCell.rsrq : null,
+						sinr: nCell.sinr != null ? nCell.sinr : null,
+						measType: nCell.measType || 'SSB'
+					});
+				});
+			}
+
+			if (orphan.lte && orphan.lte.length > 0) {
+				orphan.lte.forEach(function (lCell) {
+					var lBand = lCell.band ? String(lCell.band) : (getBandFromLteArfcn(lCell.dlArfcn) || '');
+					var freqKHz = lCell.dlFreq ? Math.round(lCell.dlFreq * 1000) : 0;
+					var bwKHz = lCell.dlBandwidth ? Math.round(lCell.dlBandwidth * 1000) : 0;
+					merged.push({
+						isPcc: false,
+						carrierRole: 'SCC',
+						sccIndex: sccCounter++,
+						sysMode: 'LTE',
+						band: lBand,
+						dlFcn: lCell.dlArfcn != null ? String(lCell.dlArfcn) : '',
+						dlFreqKHz: freqKHz,
+						dlBwKHz: bwKHz,
+						pci: lCell.pci != null ? lCell.pci : null,
+						rsrp: lCell.rsrp != null ? lCell.rsrp : null,
+						rsrq: lCell.rsrq != null ? lCell.rsrq : null,
+						sinr: null,
+						rssi: lCell.rssi != null ? lCell.rssi : null
+					});
+				});
+			}
+
+		state.carriers = merged;
+
+		/*
+		 * 状态收口（唯一判据入口，杜绝"查询异常被当成单载波"）：
+		 *   - primaryOk / secondaryOk：undefined 表示本轮尚未查询，不算失败；
+		 *   - 主载波频点查询失败时，即便只解析出 1 个载波也不能下"单载波"结论，
+		 *     因为此时根本无法确认有没有辅载波；
+		 *   - 两次查询都成功却没有载波，说明模组明确未驻网 → 'none'；
+		 *   - 其余情况按"是否已过期 / 是否曾成功过"落到 expired / error / pending。
+		 */
+		/* 只有明确的 true 才算成功：初值为 null（尚未查询），不能当成功用 */
+		var primaryOk = state.hfreqSuccess === true;
+		var secondaryOk = state.secondarySuccess === true;
+		var stale = state.caStatus.lastSuccessTime > 0 && (now - state.caStatus.lastSuccessTime > 15000);
+
+		if (merged.length > 1) {
+			state.caStatus.state = 'ca';
+			state.caStatus.lastSuccessTime = now;
+		} else if (merged.length === 1 && primaryOk) {
+			state.caStatus.state = 'single';
+			state.caStatus.lastSuccessTime = now;
+		} else if (merged.length === 0 && primaryOk && secondaryOk) {
+			state.caStatus.state = 'none';
+		} else {
+			state.caStatus.state = stale ? 'expired' : (state.caStatus.lastSuccessTime > 0 ? 'error' : 'pending');
+		}
+	}
+
 		function updateNetworkInfo() {
-			var carriers = [];
 			var serving = null;
 
 			return AtWs.client.sendCommand('AT^MONSC').then(function (monsc) {
 				serving = (monsc.success && monsc.data) ? AtWs.parseMONSC(monsc.data) : null;
 				return AtWs.client.sendCommand('AT^HFREQINFO?');
 			}).then(function (hfreq) {
-				carriers = (hfreq.success && hfreq.data) ? AtWs.parseHFREQINFO(hfreq.data) : [];
-				if (carriers.length > 0 && serving && serving.rsrp != null) {
-					if (carriers[0].rsrp == null) carriers[0].rsrp = serving.rsrp;
-				}
+				state.hfreqSuccess = hfreq.success;
+				state.rawHfreq = (hfreq.success && hfreq.data) ? AtWs.parseHFREQINFO(hfreq.data) : [];
 				if (serving) {
 					state.cell.mcc = serving.mcc; state.cell.mnc = serving.mnc;
 					state.cell.lac = serving.lac; state.cell.cid = serving.cid;
@@ -1104,11 +1525,22 @@ return L.view.extend({
 					return null;
 				});
 			}).then(function () {
-				state.carriers = carriers;
+				state.telemetryError = false;
+				syncCarriers();
 				renderSignalUI();
 				renderTabsUI();
 				renderCarriersAdv();
 			}).catch(function (e) {
+				/*
+				 * 这里无法判断是哪一步失败（MONSC / HFREQINFO / HCSQ / 渲染），
+				 * 因此不再无条件把 hfreqSuccess 置 false —— 那样会让「信号正常、
+				 * 只是辅助遥测偶发失败」的情况被误判成信号读取异常。
+				 * HFREQINFO 自身的成败已在上一级 then 中如实记录。
+				 */
+				state.telemetryError = true;
+				syncCarriers();
+				renderCarriersAdv();
+				renderTabsUI();
 				console.warn('Network info update error:', e);
 			});
 		}
@@ -1116,10 +1548,19 @@ return L.view.extend({
 		function loadSecondary() {
 			return AtWs.client.sendCommand('AT^MONSSC').then(function (monssc) {
 				state.secondaryNR = (monssc.success && monssc.data) ? Parse.parseMonsscAll(String(monssc.data)) : [];
+				state.secondarySuccess = monssc.success;
 				return AtWs.client.sendCommand('AT^CASCELLINFO?');
 			}).then(function (cascell) {
 				state.secondaryLTE = (cascell.success && cascell.data) ? Parse.parseCascellAll(String(cascell.data)) : [];
-			}).catch(function () {});
+				if (cascell.success) state.secondarySuccess = true;
+				syncCarriers();
+				renderCarriersAdv();
+				renderTabsUI();
+			}).catch(function () {
+				syncCarriers();
+				renderCarriersAdv();
+				renderTabsUI();
+			});
 		}
 
 		function loadDiagnostics() {
@@ -1245,9 +1686,95 @@ return L.view.extend({
 			});
 		}
 
-		/* SIM 卡信息读取：安全只读 AT+CIMI 与 AT^ICCID?，不带任何星号完全展现 */
-		function loadSimInfo() {
-			return AtWs.client.sendCommand('AT+CIMI').then(function (res) {
+		/*
+		 * 判断 APN 是否属于**非数据**专用承载（IMS / 紧急 / MMS / SUPL 等）。
+		 * 这些上下文由模组为 IMS 等业务预留，不能拿来当「数据通道 APN」展示。
+		 */
+		function isNonDataApn(apn) {
+			var a = String(apn || '').trim().toLowerCase();
+			if (!a) return false;
+			if (/^(ims|xcap|sos|emergency|mms|supl|dun|fota|cbs|ia)([.\-_]|$)/.test(a)) return true;
+			/* 形如 ims.mnc000.mcc460.3gppnetwork.org 的完整域名形态 */
+			if (/(^|[.\-_])ims([.\-_]|$)/.test(a)) return true;
+			return false;
+		}
+
+		/*
+		 * 从 AT+CGDCONT? 的原始响应里挑出**数据通道**上下文。
+		 * 实机响应示例（含 IMS 专用承载 cid=5）：
+		 *   +CGDCONT: 1,"IPV4V6","",...
+		 *   +CGDCONT: 5,"IPV4V6","ims",...
+		 * 规则：剔除 IMS/紧急等专用承载 → 优先 CID 1 → 命中即锁定，
+		 * 保证数据通道 APN 为空（由核心网分配）时也不会被后面的 ims 顶掉。
+		 */
+		function pickDataContext(text) {
+			var picked = null;
+			var imsApn = '';
+			var lines = String(text || '').split('\n');
+			for (var i = 0; i < lines.length; i++) {
+				var m = lines[i].trim().match(/\+CGDCONT:\s*(\d+),\s*"([^"]*)",\s*"([^"]*)"/);
+				if (!m) continue;
+				var cid = m[1];
+				var ptype = m[2];
+				var apn = m[3] || '';
+				if (isNonDataApn(apn)) {
+					if (!imsApn) imsApn = apn;
+					continue;
+				}
+				/* CID 1 优先级最高；已锁定 CID 1 后不再被后续上下文覆盖 */
+				if (!picked || (picked.cid !== '1' && cid === '1')) {
+					picked = { cid: cid, ptype: ptype, apn: apn };
+				}
+			}
+			return { data: picked, imsApn: imsApn };
+		}
+
+		/* 设备与 SIM 卡信息读取：实际获取模组 ATI, CGMM, CGSN, CPIN, CIMI, ICCID, CGMR, CGDCONT 上报 */
+		function loadDeviceInfo() {
+			return AtWs.client.sendCommand('ATI').then(function (res) {
+				if (res && res.success && res.data) {
+					var s = String(res.data);
+					var mModel = s.match(/Model:\s*([^\r\n]+)/i);
+					if (mModel) state.modemInfo.model = mModel[1].trim();
+					var mManuf = s.match(/Manufacturer:\s*([^\r\n]+)/i);
+					if (mManuf) state.modemInfo.manufacturer = mManuf[1].trim();
+					var mRev = s.match(/Revision:\s*([^\r\n]+)/i);
+					if (mRev && !state.modemInfo.fw) state.modemInfo.fw = mRev[1].trim();
+					var mImei = s.match(/IMEI:\s*([0-9A-Za-z]+)/i);
+					if (mImei) state.modemInfo.imei = mImei[1].trim();
+				}
+				if (!state.modemInfo.model) {
+					return AtWs.client.sendCommand('AT+CGMM').then(function (res2) {
+						if (res2 && res2.success && res2.data) {
+							var lines = String(res2.data).split('\n');
+							for (var i = 0; i < lines.length; i++) {
+								var l = lines[i].trim();
+								if (l && l !== 'OK' && l.indexOf('ERROR') === -1) {
+									state.modemInfo.model = l;
+									break;
+								}
+							}
+						}
+					});
+				}
+			}).then(function () {
+				return AtWs.client.sendCommand('AT+CPIN?');
+			}).then(function (res) {
+				if (res && res.success && res.data) {
+					var m = String(res.data).match(/\+CPIN:\s*([^\r\n]+)/);
+					if (m) {
+						var st = m[1].trim();
+						state.simStatus = (st === 'READY') ? '正常 (READY)' : st;
+					}
+				}
+				return AtWs.client.sendCommand('AT+CGSN');
+			}).then(function (res) {
+				if (res && res.success && res.data) {
+					var m = String(res.data).match(/\b(\d{14,16})\b/);
+					if (m) state.modemInfo.imei = m[1];
+				}
+				return AtWs.client.sendCommand('AT+CIMI');
+			}).then(function (res) {
 				if (res && res.success && res.data) {
 					var m = String(res.data).match(/\b(\d{14,16})\b/);
 					if (m) state.modemInfo.imsi = m[1];
@@ -1270,8 +1797,22 @@ return L.view.extend({
 						}
 					}
 				}
+				return AtWs.client.sendCommand('AT+CGDCONT?');
+			}).then(function (res) {
+				if (res && res.success && res.data) {
+					/* 只认数据通道：详见 pickDataContext 的说明 */
+					var ctx = pickDataContext(res.data);
+					if (ctx.imsApn) state.imsApn = ctx.imsApn;
+					if (ctx.data) {
+						state.pdpType = ctx.data.ptype;
+						state.apn = ctx.data.apn;
+						state.apnCid = ctx.data.cid;
+					}
+				}
 				renderTabsUI();
-			}).catch(function () {});
+			}).catch(function (e) {
+				console.warn('loadDeviceInfo error:', e);
+			});
 		}
 
 		// 实时网络速率采样 (每 1000ms 采样一次接口统计)
@@ -1288,6 +1829,7 @@ return L.view.extend({
 					return;
 				}
 				var now = Date.now();
+				if (r.device) state.deviceInterface = r.device;
 				if (rateSample && rateSample.device === r.device) {
 					var dt = (now - rateSample.t) / 1000;
 					if (dt >= 0.2) {
@@ -1308,29 +1850,32 @@ return L.view.extend({
 		rateTimer = setInterval(sampleRate, 1000);
 		sampleRate();
 
-		// 全量状态轮询刷新
+		// 全量状态轮询刷新：纯串行执行，避免单通道 AT 串口并发阻塞冲突
 		var refreshing = false;
 		function refreshAll() {
 			if (refreshing) return Promise.resolve();
 			refreshing = true;
 
-			var groups = [
-				[getPSReg, getOperator, loadSimInfo],
-				[getDHCP, getFlow],
-				[getTemp, getMCS],
-				[updateNetworkInfo, loadSecondary, loadDiagnostics]
+			var tasks = [
+				updateNetworkInfo,
+				loadSecondary,
+				loadDeviceInfo,
+				getPSReg,
+				getOperator,
+				getDHCP,
+				getFlow,
+				getTemp,
+				getMCS,
+				loadDiagnostics
 			];
 
-			var chain = Promise.resolve();
-			groups.forEach(function (group) {
-				chain = chain.then(function () {
-					return Promise.all(group.map(function (fn) {
-						return Promise.resolve().then(fn).catch(function () {});
-					}));
+			return tasks.reduce(function (p, fn) {
+				return p.then(function () {
+					return Promise.resolve().then(fn).catch(function (e) {
+						console.warn('Poll task error:', e);
+					});
 				});
-			});
-
-			return chain.then(function () {
+			}, Promise.resolve()).then(function () {
 				refreshing = false;
 				renderTabsUI();
 			}).catch(function () {
