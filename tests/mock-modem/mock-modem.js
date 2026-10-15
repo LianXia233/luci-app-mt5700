@@ -130,7 +130,7 @@ function replyFor(cmd) {
 	 * 应答便静默回落到 HCSQ，于是巡检报出 -140 dBm 这种假读数（页面也一起错），
 	 * 掩盖了真正的信号值。两种写法都认，避免再踩。
 	 */
-	if (c === 'AT^MONSC' || c === 'AT^MONSC?') return '^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-10,28\r\nOK';
+	if (c === 'AT^MONSC' || c === 'AT^MONSC?') return '^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-65,-10,28\r\nOK';
 	if (c === 'AT^HFREQINFO?') return '^HFREQINFO: 0,7,41,513000,2565000,100000,0,0,0\r\nOK';
 	if (c === 'AT^LENDC?') return '^LENDC: 0,1,10,0,0\r\nOK';
 	if (c === 'AT^TXPOWER?') return '^TXPOWER: 0,15,23\r\nOK';

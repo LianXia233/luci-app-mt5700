@@ -103,7 +103,7 @@ try {
 				{ n: 0, sysMode: 'NR', band: '41', dlFcn: '513000', dlFreqKHz: 2565000, dlBwKHz: 100000 }
 			],
 			secondaryNR: [
-				{ arfcn: 504990, pci: 86, rsrp: -72, rsrq: -11, sinr: 18, measType: 'SSB' }
+				{ arfcn: 501234, pci: 86, rsrp: -72, rsrq: -11, sinr: 18, measType: 'SSB' }
 			],
 			secondaryLTE: [],
 			cell: { channel: '513000', pci: 128, rsrp: -64, rsrq: -10, sinr: 25, sysMode: 'NR' },
@@ -167,7 +167,7 @@ try {
 			rawHfreq: [],
 			secondaryNR: [],
 			secondaryLTE: [],
-			cell: { channel: '504990', pci: 128, rsrp: -64, rsrq: -10, sinr: 25, sysMode: 'NR' },
+			cell: { channel: '501234', pci: 128, rsrp: -64, rsrq: -10, sinr: 25, sysMode: 'NR' },
 			hfreqSuccess: false,
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: Date.now() - 2000 }

@@ -986,7 +986,8 @@ return L.view.extend({
 
 			var ipEl = document.getElementById('net-val-ip');
 			if (ipEl) {
-				var curIp = state.dhcpv4.ipv4Address || (state.diag.addrs[0] ? state.diag.addrs[0].address : '—');
+				var pdpIpv4 = (state.diag.addrs || []).filter(function (a) { return a.family === 'IPv4'; })[0];
+			var curIp = state.dhcpv4.ipv4Address || (pdpIpv4 ? pdpIpv4.address : '—');
 				ipEl.textContent = curIp;
 			}
 
@@ -1043,8 +1044,11 @@ return L.view.extend({
 				'</table>';
 
 			// Tab 4: APN 信息（读取 AT+CGDCONT 真实配置，绝不假写 cmiot5g）
-			var ipv4 = state.dhcpv4.ipv4Address || (state.diag.addrs[0] ? state.diag.addrs[0].address : '—');
-			var ipv6 = state.dhcpv6.ipv6Address || '—';
+			/* PDP 地址按 family 取值：parseCgpaddr 现在会返回双栈两条记录 */
+			var pdpIpv4 = (state.diag.addrs || []).filter(function (a) { return a.family === 'IPv4'; })[0];
+			var pdpIpv6 = (state.diag.addrs || []).filter(function (a) { return a.family === 'IPv6'; })[0];
+			var ipv4 = state.dhcpv4.ipv4Address || (pdpIpv4 ? pdpIpv4.address : '—');
+			var ipv6 = state.dhcpv6.ipv6Address || (pdpIpv6 ? pdpIpv6.address : '—');
 			var gw = state.dhcpv4.gateway || '—';
 			var dns = (state.dhcpv4.primaryDNS || '—') + (state.dhcpv4.secondaryDNS ? ' / ' + state.dhcpv4.secondaryDNS : '');
 			var apnName = state.apn || '默认 (核心网自动分配)';

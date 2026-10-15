@@ -17,6 +17,7 @@
 - **feat(ui)**: 信号强度卡片改用**四格动态信号图标**（移植自 `cellular-signal-preview.html`）：`Mt5700.cellularSignal()` 以 `data-state` 驱动 9 种状态（无信号 / 1~4 格 / 搜索中 / 连接中 / 已断开 / 连接错误），配套颜色、扫描与闪烁动画、`prefers-reduced-motion` 降级全部在 `mt5700.css`。原环形仪表（`createSignalCircularGauge` / `#sig-gauge-circle` / `.mt-sig-gauge-box`）删除。
 - **fix(status)**: 图标状态由真实上报数据推导（`computeCellularState()`），并与品质文案同源，杜绝图形与文字不一致：主载波查询失败 → `error`；SIM 未就绪 → `disconnected`；未注册 / 状态未知 / 等待中 → `searching`（等待态同时覆盖注册被拒与未知为 `error`）；已注册但尚无 RSRP 读数 → `connecting`；已注册且 RSRP 分档 `>= -80 full` / `-95 strong` / `-110 medium` / `>-140 weak` / 其余 `none`。实机（RSRP `-64`、CGREG 已注册、CPIN READY）渲染为 `full` 4 格绿色，文案「极佳 · 满格服务」。
 - **style(chart)**: 趋势图**极简化 + 悬浮卡汉化**：图内只保留刻度数值与三条曲线，移除档位文字（Poor/Fair/Good/Excellent）、轴单位（dBm/dB）与末端 RSRP/Quality 文字标注，背景质量分区带保留；图例汉化（`RSRP · 左轴` / `SINR · 右轴` / `RSRQ · 虚线`），悬浮数据卡汉化（`时间:` / `质量:`，档位恢复中文名），空态提示恢复中文。清理随之失效的字号变量。
+- **fix(status)**: 修复 APN 信息 **IPv6 无数据**：`AT+CGPADDR` 双栈时一行携带两个地址（实机 `+CGPADDR: 1,"198.51.100.10","32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"`），旧解析每行只取第一个，IPv6（点分字节格式）被静默丢弃。现 `parseCgpaddr()` 解析行内全部地址并按 family 归类，点分字节 IPv6 转换为压缩冒号格式（`2001:db8::1`）；页面 IPv4 / IPv6 分别按 `family` 取值，不再用 `addrs[0]` 粗暴回退。
 - **fix(ui)**: 修复**卡片体双重内边距**：`.mt5700-card-body` 存在三条带 `!important` 的旧规则（`22px 24px` / `16px 18px` / `14px 20px`），与卡片自身 `padding: 20px` 叠加，导致内容区被压缩（拨号页 PDP 网格只剩 300px 宽且两侧留白）。现统一为 `padding: 0`（内边距由卡片自身提供），跨页面卡片内容宽度恢复一致。
 - **fix(ui)**: **拨号页 PDP 上下文管理手机端排版**：≤640px 时卡片网格单列全宽（原 300px 固定列且两侧留白）、PDP 卡片内边距收紧、操作按钮两列换行（最小 96px）；表格视图改为容器横向滑动（表格最小 620px，`-webkit-overflow-scrolling: touch`），五列内容完整可查、不再挤压。
 - **fix(ui)**: 修复信号图标**频繁误报「信号读取异常」**：状态判定改为「已有 RSRP 读数即按电平分档」，不再让 `AT^HFREQINFO?` / `AT^HCSQ?` 等辅助遥测命令的偶发失败覆盖正常信号；同时 `updateNetworkInfo` 的异常分支不再无条件把 `hfreqSuccess` 置 `false`（该分支无法区分是哪一步失败，改为记录 `telemetryError`），只有主载波查询明确失败且无任何读数时才判定异常。实机连续采样 32 秒稳定为 `full`（RSRP -63~-64）。
@@ -25,7 +26,7 @@
 - **style(css)**: 删除插件独立的 `mt-theme-dark` / `mt-theme-light` 明暗模式类，暗色配色改为跟随全局主题的 `[data-theme="dark"]` 与系统 `prefers-color-scheme`；核心观感变量（背景/卡片/文字/边框）改为优先继承当前 LuCI 主题的 CSS 变量（`--background-color` 等，未定义时回落插件配色），不同主题下自动适配。
 - **fix(status)**: 修复 APN 信息误显示 IMS 的问题 —— 实机 `AT+CGDCONT?` 会同时报出 cid=5 的 `ims` 专用承载，旧逻辑在数据通道 APN 为空（核心网分配）时被后面的 ims 顶掉。现抽取 `pickDataContext()`：剔除 IMS/紧急等专用承载、优先锁定 CID 1 且不再被覆盖，并在 APN 页新增「数据通道 (CID)」行。
 - **chore(ui)**: 清理确认无引用的历史残留：旧版内联 SVG 看板娘 `Mt5700.mascotSvg()`（当前看板娘使用 `mascot.png` 图片）、旧气泡样式 `.mt-anime-speech-bubble`、雷达扫描动画 `.mt-anim-sweep` / `@keyframes mt-radar-sweep`。`mt-anim-pulse/spin/stream/float` 仍被 MCS 面板、骨架屏与图标组件使用，予以保留。
-- **test**: 新增 `tests/apn-channel-test.js`（12 项：IMS 识别、CID 1 锁定、专用承载排除、异常输入）与 `tests/cellular-icon-test.js`（38 项：9 种状态格数、未知状态回落、全部真实数据分档、文案完整性，以及「有 RSRP 时遥测失败不得误报异常」的回归用例）；全量前端单测 **164 项通过**（17 + 15 + 6 + 12 + 38 + 29 + 28 + 19）。
+- **test**: 新增 `tests/apn-channel-test.js`（12 项：IMS 识别、CID 1 锁定、专用承载排除、异常输入）与 `tests/cellular-icon-test.js`（38 项：9 种状态格数、未知状态回落、全部真实数据分档、文案完整性，以及「有 RSRP 时遥测失败不得误报异常」的回归用例）；全量前端单测 **174 项通过**（17 + 15 + 6 + 12 + 38 + 29 + 10 + 28 + 19）。
 - **note(ui)**: 静态样式版本戳 `MT5700_CSS_VERSION` 提升至 `2.18.0` —— 之前多轮样式改动未同步递增，浏览器会沿用缓存的旧 `mt5700.css` 导致「代码已更新、页面仍是旧样式」的错位假象；此后样式变更需同步递增该版本号。
 - **verify**: 实机热部署后 Playwright 验收：夜间模式按钮 0 个、英雄栏动态 SVG 0 个、看板娘在列；网络状态页 PCI **128**、CA 状态「单载波 (PCC)」、APN 显示「默认 (核心网自动分配) + CID 1（数据承载）」、星座图/MIMO SVG 正常渲染、无新增控制台报错。
 
@@ -55,7 +56,7 @@
 - **fix(parse)**: `carrierSignalFor` / `unmatchedSecondaries` 空频点健壮性 —— 空 `dlFcn` 原先被 `Number('')` 折成 `0`，既会把 `arfcn=0` 的辅小区误判为「已匹配」而丢掉，也可能把主载波信号错配给空频点载波。现统一折成 `null` 并跳过匹配。
 - **fix(status)**: 载波状态判定收口为唯一出口 —— `AT^HFREQINFO?` 查询失败时，即使只解析出 1 个载波也不再判定为「单载波」（改为 `error`，数据过期则 `expired`）；两次查询都成功却没有任何载波时判定 `none`（未驻网），不再是自相矛盾的「单载波」；`hfreqSuccess` 初值 `null`（尚未查询）不再被当作成功。
 - **test**: 新增 `tests/switch-rollback-test.js`（6 项开关回滚）与 `tests/parse-regression-test.js`（15 项 PCI 进制与载波匹配回归）；`tests/ca-status-test.js` 由 13 项扩到 17 项。全量前端单测 **85 项 100% 通过**（17 + 28 + 19 + 15 + 6）。
-- **verify**: 实机（192.168.88.1，中国移动 NSA/NR n41）抓 `AT^MONSC` / `AT^HFREQINFO?` / `AT^MONSSC` / `AT^CASCELLINFO?` 原始响应后用修复后的解析层复算：PCI `0x80 → 128`、基站 `C2840C002 (TAC 149002)`、ARFCN `504990`、辅载波 0 个（MONSSC NONE / CASCELLINFO ERROR）→ 状态 `single`，与模组实际上报一致。前端热部署到真机后 Playwright 抓取渲染结果：网络状态页 PCI **128**、基站标识带 TAC、CA 状态「单载波 (PCC)」、温控开关与 `^THERMAUTOFUN: 1 0 2` 一致，无页面报错。
+- **verify**: 实机（192.168.x.1，中国移动 NSA/NR n41）抓 `AT^MONSC` / `AT^HFREQINFO?` / `AT^MONSSC` / `AT^CASCELLINFO?` 原始响应后用修复后的解析层复算：PCI `0x80 → 128`、基站 `C28xxxxx (TAC 1xxxxx)`、ARFCN `5049xx`、辅载波 0 个（MONSSC NONE / CASCELLINFO ERROR）→ 状态 `single`，与模组实际上报一致。前端热部署到真机后 Playwright 抓取渲染结果：网络状态页 PCI **128**、基站标识带 TAC、CA 状态「单载波 (PCC)」、温控开关与 `^THERMAUTOFUN: 1 0 2` 一致，无页面报错。
 
 ### 载波聚合 (CA) 多分量波生命周期识别与信号指标对齐
 
@@ -67,7 +68,7 @@
 ### 物理小区 (PCI) 十六进制进制换算与基站标识错位修复
 
 - **fix(status)**: 模组通过 `AT^MONSC` 上报的 5G NR PCI 字段为十六进制（如实机 `0x80`，手册 13.27.3 规定 0~0x3EF），前端 `rpc.js` 误用十进制 `parseInt(p[6], 10)` 导致误显为 `80`。现更正为十六进制解析 `parseInt(p[6], 16)`，实机正确输出为十进制 **`128`**，对齐 3GPP 标准与 Rust 后端 `urc.rs`。
-- **fix(status)**: 修正 NR 布局中中心频点 ARFCN（`504990`）与跟踪区码 TAC（`149002`）反向错位映射问题，基站标识现正确带出 `(TAC 149002)`。优化 PCI 为合法 `0` 时的空值回退判断。
+- **fix(status)**: 修正 NR 布局中中心频点 ARFCN（`5049xx`）与跟踪区码 TAC（`1xxxxx`）反向错位映射问题，基站标识现正确带出 `(TAC 1xxxxx)`。优化 PCI 为合法 `0` 时的空值回退判断。
 
 ### 拨号设置与模组设置 UI 紧凑化与移动端响应式重构
 

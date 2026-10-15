@@ -51,19 +51,19 @@ try {
 
 	/* ---------- 1. NR：PCI 为十六进制（手册 13.27.3，0~0x3EF） ---------- */
 	{
-		// 实机抓取：^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-64,-10,25
-		const d = AtWs.parseMONSC('^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-64,-10,25\r\nOK');
+		// 实机抓取：^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25
+		const d = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25\r\nOK');
 		check('NR PCI 十六进制换算 (0x80 -> 128)', d && d.pci === 128, d ? 'pci=' + d.pci : 'null');
-		check('NR 频点 ARFCN 与 TAC 不再错位', d && d.channel === '504990' && d.lac === '149002' && d.cid === 'C2840C002',
+		check('NR 频点 ARFCN 与 TAC 不再错位', d && d.channel === '501234' && d.lac === '12345' && d.cid === 'C1A2B3C',
 			d ? 'arfcn=' + d.channel + ' tac=' + d.lac + ' cid=' + d.cid : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: NR,460,00,504990,1,C2840C002,3EF,149002,-64,-10,25\r\nOK');
+		const d = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,3EF,12345,-64,-10,25\r\nOK');
 		check('NR PCI 取到上限 0x3EF -> 1007', d && d.pci === 1007, d ? 'pci=' + d.pci : 'null');
 	}
 	{
 		// 十进制上报的 999：按 16 进制会变成 2457（越界），必须回退
-		const d = AtWs.parseMONSC('^MONSC: NR,460,00,504990,1,C2840C002,999,149002,-64,-10,25\r\nOK');
+		const d = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,999,12345,-64,-10,25\r\nOK');
 		check('NR PCI 十六进制越界回退十进制', d && d.pci === 999, d ? 'pci=' + d.pci : 'null');
 	}
 
@@ -90,7 +90,7 @@ try {
 		check('旧编码格式 PCI 按十进制解析 (120 而非 288)', d && d.pci === 120, d ? 'pci=' + d.pci : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: 460,00,504990,C2840C002,80,504990,77,226,30,"NR"\r\nOK');
+		const d = AtWs.parseMONSC('^MONSC: 460,00,501234,C1A2B3C,80,501234,77,226,30,"NR"\r\nOK');
 		check('旧编码格式标注 NR 时按十六进制 (0x80 -> 128)', d && d.pci === 128, d ? 'pci=' + d.pci : 'null');
 	}
 
