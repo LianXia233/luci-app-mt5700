@@ -282,15 +282,15 @@ return L.view.extend({
 				E('div', { 'class': 'mt-chart-legends' }, [
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#38bdf8;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#38bdf8;' }),
-						E('span', {}, 'RSRP · Left')
+						E('span', {}, 'RSRP · 左轴')
 					]),
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#10b981;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#10b981;' }),
-						E('span', {}, 'SINR · Right')
+						E('span', {}, 'SINR · 右轴')
 					]),
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#a855f7;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:repeating-linear-gradient(90deg, #a855f7 0 4px, transparent 4px 7px);' }),
-						E('span', {}, 'RSRQ · Dashed')
+						E('span', {}, 'RSRQ · 虚线')
 					])
 				])
 			]),
@@ -667,12 +667,12 @@ return L.view.extend({
 		   ========================================================================== */
 
 		/* RSRP 质量分区（阈值与 computeCellularState 的分档保持一致） */
-		/* 档位标签用英文，保证图表区域文字风格统一（不含中文） */
+		/* 档位中文名（用于悬浮数据卡的“质量”字段；图内不再绘制档位文字） */
 		var SIGNAL_TIERS = [
-			{ label: 'Poor', min: -125, max: -110, color: '#ef4444' },
-			{ label: 'Fair', min: -110, max: -95, color: '#f59e0b' },
-			{ label: 'Good', min: -95, max: -80, color: '#0ea5e9' },
-			{ label: 'Excellent', min: -80, max: -53, color: '#10b981' }
+			{ label: '较差', min: -125, max: -110, color: '#ef4444' },
+			{ label: '一般', min: -110, max: -95, color: '#f59e0b' },
+			{ label: '良好', min: -95, max: -80, color: '#0ea5e9' },
+			{ label: '极佳', min: -80, max: -53, color: '#10b981' }
 		];
 
 		/* RSRP → 质量分区下标；无有效读数返回 -1 */
@@ -731,7 +731,7 @@ return L.view.extend({
 			var box = document.getElementById('sig-trend-chart-box');
 			if (!box) return;
 			if (sigHistory.length < 2) {
-				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">Collecting signal samples (need at least 2 points)...</div>';
+				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">正在采集实时信号趋势数据（至少需要 2 个采样点）...</div>';
 				return;
 			}
 
@@ -751,11 +751,8 @@ return L.view.extend({
 			/* 字号取「可读但不喧宾夺主」的中间值：
 			   桌面容器 ≈573 宽（viewBox 560）缩放约 1.02 → 刻度实际约 11.7px，与卡片正文 12~13px 协调；
 			   窄屏 viewBox 380、容器 ≈340 缩放约 0.9 → 刻度实际约 10.8px，保持可辨认。 */
-			var fsTick = narrow ? 12 : 11.5;      /* 轴刻度 */
-			var fsTier = narrow ? 11 : 10.5;      /* 质量档位 */
-			var fsTime = narrow ? 12 : 11.5;      /* 时间轴 */
-			var fsLabel = narrow ? 12.5 : 12;     /* 末端读数 / 质量 */
-			var fsAxis = narrow ? 11 : 10.5;      /* 轴单位 */
+			var fsTick = narrow ? 12 : 11.5;      /* 轴刻度 */      /* 质量档位 */
+			var fsTime = narrow ? 12 : 11.5;      /* 时间轴 */     /* 末端读数 / 质量 */      /* 轴单位 */
 			var tipFs = narrow ? 12 : 11.5;       /* 悬浮卡文字 */
 			var tipFsTitle = narrow ? 12.5 : 12;
 
@@ -789,9 +786,6 @@ return L.view.extend({
 				var y2 = chartScale(t.min, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
 				bands += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + chartW +
 					'" height="' + Math.max(1, y2 - y1).toFixed(1) + '" fill="' + t.color + '" opacity="0.05"/>';
-				/* 档位标签放在绘图区右端内侧，与右轴刻度（区外）分开，避免挤在一起 */
-				bands += '<text x="' + (w - padR - 6) + '" y="' + ((y1 + y2) / 2 + 3).toFixed(1) +
-					'" font-size="' + fsTier + '" fill="' + t.color + '" opacity="0.85" text-anchor="end">' + t.label + '</text>';
 			}
 
 			/* ---- 水平网格 + 左右双轴刻度 ---- */
@@ -824,9 +818,6 @@ return L.view.extend({
 				bands +
 				/* 网格与双轴刻度 */
 				grid +
-				/* 轴标题 */
-				'  <text x="' + (padL - 7) + '" y="' + (padT - 10) + '" font-size="' + fsAxis + '" font-family="monospace" fill="#0ea5e9" text-anchor="end">dBm</text>' +
-				'  <text x="' + (w - padR + 7) + '" y="' + (padT - 10) + '" font-size="' + fsAxis + '" font-family="monospace" fill="#10b981" text-anchor="start">dB</text>' +
 				/* RSRP 面积 + 主曲线 */
 				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + ' L ' + (w - padR) + ' ' + (padT + chartH) +
 				' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
@@ -839,10 +830,6 @@ return L.view.extend({
 				'  <circle cx="' + lastRsrp[0].toFixed(1) + '" cy="' + lastRsrp[1].toFixed(1) + '" r="3.6" fill="#38bdf8" stroke="#ffffff" stroke-width="1.4"/>' +
 				'  <circle cx="' + lastSinr[0].toFixed(1) + '" cy="' + lastSinr[1].toFixed(1) + '" r="3.2" fill="#10b981" stroke="#ffffff" stroke-width="1.2"/>' +
 				'  <circle cx="' + lastRsrq[0].toFixed(1) + '" cy="' + lastRsrq[1].toFixed(1) + '" r="2.6" fill="#a855f7" opacity="0.85"/>' +
-				/* 末端读数标签 */
-				'  <text x="' + (padL + 2) + '" y="' + (padT + 12) + '" font-size="' + fsLabel + '" font-family="monospace" fill="#38bdf8">RSRP ' +
-				(lastItem.rsrp != null ? lastItem.rsrp : '—') + ' dBm</text>' +
-				'  <text x="' + (padL + 2) + '" y="' + (padT + 27) + '" font-size="' + fsLabel + '" font-family="monospace" fill="' + tierColor + '">Quality ' + tierText + '</text>' +
 				/* 时间横轴 */
 				'  <text x="' + padL + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="start">' + firstTime + '</text>' +
 				'  <text x="' + (w / 2) + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="middle">' + midTime + '</text>' +
@@ -855,14 +842,14 @@ return L.view.extend({
 				'    <circle id="mt-hover-dot-rsrq" r="3.8" fill="#a855f7" stroke="#ffffff" stroke-width="2"/>' +
 				'    <g id="mt-hover-tip-card" transform="translate(0, 0)">' +
 				'      <rect x="0" y="0" width="190" height="116" rx="9" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
-				'      <text id="mt-tip-val-time" x="14" y="23" fill="#f8fafc" font-size="' + tipFsTitle + '" font-weight="bold" font-family="sans-serif">Time: --:--:--</text>' +
+				'      <text id="mt-tip-val-time" x="14" y="23" fill="#f8fafc" font-size="' + tipFsTitle + '" font-weight="bold" font-family="sans-serif">时间: --:--:--</text>' +
 				'      <circle cx="18" cy="43" r="4" fill="#38bdf8"/>' +
 				'      <text id="mt-tip-val-rsrp" x="30" y="47" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRP —</text>' +
 				'      <circle cx="18" cy="64" r="4" fill="#10b981"/>' +
 				'      <text id="mt-tip-val-sinr" x="30" y="68" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">SINR —</text>' +
 				'      <circle cx="18" cy="85" r="4" fill="#a855f7"/>' +
 				'      <text id="mt-tip-val-rsrq" x="30" y="89" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRQ —</text>' +
-				'      <text id="mt-tip-val-tier" x="14" y="108" fill="#94a3b8" font-size="' + tipFs + '" font-family="monospace">Quality: —</text>' +
+				'      <text id="mt-tip-val-tier" x="14" y="108" fill="#94a3b8" font-size="' + tipFs + '" font-family="monospace">质量: —</text>' +
 				'    </g>' +
 				'  </g>' +
 				'  <rect id="mt-chart-hitbox" x="' + padL + '" y="' + padT + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair;"/>' +
@@ -911,7 +898,7 @@ return L.view.extend({
 				if (tipCard) tipCard.setAttribute('transform', 'translate(' + tipX.toFixed(1) + ',' + tipY.toFixed(1) + ')');
 
 				var elTime = document.getElementById('mt-tip-val-time');
-				if (elTime) elTime.textContent = 'Time: ' + item.time;
+				if (elTime) elTime.textContent = '时间: ' + item.time;
 				var elR = document.getElementById('mt-tip-val-rsrp');
 				if (elR) elR.textContent = 'RSRP: ' + (item.rsrp != null ? item.rsrp + ' dBm' : '—');
 				var elS = document.getElementById('mt-tip-val-sinr');
@@ -920,7 +907,7 @@ return L.view.extend({
 				if (elQ) elQ.textContent = 'RSRQ: ' + (item.rsrq != null ? item.rsrq + ' dB' : '—');
 				var elT = document.getElementById('mt-tip-val-tier');
 				var ti = signalTierIndex(item.rsrp);
-				if (elT) elT.textContent = 'Quality: ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '—');
+				if (elT) elT.textContent = '质量: ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '—');
 			});
 
 			hitbox.addEventListener('mouseleave', function () {
