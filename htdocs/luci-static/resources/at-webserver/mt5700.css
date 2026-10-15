@@ -954,6 +954,8 @@
    ========================================================================== */
 .mt5700-card {
   position: relative;
+  /* 与 .mt-card 统一卡片内边距，保证两类卡片同排时内容基线一致 */
+  padding: 20px;
   background: var(--mt5700-card-bg);
   backdrop-filter: var(--mt5700-glass);
   -webkit-backdrop-filter: var(--mt5700-glass);
@@ -970,12 +972,15 @@
 }
 
 .mt5700-card-header {
+  /* 头部度量统一为 .mt-card-head 规范：
+     自身无 padding / 无分隔线，标题行与相邻 .mt-card 卡片严格对齐 */
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--mt5700-space-md);
-  padding: 14px 16px 8px 16px;
-  border-bottom: 1px solid var(--mt5700-divider);
+  padding: 0;
+  margin-bottom: 14px;
+  border-bottom: 0;
 }
 
 .mt5700-card-title {
@@ -996,7 +1001,7 @@
 }
 
 .mt5700-card-body {
-  padding: 16px;
+  padding: 0;
 }
 
 .mt5700-card-footer {
@@ -3111,7 +3116,7 @@
 @media (max-width: 768px) {
   .mt5700-app { padding: var(--mt5700-space-md); }
   .mt5700-page-title { font-size: var(--mt5700-font-size-2xl); }
-  .mt5700-card-body { padding: var(--mt5700-space-md); }
+  .mt5700-card-body { padding: 0; }
   .mt5700-grid { gap: var(--mt5700-space-md); }
   .mt5700-metric-value { font-size: var(--mt5700-font-size-xl); }
   .mt5700-gauge-dial { width: 100px; height: 100px; }
@@ -3483,11 +3488,11 @@
   .mt5700-card { padding: 12px 12px 13px; }
   .mt5700-card-body { gap: 9px; }
 
-  /* 卡片头部：标题与副标题允许换行，不再挤压 */
+  /* 卡片头部：标题与副标题允许换行，不再挤压（间距与 .mt-card-head 保持同步） */
   .mt5700-card-header {
     flex-wrap: wrap;
     gap: 3px 8px;
-    padding-bottom: 9px;
+    padding: 0;
     margin-bottom: 10px;
   }
   .mt5700-card-title { font-size: 14px; }
