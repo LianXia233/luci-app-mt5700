@@ -604,9 +604,17 @@
 }
 .mt-chart-svg-box {
   width: 100%;
-  height: 330px;
-  min-height: 330px;
+  /* 高度交给 SVG 的 viewBox 比例自适应：固定高度会与 viewBox 比例不匹配，
+     触发等比缩放留白并把图内文字一起压小 */
+  height: auto;
+  min-height: 0;
   position: relative;
+}
+
+.mt-chart-svg-box svg {
+  width: 100%;
+  height: auto;
+  display: block;
 }
 
 /* ================== 下方折叠面板 (高级遥测与硬件诊断) ================== */
@@ -5561,8 +5569,8 @@ select option {
 
   /* 信号趋势图在手机端的高度与容器适配 */
   .mt-chart-svg-box {
-    height: 270px !important;
-    min-height: 270px !important;
+    height: auto !important;
+    min-height: 0 !important;
     width: 100% !important;
     overflow: visible !important;
   }
@@ -5595,13 +5603,44 @@ select option {
 }
 
 @media (max-width: 480px) {
+  /* 手机端：数值与信号图标同排（不再竖排堆叠），右侧图标缩小留出文本空间 */
   .mt-sig-main-row {
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    gap: 12px !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    margin-bottom: 12px !important;
+  }
+  .mt-sig-val-group {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .mt-sig-large-num {
+    font-size: 28px !important;
+    letter-spacing: -0.5px !important;
+  }
+  .mt-sig-unit {
+    font-size: 12px !important;
+  }
+  .mt-sig-quality-pill {
+    font-size: 11px !important;
+    padding: 2px 8px !important;
+    margin-top: 4px !important;
+    white-space: nowrap;
   }
   .mt-sig-cellular-box {
     align-self: center !important;
+    flex: 0 0 auto;
+  }
+  .mt-sig-cellular-box .cellular svg {
+    width: 64px !important;
+    height: 64px !important;
+  }
+  .mt-sig-sub-metrics {
+    gap: 8px !important;
+  }
+  .mt-sub-metric-val {
+    font-size: 13px !important;
   }
 }
 
@@ -5698,6 +5737,23 @@ select option {
   flex: none;
 }
 
+
+/* 网络状态卡的键值网格：长文本（如频段组合 "N41 (2565 MHz · 100MHz) + B3 ..."）
+   原先 .mt-net-val 是 nowrap + hidden + ellipsis，长值会被直接截断成省略号；
+   这里改为允许在单元格内换行，避免超出卡片边界或丢信息 */
+.mt-net-info-cell {
+  min-width: 0;
+}
+
+.mt-net-val {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+  min-width: 0;
+}
 
 /* ==========================================================================
    网络状态卡的信号发射塔图标 (broadcast tower)
