@@ -4705,7 +4705,8 @@ select.mt5700-select {
 }
 
 .mt5700-card-body {
-  padding: 22px 24px !important;
+  /* 与 .mt-card 统一：内边距由卡片自身 20px 提供，body 不再叠加 */
+  padding: 0;
 }
 
 /* 按钮全体系升级：紫蓝软彩渐变 + 弹润交互 */
@@ -5043,11 +5044,12 @@ select.cbi-input-select:focus {
   }
 
   .mt5700-card-header {
-    padding: 14px 18px !important;
+    padding: 0 !important;
+    margin-bottom: 12px !important;
   }
 
   .mt5700-card-body {
-    padding: 16px 18px !important;
+    padding: 0 !important;
   }
 
   .mt5700-btn,
@@ -5105,11 +5107,12 @@ select.cbi-input-select:focus {
 }
 
 .mt5700-card-header {
-  padding: 12px 20px !important;
+  padding: 0 !important;
+  margin-bottom: 14px !important;
 }
 
 .mt5700-card-body {
-  padding: 14px 20px !important;
+  padding: 0 !important;
 }
 
 .mt5700-hero-card {
