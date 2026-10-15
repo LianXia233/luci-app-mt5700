@@ -18,6 +18,14 @@ config at-webserver 'config'
 	# 服务每次连上模组后会按此配置对齐一次（已在目标状态则不重复下发）。
 	option autodial_enable '1'                 # 1=开启自动拨号（默认），0=关闭
 	option autodial_mode '1'                   # 1=USB网络接口，2=转网口模式
+	# 承载接口：auto=自动扫描（已有接口挂在模组网口上就用它，例如固件自带的 wan → usb0；
+	#   没有则用 MT5700M），也可填接口名手动设置。IPv6 的 auto 跟随 IPv4 接口
+	#   （用以 '@IPv4接口' 为设备的接口，没有则为 IPv4 接口名 + v6），none=不处理 IPv6。
+	option iface_v4 'auto'
+	option iface_v6 'auto'
+	# 接口管理：1=承载接口缺失时创建、设为开机自启并登记到上行防火墙区域（默认）；
+	# 0=不创建、不修改任何接口与防火墙，拨号就绪后只对选定的承载接口补一次 ifup。
+	option manage_interface '1'
 	option websocket_port '8765'           # LuCI RPC 监听端口
 	option websocket_allow_wan '0'          # 1=RPC 监听 0.0.0.0 可被外部访问（建议同时设置 auth_key）
 	option websocket_bind ''               # 可选：覆盖监听地址，如 0.0.0.0 或 192.168.10.1
