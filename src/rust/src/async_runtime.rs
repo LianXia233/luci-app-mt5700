@@ -112,7 +112,10 @@ impl TaskManager {
     ///
     /// `spawn` 是通用入口（任务自行管理超时）；需要整体超时保护请用
     /// [Self::spawn_with_timeout]。
-    #[allow(dead_code)] // 通用入口，供后续长任务（SMS 批量 / 固件升级）复用
+    /// 通用入口（任务自行管理超时）。当前仅单元测试覆盖：生产路径一律走
+    /// [Self::spawn_with_timeout]（扫频需要整体超时保护）。将来接入无超时的
+    /// 长任务（SMS 批量 / 固件升级）时移除下方的 `#[cfg(test)]`。
+    #[cfg(test)]
     pub async fn spawn<F, Fut>(&self, kind: &str, f: F) -> String
     where
         F: FnOnce(watch::Receiver<bool>) -> Fut + Send + 'static,

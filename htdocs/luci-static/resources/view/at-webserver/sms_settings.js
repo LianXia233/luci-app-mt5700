@@ -2,9 +2,8 @@
 'require at-webserver/rpc';
 'require at-webserver/parse';
 'require at-webserver/ui';
-'require at-webserver/smsEncode';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Ui, SmsEncode, Mt5700 */
+/* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
  * 短信设置页面（含 USSD 查询）：

@@ -1,10 +1,8 @@
 'use strict';
 'require fs';
 'require uci';
-'require at-webserver/rpc';
-'require at-webserver/parse';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Mt5700 */
+/* global L, Mt5700 */
 
 /**
  * 运行日志页

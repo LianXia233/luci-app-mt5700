@@ -2,9 +2,7 @@
 'require baseclass';
 'require at-webserver/compat';
 'require at-webserver/rpc';
-'require at-webserver/parse';
-/* global L, AtWs, Parse, baseclass */
-
+/* global L, AtWs */
 /**
  * LuCI 页面公共 UI 辅助：连接状态条、面板、字段、提示、加载态。
  * 统一各页面的交互语义：加载态、错误提示、确认弹窗、自动刷新。
@@ -14,7 +12,7 @@
 // uhttpd 给静态资源的 Last-Modified 为 1970，浏览器会长期复用缓存；LuCI 主题同样
 // 采用「css?v=版本」的做法（aurora: main.css?v=1.3.1）。样式版本随包版本递增，
 // 保证升级/修复样式后用户刷新即可生效。
-var AT_CSS_VERSION = '1.10.0';
+var AT_CSS_VERSION = '1.11.0';
 
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION;
@@ -31,67 +29,9 @@ var AT_CSS_VERSION = '1.10.0';
 var Ui = (function () {
 	var api = {};
 
-	api.panel = function (title, hint, extra) {
-		// 容器使用本项目自有的 at-panel 类：外观完全由 at.css 控制，与任意 LuCI 主题解耦。
-		var cbi = E('div', { 'class': 'at-panel' });
-		var head = E('div', { 'class': 'at-panel-head' });
-		var h = E('h3', { 'class': 'at-panel-title' }, title || '');
-		head.appendChild(h);
-		if (hint) head.appendChild(E('div', { 'class': 'at-panel-hint' }, hint));
-		if (extra) {
-			var ex = E('div', { 'class': 'at-panel-extra' });
-			ex.appendChild(extra);
-			head.appendChild(ex);
-		}
-		cbi.appendChild(head);
-		var body = E('div', { 'class': 'at-panel-body' });
-		cbi.appendChild(body);
-		cbi._body = body;
-		return cbi;
-	};
 
-	api.field = function (label, control, hint) {
-		var row = E('div', { 'class': 'at-field' });
-		var lb = E('div', { 'class': 'at-field-label' }, label || '');
-		row.appendChild(lb);
-		var ctrl = E('div', { 'class': 'at-field-control' });
-		ctrl.appendChild(control);
-		if (hint) ctrl.appendChild(E('div', { 'class': 'at-field-hint' }, hint));
-		row.appendChild(ctrl);
-		return row;
-	};
 
-	api.kv = function (items) {
-		var table = E('table', { 'class': 'at-kv' });
-		for (var i = 0; i < items.length; i++) {
-			var tr = E('tr');
-			tr.appendChild(E('td', { 'class': 'at-kv-label' }, items[i].label));
-			var td = E('td', { 'class': 'at-kv-value' });
-			if (typeof items[i].value === 'string' || typeof items[i].value === 'number') {
-				td.textContent = String(items[i].value);
-			} else if (items[i].value != null) {
-				td.appendChild(items[i].value);
-			} else {
-				td.textContent = '—';
-			}
-			tr.appendChild(td);
-			table.appendChild(tr);
-		}
-		return table;
-	};
 
-	api.tag = function (text, color) {
-		var colors = {
-			green: '#1b6b2f', blue: '#1a5eab', orange: '#b36b00', red: '#b3261e',
-			grey: '#5f6368', violet: '#6a3fb5'
-		};
-		var tag = E('span', {
-			'class': 'at-tag',
-			style: 'background:' + (colors[color] || colors.grey) + '1a;color:' + (colors[color] || colors.grey) +
-				';border:1px solid ' + (colors[color] || colors.grey) + '40;'
-		}, text);
-		return tag;
-	};
 
 	// 所有按钮都经由此卡口创建。cls 接收视图传入的 cbi-button-* 变体，
 	// 通过映射附加 at-btn-* 系列类：外观完全由 at.css 决定，不受 LuCI 主题影响。
@@ -108,49 +48,10 @@ var Ui = (function () {
 		return btn;
 	};
 
-	api.primaryButton = function (label, onClick) {
-		return api.button(label, 'cbi-button-positive', onClick);
-	};
 
-	api.dangerButton = function (label, onClick) {
-		return api.button(label, 'cbi-button-negative', onClick);
-	};
 
-	api.toast = function (message, type) {
-		var t = E('div', { 'class': 'at-toast at-toast-' + (type || 'info') }, message);
-		document.body.appendChild(t);
-		window.setTimeout(function () { t.classList.add('at-toast-hide'); }, 3200);
-		window.setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 3600);
-	};
 
-	api.success = function (m) { api.toast(m, 'success'); };
-	api.error = function (m) { api.toast(m, 'error'); };
-	api.warning = function (m) { api.toast(m, 'warning'); };
-	api.info = function (m) { api.toast(m, 'info'); };
 
-	api.confirm = function (message, onOk, okText) {
-		var mask = E('div', { 'class': 'at-modal-mask' });
-		var box = E('div', { 'class': 'at-modal' });
-		var text = E('div', { 'class': 'at-modal-text' }, message);
-		var actions = E('div', { 'class': 'at-modal-actions' });
-		var cancel = api.button('取消', 'cbi-button-neutral', function () {
-			if (mask.parentNode) mask.parentNode.removeChild(mask);
-		});
-		var ok = api.button(okText || '确定', 'cbi-button-positive', function () {
-			if (mask.parentNode) mask.parentNode.removeChild(mask);
-			if (onOk) onOk();
-		});
-		actions.appendChild(cancel);
-		actions.appendChild(ok);
-		box.appendChild(text);
-		box.appendChild(actions);
-		mask.appendChild(box);
-		mask.addEventListener('click', function (e) {
-			if (e.target === mask && mask.parentNode) mask.parentNode.removeChild(mask);
-		});
-		document.body.appendChild(mask);
-		return mask;
-	};
 
 	api.promptModal = function (title, fields, onOk) {
 		var mask = E('div', { 'class': 'at-modal-mask' });
@@ -212,10 +113,6 @@ var Ui = (function () {
 
 	/* ---------- 连接状态条 ---------- */
 
-		// 连接状态卡片已按需求从所有页面移除：保留空实现兜底，任何调用不再渲染任何内容
-	api.renderConnectionBar = function () {
-		return E('div', { 'style': 'display:none' });
-	};
 
 	/* ---------- 后端降级提示（统一入口） ---------- */
 
@@ -349,33 +246,10 @@ var Ui = (function () {
 		return api.sendCmd('AT+CFUN=' + (on ? '0' : '1')).then(function (res) { return !!res.success; });
 	};
 
-	api.deriveNetworkMode = function (mode) {
-		if (!mode) return '';
-		if (mode.indexOf('NR') === 0) return 'NR';
-		if (mode.indexOf('LTE') === 0) return 'LTE';
-		if (mode.indexOf('WCDMA') === 0) return 'WCDMA';
-		return mode;
-	};
 
 	/* ---------- 通用渲染 ---------- */
 
-	// 页面容器标准结构
-	api.page = function (title, subtitle) {
-		var node = E('div', { 'class': 'at-page' });
-		var h = E('div', { 'class': 'at-page-head' });
-		h.appendChild(E('h2', { 'class': 'at-page-title' }, title || ''));
-		if (subtitle) h.appendChild(E('div', { 'class': 'at-page-subtitle' }, subtitle));
-		node.appendChild(h);
-		var body = E('div', { 'class': 'at-page-body' });
-		node.appendChild(body);
-		node._body = body;
-		return node;
-	};
 
-	api.spinner = function (text) {
-		var el = E('div', { 'class': 'at-spinner' }, text || '加载中…');
-		return el;
-	};
 
 	/* ---------- 自动刷新 ---------- */
 
@@ -446,21 +320,6 @@ var Ui = (function () {
 		return id;
 	};
 
-	/**
-	 * 订阅 AtWs 事件，hashchange 时自动 unsubscribe。
-	 */
-	api.subscribe = function (handler) {
-		_installHashHook();
-		if (AtWs && AtWs.client && typeof AtWs.client.subscribe === 'function') {
-			AtWs.client.subscribe(handler);
-		}
-		_hooks.push(function () {
-			if (AtWs && AtWs.client && typeof AtWs.client.unsubscribe === 'function') {
-				AtWs.client.unsubscribe(handler);
-			}
-		});
-		return handler;
-	};
 
 	return api;
 })();

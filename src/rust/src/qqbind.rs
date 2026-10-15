@@ -17,11 +17,8 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 const QQ_API_BASE: &str = "https://api.bot.qq.com";
-const WSS_AGENT: &str = "at-webserver-qqbind";
 /// C2C_MESSAGE_CREATE / GROUP_AT_MESSAGE_CREATE 共用 intent 位 1<<25
 const INTENT_GROUP_AND_C2C: u64 = 1 << 25;
-/// 绑定监听窗口：超过即失败（下次服务重启会自动重试）
-const BIND_WINDOW: Duration = Duration::from_secs(600);
 /// 绑定监听窗口秒数（对外暴露给 RPC 状态查询，用于前端倒计时）
 pub const BIND_WINDOW_SECS: u64 = 600;
 

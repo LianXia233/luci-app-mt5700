@@ -1,9 +1,8 @@
 'use strict';
 'require at-webserver/rpc';
-'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Ui, Mt5700 */
+/* global L, AtWs, Ui, Mt5700 */
 
 /**
  * 拨号设置页面：

@@ -3,8 +3,7 @@
 'require at-webserver/compat';
 'require at-webserver/parse';
 'require rpc';
-/* global L, baseclass */
-
+/* global L */
 /**
  * AT LuCI RPC 客户端。
  *
@@ -353,7 +352,6 @@ ATClient.prototype.disconnect = function () {
 };
 
 ATClient.prototype.reconnect = function () {
-	var self = this;
 	if (this.connected) return Promise.resolve();
 	this.setConnectionState('reconnecting');
 	return this.connect().catch(function () {});
@@ -990,23 +988,6 @@ function parseRawData(text) {
 
 /* ---- PDCP 14 字段 ---- */
 
-var PDCP_FIELDS = [
-	{ key: 'rx_bytes', label: '下行字节' },
-	{ key: 'tx_bytes', label: '上行字节' },
-	{ key: 'rx_pkts', label: '下行包数' },
-	{ key: 'tx_pkts', label: '上行包数' },
-	{ key: 'rx_rate', label: '下行速率' },
-	{ key: 'tx_rate', label: '上行速率' },
-	{ key: 'rx_pdcp_delay', label: '下行 PDCP 时延(0.1ms)' },
-	{ key: 'tx_pdcp_delay', label: '上行 PDCP 时延(0.1ms)' },
-	{ key: 'rx_pkt_loss', label: '下行丢包率' },
-	{ key: 'tx_pkt_loss', label: '上行丢包率' },
-	{ key: 'rx_retx_pct', label: '下行重传率' },
-	{ key: 'tx_retx_pct', label: '上行重传率' },
-	{ key: 'rx_volte_bytes', label: '下行 VoLTE 字节' },
-	{ key: 'tx_volte_bytes', label: '上行 VoLTE 字节' }
-];
-
 function parsePDCP(fields) {
 	var obj = {};
 	obj.rx_bytes = parseInt(fields[0], 10) || 0;
@@ -1344,7 +1325,6 @@ var AtWs = {
 	sysModeName: sysModeName,
 	parsePDCP: parsePDCP,
 	parseRawData: parseRawData,
-	PDCP_FIELDS: PDCP_FIELDS,
 	signalColor: signalColor,
 	psRegText: psRegText,
 	operatorFromCode: operatorFromCode,
