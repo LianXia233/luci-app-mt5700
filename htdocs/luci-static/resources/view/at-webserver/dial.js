@@ -10,7 +10,7 @@
  * 自动拨号开关、APN 设置、拨号方式、USB 端口模式、网口模式、后路由、DMZ、
  * PDP 上下文管理（新增 / 编辑 / 删除 / 激活）。
  *
- * 状态刷新要点（本次修复重点）：
+ * 状态刷新要点：
  * - 进入页面即串行拉取拨号配置 / USB 模式 / 网口模式 / PDP 列表
  * - 每次写操作后重新拉取并回填表单，避免界面残留旧值
  * - 自动拨号期望值同步到 UCI，供后端在重连模组后对齐
@@ -21,6 +21,31 @@ return L.view.extend({
 		var page = Mt5700.page('拨号设置', '自动拨号、APN 接入点、USB/网口工作模式与 PDP 上下文配置', 'dial', '数据链路 · APN 拨号');
 		var body = page._body;
 
+		/* 注入本页局部美化样式 */
+		var dialStyle = E('style', {}, [
+			'/* 拨号顶栏指标概览 */',
+			'.mt-dial-overview { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; background: rgba(139, 92, 246, 0.05); border: 1px solid rgba(139, 92, 246, 0.15); border-radius: 12px; margin-bottom: 16px; }',
+			'.mt-dial-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }',
+			'.mt-dial-label { color: var(--mt5700-text-secondary); font-size: 12px; }',
+			'/* 常用 APN 预设胶囊 */',
+			'.mt-apn-presets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }',
+			'.mt-apn-chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); color: #0284c7; cursor: pointer; transition: all 0.2s ease; user-select: none; }',
+			'.mt-apn-chip:hover { background: rgba(14, 165, 233, 0.18); border-color: #0284c7; transform: translateY(-1px); }',
+			'.mt-apn-chip:active { transform: translateY(0); }',
+			'/* 开关行美化 */',
+			'.mt-switch-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(125, 125, 125, 0.03); border: 1px solid var(--mt5700-border); border-radius: 10px; margin-bottom: 14px; }',
+			'.mt-switch-info { display: flex; flex-direction: column; gap: 3px; }',
+			'.mt-switch-title { font-size: 13.5px; font-weight: 600; color: var(--mt5700-text); }',
+			'.mt-switch-desc { font-size: 12px; color: var(--mt5700-text-secondary); }',
+			'/* 提示条美化 */',
+			'.mt-pdp-note { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 10px; background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(139, 92, 246, 0.05)); border: 1px solid rgba(56, 189, 248, 0.25); font-size: 12.5px; line-height: 1.6; color: var(--mt5700-text); margin-bottom: 16px; }',
+			'.mt-pdp-note-icon { font-size: 16px; flex-shrink: 0; line-height: 1.2; }',
+			'/* 表格微调 */',
+			'.mt-pdp-cid { font-weight: 700; font-family: var(--mt5700-font-mono); color: var(--mt5700-accent); }',
+			'/* 底部暂存条适配 */',
+			'.mt5700-applybar { z-index: 100; }'
+		].join('\n'));
+		body.appendChild(dialStyle);
 
 		/*
 		 * 未保存更改暂存器（OpenWrt 保存并应用语义）：
@@ -31,6 +56,14 @@ return L.view.extend({
 
 		function stageHint() {
 			Mt5700.info('更改已暂存，点击页面下方「保存并应用」后生效');
+		}
+
+		function makeSwitch(onChange) {
+			var wrap = E('div', { 'class': 'mt5700-switch' });
+			var input = E('input', { type: 'checkbox' });
+			input.addEventListener('change', function () { onChange(input.checked, input); });
+			wrap.appendChild(input);
+			return wrap;
 		}
 
 		/* ---------- 常量 ---------- */
@@ -46,13 +79,24 @@ return L.view.extend({
 		var INCFG_MODE_OPTIONS = [
 			{ label: 'USB Stick + 网口 E5 数传模式', value: 1 },
 			{ label: 'USB E5 + 网口 E5 数传模式', value: 2 },
-			{ label: '网口直通模式(需执行拨号命令)', value: 3 }
+			{ label: '网口直通模式 (需执行拨号命令)', value: 3 }
 		];
 		var AUTH_OPTIONS = [
 			{ label: '无认证', value: 0 }, { label: 'PAP 认证', value: 1 }, { label: 'CHAP 认证', value: 2 }
 		];
 		var PDP_TYPE_OPTIONS = [
 			{ label: 'IPv4', value: 'IP' }, { label: 'IPv6', value: 'IPV6' }, { label: 'IPv4/IPv6', value: 'IPV4V6' }
+		];
+
+		// 常用运营商 APN 预设胶囊
+		var COMMON_APNS = [
+			{ name: '中国移动', apn: 'cmnet' },
+			{ name: '移动物联', apn: 'cmiot' },
+			{ name: '中国联通', apn: '3gnet' },
+			{ name: '联通物联', apn: 'uninet' },
+			{ name: '中国电信', apn: 'ctnet' },
+			{ name: '电信用网', apn: 'ctiot' },
+			{ name: '中国广电', apn: 'cbnet' }
 		];
 
 		function getDialModeText(mode) {
@@ -130,25 +174,57 @@ return L.view.extend({
 			};
 		}
 
-		/* ---------- 卡片：自动拨号 + APN ---------- */
-		var dialCard = Mt5700.card('自动拨号与 APN', '开启后设备自动保持网络连接，建议保持开启');
+		/* ---------- 卡片 1：自动拨号与 APN 设置 ---------- */
+		var dialCard = Mt5700.card('自动拨号与 APN 配置', '管理开机自启拨号策略、运营商 APN 接入点及鉴权认证');
 		body.appendChild(dialCard);
 
-		var dialStatus = E('div', { 'class': 'mt5700-inline' });
-		dialCard._body.appendChild(dialStatus);
+		/* 顶部链路概览条 */
+		var dialOverview = E('div', { 'class': 'mt-dial-overview' });
+		dialCard._body.appendChild(dialOverview);
 
-		var dialBody = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
-		dialCard._body.appendChild(dialBody);
+		/* 自动拨号开关行（二次元圆润 Switch） */
+		var switchRow = E('div', { 'class': 'mt-switch-row' });
+		var switchInfo = E('div', { 'class': 'mt-switch-info' });
+		switchInfo.appendChild(E('span', { 'class': 'mt-switch-title' }, '自动拨号 (Auto Dial)'));
+		switchInfo.appendChild(E('span', { 'class': 'mt-switch-desc' }, '开启后模组自动保持网络常驻连接，断线自愈重拨；建议始终保持开启'));
+		switchRow.appendChild(switchInfo);
 
-		var dialSwitch = document.createElement('input');
-		dialSwitch.type = 'checkbox';
-		dialSwitch.className = 'cbi-input-checkbox';
-		dialSwitch.addEventListener('change', function () { handleAutoDialChange(dialSwitch.checked); });
-		dialBody.appendChild(Mt5700.formGroup('自动拨号', dialSwitch, '开启后设备将自动保持网络连接'));
+		var dialSwitch = makeSwitch(function (checked) {
+			handleAutoDialChange(checked);
+		});
+		var dialSwitchInput = dialSwitch.querySelector('input');
+		switchRow.appendChild(dialSwitch);
+		dialCard._body.appendChild(switchRow);
 
-		var apnInput = Mt5700.input('text', '请输入 APN');
+		/* APN 表单网格 */
+		var dialGrid = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		dialCard._body.appendChild(dialGrid);
+
+		// APN 输入与快捷填入
+		var apnWrap = E('div');
+		var apnInput = Mt5700.input('text', '请输入 APN (例如: cmnet)');
 		apnInput.maxLength = 99;
 		apnInput.addEventListener('input', function () { apnForm.apn = apnInput.value; });
+		apnWrap.appendChild(apnInput);
+
+		// 运营商预设胶囊
+		var presetBox = E('div', { 'class': 'mt-apn-presets' });
+		presetBox.appendChild(E('span', { style: 'font-size:11px;color:var(--mt5700-text-secondary);' }, '快捷填入:'));
+		COMMON_APNS.forEach(function (preset) {
+			var chip = E('span', { 'class': 'mt-apn-chip', title: '点击填入 ' + preset.name + ' (' + preset.apn + ')' }, preset.name);
+			chip.addEventListener('click', function () {
+				apnInput.value = preset.apn;
+				apnForm.apn = preset.apn;
+				Mt5700.info('已快速填入 ' + preset.name + ' APN: ' + preset.apn);
+			});
+			presetBox.appendChild(chip);
+		});
+		apnWrap.appendChild(presetBox);
+
+		var authSel = Mt5700.select(AUTH_OPTIONS.map(function (o) {
+			return { value: String(o.value), label: o.label };
+		}), '0');
+		authSel.addEventListener('change', function () { apnForm.authType = parseInt(authSel.value, 10); });
 
 		var userInput = Mt5700.input('text', '请输入用户名（可选）');
 		userInput.maxLength = 31;
@@ -158,27 +234,24 @@ return L.view.extend({
 		passInput.maxLength = 31;
 		passInput.addEventListener('input', function () { apnForm.password = passInput.value; });
 
-		var authSel = Mt5700.select(AUTH_OPTIONS.map(function (o) {
-			return { value: String(o.value), label: o.label };
-		}), '0');
-		authSel.addEventListener('change', function () { apnForm.authType = parseInt(authSel.value, 10); });
+		dialGrid.appendChild(Mt5700.formGroup('APN 接入点', apnWrap, '主数据通道 APN，留空时模组将使用默认接入点'));
+		dialGrid.appendChild(Mt5700.formGroup('认证方式', authSel, '运营商专网所需鉴权方式，公开互联网卡一般选「无认证」'));
+		dialGrid.appendChild(Mt5700.formGroup('用户名 (可选)', userInput));
+		dialGrid.appendChild(Mt5700.formGroup('密码 (可选)', passInput));
 
-		dialBody.appendChild(Mt5700.formGroup('APN', apnInput));
-		dialBody.appendChild(Mt5700.formGroup('用户名', userInput));
-		dialBody.appendChild(Mt5700.formGroup('密码', passInput));
-		dialBody.appendChild(Mt5700.formGroup('认证方式', authSel));
-
-		var authCurrent = E('span', { 'class': 'mt5700-hint' }, '当前认证：无鉴权');
+		var authCurrent = E('span', { 'class': 'mt5700-hint', style: 'margin-left:8px;' }, '当前认证：无鉴权');
 		dialCard._body.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('暂存 APN 更改', function () { handleApnSettingChange(); }),
 			authCurrent
 		));
 
-		/* ---------- 卡片：模式配置 ---------- */
-		var modeCard = Mt5700.card('模式配置', '拨号方式与 USB 端口模式');
-		var modeBody = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
-		modeCard._body.appendChild(modeBody);
-		body.appendChild(modeCard);
+		/* ---------- 双列网格：模式配置 + 网口与 DMZ ---------- */
+		var rowMode = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
+		body.appendChild(rowMode);
+
+		/* 卡片 2：模式配置 */
+		var modeCard = Mt5700.card('数据端口与接口模式', '拨号工作方式、USB 端口及数传模式');
+		rowMode.appendChild(modeCard);
 
 		var dialModeSel = Mt5700.select(DIAL_MODE_OPTIONS.map(function (o) {
 			return { value: String(o.value), label: o.label };
@@ -190,21 +263,21 @@ return L.view.extend({
 		}), '0');
 		usbSel.addEventListener('change', function () { handleUSBModeChange(parseInt(usbSel.value, 10)); });
 
-		modeBody.appendChild(Mt5700.formGroup('拨号方式', dialModeSel));
-		modeBody.appendChild(Mt5700.formGroup('USB 端口模式', usbSel));
-		var usbCurrent = E('div', { 'class': 'mt5700-hint' }, '当前 USB 模式：未知');
-		modeCard._body.appendChild(usbCurrent);
-
-		/* ---------- 卡片：网口模式 + 后路由 + DMZ ---------- */
-		var infCard = Mt5700.card('网口模式与 DMZ', '网口数传模式、后路由与 DMZ 主机');
-		var infBody = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
-		infCard._body.appendChild(infBody);
-		body.appendChild(infCard);
-
 		var infcfgSel = Mt5700.select(INCFG_MODE_OPTIONS.map(function (o) {
 			return { value: String(o.value), label: o.label };
 		}), '1');
 		infcfgSel.addEventListener('change', function () { handleInfcfgModeChange(parseInt(infcfgSel.value, 10)); });
+
+		var usbCurrent = E('div', { 'class': 'mt5700-hint', style: 'margin-top:6px;' }, '当前 USB 模式：未知');
+
+		modeCard._body.appendChild(Mt5700.formGroup('拨号方式', dialModeSel, '推荐「USB网络接口」，修改前需先关闭自动拨号'));
+		modeCard._body.appendChild(Mt5700.formGroup('USB 端口模式', usbSel));
+		modeCard._body.appendChild(usbCurrent);
+		modeCard._body.appendChild(Mt5700.formGroup('网口数传模式', infcfgSel, '修改应用后模组需重启以对齐'));
+
+		/* 卡片 3：网口模式与 DMZ */
+		var infCard = Mt5700.card('路由与 DMZ 高级转发', '网口后路由控制与外部端口映射 DMZ 主机');
+		rowMode.appendChild(infCard);
 
 		var postRouteSel = Mt5700.select([
 			{ label: '关闭后路由', value: '0' }, { label: '开启后路由', value: '1' }
@@ -213,40 +286,72 @@ return L.view.extend({
 
 		var dmzInput = Mt5700.input('text', '如 192.168.1.100');
 
-		infBody.appendChild(Mt5700.formGroup('网口模式', infcfgSel));
-		infBody.appendChild(Mt5700.formGroup('后路由', postRouteSel));
-		infBody.appendChild(Mt5700.formGroup('DMZ 主机', dmzInput, '设置 DMZ 时必填'));
+		infCard._body.appendChild(Mt5700.formGroup('后路由模式', postRouteSel, '开启后路由将放通内网回源数据'));
+		infCard._body.appendChild(Mt5700.formGroup('DMZ 主机 IP', dmzInput, '将未配置端口的全部外网流量直通映射至内网该 IP'));
 
-		var dmzStatus = E('div', { 'class': 'mt5700-hint' }, 'DMZ 状态：未配置');
+		var dmzStatus = E('div', { 'class': 'mt5700-hint', style: 'margin-bottom:12px;' }, 'DMZ 状态：未配置');
+		infCard._body.appendChild(dmzStatus);
+
 		infCard._body.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('设置 DMZ', function () {
-				if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(dmzInput.value.trim())) { Mt5700.error('请输入有效的 IP 地址'); return; }
+				if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(dmzInput.value.trim())) { Mt5700.error('请输入有效的 IPv4 地址'); return; }
 				handleDMZ('enable', dmzInput.value.trim());
 			}),
 			Mt5700.dangerButton('关闭 DMZ', function () {
 				handleDMZ('disable');
 			})
 		));
-		infCard._body.appendChild(dmzStatus);
 
-		/* ---------- 卡片：PDP 上下文 ---------- */
-		var pdpCard = Mt5700.card('PDP 上下文', 'CGDCONT 列表：新增、编辑、删除、激活 / 去激活');
+		/* ---------- 卡片 4：PDP 上下文 ---------- */
+		var pdpCard = Mt5700.card('PDP 上下文管理', 'CGDCONT 列表：新增、编辑、删除、激活 / 去激活');
 		body.appendChild(pdpCard);
 
-		pdpCard._body.appendChild(Mt5700.panelActions(
-			Mt5700.primaryButton('+ 新增', function () { openEdit(null); }),
-			Mt5700.ghostButton('刷新', function () { fetchPDPContexts(); })
-		));
-		var pdpBody = E('div');
+		var pdpHeaderActions = Mt5700.panelActions(
+			Mt5700.primaryButton('+ 新增上下文', function () { openEdit(null); }),
+			Mt5700.ghostButton('刷新列表', function () { fetchPDPContexts(); })
+		);
+		pdpCard._body.appendChild(pdpHeaderActions);
+
+		var pdpNoteBox = E('div');
+		pdpCard._body.appendChild(pdpNoteBox);
+
+		var pdpBody = E('div', { style: 'margin-top:12px;' });
 		pdpCard._body.appendChild(pdpBody);
 
-		/* ---------- 渲染 ---------- */
+		/* ---------- 渲染函数 ---------- */
 		function renderDialStatus() {
-			dialStatus.innerHTML = '';
-			dialStatus.appendChild(Mt5700.badge(settings.enable === 1 ? '已开启' : '已关闭',
-				settings.enable === 1 ? 'success' : 'warning'));
-			dialStatus.appendChild(Mt5700.badge('拨号方式：' + getDialModeText(settings.dialMode), 'info'));
-			dialStatus.appendChild(Mt5700.badge('协议：' + (settings.protocol || '-'), 'neutral'));
+			dialOverview.innerHTML = '';
+
+			// 自动拨号徽标
+			dialOverview.appendChild(E('div', { 'class': 'mt-dial-item' }, [
+				E('span', { 'class': 'mt-dial-label' }, '自动拨号:'),
+				Mt5700.badge(settings.enable === 1 ? '已开启' : '已关闭', settings.enable === 1 ? 'success' : 'warning')
+			]));
+
+			// 方式
+			dialOverview.appendChild(E('div', { 'class': 'mt-dial-item' }, [
+				E('span', { 'class': 'mt-dial-label' }, '接入方式:'),
+				Mt5700.badge(getDialModeText(settings.dialMode), 'info')
+			]));
+
+			// 协议
+			dialOverview.appendChild(E('div', { 'class': 'mt-dial-item' }, [
+				E('span', { 'class': 'mt-dial-label' }, '协议:'),
+				Mt5700.badge(settings.protocol || 'IPV4V6', 'neutral')
+			]));
+
+			// 鉴权
+			dialOverview.appendChild(E('div', { 'class': 'mt-dial-item' }, [
+				E('span', { 'class': 'mt-dial-label' }, '认证:'),
+				Mt5700.badge(getAuthTypeText(settings.authType), 'neutral')
+			]));
+
+			// DMZ 状态
+			dialOverview.appendChild(E('div', { 'class': 'mt-dial-item' }, [
+				E('span', { 'class': 'mt-dial-label' }, 'DMZ:'),
+				Mt5700.badge(dmzConfig.enabled ? ('已开启 → ' + dmzConfig.host) : '未配置', dmzConfig.enabled ? 'success' : 'neutral')
+			]));
+
 			authCurrent.textContent = '当前认证：' + getAuthTypeText(settings.authType);
 
 			apnInput.value = apnForm.apn || '';
@@ -261,21 +366,29 @@ return L.view.extend({
 			infcfgSel.value = String(settings.infcfgMode != null ? settings.infcfgMode : '');
 			postRouteSel.value = String(settings.postRoute != null ? settings.postRoute : '');
 			dmzStatus.textContent = 'DMZ 状态：' + (dmzConfig.enabled ? '已开启 → ' + dmzConfig.host : '未配置');
+			if (dmzConfig.enabled && dmzConfig.host) {
+				dmzInput.value = dmzConfig.host;
+			}
 		}
 
 		function renderPDP() {
-			pdpBody.innerHTML = '';
+			pdpNoteBox.innerHTML = '';
 			if (settings.enable === 1) {
-				pdpBody.appendChild(E('div', { 'class': 'mt5700-hint' },
-					'自动拨号已开启：PDP 上下文由模组自动维护，手工「激活 / 去激活」已禁用，' +
-					'避免与自动拨号争用同一 CID 导致联网中断。如需手工管理，请先关闭自动拨号。'));
+				var note = E('div', { 'class': 'mt-pdp-note' }, [
+					E('span', { 'class': 'mt-pdp-note-icon' }, '💡'),
+					E('div', {}, '模组自主维护提示：自动拨号已开启时，PDP 上下文由模组底层自主调度管理。为避免争用 CID 导致断网，手工「激活 / 去激活」已暂时锁定；您仍可正常新增、编辑或删除上下文配置。如需手工激活特定 CID，请先关闭自动拨号。')
+				]);
+				pdpNoteBox.appendChild(note);
 			}
+
+			pdpBody.innerHTML = '';
 			if (!pdpList.length) {
-				pdpBody.appendChild(Mt5700.empty('暂无 PDP 上下文'));
+				pdpBody.appendChild(Mt5700.empty('暂无 PDP 上下文数据'));
 				return;
 			}
+
 			var rows = pdpList.map(function (ctx) {
-				var opWrap = E('div', { 'class': 'mt5700-inline' });
+				var opWrap = E('div', { 'class': 'mt5700-inline', style: 'gap:6px;' });
 				opWrap.appendChild(Mt5700.button('编辑', function () { openEdit(ctx); }, 'secondary'));
 				opWrap.appendChild(Mt5700.dangerButton('删除', function () {
 					Mt5700.confirm('确定删除 CID ' + ctx.cid + ' 的 PDP 上下文？', function () {
@@ -289,17 +402,24 @@ return L.view.extend({
 						return;
 					}
 					handleActivePdp(ctx.cid, !ctx.active);
-				}, 'secondary');
+				}, ctx.active ? 'ghost' : 'secondary');
+
 				if (autodialOn) {
 					actBtn.disabled = true;
 					actBtn.title = '自动拨号开启时由模组维护 PDP，禁止手工切换';
 				}
 				opWrap.appendChild(actBtn);
+
+				var cidEl = E('span', { 'class': 'mt-pdp-cid' }, '#' + ctx.cid);
+				var typeEl = Mt5700.badge(getPdpTypeText(ctx.type), ctx.type === 'IPV4V6' ? 'info' : 'neutral');
+				var apnEl = E('span', { 'class': 'mt5700-mono', style: 'font-size:12.5px;' }, ctx.apn || '—');
+				var statusEl = Mt5700.badge(ctx.active ? '已激活' : '未激活', ctx.active ? 'success' : 'neutral');
+
 				return [
-					String(ctx.cid),
-					getPdpTypeText(ctx.type),
-					ctx.apn || '-',
-					Mt5700.badge(ctx.active ? '已激活' : '未激活', ctx.active ? 'success' : 'neutral'),
+					cidEl,
+					typeEl,
+					apnEl,
+					statusEl,
 					opWrap
 				];
 			});
@@ -328,29 +448,13 @@ return L.view.extend({
 					if (parsed.username != null) apnForm.username = parsed.username;
 					if (parsed.password != null) apnForm.password = parsed.password;
 					if (parsed.authType != null) apnForm.authType = parsed.authType;
-					dialSwitch.checked = parsed.enable === 1;
+					dialSwitchInput.checked = parsed.enable === 1;
 					syncAutodialDefault(parsed.enable === 1, parsed.dialMode);
 				}
 				renderDialStatus();
 			}).catch(function () { Mt5700.error('获取拨号配置失败'); });
 		}
 
-		/* 自动拨号期望值同步 —— 方向修正。
-		 *
-		 * 注意：若把「模组当前的观测状态」直接写成 UCI 期望值并立即 commit，
-		 * 只要打开一次本页，模组那一刻回 enable=0（上次手工关闭、未插卡被模组
-		 * 自行关闭、或应答被截断）就会把配置里的 autodial_enable 改成 0 并落盘，
-		 * 后端从此主动关闭自动拨号，且配置持久化、重启也不恢复 ——
-		 * 与「默认开启 + 断线自愈」的设计目标正好相反。
-		 * 另外这种做法绕过了本页的「保存并应用」暂存机制，用户无法撤销。
-		 *
-		 * 现在的规则：
-		 *   1) UCI 里已有 enable 或 mode 任一键（绝大多数设备）→ 以配置为准，只做提示，
-		 *      是否改写由用户点「保存并应用」决定；
-		 *   2) UCI 里两个键都不存在（首次安装 / 从旧版本升级）→ 写入 autodial_enable
-		 *      与 autodial_mode（mode 非法时归一为 '1'）并标脏，由用户确认保存；
-		 *   3) 任何情况下都不静默 commit。
-		 */
 		function syncAutodialDefault(enabled, mode) {
 			var curEnable = L.uci.get('at-webserver', 'config', 'autodial_enable');
 			var curMode = L.uci.get('at-webserver', 'config', 'autodial_mode');
@@ -374,7 +478,6 @@ return L.view.extend({
 		}
 
 		function handleAutoDialChange(checked) {
-			/* 暂存而非立即下发，应用时才发送 AT 命令 */
 			staged.set('autodial', '自动拨号：' + (checked ? '开启' : '关闭'), function () {
 				var cmd = checked ? 'AT^SETAUTODIAL=1,' + (settings.dialMode || 1) : 'AT^SETAUTODIAL=0';
 				return Ui.sendCmd(cmd).then(function (res) {
@@ -516,10 +619,10 @@ return L.view.extend({
 				? { cid: data.cid, type: data.type, apn: data.apn || '', pdp_addr: data.pdp_addr || '' }
 				: { cid: 1, type: 'IPV4V6', apn: '', pdp_addr: '' };
 			Ui.promptModal(isNew ? '新增 PDP 上下文' : '编辑 PDP 上下文（CID ' + data.cid + '）', [
-				{ key: 'cid', label: 'CID', value: edit.cid },
+				{ key: 'cid', label: 'CID 标识 (1~20)', value: edit.cid },
 				{ key: 'type', label: '协议类型', type: 'select', value: edit.type, options: PDP_TYPE_OPTIONS },
-				{ key: 'apn', label: 'APN', value: edit.apn, placeholder: '请输入 APN' },
-				{ key: 'pdp_addr', label: 'PDP 地址', value: edit.pdp_addr, placeholder: '可留空' }
+				{ key: 'apn', label: 'APN 接入点', value: edit.apn, placeholder: '请输入 APN' },
+				{ key: 'pdp_addr', label: 'PDP 地址 (可选)', value: edit.pdp_addr, placeholder: '通常留空由基站动态分配' }
 			], function (values) {
 				var cid = Number(values.cid);
 				if (!cid || !values.type) { Mt5700.error('请填写 CID 和协议类型'); return; }
