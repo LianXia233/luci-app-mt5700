@@ -2,12 +2,22 @@
 
 ## Unreleased
 
+### PR #16 复审修复：开关状态回滚、PCI 进制兼容与 CA 状态机收口
+
+- **fix(modem-settings)**: `makeSwitch` 统一承担「写指令失败就还原勾选」的职责（Codex P2）。此前只有 `res.success === false` 分支手写回滚，`.catch()` 分支与「高温时关闭 CA/MIMO」开关完全没有回滚 —— 模组拒绝 `AT^THERMAUTOFUN` 后开关停在新状态，界面会长期显示与模组实际热策略相反的值。现在 handler 只需返回 `Promise<boolean>`，失败 / reject / 抛异常一律由框架还原；返回 `undefined` 的老式 handler 行为不变。
+- **fix(modem-settings)**: 温控采样间隔输入增加正整数校验与 1~3600 秒钳制；写入失败时回滚到上一次被模组确认的值，避免界面长期显示一个模组从未接受的采样周期。
+- **fix(rpc)**: 修正本 PR 把**旧编码格式 B**（无前导制式的 `^MONSC`）PCI 由十进制改为十六进制的回归 —— 该格式的 rsrp / rsrq / sinr 同为十进制编码值，PCI 应保持一致，现恢复十进制（制式标注为 NR 时仍按十六进制）。同时给十六进制分支加「越界回退」保护：NR 上限 1007（`0x3EF`）、LTE 503、其它制式 511，十六进制解释越界而十进制解释合法时自动回退，杜绝 `500` 被读成 `1280` 这类越界值。
+- **fix(parse)**: `carrierSignalFor` / `unmatchedSecondaries` 空频点健壮性 —— 空 `dlFcn` 原先被 `Number('')` 折成 `0`，既会把 `arfcn=0` 的辅小区误判为「已匹配」而丢掉，也可能把主载波信号错配给空频点载波。现统一折成 `null` 并跳过匹配。
+- **fix(status)**: 载波状态判定收口为唯一出口 —— `AT^HFREQINFO?` 查询失败时，即使只解析出 1 个载波也不再判定为「单载波」（改为 `error`，数据过期则 `expired`）；两次查询都成功却没有任何载波时判定 `none`（未驻网），不再是自相矛盾的「单载波」；`hfreqSuccess` 初值 `null`（尚未查询）不再被当作成功。
+- **test**: 新增 `tests/switch-rollback-test.js`（6 项开关回滚）与 `tests/parse-regression-test.js`（15 项 PCI 进制与载波匹配回归）；`tests/ca-status-test.js` 由 13 项扩到 17 项。全量前端单测 **85 项 100% 通过**（17 + 28 + 19 + 15 + 6）。
+- **verify**: 实机（192.168.88.1，中国移动 NSA/NR n41）抓 `AT^MONSC` / `AT^HFREQINFO?` / `AT^MONSSC` / `AT^CASCELLINFO?` 原始响应后用修复后的解析层复算：PCI `0x80 → 128`、基站 `C2840C002 (TAC 149002)`、ARFCN `504990`、辅载波 0 个（MONSSC NONE / CASCELLINFO ERROR）→ 状态 `single`，与模组实际上报一致。
+
 ### 载波聚合 (CA) 多分量波生命周期识别与信号指标对齐
 
 - **fix(status)**: 彻底修复**实际处于载波聚合 (CA) 场景下仍误显示为单载波**的问题。将 `AT^HFREQINFO?`、`AT^MONSSC`（5G NR 辅载波）与 `AT^CASCELLINFO?`（4G LTE CA 辅小区）整合进统一多载波引擎 `syncCarriers`，通过 `Parse.carrierSignalFor` 与 `Parse.unmatchedSecondaries` 精准匹配各分量波的真实物理指标，确保辅载波 100% 不漏报。
 - **fix(status)**: 信号指标取值、单位及换算严格与模组 AT 原始响应保持一致。主载波 (PCC) 与辅载波 (SCC1, SCC2...) 各自分别展示其真实 RSRP (`dBm`)、RSRQ (`dB`)、SINR (`dB`)、物理小区 (PCI)、中心频率与带宽；彻底剔除原先辅载波指标为空时错误拷贝主载波数值的伪造逻辑，未上报指标严谨展示 `—`。
 - **feat(status)**: 引入载波聚合状态全生命周期管理（`pending` 待刷新、`error` 未知/异常、`expired` 数据过期）。在查询失败、超时或数据超过 15 秒未更新时严格显示未知/待刷新，避免直接当作单载波。
-- **test**: 新增单测 `tests/ca-status-test.js`（13 项载波聚合生命周期、NR/LTE CA 匹配、辅载波不冒充、过期保护单测全部通过）。
+- **test**: 新增单测 `tests/ca-status-test.js`（17 项载波聚合生命周期、NR/LTE CA 匹配、辅载波不冒充、过期保护与状态机收口单测全部通过）。
 
 ### 物理小区 (PCI) 十六进制进制换算与基站标识错位修复
 

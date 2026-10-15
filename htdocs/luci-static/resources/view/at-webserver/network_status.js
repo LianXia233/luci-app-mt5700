@@ -30,7 +30,7 @@ return L.view.extend({
 			hfreqSuccess: null,
 			secondarySuccess: null,
 			caStatus: {
-				state: 'pending', // 'pending' | 'single' | 'ca' | 'error' | 'expired'
+				state: 'pending', // 'pending' | 'single' | 'ca' | 'none' | 'error' | 'expired'
 				lastSuccessTime: 0
 			},
 			carriers: [],
@@ -862,6 +862,8 @@ return L.view.extend({
 					caEl.textContent = '未知 (待刷新)';
 				} else if (caSt.state === 'expired') {
 					caEl.textContent = '待刷新 (已过期)';
+				} else if (caSt.state === 'none') {
+					caEl.textContent = '未驻网';
 				} else if (state.carriers && state.carriers.length > 1) {
 					caEl.textContent = 'CA ' + state.carriers.length + 'CC 聚合';
 				} else if (state.carriers && state.carriers.length === 1) {
@@ -1225,21 +1227,7 @@ return L.view.extend({
 			var secLTE = state.secondaryLTE || [];
 			var cell = state.cell || {};
 
-			// 数据过期保护：15 秒未更新则标记过期，避免直接按单载波展示
-			var isExpired = state.caStatus.lastSuccessTime > 0 && (now - state.caStatus.lastSuccessTime > 15000);
-
-			// 查询失败或命令未响应保护
-			if (state.hfreqSuccess === false && state.secondarySuccess === false && !cell.channel) {
-				if (isExpired) {
-					state.caStatus.state = 'expired';
-				} else {
-					state.caStatus.state = state.caStatus.lastSuccessTime > 0 ? 'error' : 'pending';
-				}
-				state.carriers = [];
-				return;
-			}
-
-			var merged = [];
+		var merged = [];
 
 			// 1. 主载波 (PCC) 组装
 			if (rawHfreq.length > 0) {
@@ -1347,24 +1335,33 @@ return L.view.extend({
 				});
 			}
 
-			state.carriers = merged;
+		state.carriers = merged;
 
-			// 状态判定：根据真实活动载波数量判断单/多载波
-			if (merged.length > 1) {
-				state.caStatus.state = 'ca';
-				state.caStatus.lastSuccessTime = now;
-			} else if (merged.length === 1) {
-				state.caStatus.state = 'single';
-				state.caStatus.lastSuccessTime = now;
-			} else {
-				if (state.hfreqSuccess || state.secondarySuccess) {
-					state.caStatus.state = 'single';
-					state.caStatus.lastSuccessTime = now;
-				} else {
-					state.caStatus.state = state.caStatus.lastSuccessTime > 0 ? 'error' : 'pending';
-				}
-			}
+		/*
+		 * 状态收口（唯一判据入口，杜绝"查询异常被当成单载波"）：
+		 *   - primaryOk / secondaryOk：undefined 表示本轮尚未查询，不算失败；
+		 *   - 主载波频点查询失败时，即便只解析出 1 个载波也不能下"单载波"结论，
+		 *     因为此时根本无法确认有没有辅载波；
+		 *   - 两次查询都成功却没有载波，说明模组明确未驻网 → 'none'；
+		 *   - 其余情况按"是否已过期 / 是否曾成功过"落到 expired / error / pending。
+		 */
+		/* 只有明确的 true 才算成功：初值为 null（尚未查询），不能当成功用 */
+		var primaryOk = state.hfreqSuccess === true;
+		var secondaryOk = state.secondarySuccess === true;
+		var stale = state.caStatus.lastSuccessTime > 0 && (now - state.caStatus.lastSuccessTime > 15000);
+
+		if (merged.length > 1) {
+			state.caStatus.state = 'ca';
+			state.caStatus.lastSuccessTime = now;
+		} else if (merged.length === 1 && primaryOk) {
+			state.caStatus.state = 'single';
+			state.caStatus.lastSuccessTime = now;
+		} else if (merged.length === 0 && primaryOk && secondaryOk) {
+			state.caStatus.state = 'none';
+		} else {
+			state.caStatus.state = stale ? 'expired' : (state.caStatus.lastSuccessTime > 0 ? 'error' : 'pending');
 		}
+	}
 
 		function updateNetworkInfo() {
 			var serving = null;
