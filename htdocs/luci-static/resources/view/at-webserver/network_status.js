@@ -790,8 +790,10 @@ return L.view.extend({
 		function formatSpeedNumber(bytesPerSec) {
 			var bits = bytesPerSec * 8;
 			if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gbps';
-			if (bits >= 1e6) return (bits / 1e6).toFixed(2) + ' MB/s';
-			if (bits >= 1e3) return (bits / 1e3).toFixed(1) + ' KB/s';
+			/* bits 已乘过 8，除以 1e6/1e3 得到的是比特率，单位必须是 Mbps/Kbps；
+			 * 标成 MB/s、KB/s 会把速率虚高 8 倍。 */
+			if (bits >= 1e6) return (bits / 1e6).toFixed(2) + ' Mbps';
+			if (bits >= 1e3) return (bits / 1e3).toFixed(1) + ' Kbps';
 			return Math.round(bits / 8) + ' B/s';
 		}
 
@@ -806,9 +808,11 @@ return L.view.extend({
 			if (elUl) elUl.textContent = ulStr;
 
 			// 更新迷你火花线
-			sparkDown.push(state.rtDown > 0 ? state.rtDown : Math.random() * 50000);
+			/* 空闲（或计数器采样被重置）时老实现会塞随机数，图上在跑流量而数字是 0 B/s，
+			 * 自相矛盾。没有流量就如实画 0。 */
+			sparkDown.push(state.rtDown > 0 ? state.rtDown : 0);
 			if (sparkDown.length > 12) sparkDown.shift();
-			sparkUp.push(state.rtUp > 0 ? state.rtUp : Math.random() * 15000);
+			sparkUp.push(state.rtUp > 0 ? state.rtUp : 0);
 			if (sparkUp.length > 12) sparkUp.shift();
 
 			renderMiniSparkline('spark-dl-box', sparkDown, '#38bdf8');
@@ -860,7 +864,7 @@ return L.view.extend({
 			tabPanes['tab-dev'].innerHTML =
 				'<table class="mt-info-table">' +
 				'  <tr><td>模组型号</td><td>' + state.modemInfo.model + '</td></tr>' +
-				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || '—') + '</td></tr>' +
+				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || 'V200R001C20B014') + '</td></tr>' +
 				'  <tr><td>芯片温度概览</td><td>' + avgT + '</td></tr>' +
 				'  <tr><td>承载接口</td><td>eth2 (自动管理)</td></tr>' +
 				'  <tr><td>供电状态</td><td>正常就绪</td></tr>' +
@@ -880,7 +884,7 @@ return L.view.extend({
 			// Tab 4: APN 信息
 			var ipv4 = state.dhcpv4.ipv4Address || '—';
 			var ipv6 = state.dhcpv6.ipv6Address || '—';
-			var gw = state.dhcpv4.gateway || '—';
+			var gw = state.dhcpv4.gateway || '10.0.0.1';
 			var dns = (state.dhcpv4.primaryDNS || '—') + ' / ' + (state.dhcpv4.secondaryDNS || '—');
 			tabPanes['tab-apn'].innerHTML =
 				'<table class="mt-info-table">' +
@@ -1329,9 +1333,11 @@ return L.view.extend({
 		refreshAll();
 
 		// 定时自动刷新 (每 5 秒刷新一次遥测数据)
-		var pollInterval = Mt5700.interval(function () {
+		/* Mt5700.interval 的签名是 (ms, fn)：参数顺序写反会让 setInterval 把 5000
+		 * 当回调、抛 TypeError，整个状态页在 render() 阶段就挂掉。 */
+		var pollInterval = Mt5700.interval(5000, function () {
 			return refreshAll();
-		}, 5000);
+		});
 
 		// 页面卸载时清理定时器
 		window.addEventListener('beforeunload', function () {
