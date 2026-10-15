@@ -835,7 +835,7 @@ return L.view.extend({
 
 			var ipEl = document.getElementById('net-val-ip');
 			if (ipEl) {
-				var curIp = state.dhcpv4.ipv4Address || (state.diag.addrs[0] ? state.diag.addrs[0].address : '10.16.198.43');
+				var curIp = state.dhcpv4.ipv4Address || (state.diag.addrs[0] ? state.diag.addrs[0].address : '—');
 				ipEl.textContent = curIp;
 			}
 
@@ -848,8 +848,8 @@ return L.view.extend({
 				'  <tr><td>连接时长</td><td>' + duration + '</td></tr>' +
 				'  <tr><td>调制方式</td><td><span class="mt-pill-tag mt-pill-cyan">QAM</span> ' + (state.mcs.dlMod || '64QAM') + ' (DL) / ' + (state.mcs.ulMod || '64QAM') + ' (UL)</td></tr>' +
 				'  <tr><td>空间流 (MIMO)</td><td><span class="mt-pill-tag mt-pill-purple">MIMO 4×4</span> ' + (state.mcs.dlRank || 4) + ' 层并发 (DL) / ' + (state.mcs.ulRank || 1) + ' 层 (UL)</td></tr>' +
-				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci || '80') + '</td></tr>' +
-				'  <tr><td>基站标识 (eNB/gNB)</td><td>' + (c.cid || 'C2840C002') + (c.lac ? ' (TAC ' + c.lac + ')' : '') + '</td></tr>' +
+				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci || '—') + '</td></tr>' +
+				'  <tr><td>基站标识 (eNB/gNB)</td><td>' + (c.cid || '—') + (c.lac ? ' (TAC ' + c.lac + ')' : '') + '</td></tr>' +
 				'</table>';
 
 			// Tab 2: 设备信息
@@ -878,10 +878,10 @@ return L.view.extend({
 				'</table>';
 
 			// Tab 4: APN 信息
-			var ipv4 = state.dhcpv4.ipv4Address || '10.16.198.43';
-			var ipv6 = state.dhcpv6.ipv6Address || '2409:8d5a:35c:6eb:85d6:d211:1fd6:9918';
+			var ipv4 = state.dhcpv4.ipv4Address || '—';
+			var ipv6 = state.dhcpv6.ipv6Address || '—';
 			var gw = state.dhcpv4.gateway || '10.0.0.1';
-			var dns = (state.dhcpv4.primaryDNS || '221.179.38.7') + ' / ' + (state.dhcpv4.secondaryDNS || '120.196.165.7');
+			var dns = (state.dhcpv4.primaryDNS || '—') + ' / ' + (state.dhcpv4.secondaryDNS || '—');
 			tabPanes['tab-apn'].innerHTML =
 				'<table class="mt-info-table">' +
 				'  <tr><td>APN 名称</td><td>' + (state.apn || 'cmiot5g') + '</td></tr>' +
@@ -1007,7 +1007,7 @@ return L.view.extend({
 			var rows = [
 				['ENDC 双连接', endcTag],
 				['5GC 核心网注册', regVal],
-				['TAC / 小区标识', (d.reg && d.reg.tac ? d.reg.tac : '504990') + ' / ' + (state.cell.cid || 'C2840C002')],
+				['TAC / 小区标识', (d.reg && d.reg.tac ? d.reg.tac : '—') + ' / ' + (state.cell.cid || '—')],
 				['上行发射功率 PUSCH', txVal]
 			];
 			diagBox.appendChild(Mt5700.table(['项目', '参数状态'], rows, { striped: true }));
