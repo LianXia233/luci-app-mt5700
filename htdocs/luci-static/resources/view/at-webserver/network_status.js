@@ -857,7 +857,7 @@ return L.view.extend({
 				'</table>';
 
 			// Tab 2: 设备信息
-			var avgT = '44.8 ℃';
+			var avgT = '—';
 			if (state.temps && state.temps.modem1) {
 				avgT = state.temps.modem1 + ' ℃ (基带 ' + state.temps.modem1 + '℃, PA ' + (state.temps.sub6GPA || 43) + '℃)';
 			}
@@ -959,33 +959,40 @@ return L.view.extend({
 		/* ---------- 芯片温度渲染 (折叠面板内部) ---------- */
 		function renderTempAdv() {
 			tempBody.innerHTML = '';
-			var t = state.temps;
+			var t = state.temps || {};
+			/* 查询失败/未就绪时显示占位符，不能用 47/46/43.3 这类合成默认值
+			 * 冒充实测结温 —— 用户会拿假温度去做散热判断。 */
 			var items = [
-				{ label: 'Modem1 基带', value: t.modem1 || 47 },
-				{ label: 'AP1 主控', value: t.ap1 || 46 },
-				{ label: 'AP2 核心', value: t.ap2 || 46 },
-				{ label: 'Sub6G PA', value: t.sub6GPA || 43.3 },
-				{ label: 'Sub3G PA', value: t.sub3GPA || 43.3 },
-				{ label: 'MIMO PA', value: t.mimoPa || 41.3 },
-				{ label: 'TCXO 晶振', value: t.tcxo || 45.6 }
+				{ label: 'Modem1 基带', value: t.modem1 },
+				{ label: 'AP1 主控', value: t.ap1 },
+				{ label: 'AP2 核心', value: t.ap2 },
+				{ label: 'Sub6G PA', value: t.sub6GPA },
+				{ label: 'Sub3G PA', value: t.sub3GPA },
+				{ label: 'MIMO PA', value: t.mimoPa },
+				{ label: 'TCXO 晶振', value: t.tcxo }
 			];
 
-			var maxC = 0, sumC = 0;
+			var maxC = 0, sumC = 0, nC = 0;
 			items.forEach(function (it) {
-				if (it.value > maxC) maxC = it.value;
-				sumC += it.value;
+				if (it.value != null && !isNaN(parseFloat(it.value))) {
+					if (it.value > maxC) maxC = it.value;
+					sumC += parseFloat(it.value);
+					nC++;
+				}
 			});
-			var avgC = (sumC / items.length).toFixed(1);
+			var avgC = nC ? (sumC / nC).toFixed(1) : null;
 
 			var grid = E('div', { 'class': 'mt-temp-grid' });
 			items.forEach(function (it) {
-				var v = parseFloat(it.value) || 0;
-				var color = v >= 75 ? 'var(--mt5700-danger)' : (v >= 60 ? 'var(--mt5700-amber)' : 'var(--mt5700-green)');
-				var pct = Math.min(100, (v / 85) * 100);
+				var has = it.value != null && !isNaN(parseFloat(it.value));
+				var v = has ? parseFloat(it.value) : 0;
+				var color = !has ? 'var(--mt5700-text-muted)'
+					: (v >= 75 ? 'var(--mt5700-danger)' : (v >= 60 ? 'var(--mt5700-amber)' : 'var(--mt5700-green)'));
+				var pct = has ? Math.min(100, (v / 85) * 100) : 0;
 
 				var cell = E('div', { 'style': 'background:var(--mt5700-subtle-bg); padding:10px; border-radius:8px; text-align:center; border:1px solid var(--mt5700-border-subtle);' }, [
 					E('div', { 'style': 'font-size:11px; color:var(--mt5700-text-muted); font-weight:600;' }, it.label),
-					E('div', { 'style': 'font-size:15px; font-weight:800; font-family:monospace; color:' + color + '; margin:4px 0;' }, v + ' ℃'),
+					E('div', { 'style': 'font-size:15px; font-weight:800; font-family:monospace; color:' + color + '; margin:4px 0;' }, has ? (v + ' ℃') : '—'),
 					E('div', { 'style': 'height:4px; background:rgba(0,0,0,0.08); border-radius:2px; overflow:hidden;' }, [
 						E('div', { 'style': 'width:' + pct + '%; height:100%; background:' + color + '; border-radius:2px;' })
 					])
@@ -996,7 +1003,7 @@ return L.view.extend({
 
 			if (tempBadge) {
 				tempBadge.innerHTML = '';
-				tempBadge.appendChild(Mt5700.badge('均温 ' + avgC + ' ℃ · 温和', 'info'));
+				tempBadge.appendChild(Mt5700.badge(avgC != null ? ('均温 ' + avgC + ' ℃ · 温和') : '暂无温度读数', 'info'));
 			}
 		}
 
@@ -1004,9 +1011,11 @@ return L.view.extend({
 		function renderDiagAdv() {
 			diagBox.innerHTML = '';
 			var d = state.diag;
-			var endcTag = (d.endc && d.endc.established) ? '已建立' : '不适用 / 未建立';
-			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : '已注册 5G (SA/NSA)';
-			var txVal = d.tx ? (d.tx.pusch + ' dBm / ' + d.tx.pucch + ' dBm') : '23 dBm (正常发射)';
+			/* 查询未完成/失败时如实显示占位符：把「没查到」画成「已注册 5G」
+			 * 或「23 dBm 正常发射」，用户会拿着假状态去排障。 */
+			var endcTag = d.endc ? ((d.endc.established) ? '已建立' : '未建立') : '—';
+			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : '—';
+			var txVal = d.tx ? (d.tx.pusch + ' dBm / ' + d.tx.pucch + ' dBm') : '—';
 
 			var rows = [
 				['ENDC 双连接', endcTag],
