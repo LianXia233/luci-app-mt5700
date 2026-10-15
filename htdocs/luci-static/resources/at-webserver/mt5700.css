@@ -5,19 +5,23 @@
    ========================================================================== */
 
 :root {
-  /* 柔和二次元浅色模式调色板 (Pastel Anime Theme) */
-  --mt5700-anime-bg: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 40%, #e0f2fe 100%);
-  --mt5700-bg: rgba(245, 243, 255, 0.75);
-  --mt5700-card-bg: rgba(255, 255, 255, 0.85);
-  --mt5700-card-bg-hover: rgba(255, 255, 255, 0.95);
-  --mt5700-glass-bg: rgba(255, 255, 255, 0.72);
-  --mt5700-float-bg: rgba(255, 255, 255, 0.92);
-  --mt5700-subtle-bg: rgba(245, 243, 255, 0.65);
-  --mt5700-text: #1e1b4b;
-  --mt5700-text-secondary: #475569;
-  --mt5700-text-muted: #64748b;
-  --mt5700-border: rgba(255, 255, 255, 0.95);
-  --mt5700-border-subtle: rgba(203, 213, 225, 0.45);
+  /*
+   * 基础观感优先沿用当前 LuCI 主题的 CSS 变量（不同主题命名不同，
+   * 这里用最常见的几个做兜底链；主题未定义时回落插件自带配色，行为不变）。
+   * 插件不再自带任何主题切换逻辑，明暗由 OpenWrt 全局主题控制。
+   */
+  --mt5700-anime-bg: var(--background-color, linear-gradient(135deg, #f5f3ff 0%, #ede9fe 40%, #e0f2fe 100%));
+  --mt5700-bg: var(--background-color, rgba(245, 243, 255, 0.75));
+  --mt5700-card-bg: var(--card-background-color, var(--background-color, rgba(255, 255, 255, 0.85)));
+  --mt5700-card-bg-hover: var(--card-background-color-hover, var(--card-background-color, rgba(255, 255, 255, 0.95)));
+  --mt5700-glass-bg: var(--card-background-color, rgba(255, 255, 255, 0.72));
+  --mt5700-float-bg: var(--background-color, rgba(255, 255, 255, 0.92));
+  --mt5700-subtle-bg: var(--background-color-muted, rgba(245, 243, 255, 0.65));
+  --mt5700-text: var(--text-color, #1e1b4b);
+  --mt5700-text-secondary: var(--text-color-secondary, var(--text-color, #475569));
+  --mt5700-text-muted: var(--text-color-muted, var(--text-color-secondary, #64748b));
+  --mt5700-border: var(--border-color, rgba(255, 255, 255, 0.95));
+  --mt5700-border-subtle: var(--border-color-muted, rgba(203, 213, 225, 0.45));
   --mt5700-border-focus: rgba(139, 92, 246, 0.45);
   --mt5700-divider: rgba(139, 92, 246, 0.08);
 
@@ -59,7 +63,7 @@
 }
 
 /* 柔和二次元暗色模式 (Soft Cyber Anime Midnight) */
-.mt-theme-dark,
+[data-theme="dark"],
 [data-theme="dark"],
 .dark-theme,
 .theme-dark {
@@ -90,7 +94,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not(.mt-theme-light) {
+  :root {
     --mt5700-anime-bg: linear-gradient(145deg, #0d111e 0%, #13182b 50%, #1a1635 100%);
     --mt5700-bg: rgba(13, 17, 30, 0.85);
     --mt5700-card-bg: rgba(22, 27, 46, 0.86);
@@ -228,27 +232,6 @@
   z-index: 2;
 }
 
-.mt-theme-toggle {
-  background: var(--mt5700-subtle-bg);
-  border: 1px solid var(--mt5700-border-subtle);
-  color: var(--mt5700-text);
-  border-radius: 9999px;
-  padding: 6px 14px;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-.mt-theme-toggle:hover {
-  background: var(--mt5700-accent-pale);
-  border-color: var(--mt5700-accent-light);
-  color: var(--mt5700-accent);
-  transform: translateY(-1px);
-}
 
 .mt-mascot-speech-wrap {
   display: flex;
@@ -3684,7 +3667,7 @@
   box-shadow: 0 4px 16px rgba(139, 92, 246, 0.05), inset 0 1px 2px rgba(255, 255, 255, 0.9) !important;
   max-width: 100%;
 }
-.mt-theme-dark .mt5700-logtabs,
+[data-theme="dark"] .mt5700-logtabs,
 [data-theme="dark"] .mt5700-logtabs,
 .dark-theme .mt5700-logtabs {
   background: rgba(22, 27, 46, 0.72) !important;
@@ -3714,7 +3697,7 @@
   user-select: none;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.mt-theme-dark .mt5700-logtab,
+[data-theme="dark"] .mt5700-logtab,
 [data-theme="dark"] .mt5700-logtab,
 .dark-theme .mt5700-logtab {
   color: var(--mt5700-text-secondary, #94a3b8) !important;
@@ -3778,7 +3761,7 @@
   color: #1e1b4b;
   background: #ffffff;
 }
-.mt-theme-dark .mt5700-logselect select option,
+[data-theme="dark"] .mt5700-logselect select option,
 [data-theme="dark"] .mt5700-logselect select option {
   color: #f1f5f9;
   background: #1e2438;
@@ -3807,7 +3790,7 @@
   background-position: left 11px center !important;
   background-size: 14px 14px !important;
 }
-.mt-theme-dark .mt5700-logsearch input,
+[data-theme="dark"] .mt5700-logsearch input,
 [data-theme="dark"] .mt5700-logsearch input {
   background-color: rgba(22, 27, 46, 0.65) !important;
   border-color: rgba(139, 92, 246, 0.3) !important;
@@ -3818,7 +3801,7 @@
   background-color: rgba(255, 255, 255, 0.95) !important;
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2) !important;
 }
-.mt-theme-dark .mt5700-logsearch input:focus,
+[data-theme="dark"] .mt5700-logsearch input:focus,
 [data-theme="dark"] .mt5700-logsearch input:focus {
   background-color: rgba(28, 34, 58, 0.95) !important;
 }
@@ -3840,7 +3823,7 @@
   white-space: nowrap;
   transition: all .2s ease;
 }
-.mt-theme-dark .mt5700-logauto,
+[data-theme="dark"] .mt5700-logauto,
 [data-theme="dark"] .mt5700-logauto {
   color: var(--mt5700-text-secondary, #94a3b8);
 }
@@ -3895,7 +3878,7 @@
   border: 1px solid rgba(14, 165, 233, 0.35) !important;
   backdrop-filter: blur(10px);
 }
-.mt-theme-dark .mt5700-logbtn-accent,
+[data-theme="dark"] .mt5700-logbtn-accent,
 [data-theme="dark"] .mt5700-logbtn-accent {
   color: #38bdf8 !important;
   background: rgba(14, 165, 233, 0.15) !important;
@@ -3929,7 +3912,7 @@
   box-shadow: 0 8px 30px rgba(139, 92, 246, 0.05), inset 0 1px 2px rgba(255, 255, 255, 0.9) !important;
   overflow: hidden;
 }
-.mt-theme-dark .mt5700-logpanel,
+[data-theme="dark"] .mt5700-logpanel,
 [data-theme="dark"] .mt5700-logpanel {
   background: rgba(22, 27, 46, 0.78) !important;
   border-color: rgba(139, 92, 246, 0.25) !important;
@@ -3947,7 +3930,7 @@
   align-items: center;
   gap: 8px;
 }
-.mt-theme-dark .mt5700-logpanel-hint,
+[data-theme="dark"] .mt5700-logpanel-hint,
 [data-theme="dark"] .mt5700-logpanel-hint {
   color: var(--mt5700-text-secondary, #94a3b8);
 }
@@ -4121,7 +4104,7 @@
   font-size: 11.5px;
   color: var(--mt5700-text-secondary, #475569);
 }
-.mt-theme-dark .mt5700-logpurpose,
+[data-theme="dark"] .mt5700-logpurpose,
 [data-theme="dark"] .mt5700-logpurpose {
   color: var(--mt5700-text-secondary, #94a3b8);
 }
@@ -4139,7 +4122,7 @@
 /* 空状态 */
 .mt5700-logempty { padding: 46px 20px; text-align: center; }
 .mt5700-logempty-title { font-size: 14px; font-weight: 600; color: var(--mt5700-text, #1e1b4b); margin-bottom: 8px; }
-.mt-theme-dark .mt5700-logempty-title,
+[data-theme="dark"] .mt5700-logempty-title,
 [data-theme="dark"] .mt5700-logempty-title { color: var(--mt5700-text, #f1f5f9); }
 .mt5700-logempty-desc { font-size: 12.5px; line-height: 1.75; color: var(--mt5700-text-muted, #64748b); max-width: 520px; margin: 0 auto; }
 
@@ -4151,7 +4134,7 @@
   padding: 0 2px;
   box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.3);
 }
-.mt-theme-dark .mt5700-loglist mark,
+[data-theme="dark"] .mt5700-loglist mark,
 [data-theme="dark"] .mt5700-loglist mark {
   background: rgba(234, 179, 8, 0.35);
   color: #fef08a;
@@ -4337,12 +4320,6 @@
   overflow: visible !important;
 }
 
-.mt5700-hero-svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  filter: drop-shadow(0 6px 14px rgba(8, 124, 186, 0.15));
-}
 
 /* ---------- 动态 SVG 关键帧动效库 ---------- */
 
@@ -4364,22 +4341,6 @@
   100% { transform: rotate(360deg); }
 }
 
-@keyframes mt-wave-expand {
-  0% {
-    r: 8;
-    opacity: 0.9;
-    stroke-width: 2;
-  }
-  70% {
-    opacity: 0.4;
-    stroke-width: 1.5;
-  }
-  100% {
-    r: 34;
-    opacity: 0;
-    stroke-width: 0.5;
-  }
-}
 
 @keyframes mt-float-slow {
   0% { transform: translateY(0px) rotate(0deg); }
@@ -4412,9 +4373,6 @@
 .mt-anim-pulse { animation: mt-pulse-glow 2.5s ease-in-out infinite; transform-origin: center; }
 .mt-anim-spin { animation: mt-spin-slow 12s linear infinite; transform-origin: center; }
 .mt-anim-sweep { animation: mt-radar-sweep 4s linear infinite; transform-origin: center; }
-.mt-anim-wave1 { animation: mt-wave-expand 2.8s cubic-bezier(0.2, 0.8, 0.4, 1) infinite; }
-.mt-anim-wave2 { animation: mt-wave-expand 2.8s cubic-bezier(0.2, 0.8, 0.4, 1) infinite; animation-delay: 0.9s; }
-.mt-anim-wave3 { animation: mt-wave-expand 2.8s cubic-bezier(0.2, 0.8, 0.4, 1) infinite; animation-delay: 1.8s; }
 .mt-anim-stream {
   stroke-dasharray: 8 4;
   animation: mt-data-stream 2s linear infinite;
@@ -4693,42 +4651,8 @@ select.mt5700-select {
 }
 
 /* 顶部专属动态矢量插画容器 */
-.mt5700-hero-illu-box {
-  width: 110px !important;
-  height: 80px !important;
-  flex: 0 0 110px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  overflow: visible !important;
-  filter: drop-shadow(0 6px 16px rgba(139, 92, 246, 0.16)) !important;
-}
 
-.mt-theme-toggle {
-  white-space: nowrap !important;
-  flex-shrink: 0 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  padding: 7px 15px !important;
-  line-height: 1.4 !important;
-  border-radius: 9999px !important;
-  background: rgba(255, 255, 255, 0.88) !important;
-  border: 1px solid rgba(199, 210, 254, 0.85) !important;
-  color: #4338ca !important;
-  font-size: 12.5px !important;
-  font-weight: 600 !important;
-  cursor: pointer !important;
-  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.08) !important;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
 
-.mt-theme-toggle:hover {
-  transform: translateY(-1.5px) !important;
-  background: #ffffff !important;
-  border-color: #8b5cf6 !important;
-  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.22) !important;
-}
 
 .mt-mascot-speech-wrap {
   display: flex !important;
@@ -5085,7 +5009,7 @@ select.cbi-input-select:focus {
 }
 
 /* 暗色模式全面适配 (Dark Mode) */
-body.mt-theme-dark,
+[data-theme="dark"],
 [data-theme="dark"] {
   --mt5700-card-bg: rgba(30, 41, 59, 0.85) !important;
   --mt5700-border: rgba(148, 163, 184, 0.18) !important;
@@ -5094,53 +5018,48 @@ body.mt-theme-dark,
   --mt5700-text-muted: #64748b !important;
 }
 
-body.mt-theme-dark .mt5700-hero-title,
-body.mt-theme-dark .mt5700-card-title {
+[data-theme="dark"] .mt5700-hero-title,
+[data-theme="dark"] .mt5700-card-title {
   color: #f8fafc !important;
 }
 
-body.mt-theme-dark .mt5700-hero-desc,
-body.mt-theme-dark .mt5700-card-subtitle {
+[data-theme="dark"] .mt5700-hero-desc,
+[data-theme="dark"] .mt5700-card-subtitle {
   color: #94a3b8 !important;
 }
 
-body.mt-theme-dark .mt-speech-bubble {
+[data-theme="dark"] .mt-speech-bubble {
   background: rgba(30, 41, 59, 0.95) !important;
   border-color: rgba(148, 163, 184, 0.3) !important;
   color: #c4b5fd !important;
 }
 
-body.mt-theme-dark .mt-theme-toggle {
-  background: rgba(30, 41, 59, 0.85) !important;
-  border-color: rgba(148, 163, 184, 0.3) !important;
-  color: #c4b5fd !important;
-}
 
-body.mt-theme-dark .mt5700-input,
-body.mt-theme-dark .cbi-input-text,
-body.mt-theme-dark .mt5700-select,
-body.mt-theme-dark select.cbi-input-select {
+[data-theme="dark"] .mt5700-input,
+[data-theme="dark"] .cbi-input-text,
+[data-theme="dark"] .mt5700-select,
+[data-theme="dark"] select.cbi-input-select {
   background: rgba(15, 23, 42, 0.85) !important;
   border-color: rgba(148, 163, 184, 0.28) !important;
   color: #f1f5f9 !important;
 }
 
-body.mt-theme-dark .mt5700-btn-secondary,
-body.mt-theme-dark .cbi-button-neutral {
+[data-theme="dark"] .mt5700-btn-secondary,
+[data-theme="dark"] .cbi-button-neutral {
   background: rgba(30, 41, 59, 0.85) !important;
   border-color: rgba(148, 163, 184, 0.3) !important;
   color: #c4b5fd !important;
 }
 
-body.mt-theme-dark .mt5700-table tr {
+[data-theme="dark"] .mt5700-table tr {
   background: rgba(30, 41, 59, 0.6) !important;
 }
 
-body.mt-theme-dark .mt5700-table tr:hover {
+[data-theme="dark"] .mt5700-table tr:hover {
   background: rgba(30, 41, 59, 0.95) !important;
 }
 
-body.mt-theme-dark .mt5700-table td {
+[data-theme="dark"] .mt5700-table td {
   color: #f1f5f9 !important;
 }
 
@@ -5161,9 +5080,6 @@ body.mt-theme-dark .mt5700-table td {
   }
 
   /* 手机端隐藏中间多余插画，优先保留看板娘与主题切换 */
-  .mt5700-hero-illu-box {
-    display: none !important;
-  }
 
   .mt-speech-bubble {
     font-size: 11.5px !important;
@@ -5531,24 +5447,24 @@ select option {
 }
 
 /* ---------- 暗色模式补充 ---------- */
-body.mt-theme-dark .mt-mcs-box {
+[data-theme="dark"] .mt-mcs-box {
   background: rgba(15, 23, 42, 0.75) !important;
   border-color: rgba(148, 163, 184, 0.2) !important;
 }
 
-body.mt-theme-dark .mt5700-modal,
-body.mt-theme-dark .cbi-modal-dialog {
+[data-theme="dark"] .mt5700-modal,
+[data-theme="dark"] .cbi-modal-dialog {
   background: rgba(30, 41, 59, 0.96) !important;
   border-color: rgba(148, 163, 184, 0.28) !important;
 }
 
-body.mt-theme-dark .mt5700-modal-title,
-body.mt-theme-dark .cbi-modal-title {
+[data-theme="dark"] .mt5700-modal-title,
+[data-theme="dark"] .cbi-modal-title {
   color: #f8fafc !important;
 }
 
-body.mt-theme-dark .mt5700-modal-body,
-body.mt-theme-dark .cbi-modal-body {
+[data-theme="dark"] .mt5700-modal-body,
+[data-theme="dark"] .cbi-modal-body {
   color: #cbd5e1 !important;
 }
 
@@ -5754,4 +5670,145 @@ body.mt-theme-dark .cbi-modal-body {
   .mt-sig-gauge-box {
     align-self: center !important;
   }
+}
+
+/* ================== 显示模式切换控件 ==================
+ * 用 LuCI 原生 select（cbi-input-select），外观交给当前主题，不自带配色。
+ */
+.mt5700-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 10px;
+}
+
+.mt5700-mode-switch-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mt5700-text-secondary);
+  white-space: nowrap;
+}
+
+.mt5700-mode-switch-select {
+  font-size: 12px;
+  padding: 3px 6px;
+  min-width: 92px;
+}
+
+/* ================== 极简模式 (Compact Mode) ==================
+ * 只压缩间距、弱化装饰与缩减冗余说明；
+ * 不隐藏任何操作入口、状态徽标、告警与错误提示，也不改变任何数据流。
+ * 触发类 .mt5700-mode-compact 由 Mt5700.setDisplayMode() 即时加/去，无需刷新。
+ */
+.mt5700-mode-compact {
+  gap: 10px;
+  margin: 6px auto;
+}
+
+/* 极简模式下同步收紧插件内部间距变量（body 级标记，仅影响插件页面） */
+.mt5700-body-compact {
+  --mt5700-space-md: 10px;
+  --mt5700-space-lg: 14px;
+}
+
+.mt5700-mode-compact .mt5700-hero-card,
+.mt5700-mode-compact .mt-hero-card {
+  padding: 10px 14px;
+  border-radius: var(--mt5700-radius-md);
+  box-shadow: var(--mt5700-shadow-sm);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.mt5700-mode-compact .mt5700-hero-badge,
+.mt5700-mode-compact .mt-badge-online {
+  display: none;
+}
+
+.mt5700-mode-compact .mt5700-hero-desc,
+.mt5700-mode-compact .mt5700-hero-subtitle {
+  display: none;
+}
+
+.mt5700-mode-compact .mt5700-hero-title {
+  font-size: 17px;
+  margin: 0;
+}
+
+.mt5700-mode-compact .mt5700-hero-art {
+  gap: 8px;
+}
+
+.mt5700-mode-compact .mt5700-page-body {
+  gap: 10px;
+}
+
+.mt5700-mode-compact .mt5700-card,
+.mt5700-mode-compact .mt-card {
+  padding: 12px;
+  border-radius: var(--mt5700-radius-md);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.mt5700-mode-compact .mt5700-card:hover,
+.mt5700-mode-compact .mt-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.mt5700-mode-compact .mt5700-card-header,
+.mt5700-mode-compact .mt-card-head {
+  padding: 8px 10px 6px 10px;
+  margin-bottom: 6px;
+}
+
+.mt5700-mode-compact .mt5700-card-title,
+.mt5700-mode-compact .mt-card-title {
+  font-size: 13px;
+}
+
+/* 卡片副标题属于冗余说明，极简下收起；错误/告警类元素一律保留 */
+.mt5700-mode-compact .mt5700-card-subtitle {
+  display: none;
+}
+
+.mt5700-mode-compact .mt5700-hint {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.mt5700-mode-compact .mt5700-form-group {
+  margin-bottom: 8px;
+}
+
+.mt5700-mode-compact .mt5700-grid {
+  gap: 10px;
+}
+
+.mt5700-mode-compact .mt5700-table td,
+.mt5700-mode-compact .mt5700-table th {
+  padding: 6px 8px;
+}
+
+/* 看板娘完整保留：仅缩小尺寸与气泡，仍可点击换台词，不遮挡主信息 */
+.mt5700-mode-compact .mt-mascot-avatar {
+  width: 52px;
+  height: 48px;
+}
+
+.mt5700-mode-compact .mt-mascot-img {
+  width: 100%;
+  height: 100%;
+}
+
+.mt5700-mode-compact .mt-speech-bubble {
+  font-size: 11px;
+  padding: 5px 9px;
+  max-width: 180px;
+}
+
+.mt5700-mode-compact .mt-mascot-speech-wrap {
+  gap: 4px;
 }

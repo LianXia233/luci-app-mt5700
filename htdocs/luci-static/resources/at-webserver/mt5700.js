@@ -77,191 +77,6 @@ var Mt5700 = (function () {
 		return el;
 	}
 
-	/* ================= 动态 SVG 动效组件系统 ================= */
-
-	/**
-	 * 生成带 CSS 动画的现代化动态矢量插画 (160x120 viewBox)
-	 * 为每个页面呈现定制的高科技白色毛玻璃动态图形
-	 */
-	api.heroIllustration = function (pageKey) {
-		var svg = svgEl('svg', {
-			'class': 'mt5700-hero-svg',
-			viewBox: '0 0 160 120',
-			fill: 'none',
-			xmlns: 'http://www.w3.org/2000/svg'
-		});
-
-		var defs = svgEl('defs');
-		// 柔和二次元渐变 1：薰衣草紫/靛蓝 (主色)
-		var g1 = svgEl('linearGradient', { id: 'mt-g-accent', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		g1.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#a78bfa' }));
-		g1.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#7c3aed' }));
-		defs.appendChild(g1);
-
-		// 柔和二次元渐变 2：青空蓝/薄荷绿
-		var g2 = svgEl('linearGradient', { id: 'mt-g-cyan', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		g2.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#38bdf8' }));
-		g2.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#06b6d4' }));
-		defs.appendChild(g2);
-
-		// 柔和二次元渐变 3：樱花粉/蜜桃红
-		var g3 = svgEl('linearGradient', { id: 'mt-g-pink', x1: '0%', y1: '0%', x2: '100%', y2: '100%' });
-		g3.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#f472b6' }));
-		g3.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#ec4899' }));
-		defs.appendChild(g3);
-
-		// 柔和二次元渐变 4：毛玻璃光晕底
-		var g4 = svgEl('linearGradient', { id: 'mt-g-glass', x1: '0%', y1: '0%', x2: '0%', y2: '100%' });
-		g4.appendChild(svgEl('stop', { offset: '0%', 'stop-color': '#ffffff', 'stop-opacity': '0.9' }));
-		g4.appendChild(svgEl('stop', { offset: '100%', 'stop-color': '#ede9fe', 'stop-opacity': '0.45' }));
-		defs.appendChild(g4);
-
-		svg.appendChild(defs);
-
-		// 二次元软萌外环星轨背景
-		svg.appendChild(svgEl('circle', {
-			cx: 80, cy: 60, r: 48,
-			fill: 'url(#mt-g-glass)',
-			stroke: 'rgba(199, 210, 254, 0.75)',
-			'stroke-width': 1.5,
-			'stroke-dasharray': '6 3'
-		}));
-
-		// 浮动小星芒
-		svg.appendChild(svgEl('path', {
-			d: 'M40 32 L42 26 L44 32 L50 34 L44 36 L42 42 L40 36 L34 34 Z',
-			fill: '#fbbf24', 'class': 'mt-anim-pulse'
-		}));
-		svg.appendChild(svgEl('path', {
-			d: 'M126 84 L127.5 79 L129 84 L134 85.5 L129 87 L127.5 92 L126 87 L121 85.5 Z',
-			fill: '#f472b6', 'class': 'mt-anim-pulse'
-		}));
-
-		if (pageKey === 'network_status') {
-			// 5G 实时遥测：基站信号波与二次元星环
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 10, 'class': 'mt-anim-wave1', stroke: '#8b5cf6', 'stroke-width': '1.5', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 10, 'class': 'mt-anim-wave2', stroke: '#38bdf8', 'stroke-width': '1.5', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 56, r: 10, 'class': 'mt-anim-wave3', stroke: '#f472b6', 'stroke-width': '1.5', fill: 'none' }));
-			// 信号塔
-			svg.appendChild(svgEl('path', { d: 'M70 94L80 44L90 94M74 76H86M77 62H83', stroke: '#6366f1', 'stroke-width': '2.2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 42, r: 4.5, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-pulse' }));
-			// 5G 柔和气泡徽标
-			svg.appendChild(svgEl('rect', { x: 104, y: 28, width: 32, height: 18, rx: 7, fill: 'url(#mt-g-accent)' }));
-			var t = svgEl('text', { x: 120, y: 41, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '10', 'font-weight': 'bold', 'font-family': 'sans-serif' });
-			t.textContent = '5G';
-			svg.appendChild(t);
-		} else if (pageKey === 'network_settings') {
-			// 锁频与射频策略：科技陀螺仪与萌系锁头
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 36, stroke: '#a78bfa', 'stroke-width': '1.5', 'stroke-dasharray': '5 3', 'class': 'mt-anim-spin' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 24, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
-			// 锁扣
-			svg.appendChild(svgEl('rect', { x: 73, y: 55, width: 14, height: 13, rx: 3, fill: '#ffffff' }));
-			svg.appendChild(svgEl('path', { d: 'M76 55V49C76 46.8 77.8 45 80 45C82.2 45 84 46.8 84 49V55', stroke: '#ffffff', 'stroke-width': '2.2', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 61, r: 2, fill: '#6366f1' }));
-			// 卫星频点节点
-			svg.appendChild(svgEl('circle', { cx: 112, cy: 44, r: 4.5, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 48, cy: 76, r: 4.5, fill: '#38bdf8', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'dial') {
-			// 拨号高速隧道：流动萌光火箭与数据泡
-			svg.appendChild(svgEl('path', { d: 'M34 60C50 35 110 35 126 60C110 85 50 85 34 60Z', stroke: 'rgba(167, 139, 250, 0.35)', 'stroke-width': '2', fill: 'none' }));
-			svg.appendChild(svgEl('path', { d: 'M34 60C50 35 110 35 126 60', stroke: '#8b5cf6', 'stroke-width': '2.8', fill: 'none', 'class': 'mt-anim-stream' }));
-			svg.appendChild(svgEl('circle', { cx: 42, cy: 60, r: 7.5, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 118, cy: 60, r: 7.5, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 5.5, fill: '#0ea5e9' }));
-		} else if (pageKey === 'scan') {
-			// 全网扫频：360° 萌彩雷达与星图
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 38, stroke: 'rgba(139, 92, 246, 0.25)', 'stroke-width': '1.5', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 24, stroke: 'rgba(56, 189, 248, 0.35)', 'stroke-width': '1', fill: 'none' }));
-			svg.appendChild(svgEl('line', { x1: 42, y1: 60, x2: 118, y2: 60, stroke: 'rgba(167, 139, 250, 0.3)', 'stroke-width': '1' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 22, x2: 80, y2: 98, stroke: 'rgba(167, 139, 250, 0.3)', 'stroke-width': '1' }));
-			var sweepG = svgEl('g', { 'class': 'mt-anim-sweep', style: 'transform-origin: 80px 60px;' });
-			sweepG.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 114, y2: 36, stroke: '#38bdf8', 'stroke-width': '2.5', 'stroke-linecap': 'round' }));
-			sweepG.appendChild(svgEl('polygon', { points: '80,60 114,36 100,24', fill: 'rgba(167,139,250,0.3)' }));
-			svg.appendChild(sweepG);
-			svg.appendChild(svgEl('circle', { cx: 96, cy: 46, r: 3.5, fill: '#10b981', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 64, cy: 72, r: 3, fill: '#ec4899', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'schedule') {
-			// 定时调度：二次元星月怀表
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 34, stroke: '#8b5cf6', 'stroke-width': '2', fill: 'none' }));
-			svg.appendChild(svgEl('path', { d: 'M80 32A28 28 0 0 1 108 60', stroke: '#f472b6', 'stroke-width': '4', fill: 'none', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 80, y2: 40, stroke: '#6366f1', 'stroke-width': '2.5', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 98, y2: 60, stroke: '#38bdf8', 'stroke-width': '2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 4.5, fill: '#8b5cf6', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('path', { d: 'M62 46 C60 42 66 38 70 42 C67 44 64 45 62 46 Z', fill: '#fbbf24' }));
-		} else if (pageKey === 'modem_settings') {
-			// 模组核心 SoC：猫耳芯片与总线
-			svg.appendChild(svgEl('path', { d: 'M62 38 L54 26 L68 32 Z', fill: 'url(#mt-g-pink)' }));
-			svg.appendChild(svgEl('path', { d: 'M98 38 L106 26 L92 32 Z', fill: 'url(#mt-g-pink)' }));
-			svg.appendChild(svgEl('rect', { x: 56, y: 36, width: 48, height: 48, rx: 10, fill: 'url(#mt-g-accent)', stroke: '#ffffff', 'stroke-width': '2', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('rect', { x: 67, y: 47, width: 26, height: 26, rx: 6, fill: '#ffffff', 'fill-opacity': '0.92' }));
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 4, fill: '#ec4899' }));
-			[44, 52, 60, 68, 76].forEach(function (y) {
-				svg.appendChild(svgEl('line', { x1: 44, y1: y, x2: 56, y2: y, stroke: '#a78bfa', 'stroke-width': '2', 'stroke-linecap': 'round' }));
-				svg.appendChild(svgEl('line', { x1: 104, y1: y, x2: 116, y2: y, stroke: '#a78bfa', 'stroke-width': '2', 'stroke-linecap': 'round' }));
-			});
-		} else if (pageKey === 'upgrade') {
-			// 固件升级：云端胶囊与上升光芒
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 36, stroke: '#8b5cf6', 'stroke-width': '2', 'stroke-dasharray': '8 4', fill: 'none', 'class': 'mt-anim-spin' }));
-			svg.appendChild(svgEl('path', { d: 'M62 66C60 62 62 55 68 53C70 45 80 43 85 47C90 44 98 48 97 55C102 58 101 66 96 68H64', fill: 'url(#mt-g-accent)', opacity: '0.88' }));
-			var upArrow = svgEl('path', { d: 'M80 80V58M72 66L80 58L88 66', stroke: '#ffffff', 'stroke-width': '2.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'class': 'mt-anim-float' });
-			svg.appendChild(upArrow);
-		} else if (pageKey === 'sms_center') {
-			// 短信中心：爱心信笺与浮动气泡
-			svg.appendChild(svgEl('rect', { x: 44, y: 36, width: 52, height: 34, rx: 10, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('line', { x1: 54, y1: 47, x2: 86, y2: 47, stroke: '#ffffff', 'stroke-width': '2.2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('line', { x1: 54, y1: 55, x2: 76, y2: 55, stroke: 'rgba(255,255,255,0.75)', 'stroke-width': '2.2', 'stroke-linecap': 'round' }));
-			svg.appendChild(svgEl('rect', { x: 74, y: 56, width: 46, height: 30, rx: 10, fill: '#ffffff', stroke: 'rgba(167,139,250,0.5)', 'stroke-width': '1.5', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('path', { d: 'M97 66 C95 62 90 64 92 68 C94 72 97 75 97 75 C97 75 100 72 102 68 C104 64 99 62 97 66 Z', fill: '#f43f5e' }));
-		} else if (pageKey === 'sms_settings') {
-			// 短信设置：萌信封与齿轮星标
-			svg.appendChild(svgEl('rect', { x: 48, y: 44, width: 64, height: 42, rx: 8, fill: 'url(#mt-g-glass)', stroke: '#8b5cf6', 'stroke-width': '2' }));
-			svg.appendChild(svgEl('path', { d: 'M48 48L80 70L112 48', stroke: '#8b5cf6', 'stroke-width': '2.2', fill: 'none' }));
-			svg.appendChild(svgEl('circle', { cx: 108, cy: 44, r: 12, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 108, cy: 44, r: 5, fill: '#ffffff' }));
-		} else if (pageKey === 'terminal') {
-			// 终端：二次元毛玻璃赛博控制台
-			svg.appendChild(svgEl('rect', { x: 40, y: 34, width: 80, height: 52, rx: 9, fill: '#1e1b4b', stroke: 'rgba(167,139,250,0.4)', 'stroke-width': '1.5' }));
-			svg.appendChild(svgEl('circle', { cx: 48, cy: 42, r: 2.5, fill: '#f43f5e' }));
-			svg.appendChild(svgEl('circle', { cx: 56, cy: 42, r: 2.5, fill: '#fbbf24' }));
-			svg.appendChild(svgEl('circle', { cx: 64, cy: 42, r: 2.5, fill: '#34d399' }));
-			var p = svgEl('text', { x: 48, y: 60, fill: '#38bdf8', 'font-size': '8.5', 'font-family': 'monospace', 'font-weight': 'bold' });
-			p.textContent = '> AT+CSQ';
-			svg.appendChild(p);
-			svg.appendChild(svgEl('rect', { x: 90, y: 53, width: 5, height: 9, fill: '#a78bfa', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'logs') {
-			// 日志：心跳星波图
-			svg.appendChild(svgEl('rect', { x: 38, y: 36, width: 84, height: 48, rx: 8, fill: '#1e1b4b', stroke: 'rgba(167,139,250,0.3)', 'stroke-width': '1.5' }));
-			svg.appendChild(svgEl('path', {
-				d: 'M44 60H56L62 48L68 72L74 54L80 64L86 60H116',
-				stroke: '#34d399', 'stroke-width': '2.2', fill: 'none',
-				'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-				'class': 'mt-anim-stream'
-			}));
-			svg.appendChild(svgEl('circle', { cx: 114, cy: 60, r: 3.5, fill: '#ec4899', 'class': 'mt-anim-pulse' }));
-		} else if (pageKey === 'service') {
-			// 后台服务：机柜与旋转护盾光环
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 38, stroke: '#8b5cf6', 'stroke-width': '1.5', 'stroke-dasharray': '6 4', 'class': 'mt-anim-spin' }));
-			svg.appendChild(svgEl('rect', { x: 56, y: 34, width: 48, height: 52, rx: 8, fill: 'url(#mt-g-accent)', stroke: '#ffffff', 'stroke-width': '1.5' }));
-			svg.appendChild(svgEl('rect', { x: 62, y: 40, width: 36, height: 10, rx: 3, fill: 'rgba(255,255,255,0.88)' }));
-			svg.appendChild(svgEl('rect', { x: 62, y: 55, width: 36, height: 10, rx: 3, fill: 'rgba(255,255,255,0.88)' }));
-			svg.appendChild(svgEl('rect', { x: 62, y: 70, width: 36, height: 10, rx: 3, fill: 'rgba(255,255,255,0.88)' }));
-			svg.appendChild(svgEl('circle', { cx: 90, cy: 45, r: 2.2, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 90, cy: 60, r: 2.2, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 90, cy: 75, r: 2.2, fill: '#34d399', 'class': 'mt-anim-pulse' }));
-		} else {
-			// 默认互联水晶节点
-			svg.appendChild(svgEl('circle', { cx: 80, cy: 60, r: 16, fill: 'url(#mt-g-accent)', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('circle', { cx: 48, cy: 42, r: 9, fill: 'url(#mt-g-cyan)', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('circle', { cx: 112, cy: 78, r: 11, fill: 'url(#mt-g-pink)', 'class': 'mt-anim-float' }));
-			svg.appendChild(svgEl('line', { x1: 48, y1: 42, x2: 80, y2: 60, stroke: '#a78bfa', 'stroke-width': '1.8' }));
-			svg.appendChild(svgEl('line', { x1: 80, y1: 60, x2: 112, y2: 78, stroke: '#a78bfa', 'stroke-width': '1.8' }));
-		}
-
-		return svg;
-	};
-
-		/* ================= 调制方式星座图与 MIMO 空间流 SVG ================= */
-
 	api.constellationSvg = function (modType) {
 		var svg = svgEl('svg', {
 			'class': 'mt-constellation-svg',
@@ -579,54 +394,73 @@ api.mascotSvg = function () {
 		};
 	};
 
-	api.themeToggle = function () {
-		var btn = E('div', { 'class': 'mt-theme-toggle' });
-		var icon = E('span', {}, '🌓');
-		var txt = E('span', {}, '主题切换');
-		btn.appendChild(icon);
-		btn.appendChild(txt);
+	/* ================= 显示模式（普通 / 极简） =================
+	 *
+	 * 只影响界面布局与信息密度，不触碰后端、RPC 与轮询：
+	 * 由 .mt5700-page 上的 mt5700-mode-compact 类决定（样式全部在 mt5700.css）。
+	 *
+	 * 持久化用浏览器 localStorage（与插件既有的短信缓存、AT 命令收藏同一机制），
+	 * 纯前端显示偏好不落后端配置；读取失败或没有历史值时回落「普通模式」。
+	 */
+	var MT_DISPLAY_MODE_KEY = 'mt5700_display_mode';
+	var MT_DISPLAY_MODE_CLASS = 'mt5700-mode-compact';
 
-		function updateBtnState() {
-			var isDark = document.body.classList.contains('mt-theme-dark') || 
-			            (document.documentElement.getAttribute('data-theme') === 'dark') ||
-			            (!document.body.classList.contains('mt-theme-light') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-			if (isDark) {
-				icon.textContent = '🌙';
-				txt.textContent = '暗色模式';
-			} else {
-				icon.textContent = '☀️';
-				txt.textContent = '浅色模式';
-			}
-		}
-
-		// Init from saved pref
+	api.getDisplayMode = function () {
 		try {
-			var saved = localStorage.getItem('mt5700_theme');
-			if (saved === 'dark') {
-				document.body.classList.add('mt-theme-dark');
-				document.body.classList.remove('mt-theme-light');
-			} else if (saved === 'light') {
-				document.body.classList.add('mt-theme-light');
-				document.body.classList.remove('mt-theme-dark');
-			}
-		} catch (e) {}
-		updateBtnState();
+			var saved = localStorage.getItem(MT_DISPLAY_MODE_KEY);
+			if (saved === 'compact' || saved === 'normal') return saved;
+		} catch (e) { /* localStorage 不可用时回落普通模式 */ }
+		return 'normal';
+	};
 
-		btn.addEventListener('click', function () {
-			var isDark = document.body.classList.contains('mt-theme-dark');
-			if (isDark) {
-				document.body.classList.remove('mt-theme-dark');
-				document.body.classList.add('mt-theme-light');
-				try { localStorage.setItem('mt5700_theme', 'light'); } catch (e) {}
-			} else {
-				document.body.classList.add('mt-theme-dark');
-				document.body.classList.remove('mt-theme-light');
-				try { localStorage.setItem('mt5700_theme', 'dark'); } catch (e) {}
+	api.setDisplayMode = function (mode) {
+		var next = (mode === 'compact') ? 'compact' : 'normal';
+		try {
+			localStorage.setItem(MT_DISPLAY_MODE_KEY, next);
+		} catch (e) { /* 存储不可用也要保证本次切换生效 */ }
+		api.applyDisplayMode(next);
+		return next;
+	};
+
+	/* 立即生效：给页面上所有插件根节点加/去极简类，无需刷新与重新登录 */
+	api.applyDisplayMode = function (mode) {
+		var compact = (mode === 'compact');
+		var roots = document.querySelectorAll('.mt5700-page');
+		for (var i = 0; i < roots.length; i++) {
+			if (compact) roots[i].classList.add(MT_DISPLAY_MODE_CLASS);
+			else roots[i].classList.remove(MT_DISPLAY_MODE_CLASS);
+		}
+		if (compact) document.body.classList.add('mt5700-body-compact');
+		else document.body.classList.remove('mt5700-body-compact');
+	};
+
+	/* 模式切换控件：LuCI 原生 select（cbi-input-select），外观交给当前主题 */
+	api.displayModeSelect = function () {
+		var wrap = E('div', { 'class': 'mt5700-mode-switch' });
+		var label = E('label', { 'class': 'mt5700-mode-switch-label', 'for': 'mt5700-display-mode' }, '显示模式');
+		var sel = E('select', {
+			'class': 'cbi-input-select mt5700-mode-switch-select',
+			'id': 'mt5700-display-mode',
+			'title': '切换插件界面显示模式（仅影响本插件页面布局）'
+		});
+		var optNormal = E('option', { 'value': 'normal' }, '普通模式');
+		var optCompact = E('option', { 'value': 'compact' }, '极简模式');
+		sel.appendChild(optNormal);
+		sel.appendChild(optCompact);
+		sel.value = api.getDisplayMode();
+
+		sel.addEventListener('change', function () {
+			api.setDisplayMode(sel.value);
+			// 同步同一页面上可能存在的其它切换控件（多视图并存时保持一致）
+			var others = document.querySelectorAll('.mt5700-mode-switch-select');
+			for (var i = 0; i < others.length; i++) {
+				if (others[i] !== sel) others[i].value = sel.value;
 			}
-			updateBtnState();
 		});
 
-		return btn;
+		wrap.appendChild(label);
+		wrap.appendChild(sel);
+		return wrap;
 	};
 
 	api.page = function (title, subtitle, pageKey, badgeText) {
@@ -685,19 +519,21 @@ api.mascotSvg = function () {
 		hero.appendChild(content);
 
 		var art = E('div', { 'class': 'mt5700-hero-art' });
-		var toggle = api.themeToggle();
-		art.appendChild(toggle);
+		art.appendChild(api.displayModeSelect());
 
-		// 专属动态矢量插画 (160x120 viewBox)
-		var illuWrap = E('div', { 'class': 'mt5700-hero-illu-box' }, [api.heroIllustration(pageKey)]);
-		art.appendChild(illuWrap);
-
+		/* 看板娘完整保留（含图片、气泡、点击换台词与动画） */
 		var mascot = api.mascot(null, pageKey);
 		art.appendChild(mascot.el);
 		hero.appendChild(art);
 		node._mascot = mascot;
 
 		node.appendChild(hero);
+
+		/* 页面载入即恢复上次选择的模式（新建节点时按当前持久值打标） */
+		if (api.getDisplayMode() === 'compact') {
+			node.classList.add(MT_DISPLAY_MODE_CLASS);
+			document.body.classList.add('mt5700-body-compact');
+		}
 
 		var body = E('div', { 'class': 'mt5700-page-body' });
 		node.appendChild(body);
