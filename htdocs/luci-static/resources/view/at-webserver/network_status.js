@@ -104,8 +104,8 @@ return L.view.extend({
 						E('span', { 'id': 'sig-quality-text' }, '检测中...')
 					])
 				]),
-				E('div', { 'class': 'mt-sig-gauge-box' }, [
-					createSignalCircularGauge()
+				E('div', { 'class': 'mt-sig-cellular-box', 'id': 'sig-cellular-box' }, [
+					Mt5700.cellularSignal()
 				])
 			]),
 			E('div', { 'class': 'mt-sig-sub-metrics' }, [
@@ -357,29 +357,6 @@ return L.view.extend({
 			return svg;
 		}
 
-		function createSignalCircularGauge() {
-			var wrap = E('div', { 'style': 'width:90px; height:90px; position:relative;' });
-			wrap.innerHTML =
-				'<svg viewBox="0 0 100 100" width="90" height="90">' +
-				'  <defs>' +
-				'    <linearGradient id="sig-gauge-grad" x1="0%" y1="0%" x2="100%" y2="100%">' +
-				'      <stop offset="0%" stop-color="#38bdf8"/>' +
-				'      <stop offset="100%" stop-color="#10b981"/>' +
-				'    </linearGradient>' +
-				'  </defs>' +
-				'  <circle cx="50" cy="50" r="40" stroke="rgba(148, 163, 184, 0.2)" stroke-width="7" fill="none" stroke-linecap="round"/>' +
-				'  <circle id="sig-gauge-circle" cx="50" cy="50" r="40" stroke="url(#sig-gauge-grad)" stroke-width="7" fill="none" stroke-linecap="round"' +
-				'          stroke-dasharray="251.2" stroke-dashoffset="50" style="transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset 0.6s ease;"/>' +
-				'  <g transform="translate(37, 36)">' +
-				'    <rect x="2" y="18" width="4" height="8" rx="1.5" fill="#10b981"/>' +
-				'    <rect x="9" y="12" width="4" height="14" rx="1.5" fill="#10b981"/>' +
-				'    <rect x="16" y="6" width="4" height="20" rx="1.5" fill="#10b981"/>' +
-				'    <rect x="23" y="0" width="4" height="26" rx="1.5" fill="#10b981"/>' +
-				'  </g>' +
-				'</svg>';
-			return wrap;
-		}
-
 		function createCellularTowerSvg() {
 			var wrap = E('div', { 'style': 'width:70px; height:70px;' });
 			wrap.innerHTML =
@@ -535,6 +512,51 @@ return L.view.extend({
 		   5. 状态刷新与视图更新逻辑
 		   ========================================================================== */
 
+		/*
+		 * 四格信号图标对应的品质文案与配色（与图标状态同源，避免图标和文字各说各话）
+		 */
+		var CELLULAR_UI = {
+			full: { text: '极佳 · 满格服务', color: 'var(--mt5700-green)', bg: 'var(--mt5700-green-pale)' },
+			strong: { text: '良好 · 信号稳定', color: 'var(--mt5700-cyan)', bg: 'var(--mt5700-cyan-pale)' },
+			medium: { text: '一般 · 信号稍弱', color: 'var(--mt5700-amber)', bg: 'rgba(245, 158, 11, 0.15)' },
+			weak: { text: '较差 · 边缘覆盖', color: 'var(--mt5700-danger)', bg: 'rgba(239, 68, 68, 0.15)' },
+			none: { text: '无信号', color: 'var(--mt5700-text-muted)', bg: 'rgba(148, 163, 184, 0.15)' },
+			searching: { text: '正在搜索网络', color: 'var(--mt5700-cyan)', bg: 'var(--mt5700-cyan-pale)' },
+			connecting: { text: '正在连接网络', color: 'var(--mt5700-accent)', bg: 'var(--mt5700-accent-pale)' },
+			disconnected: { text: '网络已断开', color: 'var(--mt5700-text-muted)', bg: 'rgba(148, 163, 184, 0.15)' },
+			error: { text: '信号读取异常', color: 'var(--mt5700-danger)', bg: 'rgba(239, 68, 68, 0.15)' }
+		};
+
+		/*
+		 * 真实数据 → 四格信号图标状态。判据全部来自模组上报，不得凭空指定：
+		 *   hfreqSuccess === false  主载波频点查询失败 → error（不猜格数）
+		 *   SIM 未就绪（非"正常"/非"检测中"）        → disconnected
+		 *   注册状态含"未注册"                       → searching
+		 *   注册被拒绝 / 注册状态未知                 → error
+		 *   尚未拿到注册结论                         → searching
+		 *   已注册但无 RSRP 读数（首轮采集中）        → connecting
+		 *   已注册且有 RSRP                          → 按 RSRP 分档
+		 */
+		function computeCellularState() {
+			var c = state.cell || {};
+			var raw = c.rsrp;
+			var rsrp = (raw !== null && raw !== undefined && raw !== '' && !isNaN(raw)) ? Number(raw) : null;
+			var reg = String(state.networkStatus || '');
+			var sim = String(state.simStatus || '');
+
+			if (state.hfreqSuccess === false) return 'error';
+			if (sim !== '' && sim.indexOf('检测中') < 0 && sim.indexOf('正常') < 0) return 'disconnected';
+			if (reg.indexOf('未注册') >= 0) return 'searching';
+			if (reg.indexOf('注册被拒绝') >= 0 || reg.indexOf('未知') >= 0) return 'error';
+			if (reg === '' || reg.indexOf('检测中') >= 0 || reg.indexOf('等待状态') >= 0) return 'searching';
+			if (rsrp === null) return 'connecting';
+			if (rsrp >= -80) return 'full';
+			if (rsrp >= -95) return 'strong';
+			if (rsrp >= -110) return 'medium';
+			if (rsrp > -140) return 'weak';
+			return 'none';
+		}
+
 		function renderSignalUI() {
 			var c = state.cell;
 			var rsrp = c.rsrp;
@@ -553,51 +575,23 @@ return L.view.extend({
 			var elSubSinr = document.getElementById('sig-sub-sinr');
 			if (elSubSinr) elSubSinr.textContent = (sinr != null && !isNaN(sinr)) ? sinr + ' dB' : '-';
 
-			// 评估信号质量
-			var qualText = '良好 · 服务正常';
-			var qualColor = 'var(--mt5700-cyan)';
-			var qualBg = 'var(--mt5700-cyan-pale)';
-			var pctClamped = 0.7;
-
-			if (rsrp != null) {
-				if (rsrp >= -80) {
-					qualText = '极佳 · 满格服务';
-					qualColor = 'var(--mt5700-green)';
-					qualBg = 'var(--mt5700-green-pale)';
-					pctClamped = 0.95;
-				} else if (rsrp >= -95) {
-					qualText = '良好 · 信号稳定';
-					qualColor = 'var(--mt5700-cyan)';
-					qualBg = 'var(--mt5700-cyan-pale)';
-					pctClamped = 0.75;
-				} else if (rsrp >= -105) {
-					qualText = '一般 · 信号稍弱';
-					qualColor = 'var(--mt5700-amber)';
-					qualBg = 'rgba(245, 158, 11, 0.15)';
-					pctClamped = 0.45;
-				} else {
-					qualText = '较差 · 边缘覆盖';
-					qualColor = 'var(--mt5700-danger)';
-					qualBg = 'rgba(239, 68, 68, 0.15)';
-					pctClamped = 0.2;
-				}
-			}
+			/* 信号图标状态与品质文案同源判定，保证图形与文字完全一致 */
+			var sigState = computeCellularState();
+			var sigUI = CELLULAR_UI[sigState] || CELLULAR_UI.searching;
 
 			var elPill = document.getElementById('sig-quality-pill');
 			var elText = document.getElementById('sig-quality-text');
 			if (elPill && elText) {
-				elPill.style.background = qualBg;
-				elPill.style.color = qualColor;
-				elText.textContent = qualText;
+				elPill.style.background = sigUI.bg;
+				elPill.style.color = sigUI.color;
+				elText.textContent = sigUI.text;
 			}
 
-			// 环形进度圈
-			var circle = document.getElementById('sig-gauge-circle');
-			if (circle) {
-				var totalArc = 251.2;
-				var offset = totalArc * (1 - pctClamped);
-				circle.style.strokeDashoffset = offset;
-			}
+			/* 更新四格信号图标（状态取自真实数据） */
+			var celBox = document.getElementById('sig-cellular-box');
+			var celEl = celBox ? celBox.querySelector('.cellular') : null;
+			if (celEl && typeof celEl.setCellularState === 'function') celEl.setCellularState(sigState);
+
 
 			// 更新趋势历史
 			var now = new Date();

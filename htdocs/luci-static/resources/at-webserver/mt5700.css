@@ -361,15 +361,6 @@
   width: fit-content;
 }
 
-.mt-sig-gauge-box {
-  width: 90px;
-  height: 90px;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .mt-sig-sub-metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -5589,7 +5580,100 @@ select option {
     align-items: flex-start !important;
     gap: 12px !important;
   }
-  .mt-sig-gauge-box {
+  .mt-sig-cellular-box {
     align-self: center !important;
   }
+}
+
+
+/* ==========================================================================
+   四格动态信号图标 (cellular signal)
+   --------------------------------------------------------------------------
+   移植自 cellular-signal-preview.html：状态由 data-state 驱动，
+   颜色沿用插件调色板变量（因此跟随当前 LuCI 主题的明暗设置）。
+   ========================================================================== */
+.cellular {
+  display: inline-flex;
+  align-items: center;
+  color: var(--mt5700-green);
+  vertical-align: middle;
+}
+
+.cellular svg {
+  display: block;
+  width: 84px;
+  height: 84px;
+  overflow: visible;
+  flex: none;
+}
+
+.cellular .bar {
+  fill: currentColor;
+  opacity: 0.16;
+  transition: opacity 0.2s ease;
+}
+
+.cellular .bar.active { opacity: 1; }
+
+/* 每种状态使用独立颜色 */
+.cellular[data-state="none"],
+.cellular[data-state="disconnected"] { color: var(--mt5700-text-muted); }
+.cellular[data-state="weak"] { color: var(--mt5700-amber); }
+.cellular[data-state="medium"] { color: #eab308; }
+.cellular[data-state="strong"] { color: #65a30d; }
+.cellular[data-state="full"] { color: var(--mt5700-green); }
+.cellular[data-state="searching"] { color: var(--mt5700-cyan); }
+.cellular[data-state="connecting"] { color: var(--mt5700-accent); }
+.cellular[data-state="error"] { color: var(--mt5700-danger); }
+
+.cellular .overlay {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 无信号 / 断开：显示斜杠 */
+.cellular[data-state="none"] .slash,
+.cellular[data-state="disconnected"] .slash { opacity: 1; }
+
+/* 搜索中：信号格依次扫描 */
+.cellular[data-state="searching"] .bar {
+  animation: signal-search 1.2s ease-in-out infinite;
+}
+.cellular[data-state="searching"] .bar:nth-child(2) { animation-delay: .15s; }
+.cellular[data-state="searching"] .bar:nth-child(3) { animation-delay: .3s; }
+.cellular[data-state="searching"] .bar:nth-child(4) { animation-delay: .45s; }
+
+/* 连接中：右上角圆点轻柔闪烁 */
+.cellular[data-state="connecting"] .connecting-dot {
+  opacity: 1;
+  animation: connect-pulse 1s ease-in-out infinite;
+}
+
+/* 错误：显示感叹号 */
+.cellular[data-state="error"] .error-mark { opacity: 1; }
+
+@keyframes signal-search {
+  0%, 100% { opacity: .2; }
+  50% { opacity: 1; }
+}
+
+@keyframes connect-pulse {
+  0%, 100% { opacity: .35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cellular *,
+  .cellular *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* 卡片内承载容器（替代原环形仪表位置） */
+.mt-sig-cellular-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
 }

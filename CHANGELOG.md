@@ -5,11 +5,13 @@
 ### LuCI 原生化改造：移除独立夜间模式与英雄栏动态 SVG
 
 - **refactor(ui)**: 移除看板娘的对话气泡功能（气泡 DOM、逐页台词表、点击换台词交互与 `setBubble()` 接口，以及 `.mt-speech-bubble` 专用样式）；看板娘头像本体（`mascot.png` 与悬浮动效）完整保留。气泡会挤占英雄栏标题并在窄屏下遮挡内容。
+- **feat(ui)**: 信号强度卡片改用**四格动态信号图标**（移植自 `cellular-signal-preview.html`）：`Mt5700.cellularSignal()` 以 `data-state` 驱动 9 种状态（无信号 / 1~4 格 / 搜索中 / 连接中 / 已断开 / 连接错误），配套颜色、扫描与闪烁动画、`prefers-reduced-motion` 降级全部在 `mt5700.css`。原环形仪表（`createSignalCircularGauge` / `#sig-gauge-circle` / `.mt-sig-gauge-box`）删除。
+- **fix(status)**: 图标状态由真实上报数据推导（`computeCellularState()`），并与品质文案同源，杜绝图形与文字不一致：主载波查询失败 → `error`；SIM 未就绪 → `disconnected`；未注册 / 状态未知 / 等待中 → `searching`（等待态同时覆盖注册被拒与未知为 `error`）；已注册但尚无 RSRP 读数 → `connecting`；已注册且 RSRP 分档 `>= -80 full` / `-95 strong` / `-110 medium` / `>-140 weak` / 其余 `none`。实机（RSRP `-64`、CGREG 已注册、CPIN READY）渲染为 `full` 4 格绿色，文案「极佳 · 满格服务」。
 - **refactor(ui)**: 移除插件自带的夜间模式按钮 `Mt5700.themeToggle()` 及 `mt5700_theme` 存储键；英雄栏动态 SVG 插画 `Mt5700.heroIllustration()` 连同专用 CSS（`.mt5700-hero-illu-box` / `.mt5700-hero-svg` / `mt-anim-wave*` / `@keyframes mt-wave-expand`）一并删除。**看板娘完整保留**（`mascot.png`、气泡、点击换台词与浮动动画）；`constellationSvg` / `mimoSvg`（MCS 面板使用）原样保留。
 - **style(css)**: 删除插件独立的 `mt-theme-dark` / `mt-theme-light` 明暗模式类，暗色配色改为跟随全局主题的 `[data-theme="dark"]` 与系统 `prefers-color-scheme`；核心观感变量（背景/卡片/文字/边框）改为优先继承当前 LuCI 主题的 CSS 变量（`--background-color` 等，未定义时回落插件配色），不同主题下自动适配。
 - **fix(status)**: 修复 APN 信息误显示 IMS 的问题 —— 实机 `AT+CGDCONT?` 会同时报出 cid=5 的 `ims` 专用承载，旧逻辑在数据通道 APN 为空（核心网分配）时被后面的 ims 顶掉。现抽取 `pickDataContext()`：剔除 IMS/紧急等专用承载、优先锁定 CID 1 且不再被覆盖，并在 APN 页新增「数据通道 (CID)」行。
 - **chore(ui)**: 清理确认无引用的历史残留：旧版内联 SVG 看板娘 `Mt5700.mascotSvg()`（当前看板娘使用 `mascot.png` 图片）、旧气泡样式 `.mt-anime-speech-bubble`、雷达扫描动画 `.mt-anim-sweep` / `@keyframes mt-radar-sweep`。`mt-anim-pulse/spin/stream/float` 仍被 MCS 面板、骨架屏与图标组件使用，予以保留。
-- **test**: 新增 `tests/apn-channel-test.js`（12 项：IMS 识别、CID 1 锁定、专用承载排除、异常输入）；全量前端单测 **97 项通过**（17 + 15 + 6 + 28 + 19 + 12）。
+- **test**: 新增 `tests/apn-channel-test.js`（12 项：IMS 识别、CID 1 锁定、专用承载排除、异常输入）与 `tests/cellular-icon-test.js`（34 项：9 种状态格数、未知状态回落、全部真实数据分档、文案完整性）；全量前端单测 **131 项通过**（17 + 15 + 6 + 12 + 34 + 28 + 19）。
 - **verify**: 实机热部署后 Playwright 验收：夜间模式按钮 0 个、英雄栏动态 SVG 0 个、看板娘在列；网络状态页 PCI **128**、CA 状态「单载波 (PCC)」、APN 显示「默认 (核心网自动分配) + CID 1（数据承载）」、星座图/MIMO SVG 正常渲染、无新增控制台报错。
 
 ## v1.15.0 (2026-10-15)
