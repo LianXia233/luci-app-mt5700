@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.17.0 (2026-10-16)
+
+### 代码审计清理：移除死代码 / 冗余代码 / 孤立代码
+
+全量静态审计（引用图 + AST lint + `cargo check`）后完成的一次性清理，**不改动任何业务行为**（唯一例外见最后一条）。合计 **-2309 行 / +79 行**，19 个文件；前端 CSS+JS 体积减少约 **36 KB**。
+
+- **refactor(js)**: **`mt5700.js` 1840 → 983 行（-47%）、67847 → 34181 字节**。移除 43 个零引用导出，分四轮迭代（每轮删除后复检，直到「真实调用点」统计归零）：`signalVerdict`（170 行）、`lineChart`（113 行）、`gauge`（88 行）、`SIGNAL_ICONS`（43 行）、`SIGNAL_SPECS`、`GAUGE_PLAIN`、`TEMP_LABELS`、`TEMP_LEVELS`、`tempLabel`、`tempLevel`、`tempClass`、`signalPlain`、`signalBar`、`signalLevel`、`signalCaption`、`levelCaption`、`statusIcon`、`signalIconFor`、`CAP_ICONS`、`capIconFor`、`autoRefresh`、`clearAll`、`errorState`、`syncMetrics`、`renderConnectionBar`、`successButton`、`readonlyField`、`speedBox`、`skeleton`、`capabilityAssess`、`bandPropFor`、`bwCapFor`、`LEVEL_ORDER`、`BAND_PROP`、`BW_CAP_NR`、`BW_CAP_LTE`、`VERDICT_TEXT`、`BAR_COUNT`、`GAUGE_COLORS`、`GAUGE_CAPTIONS`、`_gradSeq` 及其附带的文档注释；`CELLULAR_LEVELS` / `CELLULAR_LABELS` 仅收敛导出（定义仍被 `cellularSignal()` 使用）。
+- **refactor(js)**: **`ui.js` 472 → 331 行（-30%）**。移除 17 个零引用导出：`panel`、`field`、`kv`、`tag`、`primaryButton`、`dangerButton`、`success`、`error`、`warning`、`info`、`confirm`、`toast`、`renderConnectionBar`、`deriveNetworkMode`、`page`、`spinner`、`subscribe`。页面实际只用到 `sendCmd` / `startup` / `sleep` / `setFlightMode` / `atErrorText` / `promptModal` / `autoRefresh` / `interval` / `button`。
+- **refactor(css)**: **`at.css` 25586 → 7520 字节（-71%，671 → 207 行）**，`mt5700.css` 163264 → 141705 字节（-13%）。共移除 278 条规则 + 6 个 `@keyframes`。裁剪按「类名是否仍出现在 JS/HTML 中」判定（含动态拼接前缀识别），`@media` 内部递归处理，并回收无人引用的动画定义。样式版本戳同步递增 `2.19.0` / `1.11.0`。
+- **refactor(parse/rpc/compat/smsEncode)**: 移除 `Parse.parseNrTxPower`、`Parse.ipv6CapDescription`、`AtWs.PDCP_FIELDS` 导出（定义保留——`parsePDCP` 仍在使用）、`AtCompat.available` / `format`、`SmsEncode.isGsm7Char`（定义后从未被调用）。
+- **refactor(view)**: 移除 `upgrade.js` 的 `fotaStateText`（FOTA 状态文案映射表，零调用）。
+- **chore(deps)**: 清理 10 处未使用的 `'require ...'`（`mt5700.js` / `ui.js` / `dial.js` / `logs.js` / `service.js` / `terminal.js` / `upgrade.js` / `sms_settings.js`），并同步精简 9 个文件 `/* global */` 注释中已失效的全局声明。`network_status.js` 的 `require at-webserver/ui` **保留**——`ui.js` 在模块求值时会注入 `at.css`，属有意的副作用依赖。
+- **chore(js)**: 清理 14 处未使用变量 / 无用赋值：`rpc.js`、`service.js`、`network_status.js` 的 `var self = this`，`peakDown` / `peakUp`、`tierColor` / `tierText`、`tier` / `lastItem`，`parse.js` 的 `pid`，`smsEncode.js` 的 `UCS2_MAX` / `count` / `cur` / `curSeptets` / `seq` / `scaOctets`。
+- **fix(rust)**: 删除 `qqbind.rs` 中由 `cargo check` 判定的死常量 `WSS_AGENT`、`BIND_WINDOW`；`async_runtime::spawn` 收敛为 `#[cfg(test)]`（生产路径一律走 `spawn_with_timeout`——扫频需要整体超时保护），将来接入无超时的长任务时移除该标注即可。`cargo check` 现存 **0 警告**，`cargo test` **156 项全通过**。
+- **chore(repo)**: `htdocs/_layout-test/status-mock.html` 移至 `docs/layout-test/`——该目录此前会随 `luci.mk` 一并装进固件 `/www`，设备上可直接访问到开发期布局 mock；删除 IDE 生成的 `.trae-html-share-packages/`。
+- **fix(ui)**: 修复 `network_status.js` 中 `AtWs.ratLabel` 的**命名空间笔误**（应为 `Mt5700.ratLabel`）。该函数定义在 `mt5700.js`，因前缀写错恒为 `undefined`，导致「制式代号 → 可读标签」这条分支**从未生效**（一直走 `c.sysMode || '5G NR'` 兜底）。现修正调用点并按原语义恢复 `Mt5700.ratLabel()`。**这是本次唯一的行为变更**，主载波制式标签将改由 `RAT_CAP` 表输出（如 `5G NR` / `LTE`），建议实机确认一次状态页「网络制式」显示。
+
 ## v1.16.0 (2026-10-16)
 
 ### LuCI 原生化改造：移除独立夜间模式与英雄栏动态 SVG

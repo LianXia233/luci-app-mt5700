@@ -1,7 +1,6 @@
 'use strict';
 'require baseclass';
-/* global AtWs, baseclass */
-
+/* global AtWs */
 /**
  * 补充解析库：运行状态 / 扫频 / USSD / 短信 / 锁频 / 定时锁频 DTO。
  * 各解析函数与 Rust 后端的应答格式严格一致。
@@ -48,21 +47,6 @@ var Parse = (function () {
 		};
 	};
 
-	// AT^NTXPOWER? 每 5 字段一个载波
-	api.parseNrTxPower = function (text) {
-		var match = text.match(/\^NTXPOWER:\s*(.+)/);
-		if (!match) return [];
-		var f = match[1].split(',').map(function (s) { return s.trim(); });
-		var carriers = [];
-		for (var i = 0; i + 4 < f.length && carriers.length < 4; i += 5) {
-			var freq = Number(f[i + 4]);
-			carriers.push({
-				pusch: power(f[i]), pucch: power(f[i + 1]), srs: power(f[i + 2]), prach: power(f[i + 3]),
-				freq: isFinite(freq) && freq !== 0 ? freq : null
-			});
-		}
-		return carriers;
-	};
 
 	var REG_STATES = { 0: '未注册，未搜网', 1: '已注册本地网络', 2: '未注册，搜网中', 3: '注册被拒绝', 4: '未知原因', 5: '已注册漫游网络', 8: '仅紧急业务' };
 	var ACT_TYPES = { 10: 'EUTRAN-5GC', 11: 'NR-5GC' };
@@ -197,11 +181,6 @@ var Parse = (function () {
 
 	/* ================= IPv6 CAP ================= */
 
-	api.ipv6CapDescription = function (v) {
-		if (v === 0) return '不支持 IPv6';
-		if (v === 1) return '支持 IPv6';
-		return '能力值 ' + v;
-	};
 
 	/* ================= 扫频 ================= */
 
@@ -592,7 +571,7 @@ var Parse = (function () {
 			pos += 2 + Math.ceil(oaLen / 2);
 		}
 		if (pos + 1 >= raw.length) return null;
-		var pid = raw[pos]; pos += 1;
+		pos += 1;  // 跳过 pid 字段
 		var dcs = raw[pos]; pos += 1;
 
 		/*

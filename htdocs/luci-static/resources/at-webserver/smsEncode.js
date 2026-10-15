@@ -1,6 +1,5 @@
 'use strict';
 'require baseclass';
-/* global baseclass */
 
 /**
  * 短信发送 PDU 编码器（SMS-SUBMIT 编码）。
@@ -15,14 +14,6 @@ var SmsEncode = (function () {
 
 	var GSM7_ALPHABET = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
 
-	function isGsm7Char(ch) {
-		var code = ch.charCodeAt(0);
-		// 基本字母表里的可打印字符
-		if (GSM7_ALPHABET.indexOf(ch) >= 0) return true;
-		// ESC 扩展表（^ 0x1B 转义）：|^€{}[]~\
-		var esc = '|^€{}[]~\\';
-		return esc.indexOf(ch) >= 0;
-	}
 
 	function gsm7Code(ch) {
 		var code = ch.charCodeAt(0);
@@ -145,7 +136,6 @@ var SmsEncode = (function () {
 	// 计算分片参数
 	var GSM7_MAX = 160;
 	var GSM7_MAX_UDH = 153;
-	var UCS2_MAX = 140;   // 70 字符
 	var UCS2_MAX_UDH = 134; // 134 octets → 67 字符
 
 	function needsUcs2(message) {
@@ -189,10 +179,9 @@ var SmsEncode = (function () {
 			} else {
 				// 长短信：按字符分包（近似 septets，扩展字符少时按字符数分包即可）
 				var per = GSM7_MAX_UDH;
-				var count = Math.ceil(septets / per);
 				var ref = Math.floor(Math.random() * 255) + 1;
 				// 重新按字符精确分包
-				var cur = [], curSeptets = 0, seq = 0, total = 0;
+				var total = 0;
 				// 先估算 total：按 septet 精确切分
 				var chunks = [];
 				var tmp = [], tmpS = 0;
@@ -236,7 +225,6 @@ var SmsEncode = (function () {
 			// SMSC 部分：有 smsc 时编码；没有则 00
 			var sca = opts.smsc ? encodeAddress(opts.smsc) : '00';
 			var fullPdu = sca + pdu;
-			var scaOctets = sca.length / 2;
 			return { pdu: fullPdu, tpduLength: pdu.length / 2 };
 		});
 	};

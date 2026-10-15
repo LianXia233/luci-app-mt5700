@@ -62,37 +62,6 @@
   --mt5700-glass: blur(var(--mt5700-blur)) saturate(var(--mt5700-saturate));
 }
 
-/* 柔和二次元暗色模式 (Soft Cyber Anime Midnight) */
-[data-theme="dark"],
-[data-theme="dark"],
-.dark-theme,
-.theme-dark {
-  --mt5700-anime-bg: linear-gradient(145deg, #0d111e 0%, #13182b 50%, #1a1635 100%);
-  --mt5700-bg: rgba(13, 17, 30, 0.85);
-  --mt5700-card-bg: rgba(22, 27, 46, 0.86);
-  --mt5700-card-bg-hover: rgba(28, 34, 58, 0.95);
-  --mt5700-glass-bg: rgba(22, 27, 46, 0.75);
-  --mt5700-float-bg: rgba(26, 31, 54, 0.95);
-  --mt5700-subtle-bg: rgba(30, 36, 62, 0.6);
-  --mt5700-text: #f1f5f9;
-  --mt5700-text-secondary: #94a3b8;
-  --mt5700-text-muted: #64748b;
-  --mt5700-border: rgba(139, 92, 246, 0.22);
-  --mt5700-border-subtle: rgba(148, 163, 184, 0.15);
-  --mt5700-border-focus: rgba(167, 139, 250, 0.6);
-  --mt5700-divider: rgba(139, 92, 246, 0.12);
-
-  --mt5700-accent-pale: rgba(139, 92, 246, 0.18);
-  --mt5700-cyan-pale: rgba(14, 165, 233, 0.18);
-  --mt5700-pink-pale: rgba(236, 72, 153, 0.18);
-  --mt5700-green-pale: rgba(16, 185, 129, 0.18);
-
-  --mt5700-sh-1: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --mt5700-sh-2: 0 12px 32px rgba(0, 0, 0, 0.45);
-  --mt5700-sh-3: 0 20px 48px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.08);
-  --mt5700-sh-float: 0 24px 60px rgba(0, 0, 0, 0.7);
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     --mt5700-anime-bg: linear-gradient(145deg, #0d111e 0%, #13182b 50%, #1a1635 100%);
@@ -225,16 +194,6 @@
   flex-wrap: wrap;
 }
 
-.mt-hero-sub-pill {
-  font-family: "JetBrains Mono", Consolas, monospace;
-  font-weight: 700;
-  background: var(--mt5700-accent-pale);
-  color: var(--mt5700-accent);
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-}
-
 /* Mascot + Bubble + Theme Toggle */
 .mt5700-hero-art,
 .mt-hero-right {
@@ -249,12 +208,6 @@
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-
-@keyframes mt-bubble-breathe {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
 }
 
 .mt-mascot-avatar {
@@ -676,38 +629,14 @@
   justify-content: space-between;
   min-height: 480px;
 }
-.mt-sms-item-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  background: var(--mt5700-subtle-bg);
-  border: 1px solid var(--mt5700-border-subtle);
-  border-radius: var(--mt5700-radius-md);
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
 .mt-sms-item-card:hover,
 .mt-sms-item-card.active {
   background: var(--mt5700-accent-pale);
   border-color: var(--mt5700-accent-light);
   transform: translateX(2px);
 }
-.mt-sms-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 13px;
-  color: #fff;
-  flex-shrink: 0;
-}
 .mt-sms-avatar.sys { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }
 .mt-sms-avatar.op { background: linear-gradient(135deg, #ec4899, #f472b6); }
-.mt-sms-avatar.biz { background: linear-gradient(135deg, #8b5cf6, #a78bfa); }
 
 /* ================== 响应式适配 (Responsive) ================== */
 @media (max-width: 960px) {
@@ -861,7 +790,7 @@
     --mt5700-sh-float: 0 4px 12px rgba(0, 0, 0, 0.36), 0 12px 36px rgba(0, 0, 0, 0.46), 0 24px 64px rgba(0, 0, 0, 0.34);
     --mt5700-sh-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
     --mt5700-ring: 0 0 0 3px rgba(97, 201, 244, 0.26);
-    /* 暗色下主色翻转为参考站点亮青 #61c9f4 */
+                                
     --mt5700-accent: #61c9f4;
     --mt5700-accent-light: #8edbf9;
     --mt5700-info: #61c9f4;
@@ -1210,111 +1139,6 @@
   box-shadow: var(--mt5700-sh-3), var(--mt5700-sh-inset);
 }
 
-/* 标签区固定高度：中英文两行在所有卡片里都占同样的垂直空间，
-   避免"信号强度 SRSRP" 这类长短不一的文案把下方仪表推得高低不齐 */
-.mt5700-gauge-labelbox {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  text-align: center;
-  min-height: 2.6em;
-}
-
-/* 描述行固定高度 + 垂直居中：不同档位文案长度不同，若随内容伸缩会让
-   四张卡的下边缘参差。固定 3 行高度后四卡底边严格对齐 */
-.mt5700-gauge-plain {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 4.5em;
-  min-height: 4.5em;
-  font-size: var(--mt5700-font-size-xs);
-  line-height: 1.5;
-  color: var(--mt5700-text-muted);
-  text-align: center;
-  padding: 0 2px;
-}
-
-.mt5700-gauge-dial {
-  position: relative;
-  width: 120px;
-  height: 120px;
-  max-width: 100%;
-}
-
-.mt5700-gauge-dial svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.mt5700-gauge-track {
-  fill: none;
-  stroke: rgba(127, 127, 127, 0.16);
-  stroke-linecap: round;
-}
-
-.mt5700-gauge-bar {
-  fill: none;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.4s ease;
-  filter: drop-shadow(0 0 5px rgba(8, 124, 186, 0.32));
-}
-
-.mt5700-gauge-center {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.mt5700-gauge-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--mt5700-text);
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-
-.mt5700-gauge-unit {
-  font-size: 11px;
-  color: var(--mt5700-text-muted);
-}
-
-.mt5700-gauge-label {
-  font-size: var(--mt5700-font-size-sm);
-  font-weight: 600;
-  color: var(--mt5700-text);
-  letter-spacing: 0.02em;
-}
-
-.mt5700-gauge-sub {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--mt5700-text-muted);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.mt5700-gauge-caption {
-  font-size: var(--mt5700-font-size-xs);
-  font-weight: 600;
-  padding: 2px 10px;
-  border-radius: var(--mt5700-radius-full);
-}
-
-/* 仪表档位态：给整张卡加一层极淡的档位底色，便于一眼扫过 */
-.mt5700-gauge-exc  { border-color: rgba(15, 157, 99, 0.35); }
-.mt5700-gauge-good { border-color: rgba(6, 182, 212, 0.35); }
-.mt5700-gauge-fair { border-color: rgba(245, 158, 11, 0.4); }
-.mt5700-gauge-poor { border-color: rgba(249, 115, 22, 0.42); }
-.mt5700-gauge-bad  { border-color: rgba(200, 61, 85, 0.42); }
-
 /* ---------- 网络能力总评横幅（单行横向布局，参考设计稿） ---------- */
 /*
  * PC 上整条一行放全：[状态图标] [摘要] [四指标卡] [能力详情]
@@ -1337,225 +1161,6 @@
   border-radius: 13px;
   box-shadow: var(--mt5700-sh-1);
 }
-
-/* 1) 最左：总状态图标 */
-.mt5700-verdict-status {
-  flex: 0 0 31px;
-  width: 31px;
-  color: var(--mt5700-verdict-accent, #10a56a);
-}
-
-.mt5700-verdict-status svg {
-  display: block;
-  width: 24px;
-  height: 24px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-}
-
-/* 外圈淡环 + 内实心圆（呼吸） */
-.mt5700-verdict-status .mt5700-status-halo { opacity: 0.16; }
-.mt5700-verdict-status .mt5700-verdict-tower { fill: currentColor; stroke: none; }
-
-/* 2) 摘要块：标题 + 描述 */
-/*
- * 早期设计稿写死 width:205px，那是按英文/短句的短描述定的。
- * 中文描述实测需 221px，套 205px 会被截尾（「…适合看高清视频及大文件下…」）。
- * 实机卡片宽 1596px、指标区之外仍有富余，因此给描述**按可用宽度自适应**：
- *   宽屏（>=1400px）放足 340px，中文整句完整可读；
- *   中等宽度（>=1100px）退到 240px，容得下 10px 中文整句；
- *   更窄时才逐级收紧，由浏览器省略号收尾（布局不破）。
- */
-.mt5700-verdict-summary {
-  flex: 0 1 auto;
-  width: 205px;
-  min-width: 165px;
-  max-width: 340px;
-}
-
-.mt5700-verdict-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--mt5700-text);
-  line-height: 1.35;
-  margin: 0;
-}
-
-.mt5700-verdict-advice {
-  margin-top: 3px;
-  font-size: 10px;
-  line-height: 1.5;
-  color: var(--mt5700-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 宽屏（>=1400px）允许描述铺到 340px，让中文句子完整可读 */
-@media (min-width: 1400px) {
-  .mt5700-verdict-summary { width: 340px; max-width: 340px; }
-}
-
-/* 中等宽度（1100-1399px）：退到 240px，刚好容下 10px 中文整句（实测 221px） */
-@media (min-width: 1100px) and (max-width: 1399px) {
-  .mt5700-verdict-summary { width: 240px; max-width: 240px; }
-}
-
-/* 中窄屏（901-1099px）：160px 起省略号收尾，此时指标区仍需保证 4×75px */
-@media (min-width: 901px) and (max-width: 1099px) {
-  .mt5700-verdict-summary { width: 168px; min-width: 168px; max-width: 168px; }
-}
-
-/* 3) 四项信号指标：带边框小卡，四列等宽 */
-.mt5700-verdict-metrics {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(75px, 1fr));
-  gap: 6px;
-  /* 与卡片同级居中对齐；指标区高 53px（23px 图标 + 上下 12px padding + 边框） */
-  align-items: stretch;
-  align-self: center;
-}
-
-.mt5700-verdict-metric {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  /* 实测 53px 高：图标 23px 之外由 label+value 两行撑起（9+12+2+行高） */
-  min-height: 53px;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border: 1px solid var(--mt5700-verdict-line, #e1e9ee);
-  border-radius: 9px;
-  background: var(--mt5700-verdict-metric-bg, #fbfdfe);
-}
-
-.mt5700-verdict-metricicon {
-  flex: 0 0 23px;
-  width: 23px;
-  height: 23px;
-  display: inline-flex;
-}
-
-.mt5700-verdict-metricicon svg {
-  display: block;
-  width: 23px;
-  height: 23px;
-  fill: none;
-  stroke: var(--mt5700-verdict-accent, #10a56a);
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.mt5700-verdict-metricbox {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.mt5700-verdict-metricname {
-  font-size: 9px;
-  color: var(--mt5700-verdict-label, #93a3af);
-  white-space: nowrap;
-  line-height: 1.3;
-}
-
-.mt5700-verdict-metricval {
-  display: block;
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--mt5700-verdict-accent, #10a56a);
-  white-space: nowrap;
-  line-height: 1.3;
-}
-
-/* 被拉低总评的那一项：描边强调 */
-.mt5700-verdict-metric-worst {
-  border-color: var(--mt5700-verdict-accent, #10a56a);
-  box-shadow: inset 0 0 0 1px var(--mt5700-verdict-accent, #10a56a);
-}
-
-/* 4) 右侧能力详情：竖线分隔的三列 */
-.mt5700-verdict-cap {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.mt5700-verdict-capitem {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 3px 9px;
-  border-left: 1px solid var(--mt5700-verdict-divider, #e7edf1);
-}
-
-.mt5700-verdict-capitem:first-child { border-left: 0; }
-
-.mt5700-verdict-capname {
-  display: block;
-  font-size: 9px;
-  color: var(--mt5700-verdict-label, #93a3af);
-  white-space: nowrap;
-  line-height: 1.3;
-}
-
-.mt5700-verdict-capval {
-  display: block;
-  margin-top: 2px;
-  max-width: 115px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--mt5700-verdict-accent, #10a56a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.3;
-}
-
-/* 唯一短板：淡底色强调 */
-.mt5700-verdict-capitem-worst {
-  background: var(--mt5700-verdict-worst-bg, rgba(16, 165, 106, 0.08));
-  border-radius: 7px;
-}
-
-/* 5) 关键说明条：被能力维度拉低时显示，靠 flex-basis:100% 独占一行 */
-.mt5700-verdict-capnote {
-  flex: 0 0 100%;
-  width: 100%;
-  display: none;
-  order: 99;
-  margin-top: 0;
-  padding: var(--mt5700-space-sm) var(--mt5700-space-md);
-  font-size: var(--mt5700-font-size-xs);
-  line-height: 1.6;
-  color: var(--mt5700-text-secondary);
-  background: rgba(245, 158, 11, 0.08);
-  border-left: 2px solid rgba(245, 158, 11, 0.55);
-  border-radius: var(--mt5700-radius-sm);
-  /* 换行后不再受 align-items:center 影响，自身左对齐 */
-  align-self: stretch;
-}
-
-/* 仅当结论被能力维度拉低时才显示，否则不占版面 */
-.mt5700-verdict-capnote-on { display: block; }
-
-/*
- * 档位色盘：整条横幅的强调色由档位驱动，图标/数值/左边条同步取色。
- * 一个变量管全部，避免每个子元素各写一套颜色。
- */
-.mt5700-verdict-exc  { --mt5700-verdict-accent: #10a56a; --mt5700-verdict-worst-bg: rgba(16, 165, 106, 0.09); }
-.mt5700-verdict-good { --mt5700-verdict-accent: #5c9e35; --mt5700-verdict-worst-bg: rgba(92, 158, 53, 0.09); }
-.mt5700-verdict-fair { --mt5700-verdict-accent: #d39425; --mt5700-verdict-worst-bg: rgba(211, 148, 37, 0.11); }
-.mt5700-verdict-poor { --mt5700-verdict-accent: #d95b51; --mt5700-verdict-worst-bg: rgba(217, 91, 81, 0.1); }
-.mt5700-verdict-bad  { --mt5700-verdict-accent: #b02b45; --mt5700-verdict-worst-bg: rgba(176, 43, 69, 0.1); }
-.mt5700-verdict-empty { --mt5700-verdict-accent: #8ba3b6; }
 
 /* ---------- 图标动效（全部由 CSS 驱动） ---------- */
 /*
@@ -1599,8 +1204,6 @@
 }
 
 .mt5700-verdict-metricicon .mt5700-check { animation: mt5700-check 1.4s ease-in-out infinite; }
-.mt5700-verdict-status .mt5700-verdict-tower { animation: mt5700-tower 1.7s ease-in-out infinite; }
-.mt5700-verdict-capicon .mt5700-band-pulse { animation: mt5700-pulse 1.2s ease-in-out infinite; }
 
 @keyframes mt5700-bar-pulse { 50% { transform: scaleY(1.08); } }
 @keyframes mt5700-wave { to { stroke-dashoffset: -8; } }
@@ -1610,41 +1213,13 @@
 }
 @keyframes mt5700-sweep { to { transform: rotate(360deg); } }
 @keyframes mt5700-check { 50% { opacity: 0.35; } }
-@keyframes mt5700-tower { 50% { transform: translateY(-1px); } }
-@keyframes mt5700-pulse { 50% { opacity: 0.35; } }
-
-/* ---------- 响应式回流 ---------- */
-@media (max-width: 1180px) {
-  .mt5700-verdict-cap { display: none; }
-}
 
 @media (max-width: 900px) {
   .mt5700-verdict { gap: 9px; padding: 9px 11px; }
-  .mt5700-verdict-summary { flex-basis: 155px; width: 155px; min-width: 125px; }
-  .mt5700-verdict-metrics { grid-template-columns: repeat(2, minmax(70px, 1fr)); }
 }
 
 @media (max-width: 520px) {
   .mt5700-verdict { gap: 7px; padding: 8px; min-height: 78px; }
-  .mt5700-verdict-status { flex-basis: 25px; width: 25px; }
-  .mt5700-verdict-summary { flex-basis: 100px; width: 100px; min-width: 100px; }
-  .mt5700-verdict-title { font-size: 12px; }
-  .mt5700-verdict-advice {
-    font-size: 8px;
-    white-space: normal;
-    line-height: 1.3;
-    max-height: 22px;
-  }
-  .mt5700-verdict-metric { padding: 4px 5px; gap: 5px; }
-  .mt5700-verdict-metricicon,
-  .mt5700-verdict-metricicon svg { flex-basis: 18px; width: 18px; height: 18px; }
-  .mt5700-verdict-metricname { font-size: 8px; }
-  .mt5700-verdict-metricval { font-size: 10px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mt5700-verdict-metricicon *,
-  .mt5700-verdict-status * { animation: none !important; transition: none !important; }
 }
 
 .mt5700-gauge-caption.exc { background: rgba(15, 157, 99, 0.14); color: #0d9e6e; }
@@ -1660,21 +1235,9 @@
   .mt5700-gauge-caption.poor { color: #fb923c; }
   .mt5700-gauge-caption.bad { color: #f87171; }
 
-  .mt5700-verdict-exc  { --mt5700-verdict-accent: #34d399; --mt5700-verdict-worst-bg: rgba(52, 211, 153, 0.12); }
-  .mt5700-verdict-good { --mt5700-verdict-accent: #a3d977; --mt5700-verdict-worst-bg: rgba(163, 217, 119, 0.12); }
-  .mt5700-verdict-fair { --mt5700-verdict-accent: #fbbf24; --mt5700-verdict-worst-bg: rgba(251, 191, 36, 0.13); }
-  .mt5700-verdict-poor { --mt5700-verdict-accent: #fb923c; --mt5700-verdict-worst-bg: rgba(251, 146, 60, 0.13); }
-  .mt5700-verdict-bad  { --mt5700-verdict-accent: #f87171; --mt5700-verdict-worst-bg: rgba(248, 113, 113, 0.13); }
-
   .mt5700-verdict { --mt5700-verdict-line: #263d52; --mt5700-verdict-divider: #263d52;
                     --mt5700-verdict-metric-bg: rgba(224, 237, 247, 0.04);
                     --mt5700-verdict-label: #8ba3b6; }
-
-  .mt5700-gauge-exc  { border-color: rgba(52, 211, 153, 0.38); }
-  .mt5700-gauge-good { border-color: rgba(34, 211, 238, 0.38); }
-  .mt5700-gauge-fair { border-color: rgba(251, 191, 36, 0.42); }
-  .mt5700-gauge-poor { border-color: rgba(251, 146, 60, 0.44); }
-  .mt5700-gauge-bad  { border-color: rgba(248, 113, 113, 0.44); }
 }
 
 /* ==========================================================================
@@ -1697,49 +1260,7 @@
   display: block;
 }
 
-.mt5700-chart-tip {
-  position: absolute;
-  z-index: 10;
-  pointer-events: none;
-  background: var(--mt5700-float-bg);
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
-  border: 1px solid var(--mt5700-border);
-  border-radius: var(--mt5700-radius-sm);
-  box-shadow: var(--mt5700-sh-float);
-  padding: 6px 10px;
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text);
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity var(--mt5700-transition-fast);
-  transform: translate(-50%, calc(-100% - 10px));
-}
-
 .mt5700-chart-tip.show { opacity: 1; }
-
-.mt5700-chart-legend {
-  display: flex;
-  align-items: center;
-  gap: var(--mt5700-space-md);
-  flex-wrap: wrap;
-  margin-top: var(--mt5700-space-sm);
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-secondary);
-}
-
-.mt5700-chart-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mt5700-chart-legend-swatch {
-  width: 14px;
-  height: 3px;
-  border-radius: 2px;
-  display: inline-block;
-}
 
 /* ==========================================================================
    按钮 (L4)
@@ -2122,13 +1643,6 @@
   background: rgba(23, 50, 75, 0.03);
   border: 1px solid var(--mt5700-divider);
   border-radius: var(--mt5700-radius-md);
-}
-
-.mt5700-raw-panel-title {
-  font-size: var(--mt5700-font-size-xs);
-  font-weight: 500;
-  color: var(--mt5700-text-muted);
-  margin-bottom: var(--mt5700-space-xs);
 }
 
 /* ---------- 字段说明块 ---------- */
@@ -2534,27 +2048,6 @@
   color: var(--mt5700-text-muted);
 }
 
-.mt5700-error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--mt5700-space-xl) var(--mt5700-space-lg);
-  text-align: center;
-  gap: var(--mt5700-space-md);
-}
-
-.mt5700-error-icon {
-  width: 48px;
-  height: 48px;
-  color: var(--mt5700-danger);
-}
-
-.mt5700-error-text {
-  font-size: var(--mt5700-font-size-sm);
-  color: var(--mt5700-text-secondary);
-}
-
 /* ---------- 自动刷新 ---------- */
 .mt5700-autorefresh {
   display: flex;
@@ -2624,49 +2117,6 @@
   margin-left: auto;
   display: flex;
   gap: var(--mt5700-space-sm);
-}
-
-/* ---------- 速率显示 (L3 浮动) ---------- */
-.mt5700-speed-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--mt5700-space-md);
-  margin-bottom: var(--mt5700-space-md);
-}
-
-.mt5700-speed-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  text-align: center;
-  background: var(--mt5700-glass-bg);
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
-  border: 1px solid var(--mt5700-border);
-  border-radius: var(--mt5700-radius-md);
-  box-shadow: var(--mt5700-sh-1), var(--mt5700-sh-inset);
-  padding: var(--mt5700-space-md);
-  transition: transform var(--mt5700-transition-base), box-shadow var(--mt5700-transition-base);
-}
-
-.mt5700-speed-box:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
-}
-
-.mt5700-speed-label {
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-muted);
-  font-weight: 500;
-}
-
-.mt5700-speed-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--mt5700-accent);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- 标签页 ---------- */
@@ -3127,12 +2577,6 @@
   overflow: hidden;
 }
 
-.mt5700-signal-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 0.4s ease;
-}
-
 /* ---------- 响应式 ---------- */
 @media (max-width: 768px) {
   .mt5700-app { padding: var(--mt5700-space-md); }
@@ -3140,8 +2584,6 @@
   .mt5700-card-body { padding: 0; }
   .mt5700-grid { gap: var(--mt5700-space-md); }
   .mt5700-metric-value { font-size: var(--mt5700-font-size-xl); }
-  .mt5700-gauge-dial { width: 100px; height: 100px; }
-  .mt5700-gauge-value { font-size: 19px; }
   .mt5700-chart { height: 140px; }
   .mt5700-btn-group { width: 100%; }
   .mt5700-btn-group .mt5700-btn { flex: 1; }
@@ -3152,19 +2594,8 @@
 .mt5700-text-center { text-align: center; }
 .mt5700-text-left { text-align: left; }
 .mt5700-text-right { text-align: right; }
-.mt5700-mt-sm { margin-top: var(--mt5700-space-sm); }
-.mt5700-mt-md { margin-top: var(--mt5700-space-md); }
-.mt5700-mt-lg { margin-top: var(--mt5700-space-lg); }
-.mt5700-mb-sm { margin-bottom: var(--mt5700-space-sm); }
-.mt5700-mb-md { margin-bottom: var(--mt5700-space-md); }
-.mt5700-mb-lg { margin-bottom: var(--mt5700-space-lg); }
 .mt5700-w-full { width: 100%; }
 .mt5700-flex { display: flex; }
-.mt5700-flex-center { display: flex; align-items: center; justify-content: center; }
-.mt5700-flex-between { display: flex; align-items: center; justify-content: space-between; }
-.mt5700-gap-sm { gap: var(--mt5700-space-sm); }
-.mt5700-gap-md { gap: var(--mt5700-space-md); }
-.mt5700-gap-lg { gap: var(--mt5700-space-lg); }
 
 /* ==========================================================================
    模组温度状态（逐项独立着色 · 6 档）
@@ -3313,14 +2744,14 @@
 /* ---------- 1) 环形仪表盘：4 屏 -> 1 屏 ---------- */
 @media (max-width: 768px) {
 
-  /* 1.1 网格：强制 2 列（早期 <=719px 已是 2 列，此处补齐 720~768 区间
-         并显式压掉 320px 的 1 列规则，保证小屏也是 2 列不塌成 1 列） */
+                                                    
+                                                  
   .mt5700-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 8px;
   }
 
-  /* 1.2 仪表卡：压缩内边距与最小高度，去掉桌面端的 100% 撑高 */
+                                         
   .mt5700-gauge {
     min-height: 0;
     gap: 4px;
@@ -3328,54 +2759,15 @@
     border-radius: var(--mt5700-radius-md);
   }
 
-  /* 去掉触屏 hover 抬升（移动端无 hover，留在按下时会抖动） */
+                                          
   .mt5700-gauge:hover {
     transform: none;
     box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
-  }
-
-  /* 1.3 圆环从 120px 缩到 78px，配合 2 列后单卡高度约 150px */
-  .mt5700-gauge-dial {
-    width: 78px;
-    height: 78px;
-  }
-
-  /* 1.4 圆环内数值与单位同步缩小，避免在小圆里挤爆 */
-  .mt5700-gauge-value { font-size: 16px; }
-  .mt5700-gauge-unit  { font-size: 9px; }
-
-  /* 1.5 标签：中文名 11px（可读下限），英文缩写 9px */
-  .mt5700-gauge-label { font-size: 11px; }
-  .mt5700-gauge-sub   { font-size: 9px; letter-spacing: 0.04em; }
-
-  /* 1.6 标签区高度从 2.6em 收到 2em，去掉多余垂直留白 */
-  .mt5700-gauge-labelbox {
-    min-height: 2em;
-    gap: 0;
-  }
-
-  /* 1.7 档位胶囊：缩小内边距，字号 10px，保证 2 列下不折行 */
-  .mt5700-gauge-caption {
-    font-size: 10px;
-    padding: 1px 8px;
-  }
-
-  /* 1.8 描述行：桌面端固定 4.5em 是为了四卡底边对齐；
-         手机 2 列时同样需要对齐，但高度可降到 3.2em（约 2 行） */
-  .mt5700-gauge-plain {
-    height: auto;
-    min-height: 3.2em;
-    font-size: 10.5px;
-    line-height: 1.4;
-    padding: 0 1px;
   }
 }
 
 /* 320px 极窄屏：圆环再收一档，防止两列挤压 */
 @media (max-width: 419px) {
-  .mt5700-gauge-dial { width: 68px; height: 68px; }
-  .mt5700-gauge-value { font-size: 14px; }
-  .mt5700-gauge-plain { font-size: 10px; }
   .mt5700-metrics { gap: 7px; }
 }
 
@@ -3385,52 +2777,19 @@
     gap: 8px;
     padding: 9px 10px;
   }
-
-  /* 标题 13px，描述 11px（此前 8px），并允许正常换行不再限高 */
-  .mt5700-verdict-title { font-size: 13px; }
-  .mt5700-verdict-advice {
-    font-size: 11px;
-    line-height: 1.35;
-    white-space: normal;
-    max-height: none;
-    overflow: visible;
-  }
-
-  /* 四个能力项在手机端改为 2x2，避免 4 列挤成 8px 字 */
-  .mt5700-verdict-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-  }
-
-  .mt5700-verdict-metric {
-    min-height: 44px;
-    padding: 5px 7px;
-    gap: 6px;
-  }
-
-  .mt5700-verdict-metricicon,
-  .mt5700-verdict-metricicon svg {
-    flex-basis: 20px;
-    width: 20px;
-    height: 20px;
-  }
-
-  /* 关键：指标名 11px（此前 8px），数值 11px */
-  .mt5700-verdict-metricname { font-size: 11px; }
-  .mt5700-verdict-metricval  { font-size: 11px; }
 }
 
 /* ---------- 3) 表格：窄屏改为「卡片式堆叠」，不再横向拖动 ---------- */
 @media (max-width: 600px) {
 
-  /* 3.1 容器去掉横向滚动条与边框，改为无边框容器 */
+                                
   .mt5700-table-wrapper {
     overflow-x: visible;
     border: none;
     background: transparent;
   }
 
-  /* 3.2 表格本身转为块级堆叠 */
+                      
   .mt5700-table,
   .mt5700-table thead,
   .mt5700-table tbody,
@@ -3442,10 +2801,10 @@
     box-sizing: border-box;
   }
 
-  /* 3.3 隐藏表头行（每格自带 data-label 前缀，见 JS 侧） */
+                                            
   .mt5700-table thead { display: none; }
 
-  /* 3.4 每行成为一张独立小卡 */
+                      
   .mt5700-table tbody tr {
     margin-bottom: 8px;
     padding: 8px 10px;
@@ -3457,14 +2816,14 @@
 
   .mt5700-table tbody tr:last-child { margin-bottom: 0; }
 
-  /* 去掉斑马纹与 hover（堆叠后无意义，反而脏） */
+                                
   .mt5700-table-striped tbody tr:nth-child(even),
   .mt5700-table tbody tr:hover,
   .mt5700-table-striped tbody tr:nth-child(even):hover {
     background: var(--mt5700-card-bg);
   }
 
-  /* 3.5 每格一行：标签 + 值左右分栏 */
+                           
   .mt5700-table td {
     display: flex;
     align-items: baseline;
@@ -3478,7 +2837,7 @@
 
   .mt5700-table tbody tr td:last-child { border-bottom: none; }
 
-  /* 3.6 data-label 前缀（由 JS 写入） */
+                                  
   .mt5700-table td[data-label]::before {
     content: attr(data-label);
     flex: 0 0 auto;
@@ -3489,7 +2848,7 @@
     white-space: nowrap;
   }
 
-  /* 3.7 值可换行（长文本如 C1A2B3C 不撑破卡片） */
+                                    
   .mt5700-table td {
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -3505,11 +2864,11 @@
 
 /* ---------- 4) 键值卡：压缩高度与列宽 ---------- */
 @media (max-width: 768px) {
-  /* 卡片内边距与间隙整体收紧 */
+                    
   .mt5700-card { padding: 12px 12px 13px; }
   .mt5700-card-body { gap: 9px; }
 
-  /* 卡片头部：标题与副标题允许换行，不再挤压（间距与 .mt-card-head 保持同步） */
+                                                    
   .mt5700-card-header {
     flex-wrap: wrap;
     gap: 3px 8px;
@@ -3523,7 +2882,6 @@
 /* ---------- 5) 折线图与网格：降低固定高度 ---------- */
 @media (max-width: 768px) {
   .mt5700-chart { height: 132px; }
-  .mt5700-chart-legend { font-size: 11px; gap: 10px; }
 }
 
 /* ---------- 6) 触屏可用性：点击目标不低于 32px ---------- */
@@ -3571,7 +2929,7 @@
     text-align: left;
   }
 
-  /* 第一列 = 项目名：弱化色，不换行 */
+                         
   .mt5700-table-kv tbody td:nth-child(1) {
     flex: 0 0 auto;
     font-size: 11.5px;
@@ -3579,7 +2937,7 @@
     white-space: nowrap;
   }
 
-  /* 第二列 = 值：右对齐加粗，可换行不截断 */
+                            
   .mt5700-table-kv tbody td:nth-child(2) {
     flex: 1 1 auto;
     text-align: right;
@@ -3589,10 +2947,10 @@
     overflow-wrap: anywhere;
   }
 
-  /* 键值表不需要 data-label 前缀 */
+                            
   .mt5700-table-kv td[data-label]::before { content: none; }
 
-  /* 空态整行居中 */
+              
   .mt5700-table-kv tbody td.mt5700-empty {
     flex: 1 1 100%;
     text-align: center;
@@ -4165,7 +3523,7 @@
     width: 100%;
   }
 
-  /* 移动端日志行极窄优化 */
+                  
   .mt5700-logrow {
     padding: 6px 14px 6px 8px;
     gap: 6px;
@@ -4176,7 +3534,7 @@
     letter-spacing: -0.3px;
   }
   .mt5700-logms {
-    display: none !important; /* 隐藏毫秒释放超 35px 空间！ */
+    display: none !important;                       
   }
   .mt5700-logpurpose {
     display: block;
@@ -4185,7 +3543,7 @@
     padding-left: 2px;
   }
 
-  /* 移动端底部统计条排版与避让 */
+                     
   .mt5700-logfooter {
     flex-direction: column;
     align-items: flex-start;
@@ -4195,7 +3553,7 @@
   .mt5700-logfooter-actions {
     width: 100%;
     justify-content: flex-end;
-    padding-right: 28px; /* 避开浮动快捷球 */
+    padding-right: 28px;              
   }
 }
 
@@ -4336,17 +3694,6 @@
   100% { transform: rotate(360deg); }
 }
 
-@keyframes mt-shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
-}
-
-@keyframes mt-ecg {
-  0% { stroke-dashoffset: 120; }
-  50% { stroke-dashoffset: 0; }
-  100% { stroke-dashoffset: -120; }
-}
-
 /* SVG 元素动画绑定类 */
 .mt-anim-pulse { animation: mt-pulse-glow 2.5s ease-in-out infinite; transform-origin: center; }
 .mt-anim-spin { animation: mt-spin-slow 12s linear infinite; transform-origin: center; }
@@ -4355,44 +3702,6 @@
   animation: mt-data-stream 2s linear infinite;
 }
 .mt-anim-float { animation: mt-float-slow 4s ease-in-out infinite alternate; }
-
-/* 骨架屏加载态 (Responsive Skeleton Glass) */
-.mt-skeleton-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-}
-
-.mt-skeleton-card {
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  border-radius: var(--mt5700-radius-lg);
-  padding: 20px;
-  position: relative;
-  overflow: hidden;
-}
-
-.mt-skeleton-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
-  animation: mt-shimmer 1.8s infinite;
-}
-
-.mt-skeleton-line {
-  height: 14px;
-  border-radius: 6px;
-  background: rgba(210, 224, 238, 0.45);
-  margin-bottom: 10px;
-}
-
-.mt-skeleton-line-title { width: 35%; height: 20px; margin-bottom: 16px; }
-.mt-skeleton-line-full { width: 100%; }
-.mt-skeleton-line-3q { width: 75%; }
-.mt-skeleton-line-half { width: 50%; }
 
 /* 暗黑模式下的毛玻璃 Hero */
 @media (prefers-color-scheme: dark) {
@@ -4413,16 +3722,6 @@
     background: #61c9f4;
     box-shadow: 0 0 8px #61c9f4;
   }
-  .mt-skeleton-card {
-    background: rgba(22, 40, 60, 0.7);
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-  .mt-skeleton-card::after {
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-  }
-  .mt-skeleton-line {
-    background: rgba(255, 255, 255, 0.08);
-  }
 }
 
 /* 响应式 (PC vs PE 移动端) 适配 */
@@ -4433,12 +3732,12 @@
     padding: 16px 18px;
     gap: 12px;
   }
-  /* 竖排时桌面规则 flex:1 1 500px 的 flex-basis 作用于高度，会把内容区撑成 500px 高、
-     整卡几乎占满手机整屏（实测 375px 视口下 hero-card 高达 706px）。这里改为 auto。 */
+                                                               
+                                                              
   .mt5700-hero-content {
     flex: 1 1 auto;
   }
-  /* 同理覆盖桌面 flex:0 0 160px，让 height 真正生效（列方向 flex-basis 会压过 height）。 */
+                                                                       
   .mt5700-hero-art {
     flex: 0 0 auto;
     align-self: center;
@@ -5031,7 +4330,7 @@ select.cbi-input-select:focus {
     gap: 8px !important;
   }
 
-  /* 手机端隐藏中间多余插画，优先保留看板娘与主题切换 */
+                                
 
 
   .mt-mascot-avatar {
@@ -5442,18 +4741,18 @@ select option {
 }
 
 @media (max-width: 768px) {
-  /* 页面根容器与内边距 */
+                 
   .mt-anime-container {
     padding: 0 !important;
   }
 
-  /* 顶部状态卡片单列全宽排列 */
+                    
   .mt-stat-grid {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
   }
 
-  /* 中部双列转为单列垂直堆叠 */
+                    
   .mt-mid-grid,
   .mt-row-2col,
   .mt-2col,
@@ -5462,7 +4761,7 @@ select option {
     gap: 12px !important;
   }
 
-  /* 卡片边距压缩 */
+              
   .mt-card {
     padding: 14px 12px !important;
     border-radius: 16px !important;
@@ -5472,7 +4771,7 @@ select option {
     overflow: hidden !important;
   }
 
-  /* Hero 卡片内部元素换行 */
+                     
   .mt-hero-card,
   .mt5700-hero-card {
     padding: 14px !important;
@@ -5488,7 +4787,7 @@ select option {
   }
 
 
-  /* 网络状态卡片网格自适应，防止 频段/带宽 文本右侧溢出 */
+                                   
   .mt-net-main-row {
     display: flex !important;
     align-items: center !important;
@@ -5526,7 +4825,7 @@ select option {
     line-height: 1.35 !important;
   }
 
-  /* Tab 按钮横向平滑滚动，消除右侧裁切 */
+                           
   .mt-tab-header {
     display: flex !important;
     overflow-x: auto !important;
@@ -5549,7 +4848,7 @@ select option {
     font-size: 12px !important;
   }
 
-  /* 表格单元格自适应换行 */
+                  
   .mt-info-table {
     width: 100% !important;
     display: table !important;
@@ -5570,7 +4869,7 @@ select option {
     word-break: break-all !important;
   }
 
-  /* 信号趋势图在手机端的高度与容器适配 */
+                         
   .mt-chart-svg-box {
     height: auto !important;
     min-height: 0 !important;
@@ -5578,7 +4877,7 @@ select option {
     overflow: visible !important;
   }
 
-  /* 调制方式与 MIMO 空间流在手机端单列垂直堆叠 */
+                                
   .mt-mcs-visual-grid {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
@@ -5591,13 +4890,13 @@ select option {
     padding: 12px 10px !important;
   }
 
-  /* 模组芯片温度在手机端调整为 2 列平铺，拒绝挤压 */
+                                
   .mt-temp-grid {
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 8px !important;
   }
 
-  /* 载波聚合卡片手机端竖排自适应 */
+                      
   .mt-carrier-card-item {
     flex-direction: column !important;
     align-items: flex-start !important;
@@ -5606,7 +4905,7 @@ select option {
 }
 
 @media (max-width: 480px) {
-  /* 手机端：数值与信号图标同排（不再竖排堆叠），右侧图标缩小留出文本空间 */
+                                          
   .mt-sig-main-row {
     flex-direction: row !important;
     align-items: center !important;

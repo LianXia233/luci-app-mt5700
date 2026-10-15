@@ -1,8 +1,7 @@
 'use strict';
 'require at-webserver/rpc';
-'require at-webserver/parse';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Mt5700 */
+/* global L, AtWs, Mt5700 */
 
 /**
  * 服务配置页面，覆盖以下配置项：
@@ -232,7 +231,6 @@ return L.view.extend({
 	},
 
 	render: function (data) {
-		var self = this;
 		var page = Mt5700.page('服务配置', 'AT 后台守护进程、串口/TCP 探测与异步通知联动配置', 'service', '守护进程 · 后台服务');
 		var body = page._body;
 
