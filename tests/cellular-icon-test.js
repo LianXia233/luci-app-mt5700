@@ -128,9 +128,23 @@ try {
 			cell: { rsrp: null }, networkStatus: '检测中...', simStatus: '检测中...', hfreqSuccess: null
 		}, o)).computeCellularState();
 
-		check('主载波查询失败 → error', mk({ hfreqSuccess: false }) === 'error', mk({ hfreqSuccess: false }));
+		/* 核心回归：信号本身正常时，辅助遥测命令失败不得显示为读取异常 */
+		check('有 RSRP 且主载波查询失败 → 仍按 RSRP 分档 (full)',
+			mk({ simStatus: '正常 (READY)', networkStatus: '已注册（本地网络）', hfreqSuccess: false, cell: { rsrp: -64 } }) === 'full',
+			'rsrp -64 + hfreq 失败');
+		check('有 RSRP 且遥测异常 → 不受 telemetryError 影响',
+			mk({ simStatus: '正常 (READY)', networkStatus: '已注册（本地网络）', hfreqSuccess: true, telemetryError: true, cell: { rsrp: -95 } }) === 'strong',
+			'telemetryError');
+		check('无 RSRP 且已注册但主载波查询失败 → error',
+			mk({ simStatus: '正常 (READY)', networkStatus: '已注册（本地网络）', hfreqSuccess: false, cell: { rsrp: null } }) === 'error',
+			'no-rsrp + hfreq 失败');
+		check('主载波查询失败但尚未拿到注册结论 → searching（不误报异常）',
+			mk({ hfreqSuccess: false }) === 'searching', 'initial + hfreq 失败');
 		check('SIM 未就绪 → disconnected', mk({ simStatus: 'SIM PIN', hfreqSuccess: true, networkStatus: '已注册（本地网络）' }) === 'disconnected',
 			'SIM PIN');
+		check('SIM 未就绪优先于已有读数 → disconnected',
+			mk({ simStatus: 'SIM PIN', networkStatus: '已注册（本地网络）', hfreqSuccess: true, cell: { rsrp: -70 } }) === 'disconnected',
+			'SIM PIN + rsrp');
 		check('注册中（未注册）→ searching', mk({ simStatus: '正常 (READY)', hfreqSuccess: true, networkStatus: '未注册，正在搜索' }) === 'searching',
 			'未注册');
 		check('注册被拒绝 → error', mk({ simStatus: '正常 (READY)', hfreqSuccess: true, networkStatus: '注册被拒绝' }) === 'error', '拒绝');
