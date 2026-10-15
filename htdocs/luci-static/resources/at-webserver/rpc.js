@@ -1030,6 +1030,53 @@ function parsePDCP(fields) {
 
 /* ---- MONSC ---- */
 
+/*
+ * 3GPP 规定的 PCI / PSC 取值上限，用于判断十六进制解析是否越界。
+ *   NR  : TS 38.211，N_ID^cell 共 1008 个 → 0~1007 (0x3EF)
+ *   LTE : TS 36.211，共 504 个          → 0~503
+ *   WCDMA: PSC 共 512 个                → 0~511
+ */
+var PCI_MAX_NR = 1007;
+var PCI_MAX_LTE = 503;
+var PCI_MAX_OTHER = 511;
+
+/*
+ * PCI 十六进制解析（带越界回退）。
+ *
+ * 背景：^MONSC 的 NR 分支 PCI 明确为十六进制（手册 13.27.3，取值 0~0x3EF，
+ * 实测 0x80 → 128），LTE 分支实测同样为十六进制。但模组在部分制式/固件上
+ * 会以十进制上报 PCI，此时把 "500" 按 16 进制解析会得到 1280，
+ * 已越出该制式的取值上限，属于明显错误。
+ *
+ * 策略（向后兼容）：先按十六进制解析；仅当结果越出该制式上限、
+ * 而十进制解释落在合法区间时，才回退为十进制。
+ * 十六进制上报的既有行为因此完全不变，十进制上报也不再被放大成越界值。
+ */
+function parsePciHex(raw, maxAllowed) {
+	if (raw === undefined || raw === null) return 0;
+	var txt = String(raw).trim().replace(/^0[xX]/, '');
+	if (txt === '') return 0;
+	var hex = parseInt(txt, 16);
+	var dec = parseInt(txt, 10);
+	if (!isFinite(hex)) return isFinite(dec) ? dec : 0;
+	if (!isFinite(dec)) return hex;
+	if (hex > maxAllowed && dec <= maxAllowed) return dec;
+	return hex;
+}
+
+/*
+ * PCI 十进制解析。用于无前导制式的旧编码格式 B：
+ * 该格式的 rsrp/rsrq/sinr 都是需要 convert* 还原的十进制编码值，
+ * PCI 与其同源，也应按十进制读取（PR #16 之前的实现即如此）。
+ */
+function parsePciDec(raw) {
+	if (raw === undefined || raw === null) return 0;
+	var txt = String(raw).trim();
+	if (txt === '') return 0;
+	var dec = parseInt(txt, 10);
+	return isFinite(dec) ? dec : 0;
+}
+
 function parseMONSC(data) {
 	var str = extractATData(data, '^MONSC');
 	if (!str) return null;
@@ -1063,22 +1110,42 @@ function parseMONSC(data) {
 			mnc: p[2] || '',
 			lac: p[3] || '',
 			cid: p[4] || '',
-			pci: p[5] !== undefined && p[5] !== '' ? parseInt(p[5], 16) : 0,
+			pci: parsePciHex(p[5], PCI_MAX_LTE),
 			channel: p[6] || '',
 			rsrp: p[7] !== undefined && p[7] !== '' ? parseFloat(p[7]) : null,
 			rsrq: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
 			sinr: null,
 			rssi: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null
 		};
+	} else if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'NR') {
+		/*
+		 * 手册 13.9.3/13.9.5：NR 的 <cell_paras>
+		 * 实测: ^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-64,-10,25
+		 *   NR,<mcc>,<mnc>,<arfcn>,<flag>,<cid_hex>,<pci_hex>,<tac_hex>,<rsrp>,<rsrq>,<sinr>
+		 * PCI 为十六进制（0x80 -> 128，与手册 13.27.3 取值 0~0x3EF 一致）
+		 * 频点 ARFCN 为 p[3]，小区 ID 为 p[5]，TAC 为 p[7]
+		 */
+		d = {
+			sysMode: 'NR',
+			mcc: p[1] || '',
+			mnc: p[2] || '',
+			channel: p[3] || '',
+			cid: p[5] || '',
+			pci: parsePciHex(p[6], PCI_MAX_NR),
+			lac: p[7] || '',
+			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
+			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
+			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
+		};
 	} else if (hasLeadingMode) {
 		d = {
 			sysMode: p[0] || '',
 			mcc: p[1] || '',
 			mnc: p[2] || '',
-			lac: p[3] || '',
+			channel: p[3] || '',
 			cid: p[5] || '',
-			pci: p[6] !== undefined ? parseInt(p[6], 10) : 0,
-			channel: p[7] || '',
+			pci: parsePciHex(p[6], PCI_MAX_OTHER),
+			lac: p[7] || '',
 			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
 			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
 			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
@@ -1089,7 +1156,10 @@ function parseMONSC(data) {
 			mnc: p[1] || '',
 			lac: p[2] || '',
 			cid: p[3] || '',
-			pci: p[4] ? parseInt(p[4], 10) : 0,
+			/* 旧编码格式的制式在末位字段，据此选择 PCI 上限 */
+			pci: (p[9] || '').replace(/"/g, '').trim().toUpperCase() === 'NR'
+				? parsePciHex(p[4], PCI_MAX_NR)
+				: parsePciDec(p[4]),
 			channel: p[5] ? p[5].trim() : '',
 			rsrp: p[6] !== undefined ? convertRsrp(parseInt(p[6], 10)) : null,
 			rsrq: p[7] !== undefined ? convertRsrq(parseInt(p[7], 10)) : null,

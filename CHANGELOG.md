@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### LuCI 原生化改造：移除独立夜间模式与英雄栏动态 SVG
+
+- **feat(chart)**: **重绘信号趋势曲线图**（纯原生 SVG）：改为**双 Y 轴**（左轴 RSRP `-125~-53 dBm`、右轴 SINR `-5~35 dB`），避免三条不同量纲的曲线挤在同一坐标系里互相误读；背景按 RSRP 质量分区着色（极佳 / 良好 / 一般 / 较差，阈值与图标分档一致）；曲线改用 Catmull-Rom → 三次贝塞尔平滑并钳制越界点，末端标注当前 RSRP 与质量档位；RSRQ 保留为细虚线参考（量纲独立，不参与双轴刻度）；新增鼠标十字准星 + 三点指示 + 数据卡（时间 / RSRP / SINR / RSRQ / 质量）。修复原图 **左轴 RSRP 刻度与位置错位**（`-107` 与 `-72` 标反）——现刻度值与 y 位置严格对应并有单测锁定。
+- **fix(ui)**: 修复状态药丸里的圆点 `.mt-beacon-dot` **垂直偏上**：`.mt-pill-tag` 是 `inline-flex` 但缺少 `align-items: center`，固定宽高的圆点退化为 `flex-start` 顶部对齐；同时空 `inline-block` 在普通文档流中默认按基线对齐也会明显偏上。现给圆点补 `vertical-align: middle` / `align-self: center`，药丸两处规则补 `align-items: center`，并加 `transform-origin: center` 避免该圆点在 SVG 内作脉冲缩放时漂移。实测「已连接 / 实时 / 信号品质」三处圆点与文字中心偏差均为 **0px**。样式版本戳同步递增 `2.18.1`。
+- **style(ui)**: **手机端信号强度卡片排版重做**：数值与四格图标改为同排（数值左、图标右，图标 84→64px），大数字 34→28px、品质药丸不再换行，卡片高度由 301px 收到 198px；副指标三列间距收紧。
+- **style(chart)**: 信号趋势图**字号与尺寸自适应**：字号由 8~10 放大到「可读但不喧宾夺主」的区间（桌面刻度实际约 11.7px、手机约 10.8px，与卡片正文 12~13px 协调）；窄屏改用 380×300 的 viewBox（缩放比接近 1:1，避免等比缩放把文字压到一半以下）；图表高度改由 viewBox 比例自适应（原固定 330/270px 会留白并二次压缩）。
+- **style(chart)**: 趋势图内**文字全部改为英文**（不含中文）：质量档位 `Poor / Fair / Good / Excellent`、末端标注 `Quality …`、悬浮卡 `Time:` / `Quality:`、图例 `RSRP · Left` / `SINR · Right` / `RSRQ · Dashed`、空态提示 `Collecting signal samples…`。
+- **fix(ui)**: 网络状态卡的「频段」等长文本原先被 `.mt-net-val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }` **截断成省略号**，超出可视区域；现改为允许在单元格内换行（`white-space: normal` + `overflow-wrap: anywhere`），并给单元格 `min-width: 0`，载波聚合等长频段组合不再被裁掉。样式版本戳递增 `2.18.6`。
+- **style(ui)**: 信号塔图标去掉原容器自带的**浅紫圆形底色与描边**（`--mt5700-accent-pale` 背景 + `border-radius: 50%` + 1px 描边），尺寸由 84px 收到 72px 与图形贴合，图标直接落在卡片背景上；样式版本戳递增 `2.18.4`。
+- **feat(ui)**: 网络状态卡的信号塔改为**用户指定的发射塔图标**（1024×1024 视口，7 条 path）：颜色走 `currentColor`，由 `renderSignalUI` 按真实状态切换（`full` 绿 / `strong` 青 / `medium` 琥珀 / `weak`·`error` 红 / `searching`·`connecting` 青·紫 / `none`·`disconnected` 灰），与四格信号图标、状态药丸同一套配色；保留轻微呼吸动画并支持 `prefers-reduced-motion`；原三层波纹 SVG 及其内联 `@keyframes` 删除。
+- **fix(ui)**: 状态圆点 `.mt-beacon-dot` **重做对齐**：不再依赖 inline 基线（空 `inline-block` 按基线对齐必然偏上），改为纯 flex 子项定位 —— 容器统一 `inline-flex + align-items: center + gap: 4px`，圆点自身 `display: block; flex: 0 0 auto;`，尺寸收到 6px 与 11px 字号匹配，去掉发光阴影（阴影会撑大视觉重心）、脉冲幅度收紧到 `0.85~1.05`。实测「已连接 / 实时 / 信号品质」三处圆点与文字中心偏差均为 0px。样式版本戳递增 `2.18.3`。
+- **refactor(ui)**: 移除看板娘的对话气泡功能（气泡 DOM、逐页台词表、点击换台词交互与 `setBubble()` 接口，以及 `.mt-speech-bubble` 专用样式）；看板娘头像本体（`mascot.png` 与悬浮动效）完整保留。气泡会挤占英雄栏标题并在窄屏下遮挡内容。
+- **feat(ui)**: 信号强度卡片改用**四格动态信号图标**（移植自 `cellular-signal-preview.html`）：`Mt5700.cellularSignal()` 以 `data-state` 驱动 9 种状态（无信号 / 1~4 格 / 搜索中 / 连接中 / 已断开 / 连接错误），配套颜色、扫描与闪烁动画、`prefers-reduced-motion` 降级全部在 `mt5700.css`。原环形仪表（`createSignalCircularGauge` / `#sig-gauge-circle` / `.mt-sig-gauge-box`）删除。
+- **fix(status)**: 图标状态由真实上报数据推导（`computeCellularState()`），并与品质文案同源，杜绝图形与文字不一致：主载波查询失败 → `error`；SIM 未就绪 → `disconnected`；未注册 / 状态未知 / 等待中 → `searching`（等待态同时覆盖注册被拒与未知为 `error`）；已注册但尚无 RSRP 读数 → `connecting`；已注册且 RSRP 分档 `>= -80 full` / `-95 strong` / `-110 medium` / `>-140 weak` / 其余 `none`。实机（RSRP `-64`、CGREG 已注册、CPIN READY）渲染为 `full` 4 格绿色，文案「极佳 · 满格服务」。
+- **fix(ui)**: 修复信号图标**频繁误报「信号读取异常」**：状态判定改为「已有 RSRP 读数即按电平分档」，不再让 `AT^HFREQINFO?` / `AT^HCSQ?` 等辅助遥测命令的偶发失败覆盖正常信号；同时 `updateNetworkInfo` 的异常分支不再无条件把 `hfreqSuccess` 置 `false`（该分支无法区分是哪一步失败，改为记录 `telemetryError`），只有主载波查询明确失败且无任何读数时才判定异常。实机连续采样 32 秒稳定为 `full`（RSRP -63~-64）。
+- **fix(ui)**: 统一卡片头部度量，消除**同排卡片标题行错位**：`.mt5700-card` 此前头部自带 `padding: 14px 16px 8px` + 下分隔线、内部 `body` 另加 16px 内边距，与 `.mt-card`（卡片 20px 内边距 + 头部无 padding、无分隔线）规范不一致，两者同排或同页时标题行会相差约 6~8px。现统一为卡片 `padding: 20px`、头部 `padding: 0` + `margin-bottom: 14px`、垂直居中（移动端同步）。跨 5 个页面验证头部偏移量完全一致。
+- **refactor(ui)**: 移除插件自带的夜间模式按钮 `Mt5700.themeToggle()` 及 `mt5700_theme` 存储键；英雄栏动态 SVG 插画 `Mt5700.heroIllustration()` 连同专用 CSS（`.mt5700-hero-illu-box` / `.mt5700-hero-svg` / `mt-anim-wave*` / `@keyframes mt-wave-expand`）一并删除。**看板娘完整保留**（`mascot.png`、气泡、点击换台词与浮动动画）；`constellationSvg` / `mimoSvg`（MCS 面板使用）原样保留。
+- **style(css)**: 删除插件独立的 `mt-theme-dark` / `mt-theme-light` 明暗模式类，暗色配色改为跟随全局主题的 `[data-theme="dark"]` 与系统 `prefers-color-scheme`；核心观感变量（背景/卡片/文字/边框）改为优先继承当前 LuCI 主题的 CSS 变量（`--background-color` 等，未定义时回落插件配色），不同主题下自动适配。
+- **fix(status)**: 修复 APN 信息误显示 IMS 的问题 —— 实机 `AT+CGDCONT?` 会同时报出 cid=5 的 `ims` 专用承载，旧逻辑在数据通道 APN 为空（核心网分配）时被后面的 ims 顶掉。现抽取 `pickDataContext()`：剔除 IMS/紧急等专用承载、优先锁定 CID 1 且不再被覆盖，并在 APN 页新增「数据通道 (CID)」行。
+- **chore(ui)**: 清理确认无引用的历史残留：旧版内联 SVG 看板娘 `Mt5700.mascotSvg()`（当前看板娘使用 `mascot.png` 图片）、旧气泡样式 `.mt-anime-speech-bubble`、雷达扫描动画 `.mt-anim-sweep` / `@keyframes mt-radar-sweep`。`mt-anim-pulse/spin/stream/float` 仍被 MCS 面板、骨架屏与图标组件使用，予以保留。
+- **test**: 新增 `tests/apn-channel-test.js`（12 项：IMS 识别、CID 1 锁定、专用承载排除、异常输入）与 `tests/cellular-icon-test.js`（38 项：9 种状态格数、未知状态回落、全部真实数据分档、文案完整性，以及「有 RSRP 时遥测失败不得误报异常」的回归用例）；全量前端单测 **164 项通过**（17 + 15 + 6 + 12 + 38 + 29 + 28 + 19）。
+- **note(ui)**: 静态样式版本戳 `MT5700_CSS_VERSION` 提升至 `2.18.0` —— 之前多轮样式改动未同步递增，浏览器会沿用缓存的旧 `mt5700.css` 导致「代码已更新、页面仍是旧样式」的错位假象；此后样式变更需同步递增该版本号。
+- **verify**: 实机热部署后 Playwright 验收：夜间模式按钮 0 个、英雄栏动态 SVG 0 个、看板娘在列；网络状态页 PCI **128**、CA 状态「单载波 (PCC)」、APN 显示「默认 (核心网自动分配) + CID 1（数据承载）」、星座图/MIMO SVG 正常渲染、无新增控制台报错。
+
 ## v1.15.0 (2026-10-15)
 
 ### 前端重构：Soft Anime 柔和二次元设计系统与高精度矢量遥测（含隐私脱敏与 Codex 复查修复）
@@ -17,6 +43,34 @@
 - **fix(sms)**: 短信页「全部 / 未读 / 已发」筛选此前只填充未挂载、且渲染不看 `currentTab`，按钮不可见也不生效；现已挂载并按 Tab 过滤（后端无已读标志位，未读按「最新一条为收到且本页会话未点开」判定，刷新后重置）。
 - **feat(responsive)**: **移动端深度自适应**：窄屏卡片单列、`overflow-x: hidden` 防横向晃动；Tab 栏触控横滑防截断；温度矩阵 2 列平铺，星座图与 MIMO 空间流单列堆叠。
 - **chore**: 删除无人引用的 `mascot.jpg`（436KB），看板娘仅使用 `mascot.png`。
+
+### PR #16 复审修复：开关状态回滚、PCI 进制兼容与 CA 状态机收口
+
+- **fix(modem-settings)**: `makeSwitch` 统一承担「写指令失败就还原勾选」的职责（Codex P2）。此前只有 `res.success === false` 分支手写回滚，`.catch()` 分支与「高温时关闭 CA/MIMO」开关完全没有回滚 —— 模组拒绝 `AT^THERMAUTOFUN` 后开关停在新状态，界面会长期显示与模组实际热策略相反的值。现在 handler 只需返回 `Promise<boolean>`，失败 / reject / 抛异常一律由框架还原；返回 `undefined` 的老式 handler 行为不变。
+- **fix(modem-settings)**: 温控采样间隔输入增加正整数校验与 1~3600 秒钳制；写入失败时回滚到上一次被模组确认的值，避免界面长期显示一个模组从未接受的采样周期。
+- **fix(rpc)**: 修正本 PR 把**旧编码格式 B**（无前导制式的 `^MONSC`）PCI 由十进制改为十六进制的回归 —— 该格式的 rsrp / rsrq / sinr 同为十进制编码值，PCI 应保持一致，现恢复十进制（制式标注为 NR 时仍按十六进制）。同时给十六进制分支加「越界回退」保护：NR 上限 1007（`0x3EF`）、LTE 503、其它制式 511，十六进制解释越界而十进制解释合法时自动回退，杜绝 `500` 被读成 `1280` 这类越界值。
+- **fix(parse)**: `carrierSignalFor` / `unmatchedSecondaries` 空频点健壮性 —— 空 `dlFcn` 原先被 `Number('')` 折成 `0`，既会把 `arfcn=0` 的辅小区误判为「已匹配」而丢掉，也可能把主载波信号错配给空频点载波。现统一折成 `null` 并跳过匹配。
+- **fix(status)**: 载波状态判定收口为唯一出口 —— `AT^HFREQINFO?` 查询失败时，即使只解析出 1 个载波也不再判定为「单载波」（改为 `error`，数据过期则 `expired`）；两次查询都成功却没有任何载波时判定 `none`（未驻网），不再是自相矛盾的「单载波」；`hfreqSuccess` 初值 `null`（尚未查询）不再被当作成功。
+- **test**: 新增 `tests/switch-rollback-test.js`（6 项开关回滚）与 `tests/parse-regression-test.js`（15 项 PCI 进制与载波匹配回归）；`tests/ca-status-test.js` 由 13 项扩到 17 项。全量前端单测 **85 项 100% 通过**（17 + 28 + 19 + 15 + 6）。
+- **verify**: 实机（192.168.88.1，中国移动 NSA/NR n41）抓 `AT^MONSC` / `AT^HFREQINFO?` / `AT^MONSSC` / `AT^CASCELLINFO?` 原始响应后用修复后的解析层复算：PCI `0x80 → 128`、基站 `C2840C002 (TAC 149002)`、ARFCN `504990`、辅载波 0 个（MONSSC NONE / CASCELLINFO ERROR）→ 状态 `single`，与模组实际上报一致。前端热部署到真机后 Playwright 抓取渲染结果：网络状态页 PCI **128**、基站标识带 TAC、CA 状态「单载波 (PCC)」、温控开关与 `^THERMAUTOFUN: 1 0 2` 一致，无页面报错。
+
+### 载波聚合 (CA) 多分量波生命周期识别与信号指标对齐
+
+- **fix(status)**: 彻底修复**实际处于载波聚合 (CA) 场景下仍误显示为单载波**的问题。将 `AT^HFREQINFO?`、`AT^MONSSC`（5G NR 辅载波）与 `AT^CASCELLINFO?`（4G LTE CA 辅小区）整合进统一多载波引擎 `syncCarriers`，通过 `Parse.carrierSignalFor` 与 `Parse.unmatchedSecondaries` 精准匹配各分量波的真实物理指标，确保辅载波 100% 不漏报。
+- **fix(status)**: 信号指标取值、单位及换算严格与模组 AT 原始响应保持一致。主载波 (PCC) 与辅载波 (SCC1, SCC2...) 各自分别展示其真实 RSRP (`dBm`)、RSRQ (`dB`)、SINR (`dB`)、物理小区 (PCI)、中心频率与带宽；彻底剔除原先辅载波指标为空时错误拷贝主载波数值的伪造逻辑，未上报指标严谨展示 `—`。
+- **feat(status)**: 引入载波聚合状态全生命周期管理（`pending` 待刷新、`error` 未知/异常、`expired` 数据过期）。在查询失败、超时或数据超过 15 秒未更新时严格显示未知/待刷新，避免直接当作单载波。
+- **test**: 新增单测 `tests/ca-status-test.js`（17 项载波聚合生命周期、NR/LTE CA 匹配、辅载波不冒充、过期保护与状态机收口单测全部通过）。
+
+### 物理小区 (PCI) 十六进制进制换算与基站标识错位修复
+
+- **fix(status)**: 模组通过 `AT^MONSC` 上报的 5G NR PCI 字段为十六进制（如实机 `0x80`，手册 13.27.3 规定 0~0x3EF），前端 `rpc.js` 误用十进制 `parseInt(p[6], 10)` 导致误显为 `80`。现更正为十六进制解析 `parseInt(p[6], 16)`，实机正确输出为十进制 **`128`**，对齐 3GPP 标准与 Rust 后端 `urc.rs`。
+- **fix(status)**: 修正 NR 布局中中心频点 ARFCN（`504990`）与跟踪区码 TAC（`149002`）反向错位映射问题，基站标识现正确带出 `(TAC 149002)`。优化 PCI 为合法 `0` 时的空值回退判断。
+
+### 拨号设置与模组设置 UI 紧凑化与移动端响应式重构
+
+- **fix(dial)**: 彻底解决 **PDP 上下文管理大表格长宽不适配与横向溢出**问题，重构为自适应卡片网格（宽屏双列 / 移动端单列）；链路状态卡片、动态药丸标签、现代化微交互 Switch 开关及运营商 APN 快捷预设。
+- **style(modem-settings)**: **网络系统配置 (SYSCFGEX)** 双列药丸化卡片紧凑重构，大幅压缩垂直空间；**网络接入顺序 (Acquisition Order)** 超紧凑单行药丸化排列，支持直观调整优先级；适配 Soft Anime 风格卡片与移动端响应式自适应。
+- **style(logs)**: 日志查看页面 (`logs.js`) Soft Anime 风格药丸化 Tab、控制栏 1+2+2 移动端对称栅格、毫秒自适应隐藏释放 35px 宽度、快捷悬浮回顶/回底。
 
 ### 安全：RPC `_rid` / `device` 注入修复
 
