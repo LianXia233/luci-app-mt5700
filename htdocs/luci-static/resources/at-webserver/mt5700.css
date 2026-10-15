@@ -173,27 +173,31 @@
 }
 
 .mt5700-hero-badge-dot,
+/*
+ * 状态圆点：重做为「flex 子项」定位 —— 容器一律 inline-flex + align-items:center，
+ * 圆点自身不再依赖 inline 基线（空 inline-block 按基线对齐必然偏上），
+ * 也不再使用发光阴影（阴影会撑大视觉重心，看起来比文字高）。
+ * 尺寸取 6px，与 11~12px 字号的状态文字视觉重量匹配；间距由容器 gap 统一控制。
+ */
 .mt-beacon-dot {
-  display: inline-block;
-  flex: none;
-  width: 7px;
-  height: 7px;
+  display: block;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 8px currentColor;
-  /* inline 流中与相邻文字垂直居中（空 inline-block 默认按基线对齐会明显偏上） */
+  /* 兼容非 flex 的兜底场景（如被内联进普通文本） */
   vertical-align: middle;
-  /* flex 容器（药丸/徽章）中居中，避免退化为 flex-start 而顶部对齐 */
   align-self: center;
-  /* 作为 SVG <circle> 使用时按自身中心缩放，防止脉冲动画期间点位漂移 */
+  /* 作为 SVG <circle> 使用时按自身中心缩放，避免脉冲期间点位漂移 */
   transform-origin: center;
   animation: mt-beacon-pulse 1.8s infinite ease-in-out;
 }
 
 @keyframes mt-beacon-pulse {
-  0% { transform: scale(0.9); opacity: 0.5; }
-  50% { transform: scale(1.3); opacity: 1; }
-  100% { transform: scale(0.9); opacity: 0.5; }
+  0% { transform: scale(0.85); opacity: 0.55; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.85); opacity: 0.55; }
 }
 
 .mt5700-hero-title,
@@ -316,6 +320,7 @@
 .mt-pill-tag {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   font-size: 11px;
   font-weight: 800;
   font-family: "JetBrains Mono", Consolas, monospace;
@@ -5363,6 +5368,7 @@ select option {
 .mt-pill-tag {
   display: inline-flex !important;
   align-items: center !important;
+  gap: 4px !important;
   padding: 2px 8px !important;
   border-radius: 6px !important;
   font-size: 11px !important;
@@ -5692,4 +5698,38 @@ select option {
   align-items: center;
   justify-content: center;
   flex: none;
+}
+
+
+/* ==========================================================================
+   网络状态卡的信号发射塔图标 (broadcast tower)
+   --------------------------------------------------------------------------
+   图形由 JS 以内联 SVG 注入（1024×1024 视口，fill 走 currentColor），
+   颜色由 renderSignalUI 按真实网络状态设置（见 network_status.js 的 TOWER_COLORS），
+   与四格信号图标、状态药丸共用同一套状态配色。
+   ========================================================================== */
+.mt-tower-svg-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--mt5700-green);
+  transition: color 0.35s ease;
+}
+
+.mt-tower-svg-box svg {
+  display: block;
+  width: 72px;
+  height: 72px;
+  animation: mt-tower-breathe 3.2s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes mt-tower-breathe {
+  0%, 100% { opacity: 0.88; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt-tower-svg-box svg { animation: none !important; }
 }
