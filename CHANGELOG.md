@@ -4,6 +4,7 @@
 
 ### LuCI 原生化改造：移除独立夜间模式与英雄栏动态 SVG
 
+- **feat(chart)**: **重绘信号趋势曲线图**（纯原生 SVG）：改为**双 Y 轴**（左轴 RSRP `-125~-53 dBm`、右轴 SINR `-5~35 dB`），避免三条不同量纲的曲线挤在同一坐标系里互相误读；背景按 RSRP 质量分区着色（极佳 / 良好 / 一般 / 较差，阈值与图标分档一致）；曲线改用 Catmull-Rom → 三次贝塞尔平滑并钳制越界点，末端标注当前 RSRP 与质量档位；RSRQ 保留为细虚线参考（量纲独立，不参与双轴刻度）；新增鼠标十字准星 + 三点指示 + 数据卡（时间 / RSRP / SINR / RSRQ / 质量）。修复原图 **左轴 RSRP 刻度与位置错位**（`-107` 与 `-72` 标反）——现刻度值与 y 位置严格对应并有单测锁定。
 - **refactor(ui)**: 移除看板娘的对话气泡功能（气泡 DOM、逐页台词表、点击换台词交互与 `setBubble()` 接口，以及 `.mt-speech-bubble` 专用样式）；看板娘头像本体（`mascot.png` 与悬浮动效）完整保留。气泡会挤占英雄栏标题并在窄屏下遮挡内容。
 - **feat(ui)**: 信号强度卡片改用**四格动态信号图标**（移植自 `cellular-signal-preview.html`）：`Mt5700.cellularSignal()` 以 `data-state` 驱动 9 种状态（无信号 / 1~4 格 / 搜索中 / 连接中 / 已断开 / 连接错误），配套颜色、扫描与闪烁动画、`prefers-reduced-motion` 降级全部在 `mt5700.css`。原环形仪表（`createSignalCircularGauge` / `#sig-gauge-circle` / `.mt-sig-gauge-box`）删除。
 - **fix(status)**: 图标状态由真实上报数据推导（`computeCellularState()`），并与品质文案同源，杜绝图形与文字不一致：主载波查询失败 → `error`；SIM 未就绪 → `disconnected`；未注册 / 状态未知 / 等待中 → `searching`（等待态同时覆盖注册被拒与未知为 `error`）；已注册但尚无 RSRP 读数 → `connecting`；已注册且 RSRP 分档 `>= -80 full` / `-95 strong` / `-110 medium` / `>-140 weak` / 其余 `none`。实机（RSRP `-64`、CGREG 已注册、CPIN READY）渲染为 `full` 4 格绿色，文案「极佳 · 满格服务」。
@@ -13,7 +14,7 @@
 - **style(css)**: 删除插件独立的 `mt-theme-dark` / `mt-theme-light` 明暗模式类，暗色配色改为跟随全局主题的 `[data-theme="dark"]` 与系统 `prefers-color-scheme`；核心观感变量（背景/卡片/文字/边框）改为优先继承当前 LuCI 主题的 CSS 变量（`--background-color` 等，未定义时回落插件配色），不同主题下自动适配。
 - **fix(status)**: 修复 APN 信息误显示 IMS 的问题 —— 实机 `AT+CGDCONT?` 会同时报出 cid=5 的 `ims` 专用承载，旧逻辑在数据通道 APN 为空（核心网分配）时被后面的 ims 顶掉。现抽取 `pickDataContext()`：剔除 IMS/紧急等专用承载、优先锁定 CID 1 且不再被覆盖，并在 APN 页新增「数据通道 (CID)」行。
 - **chore(ui)**: 清理确认无引用的历史残留：旧版内联 SVG 看板娘 `Mt5700.mascotSvg()`（当前看板娘使用 `mascot.png` 图片）、旧气泡样式 `.mt-anime-speech-bubble`、雷达扫描动画 `.mt-anim-sweep` / `@keyframes mt-radar-sweep`。`mt-anim-pulse/spin/stream/float` 仍被 MCS 面板、骨架屏与图标组件使用，予以保留。
-- **test**: 新增 `tests/apn-channel-test.js`（12 项：IMS 识别、CID 1 锁定、专用承载排除、异常输入）与 `tests/cellular-icon-test.js`（38 项：9 种状态格数、未知状态回落、全部真实数据分档、文案完整性，以及「有 RSRP 时遥测失败不得误报异常」的回归用例）；全量前端单测 **135 项通过**（17 + 15 + 6 + 12 + 38 + 28 + 19）。
+- **test**: 新增 `tests/apn-channel-test.js`（12 项：IMS 识别、CID 1 锁定、专用承载排除、异常输入）与 `tests/cellular-icon-test.js`（38 项：9 种状态格数、未知状态回落、全部真实数据分档、文案完整性，以及「有 RSRP 时遥测失败不得误报异常」的回归用例）；全量前端单测 **164 项通过**（17 + 15 + 6 + 12 + 38 + 29 + 28 + 19）。
 - **note(ui)**: 静态样式版本戳 `MT5700_CSS_VERSION` 提升至 `2.18.0` —— 之前多轮样式改动未同步递增，浏览器会沿用缓存的旧 `mt5700.css` 导致「代码已更新、页面仍是旧样式」的错位假象；此后样式变更需同步递增该版本号。
 - **verify**: 实机热部署后 Playwright 验收：夜间模式按钮 0 个、英雄栏动态 SVG 0 个、看板娘在列；网络状态页 PCI **128**、CA 状态「单载波 (PCC)」、APN 显示「默认 (核心网自动分配) + CID 1（数据承载）」、星座图/MIMO SVG 正常渲染、无新增控制台报错。
 
