@@ -293,7 +293,15 @@ var Mt5700 = (function () {
 			[-20, 20].forEach(function (x) {
 				[-20, 20].forEach(function (y) { points.push([80 + x, 70 + y]); });
 			});
-		} else if (mod.indexOf('64QAM') >= 0 || mod.indexOf('256QAM') >= 0) {
+		} else if (mod.indexOf('256QAM') >= 0) {
+			/* 256QAM 必须画 16×16 = 256 个映射点；与 64QAM 共用 6×6 点阵的话，
+			 * 角标写着 256QAM、图上却只有 36 个点，可视化就是假的。 */
+			for (var ix = 0; ix < 16; ix++) {
+				for (var iy = 0; iy < 16; iy++) {
+					points.push([80 - 37.5 + ix * 5, 70 - 37.5 + iy * 5]);
+				}
+			}
+		} else if (mod.indexOf('64QAM') >= 0) {
 			[-36, -24, -12, 12, 24, 36].forEach(function (x) {
 				[-36, -24, -12, 12, 24, 36].forEach(function (y) { points.push([80 + x, 70 + y]); });
 			});
@@ -305,11 +313,13 @@ var Mt5700 = (function () {
 		}
 
 		// 星座点着色与光晕
+		/* 256 点时半径缩小，避免点阵糊成一团 */
+		var ptR = points.length > 64 ? '1.4' : '2.5';
 		points.forEach(function (pt) {
 			svg.appendChild(svgEl('circle', {
 				cx: String(pt[0]),
 				cy: String(pt[1]),
-				r: '2.5',
+				r: ptR,
 				fill: '#38bdf8',
 				'class': 'mt-anim-pulse'
 			}));
