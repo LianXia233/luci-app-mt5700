@@ -1120,7 +1120,7 @@ function parseMONSC(data) {
 	} else if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'NR') {
 		/*
 		 * 手册 13.9.3/13.9.5：NR 的 <cell_paras>
-		 * 实测: ^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-64,-10,25
+		 * 实测: ^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25
 		 *   NR,<mcc>,<mnc>,<arfcn>,<flag>,<cid_hex>,<pci_hex>,<tac_hex>,<rsrp>,<rsrq>,<sinr>
 		 * PCI 为十六进制（0x80 -> 128，与手册 13.27.3 取值 0~0x3EF 一致）
 		 * 频点 ARFCN 为 p[3]，小区 ID 为 p[5]，TAC 为 p[7]
