@@ -115,14 +115,34 @@ var Parse = (function () {
 	};
 
 	// AT+CGPADDR
+	/*
+	 * AT+CGPADDR：一行可携带**多个地址**（双栈时为 IPv4 + IPv6 各一个）。
+	 * 实测：+CGPADDR: 1,"198.51.100.10","32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
+	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
+	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
+	 */
+	/*
+	 * AT+CGPADDR：一行可携带**多个地址**（双栈时为 IPv4 + IPv6 各一个）。
+	 * 实测：+CGPADDR: 1,"198.51.100.10","32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
+	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
+	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
+	 */
 	api.parseCgpaddr = function (text) {
-		return text.split(/\r?\n/)
-			.map(function (line) { return line.match(/\+CGPADDR:\s*(\d+),?\s*"?([^"\r\n]*)"?/); })
-			.filter(function (m) { return m !== null && m[2].trim() !== ''; })
-			.map(function (m) {
-				var fmt = formatPdpAddress(m[2].trim());
-				return { cid: Number(m[1]), address: fmt.address, family: fmt.family };
-			});
+		var out = [];
+		String(text).split(/\r?\n/).forEach(function (line) {
+			var m = line.match(/\+CGPADDR:\s*(\d+)/);
+			if (!m) return;
+			var cid = Number(m[1]);
+			var addrRe = /"([^"]*)"/g;
+			var a;
+			while ((a = addrRe.exec(line)) !== null) {
+				var raw = a[1].trim();
+				if (raw === '') continue;
+				var fmt = formatPdpAddress(raw);
+				out.push({ cid: cid, address: fmt.address, family: fmt.family });
+			}
+		});
+		return out;
 	};
 
 	/* ================= 温度 ================= */

@@ -3489,7 +3489,7 @@
     white-space: nowrap;
   }
 
-  /* 3.7 值可换行（长文本如 C2840C002 不撑破卡片） */
+  /* 3.7 值可换行（长文本如 C1A2B3C 不撑破卡片） */
   .mt5700-table td {
     overflow-wrap: anywhere;
     word-break: break-word;
