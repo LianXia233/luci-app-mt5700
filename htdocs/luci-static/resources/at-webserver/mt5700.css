@@ -174,11 +174,19 @@
 
 .mt5700-hero-badge-dot,
 .mt-beacon-dot {
+  display: inline-block;
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: currentColor;
   box-shadow: 0 0 8px currentColor;
+  /* inline 流中与相邻文字垂直居中（空 inline-block 默认按基线对齐会明显偏上） */
+  vertical-align: middle;
+  /* flex 容器（药丸/徽章）中居中，避免退化为 flex-start 而顶部对齐 */
+  align-self: center;
+  /* 作为 SVG <circle> 使用时按自身中心缩放，防止脉冲动画期间点位漂移 */
+  transform-origin: center;
   animation: mt-beacon-pulse 1.8s infinite ease-in-out;
 }
 
@@ -306,6 +314,8 @@
 }
 
 .mt-pill-tag {
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
   font-weight: 800;
   font-family: "JetBrains Mono", Consolas, monospace;
@@ -5352,6 +5362,7 @@ select option {
 
 .mt-pill-tag {
   display: inline-flex !important;
+  align-items: center !important;
   padding: 2px 8px !important;
   border-radius: 6px !important;
   font-size: 11px !important;
