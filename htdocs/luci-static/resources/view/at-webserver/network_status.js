@@ -254,15 +254,15 @@ return L.view.extend({
 				E('div', { 'class': 'mt-chart-legends' }, [
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#38bdf8;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#38bdf8;' }),
-						E('span', {}, 'RSRP')
-					]),
-					E('div', { 'class': 'mt-legend-item', 'style': 'color:#a855f7;' }, [
-						E('span', { 'class': 'mt-legend-line', 'style': 'background:#a855f7;' }),
-						E('span', {}, 'RSRQ')
+						E('span', {}, 'RSRP · 左轴')
 					]),
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#10b981;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#10b981;' }),
-						E('span', {}, 'SINR')
+						E('span', {}, 'SINR · 右轴')
+					]),
+					E('div', { 'class': 'mt-legend-item', 'style': 'color:#a855f7;' }, [
+						E('span', { 'class': 'mt-legend-line', 'style': 'background:repeating-linear-gradient(90deg, #a855f7 0 4px, transparent 4px 7px);' }),
+						E('span', {}, 'RSRQ · 虚线')
 					])
 				])
 			]),
@@ -639,176 +639,258 @@ return L.view.extend({
 			}
 		}
 
+		/* ==========================================================================
+		   信号趋势图（重绘版）
+		   --------------------------------------------------------------------------
+		   纯原生 SVG 绘制，双 Y 轴，避免三条不同量纲的曲线挤在同一坐标系里互相误读：
+		     · 左轴 RSRP (dBm, -125 ~ -55)：主曲线 + 面积渐变
+		     · 右轴 SINR (dB,  -5  ~ 35) ：副曲线
+		     · RSRQ (dB, -20 ~ -3)       ：细虚线（量纲独立，仅作参考，不参与双轴刻度）
+		   背景按 RSRP 质量分区着色（极佳 / 良好 / 一般 / 较差），一眼可判读链路质量。
+		   曲线经 Catmull-Rom → 三次贝塞尔平滑，末端点标注当前读数。
+		   ========================================================================== */
+
+		/* RSRP 质量分区（阈值与 computeCellularState 的分档保持一致） */
+		var SIGNAL_TIERS = [
+			{ label: '较差', min: -125, max: -110, color: '#ef4444' },
+			{ label: '一般', min: -110, max: -95, color: '#f59e0b' },
+			{ label: '良好', min: -95, max: -80, color: '#0ea5e9' },
+			{ label: '极佳', min: -80, max: -53, color: '#10b981' }
+		];
+
+		/* RSRP → 质量分区下标；无有效读数返回 -1 */
+		function signalTierIndex(rsrp) {
+			if (rsrp === null || rsrp === undefined || rsrp === '' || isNaN(rsrp)) return -1;
+			var v = Number(rsrp);
+			for (var i = 0; i < SIGNAL_TIERS.length; i++) {
+				if (v >= SIGNAL_TIERS[i].min && v < SIGNAL_TIERS[i].max) return i;
+			}
+			return v >= SIGNAL_TIERS[SIGNAL_TIERS.length - 1].max ? SIGNAL_TIERS.length - 1 : 0;
+		}
+
+		/* 折线点集 → 平滑路径（Catmull-Rom 转三次贝塞尔），y 超出绘图区时钳制 */
+		function smoothPathPoints(pts, top, bottom) {
+			if (!pts || !pts.length) return '';
+			function clampY(y) { return Math.max(top, Math.min(bottom, y)); }
+			var d = 'M ' + pts[0][0].toFixed(1) + ' ' + clampY(pts[0][1]).toFixed(1);
+			for (var i = 0; i < pts.length - 1; i++) {
+				var p0 = pts[i - 1] || pts[i];
+				var p1 = pts[i];
+				var p2 = pts[i + 1];
+				var p3 = pts[i + 2] || p2;
+				var c1x = p1[0] + (p2[0] - p0[0]) / 6;
+				var c1y = clampY(p1[1] + (p2[1] - p0[1]) / 6);
+				var c2x = p2[0] - (p3[0] - p1[0]) / 6;
+				var c2y = clampY(p2[1] - (p3[1] - p1[1]) / 6);
+				d += ' C ' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ', ' +
+					c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ', ' +
+					p2[0].toFixed(1) + ' ' + clampY(p2[1]).toFixed(1);
+			}
+			return d;
+		}
+
+		/* 线性映射：值域 [min, max] → 像素 [top, bottom]，越界钳制 */
+		function chartScale(value, min, max, top, bottom) {
+			var v = Number(value);
+			if (!isFinite(v)) v = min;
+			if (v < min) v = min;
+			if (v > max) v = max;
+			return top + (bottom - top) * (1 - (v - min) / (max - min));
+		}
+
+		/*
+		 * 双轴刻度表：y 为绘图区内相对位置（0 = 顶部），rsrp / sinr 为该位置对应的刻度值。
+		 * 值必须与 y 单调一致（自顶向下递减），否则轴标签会与实际位置不符。
+		 */
+		var CHART_TICKS = [
+			{ y: 0, rsrp: -53, sinr: 35 },
+			{ y: 0.25, rsrp: -71, sinr: 25 },
+			{ y: 0.5, rsrp: -89, sinr: 15 },
+			{ y: 0.75, rsrp: -107, sinr: 5 },
+			{ y: 1, rsrp: -125, sinr: -5 }
+		];
+
 		function renderSignalTrendChart() {
 			var box = document.getElementById('sig-trend-chart-box');
 			if (!box) return;
 			if (sigHistory.length < 2) {
-				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">正在采集实时信号趋势数据...</div>';
+				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">正在采集实时信号趋势数据（至少需要 2 个采样点）...</div>';
 				return;
 			}
 
-			var w = 520, h = 330;
-			var padL = 44, padR = 20, padT = 25, padB = 32;
+			var w = 560, h = 340;
+			var padL = 50, padR = 50, padT = 26, padB = 34;
 			var chartW = w - padL - padR;
 			var chartH = h - padT - padB;
 
-			// RSRP 范围: -125 ~ -55
-			function rsrpToY(val) {
-				var clamped = Math.max(-125, Math.min(-55, val));
-				return padT + chartH * (1 - (clamped - (-125)) / 70);
+			var RSRP_MIN = -125, RSRP_MAX = -53;
+			var SINR_MIN = -5, SINR_MAX = 35;
+			var RSRQ_MIN = -20, RSRQ_MAX = -3;
+
+			var n = sigHistory.length;
+			var rsrpPts = [], sinrPts = [], rsrqPts = [];
+			for (var i = 0; i < n; i++) {
+				var x = padL + (i / (n - 1)) * chartW;
+				var it = sigHistory[i];
+				rsrpPts.push([x, chartScale(it.rsrp, RSRP_MIN, RSRP_MAX, padT, padT + chartH)]);
+				sinrPts.push([x, chartScale(it.sinr, SINR_MIN, SINR_MAX, padT, padT + chartH)]);
+				rsrqPts.push([x, chartScale(it.rsrq, RSRQ_MIN, RSRQ_MAX, padT, padT + chartH)]);
 			}
 
-			// SINR 范围: -5 ~ 35
-			function sinrToY(val) {
-				var clamped = Math.max(-5, Math.min(35, val));
-				return padT + chartH * (1 - (clamped - (-5)) / 40);
+			var lastRsrp = rsrpPts[n - 1];
+			var lastSinr = sinrPts[n - 1];
+			var lastRsrq = rsrqPts[n - 1];
+			var lastItem = sigHistory[n - 1];
+			var tier = signalTierIndex(lastItem.rsrp);
+			var tierColor = tier >= 0 ? SIGNAL_TIERS[tier].color : 'var(--mt5700-text-muted)';
+			var tierText = tier >= 0 ? SIGNAL_TIERS[tier].label : '无读数';
+
+			/* ---- 背景质量分区带 ---- */
+			var bands = '';
+			for (var b = 0; b < SIGNAL_TIERS.length; b++) {
+				var t = SIGNAL_TIERS[b];
+				var y1 = chartScale(t.max, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
+				var y2 = chartScale(t.min, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
+				bands += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + chartW +
+					'" height="' + Math.max(1, y2 - y1).toFixed(1) + '" fill="' + t.color + '" opacity="0.05"/>';
+				/* 档位标签放在绘图区右端内侧，与右轴刻度（区外）分开，避免挤在一起 */
+				bands += '<text x="' + (w - padR - 6) + '" y="' + ((y1 + y2) / 2 + 3).toFixed(1) +
+					'" font-size="8" fill="' + t.color + '" opacity="0.8" text-anchor="end">' + t.label + '</text>';
 			}
 
-			// RSRQ 范围: -20 ~ -3
-			function rsrqToY(val) {
-				var clamped = Math.max(-20, Math.min(-3, val));
-				return padT + chartH * (1 - (clamped - (-20)) / 17);
+			/* ---- 水平网格 + 左右双轴刻度 ---- */
+			var grid = '';
+			var ticks = CHART_TICKS;
+			for (var k = 0; k < ticks.length; k++) {
+				var gy = padT + chartH * ticks[k].y;
+				var dash = (ticks[k].y === 0 || ticks[k].y === 1) ? '' : ' stroke-dasharray="3 3"';
+				grid += '<line x1="' + padL + '" y1="' + gy.toFixed(1) + '" x2="' + (w - padR) +
+					'" y2="' + gy.toFixed(1) + '" stroke="var(--mt5700-border-subtle)"' + dash + '/>';
+				grid += '<text x="' + (padL - 7) + '" y="' + (gy + 3).toFixed(1) +
+					'" font-size="9" font-family="monospace" fill="#0ea5e9" text-anchor="end">' + ticks[k].rsrp + '</text>';
+				grid += '<text x="' + (w - padR + 7) + '" y="' + (gy + 3).toFixed(1) +
+					'" font-size="9" font-family="monospace" fill="#10b981" text-anchor="start">' + ticks[k].sinr + '</text>';
 			}
-
-			var ptsRsrp = [], ptsSinr = [], ptsRsrq = [];
-			for (var i = 0; i < sigHistory.length; i++) {
-				var x = padL + (i / (sigHistory.length - 1)) * chartW;
-				ptsRsrp.push(x.toFixed(1) + ' ' + rsrpToY(sigHistory[i].rsrp).toFixed(1));
-				ptsSinr.push(x.toFixed(1) + ' ' + sinrToY(sigHistory[i].sinr).toFixed(1));
-				ptsRsrq.push(x.toFixed(1) + ' ' + rsrqToY(sigHistory[i].rsrq).toFixed(1));
-			}
-
-			var pathRsrp = 'M ' + ptsRsrp.join(' L ');
-			var pathSinr = 'M ' + ptsSinr.join(' L ');
-			var pathRsrq = 'M ' + ptsRsrq.join(' L ');
-
-			var lastRsrp = ptsRsrp[ptsRsrp.length - 1].split(' ');
-			var lastSinr = ptsSinr[ptsSinr.length - 1].split(' ');
-			var lastRsrq = ptsRsrq[ptsRsrq.length - 1].split(' ');
 
 			var firstTime = sigHistory[0].time;
-			var midTime = sigHistory[Math.floor(sigHistory.length / 2)].time;
-			var lastTime = sigHistory[sigHistory.length - 1].time;
+			var midTime = sigHistory[Math.floor(n / 2)].time;
+			var lastTime = sigHistory[n - 1].time;
 
 			box.innerHTML =
 				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="100%" style="overflow:visible; display:block;">' +
 				'  <defs>' +
 				'    <linearGradient id="rsrp-area" x1="0" y1="0" x2="0" y2="1">' +
-				'      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.32"/>' +
-				'      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0"/>' +
-				'    </linearGradient>' +
-				'    <linearGradient id="sinr-area" x1="0" y1="0" x2="0" y2="1">' +
-				'      <stop offset="0%" stop-color="#10b981" stop-opacity="0.25"/>' +
-				'      <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>' +
+				'      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>' +
+				'      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.02"/>' +
 				'    </linearGradient>' +
 				'  </defs>' +
-				'  <!-- 网格刻度线与 5 级垂直高度标尺 (宽裕间距) -->' +
-				'  <line x1="' + padL + '" y1="' + padT + '" x2="' + (w - padR) + '" y2="' + padT + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.25).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.25).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.50).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.50).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.75).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.75).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH) + '" stroke="var(--mt5700-border-subtle)"/>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + 3) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-55</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.25 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-72</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.50 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-90</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.75 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-107</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH + 3) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-125</text>' +
-				'  <!-- 曲线与区域 -->' +
-				'  <path d="' + pathRsrp + ' L ' + (w - padR) + ' ' + (padT + chartH) + ' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
-				'  <path d="' + pathRsrp + '" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>' +
-				'  <circle cx="' + lastRsrp[0] + '" cy="' + lastRsrp[1] + '" r="3.5" fill="#38bdf8" class="mt-beacon-dot"/>' +
-				'  <path d="' + pathSinr + ' L ' + (w - padR) + ' ' + (padT + chartH) + ' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#sinr-area)"/>' +
-				'  <path d="' + pathSinr + '" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round"/>' +
-				'  <circle cx="' + lastSinr[0] + '" cy="' + lastSinr[1] + '" r="3.5" fill="#10b981"/>' +
-				'  <path d="' + pathRsrq + '" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round"/>' +
-				'  <circle cx="' + lastRsrq[0] + '" cy="' + lastRsrq[1] + '" r="3" fill="#a855f7"/>' +
-				'  <!-- 时间横坐标 -->' +
+				/* 质量分区背景 */
+				bands +
+				/* 网格与双轴刻度 */
+				grid +
+				/* 轴标题 */
+				'  <text x="' + (padL - 7) + '" y="' + (padT - 10) + '" font-size="8.5" font-family="monospace" fill="#0ea5e9" text-anchor="end">dBm</text>' +
+				'  <text x="' + (w - padR + 7) + '" y="' + (padT - 10) + '" font-size="8.5" font-family="monospace" fill="#10b981" text-anchor="start">dB</text>' +
+				/* RSRP 面积 + 主曲线 */
+				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + ' L ' + (w - padR) + ' ' + (padT + chartH) +
+				' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
+				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + '" fill="none" stroke="#38bdf8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+				/* SINR 副曲线 */
+				'  <path d="' + smoothPathPoints(sinrPts, padT, padT + chartH) + '" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+				/* RSRQ 参考虚线 */
+				'  <path d="' + smoothPathPoints(rsrqPts, padT, padT + chartH) + '" fill="none" stroke="#a855f7" stroke-width="1.6" stroke-dasharray="5 4" stroke-linecap="round" opacity="0.85"/>' +
+				/* 末端采样点 */
+				'  <circle cx="' + lastRsrp[0].toFixed(1) + '" cy="' + lastRsrp[1].toFixed(1) + '" r="3.6" fill="#38bdf8" stroke="#ffffff" stroke-width="1.4"/>' +
+				'  <circle cx="' + lastSinr[0].toFixed(1) + '" cy="' + lastSinr[1].toFixed(1) + '" r="3.2" fill="#10b981" stroke="#ffffff" stroke-width="1.2"/>' +
+				'  <circle cx="' + lastRsrq[0].toFixed(1) + '" cy="' + lastRsrq[1].toFixed(1) + '" r="2.6" fill="#a855f7" opacity="0.85"/>' +
+				/* 末端读数标签 */
+				'  <text x="' + (padL + 2) + '" y="' + (padT + 11) + '" font-size="10" font-family="monospace" fill="#38bdf8">RSRP ' +
+				(lastItem.rsrp != null ? lastItem.rsrp : '—') + ' dBm</text>' +
+				'  <text x="' + (padL + 2) + '" y="' + (padT + 23) + '" font-size="10" font-family="monospace" fill="' + tierColor + '">质量 ' + tierText + '</text>' +
+				/* 时间横轴 */
 				'  <text x="' + padL + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="start">' + firstTime + '</text>' +
 				'  <text x="' + (w / 2) + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="middle">' + midTime + '</text>' +
 				'  <text x="' + (w - padR) + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">' + lastTime + '</text>' +
-				'  <!-- 鼠标悬浮交互指示层 (精确十字瞄准线 · 采样点徽标 · 动态数据卡) -->' +
+				/* 悬浮层：十字准星 + 三点指示 + 数据卡 */
 				'  <g id="mt-trend-hover-layer" style="display:none; pointer-events:none;">' +
-				'    <line id="mt-hover-crosshair" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + chartH) + '" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="3 3"/>' +
+				'    <line id="mt-hover-crosshair" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + chartH) + '" stroke="#a78bfa" stroke-width="1.4" stroke-dasharray="3 3"/>' +
 				'    <circle id="mt-hover-dot-rsrp" r="4.5" fill="#38bdf8" stroke="#ffffff" stroke-width="2"/>' +
 				'    <circle id="mt-hover-dot-sinr" r="4.5" fill="#10b981" stroke="#ffffff" stroke-width="2"/>' +
-				'    <circle id="mt-hover-dot-rsrq" r="4" fill="#a855f7" stroke="#ffffff" stroke-width="2"/>' +
+				'    <circle id="mt-hover-dot-rsrq" r="3.8" fill="#a855f7" stroke="#ffffff" stroke-width="2"/>' +
 				'    <g id="mt-hover-tip-card" transform="translate(0, 0)">' +
-				'      <rect x="0" y="0" width="136" height="76" rx="8" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
-				'      <text id="mt-tip-val-time" x="12" y="18" fill="#f8fafc" font-size="9.5" font-weight="bold" font-family="sans-serif">时间: --:--:--</text>' +
-				'      <circle cx="16" cy="32" r="3.5" fill="#38bdf8"/>' +
-				'      <text id="mt-tip-val-rsrp" x="26" y="35" fill="#e2e8f0" font-size="9" font-family="monospace">RSRP: - dBm</text>' +
-				'      <circle cx="16" cy="48" r="3.5" fill="#10b981"/>' +
-				'      <text id="mt-tip-val-sinr" x="26" y="51" fill="#e2e8f0" font-size="9" font-family="monospace">SINR: - dB</text>' +
-				'      <circle cx="16" cy="64" r="3.5" fill="#a855f7"/>' +
-				'      <text id="mt-tip-val-rsrq" x="26" y="67" fill="#e2e8f0" font-size="9" font-family="monospace">RSRQ: - dB</text>' +
+				'      <rect x="0" y="0" width="148" height="92" rx="8" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
+				'      <text id="mt-tip-val-time" x="12" y="19" fill="#f8fafc" font-size="9.5" font-weight="bold" font-family="sans-serif">时间: --:--:--</text>' +
+				'      <circle cx="16" cy="34" r="3.5" fill="#38bdf8"/>' +
+				'      <text id="mt-tip-val-rsrp" x="26" y="37" fill="#e2e8f0" font-size="9" font-family="monospace">RSRP —</text>' +
+				'      <circle cx="16" cy="50" r="3.5" fill="#10b981"/>' +
+				'      <text id="mt-tip-val-sinr" x="26" y="53" fill="#e2e8f0" font-size="9" font-family="monospace">SINR —</text>' +
+				'      <circle cx="16" cy="66" r="3.5" fill="#a855f7"/>' +
+				'      <text id="mt-tip-val-rsrq" x="26" y="69" fill="#e2e8f0" font-size="9" font-family="monospace">RSRQ —</text>' +
+				'      <text id="mt-tip-val-tier" x="12" y="85" fill="#94a3b8" font-size="9" font-family="monospace">质量 —</text>' +
 				'    </g>' +
 				'  </g>' +
-				'  <!-- 捕获鼠标事件的透明感应矩形 -->' +
 				'  <rect id="mt-chart-hitbox" x="' + padL + '" y="' + padT + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair;"/>' +
 				'</svg>';
 
-			// 绑定鼠标悬浮交互事件
 			var hitbox = document.getElementById('mt-chart-hitbox');
-			if (hitbox) {
-				hitbox.addEventListener('mousemove', function (e) {
-					var rect = hitbox.getBoundingClientRect();
-					var frac = (e.clientX - rect.left) / rect.width;
-					if (frac < 0) frac = 0;
-					if (frac > 1) frac = 1;
-					var idx = Math.round(frac * (sigHistory.length - 1));
-					idx = Math.max(0, Math.min(sigHistory.length - 1, idx));
-					var item = sigHistory[idx];
-					if (!item) return;
+			if (!hitbox) return;
 
-					var curX = padL + (idx / (sigHistory.length - 1)) * chartW;
-					var yR = rsrpToY(item.rsrp);
-					var yS = sinrToY(item.sinr);
-					var yQ = rsrqToY(item.rsrq);
+			hitbox.addEventListener('mousemove', function (e) {
+				var rect = hitbox.getBoundingClientRect();
+				var frac = (e.clientX - rect.left) / rect.width;
+				if (frac < 0) frac = 0;
+				if (frac > 1) frac = 1;
+				var idx = Math.round(frac * (n - 1));
+				idx = Math.max(0, Math.min(n - 1, idx));
+				var item = sigHistory[idx];
+				if (!item) return;
 
-					var layer = document.getElementById('mt-trend-hover-layer');
-					if (layer) layer.style.display = 'block';
+				var curX = padL + (idx / (n - 1)) * chartW;
+				var yR = chartScale(item.rsrp, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
+				var yS = chartScale(item.sinr, SINR_MIN, SINR_MAX, padT, padT + chartH);
+				var yQ = chartScale(item.rsrq, RSRQ_MIN, RSRQ_MAX, padT, padT + chartH);
 
-					var cross = document.getElementById('mt-hover-crosshair');
-					if (cross) {
-						cross.setAttribute('x1', curX.toFixed(1));
-						cross.setAttribute('x2', curX.toFixed(1));
-					}
+				var layer = document.getElementById('mt-trend-hover-layer');
+				if (layer) layer.style.display = 'block';
 
-					var dotR = document.getElementById('mt-hover-dot-rsrp');
-					if (dotR) { dotR.setAttribute('cx', curX.toFixed(1)); dotR.setAttribute('cy', yR.toFixed(1)); }
-					var dotS = document.getElementById('mt-hover-dot-sinr');
-					if (dotS) { dotS.setAttribute('cx', curX.toFixed(1)); dotS.setAttribute('cy', yS.toFixed(1)); }
-					var dotQ = document.getElementById('mt-hover-dot-rsrq');
-					if (dotQ) { dotQ.setAttribute('cx', curX.toFixed(1)); dotQ.setAttribute('cy', yQ.toFixed(1)); }
+				var cross = document.getElementById('mt-hover-crosshair');
+				if (cross) { cross.setAttribute('x1', curX.toFixed(1)); cross.setAttribute('x2', curX.toFixed(1)); }
 
-					var tipW = 136;
-					var tipH = 76;
-					var tipX = curX + 12;
-					if (tipX + tipW > w - 8) {
-						tipX = curX - tipW - 12;
-					}
-					var tipY = Math.min(yR, yS, yQ) - 10;
-					if (tipY < padT) tipY = padT;
-					if (tipY + tipH > h - 8) tipY = h - tipH - 8;
+				var dotR = document.getElementById('mt-hover-dot-rsrp');
+				if (dotR) { dotR.setAttribute('cx', curX.toFixed(1)); dotR.setAttribute('cy', yR.toFixed(1)); }
+				var dotS = document.getElementById('mt-hover-dot-sinr');
+				if (dotS) { dotS.setAttribute('cx', curX.toFixed(1)); dotS.setAttribute('cy', yS.toFixed(1)); }
+				var dotQ = document.getElementById('mt-hover-dot-rsrq');
+				if (dotQ) { dotQ.setAttribute('cx', curX.toFixed(1)); dotQ.setAttribute('cy', yQ.toFixed(1)); }
 
-					var tipCard = document.getElementById('mt-hover-tip-card');
-					if (tipCard) tipCard.setAttribute('transform', 'translate(' + tipX.toFixed(1) + ',' + tipY.toFixed(1) + ')');
+				var tipW = 148, tipH = 92;
+				var tipX = curX + 12;
+				if (tipX + tipW > w - 8) tipX = curX - tipW - 12;
+				if (tipX < 4) tipX = 4;
+				var tipY = Math.min(yR, yS) - 14;
+				if (tipY < padT) tipY = padT;
+				if (tipY + tipH > h - 6) tipY = h - tipH - 6;
 
-					var elTime = document.getElementById('mt-tip-val-time');
-					if (elTime) elTime.textContent = '时间: ' + item.time;
-					var elR = document.getElementById('mt-tip-val-rsrp');
-					if (elR) elR.textContent = 'RSRP: ' + item.rsrp + ' dBm';
-					var elS = document.getElementById('mt-tip-val-sinr');
-					if (elS) elS.textContent = 'SINR: ' + item.sinr + ' dB';
-					var elQ = document.getElementById('mt-tip-val-rsrq');
-					if (elQ) elQ.textContent = 'RSRQ: ' + item.rsrq + ' dB';
-				});
+				var tipCard = document.getElementById('mt-hover-tip-card');
+				if (tipCard) tipCard.setAttribute('transform', 'translate(' + tipX.toFixed(1) + ',' + tipY.toFixed(1) + ')');
 
-				hitbox.addEventListener('mouseleave', function () {
-					var layer = document.getElementById('mt-trend-hover-layer');
-					if (layer) layer.style.display = 'none';
-				});
-			}
+				var elTime = document.getElementById('mt-tip-val-time');
+				if (elTime) elTime.textContent = '时间: ' + item.time;
+				var elR = document.getElementById('mt-tip-val-rsrp');
+				if (elR) elR.textContent = 'RSRP: ' + (item.rsrp != null ? item.rsrp + ' dBm' : '—');
+				var elS = document.getElementById('mt-tip-val-sinr');
+				if (elS) elS.textContent = 'SINR: ' + (item.sinr != null ? item.sinr + ' dB' : '—');
+				var elQ = document.getElementById('mt-tip-val-rsrq');
+				if (elQ) elQ.textContent = 'RSRQ: ' + (item.rsrq != null ? item.rsrq + ' dB' : '—');
+				var elT = document.getElementById('mt-tip-val-tier');
+				var ti = signalTierIndex(item.rsrp);
+				if (elT) elT.textContent = '质量 ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '无读数');
+			});
+
+			hitbox.addEventListener('mouseleave', function () {
+				var layer = document.getElementById('mt-trend-hover-layer');
+				if (layer) layer.style.display = 'none';
+			});
 		}
 
 		function formatSpeedNumber(bytesPerSec) {
