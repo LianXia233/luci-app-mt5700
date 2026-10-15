@@ -4,6 +4,19 @@
 #   sh tests/iface/interface-selection.sh /etc/init.d/at-webserver
 
 INIT="$1"
+
+# Precondition guard: fail loudly instead of producing silent false results
+# (run() sources "$INIT" with stderr/stdout swallowed, so a missing uci or a
+# bad init path would otherwise just make every case "pass" or "fail" blindly).
+if [ -z "$INIT" ] || [ ! -f "$INIT" ]; then
+	echo "usage: $0 /etc/init.d/at-webserver" >&2
+	exit 2
+fi
+if ! command -v uci >/dev/null 2>&1; then
+	echo "ERROR: uci not found, run this on a disposable OpenWrt test machine" >&2
+	exit 2
+fi
+
 fail=0
 check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi; }
 has() { uci -q get "network.$1" >/dev/null; }
