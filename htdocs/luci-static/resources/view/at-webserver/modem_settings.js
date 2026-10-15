@@ -39,9 +39,54 @@ return L.view.extend({
 			'}',
 			'.mt-therm-badge-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }',
 			'.mt-therm-stat-chip { font-size: 12px; padding: 4px 10px; border-radius: 8px; background: rgba(125, 125, 125, 0.06); border: 1px solid var(--mt5700-border); color: var(--mt5700-text-secondary); }',
-			'.mt-radio-grid-acq { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px; }',
-			'.mt-radio-grid-roam { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }',
-			'.mt-radio-grid-srv { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }',
+			/* 网络系统配置 (SYSCFGEX) 紧凑排版优化 */
+			'.mt-sys-overview { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(14, 165, 233, 0.04)); border: 1px solid rgba(139, 92, 246, 0.16); border-radius: 10px; margin-bottom: 8px; }',
+			'.mt-sys-stat-item { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; }',
+			'.mt-sys-stat-label { color: var(--mt5700-text-secondary); font-size: 11px; }',
+			'.mt-sys-tip { font-size: 11.5px; color: var(--mt5700-text-secondary); padding: 5px 10px; border-radius: 8px; background: rgba(14, 165, 233, 0.05); border: 1px solid rgba(14, 165, 233, 0.15); margin-bottom: 8px; line-height: 1.45; }',
+			'/* 接入顺序 12 列对称紧凑响应式网格 */',
+			'.mt-sys-acq-cards { display: grid; gap: 8px; margin-bottom: 8px; }',
+			'@media (min-width: 900px) {',
+			'  .mt-sys-acq-cards { grid-template-columns: repeat(12, 1fr); }',
+			'  .mt-sys-acq-cards > label:nth-child(1), .mt-sys-acq-cards > label:nth-child(2), .mt-sys-acq-cards > label:nth-child(3), .mt-sys-acq-cards > label:nth-child(4) { grid-column: span 3; }',
+			'  .mt-sys-acq-cards > label:nth-child(5), .mt-sys-acq-cards > label:nth-child(6), .mt-sys-acq-cards > label:nth-child(7) { grid-column: span 4; }',
+			'}',
+			'@media (max-width: 899px) and (min-width: 601px) {',
+			'  .mt-sys-acq-cards { grid-template-columns: repeat(2, 1fr); }',
+			'  .mt-sys-acq-cards > label:nth-child(7) { grid-column: span 2; }',
+			'}',
+			'@media (max-width: 600px) {',
+			'  .mt-sys-acq-cards { grid-template-columns: 1fr; gap: 6px; }',
+			'}',
+			'.mt-sys-acq-cards .mt5700-radio-card { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: 10px; background: var(--mt5700-card-bg); border: 1px solid var(--mt5700-border); transition: all 0.2s ease; min-height: 52px; }',
+			'.mt-sys-acq-cards .mt5700-radio-card:hover { transform: translateY(-1px); border-color: rgba(139, 92, 246, 0.4); box-shadow: 0 3px 10px rgba(139, 92, 246, 0.08); }',
+			'.mt-sys-acq-cards .mt5700-radio-card.mt5700-radio-card-active, .mt-sys-acq-cards .mt5700-radio-card:has(input[type="radio"]:checked) { border-color: #8b5cf6; background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(14, 165, 233, 0.03)); box-shadow: 0 3px 10px rgba(139, 92, 246, 0.12); }',
+			'.mt-sys-acq-cards .mt5700-radio-card-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-wrap: nowrap; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-title { font-size: 12.5px; font-weight: 600; color: var(--mt5700-text); white-space: nowrap; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-badge { font-size: 10px; padding: 0 5px; border-radius: 999px; background: rgba(139, 92, 246, 0.15); color: #7c3aed; font-weight: 600; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-desc { font-size: 11px; color: var(--mt5700-text-secondary); line-height: 1.35; margin-top: 2px; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-code { display: inline-block; font-size: 10px; padding: 0 4px; border-radius: 3px; background: rgba(125, 125, 125, 0.08); color: var(--mt5700-text-secondary); margin-top: 0; }',
+			'/* 左右对称双面板紧凑布局 */',
+			'.mt-sys-subpanel { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; background: rgba(125, 125, 125, 0.025); border: 1px solid var(--mt5700-border); border-radius: 10px; }',
+			'.mt-sys-subpanel-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 13px; font-weight: 700; color: var(--mt5700-text); padding-bottom: 6px; border-bottom: 1px solid var(--mt5700-divider); margin-bottom: 0; }',
+			'/* 漫游卡片极简药丸排版 */',
+			'.mt-sys-roam-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }',
+			'@media (max-width: 600px) { .mt-sys-roam-cards { grid-template-columns: 1fr; } }',
+			'.mt-sys-roam-cards .mt5700-radio-card { padding: 6px 10px; border-radius: 8px; min-height: 38px; align-items: center; }',
+			'.mt-sys-roam-cards .mt5700-radio-card.mt5700-radio-card-active, .mt-sys-roam-cards .mt5700-radio-card:has(input[type="radio"]:checked) { border-color: #10b981; background: rgba(16, 185, 129, 0.06); }',
+			'.mt-sys-roam-cards .mt5700-radio-card-title { font-size: 12px; font-weight: 600; }',
+			'/* 服务域卡片极简药丸排版 */',
+			'.mt-sys-srv-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }',
+			'.mt-sys-srv-cards > label:nth-child(5) { grid-column: span 2; }',
+			'@media (max-width: 600px) { .mt-sys-srv-cards { grid-template-columns: 1fr; } .mt-sys-srv-cards > label:nth-child(5) { grid-column: span 1; } }',
+			'.mt-sys-srv-cards .mt5700-radio-card { padding: 6px 10px; border-radius: 8px; min-height: 38px; align-items: center; }',
+			'.mt-sys-srv-cards .mt5700-radio-card.mt5700-radio-card-active, .mt-sys-srv-cards .mt5700-radio-card:has(input[type="radio"]:checked) { border-color: #0284c7; background: rgba(2, 132, 199, 0.06); }',
+			'.mt-sys-srv-cards .mt5700-radio-card-title { font-size: 12px; font-weight: 600; }',
+			'/* 约束提示紧凑化 */',
+			'.mt-sys-srv-note { display: flex; align-items: flex-start; gap: 6px; padding: 6px 10px; border-radius: 6px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); color: #b45309; font-size: 11px; line-height: 1.4; margin-top: 4px; }',
+			'.mt-sys-srv-note-tag { flex-shrink: 0; font-weight: 700; }',
+			'/* 原始参数面板 */',
+			'.mt-sys-raw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; margin-top: 8px; padding: 10px 12px; border-radius: 8px; background: rgba(125, 125, 125, 0.03); border: 1px dashed var(--mt5700-border); }',
 			'/* 系统控制 */',
 			'.mt-sysctl { display: flex; flex-direction: column; gap: 12px; }',
 			'.mt-sysctl-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--mt5700-border); border-radius: 12px; background: rgba(125, 125, 125, 0.03); transition: border-color .2s ease, box-shadow .2s ease; }',
@@ -474,44 +519,44 @@ return L.view.extend({
 		sysCard._body.appendChild(sysBody);
 		body.appendChild(sysCard);
 
-		sysBody.appendChild(Mt5700.fieldNote(
-			'网络系统配置决定模组采用哪些制式与频段搜索基站。设置保存在模组非易失存储中，掉电不丢失；修改保存后模组将重新驻网（约 10~30 秒）。',
-			[
-				'推荐保持「5G 优先，逐级回落」，兼顾高速率与覆盖韧性。',
-				'当选择包含 4G 或 5G 制式时，官方规范要求服务域不可设置为「仅语音」或「不限」。'
-			]
+		/* 顶部配置概览条 */
+		var sysOverview = E('div', { 'class': 'mt-sys-overview' });
+		sysBody.appendChild(sysOverview);
+
+		sysBody.appendChild(E('div', { 'class': 'mt-sys-tip' },
+			'💡 设置保存在模组 NVRAM 掉电不丢失，保存后模组将重新驻网（约 10~30 秒）；建议保持「5G 优先，逐级回落」。'
 		));
 
 		var sysCfg = { acqorder: '', band: '', roam: 1, srvdomain: 2, lteband: '' };
 
 		var ACQ_OPTIONS = [
 			{
-				value: '080302', code: '08 → 03 → 02', label: '5G 优先，逐级回落', badge: '推荐',
-				desc: '有 5G 信号优先用 5G；无 5G 时落到 4G/3G。兼顾超高速率与信号覆盖。'
+				value: '080302', code: '08→03→02', label: '5G 优先，逐级回落', badge: '推荐',
+				desc: '优先 5G，无信号逐级回落 4G/3G'
 			},
 			{
-				value: '08', code: '08', label: '仅 5G',
-				desc: '纯 5G 驻留，搜不到持续重搜。5G 覆盖不稳定时可能出现无服务。'
+				value: '08', code: '08', label: '仅 5G (SA)',
+				desc: '纯 5G SA 驻留，无 5G 则持续搜网'
 			},
 			{
-				value: '0302', code: '03 → 02', label: '4G 优先，可回落 3G',
-				desc: '优先驻留 4G；无 4G 时落到 3G。适合 5G 信号极弱但需要省电稳定场景。'
+				value: '0302', code: '03→02', label: '4G 优先，回落 3G',
+				desc: '优先 4G，适合 5G 极弱或省电场景'
 			},
 			{
-				value: '03', code: '03', label: '仅 4G',
-				desc: '纯 4G 网络驻留，功耗较低，离开 4G 覆盖将无法联网。'
+				value: '03', code: '03', label: '仅 4G (LTE)',
+				desc: '纯 4G 驻留，功耗低稳定性高'
 			},
 			{
-				value: '0203', code: '02 → 03', label: '3G 优先，可回落 4G',
-				desc: '优先驻留 3G；无 3G 时落到 4G。特定偏远地区测试使用。'
+				value: '0203', code: '02→03', label: '3G 优先，回落 4G',
+				desc: '优先 3G，特定测试场景使用'
 			},
 			{
 				value: '02', code: '02', label: '仅 3G',
-				desc: '纯 3G 网络驻留，速率较低，仅供特殊网络环境排障。'
+				desc: '纯 3G 驻留，排障测试使用'
 			},
 			{
 				value: '99', code: '99', label: '保持当前设置',
-				desc: '不修改接入顺序参数，仅保存本卡片其他配置。'
+				desc: '不修改接入顺序参数'
 			}
 		];
 
@@ -519,15 +564,26 @@ return L.view.extend({
 			sysCfg.acqorder = v;
 			sysRawAcq.setValue(v);
 			applySrvConstraint();
+			updateSysOverview();
 		});
-		var acqCustomEl = E('div', { 'class': 'mt5700-hint', style: 'display:none; margin-bottom:8px;' });
+		acqCards.classList.add('mt-sys-acq-cards');
 
-		sysBody.appendChild(Mt5700.formGroup('网络接入顺序 (Acquisition Order)', acqCards, '决定模组优先搜网的制式优先级'));
+		var acqCustomEl = E('div', { 'class': 'mt5700-hint', style: 'display:none; margin-bottom:6px;' });
+
+		sysBody.appendChild(Mt5700.formGroup('网络接入顺序 (Acquisition Order)', acqCards, '决定模组优先搜网的制式优先级（5G SA / LTE / WCDMA 回落顺序）'));
 		sysBody.appendChild(acqCustomEl);
 
-		/* 频段预设：2 列网格 */
-		var bandGrid = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
-		sysBody.appendChild(bandGrid);
+		/* 左右两栏布局：左侧频段限制，右侧漫游与服务域 */
+		var sysDualGrid = E('div', { 'class': 'mt5700-grid mt5700-grid-2', style: 'margin-top: 8px;' });
+		sysBody.appendChild(sysDualGrid);
+
+		/* 左栏：频段范围限制 */
+		var bandPanel = E('div', { 'class': 'mt-sys-subpanel' });
+		var bandTitle = E('div', { 'class': 'mt-sys-subpanel-title' }, [
+			E('span', {}, '📶 频段掩码限制'),
+			Mt5700.badge('硬件射频过滤', 'neutral')
+		]);
+		bandPanel.appendChild(bandTitle);
 
 		var BAND_PRESETS = [
 			{ value: '', label: '不修改（保持模组当前设置）' },
@@ -539,8 +595,9 @@ return L.view.extend({
 		bandSel.addEventListener('change', function () {
 			sysCfg.band = bandSel.value;
 			sysRawBand.setValue(bandSel.value);
+			updateSysOverview();
 		});
-		bandGrid.appendChild(Mt5700.formGroup('2G / 3G 频段设置', bandSel, '模组 2G/3G 频段范围，建议保持「自动」'));
+		bandPanel.appendChild(Mt5700.formGroup('2G / 3G 频段设置', bandSel, '模组 2G/3G 频段范围，建议保持「自动」'));
 
 		var LTE_PRESETS = [
 			{ value: '', label: '不修改（保持模组当前设置）' },
@@ -551,36 +608,56 @@ return L.view.extend({
 		lteBandSel.addEventListener('change', function () {
 			sysCfg.lteband = lteBandSel.value;
 			sysRawLte.setValue(lteBandSel.value);
+			updateSysOverview();
 		});
-		bandGrid.appendChild(Mt5700.formGroup('4G / LTE 频段设置', lteBandSel, '模组 4G 频段范围，全频段会延长搜网时间'));
+		bandPanel.appendChild(Mt5700.formGroup('4G / LTE 频段设置', lteBandSel, '建议选择「常用频段」，全频段会延长首次搜网时间'));
+		sysDualGrid.appendChild(bandPanel);
+
+		/* 右栏：漫游策略与服务域 */
+		var srvPanel = E('div', { 'class': 'mt-sys-subpanel' });
+		var srvTitle = E('div', { 'class': 'mt-sys-subpanel-title' }, [
+			E('span', {}, '🌐 漫游与服务域策略'),
+			Mt5700.badge('核心网策略', 'info')
+		]);
+		srvPanel.appendChild(srvTitle);
 
 		/* 漫游卡片 */
 		var ROAM_OPTIONS = [
-			{ value: '1', label: '允许漫游', badge: '推荐', desc: '离开本地基站后使用合作运营商网络，保持常驻联网。' },
-			{ value: '0', label: '禁止漫游', desc: '仅使用本地运营商，避免额外漫游资费。' },
-			{ value: '2', label: '不修改', desc: '保持当前漫游策略不变。' }
+			{ value: '1', label: '允许漫游', badge: '推荐' },
+			{ value: '0', label: '禁止漫游' },
+			{ value: '2', label: '不修改' }
 		];
 		var roamCards = Mt5700.radioCards('roam', ROAM_OPTIONS, '1', function (v) {
 			sysCfg.roam = parseInt(v, 10);
+			sysRawRoam.setValue(v);
+			updateSysOverview();
 		});
-		sysBody.appendChild(Mt5700.formGroup('网络漫游控制', roamCards));
+		roamCards.classList.add('mt-sys-roam-cards');
+		srvPanel.appendChild(Mt5700.formGroup('网络漫游控制 (Roaming)', roamCards));
 
 		/* 服务域卡片 */
 		var SRV_OPTIONS = [
-			{ value: '2', label: '语音 + 数据', badge: '推荐', desc: '同时注册语音通话与高速数据上网，功能完备。' },
-			{ value: '1', label: '仅数据 (纯上网)', desc: '只注册数据网络，适合无语音需求的纯上网路由器。' },
-			{ value: '0', label: '仅语音', desc: '只注册通话域，无法上网。含 4G/5G 制式时受限不可选。' },
-			{ value: '3', label: '不限 (网络决定)', desc: '由基站侧动态指定。含 4G/5G 制式时受限不可选。' },
-			{ value: '4', label: '不修改', desc: '保持当前服务域设置不变。' }
+			{ value: '2', label: '语音 + 数据', badge: '推荐' },
+			{ value: '1', label: '仅数据 (纯上网)' },
+			{ value: '0', label: '仅语音 (受限)' },
+			{ value: '3', label: '不限 (网络决定)' },
+			{ value: '4', label: '不修改' }
 		];
-		var srvNote = E('div', { 'class': 'mt5700-hint', style: 'display:none; margin-bottom:12px; color:var(--mt5700-warning);' },
-			'当前接入制式包含 4G 或 5G，官方规范已自动禁用「仅语音」和「不限」。');
+		var srvNote = E('div', { 'class': 'mt-sys-srv-note', style: 'display:none;' }, [
+			E('span', { 'class': 'mt-sys-srv-note-tag' }, '⚠️ 约束提示:'),
+			E('span', {}, '当前接入制式包含 4G 或 5G，官方规范已自动禁用「仅语音」和「不限」。')
+		]);
 
 		var srvCards = Mt5700.radioCards('srv', SRV_OPTIONS, '2', function (v) {
 			sysCfg.srvdomain = parseInt(v, 10);
+			sysRawSrv.setValue(v);
+			updateSysOverview();
 		});
-		sysBody.appendChild(Mt5700.formGroup('服务域选择 (Service Domain)', srvCards));
-		sysBody.appendChild(srvNote);
+		srvCards.classList.add('mt-sys-srv-cards');
+		srvPanel.appendChild(Mt5700.formGroup('服务域选择 (Service Domain)', srvCards));
+		srvPanel.appendChild(srvNote);
+
+		sysDualGrid.appendChild(srvPanel);
 
 		function applySrvConstraint() {
 			var acq = sysCfg.acqorder || '';
@@ -594,9 +671,48 @@ return L.view.extend({
 			srvNote.style.display = hasLteOrNr ? '' : 'none';
 		}
 
+		function getAcqLabel(val) {
+			var opt = ACQ_OPTIONS.find(function (o) { return o.value === val; });
+			if (opt) return opt.label;
+			return val ? '自定义 (' + val + ')' : '未获取';
+		}
+		function getRoamLabel(val) {
+			var opt = ROAM_OPTIONS.find(function (o) { return String(o.value) === String(val); });
+			return opt ? opt.label : (val != null ? String(val) : '—');
+		}
+		function getSrvLabel(val) {
+			var opt = SRV_OPTIONS.find(function (o) { return String(o.value) === String(val); });
+			return opt ? opt.label : (val != null ? String(val) : '—');
+		}
+		function getBandPresetLabel(val) {
+			var opt = BAND_PRESETS.find(function (o) { return o.value === val; });
+			return opt ? opt.label.split('（')[0] : (val ? '自定义' : '保持当前');
+		}
+		function getLteBandPresetLabel(val) {
+			var opt = LTE_PRESETS.find(function (o) { return o.value === val; });
+			return opt ? opt.label.split('（')[0] : (val ? '自定义' : '保持当前');
+		}
+
+		function updateSysOverview() {
+			sysOverview.innerHTML = '';
+			var items = [
+				{ label: '首选制式', value: getAcqLabel(sysCfg.acqorder), type: 'info' },
+				{ label: '漫游策略', value: getRoamLabel(sysCfg.roam), type: sysCfg.roam === 1 ? 'success' : 'neutral' },
+				{ label: '服务域', value: getSrvLabel(sysCfg.srvdomain), type: sysCfg.srvdomain === 2 ? 'accent' : 'neutral' },
+				{ label: '4G 频段', value: getLteBandPresetLabel(sysCfg.lteband), type: 'neutral' },
+				{ label: '2G/3G 频段', value: getBandPresetLabel(sysCfg.band), type: 'neutral' }
+			];
+			items.forEach(function (it) {
+				var el = E('div', { 'class': 'mt-sys-stat-item' }, [
+					E('span', { 'class': 'mt-sys-stat-label' }, it.label + ':'),
+					Mt5700.badge(it.value, it.type)
+				]);
+				sysOverview.appendChild(el);
+			});
+		}
+
 		/* 原始参数面板（只读） */
-		var rawPanel = E('div', { 'class': 'mt5700-raw-panel' });
-		rawPanel.appendChild(E('div', { 'class': 'mt5700-raw-panel-title' }, '当前原始 AT 参数（只读，对标 AT 手册）'));
+		var rawPanel = E('div', { 'class': 'mt-sys-raw-grid' });
 		var sysRawAcq = Mt5700.rawValue('接入顺序', '');
 		var sysRawBand = Mt5700.rawValue('2G/3G 频段', '');
 		var sysRawRoam = Mt5700.rawValue('漫游', '');
@@ -610,7 +726,7 @@ return L.view.extend({
 
 		var rawToggle = Mt5700.ghostButton('显示原始参数', function () {
 			var shown = rawPanel.style.display !== 'none';
-			rawPanel.style.display = shown ? 'none' : '';
+			rawPanel.style.display = shown ? 'none' : 'grid';
 			rawToggle.textContent = shown ? '显示原始参数' : '隐藏原始参数';
 		});
 		rawPanel.style.display = 'none';
@@ -656,6 +772,7 @@ return L.view.extend({
 						sysRawLte.setValue(sysCfg.lteband);
 
 						applySrvConstraint();
+						updateSysOverview();
 					}
 				}
 			}).catch(function () {});
@@ -689,6 +806,7 @@ return L.view.extend({
 				acqCards.setAllDisabled(false);
 			}
 			sysRawAcq.setValue(val);
+			updateSysOverview();
 		}
 
 		/* ================= 第五行：温度保护 + 系统控制 ================= */
