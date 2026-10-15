@@ -225,6 +225,89 @@ var Mt5700 = (function () {
 		return { el: wrap };
 	};
 
+	/* ================= 四格动态信号图标 (cellular signal) =================
+	 *
+	 * 移植自 cellular-signal-preview.html：状态由 data-state 属性驱动，
+	 * 颜色与动画全部交给 mt5700.css 的 .cellular[data-state=...] 规则。
+	 *
+	 * 状态语义（与 CSS 一一对应，页面必须按真实数据选择，不得凭空指定）：
+	 *   none          无信号（0 格 + 斜杠）
+	 *   weak/medium/strong/full   1 / 2 / 3 / 4 格
+	 *   searching     正在搜索网络（信号格依次扫描）
+	 *   connecting    正在连接网络（右上角圆点闪烁）
+	 *   disconnected  网络已断开（0 格 + 斜杠）
+	 *   error         连接错误（感叹号角标）
+	 */
+	var CELLULAR_LEVELS = {
+		none: 0, weak: 1, medium: 2, strong: 3, full: 4,
+		searching: 0, connecting: 0, disconnected: 0, error: 0
+	};
+
+	var CELLULAR_LABELS = {
+		none: '无信号', weak: '弱信号', medium: '中等信号', strong: '强信号', full: '信号满格',
+		searching: '正在搜索网络', connecting: '正在连接网络',
+		disconnected: '网络已断开', error: '网络连接错误'
+	};
+
+	api.CELLULAR_LEVELS = CELLULAR_LEVELS;
+	api.CELLULAR_LABELS = CELLULAR_LABELS;
+
+	api.cellularSignal = function () {
+		var wrap = E('span', {
+			'class': 'cellular',
+			'data-state': 'searching',
+			'role': 'img',
+			'aria-label': CELLULAR_LABELS.searching
+		});
+
+		var svg = svgEl('svg', {
+			viewBox: '0 0 32 32',
+			xmlns: 'http://www.w3.org/2000/svg',
+			'aria-hidden': 'true'
+		});
+
+		/* 四格信号柱（高度递增） */
+		[[3, 22, 5, 7], [10, 17, 5, 12], [17, 11, 5, 18], [24, 5, 5, 24]].forEach(function (b) {
+			svg.appendChild(svgEl('rect', { 'class': 'bar', x: b[0], y: b[1], width: b[2], height: b[3], rx: 1 }));
+		});
+
+		/* 无信号 / 已断开：斜杠 */
+		var slash = svgEl('g', {
+			'class': 'overlay slash', fill: 'none', stroke: 'currentColor',
+			'stroke-width': '2.4', 'stroke-linecap': 'round'
+		});
+		slash.appendChild(svgEl('path', { d: 'M5 5 L27 27' }));
+		svg.appendChild(slash);
+
+		/* 连接中：右上角圆点 */
+		svg.appendChild(svgEl('circle', { 'class': 'overlay connecting-dot', cx: 26, cy: 5, r: 3, fill: 'currentColor' }));
+
+		/* 错误：感叹号角标 */
+		var errMark = svgEl('g', { 'class': 'overlay error-mark' });
+		errMark.appendChild(svgEl('circle', { cx: 25, cy: 7, r: 6, fill: 'currentColor' }));
+		errMark.appendChild(svgEl('path', { d: 'M25 3.8 V7.5 M25 10 V10.1', stroke: '#ffffff', 'stroke-width': '1.6', 'stroke-linecap': 'round' }));
+		svg.appendChild(errMark);
+
+		wrap.appendChild(svg);
+
+		var bars = svg.querySelectorAll('.bar');
+
+		/* 按状态更新格数与可访问标签；未知状态退到 searching，绝不静默留空 */
+		wrap.setCellularState = function (state) {
+			if (!Object.prototype.hasOwnProperty.call(CELLULAR_LEVELS, state)) state = 'searching';
+			wrap.setAttribute('data-state', state);
+			var level = CELLULAR_LEVELS[state];
+			for (var i = 0; i < bars.length; i++) {
+				if (i < level) bars[i].classList.add('active');
+				else bars[i].classList.remove('active');
+			}
+			wrap.setAttribute('aria-label', CELLULAR_LABELS[state]);
+			return state;
+		};
+
+		return wrap;
+	};
+
 	api.page = function (title, subtitle, pageKey, badgeText) {
 		var node = E('div', { 'class': 'mt5700-page' });
 
