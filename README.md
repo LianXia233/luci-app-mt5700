@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.14.21-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.16.0-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -40,7 +40,7 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 > [!TIP]
 > **看板实时状态说明**  
 > 控制台每秒同步模组底层射频指标：实时监测 RSRP、RSRQ、SINR 及动态信号综合评分；精确显示驻网制式（如 5G NR 中频 2565 MHz / 100 MHz 带宽）与小区 PCI / EARFCN 标识。  
-> 页面全部图形按实时数据驱动内联 SVG：**4 联射频仪表盘**（240° 表盘 + 放射刻度 + 巡航游标）、**载波聚合频谱占用图**、**芯片微热力拓扑与 4×2 读数矩阵**、**按当前 MCS 动态生成的 I/Q 星座点阵**；**速率曲线可用鼠标或触摸悬浮查看任一采样点的相对时间与上下行速率**。
+> 页面图形全部按实时数据驱动、纯原生 SVG 绘制：**信号强度卡片**用四格动态信号图标（无信号 / 1~4 格 / 搜索中 / 连接中 / 已断开 / 连接错误共 9 态，状态由 `^MONSC`、`+CGREG`、`+CPIN` 的真实读数推导）与信号发射塔指标；**信号趋势图**为双 Y 轴（左 RSRP `-125~-53 dBm`、右 SINR `-5~35 dB`）曲线，背景按 RSRP 质量分区（`Poor / Fair / Good / Excellent`）着色，RSRQ 以虚线参考，鼠标或触摸悬浮可查看任一采样点的时间 / RSRP / SINR / RSRQ 与质量档位；另有**载波聚合频谱占用图**、**芯片温度矩阵**、**按当前 MCS 动态生成的 I/Q 星座点阵**。
 
 > [!NOTE]
 > **信号三项的取数来源（`AT^HCSQ`，手册 13.5）**  
@@ -159,11 +159,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-  ./<ARCH>-luci-app-mt5700-1.14.21-r1.apk \
+  ./<ARCH>-luci-app-mt5700-1.16.0-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.14.21_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.16.0_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -404,7 +404,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.14.21)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.16.0)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / ui.js / at.css)
@@ -422,7 +422,8 @@ luci-app-mt5700/
 │   └── rust/                               # Rust 后端核心源码仓库
 ├── po/                                     # 国际化语言包 (zh_Hans)
 ├── scripts/sdk-build.sh                    # OpenWrt SDK 矩阵自动化打包脚本
-└── tests/mock-modem/                       # 自动化测试 Mock 模组服务与 E2E 用例
+└── tests/                                  # 前端单测（CA 状态 / PCI 进制 / 开关回滚 / APN 数据通道 /
+│                                           #   四格信号图标 / 趋势图绘制）与 mock-modem E2E 用例
 ```
 
 ---
