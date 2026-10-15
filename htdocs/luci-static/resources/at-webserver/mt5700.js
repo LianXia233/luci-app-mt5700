@@ -394,75 +394,6 @@ api.mascotSvg = function () {
 		};
 	};
 
-	/* ================= 显示模式（普通 / 极简） =================
-	 *
-	 * 只影响界面布局与信息密度，不触碰后端、RPC 与轮询：
-	 * 由 .mt5700-page 上的 mt5700-mode-compact 类决定（样式全部在 mt5700.css）。
-	 *
-	 * 持久化用浏览器 localStorage（与插件既有的短信缓存、AT 命令收藏同一机制），
-	 * 纯前端显示偏好不落后端配置；读取失败或没有历史值时回落「普通模式」。
-	 */
-	var MT_DISPLAY_MODE_KEY = 'mt5700_display_mode';
-	var MT_DISPLAY_MODE_CLASS = 'mt5700-mode-compact';
-
-	api.getDisplayMode = function () {
-		try {
-			var saved = localStorage.getItem(MT_DISPLAY_MODE_KEY);
-			if (saved === 'compact' || saved === 'normal') return saved;
-		} catch (e) { /* localStorage 不可用时回落普通模式 */ }
-		return 'normal';
-	};
-
-	api.setDisplayMode = function (mode) {
-		var next = (mode === 'compact') ? 'compact' : 'normal';
-		try {
-			localStorage.setItem(MT_DISPLAY_MODE_KEY, next);
-		} catch (e) { /* 存储不可用也要保证本次切换生效 */ }
-		api.applyDisplayMode(next);
-		return next;
-	};
-
-	/* 立即生效：给页面上所有插件根节点加/去极简类，无需刷新与重新登录 */
-	api.applyDisplayMode = function (mode) {
-		var compact = (mode === 'compact');
-		var roots = document.querySelectorAll('.mt5700-page');
-		for (var i = 0; i < roots.length; i++) {
-			if (compact) roots[i].classList.add(MT_DISPLAY_MODE_CLASS);
-			else roots[i].classList.remove(MT_DISPLAY_MODE_CLASS);
-		}
-		if (compact) document.body.classList.add('mt5700-body-compact');
-		else document.body.classList.remove('mt5700-body-compact');
-	};
-
-	/* 模式切换控件：LuCI 原生 select（cbi-input-select），外观交给当前主题 */
-	api.displayModeSelect = function () {
-		var wrap = E('div', { 'class': 'mt5700-mode-switch' });
-		var label = E('label', { 'class': 'mt5700-mode-switch-label', 'for': 'mt5700-display-mode' }, '显示模式');
-		var sel = E('select', {
-			'class': 'cbi-input-select mt5700-mode-switch-select',
-			'id': 'mt5700-display-mode',
-			'title': '切换插件界面显示模式（仅影响本插件页面布局）'
-		});
-		var optNormal = E('option', { 'value': 'normal' }, '普通模式');
-		var optCompact = E('option', { 'value': 'compact' }, '极简模式');
-		sel.appendChild(optNormal);
-		sel.appendChild(optCompact);
-		sel.value = api.getDisplayMode();
-
-		sel.addEventListener('change', function () {
-			api.setDisplayMode(sel.value);
-			// 同步同一页面上可能存在的其它切换控件（多视图并存时保持一致）
-			var others = document.querySelectorAll('.mt5700-mode-switch-select');
-			for (var i = 0; i < others.length; i++) {
-				if (others[i] !== sel) others[i].value = sel.value;
-			}
-		});
-
-		wrap.appendChild(label);
-		wrap.appendChild(sel);
-		return wrap;
-	};
-
 	api.page = function (title, subtitle, pageKey, badgeText) {
 		var node = E('div', { 'class': 'mt5700-page' });
 
@@ -519,7 +450,6 @@ api.mascotSvg = function () {
 		hero.appendChild(content);
 
 		var art = E('div', { 'class': 'mt5700-hero-art' });
-		art.appendChild(api.displayModeSelect());
 
 		/* 看板娘完整保留（含图片、气泡、点击换台词与动画） */
 		var mascot = api.mascot(null, pageKey);
@@ -528,12 +458,6 @@ api.mascotSvg = function () {
 		node._mascot = mascot;
 
 		node.appendChild(hero);
-
-		/* 页面载入即恢复上次选择的模式（新建节点时按当前持久值打标） */
-		if (api.getDisplayMode() === 'compact') {
-			node.classList.add(MT_DISPLAY_MODE_CLASS);
-			document.body.classList.add('mt5700-body-compact');
-		}
 
 		var body = E('div', { 'class': 'mt5700-page-body' });
 		node.appendChild(body);
