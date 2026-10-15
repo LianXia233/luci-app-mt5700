@@ -148,27 +148,6 @@ function jsonParse(s) {
 	return parseVal();
 }
 
-/*
- * 解析承载 5G 流量的网络设备名。
- * 优先 UCI network.MT5700M.device，其次 ifname，都拿不到才退回 eth2。
- * 不硬编码单一设备名，避免不同机型/接口命名下取不到计数。
- */
-function detectModemDevice() {
-	let dev = null;
-	try {
-		const cursor = uci.cursor();
-		dev = cursor.get('network', 'MT5700M', 'device');
-		if (dev == null || dev == '') {
-			dev = cursor.get('network', 'MT5700M', 'ifname');
-		}
-	} catch (e) {
-		dev = null;
-	}
-	if (dev == null || dev == '') {
-		dev = 'eth2';
-	}
-	return dev;
-}
 
 /*
  * 共享工具：给所有 fs.popen 子进程加硬超时的执行器。
@@ -295,6 +274,81 @@ function findTimeoutBin() {
 /* busybox nc 的候选路径 */
 function findNcBin() {
 	return findBinary(['/usr/bin/nc', '/bin/nc', '/usr/sbin/nc', '/sbin/nc']);
+}
+
+/* 在 /sys/class/net 里找第一个挂在 USB 总线上的网卡（与 init.d 的 detect_usb_netdev 同口径）。
+ * 脚本整体用单引号交给 sh -c，保证 timeout 包住的是整个扫描而不只是第一个词。 */
+function detectUsbNetdev() {
+	const script = 'for d in /sys/class/net/*; do n=${d##*/}; '
+		+ 'case "$n" in lo|br-*) continue ;; esac; [ -e "$d/device" ] || continue; '
+		+ 'case "$(readlink -f "$d/device" 2>/dev/null)" in *usb*) echo "NETDEV=$n"; break ;; esac; done';
+	let tbin = findTimeoutBin();
+	let cmd = "/bin/sh -c '" + script + "'";
+	if (tbin != '') {
+		cmd = tbin + ' 3 ' + cmd;
+	}
+	let p;
+	try {
+		p = fs.popen(cmd, 'r');
+	} catch (e) {
+		return null;
+	}
+	if (!p) {
+		return null;
+	}
+	let line = p.read('line');
+	p.close();
+	if (line == null || substr(line, 0, 7) != 'NETDEV=') {
+		return null;
+	}
+	return trim(substr(line, 7));
+}
+
+/* 接口的网卡名（device，其次旧式 ifname）；'@别名' 不是网卡名，视为取不到 */
+function ifaceNetdev(cursor, name) {
+	let dev = cursor.get('network', name, 'device');
+	if (dev == null || dev == '') {
+		dev = cursor.get('network', name, 'ifname');
+	}
+	if (dev == null || dev == '' || substr(dev, 0, 1) == '@') {
+		return null;
+	}
+	return dev;
+}
+
+/*
+ * 解析承载 5G 流量的网络设备名，与 init.d 的承载接口选择同口径：
+ *   1) at-webserver.config.iface_v4 手动指定了接口 → 用该接口的网卡；
+ *   2) 自动扫描（默认）→ 按 sysfs 找挂在 USB 总线上的网卡（承载的可能是固件自带的 wan）；
+ *   3) 退回 MT5700M 接口的网卡，最后才是 eth2。
+ * 不硬编码单一设备名，避免不同机型/接口命名下取不到计数。
+ */
+function detectModemDevice() {
+	let dev = null;
+	let cursor = null;
+	try {
+		cursor = uci.cursor();
+		let name = cursor.get('at-webserver', 'config', 'iface_v4');
+		if (name != null && name != '' && name != 'auto' && match(name, /^[A-Za-z0-9_]+$/)) {
+			dev = ifaceNetdev(cursor, name);
+		}
+	} catch (e) {
+		dev = null;
+	}
+	if (dev == null || dev == '') {
+		dev = detectUsbNetdev();
+	}
+	if ((dev == null || dev == '') && cursor != null) {
+		try {
+			dev = ifaceNetdev(cursor, 'MT5700M');
+		} catch (e) {
+			dev = null;
+		}
+	}
+	if (dev == null || dev == '') {
+		dev = 'eth2';
+	}
+	return dev;
 }
 
 /* 十进制 → 大写十六进制（ucode 无 sprintf('%X') 之外的便捷格式化，自己拼） */

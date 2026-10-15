@@ -111,8 +111,18 @@ return L.view.extend({
 			statBinary(BINARY).catch(function () { return null; }),
 			/* by-id 稳定路径目录可能不存在（无模组 / 尚未执行 sync_serial_by_id），
 			 * 这里独立请求并独立 catch：失败不能影响其它五项，页面照常渲染 */
-			listSerial(BY_ID_DIR).catch(function () { return { entries: [] }; })
+			listSerial(BY_ID_DIR).catch(function () { return { entries: [] }; }),
+			/* 网络接口列表：供「承载接口」下拉选择；读不到时仍可手动填写 */
+			L.uci.load('network').catch(function () { return null; })
 		]).then(function (res) {
+			var netIfaces = [];
+			try {
+				netIfaces = L.uci.sections('network', 'interface').map(function (sec) {
+					return sec['.name'];
+				}).filter(function (n) { return n && n !== 'loopback'; });
+			} catch (e) {
+				netIfaces = [];
+			}
 			var raw = res[2];
 			var entries = [];
 			if (Array.isArray(raw)) {
@@ -215,7 +225,8 @@ return L.view.extend({
 				binExec: binExec,
 				enabled: enabled,
 				serials: serials,
-				byIdSerials: byIdEntries
+				byIdSerials: byIdEntries,
+				netIfaces: netIfaces
 			};
 		});
 	},
@@ -341,6 +352,62 @@ return L.view.extend({
 
 		var baudInput = Mt5700.input('number', '115200', '');
 		connBody.appendChild(Mt5700.formGroup('波特率', baudInput));
+
+		/* 接口管理开关：固件已自带指向模组网口的上行接口（如 wan/wan6 → usb0）时关闭，
+		 * 避免插件再建 MT5700M/MT5700Mv6，导致同一网卡上两套 DHCP 与两条默认路由。 */
+		var manageIfaceSwitch = E('div', { 'class': 'mt5700-switch' });
+		var manageIfaceChk = E('input', { type: 'checkbox' });
+		manageIfaceSwitch.appendChild(manageIfaceChk);
+		connBody.appendChild(Mt5700.formGroup('自动管理网络接口', manageIfaceSwitch,
+			'开启：承载接口不存在时自动创建，并设为开机自启、登记到上行防火墙区域。' +
+			'关闭：不创建、不修改任何接口与防火墙，拨号就绪后只拉起下面选定的承载接口。' +
+			'关闭不会删除已创建的 MT5700M / MT5700Mv6，需要时请在「网络 → 接口」中手动删除。'));
+
+		/* 承载接口：自动扫描（挂在模组网口上的现有接口优先，例如固件自带的 wan → usb0）
+		 * 或手动设置（从现有接口中选，或填写接口名）。 */
+		var ifaceV4Sel = Mt5700.select([], 'auto');
+		var ifaceV4Custom = Mt5700.input('text', '例如 wan', '');
+		var ifaceV6Sel = Mt5700.select([], 'auto');
+		var ifaceV6Custom = Mt5700.input('text', '例如 wan6', '');
+		ifaceV4Custom.style.display = 'none';
+		ifaceV6Custom.style.display = 'none';
+		function fillIfaceOptions(sel, input, current, autoLabel, allowNone) {
+			while (sel.firstChild) sel.removeChild(sel.firstChild);
+			function add(v, label) {
+				sel.appendChild(E('option', { value: v }, label || v));
+			}
+			add('auto', autoLabel);
+			if (allowNone) add('none', '不使用 IPv6');
+			(state.netIfaces || []).forEach(function (n) { add(n); });
+			add('__custom__', '手动填写…');
+			var cur = current || 'auto';
+			var exists = false;
+			for (var i = 0; i < sel.options.length; i++) {
+				if (sel.options[i].value === cur) { exists = true; break; }
+			}
+			if (!exists) add(cur, cur + '（当前配置，接口暂不存在）');
+			sel.value = cur;
+			input.style.display = 'none';
+		}
+		[[ifaceV4Sel, ifaceV4Custom], [ifaceV6Sel, ifaceV6Custom]].forEach(function (pair) {
+			pair[0].addEventListener('change', function () {
+				pair[1].style.display = pair[0].value === '__custom__' ? '' : 'none';
+			});
+		});
+		connBody.appendChild(Mt5700.formGroup('IPv4 承载接口', ifaceV4Sel,
+			'自动扫描：使用已挂在模组网口上的接口，没有则使用（并在开启管理时创建）MT5700M。'));
+		connBody.appendChild(Mt5700.formGroup('IPv4 接口名', ifaceV4Custom, '仅在选择「手动填写」时生效，只能包含字母、数字和下划线'));
+		connBody.appendChild(Mt5700.formGroup('IPv6 承载接口', ifaceV6Sel,
+			'自动：使用以「@IPv4 接口」为设备的接口（如 wan6 → @wan），没有则为「IPv4 接口名 + v6」。'));
+		connBody.appendChild(Mt5700.formGroup('IPv6 接口名', ifaceV6Custom, '仅在选择「手动填写」时生效，只能包含字母、数字和下划线'));
+
+		/* 读取下拉 + 手动输入的结果；不合法返回 null */
+		function ifaceValue(sel, input, allowNone) {
+			var v = sel.value === '__custom__' ? input.value.trim() : sel.value;
+			if (!v) v = 'auto';
+			if (v === 'auto' || (allowNone && v === 'none')) return v;
+			return /^[A-Za-z0-9_]+$/.test(v) ? v : null;
+		}
 
 		/* ---------- RPC 服务 ---------- */
 		var wsCard = Mt5700.card('RPC 服务', 'LuCI 经 rpcd/ucode 代理连接后端使用的端口与密钥（仅回环监听，不对外暴露）');
@@ -773,6 +840,11 @@ return L.view.extend({
 		netPortInput.value = String(get('network_port', '20249'));
 		fillSerialOptions(String(get('serial_port', 'auto')));
 		baudInput.value = String(get('serial_baudrate', '115200'));
+		manageIfaceChk.checked = get('manage_interface', '1') !== '0';
+		fillIfaceOptions(ifaceV4Sel, ifaceV4Custom, String(get('iface_v4', 'auto')),
+			'自动扫描（推荐）', false);
+		fillIfaceOptions(ifaceV6Sel, ifaceV6Custom, String(get('iface_v6', 'auto')),
+			'自动（跟随 IPv4 接口）', true);
 		wsHostInput.value = '';
 		wsPortInput.value = String(get('websocket_port', '8765'));
 		var bindCur = get('websocket_bind', '');
@@ -842,6 +914,12 @@ return L.view.extend({
 			var set = function (key, value) {
 				L.uci.set('at-webserver', 'config', key, value);
 			};
+			var ifaceV4 = ifaceValue(ifaceV4Sel, ifaceV4Custom, false);
+			var ifaceV6 = ifaceValue(ifaceV6Sel, ifaceV6Custom, true);
+			if (ifaceV4 == null || ifaceV6 == null) {
+				Mt5700.error('承载接口名只能包含字母、数字和下划线');
+				return;
+			}
 			set('connection_type', connTypeSel.value);
 			set('network_host', hostInput.value.trim() || '192.168.8.1');
 			set('network_port', String(parseInt(netPortInput.value, 10) || 20249));
@@ -851,6 +929,9 @@ return L.view.extend({
 			}
 			set('serial_port', serialVal || 'auto');
 			set('serial_baudrate', String(parseInt(baudInput.value, 10) || 115200));
+			set('manage_interface', manageIfaceChk.checked ? '1' : '0');
+			set('iface_v4', ifaceV4);
+			set('iface_v6', ifaceV6);
 			set('websocket_port', String(parseInt(wsPortInput.value, 10) || 8765));
 			var bind = wsBindSel.value === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
 			set('websocket_bind', bind);

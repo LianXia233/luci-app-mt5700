@@ -4,7 +4,8 @@
 		"read": {
 			"uci": [
 				"at-webserver",
-				"firewall"
+				"firewall",
+				"network"
 			],
 			"ubus": {
 				"file": [
