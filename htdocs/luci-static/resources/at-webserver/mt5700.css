@@ -652,7 +652,8 @@
 }
 .mt-chart-svg-box {
   width: 100%;
-  height: 230px;
+  height: 330px;
+  min-height: 330px;
   position: relative;
 }
 
@@ -5454,5 +5455,203 @@ body.mt-theme-dark .cbi-modal-body {
 @media (max-width: 768px) {
   .mt-mcs-visual-grid {
     grid-template-columns: 1fr !important;
+  }
+}
+
+
+/* ==========================================================================
+   移动端深度自适应响应式系统 (全面消除手机屏幕横向溢出与拥挤)
+   ========================================================================== */
+
+.mt-anime-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+}
+
+.mt-temp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 768px) {
+  /* 页面根容器与内边距 */
+  .mt-anime-container {
+    padding: 0 !important;
+  }
+
+  /* 顶部状态卡片单列全宽排列 */
+  .mt-stat-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* 中部双列转为单列垂直堆叠 */
+  .mt-mid-grid,
+  .mt-row-2col,
+  .mt-2col,
+  .mt-form-row {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* 卡片边距压缩 */
+  .mt-card {
+    padding: 14px 12px !important;
+    border-radius: 16px !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  /* Hero 卡片内部元素换行 */
+  .mt-hero-card,
+  .mt5700-hero-card {
+    padding: 14px !important;
+    border-radius: 18px !important;
+  }
+
+  .mt-hero-right,
+  .mt5700-hero-art {
+    width: 100% !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-end !important;
+    gap: 8px !important;
+  }
+
+  .mt-anime-speech-bubble {
+    max-width: calc(100% - 70px) !important;
+    font-size: 11.5px !important;
+    padding: 6px 12px !important;
+  }
+
+  /* 网络状态卡片网格自适应，防止 频段/带宽 文本右侧溢出 */
+  .mt-net-main-row {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .mt-tower-svg-box {
+    width: 50px !important;
+    height: 50px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .mt-tower-svg-box svg {
+    width: 50px !important;
+    height: 50px !important;
+  }
+
+  .mt-net-info-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px 10px !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .mt-net-info-cell {
+    min-width: 0 !important;
+  }
+
+  .mt-net-val {
+    font-size: 11.5px !important;
+    word-break: break-word !important;
+    white-space: normal !important;
+    line-height: 1.35 !important;
+  }
+
+  /* Tab 按钮横向平滑滚动，消除右侧裁切 */
+  .mt-tab-header {
+    display: flex !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    gap: 6px !important;
+    padding-bottom: 6px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .mt-tab-header::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .mt-tab-btn {
+    flex-shrink: 0 !important;
+    padding: 7px 12px !important;
+    font-size: 12px !important;
+  }
+
+  /* 表格单元格自适应换行 */
+  .mt-info-table {
+    width: 100% !important;
+    display: table !important;
+  }
+
+  .mt-info-table tr td {
+    padding: 9px 6px !important;
+    font-size: 11.5px !important;
+  }
+
+  .mt-info-table tr td:first-child {
+    width: 35% !important;
+    min-width: 80px !important;
+  }
+
+  .mt-info-table tr td:last-child {
+    width: 65% !important;
+    word-break: break-all !important;
+  }
+
+  /* 信号趋势图在手机端的高度与容器适配 */
+  .mt-chart-svg-box {
+    height: 270px !important;
+    min-height: 270px !important;
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* 调制方式与 MIMO 空间流在手机端单列垂直堆叠 */
+  .mt-mcs-visual-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    width: 100% !important;
+  }
+
+  .mt-mcs-box {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 12px 10px !important;
+  }
+
+  /* 模组芯片温度在手机端调整为 2 列平铺，拒绝挤压 */
+  .mt-temp-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  /* 载波聚合卡片手机端竖排自适应 */
+  .mt-carrier-card-item {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .mt-sig-main-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+  .mt-sig-gauge-box {
+    align-self: center !important;
   }
 }

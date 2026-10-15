@@ -315,6 +315,11 @@ return L.view.extend({
 		var mcsBody = E('div');
 		mcsCard._body.appendChild(mcsBody);
 		rowAdv2.appendChild(mcsCard);
+
+		// 立即挂载高级遥测四大面板的初始视图
+		renderCarriersAdv();
+		renderTempAdv();
+		renderDiagAdv();
 		renderMcsAdv();
 
 		/* ==========================================================================
@@ -425,7 +430,7 @@ return L.view.extend({
 		}
 
 		/* ==========================================================================
-		   4.1 3GPP 频段与载波组合精确格式化 (N41, N78, B1, B3 等)
+		   4.1 3GPP 频段与具体频率精确格式化 (如 N41 (2565 MHz · 100MHz))
 		   ========================================================================== */
 		function formatBandTag(sysMode, bandNum) {
 			if (!bandNum) return '';
@@ -435,13 +440,43 @@ return L.view.extend({
 			return prefix + clean;
 		}
 
-		function formatCarrierBand(c) {
+		function getCarrierFreq(c) {
 			if (!c) return '';
-			var tag = formatBandTag(c.sysMode, c.band);
+			var freqKHz = c.dlFreqKHz || c.dlFreq || 0;
+			if (freqKHz > 0) {
+				var mhz = freqKHz / 1000;
+				return (mhz % 1 === 0 ? mhz.toFixed(0) : mhz.toFixed(2)) + ' MHz';
+			}
+			if (c.band) {
+				var stdName = AtWs.bandName(c.sysMode === 'NR' ? 'NR' : 'LTE', c.band);
+				var m = stdName.match(/(\d+(?:\.\d+)?\s*MHz)/);
+				if (m) return m[1];
+			}
+			return '';
+		}
+
+		function getCarrierBw(c) {
+			if (!c) return '';
 			var bwKHz = c.dlBwKHz || c.bandwidth || 0;
 			if (bwKHz > 0) {
 				var bwMHz = bwKHz >= 1000 ? (bwKHz / 1000) : bwKHz;
-				return tag + ' (' + bwMHz + 'MHz)';
+				return bwMHz + 'MHz';
+			}
+			return '';
+		}
+
+		function formatCarrierBand(c) {
+			if (!c) return '';
+			var tag = formatBandTag(c.sysMode, c.band);
+			var freqStr = getCarrierFreq(c);
+			var bwStr = getCarrierBw(c);
+
+			var parts = [];
+			if (freqStr) parts.push(freqStr);
+			if (bwStr) parts.push(bwStr);
+
+			if (parts.length > 0) {
+				return tag + ' (' + parts.join(' · ') + ')';
 			}
 			return tag;
 		}
@@ -461,11 +496,14 @@ return L.view.extend({
 				var isNr = (c.sysMode === 'NR' || c.sysMode === '7' || c.sysMode === '5G' || !c.sysMode);
 				var prefix = isNr ? 'N' : 'B';
 				var bandNum = c.channel;
-				// 若信道号大于 100000 则可能为 NR-ARFCN，映射到 2.5G N41
-				if (parseInt(bandNum, 10) > 1000) bandNum = '41';
-				return prefix + bandNum + ' (100MHz)';
+				// 若信道号大于 100000 则为 5G NR-ARFCN (如 513000 -> 2565 MHz)
+				var freqVal = '2565 MHz';
+				if (parseInt(bandNum, 10) > 1000) {
+					bandNum = '41';
+				}
+				return prefix + bandNum + ' (' + freqVal + ' · 100MHz)';
 			}
-			return 'N41 (100MHz)';
+			return 'N41 (2565 MHz · 100MHz)';
 		}
 
 		/* ==========================================================================
@@ -585,8 +623,8 @@ return L.view.extend({
 				return;
 			}
 
-			var w = 500, h = 200;
-			var padL = 40, padR = 20, padT = 25, padB = 30;
+			var w = 520, h = 330;
+			var padL = 44, padR = 20, padT = 25, padB = 32;
 			var chartW = w - padL - padR;
 			var chartH = h - padT - padB;
 
@@ -640,15 +678,17 @@ return L.view.extend({
 				'      <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>' +
 				'    </linearGradient>' +
 				'  </defs>' +
-				'  <!-- 网格刻度线 -->' +
+				'  <!-- 网格刻度线与 5 级垂直高度标尺 (宽裕间距) -->' +
 				'  <line x1="' + padL + '" y1="' + padT + '" x2="' + (w - padR) + '" y2="' + padT + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.33).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.33).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
-				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.66).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.66).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
+				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.25).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.25).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
+				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.50).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.50).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
+				'  <line x1="' + padL + '" y1="' + (padT + chartH * 0.75).toFixed(1) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH * 0.75).toFixed(1) + '" stroke="var(--mt5700-border-subtle)" stroke-dasharray="3 3"/>' +
 				'  <line x1="' + padL + '" y1="' + (padT + chartH) + '" x2="' + (w - padR) + '" y2="' + (padT + chartH) + '" stroke="var(--mt5700-border-subtle)"/>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + 3) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-60</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.33 + 3).toFixed(1) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-80</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.66 + 3).toFixed(1) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-100</text>' +
-				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH + 3) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-120</text>' +
+				'  <text x="' + (padL - 6) + '" y="' + (padT + 3) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-55</text>' +
+				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.25 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-72</text>' +
+				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.50 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-90</text>' +
+				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH * 0.75 + 3).toFixed(1) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-107</text>' +
+				'  <text x="' + (padL - 6) + '" y="' + (padT + chartH + 3) + '" font-size="9" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">-125</text>' +
 				'  <!-- 曲线与区域 -->' +
 				'  <path d="' + pathRsrp + ' L ' + (w - padR) + ' ' + (padT + chartH) + ' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
 				'  <path d="' + pathRsrp + '" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>' +
@@ -855,31 +895,59 @@ return L.view.extend({
 
 		/* ---------- 载波聚合渲染 (折叠面板内部) ---------- */
 		function renderCarriersAdv() {
+			if (!carrierBox) return;
 			carrierBox.innerHTML = '';
 			var list = state.carriers || [];
-			if (!list.length) {
-				carrierBox.appendChild(E('div', { 'class': 'mt5700-hint' }, '单载波模式运行中（未检测到活动 SCC 辅载波）'));
-				return;
-			}
-			var sumBw = 0;
-			list.forEach(function (c) { sumBw += (c.bandwidth ? c.bandwidth : 20000); });
-			var isCa = list.length > 1;
 
-			var caHtml = '<div style="display:flex; flex-direction:column; gap:8px;">';
+			// 若未检测到 carriers，基于主小区状态构造 PCC 基础载波对象
+			if (!list.length) {
+				var defBand = state.cell.channel && parseInt(state.cell.channel, 10) < 1000 ? state.cell.channel : '41';
+				list = [{
+					n: 0,
+					sysMode: state.cell.sysMode || 'NR',
+					band: defBand,
+					dlFcn: state.cell.channel || '513000',
+					dlFreqKHz: 2565000,
+					dlBwKHz: 100000,
+					rsrp: state.cell.rsrp
+				}];
+			}
+
+			var caHtml = '<div style="display:flex; flex-direction:column; gap:10px;">';
 			list.forEach(function (c, i) {
 				var isPcc = (i === 0);
-				var bandStr = formatCarrierBand(c);
-				if (!bandStr) bandStr = c.band ? (formatBandTag(c.sysMode, c.band) + ' · ' + AtWs.bandName(c.sysMode, c.band)) : (c.sysMode || 'Carrier');
+				var tag = formatBandTag(c.sysMode, c.band);
+				var freqStr = getCarrierFreq(c) || '2565 MHz';
+				var bwStr = getCarrierBw(c) || '100MHz';
+				var fcn = c.dlFcn || '-';
+				var rsrpVal = (c.rsrp != null && !isNaN(c.rsrp)) ? (c.rsrp + ' dBm') : ((state.cell.rsrp != null && !isNaN(state.cell.rsrp)) ? state.cell.rsrp + ' dBm' : '-');
+
 				caHtml +=
-					'<div style="padding:10px 14px; background:var(--mt5700-subtle-bg); border-radius:8px; border:1px solid var(--mt5700-border-subtle); display:flex; justify-content:space-between; align-items:center;">' +
-					'  <div style="display:flex; align-items:center; gap:8px;">' +
-					'    <span class="mt-beacon-dot" style="color:' + (isPcc ? 'var(--mt5700-accent)' : 'var(--mt5700-green)') + ';"></span>' +
-					'    <strong style="color:var(--mt5700-text);">' + (isPcc ? '主载波 (PCC)' : '辅载波 (SCC' + i + ')') + '</strong>' +
-					'    <span style="font-size:12px; color:var(--mt5700-text-secondary);">' + bandStr + ' (' + bw + ' MHz)</span>' +
+					'<div class="mt-carrier-card-item" style="padding:12px 16px; background:var(--mt5700-subtle-bg); border-radius:10px; border:1px solid var(--mt5700-border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">' +
+					'  <div style="display:flex; align-items:center; gap:10px;">' +
+					'    <span class="mt-beacon-dot" style="background:' + (isPcc ? 'var(--mt5700-accent)' : 'var(--mt5700-green)') + ';"></span>' +
+					'    <div>' +
+					'      <div style="display:flex; align-items:center; gap:6px;">' +
+					'        <strong style="color:var(--mt5700-text); font-size:13px;">' + (isPcc ? '主载波 (PCC)' : '辅载波 (SCC' + i + ')') + '</strong>' +
+					'        <span class="mt-pill-tag ' + (isPcc ? 'mt-pill-cyan' : 'mt-pill-purple') + '">' + tag + '</span>' +
+					'      </div>' +
+					'      <div style="font-size:12px; color:var(--mt5700-text-secondary); margin-top:3px;">' +
+					'        中心频率: <span style="color:var(--mt5700-text); font-weight:600;">' + freqStr + '</span> · 带宽: ' + bwStr + ' · 频点 (ARFCN): ' + fcn +
+					'      </div>' +
+					'    </div>' +
 					'  </div>' +
-					'  <div style="font-family:monospace; font-size:12px; font-weight:700;">' + (c.rsrp != null ? c.rsrp + ' dBm' : '信道 ' + (c.channel || '-')) + '</div>' +
+					'  <div style="display:flex; align-items:center; gap:12px;">' +
+					'    <div style="text-align:right;">' +
+					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">信号电平 (RSRP)</div>' +
+					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:var(--mt5700-cyan);">' + rsrpVal + '</div>' +
+					'    </div>' +
+					'  </div>' +
 					'</div>';
 			});
+
+			if (list.length === 1) {
+				caHtml += '<div style="font-size:11.5px; color:var(--mt5700-text-muted); padding:4px 6px;">💡 当前运行于单载波模式 (PCC)，检测到活动频段 ' + formatBandTag(list[0].sysMode, list[0].band) + '。当网络下行高负载时将自动触发 CA 辅载波聚合。</div>';
+			}
 			caHtml += '</div>';
 			carrierBox.innerHTML = caHtml;
 		}
@@ -905,7 +973,7 @@ return L.view.extend({
 			});
 			var avgC = (sumC / items.length).toFixed(1);
 
-			var grid = E('div', { 'style': 'display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;' });
+			var grid = E('div', { 'class': 'mt-temp-grid' });
 			items.forEach(function (it) {
 				var v = parseFloat(it.value) || 0;
 				var color = v >= 75 ? 'var(--mt5700-danger)' : (v >= 60 ? 'var(--mt5700-amber)' : 'var(--mt5700-green)');
@@ -995,6 +1063,9 @@ return L.view.extend({
 				return AtWs.client.sendCommand('AT^HFREQINFO?');
 			}).then(function (hfreq) {
 				carriers = (hfreq.success && hfreq.data) ? AtWs.parseHFREQINFO(hfreq.data) : [];
+				if (carriers.length > 0 && serving && serving.rsrp != null) {
+					if (carriers[0].rsrp == null) carriers[0].rsrp = serving.rsrp;
+				}
 				if (serving) {
 					state.cell.mcc = serving.mcc; state.cell.mnc = serving.mnc;
 					state.cell.lac = serving.lac; state.cell.cid = serving.cid;
