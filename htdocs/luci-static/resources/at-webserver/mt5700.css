@@ -4301,10 +4301,6 @@
   }
 }
 
-@keyframes mt-radar-sweep {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
 
 
 @keyframes mt-float-slow {
@@ -4337,7 +4333,6 @@
 /* SVG 元素动画绑定类 */
 .mt-anim-pulse { animation: mt-pulse-glow 2.5s ease-in-out infinite; transform-origin: center; }
 .mt-anim-spin { animation: mt-spin-slow 12s linear infinite; transform-origin: center; }
-.mt-anim-sweep { animation: mt-radar-sweep 4s linear infinite; transform-origin: center; }
 .mt-anim-stream {
   stroke-dasharray: 8 4;
   animation: mt-data-stream 2s linear infinite;
@@ -5470,11 +5465,6 @@ select option {
     gap: 8px !important;
   }
 
-  .mt-anime-speech-bubble {
-    max-width: calc(100% - 70px) !important;
-    font-size: 11.5px !important;
-    padding: 6px 12px !important;
-  }
 
   /* 网络状态卡片网格自适应，防止 频段/带宽 文本右侧溢出 */
   .mt-net-main-row {
