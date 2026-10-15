@@ -11,7 +11,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.15.0';
+var MT5700_CSS_VERSION = '2.16.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -260,7 +260,127 @@ var Mt5700 = (function () {
 		return svg;
 	};
 
-	api.mascotSvg = function () {
+		/* ================= 调制方式星座图与 MIMO 空间流 SVG ================= */
+
+	api.constellationSvg = function (modType) {
+		var svg = svgEl('svg', {
+			'class': 'mt-constellation-svg',
+			viewBox: '0 0 160 140',
+			fill: 'none',
+			xmlns: 'http://www.w3.org/2000/svg'
+		});
+
+		// 背景与坐标系 (中心点 80, 70)
+		svg.appendChild(svgEl('rect', { x: '4', y: '4', width: '152', height: '132', rx: '12', fill: 'rgba(15, 23, 42, 0.65)', stroke: 'rgba(167, 139, 250, 0.25)', 'stroke-width': '1' }));
+		svg.appendChild(svgEl('circle', { cx: '80', cy: '70', r: '46', stroke: 'rgba(56, 189, 248, 0.2)', 'stroke-width': '1', 'stroke-dasharray': '4 4' }));
+
+		// 坐标轴 I / Q
+		svg.appendChild(svgEl('line', { x1: '16', y1: '70', x2: '144', y2: '70', stroke: 'rgba(255, 255, 255, 0.2)', 'stroke-width': '1' }));
+		svg.appendChild(svgEl('line', { x1: '80', y1: '12', x2: '80', y2: '128', stroke: 'rgba(255, 255, 255, 0.2)', 'stroke-width': '1' }));
+
+		var textI = svgEl('text', { x: '138', y: '66', fill: '#94a3b8', 'font-size': '8', 'font-family': 'sans-serif' });
+		textI.textContent = 'I';
+		svg.appendChild(textI);
+
+		var textQ = svgEl('text', { x: '84', y: '20', fill: '#94a3b8', 'font-size': '8', 'font-family': 'sans-serif' });
+		textQ.textContent = 'Q';
+		svg.appendChild(textQ);
+
+		// 生成星座图阵列点 (按 16QAM / 64QAM / 256QAM)
+		var points = [];
+		var mod = String(modType || '').toUpperCase();
+		if (mod.indexOf('QPSK') >= 0) {
+			[-20, 20].forEach(function (x) {
+				[-20, 20].forEach(function (y) { points.push([80 + x, 70 + y]); });
+			});
+		} else if (mod.indexOf('64QAM') >= 0 || mod.indexOf('256QAM') >= 0) {
+			[-36, -24, -12, 12, 24, 36].forEach(function (x) {
+				[-36, -24, -12, 12, 24, 36].forEach(function (y) { points.push([80 + x, 70 + y]); });
+			});
+		} else {
+			// 默认 16QAM (4x4 阵列)
+			[-32, -11, 11, 32].forEach(function (x) {
+				[-32, -11, 11, 32].forEach(function (y) { points.push([80 + x, 70 + y]); });
+			});
+		}
+
+		// 星座点着色与光晕
+		points.forEach(function (pt) {
+			svg.appendChild(svgEl('circle', {
+				cx: String(pt[0]),
+				cy: String(pt[1]),
+				r: '2.5',
+				fill: '#38bdf8',
+				'class': 'mt-anim-pulse'
+			}));
+		});
+
+		// 调制方式类型角标
+		svg.appendChild(svgEl('rect', { x: '10', y: '10', width: '50', height: '16', rx: '5', fill: 'rgba(139, 92, 246, 0.35)', stroke: '#a78bfa', 'stroke-width': '1' }));
+		var badge = svgEl('text', { x: '35', y: '21', 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '8.5', 'font-weight': 'bold', 'font-family': 'sans-serif' });
+		badge.textContent = mod || '16QAM';
+		svg.appendChild(badge);
+
+		return svg;
+	};
+
+	api.mimoSvg = function (rank) {
+		var svg = svgEl('svg', {
+			'class': 'mt-mimo-svg',
+			viewBox: '0 0 200 140',
+			fill: 'none',
+			xmlns: 'http://www.w3.org/2000/svg'
+		});
+
+		var numRank = parseInt(rank, 10) || 4;
+		svg.appendChild(svgEl('rect', { x: '4', y: '4', width: '192', height: '132', rx: '12', fill: 'rgba(15, 23, 42, 0.65)', stroke: 'rgba(167, 139, 250, 0.25)', 'stroke-width': '1' }));
+
+		// 左侧基站发射天线阵列 Tx1..Tx4
+		var txY = [32, 54, 76, 98];
+		txY.forEach(function (y, i) {
+			svg.appendChild(svgEl('circle', { cx: '24', cy: String(y), r: '4', fill: '#8b5cf6', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('line', { x1: '16', y1: String(y), x2: '24', y2: String(y), stroke: '#a78bfa', 'stroke-width': '2' }));
+			var t = svgEl('text', { x: '10', y: String(y + 3), fill: '#94a3b8', 'font-size': '7', 'font-family': 'monospace' });
+			t.textContent = 'T' + (i + 1);
+			svg.appendChild(t);
+		});
+
+		// 右侧模组接收天线阵列 Rx1..Rx4
+		var rxY = [32, 54, 76, 98];
+		rxY.forEach(function (y, i) {
+			svg.appendChild(svgEl('circle', { cx: '176', cy: String(y), r: '4', fill: '#38bdf8', 'class': 'mt-anim-pulse' }));
+			svg.appendChild(svgEl('line', { x1: '176', y1: String(y), x2: '184', y2: String(y), stroke: '#38bdf8', 'stroke-width': '2' }));
+			var t = svgEl('text', { x: '186', y: String(y + 3), fill: '#94a3b8', 'font-size': '7', 'font-family': 'monospace' });
+			t.textContent = 'R' + (i + 1);
+			svg.appendChild(t);
+		});
+
+		// 空间流波束连接曲线
+		var streamColors = ['#8b5cf6', '#38bdf8', '#f472b6', '#34d399'];
+		for (var s = 0; s < Math.min(numRank, 4); s++) {
+			var startY = txY[s];
+			var endY = rxY[s];
+			var pathData = 'M 24 ' + startY + ' C 75 ' + (startY - 10) + ', 125 ' + (endY + 10) + ', 176 ' + endY;
+			svg.appendChild(svgEl('path', {
+				d: pathData,
+				stroke: streamColors[s % streamColors.length],
+				'stroke-width': '2.2',
+				'stroke-linecap': 'round',
+				'stroke-dasharray': '5 3',
+				'class': 'mt-anim-stream'
+			}));
+		}
+
+		// 徽标显示 Rank
+		svg.appendChild(svgEl('rect', { x: '68', y: '112', width: '64', height: '16', rx: '5', fill: 'rgba(56, 189, 248, 0.25)', stroke: '#38bdf8', 'stroke-width': '1' }));
+		var rText = svgEl('text', { x: '100', y: '123', 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '8.5', 'font-weight': 'bold', 'font-family': 'sans-serif' });
+		rText.textContent = 'MIMO ' + numRank + '×' + numRank;
+		svg.appendChild(rText);
+
+		return svg;
+	};
+
+api.mascotSvg = function () {
 		var svg = svgEl('svg', {
 			'class': 'mt-anime-mascot-svg',
 			viewBox: '0 0 200 160',
@@ -344,84 +464,92 @@ var Mt5700 = (function () {
 	api.mascot = function (defaultText, pageKey) {
 		var wrap = E('div', { 'class': 'mt-mascot-speech-wrap' });
 
+		// 优化看板娘文案：亲切称呼用户为「可可」
 		var voiceMap = {
 			network_status: [
-				'5G 信号满格，冲浪快如闪电喵！⚡',
-				'无线链路超健康，随时为主人服务喵~ 🐾',
-				'网络已连接~ 一切正常喵~ ♡',
-				'主人辛苦啦~ 路由器今天也在努力工作中！♡',
-				'喵呜~ 软萌二次元，让网络管理更有温度 ♡'
+				'可可，5G 信号满格，冲浪快如闪电喵！⚡',
+				'无线链路超健康，随时为可可服务喵~ 🐾',
+				'网络已连接~ 正在全力守护可可的信号喵~ ♡',
+				'可可辛苦啦~ 今天我也在认真巡检网络呢！♡',
+				'喵呜~ 可可，有我在，网络绝对不掉线喵！✨'
 			],
 			network_settings: [
-				'锁定高带宽频段，告别网络拥堵喵！✨',
-				'SA / NSA 独立组网模式随时掌控喵~ 🛰️',
-				'频段策略已优化，射频通道状态极佳喵！📶',
-				'邻区信号探测中，帮主人锁定最强基站喵~ ♡'
+				'可可，锁定高速 5G 频段，告别拥堵喵！✨',
+				'SA / NSA 模式已就绪，听从可可的指令喵~ 🛰️',
+				'射频通道状态极佳，正在帮可可锁定最佳基站喵！📶',
+				'可可放心，频段锁定策略随时为您待命喵~ ♡'
 			],
 			dial: [
-				'APN 高速通道已就绪，一键起飞喵！🚀',
-				'双栈 IPv4/IPv6 隧道全速畅通喵~ 🌐',
-				'拨号守护进程持续在线，断线秒级重连喵！🐾',
-				'网络链路超稳定，主人尽管放心冲浪喵~ ♡'
+				'可可，APN 高速通道已就绪，一键起飞喵！🚀',
+				'双栈 IPv4/IPv6 隧道全速畅通，可可冲浪超丝滑喵~ 🌐',
+				'守护进程全天候待命，为可可保驾护航喵！🐾',
+				'数据链路稳如磐石，可可尽管畅享高速喵~ ♡'
 			],
 			scan: [
-				'雷达全向扫描启动！周边基站无所遁形喵~ 📡',
-				'正在探索优质载波与物理小区喵！✨',
-				'信号盲区扫描完成，随时可以锁定最优小区喵~ 🐾'
+				'雷达全向扫描启动！周边基站正在向可可汇报喵~ 📡',
+				'正在为可可探索更优质的载波与小区喵！✨',
+				'扫频完成啦，可可想锁定哪个小区呢喵？🐾'
 			],
 			schedule: [
-				'智能定时调度已排班，到点自动执行喵~ ⏰',
-				'夜间闲时智能倒换，省心更省电喵！💤',
-				'定时重启能清理模组缓存，保持飞速状态喵~ ♡'
+				'智能定时调度已排班，准时为可可执行喵~ ⏰',
+				'夜间闲时智能倒换，帮可可省心又省电喵！💤',
+				'定时优化模组状态，让可可的网速永远飞起喵~ ♡'
 			],
 			modem_settings: [
-				'MT5700 核心 SoC 运转正常，温度刚刚好喵~ 💻',
-				'PCI 物理小区锁定已生效，抗干扰能力 MAX 喵！🛡️',
-				'SIM 卡卡槽通信顺畅，接触良好喵~ 🐾'
+				'MT5700 核心 SoC 运转正常，温度刚刚好，可可请放心喵~ 💻',
+				'PCI 物理小区锁定已生效，为可可开启最强抗干扰喵！🛡️',
+				'硬件状态优异，全心全意服务可可喵~ 🐾'
 			],
 			upgrade: [
-				'固件升级防护盾已开启，安全守护中喵！☁️',
-				'支持固件包完整性校验，升级超安心喵~ ⚡',
-				'保持最新版本，享受最强网络性能喵！♡'
+				'固件升级防护盾已开启，守护可可的设备安全喵！☁️',
+				'完整性校验中，可可请放心升级喵~ ⚡',
+				'保持最新版本，让可可体验最强 5G 性能喵！♡'
 			],
 			sms_center: [
-				'信箱整理得井井有条，新短信第一时间汇报喵！💌',
-				'支持长短信无损合并与批量清理喵~ 💬',
-				'重要验证码喵喵帮主人盯紧紧的喵！🐾'
+				'信箱整理得井井有条，新短信第一时间汇报给可可喵！💌',
+				'支持长短信无损合并，可可的消息一条都不漏喵~ 💬',
+				'重要验证码我帮可可盯得紧紧的喵！🐾'
 			],
 			sms_settings: [
-				'短信自动化转发与 Webhook 已配置妥当喵！📮',
-				'钉钉/飞书/Telegram 实时推送，绝不漏信喵~ 🔔',
-				'短信存储空间充足，随收随转超省心喵~ ♡'
+				'短信自动化转发与 Webhook 已为可可配置妥当喵！📮',
+				'钉钉/飞书/Telegram 实时推送，绝不让可可漏信喵~ 🔔',
+				'存储空间充足，随收随转，可可超省心喵~ ♡'
 			],
 			terminal: [
-				'AT 交互控制台就绪，请下发调试指令喵！💻',
-				'底层指令审计中，安全无副作用指令优先喵~ ✨',
-				'回车即发，高阶命令请注意语法校验喵！🐾'
+				'AT 交互控制台就绪，请可可下发调试指令喵！💻',
+				'底层指令审计中，保证可可的操作安全无虞喵~ ✨',
+				'回车即发，高阶命令我随时陪可可测试喵！🐾'
 			],
 			logs: [
-				'事件日志流实时追踪，异常波动立刻抓包喵~ 📜',
-				'系统与射频日志全天候审计，透明可视喵！🔍',
-				'运行健康度优异，一切尽在掌握中喵~ ♡'
+				'事件日志流实时追踪，异常波动立刻汇报给可可喵~ 📜',
+				'全天候日志审计，透明可视，可可一目了然喵！🔍',
+				'运行健康度优异，一切尽在可可掌握中喵~ ♡'
 			],
 			service: [
-				'AT WebServer 后台守护进程全天候巡检中喵！🛡️',
-				'后台服务健康度 100%，内存轻量低占用喵~ ⚡',
-				'模组通信守护就绪，随时响应前端请求喵！♡'
+				'后台守护进程全天候巡检中，随时响应可可喵！🛡️',
+				'服务健康度 100%，内存超轻量，可可放心喵~ ⚡',
+				'模组通信守护就绪，陪伴可可每一秒喵！♡'
 			]
 		};
 
 		var voices = voiceMap[pageKey] || [
-			'网络已连接~ 一切正常喵~ ♡',
-			'5G 信号满格，冲浪快如闪电喵！⚡',
-			'主人辛苦啦~ 路由器今天也在努力工作中！♡',
-			'无线链路超健康，随时为主人服务喵~ 🐾',
-			'喵呜~ 软萌二次元，让管理更有温度 ♡'
+			'可可，5G 信号满格，冲浪快如闪电喵！⚡',
+			'可可辛苦啦~ 今天我也在认真巡检网络呢！♡',
+			'网络已连接~ 正在全力守护可可的信号喵~ ♡',
+			'喵呜~ 可可，有我在，网络绝对不掉线喵！✨'
 		];
 
 		var initText = defaultText || voices[0];
 		var bubble = E('div', { 'class': 'mt-speech-bubble' }, initText);
-		var avatar = E('div', { 'class': 'mt-mascot-avatar' }, [api.mascotSvg()]);
+
+		// 采用用户指定的二次元蓝发猫耳看板娘头像图片，外圈带光环与悬浮动效
+		var avatar = E('div', { 'class': 'mt-mascot-avatar' });
+		var img = E('img', {
+			'class': 'mt-mascot-img',
+			'src': '/luci-static/resources/at-webserver/mascot.png?v=' + MT5700_CSS_VERSION,
+			'alt': '可可的看板娘'
+		});
+		avatar.appendChild(img);
 
 		var idx = 0;
 		function nextVoice() {
