@@ -282,15 +282,15 @@ return L.view.extend({
 				E('div', { 'class': 'mt-chart-legends' }, [
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#38bdf8;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#38bdf8;' }),
-						E('span', {}, 'RSRP · 左轴')
+						E('span', {}, 'RSRP · Left')
 					]),
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#10b981;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:#10b981;' }),
-						E('span', {}, 'SINR · 右轴')
+						E('span', {}, 'SINR · Right')
 					]),
 					E('div', { 'class': 'mt-legend-item', 'style': 'color:#a855f7;' }, [
 						E('span', { 'class': 'mt-legend-line', 'style': 'background:repeating-linear-gradient(90deg, #a855f7 0 4px, transparent 4px 7px);' }),
-						E('span', {}, 'RSRQ · 虚线')
+						E('span', {}, 'RSRQ · Dashed')
 					])
 				])
 			]),
@@ -667,11 +667,12 @@ return L.view.extend({
 		   ========================================================================== */
 
 		/* RSRP 质量分区（阈值与 computeCellularState 的分档保持一致） */
+		/* 档位标签用英文，保证图表区域文字风格统一（不含中文） */
 		var SIGNAL_TIERS = [
-			{ label: '较差', min: -125, max: -110, color: '#ef4444' },
-			{ label: '一般', min: -110, max: -95, color: '#f59e0b' },
-			{ label: '良好', min: -95, max: -80, color: '#0ea5e9' },
-			{ label: '极佳', min: -80, max: -53, color: '#10b981' }
+			{ label: 'Poor', min: -125, max: -110, color: '#ef4444' },
+			{ label: 'Fair', min: -110, max: -95, color: '#f59e0b' },
+			{ label: 'Good', min: -95, max: -80, color: '#0ea5e9' },
+			{ label: 'Excellent', min: -80, max: -53, color: '#10b981' }
 		];
 
 		/* RSRP → 质量分区下标；无有效读数返回 -1 */
@@ -730,14 +731,33 @@ return L.view.extend({
 			var box = document.getElementById('sig-trend-chart-box');
 			if (!box) return;
 			if (sigHistory.length < 2) {
-				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">正在采集实时信号趋势数据（至少需要 2 个采样点）...</div>';
+				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">Collecting signal samples (need at least 2 points)...</div>';
 				return;
 			}
 
-			var w = 560, h = 340;
-			var padL = 50, padR = 50, padT = 26, padB = 34;
+			/*
+			 * 尺寸自适应：SVG 会按宽度等比缩放，若窄屏仍用 560 宽的 viewBox，
+			 * 文字会被压缩到原来的一半以下（手机上无法辨认）。
+			 * 因此窄屏改用更窄的 viewBox（380×300），让缩放比接近 1:1，
+			 * 同时把所有字号按 viewBox 单位放大到 11~13，桌面端实际渲染约 13px。
+			 */
+			var boxW = box.clientWidth || 560;
+			var narrow = boxW < 480;
+			var w = narrow ? 380 : 560;
+			var h = narrow ? 300 : 340;
+			var padL = narrow ? 40 : 52, padR = narrow ? 42 : 52, padT = 28, padB = 36;
 			var chartW = w - padL - padR;
 			var chartH = h - padT - padB;
+			/* 字号取「可读但不喧宾夺主」的中间值：
+			   桌面容器 ≈573 宽（viewBox 560）缩放约 1.02 → 刻度实际约 11.7px，与卡片正文 12~13px 协调；
+			   窄屏 viewBox 380、容器 ≈340 缩放约 0.9 → 刻度实际约 10.8px，保持可辨认。 */
+			var fsTick = narrow ? 12 : 11.5;      /* 轴刻度 */
+			var fsTier = narrow ? 11 : 10.5;      /* 质量档位 */
+			var fsTime = narrow ? 12 : 11.5;      /* 时间轴 */
+			var fsLabel = narrow ? 12.5 : 12;     /* 末端读数 / 质量 */
+			var fsAxis = narrow ? 11 : 10.5;      /* 轴单位 */
+			var tipFs = narrow ? 12 : 11.5;       /* 悬浮卡文字 */
+			var tipFsTitle = narrow ? 12.5 : 12;
 
 			var RSRP_MIN = -125, RSRP_MAX = -53;
 			var SINR_MIN = -5, SINR_MAX = 35;
@@ -759,7 +779,7 @@ return L.view.extend({
 			var lastItem = sigHistory[n - 1];
 			var tier = signalTierIndex(lastItem.rsrp);
 			var tierColor = tier >= 0 ? SIGNAL_TIERS[tier].color : 'var(--mt5700-text-muted)';
-			var tierText = tier >= 0 ? SIGNAL_TIERS[tier].label : '无读数';
+			var tierText = tier >= 0 ? SIGNAL_TIERS[tier].label : '—';
 
 			/* ---- 背景质量分区带 ---- */
 			var bands = '';
@@ -771,7 +791,7 @@ return L.view.extend({
 					'" height="' + Math.max(1, y2 - y1).toFixed(1) + '" fill="' + t.color + '" opacity="0.05"/>';
 				/* 档位标签放在绘图区右端内侧，与右轴刻度（区外）分开，避免挤在一起 */
 				bands += '<text x="' + (w - padR - 6) + '" y="' + ((y1 + y2) / 2 + 3).toFixed(1) +
-					'" font-size="8" fill="' + t.color + '" opacity="0.8" text-anchor="end">' + t.label + '</text>';
+					'" font-size="' + fsTier + '" fill="' + t.color + '" opacity="0.85" text-anchor="end">' + t.label + '</text>';
 			}
 
 			/* ---- 水平网格 + 左右双轴刻度 ---- */
@@ -783,9 +803,9 @@ return L.view.extend({
 				grid += '<line x1="' + padL + '" y1="' + gy.toFixed(1) + '" x2="' + (w - padR) +
 					'" y2="' + gy.toFixed(1) + '" stroke="var(--mt5700-border-subtle)"' + dash + '/>';
 				grid += '<text x="' + (padL - 7) + '" y="' + (gy + 3).toFixed(1) +
-					'" font-size="9" font-family="monospace" fill="#0ea5e9" text-anchor="end">' + ticks[k].rsrp + '</text>';
+					'" font-size="' + fsTick + '" font-family="monospace" fill="#0ea5e9" text-anchor="end">' + ticks[k].rsrp + '</text>';
 				grid += '<text x="' + (w - padR + 7) + '" y="' + (gy + 3).toFixed(1) +
-					'" font-size="9" font-family="monospace" fill="#10b981" text-anchor="start">' + ticks[k].sinr + '</text>';
+					'" font-size="' + fsTick + '" font-family="monospace" fill="#10b981" text-anchor="start">' + ticks[k].sinr + '</text>';
 			}
 
 			var firstTime = sigHistory[0].time;
@@ -793,7 +813,7 @@ return L.view.extend({
 			var lastTime = sigHistory[n - 1].time;
 
 			box.innerHTML =
-				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="100%" style="overflow:visible; display:block;">' +
+				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="overflow:visible; display:block;">' +
 				'  <defs>' +
 				'    <linearGradient id="rsrp-area" x1="0" y1="0" x2="0" y2="1">' +
 				'      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>' +
@@ -805,8 +825,8 @@ return L.view.extend({
 				/* 网格与双轴刻度 */
 				grid +
 				/* 轴标题 */
-				'  <text x="' + (padL - 7) + '" y="' + (padT - 10) + '" font-size="8.5" font-family="monospace" fill="#0ea5e9" text-anchor="end">dBm</text>' +
-				'  <text x="' + (w - padR + 7) + '" y="' + (padT - 10) + '" font-size="8.5" font-family="monospace" fill="#10b981" text-anchor="start">dB</text>' +
+				'  <text x="' + (padL - 7) + '" y="' + (padT - 10) + '" font-size="' + fsAxis + '" font-family="monospace" fill="#0ea5e9" text-anchor="end">dBm</text>' +
+				'  <text x="' + (w - padR + 7) + '" y="' + (padT - 10) + '" font-size="' + fsAxis + '" font-family="monospace" fill="#10b981" text-anchor="start">dB</text>' +
 				/* RSRP 面积 + 主曲线 */
 				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + ' L ' + (w - padR) + ' ' + (padT + chartH) +
 				' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
@@ -820,13 +840,13 @@ return L.view.extend({
 				'  <circle cx="' + lastSinr[0].toFixed(1) + '" cy="' + lastSinr[1].toFixed(1) + '" r="3.2" fill="#10b981" stroke="#ffffff" stroke-width="1.2"/>' +
 				'  <circle cx="' + lastRsrq[0].toFixed(1) + '" cy="' + lastRsrq[1].toFixed(1) + '" r="2.6" fill="#a855f7" opacity="0.85"/>' +
 				/* 末端读数标签 */
-				'  <text x="' + (padL + 2) + '" y="' + (padT + 11) + '" font-size="10" font-family="monospace" fill="#38bdf8">RSRP ' +
+				'  <text x="' + (padL + 2) + '" y="' + (padT + 12) + '" font-size="' + fsLabel + '" font-family="monospace" fill="#38bdf8">RSRP ' +
 				(lastItem.rsrp != null ? lastItem.rsrp : '—') + ' dBm</text>' +
-				'  <text x="' + (padL + 2) + '" y="' + (padT + 23) + '" font-size="10" font-family="monospace" fill="' + tierColor + '">质量 ' + tierText + '</text>' +
+				'  <text x="' + (padL + 2) + '" y="' + (padT + 27) + '" font-size="' + fsLabel + '" font-family="monospace" fill="' + tierColor + '">Quality ' + tierText + '</text>' +
 				/* 时间横轴 */
-				'  <text x="' + padL + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="start">' + firstTime + '</text>' +
-				'  <text x="' + (w / 2) + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="middle">' + midTime + '</text>' +
-				'  <text x="' + (w - padR) + '" y="' + (h - 8) + '" font-size="9.5" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">' + lastTime + '</text>' +
+				'  <text x="' + padL + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="start">' + firstTime + '</text>' +
+				'  <text x="' + (w / 2) + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="middle">' + midTime + '</text>' +
+				'  <text x="' + (w - padR) + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">' + lastTime + '</text>' +
 				/* 悬浮层：十字准星 + 三点指示 + 数据卡 */
 				'  <g id="mt-trend-hover-layer" style="display:none; pointer-events:none;">' +
 				'    <line id="mt-hover-crosshair" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + chartH) + '" stroke="#a78bfa" stroke-width="1.4" stroke-dasharray="3 3"/>' +
@@ -834,15 +854,15 @@ return L.view.extend({
 				'    <circle id="mt-hover-dot-sinr" r="4.5" fill="#10b981" stroke="#ffffff" stroke-width="2"/>' +
 				'    <circle id="mt-hover-dot-rsrq" r="3.8" fill="#a855f7" stroke="#ffffff" stroke-width="2"/>' +
 				'    <g id="mt-hover-tip-card" transform="translate(0, 0)">' +
-				'      <rect x="0" y="0" width="148" height="92" rx="8" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
-				'      <text id="mt-tip-val-time" x="12" y="19" fill="#f8fafc" font-size="9.5" font-weight="bold" font-family="sans-serif">时间: --:--:--</text>' +
-				'      <circle cx="16" cy="34" r="3.5" fill="#38bdf8"/>' +
-				'      <text id="mt-tip-val-rsrp" x="26" y="37" fill="#e2e8f0" font-size="9" font-family="monospace">RSRP —</text>' +
-				'      <circle cx="16" cy="50" r="3.5" fill="#10b981"/>' +
-				'      <text id="mt-tip-val-sinr" x="26" y="53" fill="#e2e8f0" font-size="9" font-family="monospace">SINR —</text>' +
-				'      <circle cx="16" cy="66" r="3.5" fill="#a855f7"/>' +
-				'      <text id="mt-tip-val-rsrq" x="26" y="69" fill="#e2e8f0" font-size="9" font-family="monospace">RSRQ —</text>' +
-				'      <text id="mt-tip-val-tier" x="12" y="85" fill="#94a3b8" font-size="9" font-family="monospace">质量 —</text>' +
+				'      <rect x="0" y="0" width="190" height="116" rx="9" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
+				'      <text id="mt-tip-val-time" x="14" y="23" fill="#f8fafc" font-size="' + tipFsTitle + '" font-weight="bold" font-family="sans-serif">Time: --:--:--</text>' +
+				'      <circle cx="18" cy="43" r="4" fill="#38bdf8"/>' +
+				'      <text id="mt-tip-val-rsrp" x="30" y="47" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRP —</text>' +
+				'      <circle cx="18" cy="64" r="4" fill="#10b981"/>' +
+				'      <text id="mt-tip-val-sinr" x="30" y="68" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">SINR —</text>' +
+				'      <circle cx="18" cy="85" r="4" fill="#a855f7"/>' +
+				'      <text id="mt-tip-val-rsrq" x="30" y="89" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRQ —</text>' +
+				'      <text id="mt-tip-val-tier" x="14" y="108" fill="#94a3b8" font-size="' + tipFs + '" font-family="monospace">Quality: —</text>' +
 				'    </g>' +
 				'  </g>' +
 				'  <rect id="mt-chart-hitbox" x="' + padL + '" y="' + padT + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair;"/>' +
@@ -879,7 +899,7 @@ return L.view.extend({
 				var dotQ = document.getElementById('mt-hover-dot-rsrq');
 				if (dotQ) { dotQ.setAttribute('cx', curX.toFixed(1)); dotQ.setAttribute('cy', yQ.toFixed(1)); }
 
-				var tipW = 148, tipH = 92;
+				var tipW = 190, tipH = 116;
 				var tipX = curX + 12;
 				if (tipX + tipW > w - 8) tipX = curX - tipW - 12;
 				if (tipX < 4) tipX = 4;
@@ -891,7 +911,7 @@ return L.view.extend({
 				if (tipCard) tipCard.setAttribute('transform', 'translate(' + tipX.toFixed(1) + ',' + tipY.toFixed(1) + ')');
 
 				var elTime = document.getElementById('mt-tip-val-time');
-				if (elTime) elTime.textContent = '时间: ' + item.time;
+				if (elTime) elTime.textContent = 'Time: ' + item.time;
 				var elR = document.getElementById('mt-tip-val-rsrp');
 				if (elR) elR.textContent = 'RSRP: ' + (item.rsrp != null ? item.rsrp + ' dBm' : '—');
 				var elS = document.getElementById('mt-tip-val-sinr');
@@ -900,7 +920,7 @@ return L.view.extend({
 				if (elQ) elQ.textContent = 'RSRQ: ' + (item.rsrq != null ? item.rsrq + ' dB' : '—');
 				var elT = document.getElementById('mt-tip-val-tier');
 				var ti = signalTierIndex(item.rsrp);
-				if (elT) elT.textContent = '质量 ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '无读数');
+				if (elT) elT.textContent = 'Quality: ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '—');
 			});
 
 			hitbox.addEventListener('mouseleave', function () {
