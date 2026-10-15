@@ -363,9 +363,111 @@ sync_serial_by_id() {
 # 这里统一到同一套规则。
 # ---------------------------------------------------------------------------
 
-# 模组接口名（与机型定制包保持一致）
-IFACE_4G='MT5700M'
-IFACE_6G='MT5700Mv6'
+# 模组接口名的出厂默认（与机型定制包保持一致）。实际使用的接口由 resolve_ifaces 决定。
+DEFAULT_IFACE_4G='MT5700M'
+DEFAULT_IFACE_6G='MT5700Mv6'
+IFACE_4G="$DEFAULT_IFACE_4G"
+IFACE_6G="$DEFAULT_IFACE_6G"
+
+# ---------------------------------------------------------------------------
+# 承载接口的选择与管理（UCI at-webserver.config）
+#
+#   iface_v4          'auto'（默认）：自动扫描 —— 已有接口挂在模组网口上时直接用它
+#                     （例如固件自带的 wan → usb0），没有才用/创建 MT5700M；
+#                     也可填具体接口名（手动设置）。
+#   iface_v6          'auto'（默认）：用经 '@<IPv4 接口>' 引用它的接口（例如 wan6 → @wan），
+#                     没有则用「IPv4 接口名 + v6」；填 'none' 表示不处理 IPv6；也可填具体接口名。
+#   manage_interface  1（默认）：缺失时创建接口、置 auto=1、登记到上行防火墙区域；
+#                     0：不创建、不修改任何 network / firewall 配置，拨号就绪时只对上面
+#                     选定的接口补一次 ifup。
+#
+# 为什么要能选：固件已有 wan / wan6 指向模组网口时，再建 MT5700M 会让同一网卡上跑两套
+# DHCP、出现两条默认路由，而且删掉 MT5700M 后服务启动时又会重建。
+#
+# 接口名会拼进 uci 路径，只接受 [A-Za-z0-9_]，否则回退为 auto 并记录日志。
+# ---------------------------------------------------------------------------
+manage_interface_enabled() {
+	[ "$(uci -q get at-webserver.config.manage_interface)" != "0" ]
+}
+
+valid_iface_name() {
+	case "$1" in
+		''|*[!A-Za-z0-9_]*) return 1 ;;
+	esac
+	return 0
+}
+
+# 设备（device / 旧式 ifname）恰好是模组网口的接口，按 UCI 顺序每行一个
+modem_direct_ifaces() {
+	local dev s d
+	dev=$(detect_usb_netdev 2>/dev/null)
+	[ -n "$dev" ] || return 0
+	for s in $(uci -q show network | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+		d=$(uci -q get "network.$s.device")
+		[ -n "$d" ] || d=$(uci -q get "network.$s.ifname")
+		[ "$d" = "$dev" ] && echo "$s"
+	done
+}
+
+# 经 '@<接口>' 别名引用 $1 的接口（例如 wan6 的 device='@wan'）
+alias_ifaces_of() {
+	local s d
+	for s in $(uci -q show network | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+		d=$(uci -q get "network.$s.device")
+		[ -n "$d" ] || d=$(uci -q get "network.$s.ifname")
+		[ "$d" = "@$1" ] && echo "$s"
+	done
+}
+
+# 按配置解析出本次使用的 IFACE_4G / IFACE_6G（IFACE_6G 为空表示不处理 IPv6）。
+# 返回 1 表示自动扫描模式下模组网口尚未枚举：此时不应创建接口，等网口出现后
+# 由启动流程、hotplug 或拨号就绪回调再处理，避免先建出一个多余的 MT5700M。
+resolve_ifaces() {
+	local v4 v6 found
+	v4=$(uci -q get at-webserver.config.iface_v4)
+	v6=$(uci -q get at-webserver.config.iface_v6)
+	[ -n "$v4" ] || v4=auto
+	[ -n "$v6" ] || v6=auto
+	if [ "$v4" != auto ] && ! valid_iface_name "$v4"; then
+		logger -t at-webserver "警告：iface_v4='$v4' 不是合法的接口名，按自动扫描处理"
+		v4=auto
+	fi
+	if [ "$v6" != auto ] && [ "$v6" != none ] && ! valid_iface_name "$v6"; then
+		logger -t at-webserver "警告：iface_v6='$v6' 不是合法的接口名，按自动处理"
+		v6=auto
+	fi
+
+	if [ "$v4" = auto ]; then
+		found=$(modem_direct_ifaces | head -n 1)
+		if [ -n "$found" ]; then
+			IFACE_4G="$found"
+		elif [ -n "$(detect_usb_netdev 2>/dev/null)" ]; then
+			IFACE_4G="$DEFAULT_IFACE_4G"
+		else
+			IFACE_4G="$DEFAULT_IFACE_4G"
+			IFACE_6G="$DEFAULT_IFACE_6G"
+			uci -q get "network.$DEFAULT_IFACE_4G" >/dev/null 2>&1 || return 1
+		fi
+	else
+		IFACE_4G="$v4"
+	fi
+
+	case "$v6" in
+		none) IFACE_6G='' ;;
+		auto)
+			found=$(alias_ifaces_of "$IFACE_4G" | head -n 1)
+			if [ -n "$found" ]; then
+				IFACE_6G="$found"
+			elif [ "$IFACE_4G" = "$DEFAULT_IFACE_4G" ]; then
+				IFACE_6G="$DEFAULT_IFACE_6G"
+			else
+				IFACE_6G="${IFACE_4G}v6"
+			fi
+			;;
+		*) IFACE_6G="$v6" ;;
+	esac
+	return 0
+}
 
 # 拉起接口的重试预算。
 #
@@ -642,12 +744,21 @@ ensure_iface_created() {
 ensure_modem_interface() {
 	local i iface_4g iface_6g auto_val need_commit=0 p n
 
+	if ! manage_interface_enabled; then
+		logger -t at-webserver "接口管理已关闭（manage_interface=0）：不创建、不修改模组接口与防火墙；拨号就绪后只拉起选定的承载接口"
+		return 0
+	fi
+	if ! resolve_ifaces; then
+		logger -t at-webserver "模组网口尚未枚举，暂不创建承载接口（网口出现后由 hotplug / 拨号就绪回调处理）"
+		return 0
+	fi
 	iface_4g="$IFACE_4G"
 	iface_6g="$IFACE_6G"
+	logger -t at-webserver "承载接口：IPv4=$iface_4g IPv6=${iface_6g:-（不处理）}"
 
 	# V4 与 V6 都自动创建：V4 必须拿到地址，V6 按实际网络状况获取
 	ensure_iface_created "$iface_4g" dhcp || true
-	ensure_iface_created "$iface_6g" dhcpv6 || true
+	[ -z "$iface_6g" ] || ensure_iface_created "$iface_6g" dhcpv6 || true
 
 	# 登记到承载 NAT 的上行区域。必须独立于"新建"分支执行：接口若早已存在，
 	# ensure_iface_created 会直接返回，只在新建分支里做登记就会漏掉存量设备。
@@ -1025,10 +1136,23 @@ reload_service() {
 # 有明确先后关系，而不是靠 init.d 在后端拨号之前抢跑 + 猜时间。
 on_uplink() {
 	local i
+	if ! manage_interface_enabled; then
+		# 只拉起、不改配置：选定的接口不存在就什么都不做
+		resolve_ifaces || true
+		for i in "$IFACE_4G" "$IFACE_6G"; do
+			[ -n "$i" ] || continue
+			uci -q get "network.$i" >/dev/null 2>&1 || continue
+			iface_has_address "$i" && continue
+			ifup "$i" 2>&1 | logger -t at-webserver || true
+		done
+		return 0
+	fi
+	resolve_ifaces || return 0
 	ensure_iface_created "$IFACE_4G" dhcp || return 1
-	ensure_iface_created "$IFACE_6G" dhcpv6 || true
+	[ -z "$IFACE_6G" ] || ensure_iface_created "$IFACE_6G" dhcpv6 || true
 	ensure_firewall_zone
 	for i in "$IFACE_4G" "$IFACE_6G"; do
+		[ -n "$i" ] || continue
 		uci -q get "network.$i" >/dev/null 2>&1 || continue
 		if iface_has_address "$i"; then
 			continue
@@ -1052,8 +1176,16 @@ ensure_interfaces() {
 	# 原因：ifup 会等待 DHCP 就绪，单个接口可达数十秒；安装期（postinst）同步调用
 	# 会把 apk/opkg 拖住 —— 实测合并前的版本在这里耗时 180s 才返回。
 	# 拉起交给 init.d 的后台重试、hotplug 钩子与后端拨号就绪通知。
+	if ! manage_interface_enabled; then
+		logger -t at-webserver "接口管理已关闭（manage_interface=0），跳过创建模组接口"
+		return 0
+	fi
+	if ! resolve_ifaces; then
+		logger -t at-webserver "模组网口尚未枚举，暂不创建承载接口（网口出现后由 hotplug / 拨号就绪回调处理）"
+		return 0
+	fi
 	ensure_iface_created "$IFACE_4G" dhcp || return 1
-	ensure_iface_created "$IFACE_6G" dhcpv6 || true
+	[ -z "$IFACE_6G" ] || ensure_iface_created "$IFACE_6G" dhcpv6 || true
 
 	for i in "$IFACE_4G" "$IFACE_6G"; do
 		uci -q get "network.$i" >/dev/null 2>&1 || continue

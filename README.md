@@ -218,7 +218,8 @@ service at-webserver restart
 | **拨号开关与方式对齐** | Rust 后端 | 建立连接后强制核验；未达成执行退避重试（0/5/15/30/60/120s），每 5 分钟定时巡检对账 |
 | **可用性双判决** | Rust 后端 | 联合校验 `AT^NDISSTATQRY?` 与 `AT+CGACT?` 双重指标，杜绝假死虚挂 |
 | **承载接口拉起** | init.d + hotplug | 18 次 × 10s 间隔轮询保护；`hotplug.d/iface` 与 `hotplug.d/usb` 动态补发 `ifup` |
-| **接口缺失补全** | init.d | 识别到网卡硬件即按 `proto=dhcp` 自动建立 `MT5700M` 与 `MT5700Mv6` |
+| **承载接口选择** | init.d | `iface_v4`/`iface_v6` 默认自动扫描：已有接口挂在模组网口上（如固件自带的 `wan` → `usb0`）就直接使用；也可在「服务配置」中手动选择或填写 |
+| **接口缺失补全** | init.d | 未找到可用接口且识别到网卡硬件时，按 `proto=dhcp` 自动建立 `MT5700M` 与 `MT5700Mv6`；`manage_interface=0` 时不创建、不修改任何接口与防火墙 |
 | **防火墙区域绑定** | init.d | 接口创建后自动登记至 `wan` 区域并重载 `fw4`，打通 `lan → wan` 的 NAT 规则 |
 
 ### 故障链路排查速查
@@ -261,6 +262,9 @@ config at-webserver 'config'
     option serial_port_custom '/dev/ttyUSB1' # 手动指定时的备用路径（前端「自定义路径」写入）
     option autodial_enable '1'          # 自动拨号守护开关：1=启用，0=关闭
     option autodial_mode '1'            # 拨号工作模式：1=USB网卡，2=转以太网口模式
+    option iface_v4 'auto'              # IPv4 承载接口：auto=自动扫描（已挂在模组网口上的接口优先，否则 MT5700M）/ 接口名
+    option iface_v6 'auto'              # IPv6 承载接口：auto=跟随 IPv4（@IPv4 接口，否则 IPv4 名 + v6）/ none / 接口名
+    option manage_interface '1'         # 1=缺失时创建接口、置 auto=1、登记上行防火墙区域；0=不改配置，只在拨号就绪时 ifup
     option cellscan_timeout '180'       # 扫频超时阈值(秒)，最低安全下限 10
 ```
 
