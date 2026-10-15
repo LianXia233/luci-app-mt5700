@@ -860,7 +860,7 @@ return L.view.extend({
 			tabPanes['tab-dev'].innerHTML =
 				'<table class="mt-info-table">' +
 				'  <tr><td>模组型号</td><td>' + state.modemInfo.model + '</td></tr>' +
-				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || 'V200R001C20B014') + '</td></tr>' +
+				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || '—') + '</td></tr>' +
 				'  <tr><td>芯片温度概览</td><td>' + avgT + '</td></tr>' +
 				'  <tr><td>承载接口</td><td>eth2 (自动管理)</td></tr>' +
 				'  <tr><td>供电状态</td><td>正常就绪</td></tr>' +
@@ -880,7 +880,7 @@ return L.view.extend({
 			// Tab 4: APN 信息
 			var ipv4 = state.dhcpv4.ipv4Address || '—';
 			var ipv6 = state.dhcpv6.ipv6Address || '—';
-			var gw = state.dhcpv4.gateway || '10.0.0.1';
+			var gw = state.dhcpv4.gateway || '—';
 			var dns = (state.dhcpv4.primaryDNS || '—') + ' / ' + (state.dhcpv4.secondaryDNS || '—');
 			tabPanes['tab-apn'].innerHTML =
 				'<table class="mt-info-table">' +

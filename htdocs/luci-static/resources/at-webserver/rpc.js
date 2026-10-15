@@ -1038,7 +1038,7 @@ function parseMONSC(data) {
 	 * 两种实测格式，按首字段是否为纯数字自动判别：
 	 *   格式 A（NR，带前导制式）:
 	 *     ^MONSC: NR,<mcc>,<mnc>,<tac>,<flag>,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<sinr>
-	 *     实测: ^MONSC: NR,460,00,504990,1,C2840C002,80,149002,-65,-10,28
+	 *     实测: ^MONSC: NR,460,00,<tac>,1,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<sinr>
 	 *     RSRP/RSRQ/SINR 为直接工程值（dBm/dB/dB），无需 convert* 换算。
 	 *     与 ^HCSQ: "NR",77,236,31 独立交叉验证一致（77→-63, 236→27.2）。
 	 *   格式 B（旧编码，无前导制式，直接给出编码值）:
