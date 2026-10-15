@@ -8,7 +8,7 @@
 'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Mt5700, Ui */
+/* global L, AtWs, Parse, Mt5700 */
 
 	/*
 	 * 网络状态卡的信号发射塔图标（用户指定图形，1024×1024 视口）。
@@ -40,7 +40,6 @@
 
 return L.view.extend({
 	render: function () {
-		var self = this;
 		var page = Mt5700.page('MT5700 设备状态', '5G 蜂窝网络 · 射频链路与硬件遥测', 'network_status', '在线');
 		var body = page._body;
 
@@ -92,8 +91,6 @@ return L.view.extend({
 			dataBearer: null
 		};
 
-		var peakDown = 0;
-		var peakUp = 0;
 
 		// 信号趋势历史数据 (最多保留 30 个数据点)
 		var sigHistory = [];
@@ -773,10 +770,6 @@ return L.view.extend({
 			var lastRsrp = rsrpPts[n - 1];
 			var lastSinr = sinrPts[n - 1];
 			var lastRsrq = rsrqPts[n - 1];
-			var lastItem = sigHistory[n - 1];
-			var tier = signalTierIndex(lastItem.rsrp);
-			var tierColor = tier >= 0 ? SIGNAL_TIERS[tier].color : 'var(--mt5700-text-muted)';
-			var tierText = tier >= 0 ? SIGNAL_TIERS[tier].label : '—';
 
 			/* ---- 背景质量分区带 ---- */
 			var bands = '';
@@ -951,7 +944,7 @@ return L.view.extend({
 		function renderTabsUI() {
 			var c = state.cell;
 			var prim = (state.carriers && state.carriers[0]) || {};
-			var primRat = AtWs.ratLabel ? AtWs.ratLabel(c.sysMode || prim.sysMode) : (c.sysMode || '5G NR');
+			var primRat = Mt5700.ratLabel(c.sysMode || prim.sysMode);
 			var bandCombo = getBandCombinationStr();
 			var duration = state.flow.currentConnectTime || '—';
 

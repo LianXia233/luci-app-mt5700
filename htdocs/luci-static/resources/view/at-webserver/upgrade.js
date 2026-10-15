@@ -1,9 +1,8 @@
 'use strict';
 'require at-webserver/rpc';
-'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Ui, Mt5700 */
+/* global L, AtWs, Ui, Mt5700 */
 
 /**
  * 模组升级页面：
@@ -99,14 +98,6 @@ return L.view.extend({
 			}, '同意并继续');
 		}
 
-		/* ---------- 渲染 ---------- */
-		function fotaStateText(s) {
-			var map = {
-				11: '正在查询新版本', 12: '发现新版本', 13: '查询失败', 14: '无新版本',
-				20: '下载失败', 30: '下载中', 31: '下载挂起', 40: '下载完成', 50: '升级中'
-			};
-			return map[s] || (s ? '状态 ' + s : '未知');
-		}
 
 		/* FOTA 状态 → 徽章变体与数值配色（让状态一眼可判） */
 		function fotaMeta(s) {
