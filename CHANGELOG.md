@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.15.0 (2026-10-15)
 
 ### 前端重构：Soft Anime 柔和二次元设计系统与高精度矢量遥测（含隐私脱敏与 Codex 复查修复）
 
