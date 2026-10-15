@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.16.0 (2026-10-16)
 
 ### LuCI 原生化改造：移除独立夜间模式与英雄栏动态 SVG
 
