@@ -407,15 +407,13 @@
   gap: 16px;
 }
 .mt-tower-svg-box {
-  width: 84px;
-  height: 84px;
+  /* 不再使用圆形底色/描边：图标直接落在卡片背景上，尺寸贴合图形 */
+  width: 72px;
+  height: 72px;
   flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--mt5700-accent-pale);
-  border-radius: 50%;
-  border: 1px solid rgba(139, 92, 246, 0.2);
 }
 .mt-net-info-grid {
   display: grid;
@@ -5709,10 +5707,6 @@ select option {
    与四格信号图标、状态药丸共用同一套状态配色。
    ========================================================================== */
 .mt-tower-svg-box {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
   color: var(--mt5700-green);
   transition: color 0.35s ease;
 }
