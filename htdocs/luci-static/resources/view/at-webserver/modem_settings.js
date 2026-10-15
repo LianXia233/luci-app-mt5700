@@ -58,14 +58,15 @@ return L.view.extend({
 			'@media (max-width: 600px) {',
 			'  .mt-sys-acq-cards { grid-template-columns: 1fr; gap: 6px; }',
 			'}',
-			'.mt-sys-acq-cards .mt5700-radio-card { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: 10px; background: var(--mt5700-card-bg); border: 1px solid var(--mt5700-border); transition: all 0.2s ease; min-height: 52px; }',
+			'.mt-sys-acq-cards .mt5700-radio-card { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--mt5700-card-bg); border: 1px solid var(--mt5700-border); transition: all 0.2s ease; min-height: 38px; }',
 			'.mt-sys-acq-cards .mt5700-radio-card:hover { transform: translateY(-1px); border-color: rgba(139, 92, 246, 0.4); box-shadow: 0 3px 10px rgba(139, 92, 246, 0.08); }',
 			'.mt-sys-acq-cards .mt5700-radio-card.mt5700-radio-card-active, .mt-sys-acq-cards .mt5700-radio-card:has(input[type="radio"]:checked) { border-color: #8b5cf6; background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(14, 165, 233, 0.03)); box-shadow: 0 3px 10px rgba(139, 92, 246, 0.12); }',
-			'.mt-sys-acq-cards .mt5700-radio-card-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex-wrap: nowrap; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-dot { margin-top: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-body { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 1 1 auto; min-width: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-head { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; min-width: 0; }',
 			'.mt-sys-acq-cards .mt5700-radio-card-title { font-size: 12.5px; font-weight: 600; color: var(--mt5700-text); white-space: nowrap; }',
-			'.mt-sys-acq-cards .mt5700-radio-card-badge { font-size: 10px; padding: 0 5px; border-radius: 999px; background: rgba(139, 92, 246, 0.15); color: #7c3aed; font-weight: 600; }',
-			'.mt-sys-acq-cards .mt5700-radio-card-desc { font-size: 11px; color: var(--mt5700-text-secondary); line-height: 1.35; margin-top: 2px; }',
-			'.mt-sys-acq-cards .mt5700-radio-card-code { display: inline-block; font-size: 10px; padding: 0 4px; border-radius: 3px; background: rgba(125, 125, 125, 0.08); color: var(--mt5700-text-secondary); margin-top: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-badge { font-size: 10px; padding: 0 5px; border-radius: 999px; background: rgba(139, 92, 246, 0.15); color: #7c3aed; font-weight: 600; flex-shrink: 0; }',
+			'.mt-sys-acq-cards .mt5700-radio-card-code { font-size: 10px; font-family: var(--mt5700-font-mono); padding: 1px 5px; border-radius: 4px; background: rgba(125, 125, 125, 0.08); color: var(--mt5700-text-secondary); margin-top: 0; flex-shrink: 0; white-space: nowrap; }',
 			'/* 左右对称双面板紧凑布局 */',
 			'.mt-sys-subpanel { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; background: rgba(125, 125, 125, 0.025); border: 1px solid var(--mt5700-border); border-radius: 10px; }',
 			'.mt-sys-subpanel-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 13px; font-weight: 700; color: var(--mt5700-text); padding-bottom: 6px; border-bottom: 1px solid var(--mt5700-divider); margin-bottom: 0; }',
@@ -530,34 +531,13 @@ return L.view.extend({
 		var sysCfg = { acqorder: '', band: '', roam: 1, srvdomain: 2, lteband: '' };
 
 		var ACQ_OPTIONS = [
-			{
-				value: '080302', code: '08→03→02', label: '5G 优先，逐级回落', badge: '推荐',
-				desc: '优先 5G，无信号逐级回落 4G/3G'
-			},
-			{
-				value: '08', code: '08', label: '仅 5G (SA)',
-				desc: '纯 5G SA 驻留，无 5G 则持续搜网'
-			},
-			{
-				value: '0302', code: '03→02', label: '4G 优先，回落 3G',
-				desc: '优先 4G，适合 5G 极弱或省电场景'
-			},
-			{
-				value: '03', code: '03', label: '仅 4G (LTE)',
-				desc: '纯 4G 驻留，功耗低稳定性高'
-			},
-			{
-				value: '0203', code: '02→03', label: '3G 优先，回落 4G',
-				desc: '优先 3G，特定测试场景使用'
-			},
-			{
-				value: '02', code: '02', label: '仅 3G',
-				desc: '纯 3G 驻留，排障测试使用'
-			},
-			{
-				value: '99', code: '99', label: '保持当前设置',
-				desc: '不修改接入顺序参数'
-			}
+			{ value: '080302', code: '08→03→02', label: '5G 优先，逐级回落', badge: '推荐' },
+			{ value: '08', code: '08', label: '仅 5G (SA)' },
+			{ value: '0302', code: '03→02', label: '4G 优先，回落 3G' },
+			{ value: '03', code: '03', label: '仅 4G (LTE)' },
+			{ value: '0203', code: '02→03', label: '3G 优先，回落 4G' },
+			{ value: '02', code: '02', label: '仅 3G' },
+			{ value: '99', code: '99', label: '保持当前设置' }
 		];
 
 		var acqCards = Mt5700.radioCards('acq', ACQ_OPTIONS, '080302', function (v) {
@@ -570,7 +550,7 @@ return L.view.extend({
 
 		var acqCustomEl = E('div', { 'class': 'mt5700-hint', style: 'display:none; margin-bottom:6px;' });
 
-		sysBody.appendChild(Mt5700.formGroup('网络接入顺序 (Acquisition Order)', acqCards, '决定模组优先搜网的制式优先级（5G SA / LTE / WCDMA 回落顺序）'));
+		sysBody.appendChild(Mt5700.formGroup('网络接入顺序 (Acquisition Order)', acqCards));
 		sysBody.appendChild(acqCustomEl);
 
 		/* 左右两栏布局：左侧频段限制，右侧漫游与服务域 */
