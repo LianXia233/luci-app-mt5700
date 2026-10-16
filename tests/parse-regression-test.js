@@ -151,6 +151,23 @@ try {
 		const tx = Parse.parseTxPower('ERROR');
 		check('TXPOWER 返回 ERROR 时为 null（NR 场景）', tx === null, String(tx));
 	}
+	{
+		// 实机 AT+C5GQOSRDP=1 → +C5GQOSRDP: 1,6,,,,,102400,102400
+		const nr = Parse.parseC5gQosRdp('+C5GQOSRDP: 1,6,,,,,102400,102400\r\nOK');
+		check('C5GQOSRDP (5G) 取签约速率 Session-AMBR', nr && nr.cid === 1 && nr.qci === 6 &&
+			nr.ambrUl === 102400 && nr.ambrDl === 102400, nr ? JSON.stringify(nr) : 'null');
+		check('C5GQOSRDP (5G) 非 GBR 时 GFBR/MFBR 为空', nr && nr.gfbrUl === null && nr.mfbrDl === null,
+			nr ? JSON.stringify(nr) : 'null');
+	}
+	{
+		// 实机 4G 下同一命令 → +C5GQOSRDP: 1,0,,,,,, （5QI=0、速率全空）
+		const lte = Parse.parseC5gQosRdp('+C5GQOSRDP: 1,0,,,,,,\r\nOK');
+		check('C5GQOSRDP (4G) 速率字段为空，不能编造数值', lte && lte.ambrUl === null && lte.ambrDl === null,
+			lte ? JSON.stringify(lte) : 'null');
+	}
+	{
+		check('C5GQOSRDP 无匹配行返回 null', Parse.parseC5gQosRdp('ERROR') === null, 'not null');
+	}
 
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));

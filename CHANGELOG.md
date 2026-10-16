@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.21.0 (2026-10-16)
+
+### 新增：SIM 卡信息显示「签约速率」
+
+「SIM 卡信息」页新增 **签约速率 (Session-AMBR)** 一行，显示核心网下发的上下行上限。
+
+- **feat(sim)**：新增 `AT+C5GQOSRDP=1` 查询（5GS QoS 动态参数），在 `parse.js` 新增 `parseC5gQosRdp` 解析器，取末尾两个字段作为签约上下行速率（单位 kbps）
+- **feat(sim)**：数据显示为 `↑ 102.4 Mbps / ↓ 102.4 Mbps` 形式；数值直接来自模组，**不做凑整**（102400 kbps 如实换算为 102.4 Mbps），并附 `title` 说明数据来源
+- **note(sim)**：4G 下本固件同一命令只回 `5QI=0`、速率字段全空（且所有 EPS QoS 命令 `AT+CGCONTRDP`/`AT+CGEQNEG`/`AT+CGQREQ` 均返回 ERROR），此时**如实显示"模组未上报"**，不用其它参数编造速率
+- **test**：`tests/parse-regression-test.js` 新增 4 条用例（5G 有值 / 5G 非 GBR 字段为空 / 4G 为空不编造 / 无匹配返回 null），**25/25 通过**
+- **docs**：README 版本号、安装示例同步更新至 **v1.21.0**，新增 `docs/release-notes/v1.21.0.md`
+
 ## v1.20.0 (2026-10-16)
 
 ### 新增：流量统计卡片「本次使用量」统计

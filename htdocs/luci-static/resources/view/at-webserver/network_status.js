@@ -90,6 +90,8 @@ return L.view.extend({
 			ipv6Cap: { capValue: 0, description: '' },
 			mcs: { dlMod: '', ulMod: '', dlRank: null, ulRank: null, dlMcs: null, ulMcs: null, dlEff: 0, ulEff: 0 },
 			modemInfo: { manufacturer: '', model: '', fw: '', imei: '', imsi: '', iccid: '' },
+			// 签约速率（Session-AMBR，来自 AT+C5GQOSRDP=1）
+			subRate: null,
 			dataBearer: null
 		};
 
@@ -1187,6 +1189,34 @@ return L.view.extend({
 			return pad2(Math.floor(s / 3600)) + ':' + pad2(Math.floor((s % 3600) / 60)) + ':' + pad2(s % 60);
 		}
 
+		/* kbps → 人话（用于签约速率）：≥1000 显示 Mbps，否则 Kbps。
+		 * 按十进制换算（102400 kbps = 102.4 Mbps），不做"凑整"处理——
+		 * 模组上报的就是这个值，四舍五入成整数反而与实网不符。 */
+		function formatKbps(kbps) {
+			var v = Number(kbps);
+			if (!isFinite(v) || v <= 0) return '—';
+			if (v >= 1000) {
+				var m = Math.round((v / 1000) * 10) / 10;
+				return m + ' Mbps';
+			}
+			return Math.round(v) + ' Kbps';
+		}
+
+		/* 签约速率文案：有 Session-AMBR 才显示，没有就如实说明模组未上报 */
+		function subRateText() {
+			var q = state.subRate;
+			if (!q || (!q.ambrUl && !q.ambrDl)) return '模组未上报';
+			var ul = formatKbps(q.ambrUl);
+			var dl = formatKbps(q.ambrDl);
+			if (q.ambrUl && q.ambrDl) return '↑ ' + ul + ' / ↓ ' + dl;
+			return q.ambrUl ? ('↑ ' + ul) : ('↓ ' + dl);
+		}
+
+		/* 签约速率的来源说明（鼠标悬停可见）：数值直接来自模组，未做任何修饰 */
+		function subRateTip() {
+			return 'title="来自模组 AT+C5GQOSRDP 上报的 Session-AMBR（单位 kbps），为核心网下发的签约上下行上限；4G 下本固件不上报该参数"';
+		}
+
 		/* 清零本次使用量（设备侧状态一并清空，持久化开关不变） */
 		function resetUsage() {
 			AtWs.usageCtl('reset').then(function (r) {
@@ -1353,6 +1383,7 @@ return L.view.extend({
 				'  <tr><td>SIM 卡状态</td><td>' + simStat + '</td></tr>' +
 				'  <tr><td>运营商代码 (PLMN)</td><td>' + plmnStr + '</td></tr>' +
 				'  <tr><td>网络注册与漫游</td><td>' + roamStr + '</td></tr>' +
+				'  <tr><td>签约速率 (Session-AMBR)</td><td ' + subRateTip() + '>' + subRateText() + '</td></tr>' +
 				'  <tr><td>IMSI</td><td>' + (state.modemInfo.imsi || '读取中...') + '</td></tr>' +
 				'  <tr><td>ICCID</td><td>' + (state.modemInfo.iccid || '读取中...') + '</td></tr>' +
 				'</table>';
@@ -2103,6 +2134,15 @@ return L.view.extend({
 				if (res && res.success && res.data) {
 					var m = String(res.data).match(/(?:\^ICCID:\s*)?([0-9A-Za-z]{18,24})/);
 					if (m) state.modemInfo.iccid = m[1];
+				}
+				/* 签约速率（Session-AMBR）：5G 下核心网会下发上下行上限。
+				 * 该命令在 4G/5G 下都不报错，但 4G 下本固件只回 5QI=0、速率字段全空，
+				 * 此时如实显示"未上报"，绝不拿别的参数凑一个假速率。 */
+				return AtWs.client.sendCommand('AT+C5GQOSRDP=1');
+			}).then(function (res) {
+				if (res && res.success && res.data) {
+					var q = Parse.parseC5gQosRdp(res.data);
+					if (q) state.subRate = q;
 				}
 				return AtWs.client.sendCommand('AT+CGMR');
 			}).then(function (res) {
