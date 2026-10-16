@@ -672,6 +672,11 @@
   height: auto;
   min-height: 0;
   position: relative;
+  /* 触摸查看数据点时，屏蔽长按选中文本 / 系统长按菜单 / 点按高亮，避免与取数交互冲突 */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .mt-chart-svg-box svg {
