@@ -22,9 +22,12 @@
 //! - **文件大小上限**：状态文件是定长 schema 的 JSON，`MAX_USAGE_FILE_BYTES`
 //!   既是写入时的断言，也是读取时的准入线——超限的文件一律视为损坏并忽略，
 //!   避免异常大的文件被读进内存。
-//! - **自动清零**：`auto_reset_days`（默认 30 天，用户可改）存在 UCI 里，
+//! - **自动清零**：`usage_reset_day`（**每月几号**，默认 1 号，用户可改）存在 UCI 里，
 //!   与「使用量是否持久化」解耦，否则关掉持久化就连设置一起丢了。
-//!   到期后由本模块自行清零并重新基线，不需要前端参与。
+//!   到点后由本模块自行清零并重新基线，不需要前端参与。
+//!   日期判定（大小月 / 闰年 / 跨年 / 「31 号在小月按月末」）全部由
+//!   [`crate::monthly`] 负责，时刻取自 [`crate::nettime`]（NTP 优先、设备时钟兜底），
+//!   本模块只做「该不该清」这一句调用，不重复实现日历逻辑。
 //!
 //! # 边界处理
 //!
@@ -35,6 +38,7 @@
 //!   免得把一段长时间的低均值当成峰值。
 
 use crate::localtime;
+use crate::nettime;
 use crate::{log_debug, log_info, log_warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -65,14 +69,6 @@ const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// 内存文件每秒都写（tmpfs，零磨损），闪存最多每 10 分钟写一次，
 /// 把闪存寿命影响压到最低；代价是重启后最多回退 10 分钟的用量。
 const FLASH_INTERVAL_SECS: i64 = 600;
-
-/// 自动清零默认天数。
-pub const DEFAULT_USAGE_AUTO_RESET_DAYS: u32 = 30;
-/// 自动清零天数下限（1 天）：填 0 会被夹到这里，避免「永不自动清零」被
-/// 无意中设成；确实想关掉的话由 UI 另行提供语义明确的开关。
-pub const MIN_USAGE_AUTO_RESET_DAYS: u32 = 1;
-/// 自动清零天数上限（10 年）。
-pub const MAX_USAGE_AUTO_RESET_DAYS: u32 = 3650;
 
 /// 承载网卡探测的兜底名。
 ///
@@ -228,18 +224,20 @@ fn remove_file(path: &str) {
 /// 使用量后台统计器。
 pub struct UsageTracker {
     state: Mutex<UsageState>,
-    /// 自动清零天数（存 UCI，与使用量是否持久化解耦）。
-    auto_reset_days: AtomicU32,
+    /// 自动清零日：每月几号（存 UCI，与使用量是否持久化解耦）。
+    reset_day: AtomicU32,
     /// 已解析的承载网卡；读不到计数时重新探测。
     device: Mutex<Option<String>>,
 }
 
 impl UsageTracker {
     /// 创建统计器并从磁盘恢复状态。
-    pub fn new(auto_reset_days: u32) -> Arc<UsageTracker> {
+    ///
+    /// `reset_day` 为「每月几号清零」，非法值由 [`crate::monthly::normalize_day`] 夹取。
+    pub fn new(reset_day: u32) -> Arc<UsageTracker> {
         Arc::new(UsageTracker {
             state: Mutex::new(load_state()),
-            auto_reset_days: AtomicU32::new(auto_reset_days.clamp(MIN_USAGE_AUTO_RESET_DAYS, MAX_USAGE_AUTO_RESET_DAYS)),
+            reset_day: AtomicU32::new(crate::monthly::normalize_day(reset_day)),
             device: Mutex::new(None),
         })
     }
@@ -261,7 +259,7 @@ impl UsageTracker {
             Some(v) => v,
             None => return,
         };
-        let now = localtime::now().timestamp();
+        let now = nettime::now_ts();
 
         let mut st = self.state.lock().await;
         // 到期自动清零：先清零再累加，清零时直接把基线设为当前计数，
@@ -301,13 +299,14 @@ impl UsageTracker {
         }
     }
 
-    /// 到期则自动清零。
+    /// 到「每月几号」则自动清零。
+    ///
+    /// 判定本身在 [`crate::monthly`]：以 `start_ts` 之后的第一个清零时刻（本地时区
+    /// 目标日 00:00）与当下比较，天然做到一月只清一次、跨大小月/跨年都对齐；
+    /// 31 号这类「小月不存在」的日子按当月月末触发，不会整月漏清。
     fn maybe_auto_reset(&self, st: &mut UsageState, rx: u64, tx: u64, now: i64) {
-        let days = self.auto_reset_days.load(Ordering::Relaxed) as i64;
-        if days <= 0 || st.start_ts <= 0 {
-            return;
-        }
-        if now - st.start_ts < days * 86400 {
+        let day = self.reset_day.load(Ordering::Relaxed);
+        if !crate::monthly::should_reset(now, st.start_ts, day, localtime::offset()) {
             return;
         }
         st.total_rx = 0;
@@ -318,7 +317,7 @@ impl UsageTracker {
         st.last_ts = now;
         st.last_rx = rx;
         st.last_tx = tx;
-        log_info!("本次使用量已自动清零（累计已满 {days} 天）");
+        log_info!("本次使用量已自动清零（{}）", crate::monthly::describe(day));
     }
 
     /// 落盘：内存文件每次都写；闪存按节流写，`force` 时强制。
@@ -326,7 +325,7 @@ impl UsageTracker {
     /// `force` 用于清零 / 切换持久化这类「必须立刻反映到文件」的操作。
     async fn persist(&self, st: &UsageState, force: bool) {
         let Some(body) = serialize_state(st) else { return };
-        let now = localtime::now().timestamp();
+        let now = nettime::now_ts();
         let want_flash = st.persist;
         let due = force || now - st.last_flash >= FLASH_INTERVAL_SECS;
 
@@ -378,7 +377,7 @@ impl UsageTracker {
     /// 读取当前快照（供 RPC 返回）。
     pub async fn snapshot(&self) -> UsageSnapshot {
         let st = self.state.lock().await.clone();
-        let now = localtime::now().timestamp();
+        let now = nettime::now_ts();
         UsageSnapshot {
             total_rx: st.total_rx,
             total_tx: st.total_tx,
@@ -389,7 +388,8 @@ impl UsageTracker {
             last_ts: st.last_ts,
             now_ts: now,
             persist: st.persist,
-            auto_reset_days: self.auto_reset_days.load(Ordering::Relaxed),
+            reset_day: self.reset_day.load(Ordering::Relaxed),
+            time_source: nettime::source_name().to_string(),
         }
     }
 
@@ -397,7 +397,7 @@ impl UsageTracker {
     ///
     /// 持久化开着时把落盘文件一并清零（而不是只清内存），否则重启后旧值会回来。
     pub async fn reset(&self) -> UsageSnapshot {
-        let now = localtime::now().timestamp();
+        let now = nettime::now_ts();
         let (dev, rx, tx) = self.read_counters().await.unwrap_or((String::new(), 0, 0));
         let mut st = self.state.lock().await;
         st.total_rx = 0;
@@ -430,17 +430,17 @@ impl UsageTracker {
         self.snapshot().await
     }
 
-    /// 修改自动清零天数：写 UCI（跨重启生效）+ 热更新内存值。
-    pub async fn set_auto_reset_days(&self, days: u32) -> Result<u32, String> {
-        let days = days.clamp(MIN_USAGE_AUTO_RESET_DAYS, MAX_USAGE_AUTO_RESET_DAYS);
-        let arg = format!("at-webserver.config.usage_auto_reset_days={days}");
+    /// 修改自动清零日（每月几号）：写 UCI（跨重启生效）+ 热更新内存值。
+    pub async fn set_reset_day(&self, day: u32) -> Result<u32, String> {
+        let day = crate::monthly::normalize_day(day);
+        let arg = format!("at-webserver.config.usage_reset_day={day}");
         let out = tokio::process::Command::new("uci")
             .args(["set", &arg])
             .output()
             .await
             .map_err(|e| e.to_string())?;
         if !out.status.success() {
-            return Err(format!("写入 usage_auto_reset_days 失败: {}", String::from_utf8_lossy(&out.stderr)));
+            return Err(format!("写入 usage_reset_day 失败: {}", String::from_utf8_lossy(&out.stderr)));
         }
         let out = tokio::process::Command::new("uci")
             .args(["commit", "at-webserver"])
@@ -450,9 +450,9 @@ impl UsageTracker {
         if !out.status.success() {
             return Err(format!("提交配置失败: {}", String::from_utf8_lossy(&out.stderr)));
         }
-        self.auto_reset_days.store(days, Ordering::Relaxed);
-        log_info!("使用量自动清零天数已改为 {days} 天");
-        Ok(days)
+        self.reset_day.store(day, Ordering::Relaxed);
+        log_info!("使用量自动清零已改为 {}", crate::monthly::describe(day));
+        Ok(day)
     }
 }
 
@@ -525,12 +525,17 @@ pub struct UsageSnapshot {
     pub last_ts: i64,
     pub now_ts: i64,
     pub persist: bool,
-    pub auto_reset_days: u32,
+    /// 自动清零日（每月几号，1~31）。
+    pub reset_day: u32,
+    /// 时刻来源（`NTP` / `设备时钟`）：按日历清零强依赖时钟准确度，
+    /// 回退到设备时钟时在日志页能一眼看出「日期可能不准」。
+    pub time_source: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn base() -> UsageState {
         UsageState {
@@ -616,9 +621,17 @@ mod tests {
     }
 
     #[test]
-    fn auto_reset_days_bounds_are_ordered() {
-        assert!(MIN_USAGE_AUTO_RESET_DAYS <= DEFAULT_USAGE_AUTO_RESET_DAYS);
-        assert!(DEFAULT_USAGE_AUTO_RESET_DAYS <= MAX_USAGE_AUTO_RESET_DAYS);
-        assert_eq!(DEFAULT_USAGE_AUTO_RESET_DAYS, 30, "默认 30 天");
+    fn default_reset_day_is_first_of_month() {
+        // 默认「每月 1 号」而不是滚动天数：与月度对账口径一致
+        assert_eq!(crate::monthly::DEFAULT_RESET_DAY, 1);
+    }
+
+    #[test]
+    fn monthly_reset_clears_totals_and_rebaselines() {
+        // 起点 1 月 5 日，设定每月 1 号 → 到 2 月 1 日 00:00 应清零
+        let off = localtime::offset();
+        let start = off.with_ymd_and_hms(2026, 1, 5, 9, 0, 0).unwrap().timestamp();
+        let target = off.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap().timestamp();
+        assert!(crate::monthly::should_reset(target, start, 1, off));
     }
 }
