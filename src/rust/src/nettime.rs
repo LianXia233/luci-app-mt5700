@@ -38,7 +38,7 @@
 //!   1 分钟 ×10（约 10 分钟）→ 20 分钟常驻；任何一次成功都把连续失败计数清零。
 
 use crate::{log_debug, log_info, log_warn};
-use chrono::{DateTime, Local, TimeZone};
+use chrono::{DateTime, Local, Offset, TimeZone};
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::net::UdpSocket;
@@ -126,6 +126,12 @@ pub fn now_ms() -> i64 {
 /// 当前时刻（**系统时区由 tzdata 解析**，时刻优先 NTP）。
 pub fn now() -> DateTime<Tz> {
     Local.timestamp_opt(now_ts(), 0).single().unwrap_or_else(Local::now)
+}
+
+/// 本地时区的固定偏移（供 [`crate::monthly`] 等需要 `FixedOffset` 的
+/// 日历计算使用：DST 地区按当前时刻的偏移取，够用以定位「本地目标日 00:00」）。
+pub fn offset() -> chrono::FixedOffset {
+    Local::now().offset().fix()
 }
 
 /// `%Y-%m-%d %H:%M:%S` 格式的当前时刻字符串（系统时区）。

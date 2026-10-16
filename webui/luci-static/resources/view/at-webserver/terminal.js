@@ -1,12 +1,11 @@
 'use strict';
 'require at-webserver/rpc';
-'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Ui, Mt5700 */
+/* global L, AtWs, Ui, Mt5700 */
 
 /**
- * AT 调试终端页：
+ * AT 调试终端页面：
  * - 命令输入 + 回车发送、发送 / 清空 / 保存命令
  * - 终端式输出（成功 / 失败着色，自动滚动到底部）
  * - 常用命令快捷按钮：点击后先二次确认再发送（避免误触，尤其是写命令）
@@ -84,7 +83,7 @@ return L.view.extend({
 			{ label: '查询网络注册', command: 'AT+CREG?' },
 			{ label: '查询基站信息', command: 'AT+CGREG?' },
 			{ label: '查询网络时间', command: 'AT^NWTIME?' },
-			/* 以下条目与 IMEI 相关，完全沿用基准实现，未做任何改动 */
+			/* IMEI 查询：AT+CGSN（只读，无副作用） */
 			{ label: '查询 IMEI', command: 'AT+CGSN' }
 		];
 
@@ -206,19 +205,7 @@ return L.view.extend({
 		renderSaved();
 		renderConsole();
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [{ key: 'key', label: '连接密钥', type: 'password' }], function (values) {
-					if (values.key) {
-						AtWs.client.connect(values.key).catch(function (e) {
-							Mt5700.error((e && e.message) || '认证失败');
-						});
-					}
-				});
-				return;
-			}
-			if (err) console.warn(err);
-		});
+		Ui.startup(body);
 
 		return page;
 	}

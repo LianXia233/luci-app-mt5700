@@ -5,6 +5,7 @@
 //! - 独立 WebUI/HTTP API（0.0.0.0:9000，前端经 HTTP + WebSocket 通信）
 //! - LuCI RPC 兼容通道（TCP newline-JSON，保留给 mock-modem e2e 与本地调试）
 //! - 定时锁频调度、小区扫频、短信/来电/信号通知、企业微信推送
+//! - 流量使用量常驻统计与「每月几号」自动清零（从 main 分支同步）
 
 mod async_runtime;
 mod at_queue;
@@ -13,6 +14,7 @@ mod config;
 mod configstore;
 mod httpserver;
 mod logger;
+mod monthly;
 mod nettime;
 mod notify;
 mod pdu;
@@ -30,6 +32,7 @@ mod state;
 mod state_cfg;
 mod transport;
 mod urc;
+mod usage;
 
 use crate::config::Config;
 use crate::notify::Notifier;
@@ -99,6 +102,13 @@ async fn run(verbose: bool) -> Result<(), String> {
     // RPC 走缓存毫秒级返回，避免前端每次刷新都发一串会排队的 AT。
     let cache = crate::state::StateCache::new(client.clone(), ctx_rx.clone());
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
+
+    // 流量使用量统计器（从 main 分支同步）：常驻采样，与页面是否打开无关；
+    // 清零日在配置里（usage_reset_day），承载网卡取配置 netdev（见 set_device）。
+    let usage = crate::usage::UsageTracker::new(cfg.usage_reset_day);
+    let netdev = configstore::get_str("netdev", "").await;
+    usage.set_device(&netdev).await;
+
     let mut rpc = RpcServer::new(
         client.clone(),
         cfg.http.auth_key.clone(),
@@ -180,10 +190,24 @@ async fn run(verbose: bool) -> Result<(), String> {
     let cur_map = configstore::read_map().await.unwrap_or_default();
     let cfg_snapshot = Arc::new(tokio::sync::RwLock::new(cfg.clone()));
     let http_task = tokio::spawn({
-        let http = httpserver::HttpServer::new(rpc.clone(), cfg_snapshot.clone(), cur_map, ctx_rx.clone());
+        let http = httpserver::HttpServer::new(
+            rpc.clone(),
+            cfg_snapshot.clone(),
+            cur_map,
+            usage.clone(),
+            notifier.clone(),
+            ctx_rx.clone(),
+        );
         let port = cfg.http.port;
         let bind = cfg.http.bind.clone();
         async move { http.serve(&bind, port).await }
+    });
+
+    // 流量使用量常驻采样：1 秒一次，到期自动清零（大小月/闰年由 monthly 判定）。
+    let usage_task = tokio::spawn({
+        let usage = usage.clone();
+        let ctx = ctx_rx.clone();
+        async move { usage.run(ctx).await }
     });
 
     // 等待退出信号或任一服务异常。
@@ -218,6 +242,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = sched_task.await;
         let _ = cache_task.await;
         let _ = nettime_task.await;
+        let _ = usage_task.await;
         let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
         if !http_failed {

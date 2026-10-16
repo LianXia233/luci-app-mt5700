@@ -6,14 +6,15 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 全网扫频页：
+ * 全网扫频页面：
  * - 筛选：接入技术 / PLMN / 频段 / 频点 / PCI / 子载波间隔，命令按手册约束构建
  * - 异步扫描：服务端推送 cellscan 状态（running 逐行 / done / aborted / error）
  * - 页面刷新时通过 AT^CELLSCAN=STATE 恢复扫描中状态
  * - 结果一键锁定（转成 LTEFREQLOCK / NRFREQLOCK）
  * - 扫描期间模组被独占，离开页面时主动收掉本页发起的扫频
  *
- * 注意：扫频结果是异步推送的，不能用单条 AT 命令的返回值当结果。
+ * 注意：扫频结果是异步推送的，不能用单条 AT 命令的返回值当结果
+ * （若在此处取值就会得到「扫描无结果」的错误结论）。
  */
 
 return L.view.extend({
@@ -312,19 +313,7 @@ return L.view.extend({
 		/* ---------- 初始化 ---------- */
 		render();
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [{ key: 'key', label: '连接密钥', type: 'password' }], function (values) {
-					if (values.key) {
-						AtWs.client.connect(values.key).catch(function (e) {
-							Mt5700.error((e && e.message) || '认证失败');
-						});
-					}
-				});
-				return;
-			}
-			if (err) console.warn(err);
-		}).then(function () {
+		Ui.startup(body, function () {
 			checkState();
 		});
 

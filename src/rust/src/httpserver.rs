@@ -16,6 +16,9 @@
 //!   GET  /api/service/status     版本/PID/运行时长/串口清单
 //!   POST /api/service/restart    延时后退出进程（systemd 自动拉起）
 //!   GET/POST /api/file/read|write|list|stat   受限文件访问（日志文件等）
+//!   POST /api/rpc/mt5700/usage                流量使用量快照（常驻采样，从 main 同步）
+//!   POST /api/rpc/mt5700/usage_ctl            使用量控制：reset / persist_on / persist_off / set_reset_day
+//!   POST /api/rpc/mt5700/notify_test          推送通道测试（固定文案直发企业微信）
 //!   GET  /ws                     WebSocket 事件推送（每 400ms 批量增量；每 30s ping 保活）
 //!
 //! 认证：配置 auth_key 后，/api 与 /ws 需携带 X-Auth-Key 头（/ws 可用 ?key=）；
@@ -51,6 +54,10 @@ pub struct HttpServer {
     cur_map: Arc<RwLock<configstore::ConfigMap>>,
     /// 保存时实际发生变更的结构性键（apply 时据此判定 restart_required）。
     pending_restart: Arc<RwLock<Vec<String>>>,
+    /// 流量使用量统计器（usage / usage_ctl RPC，从 main 分支同步）。
+    usage: Arc<crate::usage::UsageTracker>,
+    /// 通知器（notify_test 推送通道测试，从 main 分支同步）。
+    notifier: Arc<crate::notify::Notifier>,
     started: Instant,
     ctx: tokio::sync::watch::Receiver<bool>,
 }
@@ -94,6 +101,8 @@ impl HttpServer {
         rpc: Arc<RpcServer>,
         cfg: Arc<RwLock<Config>>,
         cur_map: configstore::ConfigMap,
+        usage: Arc<crate::usage::UsageTracker>,
+        notifier: Arc<crate::notify::Notifier>,
         ctx: tokio::sync::watch::Receiver<bool>,
     ) -> HttpServer {
         HttpServer {
@@ -101,6 +110,8 @@ impl HttpServer {
             cfg,
             cur_map: Arc::new(RwLock::new(cur_map)),
             pending_restart: Arc::new(RwLock::new(Vec::new())),
+            usage,
+            notifier,
             started: Instant::now(),
             ctx,
         }
@@ -141,6 +152,8 @@ impl HttpServer {
             cfg: self.cfg.clone(),
             cur_map: self.cur_map.clone(),
             pending_restart: self.pending_restart.clone(),
+            usage: self.usage.clone(),
+            notifier: self.notifier.clone(),
             started: self.started,
             ctx: self.ctx.clone(),
         }
@@ -314,6 +327,55 @@ impl HttpServer {
             }
             ("GET", "/api/file/list") => file_list(req.query.get("path").map(|s| s.as_str()).unwrap_or("")),
             ("GET", "/api/file/stat") => file_stat(req.query.get("path").map(|s| s.as_str()).unwrap_or("")),
+            // 使用量快照（从 main 分支同步：常驻采样，与页面是否打开无关）。
+            ("POST", "/api/rpc/mt5700/usage") => {
+                let snap = self.usage.snapshot().await;
+                ok_json(serde_json::to_value(&snap).unwrap_or(json!({})))
+            }
+            // 使用量控制：reset / persist_on / persist_off / set_reset_day。
+            ("POST", "/api/rpc/mt5700/usage_ctl") => {
+                let body = match serde_json::from_slice::<Value>(&req.body) {
+                    Ok(v) => v,
+                    Err(e) => return err_json(400, &format!("请求体不是有效 JSON: {e}")),
+                };
+                let action = body.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                match action {
+                    "reset" => {
+                        let snap = self.usage.reset().await;
+                        ok_json(serde_json::to_value(&snap).unwrap_or(json!({})))
+                    }
+                    "persist_on" => {
+                        let snap = self.usage.set_persist(true).await;
+                        ok_json(serde_json::to_value(&snap).unwrap_or(json!({})))
+                    }
+                    "persist_off" => {
+                        let snap = self.usage.set_persist(false).await;
+                        ok_json(serde_json::to_value(&snap).unwrap_or(json!({})))
+                    }
+                    "set_reset_day" => {
+                        /* 前端 rpcUsageCtl 声明 params: ['action', 'days'] 且按位置传参，
+                         * 垫片序列化为 {"action", "days"}；历史/命名对象调用则为 "day"。
+                         * 两个键都认，day 优先，避免清零日永远拿到 0 而保存失败。 */
+                        let day = body.get("day")
+                            .or_else(|| body.get("days"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        match self.usage.set_reset_day(day).await {
+                            Ok(d) => {
+                                let snap = self.usage.snapshot().await;
+                                ok_json(serde_json::to_value(&snap).unwrap_or(json!({ "reset_day": d })))
+                            }
+                            Err(e) => err_json(500, &e),
+                        }
+                    }
+                    other => err_json(400, &format!("未知的 usage_ctl 动作: {other}")),
+                }
+            }
+            // 推送通道测试（从 main 分支同步）：固定文案直发企业微信。
+            ("POST", "/api/rpc/mt5700/notify_test") => match self.notifier.notify_test().await {
+                Ok(()) => ok_json(json!({ "success": true })),
+                Err(e) => ok_json(json!({ "success": false, "error": e })),
+            },
             ("POST", "/api/rpc/mt5700/task_status") => {
                 let body = match serde_json::from_slice::<Value>(&req.body) {
                     Ok(v) => v,

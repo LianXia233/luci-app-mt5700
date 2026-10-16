@@ -1,11 +1,11 @@
 'use strict';
 'require at-webserver/rpc';
-'require at-webserver/parse';
+'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Mt5700 */
+/* global L, AtWs, Ui, Mt5700 */
 
 /**
- * 模组升级页：
+ * 模组升级页面：
  * - 免责声明（未同意前不允许开始升级）
  * - 当前版本 AT+CGMR
  * - FOTA 状态机轮询 AT^FOTASTATE?：11 查询中 / 12 发现新版本 / 13 查询失败 /
@@ -98,14 +98,6 @@ return L.view.extend({
 			}, '同意并继续');
 		}
 
-		/* ---------- 渲染 ---------- */
-		function fotaStateText(s) {
-			var map = {
-				11: '正在查询新版本', 12: '发现新版本', 13: '查询失败', 14: '无新版本',
-				20: '下载失败', 30: '下载中', 31: '下载挂起', 40: '下载完成', 50: '升级中'
-			};
-			return map[s] || (s ? '状态 ' + s : '未知');
-		}
 
 		/* FOTA 状态 → 徽章变体与数值配色（让状态一眼可判） */
 		function fotaMeta(s) {
@@ -176,7 +168,7 @@ return L.view.extend({
 			renderBanner();
 		}
 
-		/* ---------- 逻辑（对齐基准 v1.3.4） ---------- */
+		/* ---------- FOTA 流程 ---------- */
 		function fetchVersion() {
 			return AtWs.client.sendCommand('AT+CGMR').then(function (res) {
 				if (res.success && typeof res.data === 'string') {
@@ -311,13 +303,7 @@ return L.view.extend({
 		/* ---------- 初始化 ---------- */
 		renderUpgrade();
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Mt5700.error('需要提供连接密钥');
-				return;
-			}
-			if (err) console.warn(err);
-		}).then(function () {
+		Ui.startup(body, function () {
 			fetchVersion();
 			if (!agreed) showDisclaimer();
 		});

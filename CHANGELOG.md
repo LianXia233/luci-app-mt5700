@@ -27,9 +27,24 @@
 - **test**: `cargo test` **53 passed / 0 failed，零警告**（新增 nettime 10 条 + ringlog 8 条；另含一条**源码级回归用例**：除 `nettime.rs` 外任何源文件出现 `chrono::Local::` / `Utc::now()` / `SystemTime::now()` 即失败）
 - **docs**: 新增 `docs/release-notes/v2.1.0.md`
 
-## [未发布]
+## v2.2.0 (2026-10-17)
 
-### 变更
+### 同步 main 分支 v1.24.3：WebUI 整包同步 + 流量使用量统计后端
+
+**背景**：`main` 自分叉（`eba64994`）以来 WebUI 漂移约 1.4 万行（v1.15 Soft Anime 重构 + v1.16~v1.24 全量特性），本分支停留在分叉时的旧版界面。本次以**逐文件决策矩阵**整包同步，仅保留两处本分支独立实现。
+
+- **feat(webui) 整包同步 main v1.24.3**：`at.css` / `mt5700.css` / `mt5700.js` / `parse.js` / `ui.js` / `compat.js` / `smsEncode.js` / `mascot.png`（新增）+ 11 个视图共 **20 个文件**取主线版；`service.js` 保留本分支版（systemd 服务管理）；`rpc.js` 仅 `loadConfig` 一节适配重贴（主线读 UCI `websocket_port/bind/auth_key`，本分支同源部署取当前站点地址）
+- **feat(usage) 流量使用量统计（从 main 同步）**：新增 `src/rust/src/usage.rs` + `monthly.rs` —— 常驻 1 秒采样 sysfs `/sys/class/net/<dev>/statistics`（**全程不下发 AT 命令，不占 AT 通道**）；负增量只重置基线不计入流量；双文件落盘（`/tmp/mt5700-usage.json` 易失 + `/etc/at-webserver-usage.json` 持久化，落盘节流 5 秒）；峰值速率按 1 秒粒度；自动清零按自然月语义（目标日 00:00 本地时区，大小月/闰年夹取到月末，跨年）由 `monthly` 模块负责
+- **feat(config)**: `Config` 新增 `usage_reset_day`（默认 1，合法区间 1~31，非法回落默认）；`debian/config.json` 同步新增 `"usage_reset_day": "1"`；网卡探测顺序为环境变量 `AT_WEBSERVER_NETDEV` → USB 网卡 → `eth2` 兜底（去掉 uci 依赖）
+- **feat(httpserver) 新增三个路由**：`POST /api/rpc/mt5700/usage`（快照）、`/api/rpc/mt5700/usage_ctl`（`reset` / `persist_on` / `persist_off` / `set_reset_day`，未知动作 400）、`/api/rpc/mt5700/notify_test`（固定文案直发企业微信 WebHook，WebHook 为空显式报错）；`UsageTracker` 与 `Notifier` 接入 `HttpServer`，`main.rs` spawn 常驻采样任务并加入优雅收尾
+- **fix(webui) `service.js` 适配主线 API 面**：主线已将 `formatDuration` 从 `mt5700.js` 移至 `rpc.js` 的 `AtWs` 门面，`Mt5700.formatDuration` 调用改为 `AtWs.formatDuration`（不改将抛 TypeError 整页渲染失败）
+- **fix(httpserver) `usage_ctl` 参数双键兼容**：前端 `rpcUsageCtl` 声明 `params: ['action', 'days']` 且按位置传参，垫片序列化为 `{"action", "days"}`；后端原只读 `day` 键，导致 `set_reset_day` 恒收到 0 而保存失败。改为 `day` 优先、`days` 回落，两个键都认
+- **fix(css) 补回主线丢失的移动端 Hero 规则**：主线 `mt5700.css` 的 768px 媒体查询里 `.mt5700-hero-card`（`flex-direction: column-reverse` 等）与 `.mt5700-hero-title { font-size: 20px }` 两条规则被删只剩空白行；按本分支既有适配补回（桌面侧英雄卡尺寸主线已全部覆盖，`hero-art` 主线演进为 auto + `!important` 更新，保留主线版）
+- **feat(webui) service.js 推送测试**：通知卡新增「推送测试」按钮，调 `/api/rpc/mt5700/notify_test` 用**已保存**的 WebHook 配置发固定文案；地址为空时前端先行提示
+- **test**: `cargo test` **73 passed / 0 failed，零警告**（含 usage 10 条新增）；WebUI 无头冒烟 **12/12 视图渲染零 JS 错误**；端到端验证 `AtWs.usageCtl('set_reset_day', 15)` 经垫片序列化 → 后端双键兼容 → `reset_day=15` 闭环
+- **docs**: 新增 `docs/release-notes/v2.2.0.md`；README「前端同步机制」补 v2.2.0 同步决策矩阵
+
+### 变更（CI 与仓库治理，承接自已发布 v2.1.0）
 
 - **ci(debian)**: release job 的 `gh release create` 增加 `--target "${GITHUB_SHA}"` —— 此前未指定 target 时 gh 会把**新创建的 tag 建到默认分支 `main` 上**，导致 Debian 的发布 tag 指向 OpenWrt 代码（v2.1.0 发布时 `debian-v2.1.0` 即因此误建在 main 的提交上，已人工修正）。tag 已存在时 GitHub 忽略该参数直接挂到已有 tag，不影响存量发布。
 - **ci(debian)**: **移除工作流的日志归档步骤，云编译不再产出 `ci-logs` 分支** ——

@@ -6,7 +6,7 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 定时锁频编排页：
+ * 定时锁频编排页面：
  * - 运行状态：当前时段 / 下次切换 / 已切换次数（AT+SCHED? 返回 status）
  * - 编排表单：检测间隔、无服务超时、解锁时是否下发 LTE/NR 解锁、切换飞行模式
  * - 夜间/日间两时段：各自 4G/5G 锁频（类型、移动性、频段/频点/PCI/SCS）
@@ -317,15 +317,7 @@ return L.view.extend({
 
 		/* ---------- 初始化 ---------- */
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [{ key: 'key', label: '连接密钥', type: 'password' }], function (values) {
-					if (values.key) AtWs.client.connect(values.key).catch(function (e) { Mt5700.error((e && e.message) || '认证失败'); });
-				});
-				return;
-			}
-			if (err) console.warn(err);
-		}).then(function () {
+		Ui.startup(body, function () {
 			load();
 		});
 

@@ -1,12 +1,11 @@
 'use strict';
 'require baseclass';
-/* global baseclass */
 
 /**
- * 短信发送 PDU 编码器（SMS-SUBMIT，3GPP TS 23.040 / 23.038）。
+ * 短信发送 PDU 编码器（SMS-SUBMIT 编码）。
  * 3GPP 23.040 / 23.038：
  * - GSM 7bit 打包（低位在前），非 GSM 字符自动切 UCS2
- * - 长短信自动分片并带 8-bit 拼接头（IEI 0x00）
+ * - 长短信自动分片，带 6 字节 UDH（UDHL=0x05，IEI=0x00 连接头）+ 8 位参考号
  * - SMSC 地址打包、TPDU 长度计算
  */
 
@@ -15,14 +14,6 @@ var SmsEncode = (function () {
 
 	var GSM7_ALPHABET = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
 
-	function isGsm7Char(ch) {
-		var code = ch.charCodeAt(0);
-		// 基本字母表里的可打印字符
-		if (GSM7_ALPHABET.indexOf(ch) >= 0) return true;
-		// ESC 扩展表（^ 0x1B 转义）：|^€{}[]~\
-		var esc = '|^€{}[]~\\';
-		return esc.indexOf(ch) >= 0;
-	}
 
 	function gsm7Code(ch) {
 		var code = ch.charCodeAt(0);
@@ -126,8 +117,8 @@ var SmsEncode = (function () {
 		var udhi = opts.udhi || null;
 		var firstOctet = 0x01; // MTI=01 (SMS-SUBMIT)
 		if (udhi) firstOctet |= 0x40; // TP-UDHI
-		firstOctet |= 0x10; // TP-VPF=10 (relative)
-		firstOctet |= 0x20; // TP-RD=1 (reject duplicates)
+		firstOctet |= 0x10; // TP-VPF=10（相对格式，固定）
+		firstOctet |= 0x20; // TP-RD=1（恒置，拒绝重复）
 
 		var da = encodeAddress(opts.destination);
 		var mr = '00';
@@ -145,8 +136,7 @@ var SmsEncode = (function () {
 	// 计算分片参数
 	var GSM7_MAX = 160;
 	var GSM7_MAX_UDH = 153;
-	var UCS2_MAX = 140;   // 70 字符
-	var UCS2_MAX_UDH = 134; // 67 字符
+	var UCS2_MAX_UDH = 134; // 134 octets → 67 字符
 
 	function needsUcs2(message) {
 		var chars = Array.from(message);
@@ -189,10 +179,9 @@ var SmsEncode = (function () {
 			} else {
 				// 长短信：按字符分包（近似 septets，扩展字符少时按字符数分包即可）
 				var per = GSM7_MAX_UDH;
-				var count = Math.ceil(septets / per);
 				var ref = Math.floor(Math.random() * 255) + 1;
 				// 重新按字符精确分包
-				var cur = [], curSeptets = 0, seq = 0, total = 0;
+				var total = 0;
 				// 先估算 total：按 septet 精确切分
 				var chunks = [];
 				var tmp = [], tmpS = 0;
@@ -213,7 +202,7 @@ var SmsEncode = (function () {
 			if (chars.length <= 70) {
 				parts.push({ message: message, encoding: 'UCS2', udhi: null });
 			} else {
-				var perC = Math.floor(UCS2_MAX_UDH / 2); // 67 octets → 33 chars
+				var perC = Math.floor(UCS2_MAX_UDH / 2); // 134 octets → 67 字符
 				var totalC = Math.ceil(chars.length / perC);
 				var refC = Math.floor(Math.random() * 255) + 1;
 				for (var i = 0; i < totalC; i++) {
@@ -236,7 +225,6 @@ var SmsEncode = (function () {
 			// SMSC 部分：有 smsc 时编码；没有则 00
 			var sca = opts.smsc ? encodeAddress(opts.smsc) : '00';
 			var fullPdu = sca + pdu;
-			var scaOctets = sca.length / 2;
 			return { pdu: fullPdu, tpduLength: pdu.length / 2 };
 		});
 	};
