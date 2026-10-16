@@ -5085,3 +5085,46 @@ select option {
 @media (prefers-reduced-motion: reduce) {
   .mt-tower-svg-box svg { animation: none !important; }
 }
+
+/* ==========================================================================
+   Hero 看板娘移动端排版优化 (Mobile hero mascot layout)
+   --------------------------------------------------------------------------
+   移动端原先继承 960px 断点的 column 布局：文案独占一行后，看板娘被
+   flex-end 顶到卡片右下角，左侧留下大片空白，卡片被撑高，头像看起来像
+   "贴边漂浮"。这里在 <=768px 改为紧凑的「左文右娘」行布局：头像与徽标/
+   标题垂直居中，文案列占满剩余宽度并可自动换行，卡片高度回落。
+   放在文件末尾：与上方同名 !important 规则同权重时以本条为准。
+   ========================================================================== */
+@media (max-width: 768px) {
+  .mt5700-hero-card {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    padding: 14px !important;
+  }
+
+  .mt5700-hero-content {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
+
+  .mt5700-hero-art {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    align-self: center !important;
+    justify-content: flex-end !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .mt5700-hero-title {
+    font-size: 19px !important;
+  }
+
+  .mt5700-hero-desc {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+}
