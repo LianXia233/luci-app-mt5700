@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::sync::{watch, RwLock};
 
 /// 任务执行状态。
@@ -332,11 +332,12 @@ impl TaskManager {
     }
 }
 
+/// 当前毫秒时间戳。
+///
+/// 走 [`crate::nettime`]（NTP 优先、设备时钟兜底）：这里记的是「任务是什么时候建的」，
+/// 属于墙上时间，必须和日志、通知、清零判定同一条时间线。
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::nettime::now_ms()
 }
 
 #[cfg(test)]
