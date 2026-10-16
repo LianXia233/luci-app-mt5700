@@ -21,6 +21,7 @@
 				"at",
 				"events",
 				"netrate",
+				"usage_ctl",
 				"logs",
 				"notify_test",
 				"qq_bind_status",
@@ -110,7 +111,8 @@
 				],
 				"mt5700": [
 					"at",
-					"events"
+					"events",
+					"usage_ctl"
 				],
 				"rc": [
 					"init"

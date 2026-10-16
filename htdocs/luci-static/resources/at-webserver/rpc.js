@@ -48,6 +48,17 @@ var rpcNetRate = L.rpc.declare({
 });
 
 /*
+ * 使用量控制：reset（清零）/ persist_on（开启持久化）/ persist_off（关闭）。
+ * 使用量状态由设备侧持有（默认 tmpfs，可选落盘），与浏览器刷新无关。
+ */
+var rpcUsageCtl = L.rpc.declare({
+	object: 'mt5700',
+	method: 'usage_ctl',
+	params: ['action'],
+	expect: {}
+});
+
+/*
  * 模组 USB 链路速率（自动识别数据源）。
  * 由 mt5700.uc 的 usb 方法直接读 sysfs 下 USB 设备的 speed 节点，
  * 全程不下发任何 AT 命令，不占用 AT 通道、不干扰模组。
@@ -1238,6 +1249,19 @@ var atClient = (function () {
  * 速率（字节/秒）需由调用方按「两次采样差 ÷ 时间差」计算，
  * 因为单次计数是累计值，本身不含速率语义。
  */
+function normalizeUsage(u) {
+	if (!u) return null;
+	return {
+		total_rx: Number(u.total_rx) || 0,
+		total_tx: Number(u.total_tx) || 0,
+		start_ts: Number(u.start_ts) || 0,
+		last_ts: Number(u.last_ts) || 0,
+		peak_rx: Number(u.peak_rx) || 0,
+		peak_tx: Number(u.peak_tx) || 0,
+		persist: Number(u.persist) ? 1 : 0
+	};
+}
+
 function fetchNetRate(device) {
 	return withTimeout(rpcNetRate(device || ''), 5000, '接口统计读取超时')
 		.then(function (resp) {
@@ -1248,11 +1272,29 @@ function fetchNetRate(device) {
 				success: true,
 				device: resp.device,
 				rx_bytes: Number(resp.rx_bytes) || 0,
-				tx_bytes: Number(resp.tx_bytes) || 0
+				tx_bytes: Number(resp.tx_bytes) || 0,
+				usage: normalizeUsage(resp.usage)
 			};
 		})
 		.catch(function (err) {
 			return { success: false, error: (err && err.message) || '接口统计读取失败' };
+		});
+}
+
+/*
+ * 使用量控制（清零 / 开关持久化）。返回 Promise<{success, usage, error}>。
+ */
+function fetchUsageCtl(action) {
+	return withTimeout(rpcUsageCtl(action), 5000, '使用量操作超时')
+		.then(function (resp) {
+			resp = resp || {};
+			if (resp.success === false) {
+				return { success: false, error: resp.error || '使用量操作失败' };
+			}
+			return { success: true, usage: normalizeUsage(resp.usage) };
+		})
+		.catch(function (err) {
+			return { success: false, error: (err && err.message) || '使用量操作失败' };
 		});
 }
 
@@ -1302,6 +1344,7 @@ function usbSpeedText(mbps) {
 var AtWs = {
 	client: atClient(),
 	netRate: fetchNetRate,
+	usageCtl: fetchUsageCtl,
 	usb: fetchUsb,
 	usbSpeedText: usbSpeedText,
 	extractATData: extractATData,
