@@ -25,6 +25,7 @@ use crate::schedule::sleep_ctx;
 use crate::signalgrade::{Assessment, Grade, SignalInput};
 use crate::urc::{parse_signal_reading, query_hfreqinfo, query_monsc};
 use crate::{log_debug, log_info};
+use chrono::Timelike;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{watch, Mutex};
@@ -405,9 +406,12 @@ fn grade_status(g: Option<Grade>) -> &'static str {
 
 /// 当前时刻在当天的分钟数（0..=1439），供时段判定使用。
 ///
-/// 时区口径由 [`crate::localtime`] 统一（系统时区，缺省北京时间）。
+/// 时刻取 [`crate::nettime`]（NTP 优先、设备时钟兜底），时区沿用系统设置
+/// （见 [`crate::localtime`]，取不到时北京时间）—— 巡检时段是按「当地几点」判定的，
+/// 时钟不准会导致该推的时段不推。
 pub fn minute_of_day_now() -> i64 {
-    crate::localtime::minute_of_day_now()
+    let n = crate::nettime::now();
+    i64::from(n.hour()) * 60 + i64::from(n.minute())
 }
 
 /// 「本次读数是否应当推送」的纯判定，便于单测覆盖各策略组合。
