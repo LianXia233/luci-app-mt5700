@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.23.1-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.24.0-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -222,11 +222,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-   ./<ARCH>-luci-app-mt5700-1.23.1-r1.apk \
+   ./<ARCH>-luci-app-mt5700-1.24.0-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.23.1_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.24.0_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -471,6 +471,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 | 版本 | 主题 |
 |:--|:--|
+| [v1.24.0](docs/release-notes/v1.24.0.md) | 自动清零改为「每月几号」（支持大小月/闰年）；新增 NTP 时间源（设备时钟兜底）；日志大小封顶 + 内存环形缓存 |
 | [v1.23.1](docs/release-notes/v1.23.1.md) | 修复「自动清零」天数输入框数字被遮挡；清理前端冗余样式（CSS -528 行，渲染零差异回归） |
 | [v1.23.0](docs/release-notes/v1.23.0.md) | 使用量统计改由后端常驻累计；新增自动清零（默认 30 天）；清零连记录文件一起清；限制记录文件大小 |
 | [v1.22.0](docs/release-notes/v1.22.0.md) | 签约速率改用 `AT^DSAMBR`（4G/5G 均可用）；修正制式角标写死 5G；流量统计数据源核对 |
@@ -489,7 +490,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.23.1)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.24.0)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本（见上方功能矩阵）
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / parse.js / mt5700.js / ui.js / mt5700.css)
