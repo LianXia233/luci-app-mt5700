@@ -12,7 +12,6 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -39,23 +38,16 @@ pub fn level() -> Level {
 }
 
 fn timestamp() -> String {
-    // 与「按月清零」同一时间源（NTP 优先、设备时钟兜底）：日志时间和清零判定
-    // 不同源的话，排障时对不上「这条日志到底是几号」。
-    let millis_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    let millis = millis_now.subsec_millis();
-    let secs = crate::nettime::now_ts();
-    // 系统时区（未配置时北京时间）格式化到秒，毫秒单独拼接，兼顾可读性与精度。
-    // 走 crate::localtime 而非 chrono::Local：本固件没有 tzdata，
-    // 守护进程也没有 TZ 环境变量，chrono::Local 会静默落到 UTC。
-    let dt = crate::localtime::from_unix(secs as i64);
-    format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), millis)
+    // 全仓库统一时间源（NTP 优先、设备时钟兜底）：日志时间必须和通知时间、
+    // 使用量按月清零判定在同一条时间线上，否则排障时对不上「这条日志到底是几号」。
+    let ms = crate::nettime::now_ms();
+    // 系统时区（未配置时北京时间，见 localtime）格式化到秒，毫秒单独拼接。
+    let dt = crate::localtime::from_unix(ms / 1000);
+    format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), ms % 1000)
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::nettime::now_ms()
 }
 
 /* ----------------------------- 内存环形缓冲 ----------------------------- */
