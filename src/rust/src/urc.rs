@@ -143,7 +143,7 @@ impl Dispatcher {
             self.last_call_at = now;
             self.call_state = "ringing".into();
 
-            let ts = crate::localtime::now_string();
+            let ts = crate::nettime::now_string();
             self.notifier
                 .notify(Notification {
                     sender: SENDER_CALL.into(),
@@ -159,7 +159,7 @@ impl Dispatcher {
             }));
         } else if line.contains("^CEND:") || line == "NO CARRIER" {
             if !self.last_call_number.is_empty() {
-                let ts = crate::localtime::now_string();
+                let ts = crate::nettime::now_string();
                 let number = self.last_call_number.clone();
                 self.notifier
                     .notify(Notification {
