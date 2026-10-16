@@ -854,17 +854,18 @@ return {
 			}
 		},
 		usage_ctl: {
-			args: { action: '', days: 0, _rid: '' },
+			args: { action: '', day: 0, _rid: '' },
 			call: function (req) {
 				let a = req.args;
 				let action = getStr(a, 'action');
-				/* action 走白名单，不透传客户端原值；days 只在 set_auto_reset_days 时带上 */
-				if (action != 'reset' && action != 'persist_on' && action != 'persist_off' && action != 'set_auto_reset_days') {
+				/* action 走白名单，不透传客户端原值；day 只在 set_reset_day 时带上 */
+				if (action != 'reset' && action != 'persist_on' && action != 'persist_off' && action != 'set_reset_day') {
 					return { success: false, error: '不支持的 usage_ctl 动作' };
 				}
 				let params = { action: action, _rid: getStr(a, '_rid') };
-				if (action == 'set_auto_reset_days') {
-					params.days = int(getStr(a, 'days')) || 0;
+				if (action == 'set_reset_day') {
+					/* 每月几号：1~31，越界交给后端夹取（大小月判定也在后端 monthly 模块） */
+					params.day = int(getStr(a, 'day')) || 0;
 				}
 				return rpcCall('usage_ctl', params);
 			}
