@@ -92,9 +92,14 @@ return L.view.extend({
 		};
 
 
-		// 信号趋势历史数据 (最多保留 30 个数据点)
+		// 信号趋势历史数据 (最多保留 30 个真实采样点，绝不伪造基线)
 		var sigHistory = [];
 		var MAX_SIG_POINTS = 30;
+		// 图表可见序列开关（点选图例切换）与显示范围（点数）
+		var chartSeries = { rsrp: true, sinr: true, rsrq: true };
+		var chartRange = MAX_SIG_POINTS;
+		// 三条曲线的配色（Soft-Anime 调色）
+		var CHART_COLORS = { rsrp: '#38bdf8', sinr: '#10b981', rsrq: '#c084fc' };
 
 		// 流量趋势微型火花线数据（初始为真实空/0采样点，绝不伪造随机数）
 		var sparkDown = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -270,27 +275,64 @@ return L.view.extend({
 		midGrid.appendChild(tabCard);
 
 		// ---------------- 右侧: 信号趋势图表 ----------------
-		var chartCard = E('div', { 'class': 'mt-card' }, [
+		/* 图例开关：点按钮切换对应曲线的显隐 */
+		function makeLegendToggle(key, label, dashed) {
+			var color = CHART_COLORS[key];
+			var lineStyle = dashed
+				? 'background:repeating-linear-gradient(90deg,' + color + ' 0 4px,transparent 4px 7px);'
+				: 'background:' + color + ';';
+			var chip = E('button', {
+				'type': 'button',
+				'class': 'mt-legend-item mt-legend-btn' + (chartSeries[key] ? ' active' : ''),
+				'style': 'color:' + color + ';',
+				'click': function () {
+					chartSeries[key] = !chartSeries[key];
+					chip.classList.toggle('active', chartSeries[key]);
+					renderSignalTrendChart();
+				}
+			}, [
+				E('span', { 'class': 'mt-legend-line', 'style': lineStyle }),
+				E('span', {}, label)
+			]);
+			return chip;
+		}
+
+		/* 显示范围：最近 15 点 / 全部 30 点 */
+		function makeRangeButton(points, label) {
+			return E('button', {
+				'type': 'button',
+				'class': 'mt-range-btn' + (chartRange === points ? ' active' : ''),
+				'data-points': String(points),
+				'click': function () {
+					chartRange = points;
+					var all = document.querySelectorAll('.mt-range-btn');
+					for (var i = 0; i < all.length; i++) {
+						all[i].classList.toggle('active', Number(all[i].getAttribute('data-points')) === points);
+					}
+					renderSignalTrendChart();
+				}
+			}, label);
+		}
+
+		var chartCard = E('div', { 'class': 'mt-card mt-chart-card' }, [
 			E('div', { 'class': 'mt-chart-head' }, [
 				E('div', { 'class': 'mt-card-title' }, [
 					svgIcon('trend'),
 					E('span', {}, '信号趋势')
 				]),
-				E('div', { 'class': 'mt-chart-legends' }, [
-					E('div', { 'class': 'mt-legend-item', 'style': 'color:#38bdf8;' }, [
-						E('span', { 'class': 'mt-legend-line', 'style': 'background:#38bdf8;' }),
-						E('span', {}, 'RSRP · 左轴')
+				E('div', { 'class': 'mt-chart-controls' }, [
+					E('div', { 'class': 'mt-chart-legend' }, [
+						makeLegendToggle('rsrp', 'RSRP', false),
+						makeLegendToggle('sinr', 'SINR', false),
+						makeLegendToggle('rsrq', 'RSRQ', true)
 					]),
-					E('div', { 'class': 'mt-legend-item', 'style': 'color:#10b981;' }, [
-						E('span', { 'class': 'mt-legend-line', 'style': 'background:#10b981;' }),
-						E('span', {}, 'SINR · 右轴')
-					]),
-					E('div', { 'class': 'mt-legend-item', 'style': 'color:#a855f7;' }, [
-						E('span', { 'class': 'mt-legend-line', 'style': 'background:repeating-linear-gradient(90deg, #a855f7 0 4px, transparent 4px 7px);' }),
-						E('span', {}, 'RSRQ · 虚线')
+					E('div', { 'class': 'mt-chart-range', 'title': '显示最近多少个采样点' }, [
+						makeRangeButton(15, '15点'),
+						makeRangeButton(30, '30点')
 					])
 				])
 			]),
+			E('div', { 'class': 'mt-chart-readout', 'id': 'sig-trend-readout' }),
 			E('div', { 'class': 'mt-chart-svg-box', 'id': 'sig-trend-chart-box' })
 		]);
 		midGrid.appendChild(chartCard);
@@ -611,56 +653,44 @@ return L.view.extend({
 			if (towerBox) towerBox.style.color = TOWER_COLORS[sigState] || TOWER_COLORS.searching;
 
 
-			// 更新趋势历史
+			// 更新趋势历史（只记录设备真实采样；不再用合成数据伪造首屏曲线）
 			var now = new Date();
-			var timeStr = (now.getHours() < 10 ? '0' : '') + now.getHours() + ':' +
-			              (now.getMinutes() < 10 ? '0' : '') + now.getMinutes() + ':' +
-			              (now.getSeconds() < 10 ? '0' : '') + now.getSeconds();
+			var timeStr = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
 
-			if (rsrp != null && !isNaN(rsrp)) {
-				var curR = Number(rsrp);
-				var curQ = rsrq != null ? Number(rsrq) : -9;
-				var curS = sinr != null ? Number(sinr) : 27;
+			var hasRsrp = (rsrp != null && rsrp !== '' && !isNaN(rsrp));
+			var numRsrq = (rsrq != null && rsrq !== '' && !isNaN(rsrq)) ? Number(rsrq) : null;
+			var numSinr = (sinr != null && sinr !== '' && !isNaN(sinr)) ? Number(sinr) : null;
 
-				// 首次采集时构建初始基线，确保图表立即呈现优美曲线
-				if (sigHistory.length === 0) {
-					var offsets = [-15, -10, -5, -2, 0];
-					for (var oi = 0; oi < offsets.length; oi++) {
-						var pastDate = new Date(now.getTime() - (offsets.length - 1 - oi) * 10000);
-						var pStr = (pastDate.getHours() < 10 ? '0' : '') + pastDate.getHours() + ':' +
-						           (pastDate.getMinutes() < 10 ? '0' : '') + pastDate.getMinutes() + ':' +
-						           (pastDate.getSeconds() < 10 ? '0' : '') + pastDate.getSeconds();
-						sigHistory.push({
-							time: pStr,
-							rsrp: curR + (oi % 2 === 0 ? 1 : -1) * (oi === 4 ? 0 : 2),
-							rsrq: curQ + (oi % 2 === 0 ? 0.5 : -0.5),
-							sinr: curS + (oi % 2 === 0 ? -1 : 1)
-						});
-					}
-				} else {
-					sigHistory.push({
-						time: timeStr,
-						rsrp: curR,
-						rsrq: curQ,
-						sinr: curS
-					});
-					if (sigHistory.length > MAX_SIG_POINTS) {
-						sigHistory.shift();
-					}
-				}
-				renderSignalTrendChart();
+			/* 每轮轮询落一个点；缺读数写 null，由绘图按断点如实断开，
+			   而不是把缺口连成一条并不存在的平滑线。 */
+			var sample = {
+				time: timeStr,
+				rsrp: hasRsrp ? Number(rsrp) : null,
+				rsrq: numRsrq,
+				sinr: numSinr
+			};
+			var lastPt = sigHistory[sigHistory.length - 1];
+			if (lastPt && lastPt.time === timeStr) {
+				sigHistory[sigHistory.length - 1] = sample;   /* 同一秒内重复刷新则覆盖，避免重影 */
+			} else {
+				sigHistory.push(sample);
+				if (sigHistory.length > MAX_SIG_POINTS) sigHistory.shift();
 			}
+			renderSignalTrendChart();
 		}
 
 		/* ==========================================================================
-		   信号趋势图（重绘版）
+		   信号趋势图（v1.19 重绘）
 		   --------------------------------------------------------------------------
-		   纯原生 SVG 绘制，双 Y 轴，避免三条不同量纲的曲线挤在同一坐标系里互相误读：
-		     · 左轴 RSRP (dBm, -125 ~ -55)：主曲线 + 面积渐变
+		   纯原生 SVG，双 Y 轴（RSRP 左 / SINR 右），避免不同量纲曲线挤在同一坐标系误读：
+		     · 左轴 RSRP (dBm, -125 ~ -53)：主曲线 + 面积渐变
 		     · 右轴 SINR (dB,  -5  ~ 35) ：副曲线
 		     · RSRQ (dB, -20 ~ -3)       ：细虚线（量纲独立，仅作参考，不参与双轴刻度）
+		   数据诚实：只画设备真实采样；缺读数写 null，曲线在该处如实断开，
+		             绝不合成基线或把缺口连成并不存在的平滑线。
+		   交互：图例可点选显隐曲线；范围可切 15/30 点；鼠标悬浮或触摸拖动查看任意点读数。
 		   背景按 RSRP 质量分区着色（极佳 / 良好 / 一般 / 较差），一眼可判读链路质量。
-		   曲线经 Catmull-Rom → 三次贝塞尔平滑，末端点标注当前读数。
+		   曲线经 Catmull-Rom → 三次贝塞尔平滑，末端点带呼吸脉冲标记“当前”。
 		   ========================================================================== */
 
 		/* RSRP 质量分区（阈值与 computeCellularState 的分档保持一致） */
@@ -724,61 +754,137 @@ return L.view.extend({
 			{ y: 1, rsrp: -125, sinr: -5 }
 		];
 
+		/* 两位补零（时间格式化） */
+		function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+		/*
+		 * 取窗口内某序列的连续分段（遇 null / NaN 断开）。
+		 * 返回 [[[x, y], ...], ...]：缺口保持缺口，不会被人为连成一条并不存在的平滑线。
+		 */
+		function seriesSegments(items, key, min, max, top, bottom, padL, chartW) {
+			var n = items.length;
+			var segs = [];
+			var cur = [];
+			for (var i = 0; i < n; i++) {
+				var v = items[i][key];
+				var x = padL + (i / (n - 1)) * chartW;
+				if (v === null || v === undefined || v === '' || isNaN(v)) {
+					if (cur.length) { segs.push(cur); cur = []; }
+				} else {
+					cur.push([x, chartScale(Number(v), min, max, top, bottom)]);
+				}
+			}
+			if (cur.length) segs.push(cur);
+			return segs;
+		}
+
+		/* 顶部读数条：始终展示最新真实读数；被隐藏的序列弱化显示 */
+		function updateChartReadout() {
+			var el = document.getElementById('sig-trend-readout');
+			if (!el) return;
+			var last = null;
+			for (var i = sigHistory.length - 1; i >= 0; i--) {
+				var p = sigHistory[i];
+				if (p.rsrp != null || p.sinr != null || p.rsrq != null) { last = p; break; }
+			}
+			var cells = [
+				{ key: 'rsrp', label: 'RSRP', unit: 'dBm' },
+				{ key: 'sinr', label: 'SINR', unit: 'dB' },
+				{ key: 'rsrq', label: 'RSRQ', unit: 'dB' }
+			];
+			var html = '';
+			for (var c = 0; c < cells.length; c++) {
+				var cc = cells[c];
+				var raw = last ? last[cc.key] : null;
+				var valStr = (raw != null && !isNaN(raw)) ? raw : '—';
+				html += '<span class="mt-readout-cell' + (chartSeries[cc.key] ? '' : ' off') + '">' +
+					'<i class="mt-readout-dot" style="background:' + CHART_COLORS[cc.key] + '"></i>' +
+					'<span class="mt-readout-label">' + cc.label + '</span>' +
+					'<span class="mt-readout-val">' + valStr + '<em>' + cc.unit + '</em></span>' +
+					'</span>';
+			}
+			html += '<span class="mt-readout-count">实时采样 · 每 5 秒 · ' + sigHistory.length + '/' + MAX_SIG_POINTS + ' 点</span>';
+			el.innerHTML = html;
+		}
+
 		function renderSignalTrendChart() {
 			var box = document.getElementById('sig-trend-chart-box');
 			if (!box) return;
-			if (sigHistory.length < 2) {
-				box.innerHTML = '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mt5700-text-muted); font-size:12px;">正在采集实时信号趋势数据（至少需要 2 个采样点）...</div>';
+
+			// 顶部读数条始终跟随最新真实读数（即使历史点不足 2 个也更新）
+			updateChartReadout();
+
+			// 可见窗口：默认全部历史，可切到最近 15 点
+			var view = sigHistory.length > chartRange ? sigHistory.slice(sigHistory.length - chartRange) : sigHistory;
+			var n = view.length;
+			if (n < 2) {
+				box.innerHTML = '<div class="mt-chart-empty">正在采集实时信号趋势数据（至少需要 2 个真实采样点，每 5 秒一次）…</div>';
 				return;
 			}
 
 			/*
-			 * 尺寸自适应：SVG 会按宽度等比缩放，若窄屏仍用 560 宽的 viewBox，
-			 * 文字会被压缩到原来的一半以下（手机上无法辨认）。
-			 * 因此窄屏改用更窄的 viewBox（380×300），让缩放比接近 1:1，
-			 * 同时把所有字号按 viewBox 单位放大到 11~13，桌面端实际渲染约 13px。
+			 * 尺寸自适应：SVG 按宽度等比缩放，窄屏改用更窄的 viewBox（380 宽）让缩放比接近 1:1，
+			 * 否则 560 的 viewBox 在手机里会把图内文字压到无法辨认。窄屏额外加高，改善可读性。
 			 */
 			var boxW = box.clientWidth || 560;
 			var narrow = boxW < 480;
 			var w = narrow ? 380 : 560;
-			var h = narrow ? 300 : 340;
-			var padL = narrow ? 40 : 52, padR = narrow ? 42 : 52, padT = 28, padB = 36;
+			var h = narrow ? 320 : 340;
+			var padL = narrow ? 44 : 52, padR = narrow ? 44 : 52, padT = 26, padB = 34;
 			var chartW = w - padL - padR;
 			var chartH = h - padT - padB;
-			/* 字号取「可读但不喧宾夺主」的中间值：
-			   桌面容器 ≈573 宽（viewBox 560）缩放约 1.02 → 刻度实际约 11.7px，与卡片正文 12~13px 协调；
-			   窄屏 viewBox 380、容器 ≈340 缩放约 0.9 → 刻度实际约 10.8px，保持可辨认。 */
-			var fsTick = narrow ? 12 : 11.5;      /* 轴刻度 */      /* 质量档位 */
-			var fsTime = narrow ? 12 : 11.5;      /* 时间轴 */     /* 末端读数 / 质量 */      /* 轴单位 */
-			var tipFs = narrow ? 12 : 11.5;       /* 悬浮卡文字 */
-			var tipFsTitle = narrow ? 12.5 : 12;
+			var bottom = padT + chartH;
+			var fsTick = narrow ? 11.5 : 11;
+			var fsTime = narrow ? 11 : 11;
+			var tipFs = 11.5;
+			var tipFsTitle = narrow ? 12 : 11.5;
 
 			var RSRP_MIN = -125, RSRP_MAX = -53;
 			var SINR_MIN = -5, SINR_MAX = 35;
 			var RSRQ_MIN = -20, RSRQ_MAX = -3;
 
-			var n = sigHistory.length;
-			var rsrpPts = [], sinrPts = [], rsrqPts = [];
-			for (var i = 0; i < n; i++) {
-				var x = padL + (i / (n - 1)) * chartW;
-				var it = sigHistory[i];
-				rsrpPts.push([x, chartScale(it.rsrp, RSRP_MIN, RSRP_MAX, padT, padT + chartH)]);
-				sinrPts.push([x, chartScale(it.sinr, SINR_MIN, SINR_MAX, padT, padT + chartH)]);
-				rsrqPts.push([x, chartScale(it.rsrq, RSRQ_MIN, RSRQ_MAX, padT, padT + chartH)]);
+			var xAt = function (i) { return padL + (i / (n - 1)) * chartW; };
+
+			/* 序列元数据：颜色 / 量纲 / 轴值域，绘制与悬浮卡共用 */
+			var seriesMeta = [
+				{ key: 'rsrp', color: CHART_COLORS.rsrp, label: 'RSRP', unit: 'dBm', min: RSRP_MIN, max: RSRP_MAX },
+				{ key: 'sinr', color: CHART_COLORS.sinr, label: 'SINR', unit: 'dB', min: SINR_MIN, max: SINR_MAX },
+				{ key: 'rsrq', color: CHART_COLORS.rsrq, label: 'RSRQ', unit: 'dB', min: RSRQ_MIN, max: RSRQ_MAX }
+			];
+			var activeMeta = [];
+			for (var sm = 0; sm < seriesMeta.length; sm++) {
+				if (chartSeries[seriesMeta[sm].key]) activeMeta.push(seriesMeta[sm]);
 			}
 
-			var lastRsrp = rsrpPts[n - 1];
-			var lastSinr = sinrPts[n - 1];
-			var lastRsrq = rsrqPts[n - 1];
+			/* 各序列的连续分段（缺口断开） */
+			var segsByKey = {};
+			for (var sk = 0; sk < seriesMeta.length; sk++) {
+				var meta = seriesMeta[sk];
+				segsByKey[meta.key] = seriesSegments(view, meta.key, meta.min, meta.max, padT, bottom, padL, chartW);
+			}
 
-			/* ---- 背景质量分区带 ---- */
+			/* 末端有效采样点（脉冲点 / 端点标注用） */
+			function lastValid(m) {
+				for (var i = n - 1; i >= 0; i--) {
+					var v = view[i][m.key];
+					if (v != null && v !== '' && !isNaN(v)) return [xAt(i), chartScale(Number(v), m.min, m.max, padT, bottom)];
+				}
+				return null;
+			}
+
+			/* ---- 背景质量分区带（窄屏不标注档位文字，避免拥挤） ---- */
 			var bands = '';
 			for (var b = 0; b < SIGNAL_TIERS.length; b++) {
 				var t = SIGNAL_TIERS[b];
-				var y1 = chartScale(t.max, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
-				var y2 = chartScale(t.min, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
+				var y1 = chartScale(t.max, RSRP_MIN, RSRP_MAX, padT, bottom);
+				var y2 = chartScale(t.min, RSRP_MIN, RSRP_MAX, padT, bottom);
+				var bandH = Math.max(1, y2 - y1);
 				bands += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + chartW +
-					'" height="' + Math.max(1, y2 - y1).toFixed(1) + '" fill="' + t.color + '" opacity="0.05"/>';
+					'" height="' + bandH.toFixed(1) + '" fill="' + t.color + '" opacity="0.045"/>';
+				if (!narrow) {
+					bands += '<text x="' + (padL + chartW - 4) + '" y="' + (y1 + bandH / 2 + 3).toFixed(1) +
+						'" font-size="9.5" font-family="sans-serif" fill="' + t.color + '" opacity="0.5" text-anchor="end">' + t.label + '</text>';
+				}
 			}
 
 			/* ---- 水平网格 + 左右双轴刻度 ---- */
@@ -795,117 +901,199 @@ return L.view.extend({
 					'" font-size="' + fsTick + '" font-family="monospace" fill="#10b981" text-anchor="start">' + ticks[k].sinr + '</text>';
 			}
 
-			var firstTime = sigHistory[0].time;
-			var midTime = sigHistory[Math.floor(n / 2)].time;
-			var lastTime = sigHistory[n - 1].time;
+			/* ---- 路径构建：分段平滑，缺口如实断开 ---- */
+			function strokePathFor(key) {
+				var segs = segsByKey[key], out = [];
+				for (var i = 0; i < segs.length; i++) {
+					if (segs[i].length >= 2) out.push(smoothPathPoints(segs[i], padT, bottom));
+				}
+				return out.join(' ');
+			}
+			function areaPathFor(key) {
+				var segs = segsByKey[key], out = '';
+				for (var i = 0; i < segs.length; i++) {
+					var s = segs[i];
+					if (s.length < 2) continue;
+					out += smoothPathPoints(s, padT, bottom) + ' L ' + s[s.length - 1][0].toFixed(1) + ' ' + bottom.toFixed(1) +
+						' L ' + s[0][0].toFixed(1) + ' ' + bottom.toFixed(1) + ' Z ';
+				}
+				return out;
+			}
+			/* 孤立采样点（两侧都是缺口）：补一个点，避免该采样在图上消失 */
+			function isolatedDotsFor(m) {
+				var segs = segsByKey[m.key], out = '';
+				for (var i = 0; i < segs.length; i++) {
+					if (segs[i].length === 1) {
+						out += '<circle cx="' + segs[i][0][0].toFixed(1) + '" cy="' + segs[i][0][1].toFixed(1) + '" r="2" fill="' + m.color + '"/>';
+					}
+				}
+				return out;
+			}
+
+			/* ---- 主曲线层（按图例可见性渲染） ---- */
+			var seriesLayer = '';
+			if (chartSeries.rsrp) {
+				seriesLayer += '<path d="' + areaPathFor('rsrp') + '" fill="url(#rsrp-area)"/>' +
+					'<path d="' + strokePathFor('rsrp') + '" fill="none" stroke="' + CHART_COLORS.rsrp + '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+					isolatedDotsFor(seriesMeta[0]);
+			}
+			if (chartSeries.sinr) {
+				seriesLayer += '<path d="' + strokePathFor('sinr') + '" fill="none" stroke="' + CHART_COLORS.sinr + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+					isolatedDotsFor(seriesMeta[1]);
+			}
+			if (chartSeries.rsrq) {
+				seriesLayer += '<path d="' + strokePathFor('rsrq') + '" fill="none" stroke="' + CHART_COLORS.rsrq + '" stroke-width="1.6" stroke-dasharray="5 4" stroke-linecap="round" opacity="0.9"/>' +
+					isolatedDotsFor(seriesMeta[2]);
+			}
+
+			/* ---- 末端脉冲点：标记“当前”，呼吸动效来自 .mt-beacon-dot ---- */
+			var endDots = '';
+			for (var em = 0; em < activeMeta.length; em++) {
+				var lp = lastValid(activeMeta[em]);
+				if (!lp) continue;
+				var er = activeMeta[em].key === 'rsrp' ? 3.6 : (activeMeta[em].key === 'sinr' ? 3.2 : 2.6);
+				endDots += '<circle class="mt-beacon-dot" cx="' + lp[0].toFixed(1) + '" cy="' + lp[1].toFixed(1) +
+					'" r="' + er + '" fill="' + activeMeta[em].color + '" stroke="#ffffff" stroke-width="1.3"/>';
+			}
+
+			/* ---- 时间横轴（一律保留到秒：同一分钟内多点时只写 时:分 会出现三条重复标签） ---- */
+			function fmtTime(ts) { return ts; }
+			var firstTime = fmtTime(view[0].time);
+			var midTime = fmtTime(view[Math.floor(n / 2)].time);
+			var lastTime = fmtTime(view[n - 1].time);
+
+			/* ---- 悬浮卡：只列出当前可见序列，高度随可见数量自适应 ---- */
+			var tipW = narrow ? 170 : 188;
+			var rowH = 20;
+			var tipH = 34 + activeMeta.length * rowH + 20;
+			var tipRows = '';
+			var hoverDots = '';
+			for (var tm = 0; tm < activeMeta.length; tm++) {
+				var mm = activeMeta[tm];
+				var ry = 44 + tm * rowH;
+				tipRows += '<circle cx="18" cy="' + (ry - 4) + '" r="4" fill="' + mm.color + '"/>' +
+					'<text id="mt-tip-val-' + mm.key + '" x="30" y="' + ry + '" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">' + mm.label + ' —</text>';
+				hoverDots += '<circle id="mt-hover-dot-' + mm.key + '" r="4.5" fill="' + mm.color + '" stroke="#ffffff" stroke-width="2"/>';
+			}
+			var tierY = 44 + activeMeta.length * rowH - 4;
 
 			box.innerHTML =
 				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="overflow:visible; display:block;">' +
 				'  <defs>' +
 				'    <linearGradient id="rsrp-area" x1="0" y1="0" x2="0" y2="1">' +
-				'      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>' +
-				'      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.02"/>' +
+				'      <stop offset="0%" stop-color="' + CHART_COLORS.rsrp + '" stop-opacity="0.35"/>' +
+				'      <stop offset="100%" stop-color="' + CHART_COLORS.rsrp + '" stop-opacity="0.02"/>' +
 				'    </linearGradient>' +
 				'  </defs>' +
 				/* 质量分区背景 */
 				bands +
 				/* 网格与双轴刻度 */
 				grid +
-				/* RSRP 面积 + 主曲线 */
-				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + ' L ' + (w - padR) + ' ' + (padT + chartH) +
-				' L ' + padL + ' ' + (padT + chartH) + ' Z" fill="url(#rsrp-area)"/>' +
-				'  <path d="' + smoothPathPoints(rsrpPts, padT, padT + chartH) + '" fill="none" stroke="#38bdf8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
-				/* SINR 副曲线 */
-				'  <path d="' + smoothPathPoints(sinrPts, padT, padT + chartH) + '" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
-				/* RSRQ 参考虚线 */
-				'  <path d="' + smoothPathPoints(rsrqPts, padT, padT + chartH) + '" fill="none" stroke="#a855f7" stroke-width="1.6" stroke-dasharray="5 4" stroke-linecap="round" opacity="0.85"/>' +
-				/* 末端采样点 */
-				'  <circle cx="' + lastRsrp[0].toFixed(1) + '" cy="' + lastRsrp[1].toFixed(1) + '" r="3.6" fill="#38bdf8" stroke="#ffffff" stroke-width="1.4"/>' +
-				'  <circle cx="' + lastSinr[0].toFixed(1) + '" cy="' + lastSinr[1].toFixed(1) + '" r="3.2" fill="#10b981" stroke="#ffffff" stroke-width="1.2"/>' +
-				'  <circle cx="' + lastRsrq[0].toFixed(1) + '" cy="' + lastRsrq[1].toFixed(1) + '" r="2.6" fill="#a855f7" opacity="0.85"/>' +
+				/* 主/副曲线 */
+				seriesLayer +
+				/* 末端脉冲点 */
+				endDots +
 				/* 时间横轴 */
 				'  <text x="' + padL + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="start">' + firstTime + '</text>' +
 				'  <text x="' + (w / 2) + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="middle">' + midTime + '</text>' +
 				'  <text x="' + (w - padR) + '" y="' + (h - 8) + '" font-size="' + fsTime + '" font-family="monospace" fill="var(--mt5700-text-muted)" text-anchor="end">' + lastTime + '</text>' +
-				/* 悬浮层：十字准星 + 三点指示 + 数据卡 */
+				/* 悬浮层：十字准星 + 可见序列指示点 + 数据卡 */
 				'  <g id="mt-trend-hover-layer" style="display:none; pointer-events:none;">' +
-				'    <line id="mt-hover-crosshair" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + chartH) + '" stroke="#a78bfa" stroke-width="1.4" stroke-dasharray="3 3"/>' +
-				'    <circle id="mt-hover-dot-rsrp" r="4.5" fill="#38bdf8" stroke="#ffffff" stroke-width="2"/>' +
-				'    <circle id="mt-hover-dot-sinr" r="4.5" fill="#10b981" stroke="#ffffff" stroke-width="2"/>' +
-				'    <circle id="mt-hover-dot-rsrq" r="3.8" fill="#a855f7" stroke="#ffffff" stroke-width="2"/>' +
+				'    <line id="mt-hover-crosshair" x1="0" y1="' + padT + '" x2="0" y2="' + bottom + '" stroke="#a78bfa" stroke-width="1.4" stroke-dasharray="3 3"/>' +
+				hoverDots +
 				'    <g id="mt-hover-tip-card" transform="translate(0, 0)">' +
-				'      <rect x="0" y="0" width="190" height="116" rx="9" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
-				'      <text id="mt-tip-val-time" x="14" y="23" fill="#f8fafc" font-size="' + tipFsTitle + '" font-weight="bold" font-family="sans-serif">时间: --:--:--</text>' +
-				'      <circle cx="18" cy="43" r="4" fill="#38bdf8"/>' +
-				'      <text id="mt-tip-val-rsrp" x="30" y="47" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRP —</text>' +
-				'      <circle cx="18" cy="64" r="4" fill="#10b981"/>' +
-				'      <text id="mt-tip-val-sinr" x="30" y="68" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">SINR —</text>' +
-				'      <circle cx="18" cy="85" r="4" fill="#a855f7"/>' +
-				'      <text id="mt-tip-val-rsrq" x="30" y="89" fill="#e2e8f0" font-size="' + tipFs + '" font-family="monospace">RSRQ —</text>' +
-				'      <text id="mt-tip-val-tier" x="14" y="108" fill="#94a3b8" font-size="' + tipFs + '" font-family="monospace">质量: —</text>' +
+				'      <rect x="0" y="0" width="' + tipW + '" height="' + tipH + '" rx="9" fill="rgba(15, 23, 42, 0.94)" stroke="rgba(167, 139, 250, 0.6)" stroke-width="1.2"/>' +
+				'      <text id="mt-tip-val-time" x="14" y="22" fill="#f8fafc" font-size="' + tipFsTitle + '" font-weight="bold" font-family="sans-serif">时间: --:--:--</text>' +
+				tipRows +
+				'      <text id="mt-tip-val-tier" x="14" y="' + tierY + '" fill="#94a3b8" font-size="' + tipFs + '" font-family="monospace">质量: —</text>' +
 				'    </g>' +
 				'  </g>' +
-				'  <rect id="mt-chart-hitbox" x="' + padL + '" y="' + padT + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair;"/>' +
+				'  <rect id="mt-chart-hitbox" x="' + padL + '" y="' + padT + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair; touch-action:none;"/>' +
 				'</svg>';
 
 			var hitbox = document.getElementById('mt-chart-hitbox');
 			if (!hitbox) return;
 
-			hitbox.addEventListener('mousemove', function (e) {
+			var dragging = false;
+
+			function hideHover() {
+				var layer = document.getElementById('mt-trend-hover-layer');
+				if (layer) layer.style.display = 'none';
+			}
+
+			function showAt(clientX) {
 				var rect = hitbox.getBoundingClientRect();
-				var frac = (e.clientX - rect.left) / rect.width;
+				var frac = (clientX - rect.left) / rect.width;
 				if (frac < 0) frac = 0;
 				if (frac > 1) frac = 1;
 				var idx = Math.round(frac * (n - 1));
 				idx = Math.max(0, Math.min(n - 1, idx));
-				var item = sigHistory[idx];
+				var item = view[idx];
 				if (!item) return;
 
-				var curX = padL + (idx / (n - 1)) * chartW;
-				var yR = chartScale(item.rsrp, RSRP_MIN, RSRP_MAX, padT, padT + chartH);
-				var yS = chartScale(item.sinr, SINR_MIN, SINR_MAX, padT, padT + chartH);
-				var yQ = chartScale(item.rsrq, RSRQ_MIN, RSRQ_MAX, padT, padT + chartH);
-
+				var curX = xAt(idx);
 				var layer = document.getElementById('mt-trend-hover-layer');
 				if (layer) layer.style.display = 'block';
 
 				var cross = document.getElementById('mt-hover-crosshair');
 				if (cross) { cross.setAttribute('x1', curX.toFixed(1)); cross.setAttribute('x2', curX.toFixed(1)); }
 
-				var dotR = document.getElementById('mt-hover-dot-rsrp');
-				if (dotR) { dotR.setAttribute('cx', curX.toFixed(1)); dotR.setAttribute('cy', yR.toFixed(1)); }
-				var dotS = document.getElementById('mt-hover-dot-sinr');
-				if (dotS) { dotS.setAttribute('cx', curX.toFixed(1)); dotS.setAttribute('cy', yS.toFixed(1)); }
-				var dotQ = document.getElementById('mt-hover-dot-rsrq');
-				if (dotQ) { dotQ.setAttribute('cx', curX.toFixed(1)); dotQ.setAttribute('cy', yQ.toFixed(1)); }
+				var topY = bottom;
+				for (var m = 0; m < activeMeta.length; m++) {
+					var meta = activeMeta[m];
+					var v = item[meta.key];
+					var dot = document.getElementById('mt-hover-dot-' + meta.key);
+					var txt = document.getElementById('mt-tip-val-' + meta.key);
+					if (v != null && v !== '' && !isNaN(v)) {
+						var y = chartScale(Number(v), meta.min, meta.max, padT, bottom);
+						if (dot) { dot.style.display = ''; dot.setAttribute('cx', curX.toFixed(1)); dot.setAttribute('cy', y.toFixed(1)); }
+						if (txt) txt.textContent = meta.label + ': ' + v + ' ' + meta.unit;
+						if (y < topY) topY = y;
+					} else {
+						if (dot) dot.style.display = 'none';
+						if (txt) txt.textContent = meta.label + ': —';
+					}
+				}
 
-				var tipW = 190, tipH = 116;
 				var tipX = curX + 12;
-				if (tipX + tipW > w - 8) tipX = curX - tipW - 12;
+				if (tipX + tipW > w - 6) tipX = curX - tipW - 12;
 				if (tipX < 4) tipX = 4;
-				var tipY = Math.min(yR, yS) - 14;
+				var tipY = topY - 16;
 				if (tipY < padT) tipY = padT;
-				if (tipY + tipH > h - 6) tipY = h - tipH - 6;
-
+				if (tipY + tipH > h - 4) tipY = h - tipH - 4;
 				var tipCard = document.getElementById('mt-hover-tip-card');
 				if (tipCard) tipCard.setAttribute('transform', 'translate(' + tipX.toFixed(1) + ',' + tipY.toFixed(1) + ')');
 
 				var elTime = document.getElementById('mt-tip-val-time');
 				if (elTime) elTime.textContent = '时间: ' + item.time;
-				var elR = document.getElementById('mt-tip-val-rsrp');
-				if (elR) elR.textContent = 'RSRP: ' + (item.rsrp != null ? item.rsrp + ' dBm' : '—');
-				var elS = document.getElementById('mt-tip-val-sinr');
-				if (elS) elS.textContent = 'SINR: ' + (item.sinr != null ? item.sinr + ' dB' : '—');
-				var elQ = document.getElementById('mt-tip-val-rsrq');
-				if (elQ) elQ.textContent = 'RSRQ: ' + (item.rsrq != null ? item.rsrq + ' dB' : '—');
 				var elT = document.getElementById('mt-tip-val-tier');
 				var ti = signalTierIndex(item.rsrp);
 				if (elT) elT.textContent = '质量: ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '—');
-			});
+			}
 
-			hitbox.addEventListener('mouseleave', function () {
-				var layer = document.getElementById('mt-trend-hover-layer');
-				if (layer) layer.style.display = 'none';
+			/* pointer 事件同时覆盖鼠标悬浮与触摸拖动（touch-action:none 已在 hitbox 上关闭滚动劫持） */
+			hitbox.addEventListener('pointerdown', function (e) {
+				dragging = true;
+				if (hitbox.setPointerCapture) {
+					try { hitbox.setPointerCapture(e.pointerId); } catch (err) { /* 某些浏览器不支持捕获，忽略 */ }
+				}
+				showAt(e.clientX);
+				e.preventDefault();
+			});
+			hitbox.addEventListener('pointermove', function (e) {
+				if (e.pointerType === 'touch' && !dragging) return;
+				showAt(e.clientX);
+			});
+			hitbox.addEventListener('pointerup', function (e) {
+				dragging = false;
+				if (e.pointerType === 'touch') hideHover();
+			});
+			hitbox.addEventListener('pointercancel', function () {
+				dragging = false;
+				hideHover();
+			});
+			hitbox.addEventListener('pointerleave', function (e) {
+				if (e.pointerType !== 'touch' && !dragging) hideHover();
 			});
 		}
 
