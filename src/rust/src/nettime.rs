@@ -20,6 +20,27 @@
 //! `tests` 里有一条源码级回归用例盯着这条约定：除 `localtime.rs` / `nettime.rs`
 //! 之外的任何源文件里出现 `chrono::Utc::now()`，测试直接失败。
 //!
+//! # 同步节奏
+//!
+//! **取到一次之后就本地计时**，不再每次取时间都去问服务器：
+//!
+//! ```text
+//! 启动 ──► 同步一次 ─成功─► 记下偏移 ──► 本地计时 20 分钟 ──► 再同步 …
+//!                │                                             ▲
+//!                └─失败─► 3 秒 ×10 次 ─► 1 分钟 ×10 次 ─► 20 分钟 ┘
+//!                         （仍失败）        （仍失败）     （长期兜底，直到成功）
+//! ```
+//!
+//! 失败退避是**先快后慢**：
+//!   - 刚开机最常见的失败原因是「还没拨上号」，几秒后就好了，所以先 **3 秒 × 10 次**
+//!     （约 30 秒窗口，覆盖拨号与基站注册的时间）；
+//!   - 仍不通说明不是瞬时抖动，降到 **1 分钟 × 10 次**（约 10 分钟窗口）；
+//!   - 再不通就落到 **20 分钟**常驻节奏，避免网络长期不可达时每 3 秒空转。
+//! 任何一次成功都会把连续失败计数清零，回到 20 分钟节奏。
+//!
+//! 期间 [`now`] / [`now_ts`] / [`now_ms`] 一律是「设备时钟 + 偏移」的本地计算，
+//! **零网络开销**。
+//!
 //! # 时间口径
 //!
 //! | 层次 | 取值 | 失败回退 |
@@ -37,7 +58,7 @@
 
 use crate::{log_debug, log_info, log_warn};
 use chrono::DateTime;
-use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::net::UdpSocket;
 
@@ -50,10 +71,27 @@ pub const NTP_SERVERS: [&str; 3] = ["ntp.tencent.com", "ntp.aliyun.com", "time.c
 const NTP_PORT: u16 = 123;
 /// 单服务器等待上限：移动网络下 DNS + 往返偶尔会到 1~2 秒，给 3 秒足够。
 const NTP_TIMEOUT: Duration = Duration::from_secs(3);
-/// 同步成功后到下次同步的间隔（6 小时）。
-const SYNC_INTERVAL: Duration = Duration::from_secs(6 * 3600);
-/// 同步失败后的重试间隔（5 分钟）：失败通常是「还没拨上号」，短间隔重试更合理。
-const RETRY_INTERVAL: Duration = Duration::from_secs(300);
+/// 同步成功后的再次同步间隔（**20 分钟**）。
+///
+/// 取到一次之后就靠「设备时钟 + 偏移」本地计时，不再频繁打扰服务器：
+/// 24 小时约 72 次查询，每次 48 字节请求 / 48 字节应答，流量可以忽略。
+/// 20 分钟足够跟上设备晶振的漂移（常温晶振日漂移百毫秒级），不需要更密。
+const SYNC_INTERVAL: Duration = Duration::from_secs(20 * 60);
+
+/// 退避第一级：**3 秒**重试，最多 [`RETRY_FAST_TIMES`] 次（约 30 秒窗口）。
+///
+/// 取 10 次而不是 3 次：开机拨号往往要十几秒到二十几秒才通，
+/// 3 次（9 秒）太早放弃，会白白掉到分钟级，把「刚开机那半分钟」浪费掉。
+const RETRY_FAST: Duration = Duration::from_secs(3);
+/// 退避第一级的重试次数。
+const RETRY_FAST_TIMES: u32 = 10;
+/// 退避第二级：**1 分钟**一次，最多 [`RETRY_SLOW_TIMES`] 次（约 10 分钟窗口）。
+///
+/// 同样取 10 次：覆盖「拨号慢 / 基站注册慢 / 短暂断网」这类分钟级恢复，
+/// 之后才认为网络长期不可达，落到 20 分钟常驻节奏。
+const RETRY_MID: Duration = Duration::from_secs(60);
+/// 退避第二级的重试次数。
+const RETRY_SLOW_TIMES: u32 = 10;
 
 /// NTP 纪元（1900-01-01）到 Unix 纪元（1970-01-01）的秒差。
 const NTP_TO_UNIX: i64 = 2_208_988_800;
@@ -73,6 +111,22 @@ static OFFSET_SECS: AtomicI64 = AtomicI64::new(0);
 static SYNCED_AT: AtomicI64 = AtomicI64::new(0);
 /// 当前时间来源：0=设备时钟，1=NTP。
 static SOURCE_NTP: AtomicU8 = AtomicU8::new(0);
+/// 连续失败次数（成功即清零），决定 [`backoff_for`] 落在哪一级。
+static CONSECUTIVE_FAILS: AtomicU32 = AtomicU32::new(0);
+
+/// 失败退避：先 3 秒快重试，再 1 分钟慢重试，最后落到 20 分钟常驻节奏。
+///
+/// 纯函数（不碰全局状态），便于单测逐级覆盖。
+/// `consecutive_fails` 为**连续**失败次数（成功即清零）。
+pub fn backoff_for(consecutive_fails: u32) -> Duration {
+    if consecutive_fails <= RETRY_FAST_TIMES {
+        RETRY_FAST
+    } else if consecutive_fails <= RETRY_FAST_TIMES + RETRY_SLOW_TIMES {
+        RETRY_MID
+    } else {
+        SYNC_INTERVAL
+    }
+}
 
 /// 时间来源是否来自 NTP。
 pub fn from_ntp() -> bool {
@@ -222,11 +276,26 @@ pub async fn sync_and_apply() -> bool {
     }
 }
 
-/// 后台对时循环：启动即试一次，之后成功等 6 小时、失败等 5 分钟。
+/// 后台对时循环：**启动即试一次，之后成功等 20 分钟、失败等 60 秒**。
+///
+/// 取时间只发生在这里（以及 [`sync_and_apply`] 被显式调用时）；
+/// [`now`] / [`now_ts`] / [`now_ms`] 都是纯本地计算，不产生任何网络流量。
 pub async fn run(ctx: tokio::sync::watch::Receiver<bool>) {
     loop {
-        sync_and_apply().await;
-        let wait = if from_ntp() { SYNC_INTERVAL } else { RETRY_INTERVAL };
+        let ok = sync_and_apply().await;
+        let wait = if ok {
+            CONSECUTIVE_FAILS.store(0, Ordering::Relaxed);
+            SYNC_INTERVAL
+        } else {
+            // 连续失败次数 +1（本次算在内），据此选择退避档位
+            let fails = CONSECUTIVE_FAILS.fetch_add(1, Ordering::Relaxed) + 1;
+            backoff_for(fails)
+        };
+        if ok {
+            log_debug!("时间源: 下次对时在 {} 分钟后", wait.as_secs() / 60);
+        } else {
+            log_debug!("时间源: 对时失败，{} 秒后重试", wait.as_secs());
+        }
         if !crate::schedule::sleep_ctx(&ctx, wait).await {
             return;
         }
@@ -357,6 +426,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn steady_state_resync_is_twenty_minutes() {
+        // 「取到后本地计时，20 分钟再同步」：绝不退化成每次取时间都去问服务器
+        assert_eq!(SYNC_INTERVAL, Duration::from_secs(20 * 60));
+        assert_eq!(SYNC_INTERVAL.as_secs(), 1200);
+    }
+
+    #[test]
+    fn backoff_is_fast_then_slow_then_steady() {
+        // 第一级：3 秒快重试（刚开机多半只是还没拨上号）
+        for fails in 1..=RETRY_FAST_TIMES {
+            assert_eq!(backoff_for(fails), RETRY_FAST, "第 {fails} 次失败应 3 秒重试");
+        }
+        assert_eq!(RETRY_FAST, Duration::from_secs(3));
+        // 第二级：1 分钟 × 3 次
+        for fails in RETRY_FAST_TIMES + 1..=RETRY_FAST_TIMES + RETRY_SLOW_TIMES {
+            assert_eq!(backoff_for(fails), RETRY_MID, "第 {fails} 次失败应 1 分钟重试");
+        }
+        assert_eq!(RETRY_MID, Duration::from_secs(60));
+        // 第三级：之后长期 20 分钟一次，不再加速
+        for fails in [RETRY_FAST_TIMES + RETRY_SLOW_TIMES + 1, 50, 1000] {
+            assert_eq!(backoff_for(fails), SYNC_INTERVAL, "第 {fails} 次失败应回落到 20 分钟");
+        }
+        // 逐级变慢，不能出现「越失败越急」
+        assert!(RETRY_FAST < RETRY_MID && RETRY_MID < SYNC_INTERVAL);
+    }
+
+    #[test]
+    fn backoff_zero_is_the_fast_lane() {
+        // 计数只在失败时自增，0 次失败不会真的走进这里；兜底给最快档
+        assert_eq!(backoff_for(0), RETRY_FAST);
     }
 
     #[test]
