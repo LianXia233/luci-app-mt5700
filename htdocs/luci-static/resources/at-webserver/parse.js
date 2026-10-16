@@ -1112,6 +1112,48 @@ var Parse = (function () {
 		};
 	};
 
+	/* ================= 5GS QoS 动态参数 +C5GQOSRDP ================= */
+	/*
+	 * 3GPP TS 27.007 +C5GQOSRDP（只读动态参数，取一次即可，无需等待业务触发）：
+	 *   +C5GQOSRDP: <cid>,<5QI>,[<GFBR_uplink>],[<GFBR_downlink>],
+	 *               [<MFBR_uplink>],[<MFBR_downlink>],[<Session-AMBR 上行>],[<Session-AMBR 下行>]
+	 * 所有比特率单位均为 **kbps**。
+	 *
+	 * 注意（实测本机 AT+C5GQOSRDP=1 → "1,6,,,,,102400,102400"）：
+	 *   - 5QI=6 是非 GBR 类，故 GFBR/MFBR 四个字段按规范留空；
+	 *   - 末尾两个非空值即核心网下发的 **Session-AMBR**，也就是这张卡的
+	 *     **签约上下行速率**（102400 kbps = 100 Mbps）。
+	 *   - 标准 3GPP 定义只有 7 个字段（末位是 averaging_window，毫秒级），
+	 *     而本固件是 8 字段变体。为避免把 averaging_window 误当成速率，
+	 *     只在字段数 ≥8 时才把第 7/8 位解析为签约速率，否则留空。
+	 */
+	api.parseC5gQosRdp = function (text) {
+		var lines = String(text).split(/\r?\n/);
+		for (var i = 0; i < lines.length; i++) {
+			var m = lines[i].match(/\+?C5GQOSRDP:\s*([^\r\n]*)/i);
+			if (!m) continue;
+			var f = m[1].split(',');
+			var num = function (v) {
+				var n = parseInt(String(v == null ? '' : v).trim(), 10);
+				return isNaN(n) ? null : n;
+			};
+			var hasAmbr = f.length >= 8;
+			return {
+				cid: num(f[0]),
+				qci: num(f[1]),
+				gfbrUl: num(f[2]),
+				gfbrDl: num(f[3]),
+				mfbrUl: num(f[4]),
+				mfbrDl: num(f[5]),
+				ambrUl: hasAmbr ? num(f[6]) : null,
+				ambrDl: hasAmbr ? num(f[7]) : null,
+				raw: lines[i].trim(),
+				at: Date.now()
+			};
+		}
+		return null;
+	};
+
 	return api;
 })();
 
