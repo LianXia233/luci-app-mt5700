@@ -565,6 +565,17 @@
   padding: 1px 8px;
   font-size: 10px;
 }
+.mt-usage-clock {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mt5700-amber);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  cursor: help;
+}
 .mt-usage-lbl {
   font-size: 10.5px;
   font-weight: 600;
