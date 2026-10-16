@@ -168,6 +168,17 @@ try {
 	{
 		check('C5GQOSRDP 无匹配行返回 null', Parse.parseC5gQosRdp('ERROR') === null, 'not null');
 	}
+	{
+		// 手册 16.17 AT^DSAMBR：5G 与 4G 实机均返回 5 个字段（cid,下行,上行,APN,状态）
+		const nr = Parse.parseDsambr('^DSAMBR: 1,2000,3000,"cmiot5g",11\r\nOK');
+		check('DSAMBR (5G) 解析签约速率', nr && nr.cid === 1 && nr.dlAmbr === 2000 && nr.ulAmbr === 3000,
+			nr ? JSON.stringify(nr) : 'null');
+		const lte = Parse.parseDsambr('^DSAMBR: 1,4000,5000,"CMIOT5G.MNC008.MCC460.GPRS",12\r\nOK');
+		check('DSAMBR (4G) 解析签约速率', lte && lte.dlAmbr === 4000 && lte.ulAmbr === 5000 && lte.apn !== '',
+			lte ? JSON.stringify(lte) : 'null');
+		check('DSAMBR 速率为空时不编造', Parse.parseDsambr('^DSAMBR: 1,,\r\nOK').dlAmbr === null, 'not null');
+		check('DSAMBR 无匹配行返回 null', Parse.parseDsambr('ERROR') === null, 'not null');
+	}
 
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));

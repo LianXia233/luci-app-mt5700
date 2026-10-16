@@ -1154,6 +1154,41 @@ var Parse = (function () {
 		return null;
 	};
 
+	/* ================= 签约速率 AT^DSAMBR（手册 16.17） ================= */
+	/*
+	 * 手册 16.17「AT^DSAMBR - 签约速率查询」：
+	 *   AT^DSAMBR=<cid>
+	 *   <CR><LF>^DSAMBR: <cid>,<DlApnAmbr>,<UlApnAmbr>[,...]<CR><LF>OK
+	 *   <DlApnAmbr> 下行签约速率，单位 kbps
+	 *   <UlApnAmbr> 上行签约速率，单位 kbps
+	 *
+	 * 实机返回比手册多两个字段（APN 与一个状态码）：
+	 *   NR: ^DSAMBR: 1,<dl>,<ul>,"<APN>",<n>
+	 *   LTE: ^DSAMBR: 1,<dl>,<ul>,"<APN>",<n>
+	 * 因此只按**前三个位置**取值，后面的原样保留在 extra 里，不做臆测。
+	 *
+	 * 该命令 4G / 5G 下均可用，是签约速率的首选来源；取不到时才回退
+	 * 到标准命令 AT+C5GQOSRDP 的 Session-AMBR（见 parseC5gQosRdp）。
+	 */
+	api.parseDsambr = function (text) {
+		var lines = String(text).split(/\r?\n/);
+		for (var i = 0; i < lines.length; i++) {
+			var m = lines[i].match(/\^DSAMBR:\s*([0-9]+)\s*,\s*([0-9]*)\s*,\s*([0-9]*)/);
+			if (!m) continue;
+			var rest = lines[i].slice(lines[i].indexOf(m[0]) + m[0].length);
+			var apnMatch = rest.match(/"([^"]*)"/);
+			return {
+				cid: parseInt(m[1], 10),
+				dlAmbr: m[2] === '' ? null : parseInt(m[2], 10),
+				ulAmbr: m[3] === '' ? null : parseInt(m[3], 10),
+				apn: apnMatch ? apnMatch[1] : '',
+				raw: lines[i].trim(),
+				at: Date.now()
+			};
+		}
+		return null;
+	};
+
 	return api;
 })();
 
