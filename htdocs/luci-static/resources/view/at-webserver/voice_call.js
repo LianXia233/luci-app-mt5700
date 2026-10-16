@@ -86,6 +86,27 @@ return L.view.extend({
 			failed: '未接通'
 		};
 
+		/*
+		 * 阶段令牌 → 文案。令牌由后端 callStageOf 给（见 mt5700.uc），
+		 * 取值与厂商 modemwebui-server 的状态机对齐：
+		 *   unknown / idle / requesting / dialing / alerting / ringing /
+		 *   waiting / active / held / ended
+		 * requesting（"等待模组确认呼出"）是厂商的本地时序态，轮询模型观测
+		 * 不到，本页不会收到；留着文案是为了两边共用一张表时不缺项。
+		 */
+		var STAGE_TEXT = {
+			unknown: '状态未知',
+			idle: '空闲',
+			requesting: '等待模组确认呼出',
+			dialing: '正在呼出',
+			alerting: '对方振铃',
+			ringing: '来电振铃',
+			waiting: '来电等待',
+			active: '已接通',
+			held: '通话保持',
+			ended: '已结束'
+		};
+
 		/* 前端号码白名单：与后端 callNumberOk 同口径（后端才是真门禁） */
 		var NUMBER_RE = /^\+?[0-9*#]+$/;
 
@@ -109,6 +130,7 @@ return L.view.extend({
 		 */
 		var st = {
 			phase: 'idle',
+			stage: null,      /* 后端 callStageOf 给的令牌；null＝还没读到过（红线 23） */
 			number: '',       /* 拨号盘输入 / 在途呼叫号码 */
 			activeAt: 0,      /* 首个 active 出现的时刻（时长基准） */
 			calls: [],        /* 最近一次 status 的全部在途呼叫 */
@@ -117,7 +139,9 @@ return L.view.extend({
 			busy: false,
 			err: '',
 			ringEnabled: true,
-			backendOk: true   /* false＝rpcd 没有 mt5700.call（后端未升级） */
+			backendOk: true,  /* false＝rpcd 没有 mt5700.call（后端未升级） */
+			pfBusy: false,    /* 前置检查进行中（它一次发 4 条 AT，要独占通道） */
+			pf: null          /* 前置检查结果；null＝还没查过 */
 		};
 
 		/* 通话跟踪：进入非 idle 时建，回到 idle 时落一条记录 */
@@ -168,6 +192,24 @@ return L.view.extend({
 		statusCard._body.appendChild(statusErr);
 
 		body.appendChild(statusCard);
+
+		/* ---------- 可用性自检 ---------- */
+
+		/*
+		 * 移植自厂商固件的 voicePreparation 思路：拨号前先把前置条件摊开。
+		 * 但**只在用户点按钮时才发 AT** —— 一次 4 条查询约 0.5 秒，串口独占
+		 * 且 rpcd 单线程（红线 63/70），放进轮询就是每 2 秒阻塞一次 LuCI。
+		 */
+		var pfCard = Mt5700.card('可用性自检',
+			'拨不出去时先点这里：逐项检查 SIM 卡 / CS 域注册 / IMS 注册 / 来电显示，'
+			+ '直接指出卡在哪一环');
+		var pfHost = E('div');
+		pfCard._body.appendChild(pfHost);
+		var pfActions = E('div', { 'class': 'mt5700-panel-actions' });
+		pfCard._body.appendChild(pfActions);
+		var pfBtn = Mt5700.ghostButton('检查能否拨号', function () { runPreflight(); });
+		pfActions.appendChild(pfBtn);
+		body.appendChild(pfCard);
 
 		/* ---------- 拨号盘 ---------- */
 
@@ -244,6 +286,76 @@ return L.view.extend({
 		logActions.appendChild(Mt5700.ghostButton('清空', function () { clearLog(); }));
 
 		body.appendChild(logCard);
+
+		/* ---------- 可用性自检：执行与渲染 ---------- */
+
+		function renderPreflight() {
+			pfHost.innerHTML = '';
+			if (!st.pf) {
+				pfHost.appendChild(E('p', { 'class': 'mt5700-hint' },
+					'未检查。点「检查能否拨号」会连发 4 条只读查询（约 0.5 秒）——'
+					+ '串口独占、rpcd 单线程，所以只在你要用时才跑，不放进 2 秒轮询。'));
+				return;
+			}
+			if (!st.pf.success) {
+				pfHost.appendChild(E('p', { 'class': 'mt5700-hint' },
+					'检查失败：' + (st.pf.error || '未知原因')));
+				return;
+			}
+			var steps = st.pf.steps || [];
+			var rows = steps.map(function (s) {
+				/*
+				 * ✓ 通过 / ✗ 未过且**确实挡住了拨号** / ○ 未过但不影响能否拨
+				 * —— 三种记号把「能不能拨」和「体验好不好」分开，避免用户看到
+				 * 一片红就以为完全不能用。
+				 * ★ 判据是后端的 blocking 而不是 core：本机能出现「CS 域没注册、
+				 *   但 IMS 已注册」这种状态，此时 CS 那一行未过却**不是**阻断项
+				 *   （真机 2026-10-16 实测，见 ucode callPreflight 函数头注释）。
+				 */
+				return [
+					s.ok ? '✓' : (s.blocking ? '✗' : '○'),
+					s.title,
+					s.cmd,
+					(s.value == null ? '—' : String(s.value)),
+					s.hint || ''
+				];
+			});
+			pfHost.appendChild(Mt5700.table(['', '检查项', '命令', '读数', '说明'], rows,
+				{ striped: true }));
+
+			var verdict;
+			if (st.pf.ready) {
+				verdict = '可以拨号。' + (st.pf.volte
+					? 'IMS 已注册，语音走 VoLTE/VoNR。'
+					: 'CS 域已注册，语音走电路域（2G/3G）。');
+			} else {
+				verdict = '当前不能拨号：' + (st.pf.blocked || '前置条件未满足');
+			}
+			pfHost.appendChild(E('p', { 'class': 'mt5700-hint' }, verdict));
+		}
+
+		function runPreflight() {
+			if (st.pfBusy) { return; }
+			st.pfBusy = true;
+			pfBtn.disabled = true;
+			pfHost.innerHTML = '';
+			pfHost.appendChild(E('p', { 'class': 'mt5700-hint' }, '检查中…（4 条只读 AT 查询）'));
+			AtWs.call('preflight').then(function (res) {
+				st.pfBusy = false;
+				pfBtn.disabled = false;
+				/*
+				 * ★ 「没响应」不能伪装成「检查完了都好」（红线 23）：
+				 *   无响应时给 success:false，渲染层画错误，不画空表。
+				 */
+				st.pf = res || { success: false, error: '无响应' };
+				renderPreflight();
+			}).catch(function () {
+				st.pfBusy = false;
+				pfBtn.disabled = false;
+				st.pf = { success: false, error: '调用失败（后端可能未升级）' };
+				renderPreflight();
+			});
+		}
 
 		/* ---------- 动作 ---------- */
 
@@ -381,10 +493,15 @@ return L.view.extend({
 					st.number = numberInput.value;
 					doDial();
 				});
+				/* 方向优先用后端的 direction 字符串（厂商口径），老记录退回 dir 整数 */
+				var dirText;
+				if (r.direction === 'incoming') { dirText = '来电'; }
+				else if (r.direction === 'outgoing') { dirText = '去电'; }
+				else { dirText = (r.dir === 1) ? '来电' : '去电'; }
 				return [
 					fmtClock(r.time),
 					r.number == null ? '—' : String(r.number),
-					(r.dir === 1 ? '来电' : '去电'),
+					dirText,
 					RESULT_TEXT[r.result] || (r.result == null ? '—' : String(r.result)),
 					r.duration ? fmtSeconds(r.duration) : '—',
 					redialBtn
@@ -439,6 +556,9 @@ return L.view.extend({
 			var rec = {
 				number: num,
 				dir: t.dir,
+				/* direction 与 dir 同义，多给一份可读字符串：厂商口径的消费方
+				 * （以及换语言/换主题时的展示）不必再各自维护 0/1 → 文案映射 */
+				direction: (t.dir === 1) ? 'incoming' : 'outgoing',
 				result: result,
 				duration: t.answeredAt ? Math.round((Date.now() - t.answeredAt) / 1000) : 0,
 				time: Math.round(t.startedAt / 1000)
@@ -594,8 +714,12 @@ return L.view.extend({
 					 * ★「读不到」与「没有通话」必须分开（红线 23）：
 					 *   后端无 mt5700.call 方法 / 通道故障 → 如实报错，不清状态；
 					 *   成功且 calls 为空数组才是真的空闲。
+					 * ★ 判据用「不是数组」而不是「=== null」：后端若在失败分支
+					 *   不回 calls 字段，`undefined === null` 为假 ⇒ 报错分支是
+					 *   死代码，通道故障看起来像空闲。后端已补 `calls: null`，
+					 *   这里同时放宽判据以兼容未升级的后端。
 					 */
-					if (res.calls === null) {
+					if (!Array.isArray(res.calls)) {
 						st.backendOk = false;
 						setErr(res.error || '通话状态读取失败');
 					}
@@ -603,6 +727,7 @@ return L.view.extend({
 				}
 				st.backendOk = true;
 				setErr('');
+				st.stage = res.stage || null;
 				applyCalls(res.calls || []);
 			}).catch(function () {
 				/* 网络抖动不清状态：下一次轮询会纠正 */
@@ -643,13 +768,30 @@ return L.view.extend({
 			if (st.phase === 'outgoing') { badgeText = '呼叫中'; badgeVariant = 'primary'; }
 			else if (st.phase === 'incoming') { badgeText = '来电'; badgeVariant = 'warning'; }
 			else if (st.phase === 'active') { badgeText = '通话中'; badgeVariant = 'success'; }
+			/*
+			 * stage 粒度比 phase 细：CLCC 本来就把 dialing / alerting /
+			 * ringing / waiting / held 分开了，厂商状态机也照此命名。
+			 * 有令牌时用令牌细化徽标，没有就保持 phase 的粗粒度（兼容老后端）。
+			 */
+			if (st.stage === 'dialing') { badgeText = '正在呼出'; badgeVariant = 'primary'; }
+			else if (st.stage === 'alerting') { badgeText = '对方振铃'; badgeVariant = 'primary'; }
+			else if (st.stage === 'ringing') { badgeText = '来电振铃'; badgeVariant = 'warning'; }
+			else if (st.stage === 'waiting') { badgeText = '来电等待'; badgeVariant = 'warning'; }
+			else if (st.stage === 'held') { badgeText = '通话保持'; badgeVariant = 'warning'; }
 			statusBadge.textContent = badgeText;
 			statusBadge.className = 'mt5700-badge mt5700-badge-' + badgeVariant;
 
 			metricNumber.querySelector('.mt5700-metric-value').textContent = st.number || '—';
 			var first = st.calls.length ? st.calls[0] : null;
-			metricState.querySelector('.mt5700-metric-value').textContent =
-				first ? (CALL_STATE[first.state] || ('状态 ' + first.state)) : '空闲';
+			/*
+			 * 状态文案优先用后端给的 stage 令牌（那是协议语义，由后端定），
+			 * 拿不到令牌时退回本地 <state> 整数映射。
+			 */
+			var stageText = (st.stage == null) ? null : (STAGE_TEXT[st.stage] || null);
+			if (stageText == null && first) {
+				stageText = CALL_STATE[first.state] || ('状态 ' + first.state);
+			}
+			metricState.querySelector('.mt5700-metric-value').textContent = stageText || '空闲';
 			metricDir.querySelector('.mt5700-metric-value').textContent =
 				first ? (CALL_DIR[first.dir] || '—') : '—';
 			metricDuration.querySelector('.mt5700-metric-value').textContent =
@@ -701,6 +843,8 @@ return L.view.extend({
 			Mt5700.interval(2000, function () {
 				/* 操作进行中不叠加查询：AT 通道是独占串行的 */
 				if (st.busy) { return; }
+				/* 前置检查一次发 4 条 AT，同样独占通道：它跑的时候让路 */
+				if (st.pfBusy) { return; }
 				refreshStatus();
 			}, page);
 		});

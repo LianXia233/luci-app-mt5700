@@ -2750,6 +2750,58 @@ function callParseClcc(data) {
 }
 
 /*
+ * 通话阶段（stage）：把 CLCC 的 <state> 整数翻成**状态令牌**。
+ *
+ * ★ 为什么要这层翻译：<state> 是 3GPP 的裸整数（0~5），前端画表要自己
+ *   维护映射；而"这条通道到底处于哪个阶段"是**协议语义**，应该由后端
+ *   定了再往外给 —— 前端只负责显示。
+ * ★ 令牌取值对齐厂商实现（modemwebui-server 的 voiceCall 状态机，
+ *   2026-10-16 从 H5000M「带电话功能beta」固件逆向得到）：
+ *     unknown / idle / requesting / dialing / alerting / ringing /
+ *     waiting / active / held / ended
+ *   厂商多一个 requesting（"等待模组确认呼出"，即 ATD 已发但 CLCC 还没
+ *   建起呼叫）—— 那是**本地时序状态**，轮询模型里观测不到，故本实现不产出
+ *   该值；其余令牌一一对应，前端可用同一套文案表。
+ * ★ 为什么不用对象字面量做表：ucode 的对象键必须是标识符或字符串字面量，
+ *   数字键 `{0:'active'}` 在部分版本上解析行为不稳（红线：本文件只在
+ *   Rust 侧编译、设备上直接跑，语法差异没有编译期兜底）。用 if 链最稳。
+ */
+function callStageOf(c) {
+	if (type(c) != 'object') {
+		return 'unknown';
+	}
+	let s = int(c.state);
+	if (s == 0) { return 'active'; }
+	if (s == 1) { return 'held'; }
+	if (s == 2) { return 'dialing'; }
+	if (s == 3) { return 'alerting'; }
+	if (s == 4) { return 'ringing'; }
+	if (s == 5) { return 'waiting'; }
+	return 'unknown';
+}
+
+/*
+ * 多路呼叫时的整体阶段：按"最靠前于用户的阶段"取优先级。
+ * 优先级 active > held > waiting > ringing > alerting > dialing
+ * —— 有一路接通就得报"已接通"，不能被另一路的拨号态盖过去。
+ * 空数组 → idle（这是"确实没有通话"，与"读不到"无关，红线 23）。
+ */
+function callOverallStage(calls) {
+	if (type(calls) != 'array' || length(calls) == 0) {
+		return 'idle';
+	}
+	let order = ['active', 'held', 'waiting', 'ringing', 'alerting', 'dialing'];
+	for (let i = 0; i < length(order); i++) {
+		for (let j = 0; j < length(calls); j++) {
+			if (callStageOf(calls[j]) == order[i]) {
+				return order[i];
+			}
+		}
+	}
+	return 'unknown';
+}
+
+/*
  * 拨号 / 接听 / 挂断 / DTMF 的统一出口。
  *
  * ★ 命令由本文件拼装，前端只传白名单内的参数 —— 前端没有任何把任意字符串
@@ -2774,16 +2826,32 @@ function callDo(action, cmd) {
 	};
 }
 
-/* 通话状态：AT+CLCC → 结构化通话数组 */
+/*
+ * 通话状态：AT+CLCC → 结构化通话数组 + 整体阶段。
+ *
+ * ★★★ 失败分支必须显式给 `calls: null`：前端用 `res.calls === null` 区分
+ *   「读不到」与「确实没有通话」（红线 23）。早先这里只回 error 不给 calls，
+ *   前端拿到的是 undefined —— `undefined === null` 为假，于是**报错分支成了
+ *   死代码**，通道故障时页面只是"看着像空闲"，用户以为没通话其实是无读数。
+ *   这类"失败被静默吞掉"的形态正是红线 23 要拦的，故在此显式声明。
+ */
 function callStatus() {
 	let r = rpcCall('at', { cmd: 'AT+CLCC' });
 	if (r == null) {
-		return { success: false, action: 'status', error: 'AT 通道无响应' };
+		return { success: false, action: 'status', calls: null, error: 'AT 通道无响应' };
 	}
 	if (!r.success) {
-		return { success: false, action: 'status', error: (r.error || '查询失败') };
+		return { success: false, action: 'status', calls: null, error: (r.error || '查询失败') };
 	}
-	return { success: true, action: 'status', calls: callParseClcc(r.data) };
+	let calls = callParseClcc(r.data);
+	for (let i = 0; i < length(calls); i++) {
+		calls[i].stage = callStageOf(calls[i]);
+	}
+	return {
+		success: true, action: 'status',
+		calls: calls,
+		stage: callOverallStage(calls)
+	};
 }
 
 /*
@@ -2873,7 +2941,20 @@ function callLogRead() {
 	if (raw == null || raw == '') { return []; }
 	let list = null;
 	try { list = jsonParse(raw); } catch (e) { return []; }
-	return (type(list) == 'array') ? list : [];
+	if (type(list) != 'array') {
+		return [];
+	}
+	/*
+	 * ★ 老记录（本次升级前落的）只有 dir 没有 direction：在**读侧补**，
+	 *   不做落盘迁移 —— 迁移要重写整份文件，一旦中途掉电就是记录全丢；
+	 *   读侧补齐的代价是每次多走一趟循环，几乎为零。
+	 */
+	for (let i = 0; i < length(list); i++) {
+		if (type(list[i]) == 'object' && list[i].direction == null) {
+			list[i].direction = (int(list[i].dir) == 1) ? 'incoming' : 'outgoing';
+		}
+	}
+	return list;
 }
 
 function callLogWrite(list) {
@@ -2894,16 +2975,37 @@ function callLogWrite(list) {
  *   不校验就等于开一条「往 /etc/mt5700 塞任意字符串」的路子。
  * ★ result 是白名单枚举，不是自由文本；duration 钳到 [0, DUR_MAX]。
  * ★ time 客户端可传（前端在通话结束时上报本地时间），缺失或非法时补 time()。
+ * ★ 兼容厂商口径（modemwebui-server 的 callRecord，2026-10-16 逆向所得）：
+ *     · 方向可写成字符串 direction='incoming'|'outgoing'（等价 dir=1|0）
+ *     · 结果别名 unanswered ≡ failed（厂商枚举里没有 canceled/rejected，
+ *       但有 unanswered —— 收敛到本项目的 failed，读侧再统一展示）
+ *   注意**只做入参兼容**：落盘仍用本项目的 canonical 形态，避免同一份记录
+ *   出现两套字段各写一半（那正是"两处名单必须一致"类事故的温床，红线 66）。
+ * ★ 落盘额外带 direction 字符串：厂商前端与我们前端都能直接画，不必各自
+ *   再维护一份 0/1 → 文案的映射。
  */
 function callLogEntry(m) {
 	if (type(m) != 'object' || type(m.number) != 'string' || !callNumberOk(m.number)) {
 		return null;
 	}
-	let dir = int(m.dir);
+	let dir = null;
+	if (m.dir != null) {
+		dir = int(m.dir);
+	} else if (m.direction == 'incoming') {
+		dir = 1;
+	} else if (m.direction == 'outgoing') {
+		dir = 0;
+	}
 	if (dir != 0 && dir != 1) {
 		return null;
 	}
 	let result = m.result;
+	if (result == 'unanswered') {
+		result = 'failed';
+	}
+	if (result == null && m.answered == true) {
+		result = 'answered';
+	}
 	if (result != 'answered' && result != 'missed' && result != 'rejected' &&
 	    result != 'canceled' && result != 'failed') {
 		return null;
@@ -2919,7 +3021,11 @@ function callLogEntry(m) {
 	if (ts == null || ts <= 0) {
 		ts = time();
 	}
-	return { number: m.number, dir: dir, result: result, duration: dur, time: ts };
+	return {
+		number: m.number, dir: dir,
+		direction: (dir == 1) ? 'incoming' : 'outgoing',
+		result: result, duration: dur, time: ts
+	};
 }
 
 function callLogAdd(rec) {
@@ -2953,6 +3059,206 @@ function callLogClear() {
 		return { success: false, error: '清空记录失败' };
 	}
 	return { success: true, cleared: true };
+}
+
+/* ---------- 语音前置检查（preflight） ---------- */
+
+/*
+ * 取应答里某前缀之后的**全部整数**（按出现顺序）。
+ *   '^SIMSQ: 1,12'        → [1, 12]
+ *   '+CREG: 2,5,"1A2B",..' → [2, 5]
+ * 只认第一行（遇 \n / \r 收工）—— URC 可能跟在后面，不能把 URC 里的数字
+ * 当成这条命令的参数。
+ */
+function callNumsAfter(text, prefix) {
+	let out = [];
+	if (text == null || prefix == null) {
+		return out;
+	}
+	let k = index(text, prefix);
+	if (k < 0) {
+		return out;
+	}
+	let rest = substr(text, k + length(prefix));
+	let cur = '';
+	for (let i = 0; i <= length(rest); i++) {
+		let c = (i < length(rest)) ? substr(rest, i, 1) : '';
+		if (c == '' || c == '\n' || c == '\r') {
+			if (length(cur) > 0) { out[length(out)] = int(cur); }
+			break;
+		}
+		if (index('0123456789', c) >= 0) {
+			cur = cur + c;
+			continue;
+		}
+		if (length(cur) > 0) {
+			out[length(out)] = int(cur);
+			cur = '';
+		}
+	}
+	return out;
+}
+
+/*
+ * 语音可用性前置检查（preflight）。
+ *
+ * ★ 这是做什么的：拨号失败时，用户最常见的困惑是「为什么打不出去」。
+ *   ATD 只会回 OK / ERROR / NO CARRIER，把"到底是卡没就绪、还是没驻网、
+ *   还是 IMS 没注册"全糊成一句失败。本动作把手册第 0/3 节那条链**逐项摊开**，
+ *   直接告诉用户卡在哪一环。
+ *
+ * ★ 出处与移植说明（2026-10-16 从 H5000M「带电话功能beta」固件逆向）：
+ *   厂商 modemwebui-server 有一套 voicePreparation 机制
+ *   （prepareQuectelVoice / ensureVoiceSetting / voicePreparationSnapshot /
+ *   setVoiceStage / cancelVoicePreparation），会在拨号前**写**模组配置：
+ *       AT+QCALLCFG="voice_disable",0
+ *       AT+QCFG="ims"
+ *   这两条是 **Quectel 私有命令**。MT5700M-CN 手册第 238 条命令里没有它们，
+ *   按红线 27（不向未定义命令盲发）与项目"只用手册内命令"的约定，
+ *   **本实现不移植任何一条 Quectel 命令**——只移植"先检查再拨号"这个
+ *   方法论，并把检查落到 MT5700M 手册里真实存在的**只读查询**上：
+ *     AT^SIMSQ?（手册 6.6）  → sim_status 必须 = 12（11 只是"可接入网络"）
+ *     AT+CREG? （手册 5.x）  → <stat> 必须 = 1 或 5（CS 域注册，语音前提）
+ *     AT+CIREG?（手册 7.6）  → <reg_info> = 1 表示 IMS 已注册（VoLTE/VoNR 前提）
+ *     AT+CLIP? （手册 5.8）  → <m> = 1 表示来电号码会上报（排查"看不到号码"）
+ *   四条全是 `?` 结尾的查询：不发写命令、不改模组状态、无副作用，
+ *   不触碰红线 22（禁自动下发周期上报类 AT）。
+ *
+ * ★ 成本与调用纪律：一次 4 条 ≈ 300~550 ms（真机单条 65~133 ms）。
+ *   串口独占串行、rpcd 单线程（红线 63/70），所以**只在用户点按钮时跑**，
+ *   绝不进 2s 轮询。
+ *
+ * ★ 与「读不到」的区分（红线 23）：第一步拿不到读数就直接 success:false，
+ *   不返回一份全是 ✗ 的表格去冒充"检查做了但都不通"。
+ */
+/*
+ * 语音可用性前置检查（四条只读查询）。
+ *
+ * ★★ 判据「能不能拨」＝ **SIM 已初始化 且（CS 域 或 IMS 域 任一可用）**。
+ *   为什么不是「CS 注册了才算」——2026-10-16 真机实测到一个反直觉状态：
+ *     +CGREG: 1,1（PS 已注册，数据通）  +CEREG: 2,1（EPS 已注册）
+ *     +CIREG: 1,1（IMS 已注册）         +CREG: 0,0（**CS 域没注册**）
+ *   若按 CS 判，这台机器会被判成「不能打电话」，而它其实可以走 VoLTE/VoNR。
+ *   手册 4.6 的 ^CCALLSTATE 给了决定性依据：<voice_domain> 明确有
+ *   「1：IMS 域语音电话」这一档 ⇒ **语音呼叫并不要求 CS 注册**。
+ *   （红线 42：两个数字打架时必须回真机量一次；红线 49：判定要带对照组。）
+ * ★ ^SIMSQ 的 <sim_status> 判据按手册 6.6.3 原文校准：
+ *   11 = 卡初始化完成（可接入网络）、12 = 卡初始化完成（短信和电话本可接入）
+ *   —— 12 说的是**短信/电话本**，不是「才能打电话」；11 与 12 都算已初始化。
+ *   之前把 12 当成语音门槛是过度解读，11 会被误判成不可用。
+ * ★ AT+CLIP? 本模组**不支持查询**：实测回 +CME ERROR: UNKNOWN，而
+ *   AT+CLIP=? 正常回 +CLIP: (0,1)。故该项只作提示、不参与 ready，
+ *   并且把「命令被拒」与「读到了但没有此项」分开报（红线 23）。
+ */
+function callPreflight() {
+	let steps = [];
+
+	/* --- 1) SIM 卡：^SIMSQ: <mode>,<sim_status>（手册 6.6） --- */
+	let r1 = rpcCall('at', { cmd: 'AT^SIMSQ?' });
+	if (r1 == null) {
+		return { success: false, action: 'preflight', error: 'AT 通道无响应' };
+	}
+	if (!r1.success) {
+		return {
+			success: false, action: 'preflight',
+			error: (r1.error || 'AT 通道不可用')
+		};
+	}
+	let v1 = callNumsAfter(r1.data, '^SIMSQ:');
+	let simStatus = (length(v1) >= 2) ? v1[1] : null;
+
+	/* --- 2) CS 域注册：+CREG: <n>,<stat>，1=本地 5=漫游（手册 5.4） --- */
+	let r2 = rpcCall('at', { cmd: 'AT+CREG?' });
+	let v2 = (r2 != null && r2.success) ? callNumsAfter(r2.data, '+CREG:') : [];
+	let stat = (length(v2) >= 2) ? v2[1] : null;
+
+	/* --- 3) IMS 注册：+CIREG: <n>,<reg_info>，reg_info=1 表示已注册（手册 7.6） --- */
+	let r3 = rpcCall('at', { cmd: 'AT+CIREG?' });
+	let v3 = (r3 != null && r3.success) ? callNumsAfter(r3.data, '+CIREG:') : [];
+	let regInfo = (length(v3) >= 2) ? v3[1] : null;
+
+	/* --- 4) 来电号码显示：+CLIP: <n>,<m>（手册 5.8） --- */
+	let r4 = rpcCall('at', { cmd: 'AT+CLIP?' });
+	let v4 = (r4 != null && r4.success) ? callNumsAfter(r4.data, '+CLIP:') : [];
+	let clip = (length(v4) >= 2) ? v4[1] : null;
+	let clipErr = (r4 != null && r4.error != null) ? r4.error : '';
+
+	/* 判据（见函数头注释的真机依据） */
+	let simOk = (simStatus == 11 || simStatus == 12);
+	let csOk = (stat == 1 || stat == 5);
+	let imsOk = (regInfo == 1);
+	let netOk = (csOk || imsOk);
+	let clipOk = (clip == 1);
+
+	/* SIM 状态文案：取值与措辞按手册 6.6.3 原文，不自己加戏 */
+	let simText = null;
+	if (simStatus == 0) { simText = '卡不在位'; }
+	else if (simStatus == 1) { simText = '卡已插入但尚未初始化'; }
+	else if (simStatus == 2) { simText = '卡被 PIN/PUK 锁'; }
+	else if (simStatus == 10) { simText = '卡文件正在初始化'; }
+	else if (simStatus == 11) { simText = '已初始化（可接入网络）'; }
+	else if (simStatus == 12) { simText = '已初始化（短信与电话本可接入）'; }
+	else if (simStatus == 98) { simText = '卡物理失效（PUK 锁死或卡失效）'; }
+	else if (simStatus == 99) { simText = '卡已移除'; }
+	else if (simStatus == 100) { simText = '卡错误（初始化失败）'; }
+
+	steps[length(steps)] = {
+		key: 'sim', title: 'SIM 卡就绪', cmd: 'AT^SIMSQ?',
+		ok: simOk, core: true, blocking: !simOk,
+		value: (simStatus == null) ? '未识别' : ('sim_status=' + simStatus),
+		hint: simOk ? ('SIM 卡' + simText + '，语音业务可用')
+			: ((simText == null)
+				? '没读到 SIM 卡状态（卡未插好，或模组未识别）'
+				: ('SIM 卡' + simText + '，此时无法建立语音呼叫'))
+	};
+	steps[length(steps)] = {
+		key: 'csreg', title: 'CS 域已注册', cmd: 'AT+CREG?',
+		ok: csOk, core: true, blocking: !netOk,
+		value: (stat == null) ? '未识别' : ('stat=' + stat),
+		hint: csOk ? (stat == 5 ? '已注册到漫游网络，电路域语音可用'
+				: '已注册到本地网络，电路域语音可用')
+			: ((stat == null) ? '没读到 CS 域注册状态'
+				: (imsOk ? 'CS 域未注册，但 IMS 已注册：语音走 VoLTE/VoNR，不影响拨号'
+					: ('CS 域未注册（stat=' + stat + '，需为 1 或 5）')))
+	};
+	steps[length(steps)] = {
+		key: 'ims', title: 'IMS 域已注册', cmd: 'AT+CIREG?',
+		ok: imsOk, core: true, blocking: !netOk,
+		value: (regInfo == null) ? '未识别' : ('reg_info=' + regInfo),
+		hint: imsOk ? 'IMS 已注册，VoLTE/VoNR 可用'
+			: ((regInfo == null) ? '模组未返回 IMS 注册状态'
+				: (csOk ? 'IMS 未注册，但 CS 域已注册：语音走电路域，不影响拨号'
+					: ('IMS 未注册（reg_info=' + regInfo + '，需为 1）')))
+	};
+	steps[length(steps)] = {
+		key: 'clip', title: '来电号码显示', cmd: 'AT+CLIP?',
+		ok: clipOk, core: false, blocking: false,
+		value: (clip == null) ? '未识别' : ('m=' + clip),
+		hint: clipOk ? '来电会带上主叫号码'
+			: ((clipErr != '')
+				? ('本模组不支持查询 CLIP（' + clipErr + '），读数不可用；不影响能否拨号')
+				: ((clip == null) ? '读不到 CLIP 设置（不影响能否拨号）'
+					: ('未开启：来电可能只显示「未知号码」，可用 AT+CLIP=1 打开')))
+	};
+
+	/* 汇总：SIM 已就绪，且 CS 域或 IMS 域至少一个可用 */
+	let ready = (simOk && netOk);
+	let blocked = '';
+	if (!simOk) {
+		blocked = (simStatus == null) ? 'SIM 卡状态读不到'
+			: ('SIM 卡未就绪（sim_status=' + simStatus + '）');
+	} else if (!netOk) {
+		blocked = '未注册到任何语音承载域（CS 与 IMS 都不可用）';
+	}
+
+	return {
+		success: true, action: 'preflight',
+		ready: ready,
+		volte: imsOk,
+		cs: csOk,
+		blocked: blocked,
+		steps: steps
+	};
 }
 
 return {
@@ -3370,10 +3676,21 @@ return {
 		 *     hangup   ATH            （单路挂断；多方时逐路断，手册 4.3；来电时即拒接）
 		 *     mute     AT+CMUT=0/1    （麦克风静音，通话中生效）
 		 *     dtmf     AT+VTS=<d>     （通话中送 DTMF，手册 4.7）
-		 *     status   AT+CLCC        （手册 5.11，返回全部在途呼叫）
+		 *     status   AT+CLCC        （手册 5.11，返回全部在途呼叫，附 stage 令牌）
+		 *     preflight SIMSQ? + CREG? + CIREG? + CLIP?
+		 *                             （语音可用性前置检查，四步全是只读查询）
 		 *     info     CMUT? + CLVL?  （麦克风静音 + 扬声器音量，按需查询不进轮询）
 		 *     loglist / logadd / logclear
 		 *                             （通话记录，落 /etc/mt5700/call-log.json）
+		 *
+		 * ★★ 本方法与前置检查的**方法论来源**：H5000M「带电话功能beta」
+		 *   官方固件里的 modemwebui-server（Go，2026-10-16 逆向）。它把
+		 *   通话拆成：voicePreparation（拨号前准备）+ 状态机 + 通话记录 +
+		 *   跨页来电通知，前端只做展示。移植时**只搬结构与语义，不搬命令**：
+		 *   厂商的 voicePreparation 写的是 Quectel 私有的
+		 *   AT+QCALLCFG="voice_disable",0 与 AT+QCFG="ims"，MT5700M-CN
+		 *   手册里没有这两条 —— 盲目照搬就是给模组发未定义命令（红线 27）。
+		 *   故本实现把"先准备/先检查"落地为四条手册内只读查询（见 callPreflight）。
 		 * ★ 状态机由前端轮询 status 驱动：CLCC 的 <state> 字段给全了
 		 *   dialing/alerting/active/incoming，不需要改 Rust、不需要开任何
 		 *   周期上报（^CURC 掩码未真机验证前不启用，避免开错位把
@@ -3396,6 +3713,9 @@ return {
 				}
 				if (action == 'status') {
 					return callStatus();
+				}
+				if (action == 'preflight') {
+					return callPreflight();
 				}
 				if (action == 'info') {
 					return callLineInfo();
@@ -3469,7 +3789,7 @@ return {
 				}
 				return {
 					success: false,
-					error: '未知 action（支持 dial/answer/hangup/mute/dtmf/status/info/loglist/logadd/logclear）'
+					error: '未知 action（支持 dial/answer/hangup/mute/dtmf/status/preflight/info/loglist/logadd/logclear）'
 				};
 			}
 		}

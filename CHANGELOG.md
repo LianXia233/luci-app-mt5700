@@ -5,6 +5,116 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.23] - 2026-10-16
+
+### Added
+
+**127. ★★★ 从厂商「带电话功能beta」固件移植通话管理台的**语义**（而不是命令）**
+
+参考对象：`H5000M-OpenWrt-25.12.5-6.12.112-带电话功能beta-中lan-password.bin`。
+
+逆向结论（先说清楚它是什么）：该固件的「电话功能」是**通话管理台，不是软电话**——
+三条独立证据钉死它没有音频通路：① 228 个内核模块里 `snd` / `soc` / `afe` 一个都没有；
+② 没有 `/dev/snd`；③ 整个 `/www` 里搜不到 `getUserMedia` / `RTCPeerConnection`，
+也没有任何 RTP / PCM / Opus 库。它的后端是 Go 写的 `modemwebui-server`
+（HTTP `:8001` + WebSocket `:8765`），只做 `ATD`/`ATA`/`ATH`/`AT+CLCC`/`AT+VTS`
+＋状态推送＋通话记录，LuCI 侧由 `luci.controller.modemwebui` 转接。所谓「电话功能」
+= 把模组那 4 个 AT 串口的通话能力做成一个带状态机的管理界面。
+
+据此移植三样**结构**：
+
+1. **状态机令牌（厂商粒度）**。ucode 新增 `callStageOf` / `callOverallStage`：
+   `AT+CLCC` 的 `<state>` 0..5 → `active` / `held` / `dialing` / `alerting` /
+   `ringing` / `waiting`；多路呼叫的总态按优先级
+   `active > held > waiting > ringing > alerting > dialing` 归并。
+   前端 `STAGE_TEXT` 用与厂商同一套令牌名，徽标从「只有 5 个粗态」变成能
+   分开显示「正在呼出 / 对方振铃 / 来电振铃 / 保持中」。
+   ★ 厂商那个 `requesting`（"等待模组确认呼出"）是它自家前端的本地时序态，
+   本实现靠 2 秒轮询观测不到，故只在表里留位、不产生。
+2. **`preflight` 前置检查**（源自厂商的 `voicePreparation` 方法论）。
+   四条**只读查询**：`AT^SIMSQ?`（`sim_status` 需为 12）/ `AT+CREG?`
+   （`stat` 需为 1 或 5）/ `AT+CIREG?`（`reg_info`=1 表示 IMS 已注册）/
+   `AT+CLIP?`（`m`=1 才报主叫号码）。核心项＝SIM + CS 注册，决定「能不能拨」；
+   IMS 与 CLIP 只影响「体验好不好」，未过不阻断拨号（IMS 不通会回落 CS 域）。
+   ★★ **厂商真正用的那两条命令没有移植**：它写的是 Quectel 私有的
+   `AT+QCALLCFG="voice_disable",0` 与 `AT+QCFG="ims"`，MT5700M-CN 手册里
+   没有这两条——照搬就是给模组发未定义命令（红线 27）。所以「先准备」在本实现里
+   落地为四条手册内的只读查询，并把这两个命令名**只允许出现在注释里**
+   （契约测试扫全文件：出现在代码行即判红）。
+3. **通话记录的 `direction` 字符串**，与既有 `dir` 整数**双向兼容**：
+   入口接受 `direction` / `dir` 任一种，`unanswered` 归一为 `failed`、
+   `answered==true` 归一为 `answered`；出口同时写 `dir` 与 `direction`；
+   老记录在**读侧**用 `dir` 补齐 `direction`（不做落盘迁移——迁移要重写整份
+   文件，中途掉电就是记录全丢，而读侧补齐的代价约为零）。
+
+**明确放弃的一项**：厂商的「跨页面来电通知」（它靠 WS 推送，任何页面上都能弹条）。
+本项目的来电通知是轮询驱动的，照搬就得让 **每个** LuCI 页面都去轮询 AT ——
+串口独占 + rpcd 单线程（红线 63），代价远大于收益，不做。
+
+### Fixed
+
+**128. ★★★ `callStatus` 失败分支不显式回 `calls: null`（前端报错分支是死代码）**
+
+`callStatus` 原来在「AT 通道无响应 / 查询失败」两个分支里**只回 `error`**，
+而前端判据写的是 `res.calls === null` —— `undefined === null` 为假，于是那条
+报错分支**一次也走不到**：后端挂了和「确实没有通话（空闲）」在界面上长得一模一样
+（红线 23：把「读不出来」伪装成「没有」）。
+两边同时修：ucode 两个失败分支显式回 `calls: null`；前端判据放宽为
+`!Array.isArray(res.calls)`（这样即便后端未升级也不会退回假空闲）。
+两条都已写成契约断言，并各有一条变异条目证明它们真的会判红。
+
+契约测试：`tests/voice-call-contract.test.js` 扩到 **121 项断言**
+（新增状态机令牌 / preflight 只读结构 / Quectel 命令禁入 / direction 双向 /
+视图接线五组），`tools/verify-guards.py` 增 **8 条**变异（第 165–172 条）。
+
+**129. ★★★ preflight 判据按真机校准：语音不要求 CS 注册（原判据是假阴性）**
+
+部署到真机（192.168.88.1）后立刻按红线 42 用**原始 AT 响应**复核了四条查询，
+量出一个反直觉但很关键的状态：
+
+| 查询 | 原始响应 | 含义 |
+|---|---|---|
+| `AT^SIMSQ?` | `^SIMSQ: 1,11` | 卡已初始化（可接入网络） |
+| `AT+CREG?` | `+CREG: 0,0` | **CS 域没注册** |
+| `AT+CGREG?` | `+CGREG: 1,1` | PS 域已注册（数据通） |
+| `AT+CEREG?` | `+CEREG: 2,1` | EPS 已注册 |
+| `AT+CIREG?` | `+CIREG: 1,1` | **IMS 已注册** |
+| `AT+CLIP?` | `+CME ERROR: UNKNOWN` | 本模组不支持查询 CLIP |
+
+据此修正三处（都是「照搬文档/参考实现」会踩的坑）：
+
+1. **`ready` 判据从「SIM + CS 注册」改为「SIM 已初始化 且（CS 或 IMS 任一可用）」。**
+   原判据会把本机（CS 未注册、IMS 已注册）判成「不能打电话」—— 假阴性。
+   **依据不是猜的**：手册 4.6 的 `^CCALLSTATE` 里 `<voice_domain>` 明确有
+   「1：IMS 域语音电话」这一档，即语音呼叫本身**不要求 CS 注册**
+   （红线 49：判定要带对照组；所以同时量了 CGREG/CEREG 做对照）。
+2. **`sim_status` 门槛从 `== 12` 改为 `11 || 12`。** 手册 6.6.3 原文：11 = 卡初始化
+   完成（可接入网络）、12 = 卡初始化完成（**短信和电话本**可接入）—— 12 讲的是
+   短信/电话本，不是「才能打电话」。把 12 当语音门槛是过度解读，实测本机停在 11。
+3. **`AT+CLIP?` 在代码里不再被当成「读到但没开」**：实测它是**命令被拒**
+   （`AT+CLIP=?` 却正常回 `+CLIP: (0,1)`），故 preflight 把「命令被拒」与
+   「读到了但没此项」分开报（红线 23），该项为提示项、不参与 `ready`。
+
+配套：步骤对象新增 `blocking` 字段（"未过且确实挡住拨号"），前端三态记号
+✓/✗/○ 改用它而不是 `core` —— 否则「CS 未过 + IMS 已过」会显示成一个红叉，
+让人以为完全不能拨；`blocked` 也从「步骤标题」改成一句原因短语。
+契约测试 **127 项**、变异 **11 条**（第 165–175 条）。
+
+**实测闭环（同一次会话内完成，非推断）**：在 CS 未注册的状态下实拨 `1008611`，
+`AT+CLCC` 的 stage 令牌按预期推进 ——
+
+```
+t+0~2s  state=2 → dialing      （正在呼出）
+t+3s    state=3 → alerting     （对方振铃）
+t+4s    state=0 → active       （已接通，脚本立即挂断）
+```
+
+**呼叫在 `+CREG: 0,0` 下接通**，且 `ATH` 的响应里带出一条
+`^IMSCTRLMSGU:1,280,"04010000…"`（IMS 控制消息）—— 两个独立信号共同证明
+这次呼叫走的是 **IMS 域**。所以 `ready` 的新判据不是放宽，是纠正：
+旧判据会把一台「能打电话的机器」说成不能打。挂断后 `status` 回到
+`idle`/`calls:[]`，状态机全链路（dialing→alerting→active→idle）真机走通。
+
 ## [2.4.22] - 2026-10-16
 
 ### Added

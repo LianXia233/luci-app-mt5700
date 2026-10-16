@@ -163,6 +163,14 @@ TARGETS = {
     #   ★ 复用 nsjs / nsjs2 会**跑错测试**（它们分别固定跑 warm-cache-contract 与
     #     ui-consistency-contract），变异生效却没人判红 —— 红线 16b。
     "nsjs3": ATWB.parent / "view" / "at-webserver" / "network_status.js",
+    # ★ 再挂两个键（2026-10-16「厂商 beta 固件的电话功能移植」）：
+    #   状态机令牌 / preflight 前置检查 / 记录 direction 三组守卫横跨
+    #   htdocs 的 voice_call.js 与 ucode 的 mt5700.uc，都跑 tests/voice-call-contract。
+    #   ★ 复用 uc / uc2..uc8 会**跑错测试**（各自固定跑 exitip / vowifi / bootstrap /
+    #     at-batch / cellscan / busy-fastfail / at-read-classification / sms-sent-log），
+    #     变异生效却没人判红 —— 红线 16b。
+    "voicejs": ATWB.parent / "view" / "at-webserver" / "voice_call.js",
+    "uc9": ROOT / "root" / "usr" / "share" / "rpcd" / "ucode" / "mt5700.uc",
 }
 
 # 每个目标改动后该跑哪个契约测试（esim.js / mt5700.css 都归 esim-contract）
@@ -238,6 +246,9 @@ TARGET_TEST = {
     "nsjs2": ROOT / "tests" / "ui-consistency-contract.test.js",
     # ★ 制式判定（NSA 下 ^MONSC 只报 LTE 锚点）—— 别复用 nsjs / nsjs2。
     "nsjs3": ROOT / "tests" / "sysmode-label.test.js",
+    # ★ 厂商 beta 固件电话功能移植（2026-10-16）：两个键都跑语音契约。
+    "voicejs": ROOT / "tests" / "voice-call-contract.test.js",
+    "uc9": ROOT / "tests" / "voice-call-contract.test.js",
 }
 
 def _resolve_node() -> str:
@@ -1721,6 +1732,105 @@ MUTATIONS = [
         "var badge = (!count ? '不可用' : count > 1"
         " ? (count + ' 载波聚合中') : dcActive ? 'EN-DC 双连接' : '单载波');",
         "renderCarriers 改用 aggregationBadge",
+    ),
+    # ★ 2026-10-16 厂商 beta 固件电话功能移植。八条覆盖三组新守卫：
+    #   状态机令牌（uc9）/ preflight 只读结构（uc9）/ 记录 direction（voicejs）
+    #   / 视图 preflight 接线（voicejs）。锚点唯一性已核（每条在各自文件里只出现 1 次）。
+    (
+        # 把「不是数组」判据退回 `=== null`：后端若不回 calls 字段，
+        # undefined === null 为假 ⇒ 报错分支不可达 ⇒ 通道故障看起来像空闲
+        # —— 这正是本次修掉的真实 bug（红线 23）。
+        "视图：失败判据退回 res.calls === null（报错分支变死代码，故障像空闲）",
+        "voicejs",
+        "if (!Array.isArray(res.calls)) {",
+        "if (res.calls === null) {",
+        "视图判据用 Array.isArray，不是 === null（否则报错分支是死代码）",
+    ),
+    (
+        # 去掉轮询让路：preflight 跑（一次 4 条 AT）时 2 秒轮询照样发 status，
+        # 两个调用争同一根串口。
+        "视图：去掉 pfBusy 的轮询让路（前置检查与轮询抢串口）",
+        "voicejs",
+        "\t\t\t\tif (st.pfBusy) { return; }\n",
+        "\t\t\t\tif (false) { return; }\n",
+        "前置检查期间轮询让路（pfBusy 守卫）",
+    ),
+    (
+        # 令牌表缺一项：后端给出 held 时前端查不到 → 退回「状态未知」。
+        "视图：STAGE_TEXT 少了 held 令牌（保持中的通话显示成「状态未知」）",
+        "voicejs",
+        "\t\t\theld: '通话保持',\n",
+        "",
+        "STAGE_TEXT 覆盖后端会给出的全部令牌",
+    ),
+    (
+        # 记录不再写 direction：厂商口径的消费方与老记录兼容链一起断。
+        "视图：记录不再写 direction 字符串（只剩 dir 整数）",
+        "voicejs",
+        "direction: (t.dir === 1) ? 'incoming' : 'outgoing',",
+        "direction: 'incoming',",
+        "视图记录写出 direction 字段",
+    ),
+    (
+        # 失败分支不显式回 calls:null：前端拿到 undefined，判据若同时退化就会误判。
+        "ucode：callStatus 无响应分支丢掉 calls: null",
+        "uc9",
+        "calls: null, error: 'AT 通道无响应' }",
+        "error: 'AT 通道无响应' }",
+        "callStatus 无响应分支显式回 calls: null",
+    ),
+    (
+        # 只读查询丢掉 ?：CIREG 从查询变成写命令，preflight 会真的改模组状态。
+        "ucode：preflight 的 AT+CIREG? 丢掉问号（只读查询变成写命令）",
+        "uc9",
+        "{ cmd: 'AT+CIREG?' }",
+        "{ cmd: 'AT+CIREG' }",
+        "preflight 每条命令都以 ? 结尾（只读查询）",
+    ),
+    (
+        # 把厂商的 Quectel 私有命令当成「数据」留在代码行里（注释外）。
+        # 它是 MT5700M-CN 手册里没有的命令，一旦被下发就是未定义行为（红线 27）。
+        "ucode：代码行里混进 Quectel 私有命令 AT+QCFG（红线 27）",
+        "uc9",
+        "title: 'IMS 域已注册', cmd: 'AT+CIREG?',",
+        "title: 'IMS 域已注册', cmd: 'AT+CIREG?', atq: 'AT+QCFG=\"ims\"',",
+        "★ Quectel 私有命令只出现在注释里（不得成为真实下发命令）",
+    ),
+    (
+        # 总态优先级倒置：同时「已接通」与「来电振铃」时挑错的那个。
+        "ucode：callOverallStage 优先级倒置（已接通被来电振铃盖住）",
+        "uc9",
+        "['active', 'held', 'waiting', 'ringing', 'alerting', 'dialing']",
+        "['dialing', 'alerting', 'ringing', 'waiting', 'held', 'active']",
+        "总态优先级序 active > held > waiting > ringing > alerting > dialing",
+    ),
+    (
+        # 2026-10-16 真机校准：把 SIM 判据退回「必须 12」。手册 6.6.3 里 12 说的是
+        # 「短信和电话本可接入」，11（已初始化、可接入网络）同样已初始化 ——
+        # 用 12 当语音门槛会把 11 误判成不可用。
+        "ucode：SIM 判据退回「必须 sim_status=12」（11 被误判成不可用）",
+        "uc9",
+        "let simOk = (simStatus == 11 || simStatus == 12);",
+        "let simOk = (simStatus == 12);",
+        "SIM 就绪判据 = sim_status 11 或 12（手册 6.6.3：两者都是「已初始化」）",
+    ),
+    (
+        # 2026-10-16 真机校准确认的假阴性：本机 +CREG: 0,0（CS 未注册）但
+        # +CIREG: 1,1（IMS 已注册），按 CS 单腿判会被判成「不能打电话」。
+        "ucode：承载域判据只留 CS（IMS 已注册也被判成不能拨 —— 真机假阴性）",
+        "uc9",
+        "let netOk = (csOk || imsOk);",
+        "let netOk = csOk;",
+        "语音承载判据 = CS 或 IMS 任一可用（netOk）",
+    ),
+    (
+        # 三态记号退回 core：CS 未注册但 IMS 已注册时，CS 那行会显示成
+        # 「✗ 挡住拨号」，而实际可以拨（一片红让人以为完全不能用）。
+        "视图：三态记号退回 core（CS 未过 + IMS 已过时误标成「挡住拨号」）",
+        "voicejs",
+        "s.ok ? '✓' : (s.blocking ? '✗' : '○')",
+        "s.ok ? '✓' : (s.core ? '✗' : '○')",
+        "三态记号 ✓/✗/○ 区分「通不过」与「通了但体验差」",
     ),
 ]
 
