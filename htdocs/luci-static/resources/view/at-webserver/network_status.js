@@ -1243,7 +1243,16 @@ return L.view.extend({
 			var endcTag = d.endc ? (d.endc.established ? '已建立 (ENDC 启用)' : '未建立') : '—';
 			var regVal = d.reg ? (d.reg.statText + (d.reg.act ? ' · ' + d.reg.act : '')) : (state.networkStatus || '—');
 			var txVal = '—';
-			if (d.tx && (d.tx.pusch != null || d.tx.pucch != null)) {
+			/* 发射功率优先取 NR（AT^NTXPOWER?）：ENDC/SA 场景只有 NR 有上报，
+			 * 无 NR 数据时再回退 GUL（AT^TXPOWER?，纯 LTE 场景）。 */
+			var nrTx = (d.nrTx || []).filter(function (c) { return c.pusch != null || c.pucch != null; });
+			if (nrTx.length === 1) {
+				txVal = (nrTx[0].pusch != null ? nrTx[0].pusch + ' dBm' : '—') + ' / ' + (nrTx[0].pucch != null ? nrTx[0].pucch + ' dBm' : '—');
+			} else if (nrTx.length > 1) {
+				txVal = nrTx.map(function (c, i) {
+					return '载波' + (i + 1) + ' ' + (c.pusch != null ? c.pusch : '—') + ' / ' + (c.pucch != null ? c.pucch : '—');
+				}).join('；') + ' dBm';
+			} else if (d.tx && (d.tx.pusch != null || d.tx.pucch != null)) {
 				txVal = (d.tx.pusch != null ? d.tx.pusch + ' dBm' : '—') + ' / ' + (d.tx.pucch != null ? d.tx.pucch + ' dBm' : '—');
 			}
 
@@ -1556,6 +1565,11 @@ return L.view.extend({
 				return AtWs.client.sendCommand('AT^TXPOWER?');
 			}).then(function (txp) {
 				state.diag.tx = (txp.success && txp.data) ? Parse.parseTxPower(txp.data) : null;
+				/* NR 下 AT^TXPOWER? 恒返回 ERROR（该命令仅 GUL 有效），
+				 * 必须再查 AT^NTXPOWER?（NR 各信道发射功率）才能拿到数据 */
+				return AtWs.client.sendCommand('AT^NTXPOWER?');
+			}).then(function (ntxp) {
+				state.diag.nrTx = (ntxp.success && ntxp.data) ? Parse.parseNrTxPower(ntxp.data) : [];
 				return AtWs.client.sendCommand('AT+CGPADDR');
 			}).then(function (pdp) {
 				state.diag.addrs = (pdp.success && pdp.data) ? Parse.parseCgpaddr(pdp.data) : [];

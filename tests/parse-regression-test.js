@@ -118,6 +118,40 @@ try {
 		check('空输入不抛异常', orphan && orphan.nr.length === 0 && orphan.lte.length === 0, 'ok');
 	}
 
+	/* ---------- 5. 发射功率：NR(AT^NTXPOWER?) 与 GUL(AT^TXPOWER?) ---------- */
+	{
+		// 实机抓取（NR 单载波）：^NTXPOWER: 22,-18,25,-18,2565000
+		const nr = Parse.parseNrTxPower('^NTXPOWER: 22,-18,25,-18,2565000\r\nOK');
+		check('NTXPOWER 单载波解析', nr.length === 1 && nr[0].pusch === 22 && nr[0].pucch === -18 &&
+			nr[0].srs === 25 && nr[0].prach === -18 && nr[0].freq === 2565000,
+			nr.length ? JSON.stringify(nr[0]) : 'empty');
+	}
+	{
+		// 手册样例（NR 2CC）：^NTXPOWER: 23,3,23,22,8675,23,2,22,23,8677
+		const nr = Parse.parseNrTxPower('^NTXPOWER: 23,3,23,22,8675,23,2,22,23,8677\r\nOK');
+		check('NTXPOWER 多载波解析 (2CC)', nr.length === 2 && nr[1].pusch === 23 && nr[1].freq === 8677,
+			'len=' + nr.length);
+	}
+	{
+		const nr = Parse.parseNrTxPower('^NTXPOWER: 999,999,999,999,0\r\nOK');
+		check('NTXPOWER 无效值 999 归 null、频点 0 归 null', nr.length === 1 && nr[0].pusch === null &&
+			nr[0].pucch === null && nr[0].freq === null, JSON.stringify(nr[0]));
+	}
+	{
+		const nr = Parse.parseNrTxPower('ERROR');
+		check('NTXPOWER 无数据返回空数组（不抛异常）', Array.isArray(nr) && nr.length === 0, 'len=' + nr.length);
+	}
+	{
+		// 手册样例（GUL/LTE）：^TXPOWER: 999,23,23,22,23
+		const tx = Parse.parseTxPower('^TXPOWER: 999,23,23,22,23\r\nOK');
+		check('TXPOWER (LTE) 解析且总功率 999 归 null', tx && tx.total === null && tx.pusch === 23 && tx.pucch === 23,
+			tx ? JSON.stringify(tx) : 'null');
+	}
+	{
+		const tx = Parse.parseTxPower('ERROR');
+		check('TXPOWER 返回 ERROR 时为 null（NR 场景）', tx === null, String(tx));
+	}
+
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));
 }
