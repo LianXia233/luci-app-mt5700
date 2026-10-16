@@ -16,7 +16,6 @@
 
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::{NotificationConfig, NotifyTemplates};
-use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -80,6 +79,8 @@ pub struct Notifier {
     qq: std::sync::RwLock<Option<std::sync::Arc<QqSender>>>,
     tx: mpsc::Sender<Notification>,
     log_file: Option<String>,
+    /// 通知日志文件的大小上限（字节），写入前按此裁剪。
+    log_file_max_bytes: u64,
     /// 本进程启动时处于 QQ「绑定模式」：绑定完成前通道为空，但事件必须照常入队，
     /// 否则绑定成功后拿不到任何后续推送（通道变了，队列入口却已关闭）。
     qq_bind_pending: bool,
@@ -89,6 +90,7 @@ pub struct Notifier {
 impl Notifier {
     pub fn new(cfg: NotificationConfig) -> (Notifier, mpsc::Receiver<Notification>) {
         let (tx, rx) = mpsc::channel(NOTIFY_QUEUE_SIZE);
+        let log_file_max_bytes = cfg.log_file_max_bytes.max(4096);
         let log_file = if !cfg.log_file.is_empty() {
             match prepare_log_file(&cfg.log_file) {
                 Ok(path) => {
@@ -127,6 +129,7 @@ impl Notifier {
                 tx,
                 log_file,
                 qq_bind_pending,
+                log_file_max_bytes,
             },
             rx,
         )
@@ -174,7 +177,7 @@ impl Notifier {
         if !self.cfg.enabled {
             log_debug!("自动推送已关闭，事件仅记本地日志不推送: {}（{:?}）", msg.sender, msg.kind);
             if let Some(path) = &self.log_file {
-                if let Err(e) = append_log(path, &msg) {
+                if let Err(e) = append_log(path, &msg, self.log_file_max_bytes) {
                     log_error!("写入通知日志失败: {}", e);
                 }
             }
@@ -187,7 +190,7 @@ impl Notifier {
         }
 
         if let Some(path) = &self.log_file {
-            if let Err(e) = append_log(path, &msg) {
+            if let Err(e) = append_log(path, &msg, self.log_file_max_bytes) {
                 log_error!("写入通知日志失败: {}", e);
             }
         }
@@ -458,7 +461,11 @@ fn prepare_log_file(path: &str) -> Result<String, String> {
     Ok(abs.to_string_lossy().into_owned())
 }
 
-fn append_log(path: &str, msg: &Notification) -> std::io::Result<()> {
+/// 追加一条通知到日志文件，**并保证文件不超过 `max_bytes`**。
+///
+/// 走 [`crate::ringlog::append_capped`]：超限先按行边界裁掉最旧的一半再追加，
+/// 绝不切出半行，也绝不让文件无上限增长（`/tmp` 是 tmpfs，写满会拖垮整机）。
+fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> std::io::Result<()> {
     let ts = if msg.time.is_empty() { now_string() } else { msg.time.clone() };
     let mut b = String::new();
     if msg.memory_full {
@@ -469,9 +476,7 @@ fn append_log(path: &str, msg: &Notification) -> std::io::Result<()> {
     b.push_str(&"-".repeat(50));
     b.push('\n');
 
-    let mut f = std::fs::OpenOptions::new().append(true).create(true).write(true).open(Path::new(path))?;
-    use std::io::Write;
-    f.write_all(b.as_bytes())
+    crate::ringlog::append_capped(path, &b, max_bytes)
 }
 
 async fn send_webhook(hook: &str, content: &str) -> Result<(), String> {
