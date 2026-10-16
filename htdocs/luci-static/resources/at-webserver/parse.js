@@ -34,7 +34,7 @@ var Parse = (function () {
 		return n;
 	};
 
-	// AT^TXPOWER?
+	// AT^TXPOWER? —— 仅 GUL(2G/3G/4G) 有效；NR 下模组返回 ERROR，需改用 AT^NTXPOWER?
 	api.parseTxPower = function (text) {
 		var match = text.match(/\^TXPOWER:\s*(.+)/);
 		if (!match) return null;
@@ -45,6 +45,23 @@ var Parse = (function () {
 			total: total === null ? null : Number((total / 10).toFixed(1)),
 			pusch: power(f[1]), pucch: power(f[2]), srs: power(f[3]), prach: power(f[4])
 		};
+	};
+
+	// AT^NTXPOWER? —— NR 发射功率，最多 4 个载波，每 5 字段一组：
+	// <PPusch>,<PPucch>,<PSrs>,<PPrach>,<Freq(kHz)>，无效值 999（统一交给 power() 归 null）
+	api.parseNrTxPower = function (text) {
+		var match = text.match(/\^NTXPOWER:\s*(.+)/);
+		if (!match) return [];
+		var f = match[1].split(',').map(function (s) { return s.trim(); });
+		var carriers = [];
+		for (var i = 0; i + 4 < f.length && carriers.length < 4; i += 5) {
+			var freq = Number(f[i + 4]);
+			carriers.push({
+				pusch: power(f[i]), pucch: power(f[i + 1]), srs: power(f[i + 2]), prach: power(f[i + 3]),
+				freq: isFinite(freq) && freq !== 0 ? freq : null
+			});
+		}
+		return carriers;
 	};
 
 
