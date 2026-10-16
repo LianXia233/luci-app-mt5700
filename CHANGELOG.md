@@ -1,5 +1,13 @@
 # Changelog
 
+本文件按**版本倒序**记录每次发布的改动。格式为 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的变体：条目形如 `**类型(范围)**：说明`。
+
+- **类型**：`feat` 新功能 / `fix` 缺陷修正 / `refactor` 重构 / `style` 样式 / `security` 安全 / `docs` 文档 / `ci` 构建流水线 / `chore` 杂项 / `note` 说明性备注（另有少量 `change` / `build` / `i18n`）
+- **范围**：改动所在的模块，如 `sim`（SIM 信息）、`usage`（流量统计）、`chart`（信号趋势图）、`ui`、`apn`、`css`、`at` 等
+- 每个版本另有独立发布说明（讲清「为什么改、怎么验的」），见 [`docs/release-notes/`](docs/release-notes/)
+
+---
+
 ## v1.22.0 (2026-10-16)
 
 ### 新增：签约速率改用厂商命令，4G 也能显示；修正制式角标写死 5G
