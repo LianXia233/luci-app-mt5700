@@ -455,6 +455,194 @@ function readCounter(path) {
 	return v;
 }
 
+/* ==================== 使用量统计（本次累计下行/上行字节） ====================
+ *
+ * 需求语义：
+ *   - 页面刷新不失效（统计值由设备侧持有，与浏览器无关）；
+ *   - 默认仅存内存：状态文件放 /tmp（tmpfs，重启即清空）；
+ *   - 用户可手动开启「持久化」：把状态额外落盘到 /etc（overlay），
+ *     重启后仍保留；关闭即删除落盘文件。
+ *
+ * 关键点：接口的 rx_bytes/tx_bytes 是**单调递增**的累计计数器，
+ * 只要累加「相邻两次采样的增量」，即便中间浏览器关闭、页面刷新，
+ * 下一次采样也能把这段时间的流量一并补上，不会漏计。
+ * 计数器归零（接口 flap / 重启）表现为负增量，此时只重置基线、不累加，
+ * 避免把一次归零误记成一笔巨额流量。
+ */
+const USAGE_VOL = '/tmp/mt5700-usage.json';
+const USAGE_FLASH = '/etc/at-webserver-usage.json';
+/* 开启持久化时的落盘节流：内存（tmpfs，零磨损）每秒都在更新，
+ * 闪存默认最多每 600s（10 分钟）写一次，把闪存写入压到最低。
+ * 代价是重启后最多回退 10 分钟的用量，对「使用量统计」完全可接受；
+ * 若需更精确可调小此值，但要权衡闪存寿命。 */
+const USAGE_FLASH_INTERVAL = 600;
+
+function readTextFile(path) {
+	let f;
+	try {
+		f = fs.open(path, 'r');
+	} catch (e) {
+		return null;
+	}
+	if (!f) {
+		return null;
+	}
+	let s = f.read(4096);
+	f.close();
+	return s;
+}
+
+function writeTextFile(path, body) {
+	let f;
+	try {
+		f = fs.open(path, 'w');
+	} catch (e) {
+		return false;
+	}
+	if (!f) {
+		return false;
+	}
+	f.write(body);
+	f.close();
+	return true;
+}
+
+/* 读取使用量状态：优先内存文件（每秒都在更新，且正常运行时一定存在），
+ * 只有内存文件缺失时（例如刚重启、/tmp 被清空）才回退读落盘的持久化文件。
+ * 这样稳态下只读 tmpfs、完全不触碰闪存；落盘文件仅在重启后读一次。 */
+function loadUsage() {
+	let s = readTextFile(USAGE_VOL);
+	if (s == null || length(trim(s)) == 0) {
+		s = readTextFile(USAGE_FLASH);
+	}
+	if (s == null || length(trim(s)) == 0) {
+		return null;
+	}
+	let o;
+	try {
+		o = jsonParse(trim(s));
+	} catch (e) {
+		return null;
+	}
+	if (o == null || o.total_rx == null) {
+		return null;
+	}
+	return o;
+}
+
+/* 保存状态：内存文件每次都写；落盘文件按节流写（force 时强制写/删） */
+function saveUsage(st, force) {
+	let now = time();
+	let wantFlash = int(st.persist) == 1;
+	if (wantFlash && (force || now - int(st.last_flash) >= USAGE_FLASH_INTERVAL)) {
+		st.last_flash = now;
+		writeTextFile(USAGE_FLASH, sprintf('%J', st));
+	} else if (!wantFlash && force) {
+		/* 关闭持久化：删掉落盘文件，避免残留旧值 */
+		try { fs.unlink(USAGE_FLASH); } catch (e) { /* 不存在即已清除 */ }
+	}
+	writeTextFile(USAGE_VOL, sprintf('%J', st));
+}
+
+/* 用最新计数器增量更新状态并落盘，返回状态对象 */
+function accumulateUsage(dev, rx, tx) {
+	let now = time();
+	let st = loadUsage();
+	if (st == null) {
+		st = {
+			device: dev, total_rx: 0, total_tx: 0, last_rx: rx, last_tx: tx,
+			start_ts: now, last_ts: now, peak_rx: 0, peak_tx: 0,
+			persist: 0, last_flash: 0
+		};
+		saveUsage(st, true);
+		return st;
+	}
+	st.persist = int(st.persist) || 0;
+	st.last_flash = int(st.last_flash) || 0;
+	if (st.start_ts == null || int(st.start_ts) <= 0) {
+		st.start_ts = now;
+	}
+	if (st.device != dev) {
+		/* 承载设备变了：重新基线，累计值保留 */
+		st.device = dev;
+		st.last_rx = rx;
+		st.last_tx = tx;
+		st.last_ts = now;
+		saveUsage(st, false);
+		return st;
+	}
+	let drx = rx - int(st.last_rx);
+	let dtx = tx - int(st.last_tx);
+	let dt = now - int(st.last_ts);
+	if (drx < 0 || dtx < 0) {
+		st.last_rx = rx;
+		st.last_tx = tx;
+		st.last_ts = now;
+	} else {
+		st.total_rx = int(st.total_rx) + drx;
+		st.total_tx = int(st.total_tx) + dtx;
+		/* 峰值只在正常节拍（1~5s）内计算：页面间隔很久后补算的增量
+		 * 除以大 dt 会得到偏低的均值，绝不能拿来当峰值。 */
+		if (dt >= 1 && dt <= 5) {
+			let rr = int(drx / dt);
+			let rt = int(dtx / dt);
+			if (rr > int(st.peak_rx)) { st.peak_rx = rr; }
+			if (rt > int(st.peak_tx)) { st.peak_tx = rt; }
+		}
+		st.last_rx = rx;
+		st.last_tx = tx;
+		st.last_ts = now;
+	}
+	saveUsage(st, false);
+	return st;
+}
+
+/* 使用量控制：reset（清零）/ persist_on / persist_off / 其余为纯查询 */
+function usageCtlCall(req) {
+	try {
+		let action = getStr(req.args, 'action');
+		let dev = detectModemDevice();
+		let base = '/sys/class/net/' + dev;
+		let rx = readCounter(base + '/statistics/rx_bytes');
+		let tx = readCounter(base + '/statistics/tx_bytes');
+		if (rx == null) { rx = 0; }
+		if (tx == null) { tx = 0; }
+		let now = time();
+		let st = loadUsage();
+		if (st == null) {
+			st = {
+				device: dev, total_rx: 0, total_tx: 0, last_rx: rx, last_tx: tx,
+				start_ts: now, last_ts: now, peak_rx: 0, peak_tx: 0,
+				persist: 0, last_flash: 0
+			};
+		}
+		st.persist = int(st.persist) || 0;
+		st.last_flash = int(st.last_flash) || 0;
+
+		if (action == 'reset') {
+			st.device = dev;
+			st.total_rx = 0;
+			st.total_tx = 0;
+			st.peak_rx = 0;
+			st.peak_tx = 0;
+			st.start_ts = now;
+			st.last_ts = now;
+			st.last_rx = rx;
+			st.last_tx = tx;
+			saveUsage(st, true);
+		} else if (action == 'persist_on') {
+			st.persist = 1;
+			saveUsage(st, true);
+		} else if (action == 'persist_off') {
+			st.persist = 0;
+			saveUsage(st, true);
+		}
+		return { success: true, usage: st };
+	} catch (e) {
+		return { success: false, error: 'usage_ctl 失败: ' + e };
+	}
+}
+
 /*
  * 取网络接口累计字节数。
  * 实时速率由前端按「两次采样差 / 时间差」计算，这里只返回原始计数与本机时钟，
@@ -482,11 +670,19 @@ function netrateCall(req) {
 		return { success: false, device: dev, error: '读不到接口计数器，设备可能不存在或未 up' };
 	}
 
+	/* 两个计数器都读到才累加使用量：只有一个可读时若把另一个当 0，
+	 * 会在下一次恢复读取时算出一个巨大的假增量，污染累计值。 */
+	let usage = null;
+	if (rx != null && tx != null) {
+		usage = accumulateUsage(dev, rx, tx);
+	}
+
 	return {
 		success: true,
 		device: dev,
 		rx_bytes: rx == null ? 0 : rx,
-		tx_bytes: tx == null ? 0 : tx
+		tx_bytes: tx == null ? 0 : tx,
+		usage: usage
 	};
 }
 
@@ -843,6 +1039,12 @@ return {
 			args: { device: '' },
 			call: function (req) {
 				return netrateCall(req);
+			}
+		},
+		usage_ctl: {
+			args: { action: '' },
+			call: function (req) {
+				return usageCtlCall(req);
 			}
 		},
 		usb: {

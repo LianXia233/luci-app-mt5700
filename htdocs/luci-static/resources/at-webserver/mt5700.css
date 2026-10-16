@@ -452,6 +452,91 @@
   height: 32px;
 }
 
+/* 流量统计 · 本次使用量（设备侧累计，默认内存、可选持久化） */
+.mt-traffic-usage {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--mt5700-border-subtle);
+}
+.mt-usage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.mt-usage-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mt5700-text-secondary);
+}
+.mt-usage-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mt-usage-btn {
+  background: transparent;
+  border: 1px solid var(--mt5700-border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.6;
+  color: var(--mt5700-text-secondary);
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.mt-usage-btn:hover {
+  color: var(--mt5700-accent);
+  border-color: var(--mt5700-accent-light);
+  background: var(--mt5700-accent-pale);
+}
+.mt-usage-btn.on {
+  color: #fff;
+  border-color: var(--mt5700-accent);
+  background: var(--mt5700-accent);
+}
+.mt-usage-btn.danger:hover {
+  color: var(--mt5700-pink);
+  border-color: var(--mt5700-pink);
+  background: var(--mt5700-pink-pale);
+}
+.mt-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+.mt-usage-cell {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--mt5700-subtle-bg);
+  border: 1px solid var(--mt5700-border-subtle);
+  border-radius: var(--mt5700-radius-sm);
+}
+.mt-usage-cell.wide {
+  grid-column: 1 / -1;
+}
+.mt-usage-lbl {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--mt5700-text-secondary);
+  white-space: nowrap;
+}
+.mt-usage-val {
+  font-size: 12.5px;
+  font-weight: 800;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  color: var(--mt5700-text);
+  white-space: nowrap;
+}
+.mt-usage-val.total {
+  color: var(--mt5700-accent);
+}
+
 /* ================== 中部 2 列布局 (Tab 卡片 + 实时信号趋势) ================== */
 .mt-mid-grid,
 .mt-row-2col {
