@@ -10,7 +10,7 @@
 use crate::{log_debug, log_info, log_warn};
 use crate::at_queue::{AtPriority, PriLock};
 use crate::config::AtConfig;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -183,6 +183,16 @@ pub struct Connection {
     describe: String,
 }
 
+/// 进程单调时钟的毫秒数（自首次调用起）。
+///
+/// 长命令「什么时候结束的」是两个瞬时之间的**间隔**，不是墙上时间：
+/// 必须用 `Instant` 这类单调时钟，否则 NTP 校正 / 手动改时间会让差值失真。
+/// `Instant` 没法塞进原子量，这里折算成「距进程起点的毫秒」再存。
+fn mono_ms() -> u64 {
+    static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    ORIGIN.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
 pub struct AtClient {
     cfg: AtConfig,
 
@@ -198,7 +208,7 @@ pub struct AtClient {
     /// 业务模块不能直接碰 TTY，只能经 send_command 走这个闸。
     gate: Arc<PriLock>,
     long_cmd: Arc<AtomicI32>,
-    long_cmd_end: Arc<AtomicI64>,
+    long_cmd_end: Arc<AtomicU64>,
     last_cmd_at: Arc<Mutex<Instant>>,
 
     pending: Arc<Mutex<Option<PendingCmd>>>,
@@ -214,7 +224,7 @@ impl AtClient {
             urc_tx,
             gate: PriLock::new(),
             long_cmd: Arc::new(AtomicI32::new(0)),
-            long_cmd_end: Arc::new(AtomicI64::new(0)),
+            long_cmd_end: Arc::new(AtomicU64::new(0)),
             last_cmd_at: Arc::new(Mutex::new(Instant::now())),
             pending: Arc::new(Mutex::new(None)),
         })
@@ -699,13 +709,7 @@ impl AtClient {
         let result = self
             .send_command_inner(ctx, AtPriority::Background, command, timeout, stream)
             .await;
-        self.long_cmd_end.store(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as i64,
-            Ordering::SeqCst,
-        );
+        self.long_cmd_end.store(mono_ms(), Ordering::SeqCst);
         self.long_cmd.fetch_sub(1, Ordering::SeqCst);
         result
     }
@@ -715,20 +719,16 @@ impl AtClient {
     }
 
     pub fn long_command_ended_at(&self) -> Option<Instant> {
-        let ns = self.long_cmd_end.load(Ordering::SeqCst);
-        if ns == 0 {
+        let end = self.long_cmd_end.load(Ordering::SeqCst);
+        if end == 0 {
             return None;
         }
-        let now_ns = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as i64;
-        if now_ns < ns {
-            // 时钟回拨：视为刚结束
+        let now = mono_ms();
+        if now < end {
+            // 回拨（理论上单调时钟不会，兜底）：视为刚结束
             return Some(Instant::now());
         }
-        let delta = (now_ns - ns) as u64;
-        Instant::now().checked_sub(Duration::from_nanos(delta))
+        Instant::now().checked_sub(Duration::from_millis(now - end))
     }
 
     /// 绕过命令锁直接向模组写入原始字符串（打断扫频用）。
