@@ -140,7 +140,7 @@ impl Dispatcher {
             self.last_call_at = now;
             self.call_state = "ringing".into();
 
-            let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let ts = crate::nettime::now_string();
             self.notifier
                 .notify(Notification {
                     sender: SENDER_CALL.into(),
@@ -155,7 +155,7 @@ impl Dispatcher {
             }));
         } else if line.contains("^CEND:") || line == "NO CARRIER" {
             if !self.last_call_number.is_empty() {
-                let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let ts = crate::nettime::now_string();
                 let number = self.last_call_number.clone();
                 self.notifier
                     .notify(Notification {
@@ -376,7 +376,7 @@ impl Dispatcher {
         }
         b.push_str(&format!(
             "📶 信号变动通知\n时间: {}\n制式: {}\n信号: {}\n",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            crate::nettime::now_string(),
             info.rat,
             signal_level(rsrp)
         ));

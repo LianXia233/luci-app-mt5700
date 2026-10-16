@@ -13,8 +13,10 @@ mod config;
 mod configstore;
 mod httpserver;
 mod logger;
+mod nettime;
 mod notify;
 mod pdu;
+mod ringlog;
 mod rpcserver;
 mod schedconfig;
 mod schedule;
@@ -74,6 +76,13 @@ async fn run(verbose: bool) -> Result<(), String> {
         return Ok(());
     }
     log_config(&cfg);
+    log_info!(
+        "当前时间: {}（来源 {}，时区 {}）",
+        crate::nettime::now().format("%Y-%m-%d %H:%M:%S"),
+        crate::nettime::source_name(),
+        // 时区交给系统 tzdata（Debian 自带 /etc/localtime），这里只展示生效偏移
+        crate::nettime::now().format("%:z")
+    );
 
     // 关闭信号：SIGINT / SIGTERM 触发优雅退出。
     let (ctx_tx, ctx_rx) = watch::channel(false);
@@ -130,6 +139,12 @@ async fn run(verbose: bool) -> Result<(), String> {
     let dispatch_task = tokio::spawn({
         let mut dispatcher = Dispatcher::new(client.clone(), notifier.clone(), broadcaster, ctx_rx.clone());
         async move { dispatcher.run(urc_rx).await }
+    });
+    // 后台对时：启动即试一次，成功等 20 分钟，失败按 3 秒×10 → 1 分钟×10 → 20 分钟退避。
+    // 日志、通知、短信、定时锁频都依赖它，必须先于这些任务起来。
+    let nettime_task = tokio::spawn({
+        let ctx = ctx_rx.clone();
+        async move { crate::nettime::run(ctx).await }
     });
     let sched_task = tokio::spawn({
         let scheduler = scheduler.clone();
@@ -202,6 +217,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = dispatch_task.await;
         let _ = sched_task.await;
         let _ = cache_task.await;
+        let _ = nettime_task.await;
         let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
         if !http_failed {
