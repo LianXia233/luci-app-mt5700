@@ -8,6 +8,16 @@
 
 ---
 
+## v1.23.1 (2026-10-17)
+
+### 修复「自动清零」输入框数字被遮挡 + 前端冗余样式清理
+
+- **fix(usage) 自动清零输入框遮挡**：流量卡片「自动清零」天数输入框里输入的数字显示不全。根因是全局深度美化规则 `input[type="number"] { padding: 8px 14px !important; font-size: 13.5px !important }` 把 `.mt-usage-days` 自己的 `padding: 1px 6px` 整个顶掉 —— 58px 宽减去左右各 14px 内边距后内容区只剩约 27px，4 位数字（最大 3650）直接溢出被裁，再叠加 number 输入框自带的步进箭头（spinner）压在数字上。修复：改用更高特异性选择器 + `!important` 拿回尺寸控制权（宽 72px / padding 2px 8px / 字号 12.5px），隐藏步进箭头（键盘 ↑↓ 与输入仍可用），对齐改为居中避免残余箭头遮挡，并加 `flex: 0 0 auto` 防止被 flex 压缩
+- **refactor(css) 冗余样式清理**：用「类名在全部 JS/uc/模板源码中出现性 + 动态拼接前缀识别」静态审计，删除 mt5700.css 中 64 个死类规则块（旧版 mt5700-* 仪表盘 / verdict / gauge / skeleton / spinner / 裸 modal-* / temp-* 温度着色体系等）与 24 个被后续同选择器规则完全覆盖的重复声明块、7+2 个孤儿 `@keyframes` 与 6 个孤儿 `--mt5700-temp-*` 设计令牌；at.css 删除 3 个死类块。**mt5700.css 5447 → 4919 行（-528 行）**
+- **note(verify) 回归验证**：以 `docs/layout-test/status-mock.html` 为基准，在 380 / 768 / 1024 / 1440 / 1920px 五档视口下对清理前后做全页截图像素对比 —— **差异像素 0**，排版零变化；输入框用 Playwright 实测 `scrollWidth 76 > clientWidth 56`（裁切）修复为 `70 = 70`（无裁切）
+- **note(css)**：样式版本 `MT5700_CSS_VERSION` 升至 **`2.23.1`**，`AT_CSS_VERSION` 升至 **`1.11.1`**（升级后强刷生效）
+- **docs**：README 版本号、安装示例同步更新至 **v1.23.1**，新增 `docs/release-notes/v1.23.1.md`
+
 ## v1.23.0 (2026-10-16)
 
 ### 使用量统计改为后端常驻累计，支持自动清零
