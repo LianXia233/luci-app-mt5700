@@ -5134,4 +5134,18 @@ select option {
     font-size: 12px !important;
     line-height: 1.45 !important;
   }
+
+  /* 看板娘头像维持正方形，避免被移动端 75×65 的非等比规则压成椭圆 */
+  .mt5700-hero-card .mt-mascot-avatar.mt-mascot-avatar {
+    width: 72px !important;
+    height: 72px !important;
+    aspect-ratio: 1 / 1 !important;
+  }
+
+  .mt5700-hero-card .mt-mascot-img.mt-mascot-img {
+    width: 100% !important;
+    height: 100% !important;
+    border-radius: 50% !important;
+    object-fit: cover !important;
+  }
 }
