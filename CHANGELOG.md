@@ -31,6 +31,7 @@
 
 ### 变更
 
+- **ci(debian)**: release job 的 `gh release create` 增加 `--target "${GITHUB_SHA}"` —— 此前未指定 target 时 gh 会把**新创建的 tag 建到默认分支 `main` 上**，导致 Debian 的发布 tag 指向 OpenWrt 代码（v2.1.0 发布时 `debian-v2.1.0` 即因此误建在 main 的提交上，已人工修正）。tag 已存在时 GitHub 忽略该参数直接挂到已有 tag，不影响存量发布。
 - **ci(debian)**: **移除工作流的日志归档步骤，云编译不再产出 `ci-logs` 分支** ——
   原「日志归档」步骤（`if: always()` + `continue-on-error: true`）会在构建时把工具版本、
   产物清单与 deb 元数据写入 `logs/debian/debian-<arch>-<时间>.txt` 并推送到仓库的
