@@ -142,6 +142,8 @@ pub struct RpcServer {
     notify: Arc<crate::notify::Notifier>,
     /// QQ 绑定进度（bind 模式时由绑定任务更新，qq_bind_status 读取；未设置则返回 idle）
     bind_status: Option<std::sync::Arc<crate::qqbind::BindStatus>>,
+    /// 使用量后台统计器：`usage` / `usage_ctl` 读写的都是它。
+    usage: Arc<crate::usage::UsageTracker>,
     ctx: tokio::sync::watch::Receiver<bool>,
 }
 
@@ -154,6 +156,7 @@ impl RpcServer {
         cache: Arc<StateCache>,
         tasks: Arc<TaskManager>,
         notify: Arc<crate::notify::Notifier>,
+        usage: Arc<crate::usage::UsageTracker>,
     ) -> RpcServer {
         RpcServer {
             client,
@@ -167,6 +170,7 @@ impl RpcServer {
             ctx,
             notify,
             bind_status: None,
+            usage,
         }
     }
 
@@ -192,6 +196,7 @@ impl RpcServer {
             ctx: self.ctx.clone(),
             notify: self.notify.clone(),
             bind_status: self.bind_status.clone(),
+            usage: self.usage.clone(),
         }
     }
 
@@ -369,6 +374,34 @@ impl RpcServer {
                     .min(1200) as usize;
                 let (seq, entries) = crate::logger::snapshot(since, limit);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "entries": entries } })
+            }
+            // 使用量统计快照：由后端常驻采样累加，与前端是否打开无关。
+            "usage" => {
+                let snap = self.usage.snapshot().await;
+                serde_json::json!({ "id": id, "result": snap })
+            }
+            // 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off /
+            // set_auto_reset_days（改自动清零天数，写 UCI）。
+            "usage_ctl" => {
+                let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                let result = match action {
+                    "reset" => Some(self.usage.reset().await),
+                    "persist_on" => Some(self.usage.set_persist(true).await),
+                    "persist_off" => Some(self.usage.set_persist(false).await),
+                    "set_auto_reset_days" => {
+                        let days = req.params.get("days").and_then(|v| v.as_u64()).unwrap_or(0);
+                        if let Err(e) = self.usage.set_auto_reset_days(days as u32).await {
+                            return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
+                        }
+                        // set_auto_reset_days 内部已热更新内存值，snapshot 读到的就是新天数
+                        Some(self.usage.snapshot().await)
+                    }
+                    _ => None,
+                };
+                match result {
+                    Some(snap) => serde_json::json!({ "id": id, "result": snap }),
+                    None => serde_json::json!({ "id": id, "error": { "code": -32602, "message": format!("未知的 usage_ctl 动作: {action}") } }),
+                }
             }
             // 后台任务管理（异步化新增）：查询状态 / 取消 / 列表。
             // 不改变既有 at/events/logs 接口，前端仍通过 AT^CELLSCAN 伪命令触发扫频。

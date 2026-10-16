@@ -244,7 +244,7 @@ return L.view.extend({
 					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-ul-box' })
 				])
 			]),
-			// 本次使用量（设备侧累计：页面刷新不失效，重启后归零；可选持久化）
+			// 本次使用量（后端常驻统计：页面关闭/刷新都不影响；可选持久化、可自动清零）
 			E('div', { 'class': 'mt-traffic-usage' }, [
 				E('div', { 'class': 'mt-usage-head' }, [
 					E('span', { 'class': 'mt-usage-title' }, '本次使用量'),
@@ -256,7 +256,7 @@ return L.view.extend({
 						}, '持久化'),
 						E('button', {
 							'class': 'mt-usage-btn danger', 'id': 'usage-reset', 'type': 'button',
-							'title': '清零本次使用量', 'click': resetUsage
+							'title': '清零本次使用量（同时清空闪存里的记录文件）', 'click': resetUsage
 						}, '清零')
 					])
 				]),
@@ -274,12 +274,28 @@ return L.view.extend({
 						E('span', { 'class': 'mt-usage-val total', 'id': 'usage-total' }, '0 B')
 					]),
 					E('div', { 'class': 'mt-usage-cell' }, [
-						E('span', { 'class': 'mt-usage-lbl' }, '采样时长'),
+						E('span', { 'class': 'mt-usage-lbl' }, '累计时长'),
 						E('span', { 'class': 'mt-usage-val', 'id': 'usage-dur' }, '00:00:00')
 					]),
 					E('div', { 'class': 'mt-usage-cell wide' }, [
 						E('span', { 'class': 'mt-usage-lbl' }, '峰值速率'),
 						E('span', { 'class': 'mt-usage-val', 'id': 'usage-peak' }, '↓0 B/s · ↑0 B/s')
+					]),
+					E('div', { 'class': 'mt-usage-cell wide auto' }, [
+						E('span', { 'class': 'mt-usage-lbl' }, '自动清零'),
+						E('span', { 'class': 'mt-usage-auto' }, [
+							E('input', {
+								'class': 'mt-usage-days', 'id': 'usage-days', 'type': 'number',
+								'min': '1', 'max': '3650', 'step': '1', 'value': '30',
+								'title': '累计满这么多天就自动清零（1~3650 天）'
+							}),
+							E('span', { 'class': 'mt-usage-unit' }, '天'),
+							E('button', {
+								'class': 'mt-usage-btn', 'id': 'usage-days-save', 'type': 'button',
+								'title': '保存自动清零天数（写入配置，重启后仍生效）',
+								'click': saveUsageAutoResetDays
+							}, '保存')
+						])
 					])
 				])
 			])
@@ -1233,7 +1249,7 @@ return L.view.extend({
 			return q.dlAmbr ? ('↓ ' + dl) : ('↑ ' + ul);
 		}
 
-		/* 清零本次使用量（设备侧状态一并清空，持久化开关不变） */
+		/* 清零本次使用量（后端一并清空闪存里的记录文件，持久化开着也清） */
 		function resetUsage() {
 			AtWs.usageCtl('reset').then(function (r) {
 				if (r && r.success && r.usage) {
@@ -1243,10 +1259,25 @@ return L.view.extend({
 			});
 		}
 
-		/* 切换「持久化」：开启后使用量写入闪存、重启后保留；关闭即删除落盘文件 */
+		/* 切换「持久化」：开启后使用量落盘闪存、重启后保留 */
 		function toggleUsagePersist() {
 			var on = !!(state.usage && state.usage.persist);
 			AtWs.usageCtl(on ? 'persist_off' : 'persist_on').then(function (r) {
+				if (r && r.success && r.usage) {
+					state.usage = r.usage;
+					renderSpeedUI();
+				}
+			});
+		}
+
+		/* 保存自动清零天数（1~3650，写 UCI，重启后仍生效） */
+		function saveUsageAutoResetDays() {
+			var el = document.getElementById('usage-days');
+			if (!el) return;
+			var days = parseInt(el.value, 10);
+			if (!isFinite(days) || days < 1) days = 1;
+			if (days > 3650) days = 3650;
+			AtWs.usageCtl('set_auto_reset_days', days).then(function (r) {
 				if (r && r.success && r.usage) {
 					state.usage = r.usage;
 					renderSpeedUI();
@@ -1298,9 +1329,18 @@ return L.view.extend({
 				? '↓' + formatSpeedNumber(u.peak_rx) + ' · ↑' + formatSpeedNumber(u.peak_tx)
 				: '↓0 B/s · ↑0 B/s';
 			var uDur = document.getElementById('usage-dur');
-			if (uDur) uDur.textContent = (u && u.start_ts && u.last_ts >= u.start_ts)
-				? formatUsageDuration(u.last_ts - u.start_ts)
-				: '00:00:00';
+			if (uDur) {
+				/* 时长用后端给的 now_ts 减 start_ts：统计由后端常驻做，
+				 * 用浏览器时钟会在页面刚打开时算出一段假时长。 */
+				var endTs = (u && u.now_ts) ? u.now_ts : ((u && u.last_ts) || 0);
+				uDur.textContent = (u && u.start_ts && endTs >= u.start_ts)
+					? formatUsageDuration(endTs - u.start_ts)
+					: '00:00:00';
+			}
+			var elDays = document.getElementById('usage-days');
+			if (elDays && u && u.auto_reset_days && document.activeElement !== elDays) {
+				elDays.value = String(u.auto_reset_days);
+			}
 			var uPersist = document.getElementById('usage-persist');
 			if (uPersist) {
 				if (u && u.persist) uPersist.classList.add('on');
@@ -2222,6 +2262,17 @@ return L.view.extend({
 		var rateSample = null;
 		var rateTimer = null;
 
+		/* 本次使用量由 Rust 后端常驻统计（见 src/rust/src/usage.rs），
+		 * 前端关闭 / 刷新都不影响累计；这里只负责拉取快照展示。 */
+		function sampleUsage() {
+			return AtWs.usage().then(function (r) {
+				if (r && r.success && r.usage) {
+					state.usage = r.usage;
+					renderSpeedUI();
+				}
+			});
+		}
+
 		function sampleRate() {
 			return AtWs.netRate('').then(function (r) {
 				if (!r.success) {
@@ -2233,8 +2284,6 @@ return L.view.extend({
 				}
 				var now = Date.now();
 				if (r.device) state.deviceInterface = r.device;
-				/* 本次使用量由设备侧累计（见 mt5700.uc，默认内存、可选落盘），这里只取回展示 */
-				if (r.usage) state.usage = r.usage;
 				if (rateSample && rateSample.device === r.device) {
 					var dt = (now - rateSample.t) / 1000;
 					if (dt >= 0.2) {
@@ -2256,6 +2305,10 @@ return L.view.extend({
 
 		rateTimer = setInterval(sampleRate, 1000);
 		sampleRate();
+		/* 使用量单独一条轮询线：与速率解耦，互不阻塞。
+		 * 累计由后端常驻做，这里拉不到只影响展示，不影响统计本身。 */
+		setInterval(sampleUsage, 1000);
+		sampleUsage();
 
 		// 全量状态轮询刷新：纯串行执行，避免单通道 AT 串口并发阻塞冲突
 		var refreshing = false;
