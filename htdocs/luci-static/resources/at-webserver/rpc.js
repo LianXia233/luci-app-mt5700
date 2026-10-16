@@ -48,7 +48,8 @@ var rpcNetRate = L.rpc.declare({
 });
 
 /*
- * 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off / set_auto_reset_days。
+ * 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off /
+ * set_reset_day（改自动清零日 = 每月几号）。
  * 使用量由 Rust 后端常驻采样统计，与浏览器是否打开无关。
  */
 var rpcUsage = L.rpc.declare({
@@ -1267,7 +1268,10 @@ function normalizeUsage(u) {
 		peak_rx: Number(u.peak_rx) || 0,
 		peak_tx: Number(u.peak_tx) || 0,
 		persist: Number(u.persist) ? 1 : 0,
-		auto_reset_days: Number(u.auto_reset_days) || 0,
+		/* 自动清零：每月几号（1~31）。后端按自然月判定，大小月/闰年由 monthly 模块处理 */
+		reset_day: Number(u.reset_day) || 0,
+		/* 时刻来源（NTP / 设备时钟）：回退设备时钟时按日历清零可能不准，前端据此提示 */
+		time_source: u.time_source || '',
 		device: u.device || ''
 	};
 }
@@ -1308,13 +1312,13 @@ function fetchUsage() {
 }
 
 /*
- * 使用量控制（清零 / 开关持久化 / 改自动清零天数）。
- * days 仅在 set_auto_reset_days 时使用。
+ * 使用量控制（清零 / 开关持久化 / 改自动清零日）。
+ * day 仅在 set_reset_day 时使用（每月几号，1~31）。
  */
-function fetchUsageCtl(action, days) {
+function fetchUsageCtl(action, day) {
 	var params = { action: action };
-	if (days != null) params.days = Number(days) || 0;
-	return withTimeout(rpcUsageCtl(action, params.days || 0), 5000, '使用量操作超时')
+	if (day != null) params.day = Number(day) || 0;
+	return withTimeout(rpcUsageCtl(action, params.day || 0), 5000, '使用量操作超时')
 		.then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
