@@ -8,6 +8,21 @@
 
 ---
 
+## v1.24.0 (2026-10-17)
+
+### 自动清零改为「每月几号」；新增 NTP 时间源；日志文件大小封顶
+
+- **feat(usage) 按月清零**：自动清零从「累计满 N 天」改为**每月固定几号**（UCI `usage_reset_day`，默认 **1 号**，范围 1~31）。按自然月对账，不再在月里漂移
+- **feat(usage) 支持大小月**：新增 `src/rust/src/monthly.rs` 负责全部日历算术 —— 闰年（能被 4 整除且不被 100 整除，或被 400 整除）、跨年进位、**31 号这类小月没有的日子按当月最后一天触发**（平年 2 月 → 28 号，闰年 → 29 号），不会整月漏清；一个月只清一次
+- **feat(nettime) NTP 时间源**：新增 `src/rust/src/nettime.rs`，依次尝试 **ntp.tencent.com → ntp.aliyun.com → time.cloudflare.com**（UDP 123，NTPv4 客户端），成功即以「NTP 时刻 − 设备时刻」为偏移持续校正；**三个都不可达则回退设备时钟**并在日志页/流量卡提示。时区仍沿用 OpenWrt 系统设置（`/etc/TZ` → uci），**取不到才回落北京时间**
+- **fix(logs) 日志不再无限增长**：新增 `src/rust/src/ringlog.rs`。通知日志文件（`/tmp/at-notifications.log`）原来是纯 append、**没有任何上限**，长期跑会吃满 tmpfs；现在写入前按上限（默认 **256 KiB**，UCI `log_file_max_bytes` 可调）先按行边界裁掉最旧的一半再追加，**绝不切出半行**
+- **refactor(logs) 默认走内存环形缓存**：后端日志缓冲改用 `RingLog`，**条数（1200）+ 总字节（512 KiB）双上限**淘汰 —— 只限条数不够，一条超长 URC/短信正文照样能撑大内存；日志页默认读内存环形缓存，序列化结构不变
+- **refactor 新增独立模块**：`monthly.rs` / `nettime.rs` / `ringlog.rs` 三个新模块各司其职，`usage.rs` 只保留「该不该清」一句调用，未往既有模块里堆逻辑
+- **note(ui)**：流量卡片「自动清零」改为「**每月清零**」+ 「号」，输入范围 1~31；NTP 不可达时卡头显示琥珀色「时间源: 设备时钟」提示（日期可能不准）
+- **note(config) 配置项变更**：`usage_auto_reset_days`（天数）作废，改为 **`usage_reset_day`**（每月几号）。旧键不再读取，升级后自动清零回到默认「每月 1 号」
+- **test**：`cargo test` **195 passed**（基线 165，新增 30 条：`monthly` 12 条覆盖大小月/闰年/跨年/边界，`nettime` 9 条覆盖报文解析与纪元回退，`ringlog` 9 条覆盖双上限与按行裁剪），**零警告**；`tests/parse-regression-test.js` 不受影响
+- **docs**：README 版本号、安装示例同步至 **v1.24.0**，新增 `docs/release-notes/v1.24.0.md`
+
 ## v1.23.1 (2026-10-17)
 
 ### 修复「自动清零」输入框数字被遮挡 + 前端冗余样式清理
