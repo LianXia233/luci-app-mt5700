@@ -75,15 +75,7 @@ var AtCompat = (function () {
 		return true;
 	};
 
-	api.available = function () {
-		return typeof String.prototype.format === 'function';
-	};
 
-	// 便于自检：按 luci 语义格式化一段模板
-	api.format = function (fmt) {
-		var args = Array.prototype.slice.call(arguments, 1);
-		return String.prototype.format.apply(fmt, args);
-	};
 
 	// 模块求值即安装，早于任何视图 load/render。
 	api.installed = api.install();

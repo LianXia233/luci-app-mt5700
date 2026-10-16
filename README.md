@@ -309,11 +309,22 @@ http://<host>:9000/_layout-test/status-mock.html
 **保持同源同步**：`main` 的纯前端 UI 改动可直接同步到本分支对应路径，改动随下次
 `install.sh` 部署即生效，无需打包或构建。
 
+**v2.2.0 已整包同步至 `main` v1.24.3**（Soft Anime 重构 + v1.16~v1.24 全量特性），
+同步策略为逐文件决策：
+
+| 类别 | 文件 | 处理方式 |
+| --- | --- | --- |
+| 主线原样采用 | `at.css` / `mt5700.css` / `mt5700.js` / `parse.js` / `ui.js` / `compat.js` / `smsEncode.js` / `mascot.png` + 11 个视图（`service.js` 除外） | 直接取主线版 |
+| 保留本分支版 | `view/at-webserver/service.js` | systemd 服务管理为本分支独有（主线走 init.d） |
+| 适配重贴 | `at-webserver/rpc.js` 的 `loadConfig` | 主线读 UCI `websocket_port/bind/auth_key`；本分支为同源部署，连接信息取当前站点地址 |
+| 适配重贴 | `mt5700.css` 的 768px Hero 移动端规则 | 主线该处回归丢失 `.mt5700-hero-card`（column-reverse）与标题 20px 两条规则，按本分支既有适配补回 |
+| 无需适配 | `network_status.js` | 主线重构后自洽（内联 `.mt-row-2col` 注入已改为 CSS 类，网格均为 2 子元素） |
+
 以下文件为 Debian 独立实现，**同步时必须保留本分支版本，不得用 `main` 覆盖**：
 
 | 文件 | 独立实现的原因 |
 | --- | --- |
-| `at-webserver/rpc.js` | `main` 走 LuCI RPC（`L.rpc.declare` + rpcd/ucode 代理）；本分支映射到后端 HTTP API（`/api/*`），含鉴权头注入、401 → `REQUIRE_AUTH_KEY` 流程 |
+| `at-webserver/rpc.js` | `main` 走 LuCI RPC（`L.rpc.declare` + rpcd/ucode 代理）；本分支映射到后端 HTTP API（`/api/*`），含鉴权头注入、401 → `REQUIRE_AUTH_KEY` 流程。仅 `loadConfig` 一节按上表适配重贴，其余（usage RPC 声明、URC 解析、熔断器）主线原样 |
 | `view/at-webserver/service.js` | `main` 经 init.d 管理服务；本分支经 systemd，管理 `/api/service/status|restart` 与 `/dev` 串口扫描，保存流程改为 `/api/config` + `/api/config/apply` 热应用 |
 
 `main` 侧的 `Makefile`、`scripts/sdk-build.sh`、`.github/workflows/` 属 OpenWrt 构建
@@ -324,7 +335,7 @@ http://<host>:9000/_layout-test/status-mock.html
 本分支的变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，逐版本的设计说明与实测记录见
 [`docs/release-notes/`](docs/release-notes/)。
 
-版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.0.1`，
+版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.2.0`，
 Release 标签前缀 `debian-v*`），不对应 `main` 的 v1.x 编号；`main` 侧的变更记录见
 `main` 分支的 `CHANGELOG.md`。
 

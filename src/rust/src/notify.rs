@@ -107,6 +107,21 @@ impl Notifier {
         }
     }
 
+    /// 推送通道测试（从 main 分支同步）：固定文案直接发一条企业微信，
+    /// 不经事件链路，用于在服务配置页验证 WebHook 是否配好。
+    ///
+    /// 与 [`Notifier::notify`] 的分工：本方法只验证**通道连通性**；
+    /// 未配置 WebHook 时显式返回错误（界面显示失败，而不是静默 Ok）。
+    pub async fn notify_test(&self) -> Result<(), String> {
+        if self.cfg.wechat_webhook.is_empty() {
+            return Err("企业微信 WebHook 未配置，请先填写并保存".into());
+        }
+        let now = crate::nettime::now_string();
+        let content = format!("喵～测试通知来啦！推送通道一切正常，链路畅通无阻喵！\n（{now}）");
+        send_webhook(&self.cfg.wechat_webhook, &content).await;
+        Ok(())
+    }
+
     /// 驱动企业微信的合并发送，直到 ctx 结束。
     /// 合并窗口 60 秒：窗口内到达的事件攒成一条发，窗口到期立即发。
     pub async fn run(&self, mut rx: mpsc::Receiver<Notification>, mut ctx: tokio::sync::watch::Receiver<bool>) {

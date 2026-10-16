@@ -6,9 +6,9 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 网络设置页：LTE/NR 锁频、邻区扫描（MONNC）、5G 选项（C5GOPTION）、
- * 网络拒绝原因（^REJINFO 主动上报）。
- * 锁频应用流程：开启飞行模式 → 下发锁频命令 → 关闭飞行模式 → 重新查询。
+ * 网络设置页面：LTE/NR 锁频、邻区扫描（MONNC）、
+ * 5G 选项（C5GOPTION）、网络拒绝原因（^REJINFO 主动上报）。
+ * 锁频应用流程：飞行模式 → 下发锁频命令 → 关闭飞行模式 → 重新查询。
  */
 
 return L.view.extend({
@@ -321,7 +321,7 @@ return L.view.extend({
 			});
 			chain = chain.then(query5G);
 			chain = chain.then(function () {
-				// 回填锁频表单（基准：查询后重新渲染）
+				// 回填锁频表单：查询后按最新值重新渲染
 				lteBody.innerHTML = '';
 				lteBody.appendChild(lockEditor('lte'));
 				nrBody.innerHTML = '';
@@ -508,17 +508,7 @@ return L.view.extend({
 
 		/* ---------- 初始化 ---------- */
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [{ key: 'key', label: '连接密钥', type: 'password' }], function (values) {
-					if (values.key) {
-						AtWs.client.connect(values.key).catch(function (e) { Mt5700.error((e && e.message) || '认证失败'); });
-					}
-				});
-				return;
-			}
-			if (err) console.warn(err);
-		}).then(function () {
+		Ui.startup(body, function () {
 			fetchCurrent();
 		});
 

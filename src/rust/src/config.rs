@@ -128,6 +128,12 @@ pub struct Config {
     pub websocket: WebSocketConfig,
     pub http: HttpConfig,
     pub schedule: ScheduleConfig,
+    /// 使用量统计的自动清零日：**每月几号**（默认 1 号，范围 1~31，从 main 分支同步）。
+    ///
+    /// 放在配置里而不是使用量状态文件：状态文件在「持久化关」时重启即失，
+    /// 设置跟着一起丢会让用户每次重启后都要重填。
+    /// 日历语义（大小月 / 闰年 / 跨年）见 [`crate::monthly`]。
+    pub usage_reset_day: u32,
 }
 
 pub fn default_config() -> Config {
@@ -190,6 +196,7 @@ pub fn default_config() -> Config {
             day_lte: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
             day_nr: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
         },
+        usage_reset_day: crate::monthly::DEFAULT_RESET_DAY,
     }
 }
 
@@ -331,6 +338,15 @@ pub async fn load_config() -> Config {
         max_bytes as u64
     } else {
         crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES
+    };
+    // 使用量自动清零日（每月几号）：与 main 分支同款夹取口径。
+    let raw_day = values.int("usage_reset_day", crate::monthly::DEFAULT_RESET_DAY as i64);
+    cfg.usage_reset_day = if (crate::monthly::MIN_RESET_DAY as i64..=crate::monthly::MAX_RESET_DAY as i64)
+        .contains(&raw_day)
+    {
+        raw_day as u32
+    } else {
+        crate::monthly::DEFAULT_RESET_DAY
     };
     cfg.notification.types = NotifyTypes {
         sms: values.bool("notify_sms", true),

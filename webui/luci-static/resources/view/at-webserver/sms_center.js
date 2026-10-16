@@ -7,7 +7,8 @@
 /* global L, AtWs, Parse, Ui, SmsEncode, Mt5700 */
 
 /**
- * 短信中心页：
+ * 短信中心页面：
+ *
  * - 联系人聚合（按号码分组，按最后消息时间排序）
  * - 会话视图（聊天样式）、发送（自动编码 PDU + 长短信分片）
  * - 新短信推送实时更新（new_sms）
@@ -35,6 +36,28 @@ return L.view.extend({
 
 		// 左：联系人
 		var left = E('div', { 'class': 'mt5700-sms-list' });
+		var currentTab = 'all'; // all, unread, sent
+		var smsTabHeader = E('div', { 'class': 'mt-tab-header', 'style': 'margin-bottom:10px;' });
+		var tabDefs = [
+			{ id: 'all', title: '全部' },
+			{ id: 'unread', title: '未读' },
+			{ id: 'sent', title: '已发' }
+		];
+		tabDefs.forEach(function (td) {
+			var tb = E('button', {
+				'class': 'mt-tab-btn' + (td.id === 'all' ? ' active' : ''),
+				'click': function () {
+					currentTab = td.id;
+					smsTabHeader.querySelectorAll('.mt-tab-btn').forEach(function (b) { b.classList.remove('active'); });
+					tb.classList.add('active');
+					renderContacts();
+				}
+			}, td.title);
+			smsTabHeader.appendChild(tb);
+		});
+		/* 必须先挂载：只填充不 append 的话，三个筛选按钮根本不会出现在页面上 */
+		left.appendChild(smsTabHeader);
+
 		var leftHead = E('div', { 'class': 'mt5700-sms-list-header' });
 		var storageEl = E('div', { 'class': 'mt5700-hint' }, '存储：—');
 		leftHead.appendChild(storageEl);
@@ -135,13 +158,37 @@ return L.view.extend({
 			storageEl.textContent = '存储：' + state.storage.used + ' / ' + state.storage.total;
 		}
 
+		/*
+		 * 按当前 Tab 过滤会话。
+		 * 说明：后端没有"已读/未读"标志位，未读只能按「会话里最新一条是收到的、
+		 * 且本次页面会话中还没点开过」来判断；刷新页面后该状态会重置，
+		 * 所以这里只当作本页的快捷筛选，不冒充持久未读状态。
+		 */
+		function latestMsg(c) {
+			return c.messages && c.messages.length ? c.messages[c.messages.length - 1] : null;
+		}
+
+		function matchTab(c) {
+			if (currentTab === 'all') return true;
+			var m = latestMsg(c);
+			if (!m) return false;
+			if (currentTab === 'sent') return m.type === 'sent';
+			if (currentTab === 'unread') {
+				return m.type === 'received' && c.number !== state.selectedContact;
+			}
+			return true;
+		}
+
 		function renderContacts() {
 			contactList.innerHTML = '';
-			if (!state.contacts.length) {
-				contactList.appendChild(Mt5700.empty('暂无短信'));
+			var shown = (state.contacts || []).filter(matchTab);
+			if (!shown.length) {
+				contactList.appendChild(Mt5700.empty(
+					state.contacts.length ? '当前筛选下没有会话' : '暂无短信'));
+				return;
 			}
-			for (var i = 0; i < state.contacts.length; i++) {
-				var c = state.contacts[i];
+			for (var i = 0; i < shown.length; i++) {
+				var c = shown[i];
 				var item = E('div', {
 					'class': 'mt5700-sms-item' + (c.number === state.selectedContact ? ' active' : '')
 				});
@@ -155,6 +202,62 @@ return L.view.extend({
 			}
 		}
 
+		/*
+		 * 单条消息气泡（含时间、长短信缺失提示与删除按钮）。
+		 */
+		function buildBubble(m, isSent) {
+			var bubble = E('div', { 'class': 'mt5700-sms-bubble ' + (isSent ? 'mt5700-sms-bubble-sent' : 'mt5700-sms-bubble-recv') });
+			bubble.appendChild(E('div', {}, m.content || '(空消息)'));
+			/*
+			 * 时间未知时如实显示「时间未知」：
+			 * 空白会让人以为渲染丢了，直接不显示又会让人默认它是刚刚。
+			 * 近似时间（来自 TP-VP 有效期）额外标注，避免被当成精确发送时刻。
+			 */
+			/* 日期已由分隔条给出，气泡内只留时刻，
+			   否则每条消息都把年月日重复一遍，读起来很吵 */
+			var timeText = m.time ? (String(m.time).split(',')[1] || m.time) : '时间未知';
+			if (m.time && m.timeApprox) timeText += '（有效期，非发送时刻）';
+			bubble.appendChild(E('div', { 'class': 'mt5700-sms-time' }, timeText));
+			if (m.partsExpected != null && m.partsCount != null && m.partsCount < m.partsExpected) {
+				bubble.appendChild(E('div', { 'class': 'mt5700-sms-time' },
+					'长短信已合并 ' + m.partsCount + '/' + m.partsExpected + ' 段（部分缺失）'));
+			}
+			var del = Mt5700.button('删除', function (mm) {
+				return function () {
+					Mt5700.confirm('确定删除该短信？', function () { deleteMessage(mm); });
+				};
+			}(m), 'danger');
+			del.className = 'mt5700-btn mt5700-btn-danger mt5700-sms-del';
+			bubble.appendChild(del);
+			return bubble;
+		}
+
+		/*
+		 * 日期分隔条文案（`YY/MM/DD,HH:MM:SS` → `20YY-MM-DD`）。
+		 *
+		 * 无时刻的消息若借到了锚点位置，日期就用锚点那条的日期 —— 否则时间轴中间
+		 * 会突然冒出一条「时间未知的消息」分隔，把一次来回劈成两半。真的连锚点都
+		 * 没有（它排在最前）时，才单列一档如实说明。
+		 */
+		function dayLabel(m, keyOf) {
+			var k = keyOf && keyOf[m];
+			var timeStr = m.time || (k && k.anchorTime) || null;
+			if (!timeStr) return '时间未知的消息';
+			var day = String(timeStr).split(',')[0];
+			var seg = day.split('/');
+			if (seg.length === 3) return '20' + seg[0] + '-' + seg[1] + '-' + seg[2];
+			return day;
+		}
+
+		/*
+		 * 聊天式单条时间轴（用户要求「像 QQ 那样显示」）：
+		 * 收发消息按时间顺序**混排在同一条轴上**，靠气泡左右位置区分方向 ——
+		 * 对方在左、自己在右，跨天处插一条日期分隔条。
+		 *
+		 * 早期版本为了「对面的消息和自己的消息不能挤在一起」改成上下分区，
+		 * 代价是丢失「来一回一」的对话对应关系；现按用户要求回到聊天式排布，
+		 * 分区所需的块标题与空态一并去掉。
+		 */
 		function renderConversation() {
 			convHead.innerHTML = '';
 			convHead.appendChild(E('div', { 'class': 'mt5700-sms-item-number' },
@@ -162,25 +265,19 @@ return L.view.extend({
 			convBody.innerHTML = '';
 			if (!state.messages.length) {
 				convBody.appendChild(Mt5700.empty('暂无消息，输入内容发送'));
+				return;
 			}
-			for (var i = 0; i < state.messages.length; i++) {
-				var m = state.messages[i];
-				var isSent = m.type === 'sent';
-				var bubble = E('div', { 'class': 'mt5700-sms-bubble ' + (isSent ? 'mt5700-sms-bubble-sent' : 'mt5700-sms-bubble-recv') });
-				bubble.appendChild(E('div', {}, m.content || '(空消息)'));
-				bubble.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' }, m.time || ''));
-				if (m.partsExpected != null && m.partsCount != null && m.partsCount < m.partsExpected) {
-					bubble.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' },
-						'长短信已合并 ' + m.partsCount + '/' + m.partsExpected + ' 段（部分缺失）'));
+			var ordered = conversationOrder(state.messages);
+			var list = ordered.sorted;
+			var lastDay = null;
+			for (var i = 0; i < list.length; i++) {
+				var m = list[i];
+				var day = dayLabel(m, ordered.keyOf);
+				if (day !== lastDay) {
+					convBody.appendChild(E('div', { 'class': 'mt5700-sms-date' }, day));
+					lastDay = day;
 				}
-				var del = Mt5700.button('删除', function (mm) {
-					return function () {
-						Mt5700.confirm('确定删除该短信？', function () { deleteMessage(mm); });
-					};
-				}(m), 'danger');
-				del.className = 'mt5700-btn mt5700-btn-danger mt5700-sms-del';
-				bubble.appendChild(del);
-				convBody.appendChild(bubble);
+				convBody.appendChild(buildBubble(m, m.type === 'sent'));
 			}
 			convBody.scrollTop = convBody.scrollHeight;
 		}
@@ -197,9 +294,19 @@ return L.view.extend({
 		/* ---------- 数据 ---------- */
 
 		function refreshStorage() {
-			return AtWs.client.sendCommand('AT^CPMS?').then(function (res) {
+			/*
+			 * 必须用**标准** `AT+CPMS?`：本模组（MT5700M-CN）不认私有前缀的
+			 * `AT^CPMS?`，实测直接回 ERROR，存储用量会永远停在 0 / 0。
+			 * 同项目的「短信设置」页用的也是 `AT+CPMS?`，此处曾误写成 `^` 前缀。
+			 */
+			return AtWs.client.sendCommand('AT+CPMS?').then(function (res) {
 				if (res.success && res.data) {
-					var m = String(res.data).match(/\+CPMS: "\w+",(\d+),(\d+)/);
+					/*
+					 * 应答前缀两种都要收：标准 `+CPMS: "SM",<used>,<total>,...`，
+					 * 少数固件（如 SIMCom 系）回私有 `^CPMS:`。只匹配 `\+CPMS`
+					 * 会在那些固件上让用量永远停在 0 / 0。
+					 */
+					var m = String(res.data).match(/[\^+]CPMS: "\w+",(\d+),(\d+)/);
 					if (m) {
 						state.storage = { used: parseInt(m[1], 10), total: parseInt(m[2], 10) };
 						renderStorage();
@@ -220,10 +327,129 @@ return L.view.extend({
 				}
 				var raw = typeof res.data === 'string' ? res.data : '';
 				var parsed = (raw && raw !== 'OK' && raw !== 'NO SMS') ? Parse.parseCMGL(raw) : [];
-				var cached = Parse.getCachedSentMessages();
-				buildContacts(parsed.concat(cached));
+				/*
+				 * 已发短信可能同时来自两处：模组存储（CMGL 返回的 SMS-SUBMIT PDU）
+				 * 与浏览器缓存（localStorage）。解析器支持 SUBMIT 之后两边会撞车，
+				 * 直接 concat 就会显示两条一样的已发消息，所以先去重。
+				 */
+				buildContacts(parsed.concat(mergeCachedSent(parsed, Parse.getCachedSentMessages())));
 			}).catch(function () {
 				Mt5700.error('获取短信列表失败');
+			});
+		}
+
+		/*
+		 * 单元格排序键：模组存储的序号。已发缓存用负数序号（-Date.now()），
+		 * 数值越大表示越新，与模组序号无关但只用于「同一时刻」的兜底排序。
+		 */
+		function sortIndex(m) {
+			return m && typeof m.index === 'number' ? m.index : 0;
+		}
+
+		/*
+		 * 会话内排序。
+		 *
+		 * 时间轴成立的前提是每条消息都有时刻。收到短信没问题（PDU 的 TP-SCTS 一定
+		 * 有），但**发出短信按 3GPP TS 23.040 就没有发送时刻**，只有 TP-VP 有效期 ——
+		 * 模组存下来再读回去，时间是真的不知道。早先的实现把这类消息一律排到会话
+		 * 末尾，后果是「对面两句挤在一起、自己那句跑到最后」，一次来回被打散，
+		 * 看起来根本不像对话。
+		 *
+		 * 这里改为借**存储顺序**给它找位置：AT+CMGL 的序号就是存储先后，取该条
+		 * 前面最近那条有确切时刻的消息的时刻作锚点，让它落在那个位置附近。
+		 * 锚点只用于排序与日期分隔，气泡里照旧如实标「时间未知」——借位置，不伪造时刻。
+		 *
+		 * 返回 { sorted, keyOf }；keyOf 交给日期分隔条复用，免得「排序用的锚点」
+		 * 与「显示的日期」各算一套、互相对不上。
+		 */
+		function conversationOrder(msgs) {
+			var keyOf = {};
+			var stored = [];
+			for (var i = 0; i < msgs.length; i++) {
+				if (msgs[i].index != null && msgs[i].index >= 0) stored.push(msgs[i]);
+			}
+			stored.sort(function (a, b) { return sortIndex(a) - sortIndex(b); });
+
+			var anchorMs = null, anchorTime = null;
+			for (var s = 0; s < stored.length; s++) {
+				var t = Parse.messageTimeMs(stored[s].time);
+				if (t !== null) { anchorMs = t; anchorTime = stored[s].time; }
+				keyOf[stored[s]] = { ms: anchorMs, anchorTime: anchorTime, relaxed: t === null };
+			}
+			/* 缓存条目（index 为负）自带本机发送时刻，不参与存储顺序这条线索 */
+			for (var j = 0; j < msgs.length; j++) {
+				if (keyOf[msgs[j]]) continue;
+				var tj = Parse.messageTimeMs(msgs[j].time);
+				keyOf[msgs[j]] = { ms: tj, anchorTime: tj === null ? null : msgs[j].time, relaxed: tj === null };
+			}
+
+			var sorted = msgs.slice().sort(function (x, y) {
+				var kx = keyOf[x], ky = keyOf[y];
+				if (kx.ms !== ky.ms) {
+					if (kx.ms === null) return -1;      /* 连锚点都没有 → 排最前 */
+					if (ky.ms === null) return 1;
+					return kx.ms - ky.ms;
+				}
+				/* 同一位置：有确切时刻的在前，借位置的紧随其后 */
+				if (kx.relaxed !== ky.relaxed) return kx.relaxed ? 1 : -1;
+				return sortIndex(x) - sortIndex(y);
+			});
+			return { sorted: sorted, keyOf: keyOf };
+		}
+
+		/*
+		 * 把浏览器缓存里的「已发」记录与模组返回的合并（同一条则去重）。
+		 *
+		 * 判定：号码 + 正文相同即视为同一条；两边都有时间时，还要求时间相差不超过
+		 * 10 分钟（否则只是内容恰好相同的另一条短信）。
+		 *
+		 * 关键点：模组存回来的 SMS-SUBMIT 按规范**不含发送时刻**，只有 TP-VP 有效期，
+		 * 而缓存那条是本机发送当时打的时间戳 —— **缓存那条才是唯一带准确时间的**。
+		 * 早先的实现在去重时保留模组那份、丢掉缓存那份，等于把唯一的时间信息一并
+		 * 扔了，于是自己发的消息全部变成「时间未知」并沉到会话末尾。现在改为反向
+		 * 吸收：把缓存的时间戳补给模组那条。模组的 index 仍然保留 —— 删除要走
+		 * AT+CMGD，不能换成缓存的负数 index。
+		 */
+		function mergeCachedSent(modemList, cached) {
+			function keyOf(m) { return normalizeNumber(m.number) + '|' + (m.content || ''); }
+			/*
+			 * 同一个「号码+正文」在模组里可能有不止一条（同内容重复发送），
+			 * 所以按 key 分桶后用游标逐条配对，避免一条缓存把多条模组记录都
+			 * 当成自己的副本而误消。
+			 */
+			var buckets = {};
+			for (var i = 0; i < modemList.length; i++) {
+				var m = modemList[i];
+				if (m.type !== 'sent') continue;
+				var k = keyOf(m);
+				if (!buckets[k]) buckets[k] = [];
+				buckets[k].push(m);
+			}
+
+			var cursor = {};
+			return cached.filter(function (c) {
+				var k = keyOf(c);
+				var arr = buckets[k];
+				if (!arr) return true;              /* 模组里没有 → 缓存这条独立保留 */
+
+				var tCached = Parse.messageTimeMs(c.time);
+				for (var i = cursor[k] || 0; i < arr.length; i++) {
+					var tModem = Parse.messageTimeMs(arr[i].time);
+					if (tModem !== null && !(tCached !== null && Math.abs(tModem - tCached) <= 10 * 60 * 1000)) {
+						continue;                   /* 两边都有时间且差得远 → 是另一条 */
+					}
+					if (tModem === null && tCached !== null) {
+						/*
+						 * 模组那条没有时刻，把本机记录的时刻补上 ——
+						 * 这是这条消息唯一的准确时间来源。
+						 */
+						arr[i].time = c.time;
+						arr[i].timeApprox = false;
+					}
+					cursor[k] = i + 1;
+					return false;                   /* 缓存这条已被模组记录吸收 */
+				}
+				return true;
 			});
 		}
 
@@ -238,22 +464,32 @@ return L.view.extend({
 					map[num] = { number: num, lastMessage: msg.content, lastTime: msg.time, unreadCount: 0, messages: [] };
 				}
 				map[num].messages.push(msg);
-				var t = Parse.parseMessageTime(msg.time).getTime();
-				if (t >= Parse.parseMessageTime(map[num].lastTime).getTime()) {
-					map[num].lastMessage = msg.content;
-					map[num].lastTime = msg.time;
-				}
 			}
 			var list2 = [];
 			for (var key in map) {
 				var c = map[key];
-				c.messages.sort(function (a, b) {
-					return Parse.parseMessageTime(a.time).getTime() - Parse.parseMessageTime(b.time).getTime();
-				});
+				c.messages = conversationOrder(c.messages).sorted;
+				/*
+				 * 联系人列表里的「最近一条」取**时间最新**的那条，而不是数组末尾那条
+				 * —— 排序把时间未知的消息放在了末尾，直接取末尾会拿错。
+				 */
+				var newest = null;
+				for (var n = c.messages.length - 1; n >= 0; n--) {
+					if (Parse.messageTimeMs(c.messages[n].time) !== null) { newest = c.messages[n]; break; }
+				}
+				if (!newest) newest = c.messages.length ? c.messages[c.messages.length - 1] : null;
+				c.lastMessage = newest ? (newest.content || '') : '';
+				c.lastTime = newest ? (newest.time || '') : '';
 				list2.push(c);
 			}
+			/* 联系人按最近一次联系时间倒序；时间未知的沉底 */
 			list2.sort(function (a, b) {
-				return Parse.parseMessageTime(b.lastTime).getTime() - Parse.parseMessageTime(a.lastTime).getTime();
+				var ta = Parse.messageTimeMs(a.lastTime);
+				var tb = Parse.messageTimeMs(b.lastTime);
+				if (ta !== null && tb !== null) return tb - ta;
+				if (ta !== null) return -1;
+				if (tb !== null) return 1;
+				return 0;
 			});
 			state.contacts = list2;
 			if (state.selectedContact) {
@@ -282,6 +518,15 @@ return L.view.extend({
 
 		/* ---------- 发送 ---------- */
 
+		/*
+		 * 本机（浏览器）当前时间，用于给「刚发出去的消息」盖时间戳。
+		 *
+		 * 口径说明：这里用的是**浏览器所在终端的本地时间**，而插件后端
+		 * （日志 / 推送 / 定时锁频）统一走设备系统时区（见 crate::localtime）。
+		 * 日常使用中 LuCI 就在同一台设备所在的局域网内，两者一致；
+		 * 若用异时区的电脑远程登录 LuCI，这条本地缓存的时间戳会按浏览器时区显示，
+		 * 而从模组读到的收发短信时间始终以设备时区给出（PDU 时间戳原样保留）。
+		 */
 		function nowTimeStr() {
 			var d = new Date();
 			var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -454,17 +699,7 @@ return L.view.extend({
 
 		/* ---------- 初始化 ---------- */
 
-		AtWs.client.connect().catch(function (err) {
-			if (err && err.message === 'REQUIRE_AUTH_KEY') {
-				Ui.promptModal('连接密钥', [{ key: 'key', label: '连接密钥', type: 'password' }], function (values) {
-					if (values.key) {
-						AtWs.client.connect(values.key).catch(function (e) { Mt5700.error((e && e.message) || '认证失败'); });
-					}
-				});
-				return;
-			}
-			if (err) console.warn(err);
-		}).then(function () {
+		Ui.startup(body, function () {
 			refreshStorage();
 			refresh();
 		});
