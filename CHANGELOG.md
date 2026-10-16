@@ -8,6 +8,18 @@
 
 ---
 
+## v1.24.3 (2026-10-17)
+
+### 修复 CI：中间态 commit 不再触发完整构建
+
+- **fix(ci) 陈旧提交跳过**：批量改动若以「一次一个文件」的方式推送，每个文件都是独立 commit，push 事件**逐 commit 触发** —— 一次 19 文件的改动就起了 24 个 run 排队。其中「改了一半」的中间 commit（例如删掉了 `localtime::now_string` 但 `signalwatch` / `urc` 还没改成 `nettime`）编译必然失败，白占 6 个架构矩阵各跑一遍 SDK 编译
+  - 现在 build job 先用 `git ls-remote` 比对分支 HEAD：不是最新的提交**直接跳过**依赖安装 / 构建 / 产物校验 / 归档，release job 同步跳过（否则会因缺产物失败）
+  - tag 推送与手动 dispatch 不受影响（本来就是终态）
+- **note(ci) 并发策略保持不变**：`concurrency` 仍按 `github.sha` 分组且 `cancel-in-progress: false` —— 一次发布会同时产生 main push 与 tag push 两个**同 sha** 的 run，必须串行才能避免 Release 的 delete+create 竞态；改成按 ref 分组会让两者并行，反而踩回老坑
+- **verify 远端代码本身可编译**：拉取 main 最新代码执行 `cargo build --release` —— **通过、零警告**。失败的红叉来自中间态 commit，不是代码缺陷
+- **note(ops)**：已取消本次全部在跑/排队的 run（23 个）
+- **docs**：新增 `docs/release-notes/v1.24.3.md`
+
 ## v1.24.2 (2026-10-17)
 
 ### NTP 取到即本地计时，20 分钟再同步；失败逐级退避
