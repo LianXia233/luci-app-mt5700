@@ -381,19 +381,20 @@ impl RpcServer {
                 serde_json::json!({ "id": id, "result": snap })
             }
             // 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off /
-            // set_auto_reset_days（改自动清零天数，写 UCI）。
+            // set_reset_day（改自动清零日 = 每月几号，写 UCI）。
             "usage_ctl" => {
                 let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("");
                 let result = match action {
                     "reset" => Some(self.usage.reset().await),
                     "persist_on" => Some(self.usage.set_persist(true).await),
                     "persist_off" => Some(self.usage.set_persist(false).await),
-                    "set_auto_reset_days" => {
-                        let days = req.params.get("days").and_then(|v| v.as_u64()).unwrap_or(0);
-                        if let Err(e) = self.usage.set_auto_reset_days(days as u32).await {
+                    // 每月几号清零：日期语义（大小月/闰年）由 crate::monthly 负责
+                    "set_reset_day" => {
+                        let day = req.params.get("day").and_then(|v| v.as_u64()).unwrap_or(0);
+                        if let Err(e) = self.usage.set_reset_day(day as u32).await {
                             return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
                         }
-                        // set_auto_reset_days 内部已热更新内存值，snapshot 读到的就是新天数
+                        // set_reset_day 内部已热更新内存值，snapshot 读到的就是新的清零日
                         Some(self.usage.snapshot().await)
                     }
                     _ => None,
