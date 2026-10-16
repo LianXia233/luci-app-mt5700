@@ -1214,7 +1214,8 @@ return L.view.extend({
 
 		/* 签约速率的来源说明（鼠标悬停可见）：数值直接来自模组，未做任何修饰 */
 		function subRateTip() {
-			return 'title="来自模组 AT+C5GQOSRDP 上报的 Session-AMBR（单位 kbps），为核心网下发的签约上下行上限；4G 下本固件不上报该参数"';
+			return 'title="数据上网上下文（CID ' + (state.apnCid || '1') + '，已剔除 IMS 等专用承载）的 Session-AMBR，' +
+				'来自模组 AT+C5GQOSRDP 上报，单位 kbps；4G 下本固件不上报该参数"';
 		}
 
 		/* 清零本次使用量（设备侧状态一并清空，持久化开关不变） */
@@ -2135,15 +2136,6 @@ return L.view.extend({
 					var m = String(res.data).match(/(?:\^ICCID:\s*)?([0-9A-Za-z]{18,24})/);
 					if (m) state.modemInfo.iccid = m[1];
 				}
-				/* 签约速率（Session-AMBR）：5G 下核心网会下发上下行上限。
-				 * 该命令在 4G/5G 下都不报错，但 4G 下本固件只回 5QI=0、速率字段全空，
-				 * 此时如实显示"未上报"，绝不拿别的参数凑一个假速率。 */
-				return AtWs.client.sendCommand('AT+C5GQOSRDP=1');
-			}).then(function (res) {
-				if (res && res.success && res.data) {
-					var q = Parse.parseC5gQosRdp(res.data);
-					if (q) state.subRate = q;
-				}
 				return AtWs.client.sendCommand('AT+CGMR');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
@@ -2168,6 +2160,18 @@ return L.view.extend({
 						state.apnCid = ctx.data.cid;
 					}
 				}
+				/* 签约速率（Session-AMBR）只查**数据上网**那条上下文，绝不查 IMS。
+				 * state.apnCid 来自 pickDataContext —— 它已剔除 IMS / 紧急 / MMS / SUPL
+				 * 等专用承载 APN，所以这里拿到的必然是数据通道 CID；
+				 * 万一没解析到，退回 CID 1（默认数据上下文，实机 +CGACT: 1,1 即上网承载）。 */
+				var dataCid = state.apnCid || '1';
+				return AtWs.client.sendCommand('AT+C5GQOSRDP=' + dataCid);
+			}).then(function (res) {
+				/* 5QI 1（VoLTE 语音）/ 5（IMS 信令）是 IMS 专用承载的特征值：
+				 * 万一真拿到这种值，说明查到的不是数据上网那条上下文，
+				 * 宁可不显示也不张冠李戴（取不到一律清空，避免残留旧值）。 */
+				var q = (res && res.success && res.data) ? Parse.parseC5gQosRdp(res.data) : null;
+				state.subRate = (q && q.qci !== 1 && q.qci !== 5) ? q : null;
 				renderTabsUI();
 			}).catch(function (e) {
 				console.warn('loadDeviceInfo error:', e);
