@@ -188,7 +188,7 @@ var rpcSmsLog = L.rpc.declare({
 var rpcCall = L.rpc.declare({
 	object: 'mt5700',
 	method: 'call',
-	params: ['action', 'number', 'digit'],
+	params: ['action', 'number', 'digit', 'record'],
 	expect: {}
 });
 
@@ -1831,15 +1831,24 @@ function fetchSmsLog(action, entry, id) {
  *     sent=false + error  ＝后端拒绝或通道故障，命令没到模组
  *   status                  → Promise<{success, action, calls: [{id,dir,state,mode,mpty,number,type}]}>
  *     calls 为空数组＝**确实没有通话**（与「读不到」是两件事，红线 23）
+ *   info                    → Promise<{success, action, mute, volume}>
+ *     mute/volume 为 null ＝后端没拿到该项（不是「值是 0」）
+ *   loglist                 → Promise<{success, action, records: [{number,dir,result,duration,time}]}>
+ *   logadd（record=JSON 串） → Promise<{success, action, added, count}>
+ *   logclear                → Promise<{success, action, cleared}>
+ *
+ * ★ record 走 **JSON 字符串**：与 smslog 的 entry 同一约定（ubus args schema
+ *   声明为字符串，对象在传输层容易被展平）。由调用方 JSON.stringify。
  *
  * 超时 14s：与 sendCommand 同口径（后端最坏 8s 排队 + 3s 写入 + 2s 应答）。
  */
-function fetchCall(action, number, digit) {
+function fetchCall(action, number, digit, record) {
 	return withTimeout(
 		rpcCall(
 			action || '',
 			number == null ? '' : String(number),
-			digit == null ? '' : String(digit)
+			digit == null ? '' : String(digit),
+			record == null ? '' : String(record)
 		),
 		14000, '通话操作超时'
 	).then(function (resp) {
@@ -1849,6 +1858,7 @@ function fetchCall(action, number, digit) {
 				action: action,
 				sent: false,
 				calls: null,
+				records: null,
 				error: (resp && resp.error) || 'rpcd 没有 mt5700.call 方法（后端未升级）'
 			};
 		}
@@ -1858,11 +1868,17 @@ function fetchCall(action, number, digit) {
 			sent: resp.sent !== false,
 			raw: resp.raw || '',
 			calls: Array.isArray(resp.calls) ? resp.calls : null,
+			records: Array.isArray(resp.records) ? resp.records : null,
+			mute: (resp.mute == null) ? null : resp.mute,
+			volume: (resp.volume == null) ? null : resp.volume,
+			added: resp.added === true,
+			count: (resp.count == null) ? null : resp.count,
+			cleared: resp.cleared === true,
 			error: resp.error || ''
 		};
 	}).catch(function (err) {
 		return {
-			success: false, action: action, sent: false, calls: null,
+			success: false, action: action, sent: false, calls: null, records: null,
 			error: (err && err.message) || '通话操作失败'
 		};
 	});

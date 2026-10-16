@@ -65,8 +65,8 @@ console.log('== 语音通话契约 ==');
 
 ok('ucode 可读', ucSrc.length > 0);
 ok('call 方法已注册', /\n\t\tcall: \{/.test(ucSrc));
-ok('call 的 args 声明含 action/number/digit',
-	/args: \{ action: '', number: '', digit: '' \}/.test(ucSrc));
+ok('call 的 args 声明含 action/number/digit/record',
+	/args: \{ action: '', number: '', digit: '', record: '' \}/.test(ucSrc));
 
 /* 命令拼装：逐条核对（这些字符串写错，功能当场失效） */
 ok("dial 拼 ATD<number>;（分号＝语音呼叫）", ucSrc.includes("'ATD' + num + ';'"));
@@ -74,9 +74,14 @@ ok("answer 拼 ATA", ucSrc.includes("callDo('answer', 'ATA')"));
 ok("hangup 拼 ATH", ucSrc.includes("callDo('hangup', 'ATH')"));
 ok("dtmf 拼 AT+VTS=<digit>", ucSrc.includes("'AT+VTS=' + d"));
 ok("status 用 AT+CLCC", ucSrc.includes("'AT+CLCC'"));
-ok('五个 action 分支齐全',
+ok('呼叫控制 action 分支齐全（dial/answer/hangup/dtmf/status）',
 	["action == 'dial'", "action == 'answer'", "action == 'hangup'",
 	 "action == 'dtmf'", "action == 'status'"].every(function (s) {
+		return ucSrc.includes(s);
+	}));
+ok('管理台 action 分支齐全（mute/info/loglist/logadd/logclear）',
+	["action == 'mute'", "action == 'info'", "action == 'loglist'",
+	 "action == 'logadd'", "action == 'logclear'"].every(function (s) {
 		return ucSrc.includes(s);
 	}));
 
@@ -128,7 +133,8 @@ ok('菜单指向 voice_call 视图',
 
 ok('rpc.js 声明 mt5700.call',
 	/var rpcCall = L\.rpc\.declare\(\{\s*object: 'mt5700',\s*method: 'call',/.test(rpcSrc));
-ok('rpcCall 参数表 action/number/digit', /method: 'call',\s*params: \['action', 'number', 'digit'\]/.test(rpcSrc));
+ok('rpcCall 参数表 action/number/digit/record',
+	/method: 'call',\s*params: \['action', 'number', 'digit', 'record'\]/.test(rpcSrc));
 ok('fetchCall 包装存在', rpcSrc.includes('function fetchCall('));
 ok('fetchCall 区分「没有方法」与「调用失败」',
 	rpcSrc.includes("'rpcd 没有 mt5700.call 方法（后端未升级）'"));
@@ -155,6 +161,72 @@ ok('订阅来电推送并在 dispose 时退订',
 	viewSrc.includes('AtWs.client.unsubscribe(onPush)'));
 ok('busy 时不叠加轮询（AT 通道独占串行）',
 	/if \(st\.busy\) \{ return; \}/.test(viewSrc));
+
+/* ---------- ⑧ 静音 / 线路信息（ucode） ---------- */
+
+ok("mute 拼 AT+CMUT=0/1，digit 只收 '0'/'1'",
+	ucSrc.includes("'AT+CMUT=' + v") && ucSrc.includes("if (v != '0' && v != '1')"));
+
+const infoFn = grab('callLineInfo', ucSrc);
+ok('callLineInfo 取 CMUT? 与 CLVL?',
+	infoFn.includes("'AT+CMUT?'") && infoFn.includes("'AT+CLVL?'"));
+/* ★★★ 真机踩过的坑（2026-10-16）：rpcCall() 只认 **Rust(127.0.0.1:8765)** 的
+   方法名，而 at_batch 是本文件在 rpcd 层注册的 ubus 方法 —— 在 ucode 内部
+   写 rpcCall('at_batch') 会被 Rust 直接回「未知方法: at_batch」，
+   CMUT/CLVL 一个都取不到。这条断言就是拦它。 */
+ok("callLineInfo 不用 rpcCall('at_batch')（Rust 不认这个 rpcd 层方法）",
+	!infoFn.includes("rpcCall('at_batch'"));
+ok('CLVL 失败只降级不整体报错（volume 留 null）',
+	infoFn.includes('out.volume = callNumAfter'));
+ok('callNumAfter 区分「没这一项」与「值是 0」（返回 null）',
+	grab('callNumAfter', ucSrc).includes("(digits == '') ? null : int(digits)"));
+
+/* ---------- ⑨ 通话记录：字段白名单 + 上限 + 原子落盘 ---------- */
+
+ok('记录落在 /etc/mt5700/call-log.json（与短信记录同目录）',
+	ucSrc.includes("const CALL_LOG_FILE = CALL_LOG_DIR + '/call-log.json'"));
+ok('记录条数上限 100', ucSrc.includes('const CALL_LOG_MAX = 100'));
+
+const logEntryFn = grab('callLogEntry', ucSrc);
+ok('记录 number 必须过 callNumberOk（挡「往设备文件写任意字符串」）',
+	logEntryFn.includes('callNumberOk(m.number)'));
+ok('记录 result 是白名单枚举（不是自由文本）',
+	logEntryFn.includes("result != 'answered'") && logEntryFn.includes("result != 'missed'") &&
+	logEntryFn.includes("result != 'rejected'") && logEntryFn.includes("result != 'canceled'"));
+ok('记录 duration 钳到 [0, DUR_MAX]', logEntryFn.includes('dur > CALL_LOG_DUR_MAX'));
+ok('记录落盘走「写 tmp 再 rename」（原子，断不留半个 JSON）',
+	grab('callLogWrite', ucSrc).includes('fs.rename(tmp, CALL_LOG_FILE)'));
+ok('logadd 走 JSON 字符串（与 smslog 的 entry 同一约定）',
+	ucSrc.includes("let raw = getStr(a, 'record')") && ucSrc.includes('jsonParse(raw)'));
+ok('logadd 解析失败明确报错，不当成空记录',
+	ucSrc.includes("error: 'record 不是合法 JSON'"));
+
+/* ---------- ⑩ 视图扩展：铃声 / 拒接 / 记录 / 能力提示 ---------- */
+
+ok('视图调用 mute/info/loglist/logadd/logclear',
+	["AtWs.call('mute'", "AtWs.call('info'", "AtWs.call('loglist'",
+	 "AtWs.call('logadd'", "AtWs.call('logclear'"].every(function (s) {
+		return viewSrc.includes(s);
+	}));
+ok('记录以 JSON.stringify 传出（record 是字符串参数）',
+	viewSrc.includes('JSON.stringify(rec)'));
+ok('来电时挂断按钮改文案为「拒接」', viewSrc.includes("'拒接'"));
+ok('来电铃声用 Web Audio 生成（本页唯一能让手机出声的部分）',
+	viewSrc.includes('webkitAudioContext') && viewSrc.includes('createOscillator'));
+ok('铃声在离开页面时停掉', /_onDispose\(function[\s\S]*?ringStop\(\)/.test(viewSrc));
+ok('页面明示「本机无音频硬件」', viewSrc.includes('本机无音频硬件'));
+ok('静音未读到时显示「—」而不是当作 0（红线 23）',
+	/if \(st\.mute == null\)/.test(viewSrc));
+ok('通话结束落记录（回到 idle 触发 saveRecord）',
+	viewSrc.includes('saveRecord(t)'));
+
+/* ---------- ⑪ rpc.js：record 参数与结果透传 ---------- */
+
+ok('rpcCall 参数表含 record',
+	/params: \['action', 'number', 'digit', 'record'\]/.test(rpcSrc));
+ok('fetchCall 透传 records / mute / volume',
+	rpcSrc.includes('records: Array.isArray(resp.records)') &&
+	rpcSrc.includes('mute: (resp.mute == null)'));
 
 /* ---------- 汇总 ---------- */
 

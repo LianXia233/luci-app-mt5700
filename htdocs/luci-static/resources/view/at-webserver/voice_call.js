@@ -6,13 +6,26 @@
 /* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 语音通话 - CS 域语音呼叫控制
+ * 语音通话 - 通话管理台（拨号 / 接听 / 拒接 / 挂断 / DTMF / 记录）
  *
- * 功能（对应手册第 4 章 3GPP 呼叫控制 + 第 5 章网络服务 + 第 12 章鼎桥私有 URC）：
- *   · 拨号盘（0-9 / * / #，国际前缀 +，退格）
- *   · 拨打 / 接听 / 挂断 / 通话中 DTMF
- *   · 通话状态（AT+CLCC 轮询：dialing / alerting / active / incoming / waiting）
- *   · 通话时长（active 态起算）
+ * 功能（手册第 4 章呼叫控制 + 第 5 章网络服务 + 第 12 章鼎桥私有 URC）：
+ *   · 拨号盘（0-9 / * / # / 国际前缀 +，退格、清空）
+ *   · 拨打 / 接听 / 拒接 / 挂断 / 通话中 DTMF
+ *   · 通话状态（AT+CLCC 2s 轮询：dialing / alerting / active / incoming / waiting）
+ *   · 通话时长（active 起算）
+ *   · 麦克风静音（AT+CMUT）与扬声器音量读数（AT+CLVL）
+ *   · 通话记录（设备侧持久化 /etc/mt5700/call-log.json，跨浏览器可见）
+ *   · 来电铃声（Web Audio 生成，手机浏览器可响）
+ *
+ * ★★★ 声音为什么不在本机（实测取证，2026-10-16）：
+ *   MT5700 的语音音频出口是**模组自己的 PCM 引脚**，主机侧（USB）只有
+ *   CDC-NCM 数据口 + 4 个 AT 串口 —— 无 audio class 接口（bInterfaceClass
+ *   01 计数 = 0）。设备侧同样没有音频硬件：无 /dev/snd、无 /proc/asound、
+ *   dmesg 无任何音频驱动、设备树无 sound/i2s 节点。AT+CLVL 读到 7
+ *   （普通模式 0–5，**车载 PCM 模式 1–12**）⇒ 模组正处于车载 PCM 语音模式。
+ *   结论：语音流到不了浏览器，本页**不可能**做软电话。要出声必须外接音频
+ *   硬件（模组音频引脚接 codec），或换支持 USB Audio Class 的模组。
+ *   本页做的是「通话管理台」：信令侧的功能全都有，音频侧没有。
  *
  * ★ 状态来源为什么是轮询而不是 URC：
  *   呼叫生命周期的私有 URC（^ORIG / ^CONF / ^CONN / ^CEND）受 AT^CURC 控制，
@@ -21,7 +34,6 @@
  *   ^DSFLOWRPT 之类的常驻上报放出来，那正是红线 22 要防的事故形态。
  *   在掩码验证之前，本页只用 AT+CLCC 轮询拿全量状态 —— 真机实测该命令
  *   在通话中照样应答（12.3s 时返回 +CLCC: 1,0,0,0,0,"1008611",161）。
- *   ^CURC 掩码验证通过后再升级为「URC 即时 + 轮询兜底」。
  *
  * ★ 来电的瞬间通知走既有 incoming_call 推送（urc.rs 的 RING/+CLIP），
  *   但 +CLIP 是否上报取决于模组的 CLIP 设置，所以**来电检测以 CLCC 轮询
@@ -33,12 +45,26 @@
 
 return L.view.extend({
 	render: function () {
-		var page = Mt5700.page('语音通话', '拨打、接听、挂断与 DTMF（CS 域语音呼叫）');
+		var page = Mt5700.page('语音通话', '拨打、接听、拒接、挂断、DTMF 与通话记录');
 		var body = page._body;
 
 		var connBar = E('div');
 		body.appendChild(connBar);
 		Mt5700.renderConnectionBar(connBar);
+
+		/* ---------- 能力提示 ---------- */
+		/*
+		 * 先说清楚「没有声音」再谈功能：用户第一眼就该知道这一页能做到
+		 * 什么、做不到什么 —— 否则「接通了却没声音」会被当成功能坏了。
+		 */
+		body.appendChild(E('div', {
+			'class': 'mt5700-hint',
+			style: 'padding:10px 12px;border-left:3px solid #c98a00;background:#fdf6e3;'
+				+ 'color:#6b4e00;border-radius:4px;margin-bottom:12px;line-height:1.7'
+		}, '本机无音频硬件 —— MT5700 的语音音频走模组 PCM 引脚，这台 CPE 既没有 codec'
+			+ '也没有音频设备（模组 USB 上也没有音频接口）。所以：拨号、接听、拒接、挂断、'
+			+ '状态、DTMF、通话记录都能用，来电时页面还会响铃；但通话内容听不到 ——'
+			+ '那需要外接音频硬件。'));
 
 		/* ---------- 常量 ---------- */
 
@@ -52,6 +78,13 @@ return L.view.extend({
 			5: '等待中'
 		};
 		var CALL_DIR = { 0: '本机呼叫', 1: '网络来电' };
+		var RESULT_TEXT = {
+			answered: '已接通',
+			missed: '未接',
+			rejected: '已拒接',
+			canceled: '已取消',
+			failed: '未接通'
+		};
 
 		/* 前端号码白名单：与后端 callNumberOk 同口径（后端才是真门禁） */
 		var NUMBER_RE = /^\+?[0-9*#]+$/;
@@ -71,7 +104,7 @@ return L.view.extend({
 		 *   idle      无在途呼叫
 		 *   outgoing  本机已发起（dialing/alerting）
 		 *   incoming  网络来电（振铃）
-		 *   active    已接通
+		 *   active    已接通（含保持）
 		 * busy 只挡「用户连点」，不参与状态判定。
 		 */
 		var st = {
@@ -79,15 +112,27 @@ return L.view.extend({
 			number: '',       /* 拨号盘输入 / 在途呼叫号码 */
 			activeAt: 0,      /* 首个 active 出现的时刻（时长基准） */
 			calls: [],        /* 最近一次 status 的全部在途呼叫 */
+			mute: null,       /* null＝还没读到（与「未静音 0」不是一回事，红线 23） */
+			volume: null,     /* 同上 */
 			busy: false,
 			err: '',
+			ringEnabled: true,
 			backendOk: true   /* false＝rpcd 没有 mt5700.call（后端未升级） */
 		};
+
+		/* 通话跟踪：进入非 idle 时建，回到 idle 时落一条记录 */
+		var track = null;
 
 		/* ---------- DOM ---------- */
 
 		var statusBadge = Mt5700.badge('空闲', 'neutral');
-		var statusCard = Mt5700.card('通话状态', '状态来自 AT+CLCC 轮询（2 秒一次）', statusBadge);
+		var muteBadge = Mt5700.badge('静音 —', 'neutral');
+		var headerExtra = E('span');
+		headerExtra.appendChild(statusBadge);
+		headerExtra.appendChild(E('span', {}, ' '));
+		headerExtra.appendChild(muteBadge);
+
+		var statusCard = Mt5700.card('通话状态', '状态来自 AT+CLCC 轮询（2 秒一次）', headerExtra);
 		var statusMain = E('div');
 		statusCard._body.appendChild(statusMain);
 
@@ -97,22 +142,34 @@ return L.view.extend({
 		var metricState = Mt5700.metric('状态', '空闲');
 		var metricDir = Mt5700.metric('方向', '—');
 		var metricDuration = Mt5700.metric('时长', '—');
+		var metricVolume = Mt5700.metric('音量', '—');
 		statusMetrics.appendChild(metricNumber);
 		statusMetrics.appendChild(metricState);
 		statusMetrics.appendChild(metricDir);
 		statusMetrics.appendChild(metricDuration);
+		statusMetrics.appendChild(metricVolume);
 
 		var statusActions = E('div', { 'class': 'mt5700-panel-actions' });
 		statusMain.appendChild(statusActions);
 		var answerBtn = Mt5700.successButton('接听', function () { doAnswer(); });
 		var hangupBtn = Mt5700.dangerButton('挂断', function () { doHangup(); });
+		var muteBtn = Mt5700.ghostButton('静音', function () { toggleMute(); });
+		var ringBtn = Mt5700.ghostButton('铃声：开', function () {
+			st.ringEnabled = !st.ringEnabled;
+			if (!st.ringEnabled) { ringStop(); }
+			ringBtn.textContent = '铃声：' + (st.ringEnabled ? '开' : '关');
+		});
 		statusActions.appendChild(answerBtn);
 		statusActions.appendChild(hangupBtn);
+		statusActions.appendChild(muteBtn);
+		statusActions.appendChild(ringBtn);
 
 		var statusErr = E('p', { 'class': 'mt5700-hint' }, '');
 		statusCard._body.appendChild(statusErr);
 
 		body.appendChild(statusCard);
+
+		/* ---------- 拨号盘 ---------- */
 
 		var dialerCard = Mt5700.card('拨号盘', '输入号码后点「拨打」；* 与 # 可用于 USSD 与补充业务码');
 		var dialerBody = E('div');
@@ -170,10 +227,23 @@ return L.view.extend({
 		dialerActions.appendChild(backspaceBtn);
 		dialerActions.appendChild(clearBtn);
 
-		var dialerHint = E('p', { 'class': 'mt5700-hint' }, ''
+		dialerBody.appendChild(E('p', { 'class': 'mt5700-hint' }, ''
 			+ '通话会产生运营商通话费（10086 等客服号通常免费）。'
-			+ '本页只控制呼叫本身，不通话音频——模组音频走 PCM，由模组与网络侧处理。');
-		dialerBody.appendChild(dialerHint);
+			+ '本页不通话音频 —— 音频在模组的 PCM 接口上，本机没有音频硬件。'));
+
+		/* ---------- 通话记录 ---------- */
+
+		var logCard = Mt5700.card('通话记录',
+			'保存在设备上（/etc/mt5700/call-log.json），换浏览器也看得到；最多 100 条');
+		var logHost = E('div');
+		logCard._body.appendChild(logHost);
+
+		var logActions = E('div', { 'class': 'mt5700-panel-actions' });
+		logCard._body.appendChild(logActions);
+		logActions.appendChild(Mt5700.ghostButton('刷新', function () { loadLog(); }));
+		logActions.appendChild(Mt5700.ghostButton('清空', function () { clearLog(); }));
+
+		body.appendChild(logCard);
 
 		/* ---------- 动作 ---------- */
 
@@ -182,6 +252,7 @@ return L.view.extend({
 			dialBtn.disabled = on;
 			answerBtn.disabled = on;
 			hangupBtn.disabled = on;
+			muteBtn.disabled = on;
 		}
 
 		function setErr(msg) {
@@ -197,6 +268,7 @@ return L.view.extend({
 				return;
 			}
 			if (st.busy) { return; }
+			primeRing();
 			setBusy(true);
 			setErr('');
 			AtWs.call('dial', num).then(function (res) {
@@ -218,6 +290,7 @@ return L.view.extend({
 
 		function doAnswer() {
 			if (st.busy) { return; }
+			primeRing();
 			setBusy(true);
 			AtWs.call('answer').then(function (res) {
 				setBusy(false);
@@ -234,6 +307,8 @@ return L.view.extend({
 
 		function doHangup() {
 			if (st.busy) { return; }
+			/* 来电振铃时挂断＝拒接：记录里区分「未接」与「已拒接」 */
+			if (st.phase === 'incoming' && track) { track.rejected = true; }
 			setBusy(true);
 			AtWs.call('hangup').then(function (res) {
 				setBusy(false);
@@ -249,6 +324,24 @@ return L.view.extend({
 			});
 		}
 
+		function toggleMute() {
+			if (st.busy) { return; }
+			var next = (st.mute === 1) ? 0 : 1;
+			setBusy(true);
+			AtWs.call('mute', null, String(next)).then(function (res) {
+				setBusy(false);
+				if (!res.success) {
+					setErr(res.error || '静音设置失败');
+					return;
+				}
+				/* 写命令回 OK 不等于状态已变 —— 回读一次 */
+				refreshInfo();
+			}).catch(function () {
+				setBusy(false);
+				setErr('静音设置失败');
+			});
+		}
+
 		function sendDtmf(digit) {
 			if (st.busy) { return; }
 			setBusy(true);
@@ -261,6 +354,151 @@ return L.view.extend({
 				setBusy(false);
 				setErr('DTMF 发送失败');
 			});
+		}
+
+		/* ---------- 通话记录读写 ---------- */
+
+		function fmtClock(ts) {
+			if (!ts) { return '—'; }
+			var d = new Date(ts * 1000);
+			function p2(x) { return (x < 10 ? '0' : '') + x; }
+			return p2(d.getMonth() + 1) + '-' + p2(d.getDate())
+				+ ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+		}
+
+		function fmtSeconds(sec) {
+			var s = Number(sec) || 0;
+			var m = Math.floor(s / 60);
+			s = s % 60;
+			return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+		}
+
+		function renderLog(records) {
+			logHost.innerHTML = '';
+			var rows = (records || []).map(function (r) {
+				var redialBtn = Mt5700.ghostButton('重拨', function () {
+					numberInput.value = r.number || '';
+					st.number = numberInput.value;
+					doDial();
+				});
+				return [
+					fmtClock(r.time),
+					r.number == null ? '—' : String(r.number),
+					(r.dir === 1 ? '来电' : '去电'),
+					RESULT_TEXT[r.result] || (r.result == null ? '—' : String(r.result)),
+					r.duration ? fmtSeconds(r.duration) : '—',
+					redialBtn
+				];
+			});
+			logHost.appendChild(Mt5700.table(
+				['时间', '号码', '方向', '结果', '时长', ''], rows, { striped: true }));
+		}
+
+		function loadLog() {
+			AtWs.call('loglist').then(function (res) {
+				if (!res || !res.success) {
+					/*
+					 * ★「读不到」与「没有记录」分开（红线 23）：
+					 *   失败时画错误提示，不画「暂无数据」那张空表。
+					 */
+					logHost.innerHTML = '';
+					logHost.appendChild(E('p', { 'class': 'mt5700-hint' },
+						(res && res.error) || '通话记录读取失败'));
+					return;
+				}
+				renderLog(res.records || []);
+			}).catch(function () {
+				logHost.innerHTML = '';
+				logHost.appendChild(E('p', { 'class': 'mt5700-hint' }, '通话记录读取失败'));
+			});
+		}
+
+		function clearLog() {
+			AtWs.call('logclear').then(function (res) {
+				if (!res || !res.success) {
+					Mt5700.error((res && res.error) || '清空失败');
+					return;
+				}
+				loadLog();
+			}).catch(function () { Mt5700.error('清空失败'); });
+		}
+
+		/*
+		 * 通话结束时落一条记录。字段与后端 callLogEntry 的白名单一一对应；
+		 * number 必须过前端白名单（后端还会再校验一次）。
+		 * ★ 记录写失败不打扰用户：它是日志，不该因为一次写盘失败就弹错。
+		 */
+		function saveRecord(t) {
+			var num = String(t.number || '');
+			if (!num || !NUMBER_RE.test(num)) { return; }
+			var result;
+			if (t.answeredAt) { result = 'answered'; }
+			else if (t.rejected) { result = 'rejected'; }
+			else if (t.dir === 1) { result = 'missed'; }
+			else { result = 'canceled'; }
+			var rec = {
+				number: num,
+				dir: t.dir,
+				result: result,
+				duration: t.answeredAt ? Math.round((Date.now() - t.answeredAt) / 1000) : 0,
+				time: Math.round(t.startedAt / 1000)
+			};
+			AtWs.call('logadd', null, null, JSON.stringify(rec)).then(function (res) {
+				if (res && res.success) { loadLog(); }
+			}).catch(function () { });
+		}
+
+		/* ---------- 来电铃声（Web Audio） ---------- */
+
+		/*
+		 * ★ 为什么用振荡器而不是音频文件：不引外部资源，且回铃音本来就是
+		 *   450~480Hz 的断续正弦，两个振荡器足够。这是本页唯一能"让手机
+		 *   出声"的地方 —— 但它只是**提醒**，不是通话。
+		 * ★ 浏览器自动播放策略：AudioContext 在无用户手势时处于 suspended，
+		 *   resume() 必须在手势回调里调。所以页面加载后挂一次性 click 预热；
+		 *   若来电时仍是 suspended，就只靠 toast —— 不假装响了。
+		 */
+		var ring = { ctx: null, timer: 0 };
+
+		function primeRing() {
+			var Ctx = window.AudioContext || window.webkitAudioContext;
+			if (!Ctx) { return; }
+			try {
+				if (!ring.ctx) { ring.ctx = new Ctx(); }
+				if (ring.ctx.state === 'suspended') { ring.ctx.resume(); }
+			} catch (e) { ring.ctx = null; }
+		}
+
+		function ringBurst() {
+			if (!ring.ctx) { return; }
+			var now = ring.ctx.currentTime;
+			[450, 480].forEach(function (f) {
+				var osc = ring.ctx.createOscillator();
+				var gain = ring.ctx.createGain();
+				osc.type = 'sine';
+				osc.frequency.value = f;
+				gain.gain.setValueAtTime(0.0001, now);
+				gain.gain.exponentialRampToValueAtTime(0.12, now + 0.05);
+				gain.gain.setValueAtTime(0.12, now + 0.85);
+				gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.0);
+				osc.connect(gain);
+				gain.connect(ring.ctx.destination);
+				osc.start(now);
+				osc.stop(now + 1.05);
+			});
+		}
+
+		function ringStart() {
+			if (!st.ringEnabled || ring.timer) { return; }
+			primeRing();
+			if (!ring.ctx) { return; }
+			ringBurst();
+			/* 响 1 秒、停 3 秒 —— 与国标回铃节奏接近，够听出是来电 */
+			ring.timer = setInterval(ringBurst, 4000);
+		}
+
+		function ringStop() {
+			if (ring.timer) { clearInterval(ring.timer); ring.timer = 0; }
 		}
 
 		/* ---------- 状态轮询 ---------- */
@@ -307,14 +545,46 @@ return L.view.extend({
 				st.activeAt = 0;
 			}
 			st.number = (first && first.number) ? first.number : st.number;
+
 			/*
-			 * 来电提示只在**转换进来时**弹一次：renderStatus 每 2s 被轮询
-			 * 调一次，放在渲染里就会每两秒弹一回。
+			 * 来电提示与铃声只在**转换进来时**触发：applyCalls 每 2s 被轮询
+			 * 调一次，放在渲染里就会每两秒弹一回、每两秒重响一次。
 			 */
 			if (st.phase === 'incoming' && prev !== 'incoming') {
 				Mt5700.info('来电：' + (st.number || '未知号码'));
+				ringStart();
 			}
+			if (st.phase !== 'incoming' && prev === 'incoming') {
+				ringStop();
+			}
+
+			updateTrack(first);
 			renderStatus();
+		}
+
+		/*
+		 * 通话生命周期跟踪：第一次进入非 idle 建档，回到 idle 时落记录。
+		 * 记录里的方向/号码以后到的读数覆盖（首次轮询可能还没拿到号码）。
+		 */
+		function updateTrack(first) {
+			if (st.phase !== 'idle') {
+				if (!track) {
+					track = { number: '', dir: 0, startedAt: Date.now(), answeredAt: 0, rejected: false };
+				}
+				if (first) {
+					if (first.number) { track.number = String(first.number); }
+					track.dir = (first.dir === 1) ? 1 : 0;
+				} else if (st.number) {
+					track.number = st.number;
+				}
+				if (st.phase === 'active' && !track.answeredAt) {
+					track.answeredAt = Date.now();
+				}
+			} else if (track) {
+				var t = track;
+				track = null;
+				saveRecord(t);
+			}
 		}
 
 		function refreshStatus() {
@@ -339,6 +609,35 @@ return L.view.extend({
 			});
 		}
 
+		/* 线路信息（静音 / 音量）：不进轮询，按需查 —— 见 ucode callLineInfo 注释 */
+		function refreshInfo() {
+			AtWs.call('info').then(function (res) {
+				if (!res || !res.success) { return; }
+				st.mute = res.mute;
+				st.volume = res.volume;
+				renderInfo();
+			}).catch(function () { });
+		}
+
+		function renderInfo() {
+			if (st.mute == null) {
+				muteBadge.textContent = '静音 —';
+				muteBadge.className = 'mt5700-badge mt5700-badge-neutral';
+				muteBtn.textContent = '静音';
+				muteBtn.disabled = false;
+			} else if (st.mute === 1) {
+				muteBadge.textContent = '已静音';
+				muteBadge.className = 'mt5700-badge mt5700-badge-warning';
+				muteBtn.textContent = '取消静音';
+			} else {
+				muteBadge.textContent = '未静音';
+				muteBadge.className = 'mt5700-badge mt5700-badge-neutral';
+				muteBtn.textContent = '静音';
+			}
+			metricVolume.querySelector('.mt5700-metric-value').textContent =
+				(st.volume == null) ? '—' : String(st.volume);
+		}
+
 		function renderStatus() {
 			var badgeText = '空闲', badgeVariant = 'neutral';
 			if (st.phase === 'outgoing') { badgeText = '呼叫中'; badgeVariant = 'primary'; }
@@ -356,16 +655,21 @@ return L.view.extend({
 			metricDuration.querySelector('.mt5700-metric-value').textContent =
 				(st.phase === 'active' && st.activeAt) ? fmtDuration(Date.now() - st.activeAt) : '—';
 
-		/* 按钮可见性跟着状态走：空闲只能拨，来电只能接/挂，通话中只能挂 */
-		answerBtn.style.display = (st.phase === 'incoming') ? '' : 'none';
-		hangupBtn.style.display = (st.phase === 'idle') ? 'none' : '';
-	}
+			/*
+			 * 按钮可见性跟着状态走：空闲只能拨；来电可接/拒接；
+			 * 在途（拨出/通话）只留挂断。静音只在通话中有意义。
+			 */
+			answerBtn.style.display = (st.phase === 'incoming') ? '' : 'none';
+			hangupBtn.style.display = (st.phase === 'idle') ? 'none' : '';
+			hangupBtn.textContent = (st.phase === 'incoming') ? '拒接' : '挂断';
+			muteBtn.style.display = (st.phase === 'active') ? '' : 'none';
+		}
 
 		/* ---------- 来电推送 ---------- */
 
 		/*
 		 * urc.rs 的 RING/+CLIP 会推 incoming_call。它让号码比轮询早 ~2s 出现，
-		 * 但**判定以来没它不行**：+CLIP 是否上报取决于模组 CLIP 设置，
+		 * 但**判定不能依赖它**：+CLIP 是否上报取决于模组 CLIP 设置，
 		 * 而推送里没有呼叫 ID 与方向。所以这里只拿它做「预提示」——
 		 * 立即刷一次状态，其余仍以 CLCC 为准。
 		 */
@@ -379,8 +683,17 @@ return L.view.extend({
 
 		/* ---------- 初始化 ---------- */
 
+		/* 浏览器要求用户手势后才能出声：首次点击时预热 AudioContext */
+		function onGesture() {
+			primeRing();
+			document.removeEventListener('click', onGesture);
+		}
+		document.addEventListener('click', onGesture);
+
 		Mt5700.connectThen(function () {
 			refreshStatus();
+			refreshInfo();
+			loadLog();
 			/*
 			 * 2s 轮询：CLCC 单条 65~133ms，与网络状态页的信号轮询同量级。
 			 * interval 自带 scopeEl 检查——离开页面自动停，不会跟用户抢串口。
@@ -397,6 +710,8 @@ return L.view.extend({
 		}
 
 		page._onDispose(function () {
+			ringStop();
+			document.removeEventListener('click', onGesture);
 			if (AtWs.client && AtWs.client.unsubscribe) {
 				AtWs.client.unsubscribe(onPush);
 			}

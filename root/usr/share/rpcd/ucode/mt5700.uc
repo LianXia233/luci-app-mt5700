@@ -2786,6 +2786,175 @@ function callStatus() {
 	return { success: true, action: 'status', calls: callParseClcc(r.data) };
 }
 
+/*
+ * 取应答里某前缀后的第一个整数（'+CMUT: 0' → 0）。
+ * 找不到返回 null —— 调用方据此区分「没有这一项」与「值就是 0」
+ * （与 callParseClcc 的「空数组 vs 读不到」同一原则，红线 23）。
+ */
+function callNumAfter(text, prefix) {
+	if (text == null || prefix == null) {
+		return null;
+	}
+	let k = index(text, prefix);
+	if (k < 0) {
+		return null;
+	}
+	let rest = substr(text, k + length(prefix));
+	let i = 0;
+	while (i < length(rest)) {
+		let c = substr(rest, i, 1);
+		if (c != ' ' && c != ':' && c != '\t') {
+			break;
+		}
+		i++;
+	}
+	let digits = '';
+	while (i < length(rest)) {
+		let c = substr(rest, i, 1);
+		if (index('0123456789', c) < 0) {
+			break;
+		}
+		digits = digits + c;
+		i++;
+	}
+	return (digits == '') ? null : int(digits);
+}
+
+/*
+ * 通话线路信息：麦克风静音（CMUT）与扬声器音量（CLVL）。
+ *
+ * ★ 为什么不并进 status 轮询：status 每 2 秒一轮，并进这两条就是把每轮
+ *   串口占用从 1 条变 3 条（真机单条 65–133ms，串口独占串行 —— 红线 70：
+ *   多查不会更快，只会更久）。而 CMUT/CLVL 几乎不变，做成按需查询。
+ * ★★★ 这里**不能**写 rpcCall('at_batch', ...)：at_batch 是 rpcd 层注册的
+ *   ubus 方法（本文件下面 dispatch 里那个），而 rpcCall() 只认 **Rust 服务
+ *   （127.0.0.1:8765）** 的方法名。真机实测（2026-10-16）写错时 Rust 直接回
+ *   `"error": "未知方法: at_batch"` —— 于是 CMUT/CLVL 一个都取不到。
+ *   两条命令就老老实实两次 rpcCall('at')。
+ * ★ 两项独立降级：CMUT 拿不到 = 通道不通（整体报错）；CLVL 拿不到只把
+ *   volume 留 null —— 调用方据此区分「没读到」与「值是 0」（红线 23）。
+ * ★ 真机实测：`+CMUT: 0`、`+CLVL: 7`。
+ *   CLVL 取值：普通模式 0–5，**车载 PCM 模式 1–12**（NV wpgPcmFlag 控制，
+ *   手册 6.10）—— 读到 7 即说明本模组当前处于车载 PCM 语音模式。
+ */
+function callLineInfo() {
+	let out = { success: true, action: 'info', mute: null, volume: null, raw: '' };
+
+	let m = rpcCall('at', { cmd: 'AT+CMUT?' });
+	if (m == null) {
+		return { success: false, action: 'info', error: 'AT 通道无响应' };
+	}
+	if (m.success && type(m.data) == 'string') {
+		out.raw = out.raw + m.data;
+		out.mute = callNumAfter(m.data, '+CMUT:');
+	}
+
+	let v = rpcCall('at', { cmd: 'AT+CLVL?' });
+	if (v != null && v.success && type(v.data) == 'string') {
+		out.raw = out.raw + v.data;
+		out.volume = callNumAfter(v.data, '+CLVL:');
+	}
+
+	return out;
+}
+
+/* ---------- 通话记录（设备侧持久化，跨浏览器可见的唯一真源） ---------- */
+
+const CALL_LOG_DIR = '/etc/mt5700';
+const CALL_LOG_FILE = CALL_LOG_DIR + '/call-log.json';
+/* 条数上限：一条约 120 字节，100 条约 12KB。记录是日志，超了丢最旧的 */
+const CALL_LOG_MAX = 100;
+/* 单次通话时长上限（秒）：86400＝24 小时，纯粹是挡异常输入 */
+const CALL_LOG_DUR_MAX = 86400;
+
+function callLogRead() {
+	let raw = null;
+	try { raw = fs.readfile(CALL_LOG_FILE); } catch (e) { return []; }
+	if (raw == null || raw == '') { return []; }
+	let list = null;
+	try { list = jsonParse(raw); } catch (e) { return []; }
+	return (type(list) == 'array') ? list : [];
+}
+
+function callLogWrite(list) {
+	try { fs.mkdir(CALL_LOG_DIR); } catch (e) { }
+	let tmp = CALL_LOG_FILE + '.tmp';
+	try {
+		fs.writefile(tmp, sprintf('%J', list));
+		fs.rename(tmp, CALL_LOG_FILE);
+		return true;
+	} catch (e) {
+		return false;
+	}
+}
+
+/*
+ * 只收界面画得出来的字段（照 smsLogEntry 的收敛原则）。
+ * ★ number 必须过 callNumberOk：这条通路能把内容写进设备文件，
+ *   不校验就等于开一条「往 /etc/mt5700 塞任意字符串」的路子。
+ * ★ result 是白名单枚举，不是自由文本；duration 钳到 [0, DUR_MAX]。
+ * ★ time 客户端可传（前端在通话结束时上报本地时间），缺失或非法时补 time()。
+ */
+function callLogEntry(m) {
+	if (type(m) != 'object' || type(m.number) != 'string' || !callNumberOk(m.number)) {
+		return null;
+	}
+	let dir = int(m.dir);
+	if (dir != 0 && dir != 1) {
+		return null;
+	}
+	let result = m.result;
+	if (result != 'answered' && result != 'missed' && result != 'rejected' &&
+	    result != 'canceled' && result != 'failed') {
+		return null;
+	}
+	let dur = int(m.duration);
+	if (dur == null || dur < 0) {
+		dur = 0;
+	}
+	if (dur > CALL_LOG_DUR_MAX) {
+		dur = CALL_LOG_DUR_MAX;
+	}
+	let ts = int(m.time);
+	if (ts == null || ts <= 0) {
+		ts = time();
+	}
+	return { number: m.number, dir: dir, result: result, duration: dur, time: ts };
+}
+
+function callLogAdd(rec) {
+	let e = callLogEntry(rec);
+	if (e == null) {
+		return { success: false, error: '记录字段非法（number/dir/result 需在白名单内）' };
+	}
+	let list = callLogRead();
+	/* 新的排最前：界面按数组顺序画就是时间倒序 */
+	let out = [e];
+	for (let i = 0; i < length(list); i++) {
+		if (type(list[i]) == 'object') {
+			out[length(out)] = list[i];
+		}
+	}
+	if (length(out) > CALL_LOG_MAX) {
+		let cut = [];
+		for (let i = 0; i < CALL_LOG_MAX; i++) {
+			cut[i] = out[i];
+		}
+		out = cut;
+	}
+	if (!callLogWrite(out)) {
+		return { success: false, error: '写记录失败（/etc/mt5700 不可写？）' };
+	}
+	return { success: true, added: true, count: length(out) };
+}
+
+function callLogClear() {
+	if (!callLogWrite([])) {
+		return { success: false, error: '清空记录失败' };
+	}
+	return { success: true, cleared: true };
+}
+
 return {
 	mt5700: {
 		at: {
@@ -3189,26 +3358,36 @@ return {
 			}
 		},
 		/*
-		 * 语音通话：dial / answer / hangup / dtmf / status。
+		 * 语音通话：dial / answer / hangup / dtmf / status / info / log*。
 		 *
 		 * ★ 为什么自成方法而不是让前端直接发 AT：号码是**用户输入**，而它会
 		 *   原样进 AT 命令行。放前端拼就等于给 AT 通道开一个注入面（分号可
 		 *   分隔多条命令）。收敛到这里之后，号码与 DTMF 码都只过白名单
 		 *   （callNumberOk / callDtmfOk），命令串在本文件拼装。
 		 * ★ 命令集（手册第 4 章 3GPP + 第 12 章鼎桥私有 URC）：
-		 *     dial   ATD<number>;   （分号＝语音呼叫，真机 2026-10-16 实测可用）
-		 *     answer ATA            （手册 4.2）
-		 *     hangup ATH            （单路挂断；多方时逐路断，手册 4.3）
-		 *     dtmf   AT+VTS=<d>     （通话中送 DTMF，手册 4.7）
-		 *     status AT+CLCC        （手册 5.11，返回全部在途呼叫）
+		 *     dial     ATD<number>;   （分号＝语音呼叫，真机 2026-10-16 实测可用）
+		 *     answer   ATA            （手册 4.2）
+		 *     hangup   ATH            （单路挂断；多方时逐路断，手册 4.3；来电时即拒接）
+		 *     mute     AT+CMUT=0/1    （麦克风静音，通话中生效）
+		 *     dtmf     AT+VTS=<d>     （通话中送 DTMF，手册 4.7）
+		 *     status   AT+CLCC        （手册 5.11，返回全部在途呼叫）
+		 *     info     CMUT? + CLVL?  （麦克风静音 + 扬声器音量，按需查询不进轮询）
+		 *     loglist / logadd / logclear
+		 *                             （通话记录，落 /etc/mt5700/call-log.json）
 		 * ★ 状态机由前端轮询 status 驱动：CLCC 的 <state> 字段给全了
 		 *   dialing/alerting/active/incoming，不需要改 Rust、不需要开任何
 		 *   周期上报（^CURC 掩码未真机验证前不启用，避免开错位把
 		 *   ^DSFLOWRPT 之类的常驻上报放出来 —— 红线 22）。
 		 *   来电瞬间通知走既有 incoming_call 推送（urc.rs 的 RING/+CLIP）。
+		 * ★★ 本机**没有音频硬件**（实测：无 /dev/snd、无 /proc/asound、dmesg
+		 *   无音频驱动、模组 USB 无 audio class 接口、设备树无 sound/i2s 节点）。
+		 *   模组语音音频的出口是它自己的 PCM 引脚（CLVL 读到 7 ⇒ 车载 PCM 模式），
+		 *   主机侧只有 4 个 AT 串口 —— 语音流**不可能**到浏览器。
+		 *   所以本模块提供的是「通话管理台」（拨号/接听/挂断/状态/记录），
+		 *   不是软电话；音频需外接硬件。详见 README 与页面提示条。
 		 */
 		call: {
-			args: { action: '', number: '', digit: '' },
+			args: { action: '', number: '', digit: '', record: '' },
 			call: function (req) {
 				let a = req.args;
 				let action = getStr(a, 'action');
@@ -3217,6 +3396,33 @@ return {
 				}
 				if (action == 'status') {
 					return callStatus();
+				}
+				if (action == 'info') {
+					return callLineInfo();
+				}
+				if (action == 'loglist') {
+					return { success: true, action: action, records: callLogRead() };
+				}
+				if (action == 'logclear') {
+					return callLogClear();
+				}
+				if (action == 'logadd') {
+					/*
+					 * ★ record 走**JSON 字符串**而不是对象参数：与 smslog 的 entry
+					 *   同一约定（ubus 的 args schema 声明为字符串，对象在传输层
+					 *   容易被展平/丢弃）。解析失败明确报错，不当成空记录。
+					 */
+					let raw = getStr(a, 'record');
+					if (raw == null || raw == '') {
+						return { success: false, action: action, error: '缺少参数 record（JSON 字符串）' };
+					}
+					let rec = null;
+					try {
+						rec = jsonParse(raw);
+					} catch (e) {
+						return { success: false, action: action, error: 'record 不是合法 JSON' };
+					}
+					return callLogAdd(rec);
 				}
 				if (action == 'answer') {
 					return callDo('answer', 'ATA');
@@ -3237,6 +3443,20 @@ return {
 					}
 					return callDo('dial', 'ATD' + num + ';');
 				}
+				if (action == 'mute') {
+					/*
+					 * 麦克风静音（AT+CMUT）。digit 只收 '0'/'1' —— 不接收任意
+					 * 取值再拼进 AT 命令，参数面越窄越好。
+					 */
+					let v = getStr(a, 'digit');
+					if (v != '0' && v != '1') {
+						return {
+							success: false, action: action, sent: false,
+							error: 'mute 只接受 digit=0（取消静音）或 1（静音）'
+						};
+					}
+					return callDo('mute', 'AT+CMUT=' + v);
+				}
 				if (action == 'dtmf') {
 					let d = getStr(a, 'digit');
 					if (!callDtmfOk(d)) {
@@ -3247,7 +3467,10 @@ return {
 					}
 					return callDo('dtmf', 'AT+VTS=' + d);
 				}
-				return { success: false, error: '未知 action（只支持 dial/answer/hangup/dtmf/status）' };
+				return {
+					success: false,
+					error: '未知 action（支持 dial/answer/hangup/mute/dtmf/status/info/loglist/logadd/logclear）'
+				};
 			}
 		}
 	}
