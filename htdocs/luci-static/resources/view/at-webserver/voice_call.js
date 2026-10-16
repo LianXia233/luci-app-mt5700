@@ -138,6 +138,13 @@ return L.view.extend({
 			volume: null,     /* 同上 */
 			busy: false,
 			err: '',
+			/*
+			 * channelError：最近一次 status 读失败（后端无 call 方法 / AT 通道
+			 * 故障）。与 backendOk 分工：backendOk 说"后端在不在"，这个说
+			 * "刚才那一次通没通"。后者喂给 applyGates 灰化按钮（厂商 usable
+			 * 纪律）。读失败时**不清** stage/calls —— 那会把故障渲染成空闲。
+			 */
+			channelError: false,
 			ringEnabled: true,
 			backendOk: true,  /* false＝rpcd 没有 mt5700.call（后端未升级） */
 			pfBusy: false,    /* 前置检查进行中（它一次发 4 条 AT，要独占通道） */
@@ -338,11 +345,14 @@ return L.view.extend({
 			if (st.pfBusy) { return; }
 			st.pfBusy = true;
 			pfBtn.disabled = true;
+			/* 自检期间也挡住拨号：它一次发 4 条 AT，通道是独占的 */
+			applyGates();
 			pfHost.innerHTML = '';
 			pfHost.appendChild(E('p', { 'class': 'mt5700-hint' }, '检查中…（4 条只读 AT 查询）'));
 			AtWs.call('preflight').then(function (res) {
 				st.pfBusy = false;
 				pfBtn.disabled = false;
+				applyGates();
 				/*
 				 * ★ 「没响应」不能伪装成「检查完了都好」（红线 23）：
 				 *   无响应时给 success:false，渲染层画错误，不画空表。
@@ -352,6 +362,7 @@ return L.view.extend({
 			}).catch(function () {
 				st.pfBusy = false;
 				pfBtn.disabled = false;
+				applyGates();
 				st.pf = { success: false, error: '调用失败（后端可能未升级）' };
 				renderPreflight();
 			});
@@ -361,10 +372,11 @@ return L.view.extend({
 
 		function setBusy(on) {
 			st.busy = on;
-			dialBtn.disabled = on;
-			answerBtn.disabled = on;
-			hangupBtn.disabled = on;
-			muteBtn.disabled = on;
+			/*
+			 * 只改 busy 标志，禁用判定统一交给 applyGates —— 两处各写一套
+			 * disabled 判据必然漂移（一次加"通道故障"条件就会漏掉一处）。
+			 */
+			applyGates();
 		}
 
 		function setErr(msg) {
@@ -721,11 +733,23 @@ return L.view.extend({
 					 */
 					if (!Array.isArray(res.calls)) {
 						st.backendOk = false;
+						/*
+						 * 通道路故障：不只是报错，还要让动作按钮灰掉
+						 * （applyGates 读这个标志）。否则通道已经断了，
+						 * 按钮却照亮着，用户会一直点一个注定失败的通道 ——
+						 * 这是厂商 usable 纪律里 !s.status?.error 那一半。
+						 * ★ 不清 st.stage / st.calls：保留最后一次成功读到的
+						 *   状态，只用灰化表达"当前不可操作"，避免读失败
+						 *   被渲染成「空闲」（红线 23）。
+						 */
+						st.channelError = true;
 						setErr(res.error || '通话状态读取失败');
+						applyGates();
 					}
 					return;
 				}
 				st.backendOk = true;
+				st.channelError = false;
 				setErr('');
 				st.stage = res.stage || null;
 				applyCalls(res.calls || []);
@@ -805,6 +829,32 @@ return L.view.extend({
 			hangupBtn.style.display = (st.phase === 'idle') ? 'none' : '';
 			hangupBtn.textContent = (st.phase === 'incoming') ? '拒接' : '挂断';
 			muteBtn.style.display = (st.phase === 'active') ? '' : 'none';
+
+			applyGates();
+		}
+
+		/*
+		 * 移植厂商 modemwebui call.js 的 usable 纪律：按钮「能不能点」由
+		 * 两个条件与运算得出，而不是只看 busy。
+		 *   ① 通道路是否正常 —— 通道故障时按钮灰掉，避免用户对着一个
+		 *      注定失败的通道反复点（厂商：!s.status?.error）。
+		 *   ② 动作与状态匹配 —— 空闲时"接听"不该可点、通话中"拨打"
+		 *      更不该可点（厂商逐个按钮算 disabled）。
+		 * busy / pfBusy 也并进来 —— AT 通道独占，它俩在跑时谁都不许发。
+		 *
+		 * ★ 为什么保留 display 而不用纯 disabled：厂商把答案/挂断/静音
+		 *   全部常驻，靠灰化表达"此刻不可用"，视觉噪音大（页面有 5 个动作，
+		 *   空闲时有 3 个是灰的）。本页维持"只显示此刻有意义的动作"的既有
+		 *   风格，但**在显示出来的按钮上补上 disabled 判定** —— 可见性
+		 *   交给 display，可点性交给 disabled，两者职责不混。
+		 */
+		function applyGates() {
+			var blocked = st.busy || st.pfBusy || st.channelError;
+			dialBtn.disabled = blocked || (st.phase !== 'idle');
+			answerBtn.disabled = blocked
+				|| ((st.stage !== 'ringing') && (st.stage !== 'waiting'));
+			hangupBtn.disabled = blocked || (st.phase === 'idle');
+			muteBtn.disabled = blocked || (st.phase !== 'active');
 		}
 
 		/* ---------- 来电推送 ---------- */

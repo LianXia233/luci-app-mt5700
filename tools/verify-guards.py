@@ -56,6 +56,10 @@ TARGETS = {
     # 「单一真源」契约（tests/single-source-contract.test.js）覆盖多个文件，
     # 每个被它守着的文件都要能单独变异 —— 一份文件一个键，别混。
     "rpcjs": ATWB / "rpc.js",
+    # rpc.js 再挂一个键：**通话响应透传**（stage / preflight 四字段）。
+    # 2026-10-16 真实故障：中间这层没搬字段，后端在回、前端在读，唯独它没传 ——
+    # 真机用 ubus 直调验证时**绕过**了这一层，所以没能暴露。见 MUTATIONS 175-177。
+    "rpcjs8": ATWB / "rpc.js",
     "parsejs": ATWB / "parse.js",
     "termjs": ATWB.parent / "view" / "at-webserver" / "terminal.js",
     "smssetjs": ATWB.parent / "view" / "at-webserver" / "sms_settings.js",
@@ -249,6 +253,11 @@ TARGET_TEST = {
     # ★ 厂商 beta 固件电话功能移植（2026-10-16）：两个键都跑语音契约。
     "voicejs": ROOT / "tests" / "voice-call-contract.test.js",
     "uc9": ROOT / "tests" / "voice-call-contract.test.js",
+    # ★ rpc.js 的第三个键：**通话响应透传**（2026-10-16 真实故障）。
+    #   既有 7 个 rpcjs* 键分别跑 single-source / vowifi / retry-offload /
+    #   cellscan-removed / busy-fastfail / at-read-classification / sms-sent-log，
+    #   复用任何一个都会「变异生效却没人判红」（红线 16b）。
+    "rpcjs8": ROOT / "tests" / "voice-call-contract.test.js",
 }
 
 def _resolve_node() -> str:
@@ -1822,6 +1831,74 @@ MUTATIONS = [
         "let netOk = (csOk || imsOk);",
         "let netOk = csOk;",
         "语音承载判据 = CS 或 IMS 任一可用（netOk）",
+    ),
+    (
+        # ★★ 2026-10-16 真实故障（不是假想）：rpc.js 的 fetchCall 没搬 stage。
+        #   ucode 真机确实回 "stage":"idle"，视图也确实读 res.stage，但中间这层
+        #   没透传 ⇒ res.stage 恒 undefined ⇒ st.stage 恒 null ⇒ 徽标一直退回
+        #   CALL_STATE 的 0-5 粗判。上一轮真机验证用 ubus 直调**绕过**了这一层，
+        #   所以没暴露。守卫必须覆盖「相邻两层的字段名」而不只是单层。
+        "rpc.js：fetchCall 漏搬 stage（后端在回、前端在读，中间层丢弃）",
+        "rpcjs8",
+        "stage: (resp.stage == null) ? null : resp.stage,",
+        "/* stage 未透传 */",
+        "★ fetchCall 透传 stage（后端在回、前端在读，这一层不能漏）",
+    ),
+    (
+        # 同一个故障的第二个表现：自检四字段也被吃掉，卡片永远显示「检查失败」。
+        "rpc.js：fetchCall 漏搬 preflight 四字段（自检卡片永远渲染不出来）",
+        "rpcjs8",
+        "ready: resp.ready === true,",
+        "/* ready 未透传 */",
+        "★ fetchCall 透传 preflight 四字段 ready/volte/blocked/steps",
+    ),
+    (
+        # ready 取值放宽成 resp.ready || —— 「没读到」会被显示成「已就绪」。
+        "rpc.js：ready 宽松取值（undefined 变 true，读失败伪装成就绪）",
+        "rpcjs8",
+        "ready: resp.ready === true,",
+        "ready: resp.ready || false,",
+        "★ ready 严格取 true（不让 undefined 变 true，红线 23）",
+    ),
+    (
+        # 按钮禁用不再看通道故障：用户对着一个已经断了的通道反复点。
+        "视图：applyGates 不再把通道故障算进禁用",
+        "voicejs",
+        "var blocked = st.busy || st.pfBusy || st.channelError;",
+        "var blocked = st.busy || st.pfBusy;",
+        "applyGates 把「通道故障」算进禁用（厂商 !s.status?.error 那一半）",
+    ),
+    (
+        # 通话中还能再拨一个号（第二个 ATD 会被模组拒，前端该自己挡住）。
+        "视图：通话中「拨打」仍可点（会发出第二条 ATD）",
+        "voicejs",
+        "dialBtn.disabled = blocked || (st.phase !== 'idle');",
+        "dialBtn.disabled = blocked;",
+        "拨打只在 idle 可点（通话中不该还能再拨一个）",
+    ),
+    (
+        # 接听判定放宽到「任何非空闲都可接」：空闲时也能点接听。
+        "视图：接听判定放宽（空闲也能点接听）",
+        "voicejs",
+        "answerBtn.disabled = blocked",
+        "answerBtn.disabled = false && blocked",
+        "接听只在 ringing/waiting 可点（厂商口径：这两个状态之外一律灰化）",
+    ),
+    (
+        # 读失败后不复位通道标志 ⇒ 一次抖动就让按钮永久灰化。
+        "视图：status 读成功后不复位 channelError（按钮永久灰化）",
+        "voicejs",
+        "\t\t\tst.channelError = false;\n",
+        "\t\t\t/* 未复位 */\n",
+        "status 读失败置 channelError 且成功时复位（否则永久灰化）",
+    ),
+    (
+        # 禁用判据散落回 setBusy —— 第二套判据必然与 applyGates 漂移。
+        "视图：setBusy 里另写一套 disabled（禁用判据漂移）",
+        "voicejs",
+        "\t\t\tapplyGates();\n\t\t}\n\n\t\tfunction setErr(msg) {",
+        "\t\t\tdialBtn.disabled = on;\n\t\t}\n\n\t\tfunction setErr(msg) {",
+        "setBusy 只改 busy 标志并转交 applyGates",
     ),
     (
         # 三态记号退回 core：CS 未注册但 IMS 已注册时，CS 那行会显示成

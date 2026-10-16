@@ -1858,7 +1858,23 @@ function fetchCall(action, number, digit, record) {
 				action: action,
 				sent: false,
 				calls: null,
+				/*
+				 * 失败分支必须显式给 stage: null，不能省。省略的话前端读到
+				 * undefined，与「还没查到过」混同；而这里的真实语义是
+				 * 「查过了，失败了」—— 前端要能把它与空闲区分开（红线 23）。
+				 */
+				stage: null,
+				steps: [],
 				records: null,
+				/*
+				 * ready/volte 在失败分支必须显式给 false。省略时读到的是
+				 * undefined —— 虽然 falsy、当前 UI 表现一致，但成功分支给的是
+				 * 布尔 false，两边类型不一致；将来任何 ready === undefined
+				 * 之类的判据都会被这个洞绊倒。显式写出来，类型就统一了。
+				 */
+				ready: false,
+				volte: false,
+				blocked: '',
 				error: (resp && resp.error) || 'rpcd 没有 mt5700.call 方法（后端未升级）'
 			};
 		}
@@ -1868,6 +1884,26 @@ function fetchCall(action, number, digit, record) {
 			sent: resp.sent !== false,
 			raw: resp.raw || '',
 			calls: Array.isArray(resp.calls) ? resp.calls : null,
+			/*
+			 * stage 必须在这里透传：后端 callOverallStage 给的总态令牌
+			 * （active/held/waiting/ringing/alerting/dialing/idle）。
+			 * ★ 曾经的坑：本层漏了它，视图 st.stage 恒为 null，徽标一直退回
+			 *   CALL_STATE 的 0-5 粗判，厂商粒度的状态机等于白写（后端在回、
+			 *   前端在读，只有中间这层没搬）。null 保留「还没读到过」的语义
+			 *   —— 与 'idle' 不同，后者是读到了且确实空闲（红线 23）。
+			 */
+			stage: (resp.stage == null) ? null : resp.stage,
+			/*
+			 * preflight 的判定结果同样要透传。与 stage 同一个坑：
+			 * 只回 error 不带 steps/ready/volte/blocked，前端拿到的是
+			 * 「检查失败」，自检卡片永远渲染不出那四行。
+			 * ready 用 resp.ready === true 严格取，**不让 undefined 变 true**
+			 * （「没读到」不等于「就绪」，红线 23）。
+			 */
+			ready: resp.ready === true,
+			volte: resp.volte === true,
+			blocked: resp.blocked || '',
+			steps: Array.isArray(resp.steps) ? resp.steps : [],
 			records: Array.isArray(resp.records) ? resp.records : null,
 			mute: (resp.mute == null) ? null : resp.mute,
 			volume: (resp.volume == null) ? null : resp.volume,
@@ -1878,7 +1914,9 @@ function fetchCall(action, number, digit, record) {
 		};
 	}).catch(function (err) {
 		return {
-			success: false, action: action, sent: false, calls: null, records: null,
+			success: false, action: action, sent: false,
+			calls: null, stage: null, steps: [], records: null,
+			ready: false, volte: false, blocked: '',
 			error: (err && err.message) || '通话操作失败'
 		};
 	});

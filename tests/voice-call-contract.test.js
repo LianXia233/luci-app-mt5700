@@ -25,6 +25,14 @@
  *      命令（AT+QCALLCFG / AT+QCFG，MT5700M 手册里没有 —— 红线 27）
  *   ⑦ 通话记录双向字段：direction 字符串与 dir 整数同义、unanswered→failed、
  *      读侧补齐 direction（不落盘迁移）
+ *   ⑧ ★★ 端到端透传（2026-10-16 真实故障）：ucode 真机确实回 "stage":"idle"，
+ *      视图也确实读 res.stage，但中间的 rpc.js#fetchCall 没搬这个字段 ⇒
+ *      res.stage 恒 undefined ⇒ 厂商粒度状态机在 UI 上完全不生效。
+ *      「后端返回正确」不等于「页面拿到」—— 每层都要验，且断言必须把
+ *      相邻两层的字段名钉在一起。上一轮真机验证用 `ubus call` 直调，
+ *      **绕过**了这一层，所以没能暴露。
+ *   ⑨ 按钮禁用纪律（厂商 usable 语义）：禁用判据只有 applyGates 一处，
+ *      且把「通道故障」算进去；读失败不清 stage/calls（别把故障渲染成空闲）
  *
  * 运行：node tests/voice-call-contract.test.js
  */
@@ -243,6 +251,96 @@ ok('rpcCall 参数表含 record',
 ok('fetchCall 透传 records / mute / volume',
 	rpcSrc.includes('records: Array.isArray(resp.records)') &&
 	rpcSrc.includes('mute: (resp.mute == null)'));
+
+/* ---------- ⑪b rpc.js：端到端透传（真实踩过的坑，不是假想） ---------- */
+
+/*
+ * ★★★ 这组断言来自一次真实故障：v2.4.23 把厂商粒度状态机（stage）与前置
+ *   自检（ready/volte/blocked/steps）都实现了，ucode 真机也确实回了
+ *   "stage":"idle"，但 rpc.js 的 fetchCall **没把这两个字段搬过来**。
+ *   于是后端在回、前端在读，中间那层没搬 ⇒ res.stage 恒为 undefined、
+ *   st.stage 恒为 null ⇒ 徽标一直退回 CALL_STATE 的 0-5 粗判，
+ *   自检卡片永远只显示「检查失败」。
+ *   ★ 为什么之前没发现：真机验证是 `ubus call mt5700 call {...}` 直调，
+ *     **绕过了 rpc.js 这一层**。所以「后端返回正确」不等于「页面正确」——
+ *     每一层都得单独验，且必须有断言把相邻两层的字段名钉在一起。
+ *   ★ 教训：断言只覆盖单层时，跨层的字段改名/漏搬一律无声通过。
+ */
+ok('★ fetchCall 透传 stage（后端在回、前端在读，这一层不能漏）',
+	rpcSrc.includes('stage: (resp.stage == null) ? null : resp.stage'),
+	'漏了它 → st.stage 恒 null → 厂商粒度状态机在 UI 上完全不生效');
+ok('★ fetchCall 透传 preflight 四字段 ready/volte/blocked/steps',
+	rpcSrc.includes('ready: resp.ready === true') &&
+	rpcSrc.includes('volte: resp.volte === true') &&
+	rpcSrc.includes('blocked: resp.blocked') &&
+	rpcSrc.includes('steps: Array.isArray(resp.steps)'),
+	'漏了它们 → 自检卡片永远渲染不出那四行，只显示「检查失败」');
+ok('★ ready 严格取 true（不让 undefined 变 true，红线 23）',
+	rpcSrc.includes('resp.ready === true') &&
+	!rpcSrc.includes('ready: resp.ready ||'),
+	'「没读到」不等于「就绪」——宽松取值会把读失败显示成一切正常');
+ok('★ fetchCall 两条失败分支都显式给 stage: null 与 steps: []',
+	(function () {
+		var n = (rpcSrc.match(/stage: null/g) || []).length;
+		var m = (rpcSrc.match(/steps: \[\]/g) || []).length;
+		/* 一条成功分支取 resp.stage，两条失败分支各一处 null ⇒ 共 3 */
+		return n >= 2 && m >= 2;
+	})(),
+	'失败时省略字段 → 前端读到 undefined，与「还没查到过」混同（红线 23）');
+ok('★ 视图读 res.stage 的前提是 rpc 层真的给了（两端钉在一起）',
+	viewSrc.includes('st.stage = res.stage || null;') &&
+	rpcSrc.includes('stage: (resp.stage == null) ? null : resp.stage'));
+
+/* ---------- ⑪c 视图：按钮禁用纪律（厂商 usable 语义） ---------- */
+
+/*
+ * 厂商 modemwebui call.js 的 usable = s.fresh && !s.busy && !s.status?.error，
+ * 再按状态逐个按钮算 disabled。本页的对应实现是 applyGates()。
+ * ★ 关键性质：**禁用判据只有一处**。曾在 setBusy 里写一套、renderStatus
+ *   里写另一套，结果加「通道故障」条件时漏了一处 —— 两处判据必然漂移。
+ */
+ok('视图有统一的 applyGates（禁用判据只写一处，不散落在 setBusy/renderStatus）',
+	viewSrc.includes('function applyGates()'));
+ok('setBusy 只改 busy 标志并转交 applyGates',
+	viewSrc.includes('applyGates();') &&
+	/function setBusy\(on\) \{[\s\S]{0,300}applyGates\(\);[\s\S]{0,80}\}/.test(viewSrc) &&
+	!/function setBusy\(on\) \{[^}]*dialBtn\.disabled/.test(viewSrc),
+	'setBusy 里直接写 dialBtn.disabled = on 就是第二套判据，会漂移');
+ok('applyGates 把「通道故障」算进禁用（厂商 !s.status?.error 那一半）',
+	viewSrc.includes('var blocked = st.busy || st.pfBusy || st.channelError;'));
+ok('接听只在 ringing/waiting 可点（厂商口径：这两个状态之外一律灰化）',
+	viewSrc.includes('answerBtn.disabled = blocked') &&
+	viewSrc.includes("(st.stage !== 'ringing') && (st.stage !== 'waiting')"));
+ok('拨打只在 idle 可点（通话中不该还能再拨一个）',
+	viewSrc.includes("dialBtn.disabled = blocked || (st.phase !== 'idle')"));
+ok('静音只在 active 可点',
+	viewSrc.includes("muteBtn.disabled = blocked || (st.phase !== 'active')"));
+ok('status 读失败置 channelError 且成功时复位（否则永久灰化）',
+	viewSrc.includes('st.channelError = true;') &&
+	viewSrc.includes('st.channelError = false;'));
+ok('读失败不清 stage/calls（别把故障渲染成空闲，红线 23）',
+	(function () {
+		var i = viewSrc.indexOf('st.channelError = true;');
+		if (i < 0) { return false; }
+		/*
+		 * 窗口只取到失败分支的 `return` 为止 —— 越过它就会落进成功分支，
+		 * 而成功分支里的 st.stage = res.stage 是**应该**有的（这正是真机
+		 * 观察到的那行）。窗口开太大 ⇒ 断言恒红，久了就没人看它。
+		 */
+		var seg = viewSrc.slice(i, viewSrc.indexOf('return;', i));
+		return !seg.includes('st.stage = ') && !seg.includes('st.calls = ')
+			&& !seg.includes('applyCalls(');
+	})(),
+	'失败分支里一旦重置 stage/calls，通道故障看起来就像空闲');
+ok('st 有 channelError 初值 false（未查询过 ≠ 故障）',
+	/channelError: false,/.test(viewSrc));
+ok('前置检查期间也调用 applyGates（它一次发 4 条 AT，独占通道）',
+	(function () {
+		var i = viewSrc.indexOf('function runPreflight(');
+		var seg = viewSrc.slice(i, viewSrc.indexOf('function setBusy('));
+		return (seg.match(/applyGates\(\);/g) || []).length >= 2;
+	})(),
+	'成功/失败/异常三条出口都要解锁，只解一条会留下永久灰化的按钮');
 
 /* ---------- ⑫ 状态机令牌（2026-10-16 从厂商 beta 固件移植） ---------- */
 

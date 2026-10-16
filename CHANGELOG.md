@@ -5,6 +5,60 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.24] - 2026-10-16
+
+### 修复
+
+- **★★ `rpc.js#fetchCall` 漏搬字段，导致 v2.4.23 的两个新功能在页面上完全没生效**
+  （本条是真实故障，不是假想防御。详见下方「发现过程」）
+
+  | 字段 | 谁产出 | 谁消费 | 漏了会怎样 |
+  |---|---|---|---|
+  | `stage` | ucode `callOverallStage` | 视图 `st.stage` | 厂商粒度状态机**完全不生效**：徽标一直退回 `CALL_STATE` 的 0-5 粗判，「正在呼出/对方振铃/来电等待/通话保持」四种状态分不出来 |
+  | `ready`/`volte`/`blocked`/`steps` | ucode `callPreflight` | 视图 `renderPreflight` | 可用性自检**永远只显示「检查失败」**，那四行读数一条都渲染不出来 |
+
+- 两条失败分支（`success === false` 与 Promise reject）补齐 `stage: null` /
+  `steps: []` / `ready: false` / `volte: false` / `blocked: ''`：
+  省略时前端读到的是 `undefined`，与「还没查到过」混同（红线 23）；
+  且成功分支给布尔 `false`、失败分支给 `undefined`，类型不一致，
+  将来任何 `ready === undefined` 判据都会被绊倒。
+
+### 新增
+
+- **移植厂商 `modemwebui` 的按钮禁用纪律（`usable` 语义）**：
+  新增 `applyGates()`，禁用判据**只此一处**。判据 = 忙/自检中/通道故障
+  ∨ 动作与状态不匹配：
+
+  | 按钮 | 可点条件 |
+  |---|---|
+  | 拨打 | 仅 `idle`（通话中不再能发出第二条 `ATD`） |
+  | 接听 | 仅 `ringing`/`waiting`（对齐厂商口径） |
+  | 挂断 | 非 `idle` |
+  | 静音 | 仅 `active` |
+
+  新增 `st.channelError`：`status` 读失败时置位、成功时复位，
+  通道故障期间按钮灰化，不再让用户对着一个已断的通道反复点。
+  **读失败不清 `stage`/`calls`** —— 那会把故障渲染成「空闲」。
+  `setBusy` 改为只改标志并转交 `applyGates`（此前它自己写了一套
+  `disabled`，两处判据必然漂移）。
+
+### 发现过程（值得记一笔）
+
+上一轮真机验证用的是 `ubus call mt5700 call '{"action":"status"}'` **直调**，
+它返回了正确的 `"stage":"idle"`，于是一度认为状态机移植成功。
+但直调**绕过**了 `rpc.js` 这一层 —— 后端在回、前端在读，唯独中间层没搬。
+**「后端返回正确」不等于「页面拿到」。**
+教训固化为两条守卫：
+
+- `tests/voice-call-contract.test.js` 新增 ⑪b/⑪c/⑨ 三组断言（**142 项**），
+  把相邻两层的字段名钉在一起，并要求禁用判据只有 `applyGates` 一处。
+- 新增 `tests/call-passthrough-contract.test.js`（**16 项**）：把**真机实抓**
+  的 `status` / `preflight` 响应喂进**未经修改的** `fetchCall` 源码执行，
+  验证字段真能活着到视图。样本用真数据而非手编 —— 手写容易「恰好符合
+  自己的假设」，真机能暴露字段名/类型不一致。
+- `tools/verify-guards.py` 新增 `rpcjs8` 键（既有 7 个 `rpcjs*` 各跑别的测试，
+  复用会「变异生效却没人判红」）+ **8 条变异（第 176–183 条）**。
+
 ## [2.4.23] - 2026-10-16
 
 ### Added
