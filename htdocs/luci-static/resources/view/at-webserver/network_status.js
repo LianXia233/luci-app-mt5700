@@ -249,6 +249,8 @@ return L.view.extend({
 				E('div', { 'class': 'mt-usage-head' }, [
 					E('span', { 'class': 'mt-usage-title' }, '本次使用量'),
 					E('div', { 'class': 'mt-usage-actions' }, [
+						/* 时间源提示：NTP 不可达时才显示（后端回退设备时钟，日期可能不准） */
+						E('span', { 'class': 'mt-usage-clock', 'id': 'usage-clock', 'style': 'display:none;' }),
 						E('button', {
 							'class': 'mt-usage-btn', 'id': 'usage-persist', 'type': 'button',
 							'title': '开启后：使用量写入闪存，重启后依然保留（约每 10 分钟写一次）',
@@ -282,18 +284,18 @@ return L.view.extend({
 						E('span', { 'class': 'mt-usage-val', 'id': 'usage-peak' }, '↓0 B/s · ↑0 B/s')
 					]),
 					E('div', { 'class': 'mt-usage-cell wide auto' }, [
-						E('span', { 'class': 'mt-usage-lbl' }, '自动清零'),
+						E('span', { 'class': 'mt-usage-lbl' }, '每月清零'),
 						E('span', { 'class': 'mt-usage-auto' }, [
 							E('input', {
 								'class': 'mt-usage-days', 'id': 'usage-days', 'type': 'number',
-								'min': '1', 'max': '3650', 'step': '1', 'value': '30',
-								'title': '累计满这么多天就自动清零（1~3650 天）'
+								'min': '1', 'max': '31', 'step': '1', 'value': '1',
+								'title': '每月几号自动清零（1~31 号）；31 号这类小月没有的日子，按当月最后一天清零'
 							}),
-							E('span', { 'class': 'mt-usage-unit' }, '天'),
+							E('span', { 'class': 'mt-usage-unit' }, '号'),
 							E('button', {
 								'class': 'mt-usage-btn', 'id': 'usage-days-save', 'type': 'button',
-								'title': '保存自动清零天数（写入配置，重启后仍生效）',
-								'click': saveUsageAutoResetDays
+								'title': '保存每月清零日（写入配置，重启后仍生效）',
+								'click': saveUsageResetDay
 							}, '保存')
 						])
 					])
@@ -1270,14 +1272,16 @@ return L.view.extend({
 			});
 		}
 
-		/* 保存自动清零天数（1~3650，写 UCI，重启后仍生效） */
-		function saveUsageAutoResetDays() {
+		/* 保存每月清零日（1~31 号，写 UCI，重启后仍生效）
+		 * 后端按自然月判定：大小月、闰年、跨年由 Rust 的 monthly 模块处理，
+		 * 31 号这类小月没有的日子按当月月末触发，不会整月漏清。 */
+		function saveUsageResetDay() {
 			var el = document.getElementById('usage-days');
 			if (!el) return;
-			var days = parseInt(el.value, 10);
-			if (!isFinite(days) || days < 1) days = 1;
-			if (days > 3650) days = 3650;
-			AtWs.usageCtl('set_auto_reset_days', days).then(function (r) {
+			var day = parseInt(el.value, 10);
+			if (!isFinite(day) || day < 1) day = 1;
+			if (day > 31) day = 31;
+			AtWs.usageCtl('set_reset_day', day).then(function (r) {
 				if (r && r.success && r.usage) {
 					state.usage = r.usage;
 					renderSpeedUI();
@@ -1338,8 +1342,21 @@ return L.view.extend({
 					: '00:00:00';
 			}
 			var elDays = document.getElementById('usage-days');
-			if (elDays && u && u.auto_reset_days && document.activeElement !== elDays) {
-				elDays.value = String(u.auto_reset_days);
+			if (elDays && u && u.reset_day && document.activeElement !== elDays) {
+				elDays.value = String(u.reset_day);
+			}
+			/* 时刻来源：NTP 不可达时后端回退设备时钟，此时按日历清零的日期可能不准，
+			 * 不做隐藏 —— 排障时「为什么没在 1 号清零」第一眼就该看到这个。 */
+			var elClock = document.getElementById('usage-clock');
+			if (elClock) {
+				var src = (u && u.time_source) ? u.time_source : '';
+				if (src && src !== 'NTP') {
+					elClock.textContent = '时间源: ' + src;
+					elClock.title = 'NTP 不可达，当前用设备时钟；设备断电无 RTC 时日期可能不准，清零日会相应偏移';
+					elClock.style.display = '';
+				} else {
+					elClock.style.display = 'none';
+				}
 			}
 			var uPersist = document.getElementById('usage-persist');
 			if (uPersist) {
