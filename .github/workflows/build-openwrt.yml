@@ -52,6 +52,9 @@ jobs:
   build:
     name: 编译构建（${{ matrix.fmt }} · ${{ matrix.arch }}）
     runs-on: ubuntu-latest
+    # stale=true 表示「本次提交已被后续提交取代」，供 release job 判断是否跳过。
+    outputs:
+      stale: ${{ steps.stale.outputs.stale }}
     strategy:
       fail-fast: false
       matrix:
@@ -106,10 +109,36 @@ jobs:
           echo "==> Rust 目标三元组：${{ matrix.rust }}"
           echo "==> 工作目录：$(pwd)，SDK 镜像：openwrt/sdk:${{ matrix.image }}"
 
+      # ------------------------------------------------------------------
+      # 陈旧提交检查：连续推送会为每个中间 commit 各起一个 run
+      #
+      # 背景（真实故障）：批量改动用「一次一个文件」的方式推送时，每个文件都是
+      # 一个独立 commit，push 事件逐 commit 触发 —— 24 个 run 排队，其中
+      # 「改了一半」的中间 commit（例如删掉了 localtime::now_string 但调用方还没
+      # 改成 nettime）编译必然失败，白白占用 6 个架构矩阵各跑一遍 SDK 编译。
+      # 这些失败的红叉不是代码问题，纯粹是中间态。
+      #
+      # 处理：只有「仍是分支最新」的提交才真正构建；被后续提交取代的直接跳过。
+      # tag 推送与手动 dispatch 不受影响（它们本来就是终态）。
+      # ------------------------------------------------------------------
+      - name: 陈旧提交检查（已被后续提交取代则跳过构建）
+        id: stale
+        run: |
+          stale=false
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "branch" ]; then
+            head=$(git ls-remote https://github.com/${{ github.repository }} "refs/heads/${{ github.ref_name }}" 2>/dev/null | cut -f1)
+            if [ -n "$head" ] && [ "$head" != "${{ github.sha }}" ]; then
+              stale=true
+              echo "==> 本提交已被 ${head} 取代，跳过构建（避免为中间态 commit 白跑一遍）"
+            fi
+          fi
+          echo "stale=$stale" >> "$GITHUB_OUTPUT"
+
       # 依赖安装与构建执行分为两个 SDK 容器运行：
       #   依赖安装阶段把 Rust 工具链与 zig 装进 /opt 卷（宿主机 .ci-toolchain 目录持久化），
       #   构建执行阶段复用同一 /opt 卷，无需重复下载工具链。
       - name: 依赖安装（Rust 工具链 + zig 交叉链接器，SDK 容器内）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set +e
           docker run --rm --user root \
@@ -124,6 +153,7 @@ jobs:
           exit $rc
 
       - name: 构建执行（OpenWrt SDK 编译 LuCI 前端 + Rust 后端）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set +e
           docker run --rm --user root \
@@ -142,6 +172,7 @@ jobs:
       # 因此若 out/<矩阵期望架构>/ 不存在，说明镜像 tag 与矩阵登记不符。
       # 这一步把「发错架构的包」从「用户装不上」提前到「CI 直接失败」。
       - name: 产物校验（架构一致性闸门）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set -e
           echo "==> out 目录实际结构："
@@ -157,6 +188,7 @@ jobs:
           cat "out/${{ matrix.arch }}/ARCH.txt"
 
       - name: 产物校验（单包完整性与后端二进制闸门）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set -e
           if [ -z "$(find "out/${{ matrix.arch }}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)" ]; then
@@ -178,6 +210,7 @@ jobs:
           echo "==> 体积校验通过（单包策略）"
 
       - name: 产物归档（上传 Actions 构件）
+        if: steps.stale.outputs.stale != 'true'
         # v5：与 v4 的差异之一是同名构件默认覆盖（overwrite=true），此处每个矩阵组合
         # 的名称唯一，用不到该行为；升级的主因是 v4 仍跑在 Node 20，runner 已弃用。
         uses: actions/upload-artifact@v5
@@ -196,6 +229,8 @@ jobs:
   release:
     name: 统一发布（汇总全部架构产物并发布 Release）
     needs: build
+    # 构建被「陈旧提交」跳过时不能发布：没有产物，发布步骤必然失败
+    if: needs.build.outputs.stale != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
