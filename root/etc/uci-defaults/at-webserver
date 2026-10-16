@@ -28,6 +28,40 @@ chmod 0755 /etc/hotplug.d/net/99-mt5700-renew 2>/dev/null
 chmod 0755 /etc/init.d/at-webserver 2>/dev/null
 
 # ---------------------------------------------------------------------------
+# 运行时兜底：timeout 命令（2026-10-07 真机故障，MWRT r33382 / kernel 6.6.94）
+# ---------------------------------------------------------------------------
+# rpcd ucode 插件（/usr/share/rpcd/ucode/mt5700.uc）的 6 处调用都用
+# `timeout N ...` 拿回环 RPC / curl / nslookup / 诊断探针：
+#     p = fs.popen('timeout 45 nc 127.0.0.1 8765 < tmp', 'r');   ← 第 356 行 rpcCall
+# 部分固件的 busybox 不含 timeout applet（MWRT 实测：busybox timeout →
+# "applet not found"、/bin/sh → "timeout: not found"、PATH 里也没有），
+# 于是 shell 直接 127 退出、一行输出都没有，ucode 侧读到的 line 为空，
+# 统一报成「Rust 后端无应答（已限时 45 秒）」—— **该文案是假的**，实测耗时 0.00s。
+#
+# 后果不是降级而是全废：所有 AT 读取失败，整个 /admin/modem/5g 页面读不到任何信息，
+# 同时 exitip / sysdiag / DoH / ePDG 一起失效。
+# ★ 该固件上 AT 通道本身完全正常（直连 nc 8765 连续 5 次成功、通知日志有真实
+#   RSRP/频点），所以任何"重启服务""换串口"都是白费力气，务必先查 timeout 在不在。
+#
+# 为什么不在 Makefile 的 LUCI_DEPENDS 里声明 coreutils-timeout：
+#   与文件头"netcat 不设硬依赖"是同一条理由 —— 目标源缺同名包时，硬依赖会让
+#   opkg 直接安装失败，得不偿失。缺失是可诊断的（只需 command -v timeout）。
+# coreutils-timeout 仅 20KB，Depends 只有 libc/coreutils/librt（coreutils 本体
+#   常已随固件存在），代价可忽略，值得在缺时补装而不是让整个包装不上。
+if ! command -v timeout >/dev/null 2>&1; then
+	logger -t mt5700-uci "缺少 timeout 命令（ucode 代理的 6 处调用都依赖它），正在补装 coreutils-timeout"
+	# opkg 优先；apk 系（OpenWrt 24.10+ / MWRT）两者都可能存在，都试一遍。
+	# 装不上也不阻塞安装流程 —— 下面的告警已经足够定位。
+	(opkg install coreutils-timeout ||
+		apk add --no-cache coreutils-timeout) >/dev/null 2>&1
+	if command -v timeout >/dev/null 2>&1; then
+		logger -t mt5700-uci "coreutils-timeout 安装成功，AT 通道可用"
+	else
+		logger -t mt5700-uci "警告：coreutils-timeout 安装失败，AT 通道将全部报「无应答」。请手动 opkg install coreutils-timeout"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
 # AT 服务开机自启
 # ---------------------------------------------------------------------------
 # 真机故障（2026-09-15）：固件里 /etc/rc.d/S99at-webserver 链接是存在的（构建时

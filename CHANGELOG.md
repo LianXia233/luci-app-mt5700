@@ -5,6 +5,69 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.20] - 2026-10-16
+
+### Fixed
+
+**123. ★ 缺 `timeout` 命令导致 `/admin/modem/5g` 页面读不到任何信息（MWRT 固件运行时兜底）**
+
+真机现象：换 MWRT 固件（r33382 / kernel 6.6.94）后，整个 `/admin/modem/5g`
+页面读不到任何信息，所有 AT 调用统一失败：
+
+```json
+{ "success": false, "error": "Rust 后端无应答（已限时 45 秒）" }
+```
+
+同时 `exitip` / `sysdiag` / DoH / ePDG 一起失效。
+
+**根因** —— 不是模组、串口或 Rust 后端的问题，是**这条错误文案在撒谎**。
+
+`/usr/share/rpcd/ucode/mt5700.uc` 的 `rpcCall()`（第 356 行）用
+`timeout` 包住回环 RPC：
+
+```ucode
+p = fs.popen('timeout 45 nc 127.0.0.1 ' + port + ' < ' + tmp, 'r');
+```
+
+该固件的 busybox 1.36.1 **不含 `timeout` applet**，实测三处都找不到：
+
+```
+$ busybox timeout 5 true        → timeout: applet not found
+$ /bin/sh -c 'timeout 5 true'   → timeout: not found
+$ command -v timeout            → （空）
+```
+
+于是 shell 直接 **rc=127**、一行输出都没有，ucode 侧 `p.read('line')` 得到空串，
+统一报成「无应答（已限时 45 秒）」。**实测该调用耗时 0.00 秒** —— 不可能等满 45 秒，
+文案与病因完全对不上（这正是它难查的原因）。
+
+**对照证据**（同一时刻、同一台设备）：
+
+| 探测 | 结果 |
+|---|---|
+| 直连 `nc 127.0.0.1 8765`（不带 timeout） | `{"data":"TD Tech Ltd.\r\nOK","success":true}`，连续 5 次全成功 |
+| 通知日志 | 15:06:29 有真实数据（NR / RSRP −86 / 频点 504990 / PCI 276） |
+| `ttyUSB1` 持有者 | 仅 `at-webserver-rust`（fd 10/11），未被抢占 |
+| 不过串口的 `netrate` | `success: true` |
+
+⇒ **AT 通道与后端都活着**，所以「重启服务 / 换串口 / 重装插件」全是白费力气。
+
+**修复** —— 在 `root/etc/uci-defaults/at-webserver` 加运行时兜底：检测到
+`command -v timeout` 缺失时补装 `coreutils-timeout`（仅 20KB，
+Depends 只有 libc/coreutils/librt），装不上则打可定位告警。
+不改 `mt5700.uc` 任何一行。
+
+**为什么不在 `LUCI_DEPENDS` 声明它** —— 与文件头"netcat 不设硬依赖"是同一条理由：
+目标源缺同名包时，硬依赖会让 opkg 直接安装失败，而缺失是可诊断的。
+
+**验证**（修复后真机实测）：`AT+CGMI=TD Tech Ltd.`、`AT+CSQ=+CSQ:`、
+`AT+CEREG?=+CEREG:2,1`、`AT^CHIPTEMP?=12 路温度`；`at_batch` 2/2；
+`sysdiag` 20+ 字段；`exitip=111.55.210.93`；LuCI 全站 0 个 error500；
+限时语义正确（`timeout 3 sleep 30` → rc=124 / 3s）。
+
+**注意**：存量已装机不会重跑 uci-defaults，需手动执行一次
+`sh /etc/uci-defaults/at-webserver`（幂等）或 `opkg install coreutils-timeout`。
+
 ## [2.4.19] - 2026-09-30
 
 ### Fixed
