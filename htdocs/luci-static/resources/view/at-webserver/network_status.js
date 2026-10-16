@@ -101,6 +101,16 @@ return L.view.extend({
 		// 三条曲线的配色（Soft-Anime 调色）
 		var CHART_COLORS = { rsrp: '#38bdf8', sinr: '#10b981', rsrq: '#c084fc' };
 
+		// 当前选中的趋势点（按时间戳记录，重绘后据此恢复常显的悬浮卡）
+		var trendHoverTime = null;
+
+		/* 收起信号趋势悬浮卡：触摸点选后常显，点图表外或再次点选同一点时收起 */
+		function hideTrendHover() {
+			var layer = document.getElementById('mt-trend-hover-layer');
+			if (layer) layer.style.display = 'none';
+			trendHoverTime = null;
+		}
+
 		// 流量趋势微型火花线数据（初始为真实空/0采样点，绝不伪造随机数）
 		var sparkDown = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 		var sparkUp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -336,6 +346,12 @@ return L.view.extend({
 			E('div', { 'class': 'mt-chart-svg-box', 'id': 'sig-trend-chart-box' })
 		]);
 		midGrid.appendChild(chartCard);
+
+		/* 点击/触摸图表以外的区域时收起趋势悬浮卡（整页仅注册一次） */
+		document.addEventListener('pointerdown', function (ev) {
+			var b = document.getElementById('sig-trend-chart-box');
+			if (b && !b.contains(ev.target)) hideTrendHover();
+		}, true);
 
 		/* ==========================================================================
 		   3. 底部折叠面板: 高级遥测与硬件诊断 (保留原有全量数据)
@@ -1016,20 +1032,11 @@ return L.view.extend({
 
 			var dragging = false;
 
-			function hideHover() {
-				var layer = document.getElementById('mt-trend-hover-layer');
-				if (layer) layer.style.display = 'none';
-			}
-
-			function showAt(clientX) {
-				var rect = hitbox.getBoundingClientRect();
-				var frac = (clientX - rect.left) / rect.width;
-				if (frac < 0) frac = 0;
-				if (frac > 1) frac = 1;
-				var idx = Math.round(frac * (n - 1));
+			function showIndex(idx) {
 				idx = Math.max(0, Math.min(n - 1, idx));
 				var item = view[idx];
 				if (!item) return;
+				trendHoverTime = item.time;
 
 				var curX = xAt(idx);
 				var layer = document.getElementById('mt-trend-hover-layer');
@@ -1071,30 +1078,55 @@ return L.view.extend({
 				if (elT) elT.textContent = '质量: ' + (ti >= 0 ? SIGNAL_TIERS[ti].label : '—');
 			}
 
-			/* pointer 事件同时覆盖鼠标悬浮与触摸拖动（touch-action:none 已在 hitbox 上关闭滚动劫持） */
+			function indexAtClientX(clientX) {
+				var rect = hitbox.getBoundingClientRect();
+				var frac = (clientX - rect.left) / rect.width;
+				if (frac < 0) frac = 0;
+				if (frac > 1) frac = 1;
+				return Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+			}
+
+			/* 长按会弹系统菜单/选中文本，这里直接屏蔽，避免与取数交互冲突 */
+			hitbox.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+			/* pointer 事件同时覆盖鼠标悬浮与触摸点选：
+			   触摸单击 → 常显；拖动 → 移动；在原点再点一次 → 收起；点图表外 → 收起（见上方 document 监听）。 */
 			hitbox.addEventListener('pointerdown', function (e) {
+				var idx = indexAtClientX(e.clientX);
+				var beforeTime = trendHoverTime;
 				dragging = true;
 				if (hitbox.setPointerCapture) {
-					try { hitbox.setPointerCapture(e.pointerId); } catch (err) { /* 某些浏览器不支持捕获，忽略 */ }
+					try { hitbox.setPointerCapture(e.pointerId); } catch (err) { /* 部分浏览器不支持捕获，忽略 */ }
 				}
-				showAt(e.clientX);
+				if (e.pointerType === 'touch' && beforeTime !== null && view[idx] && view[idx].time === beforeTime) {
+					hideTrendHover();
+					dragging = false;
+				} else {
+					showIndex(idx);
+				}
 				e.preventDefault();
 			});
 			hitbox.addEventListener('pointermove', function (e) {
 				if (e.pointerType === 'touch' && !dragging) return;
-				showAt(e.clientX);
+				showIndex(indexAtClientX(e.clientX));
 			});
-			hitbox.addEventListener('pointerup', function (e) {
+			hitbox.addEventListener('pointerup', function () {
+				/* 触摸松开后保持常显，不再自动收起 */
 				dragging = false;
-				if (e.pointerType === 'touch') hideHover();
 			});
-			hitbox.addEventListener('pointercancel', function () {
-				dragging = false;
-				hideHover();
-			});
+			hitbox.addEventListener('pointercancel', function () { dragging = false; });
 			hitbox.addEventListener('pointerleave', function (e) {
-				if (e.pointerType !== 'touch' && !dragging) hideHover();
+				if (e.pointerType !== 'touch' && !dragging) hideTrendHover();
 			});
+
+			/* 每 5 秒重绘会重建 SVG：按时间戳恢复上一次选中的点，保证选中状态不闪没 */
+			if (trendHoverTime !== null) {
+				var ri = -1;
+				for (var hi = 0; hi < n; hi++) {
+					if (view[hi].time === trendHoverTime) { ri = hi; break; }
+				}
+				if (ri >= 0) showIndex(ri); else hideTrendHover();
+			}
 		}
 
 		function formatSpeedNumber(bytesPerSec) {
