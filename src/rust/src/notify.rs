@@ -535,11 +535,12 @@ fn post_webhook(hook: &str, body: &str) -> Result<(), String> {
 /// 本机当前时刻字符串（`%Y-%m-%d %H:%M:%S`，系统时区）。事件产生侧用它填充
 /// [`Notification::time`]，保证推送文案里的 `{time}` 是事件时刻而非推送时刻。
 ///
-/// 时区口径统一交给 [`crate::localtime`]：**系统怎么设就怎么显示**，
-/// 系统没设时默认北京时间。此处曾经直接用 `chrono::Local`，
-/// 在无 tzdata 的固件上静默变成 UTC，推送时间比现实早 8 小时。
+/// 时刻取 [`crate::nettime`]（NTP 优先、设备时钟兜底），时区沿用系统设置
+/// （见 [`crate::localtime`]，取不到时北京时间）—— **系统怎么设就怎么显示**。
+/// 此处曾经直接用 `chrono::Local`，在无 tzdata 的固件上静默变成 UTC，
+/// 推送时间比现实早 8 小时。
 pub fn now_string() -> String {
-    crate::localtime::now_string()
+    crate::nettime::now_string()
 }
 
 /// 号码归一化：剥掉前导 `+` 与国家码 `86`，与前端 `Parse.normalizePhoneNumber`
