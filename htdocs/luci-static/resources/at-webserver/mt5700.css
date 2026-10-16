@@ -321,6 +321,9 @@
   font-weight: 700;
   color: var(--mt5700-text);
   word-break: break-all;
+  /* 等宽数字：读数类页面（网络状态 1s 轮询、信号/速率刷新）数值跳动时
+     卡片宽度不跟着抖 —— 与 gauge-value / speed-value 同一条纪律。 */
+  font-variant-numeric: tabular-nums;
 }
 
 .mt5700-metric-value.accent { color: var(--mt5700-accent); }
@@ -3227,4 +3230,190 @@
 /* 窄屏：三个按钮平分整行，避免各自只占半截、点不准 */
 @media (max-width: 640px) {
   .mt5700-esim-row-acts > .mt5700-btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ==========================================================================
+   通话台组件（v5.6.0 新增，voice_call 页首发；按通用件设计，别处可直接用）
+   --------------------------------------------------------------------------
+   1) .mt5700-num-display  大号号码显示屏（等宽数字 / 聚焦环 / 占位符降档）
+   2) .mt5700-keypad       电话键盘（3 列方键 + 字母辅助 + 按压反馈）
+   3) .mt5700-callbar      通话动作条（按钮等宽，文案切换不抖动）
+   4) .mt5700-verdict      结论色块（is-ok / is-bad / is-warn，亮暗双模）
+
+   命名与纪律沿用既有 mt5700-* 体系：
+   · 只走 :root 变量，不写死色值（暗色在文末 media query 覆盖）；
+   · 这些类是**增量**：叠加在 .mt5700-input / .mt5700-btn 基类之上，
+     不重复基类已有的背景/边框/过渡，避免两处定义漂移；
+   · 尺寸带 !important 的原则同 iOS 开关（Argon 会压 input 尺寸）——
+     显示屏与键盘是几何关键项，一样处理。
+   ========================================================================== */
+
+/* ---------- 1. 大号号码显示屏 ---------- */
+.mt5700-num-display {
+  font-size: 26px !important;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mt5700-font-mono);
+  padding: 14px 16px !important;
+}
+
+.mt5700-num-display::placeholder {
+  font-size: 15px;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--mt5700-text-muted);
+}
+
+.mt5700-num-display:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+/* ---------- 2. 电话键盘 ---------- */
+.mt5700-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 336px;
+  margin: var(--mt5700-space-sm) auto 0;
+}
+
+/*
+ * 键面在 .mt5700-btn 基类上做增量：方键（不是扁条）、双行结构
+ * （大号数字 + 字母辅助行）、按压回弹比普通按钮更明显。
+ * ★ 不禁用键盘：同一排键两用 —— 空闲输号码、接通送 DTMF，
+ *   所以这里不出现 :disabled 专属几何，禁用态交给基类。
+ */
+.mt5700-keypad-key {
+  flex-direction: column;
+  gap: 1px;
+  min-height: 62px;
+  padding: 10px 0 8px !important;
+  border-radius: var(--mt5700-radius-md) !important;
+}
+
+.mt5700-keypad-key:active:not(:disabled) {
+  transform: scale(0.93);
+  transition-duration: 70ms;
+}
+
+.mt5700-keypad-key .k {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.mt5700-keypad-key .sub {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  line-height: 1.2;
+  min-height: 12px;
+  color: var(--mt5700-text-muted);
+}
+
+/* ---------- 3. 通话动作条 ---------- */
+/*
+ * 接听/挂断/静音/铃声一行常驻。按钮等宽（flex:1）且给 min-width：
+ * 文案会在「挂断↔拒接」「静音↔取消静音」之间切换，等宽保证整行不抖
+ * （红线 41：固定尺寸区域，拒绝按数据量动态撑开）。
+ */
+.mt5700-callbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.mt5700-callbar .mt5700-btn {
+  flex: 1 1 0;
+  min-width: 108px;
+}
+
+/* ---------- 4. 结论色块 ---------- */
+/*
+ * 用于自检/诊断的「一眼结论」：左边界色 + 淡底 + 深字。
+ * 与 .mt5700-notice 的分工：notice 带 ! 图标做过程提示，
+ * verdict 是纯结论块（可拨 / 不可拨 / 有风险），不做图标。
+ */
+.mt5700-verdict {
+  margin-top: 10px;
+  padding: 10px 14px;
+  font-size: var(--mt5700-font-size-sm);
+  line-height: 1.7;
+  color: var(--mt5700-text-secondary);
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-left-width: 3px;
+  border-radius: var(--mt5700-radius-md);
+}
+
+.mt5700-verdict.is-ok {
+  background: rgba(16, 185, 129, 0.07);
+  border-color: rgba(16, 185, 129, 0.24);
+  color: #065f46;
+}
+
+.mt5700-verdict.is-bad {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.22);
+  color: #991b1b;
+}
+
+.mt5700-verdict.is-warn {
+  background: rgba(245, 158, 11, 0.07);
+  border-color: rgba(245, 158, 11, 0.24);
+  color: #92400e;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mt5700-verdict.is-ok { color: #6ee7b7; }
+  .mt5700-verdict.is-bad { color: #fca5a5; }
+  .mt5700-verdict.is-warn { color: #fcd34d; }
+}
+
+/* ==========================================================================
+   动效降级（v5.6.0）
+   --------------------------------------------------------------------------
+   两类收益：① 可访问性 —— 系统级「减少动态效果」偏好必须被尊重；
+   ② 性能 —— CPE 的 CPU 带 18px 毛玻璃 + 多层阴影本来就吃力，
+   关掉装饰性动效直接省合成器开销。
+   保留 spinner 的旋转：它是「正在处理」的唯一反馈，停转会被误判为卡死。
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .mt5700-card,
+  .mt5700-metric,
+  .mt5700-gauge,
+  .mt5700-speed-box,
+  .mt5700-btn,
+  .mt5700-keypad-key,
+  .mt5700-tab,
+  .mt5700-step,
+  .mt5700-sms-item {
+    transition: none !important;
+  }
+
+  .mt5700-card:hover,
+  .mt5700-metric:hover,
+  .mt5700-gauge:hover,
+  .mt5700-speed-box:hover,
+  .mt5700-btn-primary:hover:not(:disabled),
+  .mt5700-btn-success:hover:not(:disabled),
+  .mt5700-btn-danger:hover:not(:disabled),
+  .mt5700-btn-secondary:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .mt5700-skeleton,
+  .at-status-card.is-online .at-status-dot,
+  .mt5700-gauge-bar {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .mt5700-modal,
+  .mt5700-toast {
+    animation: none !important;
+  }
 }

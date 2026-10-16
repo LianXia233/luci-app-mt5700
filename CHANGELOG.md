@@ -5,6 +5,36 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.26] - 2026-10-16
+
+### 变更（UI 全局优化，用户反馈「这个 UI 不好看，整个插件也要优化」）
+
+- **★★ voice_call 页去内联样式（7 处清零），全面接入 mt5700 设计系统**：
+  此前该页是"三种风格混战"—— Mt5700 组件 + 手写内联 style + 硬编码色值，
+  且内联黄块/色块不响应暗色模式（`#fdf6e3` 底在暗色下一片刺眼）。
+  现在提示条走 `.mt5700-notice-warning`、自检结论走 `.mt5700-verdict`、
+  号码输入走 `.mt5700-num-display`、键盘走 `.mt5700-keypad`、
+  通话动作行走 `.mt5700-callbar`，亮暗双模、与全插件同一套语言。
+- **新增四个通用组件**（CSS v5.6.0，`.mt5700-keypad` / `.mt5700-callbar` /
+  `.mt5700-num-display` / `.mt5700-verdict`）：电话键盘（3 列方键 + 字母辅助
+  2=ABC…9=WXYZ + 按压回弹）、通话动作条（按钮等宽，文案在"挂断↔拒接"间
+  切换时整行不抖）、大号号码显示屏（等宽数字 + 聚焦环）、结论色块
+  （is-ok / is-bad / is-warn）。均按通用件设计，别处页面可直接取用。
+- **全局增强（12 个页面共同受益）**：
+  · `.mt5700-metric-value` 加 `font-variant-numeric: tabular-nums` ——
+    读数类页面（网络状态 1s 轮询）数值跳动时卡片宽度不抖；
+  · 新增 `prefers-reduced-motion` 降级：尊重系统"减少动态效果"偏好，
+    同时给 CPE 的 CPU 省合成器开销（18px 毛玻璃 + 多层阴影本就吃力）；
+    spinner 旋转保留——它是"正在处理"的唯一反馈，停转会被误判为卡死。
+- `renderInfo()` 历史遗留的错乱缩进修正（不影响逻辑）；通话页键盘键面
+  补字母辅助行（纯装饰，不进输入值）。
+
+### 质量门禁
+
+- 82 个测试文件 + `run-all.js` 全绿；voice-call 契约 145 项断言通过；
+  变异守卫 187 条全检出、还原逐字节一致；CSS 缓存契约指纹已同步
+  （`MT5700_CSS_VERSION` 5.5.22 → **5.6.0**，`CSS_FINGERPRINT` 已更新）。
+
 ## [2.4.25] - 2026-10-16
 
 ### 修复（用户实测反馈）

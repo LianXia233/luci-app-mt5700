@@ -60,10 +60,13 @@ return L.view.extend({
 		 * 先说清楚「没有声音」再谈功能：用户第一眼就该知道这一页能做到
 		 * 什么、做不到什么 —— 否则「接通了却没声音」会被当成功能坏了。
 		 */
+		/*
+		 * 提示条走设计系统的 .mt5700-notice-warning（带 ! 图标、亮暗双模）。
+		 * 此前这里是手写内联黄块（#fdf6e3 底 / #6b4e00 字）——暗色模式下
+		 * 一片刺眼的亮黄，且与全插件视觉语言脱节。
+		 */
 		body.appendChild(E('div', {
-			'class': 'mt5700-hint',
-			style: 'padding:10px 12px;border-left:3px solid #c98a00;background:#fdf6e3;'
-				+ 'color:#6b4e00;border-radius:4px;margin-bottom:12px;line-height:1.7'
+			'class': 'mt5700-notice mt5700-notice-warning'
 		}, '这一页管「信令」不管「声音」：拨号、接听、拒接、挂断、状态、DTMF、'
 			+ '通话记录都能用，来电时页面还会响铃；但通话内容听不到。'
 			+ '实测（2026-10-16）：模组侧 PCM 语音模式已开启（AT+CLVL 档位 1–12），'
@@ -122,6 +125,15 @@ return L.view.extend({
 			['7', '8', '9'],
 			['*', '0', '#']
 		];
+
+		/*
+		 * 键面字母辅助（传统电话布局 2=ABC … 9=WXYZ）。
+		 * 纯装饰：只显示、不进输入值（本页只拨号码，不搞 T9）。
+		 */
+		var KEY_LETTERS = {
+			'2': 'ABC', '3': 'DEF', '4': 'GHI', '5': 'JKL',
+			'6': 'MNO', '7': 'PQRS', '8': 'TUV', '9': 'WXYZ'
+		};
 
 		/* ---------- 状态 ---------- */
 
@@ -185,17 +197,22 @@ return L.view.extend({
 		statusMetrics.appendChild(metricDuration);
 		statusMetrics.appendChild(metricVolume);
 
-		var statusActions = E('div', { 'class': 'mt5700-panel-actions' });
+		/*
+		 * 动作行走 .mt5700-callbar：CSS 负责按钮等宽（flex:1 + min-width），
+		 * 不再逐按钮写内联定宽 —— 文案在「挂断↔拒接」「静音↔取消静音」
+		 * 之间切换时整行宽度不抖（红线 41）。
+		 */
+		var statusActions = E('div', { 'class': 'mt5700-callbar' });
 		statusMain.appendChild(statusActions);
 		/*
 		 * 四个通话动作**常驻可见**，用灰化表达"此刻不可用"（厂商 modemwebui
 		 * call.js 的形态：答案/挂断/静音一直在位，只改 disabled）。
+		 * 规格（大键 + 等宽）由 .mt5700-btn-lg + .mt5700-callbar 的 CSS 负责，
+		 * 这里不再写内联样式。
 		 *
 		 * ★ 为什么从 display 隐藏改成常驻：上一版把"接听/挂断/静音"按状态
 		 *   隐藏，用户在原地说"没看到接停电话"—— 找不到的按钮等于没有，
 		 *   尤其来电就响那么几秒，藏起来的接听键根本指望不上。
-		 * ★ 定宽：文案会在 挂断↔拒接、静音↔取消静音 之间切换，不定宽
-		 *   整行按钮会跟着抖（红线 41：固定尺寸，不按数据量动态撑开）。
 		 */
 		var answerBtn = Mt5700.successButton('接听', function () { doAnswer(); });
 		var hangupBtn = Mt5700.dangerButton('挂断', function () { doHangup(); });
@@ -205,14 +222,8 @@ return L.view.extend({
 			if (!st.ringEnabled) { ringStop(); }
 			ringBtn.textContent = '铃声：' + (st.ringEnabled ? '开' : '关');
 		});
-		[answerBtn, hangupBtn].forEach(function (b) {
+		[answerBtn, hangupBtn, muteBtn, ringBtn].forEach(function (b) {
 			b.classList.add('mt5700-btn-lg');
-			b.style.minWidth = '112px';
-			b.style.fontSize = '15px';
-			b.style.fontWeight = '600';
-		});
-		[muteBtn, ringBtn].forEach(function (b) {
-			b.style.minWidth = '92px';
 		});
 		statusActions.appendChild(answerBtn);
 		statusActions.appendChild(hangupBtn);
@@ -250,8 +261,9 @@ return L.view.extend({
 		body.appendChild(dialerCard);
 
 		var numberInput = Mt5700.input('text', '输入号码（数字、*、#，国际号码以 + 开头）');
-		numberInput.style.cssText = 'font-size:22px;letter-spacing:1px;text-align:center;'
-			+ 'padding:12px;font-weight:600';
+		/* 大号显示屏样式走 .mt5700-num-display（等宽数字 + 居中 + 聚焦环），
+		 * 不再手写内联字号 —— 那套写法在暗色下没有对应定义。 */
+		numberInput.classList.add('mt5700-num-display');
 		numberInput.setAttribute('inputmode', 'tel');
 		numberInput.addEventListener('input', function () {
 			/* 即时过滤：把白名单外字符直接挡在外面，错误在输入时就消除 */
@@ -267,10 +279,15 @@ return L.view.extend({
 		});
 		dialerBody.appendChild(Mt5700.formGroup('号码', numberInput));
 
-		var keypad = E('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:336px' });
+		/*
+		 * 键盘走 .mt5700-keypad / .mt5700-keypad-key（CSS v5.6.0 通用件）：
+		 * 3 列方键网格 + 键面双行（大号数字 + 字母辅助行）。
+		 * 键的点击逻辑不变：空闲输号码、已接通送 DTMF（见下）。
+		 */
+		var keypad = E('div', { 'class': 'mt5700-keypad' });
 		KEYPAD.forEach(function (row) {
 			row.forEach(function (key) {
-				var b = Mt5700.button(key, function () {
+				var b = Mt5700.button('', function () {
 					numberInput.value += key;
 					st.number = numberInput.value;
 					/*
@@ -280,19 +297,21 @@ return L.view.extend({
 					 */
 					if (st.phase === 'active') { sendDtmf(key); }
 				}, 'secondary');
-				b.style.cssText = 'font-size:20px;padding:14px 0;font-weight:600';
+				b.classList.add('mt5700-keypad-key');
+				b.appendChild(E('span', { 'class': 'k' }, key));
+				if (KEY_LETTERS[key]) {
+					b.appendChild(E('span', { 'class': 'sub' }, KEY_LETTERS[key]));
+				}
 				keypad.appendChild(b);
 			});
 		});
 		dialerBody.appendChild(keypad);
 
-		var dialerActions = E('div', { 'class': 'mt5700-panel-actions' });
+		var dialerActions = E('div', { 'class': 'mt5700-callbar' });
 		dialerBody.appendChild(dialerActions);
 		var dialBtn = Mt5700.primaryButton('拨打', function () { doDial(); });
 		/* 与状态卡的通话键同规格：这一页的主角是「打」和「接」 */
 		dialBtn.classList.add('mt5700-btn-lg');
-		dialBtn.style.minWidth = '112px';
-		dialBtn.style.fontWeight = '600';
 		var backspaceBtn = Mt5700.ghostButton('退格', function () {
 			numberInput.value = numberInput.value.slice(0, -1);
 			st.number = numberInput.value;
@@ -359,25 +378,22 @@ return L.view.extend({
 			pfHost.appendChild(Mt5700.table(['', '检查项', '命令', '读数', '说明'], rows,
 				{ striped: true }));
 
-			/*
-			 * 结论做成色块：绿灯「可以拨」/红灯「卡在哪一环」。
-			 * 自检的意义就在于一眼看到结论，而不是让人读四行表格自己归纳。
-			 */
-			var verdict, verdictStyle;
-			if (st.pf.ready) {
-				verdict = '可以拨号。' + (st.pf.volte
-					? 'IMS 已注册，语音走 VoLTE/VoNR。'
-					: 'IMS 未注册，语音走电路域（CS）。');
-				verdictStyle = 'padding:8px 12px;border-left:3px solid #059669;'
-					+ 'background:#ecfdf5;color:#065f46;border-radius:4px;'
-					+ 'margin-top:10px;line-height:1.7';
-			} else {
-				verdict = '当前不能拨号：' + (st.pf.blocked || '前置条件未满足');
-				verdictStyle = 'padding:8px 12px;border-left:3px solid #dc2626;'
-					+ 'background:#fef2f2;color:#991b1b;border-radius:4px;'
-					+ 'margin-top:10px;line-height:1.7';
-			}
-			pfHost.appendChild(E('p', { 'class': 'mt5700-hint', style: verdictStyle }, verdict));
+		/*
+		 * 结论做成色块：绿灯「可以拨」/红灯「卡在哪一环」。
+		 * 自检的意义就在于一眼看到结论，而不是让人读四行表格自己归纳。
+		 * 样式走 .mt5700-verdict（亮暗双模），不再手写内联配色。
+		 */
+		var verdict, verdictCls;
+		if (st.pf.ready) {
+			verdict = '可以拨号。' + (st.pf.volte
+				? 'IMS 已注册，语音走 VoLTE/VoNR。'
+				: 'IMS 未注册，语音走电路域（CS）。');
+			verdictCls = 'mt5700-verdict is-ok';
+		} else {
+			verdict = '当前不能拨号：' + (st.pf.blocked || '前置条件未满足');
+			verdictCls = 'mt5700-verdict is-bad';
+		}
+		pfHost.appendChild(E('p', { 'class': verdictCls }, verdict));
 		}
 
 		function runPreflight() {
@@ -818,14 +834,14 @@ return L.view.extend({
 			 *   又把静音键点亮，和 applyGates 的判定打架（两套判据必然漂移）。
 			 */
 		} else if (st.mute === 1) {
-				muteBadge.textContent = '已静音';
-				muteBadge.className = 'mt5700-badge mt5700-badge-warning';
-				muteBtn.textContent = '取消静音';
-			} else {
-				muteBadge.textContent = '未静音';
-				muteBadge.className = 'mt5700-badge mt5700-badge-neutral';
-				muteBtn.textContent = '静音';
-			}
+			muteBadge.textContent = '已静音';
+			muteBadge.className = 'mt5700-badge mt5700-badge-warning';
+			muteBtn.textContent = '取消静音';
+		} else {
+			muteBadge.textContent = '未静音';
+			muteBadge.className = 'mt5700-badge mt5700-badge-neutral';
+			muteBtn.textContent = '静音';
+		}
 		metricVolume.querySelector('.mt5700-metric-value').textContent =
 			(st.volume == null) ? '—' : String(st.volume);
 		/* 静音键文案变了（静音↔取消静音），可点性重新算一遍 */

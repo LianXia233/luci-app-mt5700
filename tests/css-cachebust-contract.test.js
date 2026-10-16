@@ -43,9 +43,12 @@ const js = fs.readFileSync(JSP, 'utf8');
  *
  * 变更日志：
  *   2026-09-28  短信批量删除重做（全选/计数/选择列表）→ 5.5.22
+ *   2026-10-16  通话台 UI 重设计（voice_call 去全部内联样式；新增 keypad /
+ *              callbar / num-display / verdict 四组件；metric 等宽数字；
+ *              prefers-reduced-motion 降级）→ 5.6.0
  *   2026-09-20  eSIM 管理页重排（EID 等宽块 / Profile 行卡 / 卡内分区标题）→ 5.5.20
  */
-const CSS_FINGERPRINT = '698acdb40477d738';
+const CSS_FINGERPRINT = '54d8a4143a6d8676';
 
 let pass = 0;
 const fails = [];
