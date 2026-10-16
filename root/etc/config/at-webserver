@@ -43,6 +43,15 @@ config at-webserver 'config'
 	option qq_target_id ''                 # group_openid / 用户 openid / channel_id（bind 模式由后端自动写回，勿手填）
 	option qq_bind_qq ''                   # 绑定模式下你的 QQ 号（仅日志标签；绑定后给机器人发条消息即自动完成）
 	option log_file '/tmp/at-notifications.log'
+	# 通知日志文件的大小上限（字节，默认 256 KiB）。/tmp 是 tmpfs（占内存），
+	# 不加限制时长期运行会把内存吃满；达到上限后按行边界裁掉最旧的一半再继续写。
+	# 填小于 4096 的值会被忽略并回落默认。
+	option log_file_max_bytes '262144'
+
+	# 使用量「自动清零」日：每月几号（1~31，默认 1 号）。
+	# 按自然月对账，不是滚动天数；大小月 / 闰年 / 跨年由后端处理，
+	# 31 号这类小月没有的日子按当月最后一天触发（不会整月漏清）。
+	option usage_reset_day '1'
 
 	# 自动推送总开关。关闭后所有事件都不推送（仅写本地日志文件，便于事后追溯），
 	# 同时停掉信号定时轮询（不再周期性占用串口）。默认开启。
