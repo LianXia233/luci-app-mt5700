@@ -1,6 +1,7 @@
 //! SMS PDU 解码（SMS-DELIVER），GSM7/UCS2/8bit + UDH 长短信。
 
 use crate::localtime;
+use crate::nettime;
 use chrono::DateTime;
 
 /// 3GPP TS 23.038 默认字母表（按码位索引）。
@@ -105,7 +106,7 @@ fn bcd_digit(b: u8) -> i32 {
 
 fn decode_timestamp(ts: &[u8]) -> DateTime<localtime::Tz> {
     if ts.len() < 7 {
-        return localtime::now();
+        return nettime::now();
     }
     let year = 2000 + bcd_digit(ts[0]);
     let month = bcd_digit(ts[1]);
@@ -115,11 +116,11 @@ fn decode_timestamp(ts: &[u8]) -> DateTime<localtime::Tz> {
     let second = bcd_digit(ts[5]);
 
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
-        return localtime::now();
+        return nettime::now();
     }
     // 时区字节存在但沿用本机时区解释（PDU 时间戳不带时区，协议惯例即如此）。
     localtime::from_ymdhms(year, month as u32, day as u32, hour as u32, minute as u32, second as u32)
-        .unwrap_or_else(localtime::now)
+        .unwrap_or_else(nettime::now)
 }
 
 /// 解码 BCD 电话号码，digits 为号码位数。
