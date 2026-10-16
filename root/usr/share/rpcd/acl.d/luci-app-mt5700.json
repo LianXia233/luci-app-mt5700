@@ -21,6 +21,7 @@
 				"at",
 				"events",
 				"netrate",
+				"usage",
 				"usage_ctl",
 				"logs",
 				"notify_test",

@@ -335,6 +335,11 @@ pub struct Config {
     pub notification: NotificationConfig,
     pub websocket: WebSocketConfig,
     pub schedule: ScheduleConfig,
+    /// 使用量统计的自动清零天数（默认 30）。
+    ///
+    /// 放在 UCI 而不是使用量状态文件里：状态文件在「持久化关」时重启即失，
+    /// 设置跟着一起丢会让用户每次重启后都要重填。
+    pub usage_auto_reset_days: u32,
 }
 
 pub fn default_config() -> Config {
@@ -401,6 +406,7 @@ pub fn default_config() -> Config {
             day_lte: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
             day_nr: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
         },
+        usage_auto_reset_days: crate::usage::DEFAULT_USAGE_AUTO_RESET_DAYS,
     }
 }
 
@@ -684,6 +690,15 @@ pub async fn load_config() -> Config {
     s.day_lte = values.band_lock("schedule_day_lte");
     s.day_nr = values.band_lock("schedule_day_nr");
 
+    // 使用量自动清零天数：默认 30 天，夹在 [1, 3650]
+    cfg.usage_auto_reset_days = (values
+        .int("usage_auto_reset_days", crate::usage::DEFAULT_USAGE_AUTO_RESET_DAYS as i64)
+        .clamp(
+            crate::usage::MIN_USAGE_AUTO_RESET_DAYS as i64,
+            crate::usage::MAX_USAGE_AUTO_RESET_DAYS as i64,
+        ) as u32)
+        .max(crate::usage::MIN_USAGE_AUTO_RESET_DAYS);
+
     cfg
 }
 
@@ -863,5 +878,35 @@ mod tests {
         // 合法但跨零点的写法要保留
         assert!(valid_hhmm("22:00"));
         assert!(valid_hhmm("06:00"));
+    }
+
+    #[test]
+    fn usage_auto_reset_days_clamps() {
+        let mk = |pairs: &[(&str, &str)]| {
+            let mut m = HashMap::new();
+            for (k, v) in pairs {
+                m.insert(k.to_string(), v.to_string());
+            }
+            UciReader(m)
+        };
+        let read = |v: &UciReader| -> u32 {
+            (v.int("usage_auto_reset_days", crate::usage::DEFAULT_USAGE_AUTO_RESET_DAYS as i64)
+                .clamp(
+                    crate::usage::MIN_USAGE_AUTO_RESET_DAYS as i64,
+                    crate::usage::MAX_USAGE_AUTO_RESET_DAYS as i64,
+                ) as u32)
+                .max(crate::usage::MIN_USAGE_AUTO_RESET_DAYS)
+        };
+        // 没配：默认 30 天
+        assert_eq!(read(&mk(&[])), 30);
+        // 正常值透传
+        assert_eq!(read(&mk(&[("usage_auto_reset_days", "7")])), 7);
+        // 0 与负值夹到下限 1（不能退化成「永不自动清零」）
+        assert_eq!(read(&mk(&[("usage_auto_reset_days", "0")])), 1);
+        assert_eq!(read(&mk(&[("usage_auto_reset_days", "-5")])), 1);
+        // 超大值夹到上限
+        assert_eq!(read(&mk(&[("usage_auto_reset_days", "99999")])), 3650);
+        // 非数字回落默认
+        assert_eq!(read(&mk(&[("usage_auto_reset_days", "abc")])), 30);
     }
 }
