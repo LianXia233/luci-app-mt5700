@@ -173,7 +173,6 @@
 }
 .at-modal-wide { max-width: 660px; }
 .at-modal-title { margin: 0 0 14px; font-size: 17px; font-weight: 700; color: var(--at-text); }
-.at-modal-text { margin: 0 0 16px; font-size: 14px; color: var(--at-text-secondary); line-height: 1.6; }
 .at-modal-body { }
 .at-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .at-modal .at-field { margin-bottom: 12px; }
@@ -182,8 +181,6 @@
 @keyframes at-scale-up { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 .at-sms-left > .at-btn { margin: 10px; }
 .at-terminal-input .cbi-input-text { flex: 1 1 260px; }
-.at-chip { display: inline-flex; align-items: center; gap: 4px; }
-.at-chip-del { color: #c83d55; cursor: pointer; padding: 0 4px; font-size: 14px; }
 .at-lock-item .cbi-input-text { width: 100px; }
 
 /* ---------- 自动刷新 ---------- */
