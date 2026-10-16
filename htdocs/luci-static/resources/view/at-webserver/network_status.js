@@ -63,6 +63,8 @@ return L.view.extend({
 			carriers: [],
 			rtDown: 0,
 			rtUp: 0,
+			// 本次使用量（由设备侧累计并返回，页面刷新不失效；默认内存、可选落盘）
+			usage: null,
 			ambrDown: 0,
 			ambrUp: 0,
 			networkStatus: '检测中...',
@@ -238,6 +240,45 @@ return L.view.extend({
 						])
 					]),
 					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-ul-box' })
+				])
+			]),
+			// 本次使用量（设备侧累计：页面刷新不失效，重启后归零；可选持久化）
+			E('div', { 'class': 'mt-traffic-usage' }, [
+				E('div', { 'class': 'mt-usage-head' }, [
+					E('span', { 'class': 'mt-usage-title' }, '本次使用量'),
+					E('div', { 'class': 'mt-usage-actions' }, [
+						E('button', {
+							'class': 'mt-usage-btn', 'id': 'usage-persist', 'type': 'button',
+							'title': '开启后：使用量写入闪存，重启后依然保留（约每 10 分钟写一次）',
+							'click': toggleUsagePersist
+						}, '持久化'),
+						E('button', {
+							'class': 'mt-usage-btn danger', 'id': 'usage-reset', 'type': 'button',
+							'title': '清零本次使用量', 'click': resetUsage
+						}, '清零')
+					])
+				]),
+				E('div', { 'class': 'mt-usage-grid' }, [
+					E('div', { 'class': 'mt-usage-cell' }, [
+						E('span', { 'class': 'mt-usage-lbl' }, '下行'),
+						E('span', { 'class': 'mt-usage-val', 'id': 'usage-dl' }, '0 B')
+					]),
+					E('div', { 'class': 'mt-usage-cell' }, [
+						E('span', { 'class': 'mt-usage-lbl' }, '上行'),
+						E('span', { 'class': 'mt-usage-val', 'id': 'usage-ul' }, '0 B')
+					]),
+					E('div', { 'class': 'mt-usage-cell' }, [
+						E('span', { 'class': 'mt-usage-lbl' }, '合计'),
+						E('span', { 'class': 'mt-usage-val total', 'id': 'usage-total' }, '0 B')
+					]),
+					E('div', { 'class': 'mt-usage-cell' }, [
+						E('span', { 'class': 'mt-usage-lbl' }, '采样时长'),
+						E('span', { 'class': 'mt-usage-val', 'id': 'usage-dur' }, '00:00:00')
+					]),
+					E('div', { 'class': 'mt-usage-cell wide' }, [
+						E('span', { 'class': 'mt-usage-lbl' }, '峰值速率'),
+						E('span', { 'class': 'mt-usage-val', 'id': 'usage-peak' }, '↓0 B/s · ↑0 B/s')
+					])
 				])
 			])
 		]);
@@ -1129,6 +1170,44 @@ return L.view.extend({
 			}
 		}
 
+		/* 字节量格式化，用于累计使用量。注意与 formatSpeedNumber 区别：
+		   这里的换算单位是 B / KB / MB / GB（已是字节，不再乘 8）。 */
+		function formatBytes(bytes) {
+			var b = Number(bytes);
+			if (!isFinite(b) || b < 0) b = 0;
+			if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+			if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+			if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+			return Math.round(b) + ' B';
+		}
+
+		/* 秒 → HH:MM:SS（用于采样时长；起止时间戳均来自设备侧，无浏览器时钟偏差） */
+		function formatUsageDuration(sec) {
+			var s = Math.floor(isFinite(sec) && sec > 0 ? sec : 0);
+			return pad2(Math.floor(s / 3600)) + ':' + pad2(Math.floor((s % 3600) / 60)) + ':' + pad2(s % 60);
+		}
+
+		/* 清零本次使用量（设备侧状态一并清空，持久化开关不变） */
+		function resetUsage() {
+			AtWs.usageCtl('reset').then(function (r) {
+				if (r && r.success && r.usage) {
+					state.usage = r.usage;
+					renderSpeedUI();
+				}
+			});
+		}
+
+		/* 切换「持久化」：开启后使用量写入闪存、重启后保留；关闭即删除落盘文件 */
+		function toggleUsagePersist() {
+			var on = !!(state.usage && state.usage.persist);
+			AtWs.usageCtl(on ? 'persist_off' : 'persist_on').then(function (r) {
+				if (r && r.success && r.usage) {
+					state.usage = r.usage;
+					renderSpeedUI();
+				}
+			});
+		}
+
 		function formatSpeedNumber(bytesPerSec) {
 			var bits = bytesPerSec * 8;
 			if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gbps';
@@ -1159,6 +1238,28 @@ return L.view.extend({
 
 			renderMiniSparkline('spark-dl-box', sparkDown, '#38bdf8');
 			renderMiniSparkline('spark-ul-box', sparkUp, '#ec4899');
+
+			/* 本次使用量（设备侧累计，来自 netrate 返回的 usage） */
+			var u = state.usage;
+			var uDl = document.getElementById('usage-dl');
+			if (uDl) uDl.textContent = u ? formatBytes(u.total_rx) : '0 B';
+			var uUl = document.getElementById('usage-ul');
+			if (uUl) uUl.textContent = u ? formatBytes(u.total_tx) : '0 B';
+			var uTot = document.getElementById('usage-total');
+			if (uTot) uTot.textContent = u ? formatBytes(u.total_rx + u.total_tx) : '0 B';
+			var uPeak = document.getElementById('usage-peak');
+			if (uPeak) uPeak.textContent = u
+				? '↓' + formatSpeedNumber(u.peak_rx) + ' · ↑' + formatSpeedNumber(u.peak_tx)
+				: '↓0 B/s · ↑0 B/s';
+			var uDur = document.getElementById('usage-dur');
+			if (uDur) uDur.textContent = (u && u.start_ts && u.last_ts >= u.start_ts)
+				? formatUsageDuration(u.last_ts - u.start_ts)
+				: '00:00:00';
+			var uPersist = document.getElementById('usage-persist');
+			if (uPersist) {
+				if (u && u.persist) uPersist.classList.add('on');
+				else uPersist.classList.remove('on');
+			}
 		}
 
 		function renderTabsUI() {
@@ -2048,6 +2149,8 @@ return L.view.extend({
 				}
 				var now = Date.now();
 				if (r.device) state.deviceInterface = r.device;
+				/* 本次使用量由设备侧累计（见 mt5700.uc，默认内存、可选落盘），这里只取回展示 */
+				if (r.usage) state.usage = r.usage;
 				if (rateSample && rateSample.device === r.device) {
 					var dt = (now - rateSample.t) / 1000;
 					if (dt >= 0.2) {
@@ -2055,6 +2158,7 @@ return L.view.extend({
 						var dtx = r.tx_bytes - rateSample.tx;
 						state.rtDown = drx >= 0 ? drx / dt : 0;
 						state.rtUp = dtx >= 0 ? dtx / dt : 0;
+
 						rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
 						renderSpeedUI();
 						return;
@@ -2062,6 +2166,7 @@ return L.view.extend({
 					return;
 				}
 				rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+				renderSpeedUI();
 			}).catch(function () {});
 		}
 
