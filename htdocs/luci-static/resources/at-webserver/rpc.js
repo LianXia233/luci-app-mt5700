@@ -48,13 +48,20 @@ var rpcNetRate = L.rpc.declare({
 });
 
 /*
- * 使用量控制：reset（清零）/ persist_on（开启持久化）/ persist_off（关闭）。
- * 使用量状态由设备侧持有（默认 tmpfs，可选落盘），与浏览器刷新无关。
+ * 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off / set_auto_reset_days。
+ * 使用量由 Rust 后端常驻采样统计，与浏览器是否打开无关。
  */
+var rpcUsage = L.rpc.declare({
+	object: 'mt5700',
+	method: 'usage',
+	params: [],
+	expect: {}
+});
+
 var rpcUsageCtl = L.rpc.declare({
 	object: 'mt5700',
 	method: 'usage_ctl',
-	params: ['action'],
+	params: ['action', 'days'],
 	expect: {}
 });
 
@@ -1256,9 +1263,12 @@ function normalizeUsage(u) {
 		total_tx: Number(u.total_tx) || 0,
 		start_ts: Number(u.start_ts) || 0,
 		last_ts: Number(u.last_ts) || 0,
+		now_ts: Number(u.now_ts) || 0,
 		peak_rx: Number(u.peak_rx) || 0,
 		peak_tx: Number(u.peak_tx) || 0,
-		persist: Number(u.persist) ? 1 : 0
+		persist: Number(u.persist) ? 1 : 0,
+		auto_reset_days: Number(u.auto_reset_days) || 0,
+		device: u.device || ''
 	};
 }
 
@@ -1272,8 +1282,7 @@ function fetchNetRate(device) {
 				success: true,
 				device: resp.device,
 				rx_bytes: Number(resp.rx_bytes) || 0,
-				tx_bytes: Number(resp.tx_bytes) || 0,
-				usage: normalizeUsage(resp.usage)
+				tx_bytes: Number(resp.tx_bytes) || 0
 			};
 		})
 		.catch(function (err) {
@@ -1282,16 +1291,36 @@ function fetchNetRate(device) {
 }
 
 /*
- * 使用量控制（清零 / 开关持久化）。返回 Promise<{success, usage, error}>。
+ * 读取使用量快照（后端常驻统计，前端只读）。
  */
-function fetchUsageCtl(action) {
-	return withTimeout(rpcUsageCtl(action), 5000, '使用量操作超时')
+function fetchUsage() {
+	return withTimeout(rpcUsage(), 5000, '使用量读取超时')
+		.then(function (resp) {
+			resp = resp || {};
+			if (resp.success === false) {
+				return { success: false, error: resp.error || '读不到使用量' };
+			}
+			return { success: true, usage: normalizeUsage(resp) };
+		})
+		.catch(function (err) {
+			return { success: false, error: (err && err.message) || '读不到使用量' };
+		});
+}
+
+/*
+ * 使用量控制（清零 / 开关持久化 / 改自动清零天数）。
+ * days 仅在 set_auto_reset_days 时使用。
+ */
+function fetchUsageCtl(action, days) {
+	var params = { action: action };
+	if (days != null) params.days = Number(days) || 0;
+	return withTimeout(rpcUsageCtl(action, params.days || 0), 5000, '使用量操作超时')
 		.then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
 				return { success: false, error: resp.error || '使用量操作失败' };
 			}
-			return { success: true, usage: normalizeUsage(resp.usage) };
+			return { success: true, usage: normalizeUsage(resp) };
 		})
 		.catch(function (err) {
 			return { success: false, error: (err && err.message) || '使用量操作失败' };
@@ -1344,6 +1373,7 @@ function usbSpeedText(mbps) {
 var AtWs = {
 	client: atClient(),
 	netRate: fetchNetRate,
+	usage: fetchUsage,
 	usageCtl: fetchUsageCtl,
 	usb: fetchUsb,
 	usbSpeedText: usbSpeedText,

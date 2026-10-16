@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.22.0-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.23.0-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -132,13 +132,24 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 > 实机核对示例（同一约 26 秒时间窗）：内核计数器增量与页面「本次使用量」增量的**比差为 0.30%**，残差来自页面 1 秒的采样粒度；同期 LAN 口计数器增量与页面值相差三个数量级，可确认未误用 LAN 口。
 
 > [!IMPORTANT]
-> **「本次使用量」的记录时机**
+> **「本次使用量」由后端常驻统计**
 >
-> 累加动作由 rpcd 的 `netrate` 方法在**前端每秒轮询时**触发，页面关闭期间不会逐秒累加；但内核计数器是**单调累计值**，重新打开页面时会把关闭期间的全部增量**一次性补上**，所以最终数值与「后端一直记录」等价。
+> 累计逻辑在 Rust 后端（`src/rust/src/usage.rs`）里**独立 1 秒一采**，与前端是否打开、
+> 是否刷新**完全无关** —— 关掉浏览器照样累计，刷新页面数值不变（只是重新拉一次快照）。
+> 前端只通过 `usage` RPC 读快照，不参与累计。
 >
-> 实机核对（页面完全关闭 30 秒，期间持续下载）：相对累加器基线的内核增量为 **94.44 MB**；重开页面后同一基线下的内核增量为 **102.38 MB**，页面显示 **101.28 MB**（差 1.07%，残差为页面 1 秒采样粒度）—— 关闭期间那 94.44 MB 被完整补记。
+> 相关控制（都在流量统计卡片里）：
 >
-> **唯一例外**：若关闭期间承载网卡计数器归零（接口 flap / 重新拨号），该段增量无法补记，重新驻网后会从新基线开始累计。峰值速率同理只在有采样的时段内计算。
+> | 控制 | 行为 |
+> |:--|:--|
+> | **持久化** | 开启后使用量额外写入闪存（约每 10 分钟一次），重启后保留；关闭即删掉落盘文件 |
+> | **清零** | 无论持久化开关状态如何，都强制重写/删除记录文件，不会残留旧值 |
+> | **自动清零** | 累计满 N 天由后端自行清零并重新基线，**默认 30 天**（1~3650 可改，存 UCI，重启后仍生效） |
+>
+> 记录文件大小有硬上限（4 KiB）：写入超限即放弃本次落盘，读取超限一律视为损坏并忽略。
+>
+> **唯一例外**：若累计期间承载网卡计数器归零（接口 flap / 重新拨号），该段增量无法补记，
+> 重新驻网后会从新基线开始累计。峰值速率同理只在有采样的时段内计算。
 
 ---
 
@@ -211,11 +222,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-   ./<ARCH>-luci-app-mt5700-1.22.0-r1.apk \
+   ./<ARCH>-luci-app-mt5700-1.23.0-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.22.0_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.23.0_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -460,10 +471,11 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 | 版本 | 主题 |
 |:--|:--|
+| [v1.23.0](docs/release-notes/v1.23.0.md) | 使用量统计改由后端常驻累计；新增自动清零（默认 30 天）；清零连记录文件一起清；限制记录文件大小 |
 | [v1.22.0](docs/release-notes/v1.22.0.md) | 签约速率改用 `AT^DSAMBR`（4G/5G 均可用）；修正制式角标写死 5G；流量统计数据源核对 |
 | [v1.21.1](docs/release-notes/v1.21.1.md) | 签约速率只取数据上网上下文（剔除 IMS） |
 | [v1.21.0](docs/release-notes/v1.21.0.md) | SIM 卡信息新增「签约速率」 |
-| [v1.20.0](docs/release-notes/v1.20.0.md) | 流量统计新增「本次使用量」（设备侧累计、刷新不失效、可选持久化、可清零） |
+| [v1.20.0](docs/release-notes/v1.20.0.md) | 流量统计新增「本次使用量」（后端常驻累计、刷新不失效、可选持久化、可自动清零） |
 | [v1.19.1](docs/release-notes/v1.19.1.md) | 手机端信号趋势点选常显 |
 | [v1.19.0](docs/release-notes/v1.19.0.md) | 信号趋势图重做（真实采样 / 缺口断线 / 图例开关 / 范围切换 / 触摸悬浮） |
 | [v1.18.3](docs/release-notes/v1.18.3.md) | 移动端看板娘头像圆形修正 |
@@ -476,7 +488,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.22.0)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.23.0)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本（见上方功能矩阵）
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / parse.js / mt5700.js / ui.js / mt5700.css)

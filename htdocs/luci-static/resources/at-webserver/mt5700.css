@@ -520,6 +520,39 @@
 .mt-usage-cell.wide {
   grid-column: 1 / -1;
 }
+.mt-usage-cell.auto {
+  align-items: center;
+}
+.mt-usage-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mt-usage-days {
+  width: 58px;
+  padding: 1px 6px;
+  background: var(--mt5700-bg-elevated, #fff);
+  border: 1px solid var(--mt5700-border);
+  border-radius: var(--mt5700-radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  color: var(--mt5700-text);
+  text-align: right;
+}
+.mt-usage-days:focus {
+  outline: none;
+  border-color: var(--mt5700-border-focus);
+}
+.mt-usage-unit {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--mt5700-text-secondary);
+}
+.mt-usage-auto .mt-usage-btn {
+  padding: 1px 8px;
+  font-size: 10px;
+}
 .mt-usage-lbl {
   font-size: 10.5px;
   font-weight: 600;

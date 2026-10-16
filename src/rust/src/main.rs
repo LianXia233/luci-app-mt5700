@@ -30,6 +30,7 @@ mod state_cfg;
 mod timerpush;
 mod transport;
 mod urc;
+mod usage;
 
 use crate::config::Config;
 use crate::notify::Notifier;
@@ -98,6 +99,8 @@ async fn run(verbose: bool) -> Result<(), String> {
     // RPC 走缓存毫秒级返回，避免前端每次刷新都发一串会排队的 AT。
     let cache = crate::state::StateCache::new(client.clone(), ctx_rx.clone());
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
+    // 使用量后台统计：常驻周期采样，与前端是否打开无关。
+    let usage = crate::usage::UsageTracker::new(cfg.usage_auto_reset_days);
     let mut rpc = RpcServer::new(
         client.clone(),
         cfg.websocket.auth_key.clone(),
@@ -106,6 +109,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         cache.clone(),
         tasks.clone(),
         notifier.clone(),
+        usage.clone(),
     );
     // QQ 绑定进度：bind 模式下由绑定任务更新，LuCI 经 qq_bind_status 轮询展示倒计时
     let qq_bind_status = std::sync::Arc::new(crate::qqbind::BindStatus::default());
@@ -188,6 +192,12 @@ async fn run(verbose: bool) -> Result<(), String> {
         let ctx = ctx_rx.clone();
         async move { cache.run(ctx).await }
     });
+    // 使用量后台统计：1 秒一采，前端关闭/刷新都不影响累计。
+    let usage_task = tokio::spawn({
+        let usage = usage.clone();
+        let ctx = ctx_rx.clone();
+        async move { usage.run(ctx).await }
+    });
     // 后台任务生命周期兜底：定期淘汰已结束的旧任务，避免无界增长。
     let task_cleanup_task = {
         let tasks = tasks.clone();
@@ -232,6 +242,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = signalwatch_task.await;
         let _ = timerpush_task.await;
         let _ = cache_task.await;
+        let _ = usage_task.await;
         let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
     })
@@ -366,6 +377,10 @@ fn log_config(cfg: &Config) {
         }
     }
     log_info!("定时锁频: {}", if cfg.schedule.enabled { "启用" } else { "禁用" });
+    log_info!(
+        "使用量统计: 后台常驻采样（1s），自动清零 {} 天",
+        cfg.usage_auto_reset_days
+    );
 }
 
 fn on_off(b: bool) -> &'static str {
