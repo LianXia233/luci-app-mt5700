@@ -8,6 +8,17 @@
 
 ---
 
+## v1.24.1 (2026-10-17)
+
+### 全局时间统一走 nettime（NTP 优先 / 设备时钟回退），时区仍读设备
+
+- **refactor(time) 统一时间源**：插件里凡是「现在几点」的地方一律改走 `nettime` —— 日志时间戳（`logger`）、任务创建时间（`async_runtime`）、短信 PDU 时间兜底（`pdu`）、通知与 URC 时间（`notify` / `urc`）、信号巡检时段判定（`signalwatch::minute_of_day_now`）、定时锁频（`schedule`）。此前这些点各自取 `localtime::now()` / `SystemTime::now()`，NTP 校正后会出现「日志一个时间、通知另一个时间」的两条时间线
+- **note(time) 时区仍然读设备**：`nettime` 只负责**校正 UTC 时刻**（NTP → 设备时钟回退），**时区**依旧沿用 OpenWrt 系统设置（`/etc/TZ` → uci），取不到才回落北京时间 —— 两者正交，`localtime` 收敛为纯时区层（删除了已无人调用的 `now_string` / `minute_of_day_now`）
+- **fix(atclient) 间隔测量改用单调时钟**：长命令「结束于何时」原来用 `SystemTime`（墙上时间）算差值，NTP 校正或手动改时间会让这个差值失真；改为基于 `Instant` 的进程单调毫秒（`mono_ms()`），**耗时/节流/有效期一类间隔一律不碰墙上时钟**
+- **test 源码级回归用例**：新增 `nettime::tests::no_direct_wall_clock_outside_time_modules`，扫描 `src/` 下除 `localtime.rs` / `nettime.rs` 外的所有源文件（剥离注释后匹配），一旦出现 `chrono::Utc::now()` / `chrono::Local` / `SystemTime::now()` 即测试失败 —— 这条约定以后由 CI 兜底，不再靠人记
+- **test**：`cargo test` **194 passed / 0 failed，零警告**（v1.24.0 为 195：删除 `localtime` 已废弃的 2 条用例、新增 1 条回归用例）
+- **docs**：README 版本号、安装示例同步至 **v1.24.1**，新增 `docs/release-notes/v1.24.1.md`
+
 ## v1.24.0 (2026-10-17)
 
 ### 自动清零改为「每月几号」；新增 NTP 时间源；日志文件大小封顶
