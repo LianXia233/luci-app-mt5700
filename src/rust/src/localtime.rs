@@ -42,11 +42,19 @@
 //!
 //! # 全仓库约定
 //!
-//! 除本模块外**任何地方都不许再出现 `chrono::Local`**，一律使用 [`now`] /
-//! [`now_string`] / [`Tz`]。`tests` 里有一条回归用例专门盯这一点。
+//! 1. 除本模块外**任何地方都不许再出现 `chrono::Local`**，一律使用 [`offset`] /
+//!    [`from_unix`] / [`Tz`]；
+//! 2. **本模块只管时区，不管「现在几点」** —— 绝对时刻一律走
+//!    [`crate::nettime`]（`now` / `now_ts` / `now_ms` / `now_string`）：
+//!    它优先用 NTP 校正设备时钟，取不到才回退到本模块的设备时钟。
+//!    [`now`] 保留在这里正是作为那条回退链的底座，业务代码不要直接调它；
+//! 3. 耗时 / 间隔测量用 `Instant`，不要用墙上时钟（NTP 校正会造成跳变）。
+//!
+//! 上述约定由 `nettime` 里的源码级回归用例盯着：除 `localtime.rs` / `nettime.rs`
+//! 之外出现 `chrono::Utc::now()` / `SystemTime::now()`，测试直接失败。
 
 use crate::{log_info, log_warn};
-use chrono::{DateTime, FixedOffset, LocalResult, TimeZone, Timelike};
+use chrono::{DateTime, FixedOffset, LocalResult, TimeZone};
 use std::sync::OnceLock;
 
 /// 全仓库统一的时间类型。等价于 `chrono::DateTime<chrono::FixedOffset>`。
@@ -87,7 +95,10 @@ pub fn offset() -> FixedOffset {
     resolved().offset
 }
 
-/// 当前时刻（系统时区，缺省北京时间）。
+/// 当前时刻（设备时钟 + 系统时区，缺省北京时间）。
+///
+/// 这是**设备时钟**口径，不含 NTP 校正。业务代码要「现在几点」请用
+/// [`crate::nettime::now`]（NTP 优先、失败自动回退到这里）。
 pub fn now() -> DateTime<Tz> {
     chrono::Utc::now().with_timezone(&offset())
 }
@@ -113,17 +124,6 @@ pub fn from_ymdhms(
         LocalResult::Single(dt) => Some(dt),
         _ => None,
     }
-}
-
-/// `%Y-%m-%d %H:%M:%S` 格式的当前时刻字符串。
-pub fn now_string() -> String {
-    now().format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-/// 当前时刻在当天的分钟数（0..=1439），供时段判定使用。
-pub fn minute_of_day_now() -> i64 {
-    let n = now();
-    i64::from(n.hour()) * 60 + i64::from(n.minute())
 }
 
 /// 供设置页/日志展示的完整说明，例如 `CST-8 → UTC+08:00`。
@@ -384,7 +384,6 @@ mod tests {
     use chrono::Utc;
 
     /// 一天 24 小时的分钟数，仅测试断言用。
-    const MINUTES_PER_DAY: i64 = 24 * 60;
 
     /// 生效偏移的秒数（东为正）。生产代码不需要它，故只活在测试里。
     fn offset_secs() -> i32 {
@@ -519,24 +518,12 @@ mod tests {
         assert_eq!(pick_offset(None, None), (BEIJING_OFFSET_SECS, false));
     }
 
-    #[test]
-    fn now_string_has_expected_shape() {
-        let s = now_string();
-        assert_eq!(s.len(), 19, "格式应为 %Y-%m-%d %H:%M:%S: {s}");
-        let (date, time) = s.split_once(' ').expect("应有空格分隔");
-        assert_eq!(date.split('-').count(), 3);
-        assert_eq!(time.split(':').count(), 3);
-        // 与 now() 同源，不得出现两条时间线
-        assert_eq!(s, now().format("%Y-%m-%d %H:%M:%S").to_string());
-    }
+
 
     #[test]
-    fn minute_of_day_is_in_range() {
-        let m = minute_of_day_now();
-        assert!((0..MINUTES_PER_DAY).contains(&m), "分钟数越界: {m}");
-        assert_eq!(m, i64::from(now().hour()) * 60 + i64::from(now().minute()));
+    fn describe_is_non_empty() {
+        assert!(!describe().is_empty());
     }
-
     #[test]
     fn from_unix_matches_offset() {
         // 0 秒（epoch）在 UTC 是 1970-01-01 00:00:00，本地应等于「UTC + 偏移」
@@ -544,7 +531,12 @@ mod tests {
         assert_eq!(dt.timestamp(), 0);
         assert_eq!(dt.offset().local_minus_utc(), offset_secs());
     }
-
+    #[test]
+    fn from_ymdhms_rejects_invalid() {
+        // 字段越界必须返回 None 而不是 panic 或静默纠正
+        assert!(from_ymdhms(2025, 2, 30, 0, 0, 0).is_none());
+        assert!(from_ymdhms(2025, 13, 1, 0, 0, 0).is_none());
+    }
     #[test]
     fn from_ymdhms_roundtrip_timezone() {
         // 2025-08-25 12:00:00 本地 → 减去偏移即为 UTC
@@ -553,24 +545,11 @@ mod tests {
         assert_eq!(dt.timestamp(), 1756123200 - i64::from(offset_secs()));
         assert_eq!(dt.offset().local_minus_utc(), offset_secs());
     }
-
-    #[test]
-    fn from_ymdhms_rejects_invalid() {
-        // 字段越界必须返回 None 而不是 panic 或静默纠正
-        assert!(from_ymdhms(2025, 2, 30, 0, 0, 0).is_none());
-        assert!(from_ymdhms(2025, 13, 1, 0, 0, 0).is_none());
-    }
-
     #[test]
     fn hhmm_formats_signed_offset() {
         assert_eq!(hhmm(8 * 3600), "08:00");
         assert_eq!(hhmm(-5 * 3600), "05:00");
         assert_eq!(hhmm(5 * 3600 + 1800), "05:30");
         assert_eq!(hhmm(0), "00:00");
-    }
-
-    #[test]
-    fn describe_is_non_empty() {
-        assert!(!describe().is_empty());
     }
 }
