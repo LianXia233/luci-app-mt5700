@@ -1,10 +1,9 @@
 'use strict';
 'require baseclass';
-/* global AtWs, baseclass */
-
+/* global AtWs */
 /**
  * 补充解析库：运行状态 / 扫频 / USSD / 短信 / 锁频 / 定时锁频 DTO。
- * 对应模组 AT 应答格式，与后端解析保持一致。
+ * 各解析函数与 Rust 后端的应答格式严格一致。
  */
 
 var Parse = (function () {
@@ -35,7 +34,7 @@ var Parse = (function () {
 		return n;
 	};
 
-	// AT^TXPOWER?
+	// AT^TXPOWER? —— 仅 GUL(2G/3G/4G) 有效；NR 下模组返回 ERROR，需改用 AT^NTXPOWER?
 	api.parseTxPower = function (text) {
 		var match = text.match(/\^TXPOWER:\s*(.+)/);
 		if (!match) return null;
@@ -48,7 +47,8 @@ var Parse = (function () {
 		};
 	};
 
-	// AT^NTXPOWER? 每 5 字段一个载波
+	// AT^NTXPOWER? —— NR 发射功率，最多 4 个载波，每 5 字段一组：
+	// <PPusch>,<PPucch>,<PSrs>,<PPrach>,<Freq(kHz)>，无效值 999（统一交给 power() 归 null）
 	api.parseNrTxPower = function (text) {
 		var match = text.match(/\^NTXPOWER:\s*(.+)/);
 		if (!match) return [];
@@ -63,6 +63,7 @@ var Parse = (function () {
 		}
 		return carriers;
 	};
+
 
 	var REG_STATES = { 0: '未注册，未搜网', 1: '已注册本地网络', 2: '未注册，搜网中', 3: '注册被拒绝', 4: '未知原因', 5: '已注册漫游网络', 8: '仅紧急业务' };
 	var ACT_TYPES = { 10: 'EUTRAN-5GC', 11: 'NR-5GC' };
@@ -115,14 +116,34 @@ var Parse = (function () {
 	};
 
 	// AT+CGPADDR
+	/*
+	 * AT+CGPADDR：一行可携带**多个地址**（双栈时为 IPv4 + IPv6 各一个）。
+	 * 实测：+CGPADDR: 1,"198.51.100.10","32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
+	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
+	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
+	 */
+	/*
+	 * AT+CGPADDR：一行可携带**多个地址**（双栈时为 IPv4 + IPv6 各一个）。
+	 * 实测：+CGPADDR: 1,"198.51.100.10","32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
+	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
+	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
+	 */
 	api.parseCgpaddr = function (text) {
-		return text.split(/\r?\n/)
-			.map(function (line) { return line.match(/\+CGPADDR:\s*(\d+),?\s*"?([^"\r\n]*)"?/); })
-			.filter(function (m) { return m !== null && m[2].trim() !== ''; })
-			.map(function (m) {
-				var fmt = formatPdpAddress(m[2].trim());
-				return { cid: Number(m[1]), address: fmt.address, family: fmt.family };
-			});
+		var out = [];
+		String(text).split(/\r?\n/).forEach(function (line) {
+			var m = line.match(/\+CGPADDR:\s*(\d+)/);
+			if (!m) return;
+			var cid = Number(m[1]);
+			var addrRe = /"([^"]*)"/g;
+			var a;
+			while ((a = addrRe.exec(line)) !== null) {
+				var raw = a[1].trim();
+				if (raw === '') continue;
+				var fmt = formatPdpAddress(raw);
+				out.push({ cid: cid, address: fmt.address, family: fmt.family });
+			}
+		});
+		return out;
 	};
 
 	/* ================= 温度 ================= */
@@ -177,11 +198,6 @@ var Parse = (function () {
 
 	/* ================= IPv6 CAP ================= */
 
-	api.ipv6CapDescription = function (v) {
-		if (v === 0) return '不支持 IPv6';
-		if (v === 1) return '支持 IPv6';
-		return '能力值 ' + v;
-	};
 
 	/* ================= 扫频 ================= */
 
@@ -340,26 +356,59 @@ var Parse = (function () {
 		return /^\d{5,19}$/.test(api.normalizePhoneNumber(number));
 	};
 
+	/*
+	 * Date → PDU 时间串 `YY/MM/DD,HH:MM:SS`。
+	 *
+	 * 这是短信中心内部统一的时间表示（也是 AT+CMGL 文本模式给出的格式）。
+	 * 传进来的 Date 无效时返回**空串**而不是回落当前时刻：
+	 * 旧实现回落成 `new Date().toLocaleString()`，等于给一条时间未知的短信
+	 * 盖上「刚刚」的章，既污染排序又误导用户。空串在界面上会显示为「时间未知」。
+	 */
 	api.formatPDUTime = function (ts) {
+		/*
+		 * null / undefined 表示「时间未知」，必须显式短路：
+		 * `new Date(null)` 会得到 epoch（1970-01-01T00:00:00Z），那是一个**合法**日期，
+		 * 单靠下面的 isNaN 判不出来 —— 会把「不知道什么时候」渲染成 1970 年，
+		 * 而且它小于任何真实时间，排序时还会被排到最前面。
+		 */
+		if (ts == null) return '';
 		var d = ts instanceof Date ? ts : new Date(ts);
-		if (isNaN(d.getTime())) return new Date().toLocaleString('zh-CN');
+		if (isNaN(d.getTime())) return '';
 		var pad = function (n) { return String(n).padStart(2, '0'); };
 		return pad(d.getFullYear() % 100) + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) +
 			',' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 	};
 
+	/*
+	 * 时间串 → Date；无法识别返回 **null**（不是「此刻」）。
+	 *
+	 * 支持两种来源：
+	 *   - `YY/MM/DD,HH:MM:SS`，即 formatPDUTime 的输出；
+	 *   - 任何 `new Date()` 能识别的串（兜底容错）。
+	 *
+	 * 为什么必须返回 null：旧实现在两种都失败时返回 `new Date()`。
+	 * 后果有两层：一是时间未知的老短信永远排在最新，二是 `now` 每次刷新都在变，
+	 * 排序结果随之抖动，表现为会话列表「自己乱跳」。如实返回 null 后，
+	 * 由调用方按「时间未知」处理，排序才是稳定的。
+	 */
 	api.parseMessageTime = function (timeStr) {
-		if (!timeStr) return new Date();
+		if (!timeStr) return null;
 		var match = String(timeStr).trim().match(/(\d{2})\/(\d{2})\/(\d{2}),(\d{2}):(\d{2}):(\d{2})/);
 		if (match) {
 			return new Date(2000 + parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10),
 				parseInt(match[4], 10), parseInt(match[5], 10), parseInt(match[6], 10));
 		}
 		var parsed = new Date(timeStr);
-		return isNaN(parsed.getTime()) ? new Date() : parsed;
+		return isNaN(parsed.getTime()) ? null : parsed;
 	};
 
-	/* ================= 短信 PDU 解码（等价 Rust pdu.rs / Go pdu.go） ================= */
+	/* 时间串 → 毫秒时间戳；时间未知返回 null。排序与「最近一条」判定统一走这里。 */
+	api.messageTimeMs = function (timeStr) {
+		var d = api.parseMessageTime(timeStr);
+		return d ? d.getTime() : null;
+	};
+
+	/* ================= 短信 PDU 解码（3GPP TS 23.040） ================= */
 
 	var GSM7_ALPHABET = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
 
@@ -418,8 +467,14 @@ var Parse = (function () {
 
 	function bcdDigit(b) { return (b & 0x0F) * 10 + (b >> 4); }
 
+	/*
+	 * 7 字节 BCD 时间戳（TP-SCTS / TP-VP 绝对格式）→ Date；字段非法返回 null。
+	 *
+	 * 同样不再回落 `new Date()`：时间戳坏了就是「不知道」，
+	 * 编一个当前时刻会让排序与界面都在说谎。
+	 */
 	function decodeTimestamp(ts) {
-		if (ts.length < 7) return new Date();
+		if (!ts || ts.length < 7) return null;
 		var year = 2000 + bcdDigit(ts[0]);
 		var month = bcdDigit(ts[1]);
 		var day = bcdDigit(ts[2]);
@@ -427,7 +482,7 @@ var Parse = (function () {
 		var minute = bcdDigit(ts[4]);
 		var second = bcdDigit(ts[5]);
 		if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) {
-			return new Date();
+			return null;
 		}
 		return new Date(year, month - 1, day, hour, minute, second);
 	}
@@ -465,8 +520,7 @@ var Parse = (function () {
 	 *   0xC0-0xDF 消息等待组：bit3=1 为 UCS2，否则 GSM7
 	 *   0xF0-0xFF 数据编码/消息类别组：固定 GSM7（bit3-2 是类别不是编码！）
 	 * 返回 0=GSM7 / 1=8bit / 2=UCS2。
-	 * 注意：不能统一用 dcs & 0x0C 判定 —— 0xF 组的 bit3-2 是消息类别而非编码，
-	 * 误用会把 F 组的类别位当成编码位导致乱码。
+	 * 注意：若用 dcs & 0x0C 判断，会把 F 组的类别位误读成编码位导致乱码。
 	 */
 	function dcsEncoding(dcs) {
 		var group = dcs >> 4;
@@ -479,7 +533,30 @@ var Parse = (function () {
 		return (dcs >> 2) & 0x03;
 	}
 
-	// 解析一条 SMS-DELIVER PDU（hex），返回 { sender, content, date, partial }
+	/*
+	 * 解析一条短信 PDU（hex），返回
+	 * { direction, number, sender, content, date, timeApprox, partial }；无法解析返回 null。
+	 *
+	 * 支持两种 PDU 类型（3GPP TS 23.040）：
+	 *
+	 *   TP-MTI = 0  SMS-DELIVER —— 对方发来的。地址字段是 TP-OA（发件号码），
+	 *               随后 7 字节 TP-SCTS 是服务中心盖的**收信时刻**，时间可信。
+	 *
+	 *   TP-MTI = 1  SMS-SUBMIT  —— 本机发出的。模组若把已发短信存在存储里，
+	 *               AT+CMGL 就会以这种类型列出来。地址字段是 TP-DA（收件号码），
+	 *               前面多一个 TP-MR（1 字节）。SUBMIT **没有发送时刻字段**，
+	 *               只有一个 TP-VP 有效期：VPF=01/11（7 字节）时能解出时间，
+	 *               但语义是「有效期截止」而非「发送时刻」，故标记 timeApprox；
+	 *               VPF=10（1 字节相对格式，本插件发信时用的就是它）拿不到绝对时间，
+	 *               此时 date 返回 null —— 宁可显示「时间未知」，也不编一个时刻出来。
+	 *
+	 * 为什么必须支持 SUBMIT：旧实现开头就是 `if (mti !== 0) return null`，
+	 * 整条 SUBMIT 被丢掉；而 parseCMGL 又把解析成功的统统标成 'received'。
+	 * 两者叠加会把「本机发出的短信」变成一条假的 incoming —— 号码是自己的收件人，
+	 * 方向却是「收到」。这里由 PDU 的 MTI 决定方向，不再靠调用方猜。
+	 *
+	 * MTI = 2/3（SMS-STATUS-REPORT / SMS-COMMAND）本页不展示，返回 null 跳过。
+	 */
 	api.decodeIncomingPdu = function (hex) {
 		var raw = [];
 		for (var i = 0; i + 1 < hex.length; i += 2) {
@@ -491,19 +568,52 @@ var Parse = (function () {
 		if (pos >= raw.length) return null;
 		var firstOctet = raw[pos];
 		var mti = firstOctet & 0x03;
-		if (mti !== 0) return null; // 只处理 SMS-DELIVER
+		if (mti !== 0 && mti !== 1) return null;
+		var isSubmit = mti === 1;
 		pos += 1;
-		var oaLen = raw[pos];
-		if (pos + 1 + Math.ceil(oaLen / 2) > raw.length) return null;
-		var addr = decodeAddress(raw, pos);
-		pos += 2 + Math.ceil(oaLen / 2);
+
+		var addr;
+		if (isSubmit) {
+			/* TP-MR 占 1 字节，跳过；随后才是与 DELIVER 同构的地址字段 */
+			if (pos >= raw.length) return null;
+			pos += 1;
+			var daLen = raw[pos];
+			if (pos + 1 + Math.ceil(daLen / 2) > raw.length) return null;
+			addr = decodeAddress(raw, pos);
+			pos += 2 + Math.ceil(daLen / 2);
+		} else {
+			var oaLen = raw[pos];
+			if (pos + 1 + Math.ceil(oaLen / 2) > raw.length) return null;
+			addr = decodeAddress(raw, pos);
+			pos += 2 + Math.ceil(oaLen / 2);
+		}
 		if (pos + 1 >= raw.length) return null;
-		var pid = raw[pos]; pos += 1;
+		pos += 1;  // 跳过 pid 字段
 		var dcs = raw[pos]; pos += 1;
-		if (pos + 7 > raw.length) return null;
-		var ts = raw.slice(pos, pos + 7);
-		var date = decodeTimestamp(ts);
-		pos += 7;
+
+		/*
+		 * TP-VP 长度由首字节的 bit4:bit3（TP-VPF）决定（TS 23.040）：
+		 *   bit4 bit3
+		 *     0    0   → 无 TP-VP
+		 *     1    0   → 相对格式，1 字节（只有「还有多久过期」，无绝对时间）
+		 *     0    1   → 增强格式，7 字节
+		 *     1    1   → 绝对格式，7 字节
+		 * (firstOctet >> 3) & 0x03 正好得到上表的行号 0/1/2/3，
+		 * 故长度表为 [0, 7, 1, 7]（下标 1 = 增强、下标 2 = 相对）。
+		 */
+		var vpf = (firstOctet >> 3) & 0x03;
+		var vpLen = [0, 7, 1, 7][vpf];
+		var date = null;
+		var timeApprox = false;
+		if (isSubmit) {
+			if (pos + vpLen > raw.length) return null;
+			if (vpLen === 7) { date = decodeTimestamp(raw.slice(pos, pos + 7)); timeApprox = true; }
+			pos += vpLen;
+		} else {
+			if (pos + 7 > raw.length) return null;
+			date = decodeTimestamp(raw.slice(pos, pos + 7));
+			pos += 7;
+		}
 		if (pos >= raw.length) return null;
 		var udl = raw[pos]; pos += 1;
 		var udLen;
@@ -548,7 +658,7 @@ var Parse = (function () {
 			/*
 			 * 7-bit：UDH 占用的 septet 数按其八位组长度折算，
 			 * 必须先解「完整 UD 字节流」的 septet 序列、再跳过头部码位；
-			 * 不可先按字节切掉 UDH 再解包，否则位流错位会导致长短信正文乱码。
+			 * 注意：若先按字节切掉 UDH 再解包，位流会错位，导致长短信正文乱码。
 			 */
 			var udhSeptets = (udhi && ud.length > 0) ? Math.ceil((ud[0] + 1) * 8 / 7) : 0;
 			var totalSeptets = Math.max(udl, udhSeptets);
@@ -558,10 +668,20 @@ var Parse = (function () {
 				: '';
 		}
 
-		return { sender: addr.address, content: content, date: date, partial: partial };
+		return {
+			direction: isSubmit ? 'sent' : 'received',
+			/* SUBMIT 的地址是收件人、DELIVER 的是发件人，统一用 number 表示「对方号码」 */
+			number: addr.address,
+			sender: addr.address,
+			content: content,
+			/* Date 或 null（时间未知） */
+			date: date,
+			timeApprox: timeApprox,
+			partial: partial
+		};
 	};
 
-	// 解析 CMGL=4 应答（PDU 块 / 已解码文本行），输出 SMS[]（等价 modem/sms.ts parseCMGL + PDU 解析）
+	// 解析 CMGL=4 应答（PDU 块 / 已解码文本行），输出 SMS[]
 	api.parseCMGL = function (data) {
 		var sms = [];
 		var text = data;
@@ -600,13 +720,22 @@ var Parse = (function () {
 			if (pduHex) {
 				var decoded = api.decodeIncomingPdu(pduHex);
 				if (decoded) {
+					/*
+					 * 方向必须取自 PDU 的 MTI，不能像旧实现那样硬编码 'received'：
+					 * 模组把已发短信也列出来时（SUBMIT PDU），硬编码会让「我发出去的」
+					 * 显示成「我收到的」，号码还是对方 —— 直接看反了对话方向。
+					 * 时间同样如实传递：decoded.date 为 null 时 formatPDUTime 返回空串，
+					 * 界面标注「时间未知」，排序也不会被假时间带偏。
+					 */
 					sms.push({
 						index: idx,
 						content: decoded.content,
-						number: api.normalizePhoneNumber(decoded.sender || ''),
+						number: api.normalizePhoneNumber(decoded.number || ''),
 						time: api.formatPDUTime(decoded.date),
-						type: 'received',
-						isConcatenated: !!decoded.partial,
+						type: decoded.direction,
+						timeApprox: decoded.timeApprox,
+						/* 长短信拼接只对收到的消息做（发送侧由本机自己分片，无需重组） */
+						isConcatenated: !!decoded.partial && decoded.direction === 'received',
 						concatenatedRef: decoded.partial ? decoded.partial.reference : undefined,
 						concatenatedSeq: decoded.partial ? decoded.partial.part_number : undefined,
 						concatenatedTotal: decoded.partial ? decoded.partial.parts_count : undefined
@@ -617,7 +746,7 @@ var Parse = (function () {
 		return sms;
 	};
 
-	// 已发送短信本地缓存（localStorage 键 sms_sent_messages_cache）
+	// 短信中心保存的已发消息缓存（localStorage sms_sent_messages_cache）
 	api.SMS_CACHE_KEY = 'sms_sent_messages_cache';
 	api.MAX_SMS_CACHE = 1000;
 
@@ -703,7 +832,7 @@ var Parse = (function () {
 		return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: pcis };
 	};
 
-	// 拼装锁频命令（即时生效场景，如扫频结果一键锁定）
+	// 拼接锁频命令（即时生效场景，如扫频结果一键锁定）
 	api.buildLockCommand = function (kind, type, mobility, items) {
 		var cmd = kind === 'lte' ? 'AT^LTEFREQLOCK' : 'AT^NRFREQLOCK';
 		if (type === 0) return cmd + '=0';
@@ -753,7 +882,7 @@ var Parse = (function () {
 
 	api.modeText = function (mode) { return mode === '' ? '当前时段不锁频' : mode; };
 
-	/* ================= 辅载波 / 辅站小区解析 ================= */
+	/* ================= 辅载波/辅站小区 ================= */
 	// 手册 13.27 AT^MONSSC — NSA 下 5G 辅连接服务小区（最多 8CC）
 	// 手册 13.18 AT^CASCELLINFO? — LTE CA 的辅小区（最多 4 个 SCELL）
 	// ^HFREQINFO 只给频点与带宽，这两条补每个辅载波各自的信号质量。
@@ -837,27 +966,53 @@ var Parse = (function () {
 		return String(text).split(/\r?\n/).map(api.parseCascell).filter(Boolean);
 	};
 
+	/*
+	 * 频点归一化：^HFREQINFO 的 dl_fcn 与 ^MONSSC 的 arfcn 都是字符串，
+	 * 空串会被 Number() 变成 0，进而把 arfcn=0 的辅小区误判成「已匹配」。
+	 * 这里统一把空值/非法值折成 null，让调用方显式处理。
+	 */
+	function normalizeArfcn(value) {
+		if (value === undefined || value === null) return null;
+		var txt = String(value).trim();
+		if (txt === '') return null;
+		var n = Number(txt);
+		return isFinite(n) ? n : null;
+	}
+
 	// 把 ^MONSSC / ^CASCELLINFO 的信号质量对应到 ^HFREQINFO 报出来的某个载波上。
 	api.carrierSignalFor = function (carrier, nr, lte) {
-		var arfcn = Number(carrier.dlFcn);
-		if (!isFinite(arfcn)) return null;
+		if (!carrier) return null;
+		var arfcn = normalizeArfcn(carrier.dlFcn);
+		if (arfcn === null) return null;
+		var nrList = nr || [];
+		var lteList = lte || [];
 		if (carrier.sysMode === 'NR') {
-			var hit = nr.find(function (c) { return c.arfcn === arfcn; });
+			var hit = nrList.find(function (c) { return normalizeArfcn(c && c.arfcn) === arfcn; });
 			return hit
 				? { pci: hit.pci, rsrp: hit.rsrp, rsrq: hit.rsrq, sinr: hit.sinr, measType: hit.measType }
 				: null;
 		}
-		var lHit = lte.find(function (c) { return c.dlArfcn === arfcn; });
+		var lHit = lteList.find(function (c) { return normalizeArfcn(c && c.dlArfcn) === arfcn; });
 		return lHit ? { pci: lHit.pci, rsrp: lHit.rsrp, rsrq: lHit.rsrq, sinr: null, rssi: lHit.rssi } : null;
 	};
 
 	// 找出没能对应到任何载波的辅小区，合并后不把数据悄悄丢掉。
 	api.unmatchedSecondaries = function (carriers, nr, lte) {
 		var arfcns = {};
-		carriers.forEach(function (c) { arfcns[Number(c.dlFcn)] = true; });
+		(carriers || []).forEach(function (c) {
+			var a = normalizeArfcn(c && c.dlFcn);
+			if (a !== null) arfcns[a] = true;
+		});
+		var inList = function (a) { return a !== null && arfcns[a] === true; };
 		return {
-			nr: nr.filter(function (c) { return !arfcns[c.arfcn]; }),
-			lte: lte.filter(function (c) { return c.dlArfcn === null || !arfcns[c.dlArfcn]; })
+			nr: (nr || []).filter(function (c) {
+				var a = normalizeArfcn(c && c.arfcn);
+				return a === null || !inList(a);
+			}),
+			lte: (lte || []).filter(function (c) {
+				var a = normalizeArfcn(c && c.dlArfcn);
+				return a === null || !inList(a);
+			})
 		};
 	};
 
@@ -874,7 +1029,7 @@ var Parse = (function () {
 		0: 'LAU 被拒', 1: '鉴权失败', 2: '业务请求被拒', 3: '网络 detach 被拒',
 		4: 'ATTACH 被拒', 5: 'RAU 被拒', 6: 'TAU 被拒'
 	};
-	// 原因值来自 3GPP TS 24.008 / 24.301 / 24.501，未收录的直接显示编号
+	// 原因值来自 3GPP TS 24.008 / 24.301 / 24.501，未收录的原样显示编号
 	var REJ_CAUSES = {
 		2: 'IMSI 未在 HSS 登记', 3: '非法终端', 5: 'IMEI 不被接受', 6: '非法设备',
 		7: '不允许使用分组域业务', 8: '不允许使用分组域和非分组域业务', 9: '网络无法识别终端身份',
@@ -955,6 +1110,83 @@ var Parse = (function () {
 			dead: status === 98,
 			present: status !== 0 && status !== 99
 		};
+	};
+
+	/* ================= 5GS QoS 动态参数 +C5GQOSRDP ================= */
+	/*
+	 * 3GPP TS 27.007 +C5GQOSRDP（只读动态参数，取一次即可，无需等待业务触发）：
+	 *   +C5GQOSRDP: <cid>,<5QI>,[<GFBR_uplink>],[<GFBR_downlink>],
+	 *               [<MFBR_uplink>],[<MFBR_downlink>],[<Session-AMBR 上行>],[<Session-AMBR 下行>]
+	 * 所有比特率单位均为 **kbps**。
+	 *
+	 * 注意（实测本机 AT+C5GQOSRDP=1 → "1,6,,,,,102400,102400"）：
+	 *   - 5QI=6 是非 GBR 类，故 GFBR/MFBR 四个字段按规范留空；
+	 *   - 末尾两个非空值即核心网下发的 **Session-AMBR**，也就是这张卡的
+	 *     **签约上下行速率**（102400 kbps = 100 Mbps）。
+	 *   - 标准 3GPP 定义只有 7 个字段（末位是 averaging_window，毫秒级），
+	 *     而本固件是 8 字段变体。为避免把 averaging_window 误当成速率，
+	 *     只在字段数 ≥8 时才把第 7/8 位解析为签约速率，否则留空。
+	 */
+	api.parseC5gQosRdp = function (text) {
+		var lines = String(text).split(/\r?\n/);
+		for (var i = 0; i < lines.length; i++) {
+			var m = lines[i].match(/\+?C5GQOSRDP:\s*([^\r\n]*)/i);
+			if (!m) continue;
+			var f = m[1].split(',');
+			var num = function (v) {
+				var n = parseInt(String(v == null ? '' : v).trim(), 10);
+				return isNaN(n) ? null : n;
+			};
+			var hasAmbr = f.length >= 8;
+			return {
+				cid: num(f[0]),
+				qci: num(f[1]),
+				gfbrUl: num(f[2]),
+				gfbrDl: num(f[3]),
+				mfbrUl: num(f[4]),
+				mfbrDl: num(f[5]),
+				ambrUl: hasAmbr ? num(f[6]) : null,
+				ambrDl: hasAmbr ? num(f[7]) : null,
+				raw: lines[i].trim(),
+				at: Date.now()
+			};
+		}
+		return null;
+	};
+
+	/* ================= 签约速率 AT^DSAMBR（手册 16.17） ================= */
+	/*
+	 * 手册 16.17「AT^DSAMBR - 签约速率查询」：
+	 *   AT^DSAMBR=<cid>
+	 *   <CR><LF>^DSAMBR: <cid>,<DlApnAmbr>,<UlApnAmbr>[,...]<CR><LF>OK
+	 *   <DlApnAmbr> 下行签约速率，单位 kbps
+	 *   <UlApnAmbr> 上行签约速率，单位 kbps
+	 *
+	 * 实机返回比手册多两个字段（APN 与一个状态码）：
+	 *   NR: ^DSAMBR: 1,<dl>,<ul>,"<APN>",<n>
+	 *   LTE: ^DSAMBR: 1,<dl>,<ul>,"<APN>",<n>
+	 * 因此只按**前三个位置**取值，后面的原样保留在 extra 里，不做臆测。
+	 *
+	 * 该命令 4G / 5G 下均可用，是签约速率的首选来源；取不到时才回退
+	 * 到标准命令 AT+C5GQOSRDP 的 Session-AMBR（见 parseC5gQosRdp）。
+	 */
+	api.parseDsambr = function (text) {
+		var lines = String(text).split(/\r?\n/);
+		for (var i = 0; i < lines.length; i++) {
+			var m = lines[i].match(/\^DSAMBR:\s*([0-9]+)\s*,\s*([0-9]*)\s*,\s*([0-9]*)/);
+			if (!m) continue;
+			var rest = lines[i].slice(lines[i].indexOf(m[0]) + m[0].length);
+			var apnMatch = rest.match(/"([^"]*)"/);
+			return {
+				cid: parseInt(m[1], 10),
+				dlAmbr: m[2] === '' ? null : parseInt(m[2], 10),
+				ulAmbr: m[3] === '' ? null : parseInt(m[3], 10),
+				apn: apnMatch ? apnMatch[1] : '',
+				raw: lines[i].trim(),
+				at: Date.now()
+			};
+		}
+		return null;
 	};
 
 	return api;

@@ -14,6 +14,8 @@
  * - 保存流程：暂存键值 → /api/config 落盘 → /api/config/apply 热应用；
  *   结构性配置（连接类型/串口/端口等）提示重启后生效。
  * - 定时锁频支持热应用（schedule_enabled 与时段参数即时生效，无需重启）。
+ * - 通知卡提供「推送测试」：固定文案经后端 /api/rpc/mt5700/notify_test
+ *   直发已保存的 WebHook，用于验证企业微信通道是否通畅。
  */
 
 var SERVICE = 'at-webserver';
@@ -87,7 +89,7 @@ return L.view.extend({
 
 		if (svc.uptime_secs != null) {
 			statusBody.appendChild(E('div', { 'class': 'mt5700-hint' },
-				'已运行 ' + Mt5700.formatDuration(svc.uptime_secs) + '；进程由 systemd 管理（at-webserver.service）'));
+				'已运行 ' + AtWs.formatDuration(svc.uptime_secs) + '；进程由 systemd 管理（at-webserver.service）'));
 		}
 		if (status.hint) {
 			statusBody.appendChild(E('div', { 'class': 'mt5700-hint' }, status.hint));
@@ -207,8 +209,29 @@ return L.view.extend({
 		notifBody.appendChild(Mt5700.formGroup('信号变化通知', notifySignal.wrap));
 		notifBody.appendChild(Mt5700.formGroup('短信存储满通知', notifyMem.wrap));
 
-		var webhookInput = Mt5700.input('text', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx', '');
-		notifBody.appendChild(Mt5700.formGroup('企业微信 WebHook', webhookInput, '通知将推送到该 WebHook 地址'));
+	var webhookInput = Mt5700.input('text', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx', '');
+	notifBody.appendChild(Mt5700.formGroup('企业微信 WebHook', webhookInput, '通知将推送到该 WebHook 地址'));
+
+	/* 推送测试：固定文案直发 WebHook，验证通知通道是否通畅 */
+	var notifyTestBtn = Mt5700.button('推送测试', function () {
+		if (!webhookInput.value.trim()) {
+			Mt5700.error('请先填写企业微信 WebHook 地址并保存，再测试推送');
+			return;
+		}
+		notifyTestBtn.disabled = true;
+		L._httpJson('/api/rpc/mt5700/notify_test', { method: 'POST', body: {} }).then(function (res) {
+			if (res && res.success) {
+				Mt5700.success('测试通知已推送，请检查企业微信群消息');
+			} else {
+				Mt5700.error('推送失败：' + ((res && res.error) || '未知错误'));
+			}
+		}).catch(function (err) {
+			Mt5700.error('推送失败：' + ((err && err.message) || '未知错误'));
+		}).then(function () {
+			notifyTestBtn.disabled = false;
+		});
+	});
+	notifBody.appendChild(Mt5700.formGroup('通道测试', notifyTestBtn, '发送一条固定文案的测试通知（使用已保存的 WebHook 配置）'));
 
 		/* ---------- 载入配置（JSON 扁平键，与后端 config.json 一致） ---------- */
 		var get = function (key, def) {

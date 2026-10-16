@@ -16,6 +16,7 @@
 #   systemctl disable --now at-webserver
 #   rm -f /usr/bin/at-webserver /etc/systemd/system/at-webserver.service
 #   rm -rf /usr/share/mt5700 /etc/mt5700
+#   rm -f /etc/at-webserver-usage.json   # 使用量持久化文件（无需保留统计时删除）
 
 set -euo pipefail
 
