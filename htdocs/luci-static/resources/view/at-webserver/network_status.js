@@ -136,7 +136,7 @@ return L.view.extend({
 					svgIcon('signal'),
 					E('span', {}, '信号强度')
 				]),
-				E('span', { 'class': 'mt-pill-tag' }, '5G')
+				E('span', { 'class': 'mt-pill-tag', 'id': 'sig-rat-tag' }, '—')
 			]),
 			E('div', { 'class': 'mt-sig-main-row' }, [
 				E('div', { 'class': 'mt-sig-val-group' }, [
@@ -672,6 +672,18 @@ return L.view.extend({
 			return state.hfreqSuccess === false ? 'error' : 'connecting';
 		}
 
+		/* 制式角标短文案：NR→5G、LTE→4G、WCDMA→3G、GSM→2G。
+		 * 与 Mt5700.normRat 同口径，取不到就返回空，由调用方决定占位。 */
+		function ratBadgeText(sysMode) {
+			var s = String(sysMode || '').toUpperCase();
+			if (!s) return '';
+			if (s === 'NR' || s === '7' || s === '11' || s.indexOf('NR') === 0) return '5G';
+			if (s.indexOf('LTE') === 0 || s === '6') return '4G';
+			if (s.indexOf('WCDMA') === 0 || s === '3') return '3G';
+			if (s.indexOf('GSM') === 0 || s === '1') return '2G';
+			return s;
+		}
+
 		function renderSignalUI() {
 			var c = state.cell;
 			var rsrp = c.rsrp;
@@ -700,6 +712,15 @@ return L.view.extend({
 				elPill.style.background = sigUI.bg;
 				elPill.style.color = sigUI.color;
 				elText.textContent = sigUI.text;
+			}
+
+			/* 制式角标与当前驻网制式同源：NR→5G、LTE→4G，不再写死 5G
+			 * （原来写死 '5G'，4G 下也显示 5G，与真实制式不符）。 */
+			var elRatTag = document.getElementById('sig-rat-tag');
+			if (elRatTag) {
+				var primCarrier = (state.carriers && state.carriers[0]) || {};
+				var ratTxt = ratBadgeText(c.sysMode || primCarrier.sysMode);
+				elRatTag.textContent = ratTxt || '—';
 			}
 
 			/* 更新四格信号图标（状态取自真实数据） */
@@ -1202,20 +1223,14 @@ return L.view.extend({
 			return Math.round(v) + ' Kbps';
 		}
 
-		/* 签约速率文案：有 Session-AMBR 才显示，没有就如实说明模组未上报 */
+		/* 签约速率文案：有值才显示，没有就如实说明模组未上报 */
 		function subRateText() {
 			var q = state.subRate;
-			if (!q || (!q.ambrUl && !q.ambrDl)) return '模组未上报';
-			var ul = formatKbps(q.ambrUl);
-			var dl = formatKbps(q.ambrDl);
-			if (q.ambrUl && q.ambrDl) return '↑ ' + ul + ' / ↓ ' + dl;
-			return q.ambrUl ? ('↑ ' + ul) : ('↓ ' + dl);
-		}
-
-		/* 签约速率的来源说明（鼠标悬停可见）：数值直接来自模组，未做任何修饰 */
-		function subRateTip() {
-			return 'title="数据上网上下文（CID ' + (state.apnCid || '1') + '，已剔除 IMS 等专用承载）的 Session-AMBR，' +
-				'来自模组 AT+C5GQOSRDP 上报，单位 kbps；4G 下本固件不上报该参数"';
+			if (!q || (!q.dlAmbr && !q.ulAmbr)) return '模组未上报';
+			var ul = formatKbps(q.ulAmbr);
+			var dl = formatKbps(q.dlAmbr);
+			if (q.dlAmbr && q.ulAmbr) return '↑ ' + ul + ' / ↓ ' + dl;
+			return q.dlAmbr ? ('↓ ' + dl) : ('↑ ' + ul);
 		}
 
 		/* 清零本次使用量（设备侧状态一并清空，持久化开关不变） */
@@ -1384,7 +1399,7 @@ return L.view.extend({
 				'  <tr><td>SIM 卡状态</td><td>' + simStat + '</td></tr>' +
 				'  <tr><td>运营商代码 (PLMN)</td><td>' + plmnStr + '</td></tr>' +
 				'  <tr><td>网络注册与漫游</td><td>' + roamStr + '</td></tr>' +
-				'  <tr><td>签约速率 (Session-AMBR)</td><td ' + subRateTip() + '>' + subRateText() + '</td></tr>' +
+				'  <tr><td>签约速率</td><td>' + subRateText() + '</td></tr>' +
 				'  <tr><td>IMSI</td><td>' + (state.modemInfo.imsi || '读取中...') + '</td></tr>' +
 				'  <tr><td>ICCID</td><td>' + (state.modemInfo.iccid || '读取中...') + '</td></tr>' +
 				'</table>';
@@ -2160,18 +2175,43 @@ return L.view.extend({
 						state.apnCid = ctx.data.cid;
 					}
 				}
-				/* 签约速率（Session-AMBR）只查**数据上网**那条上下文，绝不查 IMS。
+				/* 签约速率只查**数据上网**那条上下文，绝不查 IMS。
 				 * state.apnCid 来自 pickDataContext —— 它已剔除 IMS / 紧急 / MMS / SUPL
 				 * 等专用承载 APN，所以这里拿到的必然是数据通道 CID；
-				 * 万一没解析到，退回 CID 1（默认数据上下文，实机 +CGACT: 1,1 即上网承载）。 */
+				 * 万一没解析到，退回 CID 1（默认数据上下文，实机 +CGACT: 1,1 即上网承载）。
+				 *
+				 * 优先用厂商私有命令 AT^DSAMBR（手册 16.17「签约速率查询」）：
+				 * 它 4G/5G 下都能拿到真实的上下行签约速率（kbps）。
+				 * 只有它不返回时，才退回标准命令 AT+C5GQOSRDP（Session-AMBR）。 */
 				var dataCid = state.apnCid || '1';
-				return AtWs.client.sendCommand('AT+C5GQOSRDP=' + dataCid);
+				return AtWs.client.sendCommand('AT^DSAMBR=' + dataCid);
 			}).then(function (res) {
-				/* 5QI 1（VoLTE 语音）/ 5（IMS 信令）是 IMS 专用承载的特征值：
-				 * 万一真拿到这种值，说明查到的不是数据上网那条上下文，
-				 * 宁可不显示也不张冠李戴（取不到一律清空，避免残留旧值）。 */
-				var q = (res && res.success && res.data) ? Parse.parseC5gQosRdp(res.data) : null;
-				state.subRate = (q && q.qci !== 1 && q.qci !== 5) ? q : null;
+				var q = (res && res.success && res.data) ? Parse.parseDsambr(res.data) : null;
+				if (!q || (!q.dlAmbr && !q.ulAmbr)) {
+					return AtWs.client.sendCommand('AT+C5GQOSRDP=' + (state.apnCid || '1'));
+				}
+				q.source = 'dsambr';
+				state.subRate = q;
+				return null;
+			}).then(function (res) {
+				if (res && res.data) {
+					var q2 = Parse.parseC5gQosRdp(res.data);
+					/* 5QI 1（VoLTE 语音）/ 5（IMS 信令）是 IMS 专用承载的特征值：
+					 * 万一真拿到这种值，说明查到的不是数据上网那条上下文，
+					 * 宁可不显示也不张冠李戴。 */
+					if (q2 && q2.qci !== 1 && q2.qci !== 5 && (q2.ambrUl || q2.ambrDl)) {
+						q2.source = 'qosrdp';
+						state.subRate = {
+							dlAmbr: q2.ambrDl, ulAmbr: q2.ambrUl,
+							apn: state.apn, cid: q2.cid, source: 'qosrdp'
+						};
+					} else {
+						state.subRate = null;
+					}
+				} else {
+					/* DSAMBR 已经给出结果时 res 为 null，无需再动 */
+					if (!state.subRate || state.subRate.source !== 'dsambr') state.subRate = null;
+				}
 				renderTabsUI();
 			}).catch(function (e) {
 				console.warn('loadDeviceInfo error:', e);
