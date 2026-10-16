@@ -60,6 +60,14 @@
 			"path": "at-webserver/modem_settings"
 		}
 	},
+	"admin/modem/5g/voice-call": {
+		"title": "语音通话",
+		"order": 52,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/voice_call"
+		}
+	},
 	"admin/modem/5g/esim": {
 		"title": "eSIM 管理",
 		"order": 55,

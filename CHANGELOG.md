@@ -5,6 +5,38 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.21] - 2026-10-16
+
+### Added
+
+**124. ★★★ 语音通话（拨打 / 接听 / 挂断 / 状态 / DTMF）—— 新增独立页面 `admin/modem/5g/voice-call`**
+
+真机实测授权拨打 1008611 后落地（MT5700M-CN V200R001C20B025，NR SA 注册态）：
+
+- **后端** `mt5700.uc` 新增 `call` ubus 方法（action: `dial` / `answer` / `hangup` /
+  `status`），ACL 的 read/write 两段同步登记：
+  - `dial`：`ATD<号码>;`（分号＝语音呼叫，缺分号会按数据呼叫走）；
+  - `answer`：`ATA`；`hangup`：`ATH`；
+  - `status`：`AT+CLCC` 解析为结构化列表（`idx/dir/state/mode/mpty/number/type`），
+        状态位按 3GPP TS 27.007 映射（0 活跃 / 1 保持 / 2 主叫拨出 / 3 被叫振铃 / …）。
+- **号码白名单**：仅放行 `+ * #` 与数字（≤32 位），拒绝其他一切字符 —— 拨号字符串
+  直接进 AT 通道，必须前置校验。
+- **前端** 新增 `voice_call.js` 视图：拨号盘（12 键）、通话状态卡（CLCC 2s 轮询 +
+  计时）、来电「接听/挂断」、通话中 DTMF 键盘；事件订阅走 `page._onDispose` 退订。
+- **契约测试** `tests/voice-call-contract.test.js` 41 项：号码白名单、CLCC 解析、
+  ucode/前端/ACL/菜单四处接线一致性；4 组变异（删 ACL、视图直发 ATD、ucode 去分号）
+  全部被抓（红线 16）。
+
+**实测数据**（192.168.88.1，2026-10-16）：`ATD1008611;` → `OK` → 8s 后
+`+CLCC: 1,0,0,0,0,"1008611",161`（接通）→ `ATH` → `OK` → CLCC 空。
+`AT^CURC?` = 0（呼叫类 URC 全部禁止上报）⇒ 状态只能靠 CLCC 轮询，
+故采用 2s 轮询而非即时推送（详见 REFERENCE §语音通话）。
+
+### Notes
+
+- Rust 侧无需改动：`at` 通道已具备所有能力（拨号命令 2s 超时即返回 OK）。
+- 本机无 Rust 工具链（红线 64），本次改动全部在 ucode/前端/测试层，可本地全量验证。
+
 ## [2.4.20] - 2026-10-16
 
 ### Fixed

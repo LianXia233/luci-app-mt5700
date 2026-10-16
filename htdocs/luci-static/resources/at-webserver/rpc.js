@@ -176,6 +176,22 @@ var rpcSmsLog = L.rpc.declare({
 	expect: {}
 });
 
+/*
+ * 语音通话：dial / answer / hangup / dtmf / status。
+ *
+ * ★ number 与 digit 都只是白名单内的短串（后端 callNumberOk / callDtmfOk 再校验），
+ *   命令串（ATD…; / ATA / ATH / AT+VTS=… / AT+CLCC）全部由后端拼 ——
+ *   前端没有把任意字符串送进 AT 通道的路径。
+ * ★ 老设备（rpcd 里没有 mt5700.call）时 response 为 undefined，由 fetchCall
+ *   统一翻成 success:false + 明确文案（与 vowifi/smslog 同一约定）。
+ */
+var rpcCall = L.rpc.declare({
+	object: 'mt5700',
+	method: 'call',
+	params: ['action', 'number', 'digit'],
+	expect: {}
+});
+
 function withTimeout(p, ms, msg) {
 	/*
 	 * ★ P11（2026-09-19 会审）：竞速胜出后清掉另一路的定时器。
@@ -1804,6 +1820,54 @@ function fetchSmsLog(action, entry, id) {
 	});
 }
 
+/*
+ * 语音通话动作。
+ *
+ * 用法：fetchCall('status') / fetchCall('dial', '1008611') /
+ *       fetchCall('answer') / fetchCall('hangup') / fetchCall('dtmf', null, '5')
+ *
+ * 返回：
+ *   dial/answer/hangup/dtmf → Promise<{success, action, sent, raw, error}>
+ *     sent=false + error  ＝后端拒绝或通道故障，命令没到模组
+ *   status                  → Promise<{success, action, calls: [{id,dir,state,mode,mpty,number,type}]}>
+ *     calls 为空数组＝**确实没有通话**（与「读不到」是两件事，红线 23）
+ *
+ * 超时 14s：与 sendCommand 同口径（后端最坏 8s 排队 + 3s 写入 + 2s 应答）。
+ */
+function fetchCall(action, number, digit) {
+	return withTimeout(
+		rpcCall(
+			action || '',
+			number == null ? '' : String(number),
+			digit == null ? '' : String(digit)
+		),
+		14000, '通话操作超时'
+	).then(function (resp) {
+		if (!resp || resp.success === false) {
+			return {
+				success: false,
+				action: action,
+				sent: false,
+				calls: null,
+				error: (resp && resp.error) || 'rpcd 没有 mt5700.call 方法（后端未升级）'
+			};
+		}
+		return {
+			success: true,
+			action: resp.action || action,
+			sent: resp.sent !== false,
+			raw: resp.raw || '',
+			calls: Array.isArray(resp.calls) ? resp.calls : null,
+			error: resp.error || ''
+		};
+	}).catch(function (err) {
+		return {
+			success: false, action: action, sent: false, calls: null,
+			error: (err && err.message) || '通话操作失败'
+		};
+	});
+}
+
 var AtWs = {
 	client: atClient(),
 	netRate: fetchNetRate,
@@ -1813,6 +1877,7 @@ var AtWs = {
 	exitIp: fetchExitIp,
 	vowifi: fetchVowifi,
 	vowifiSet: fetchVowifiSet,
+	call: fetchCall,
 	es9pAvailable: es9pAvailable,
 	extractATData: extractATData,
 	extractATDataMultiline: extractATDataMultiline,

@@ -2626,6 +2626,166 @@ function smsLogNextId(list) {
 	return max + 1;
 }
 
+/* ---------- 语音通话（2026-10-16） ---------- */
+
+/*
+ * 通话号码白名单校验。
+ *
+ * ★ 为什么必须是白名单：这个字符串会被**原样拼进 AT 命令**（ATD<number>;）。
+ *   AT 的行语义认分号 —— 号码里若能带 ';'，一条请求就变成两条命令
+ *   （如 "10086;AT+CFUN=0" 直接关射频，而调用方看到的只是「拨号失败」）。
+ *   所以只放行：
+ *     · 数字 0-9
+ *     · * 与 #（USSD / 补充业务码，如 *21*6361# 查询呼叫转移）
+ *     · 开头的 +（国际前缀，**仅第 0 位**；中间出现 + 一律拒）
+ *   分号、等号、字母、引号、空白、控制字符全部拒绝。
+ *   长度上限 24：E.164 最长 15 位，USSD 码约 20 字符，24 够用且挡住异常输入。
+ */
+function callNumberOk(s) {
+	if (s == null || type(s) != 'string') {
+		return false;
+	}
+	let n = length(s);
+	if (n < 1 || n > 24) {
+		return false;
+	}
+	for (let i = 0; i < n; i++) {
+		let c = substr(s, i, 1);
+		if (i == 0 && c == '+') {
+			continue;
+		}
+		if (index('0123456789*#', c) < 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/* DTMF 码白名单：手册 4.7，AT+VTS 取值 (0-9,A-D,*,#)，只收单字符 */
+function callDtmfOk(s) {
+	if (s == null || type(s) != 'string' || length(s) != 1) {
+		return false;
+	}
+	return index('0123456789ABCD*#', s) >= 0;
+}
+
+/*
+ * 拆一行 CLCC 应答的字段，**引号字段整体取出**（号码回的是 "1008611" 或
+ * "+86100861" 带引号形态）。输入行不含 '+CLCC:' 前缀；返回字段数组（引号已剥）。
+ * 纯 substr/index 实现 —— 与本文件其余解析保持一致（crsmHex 同款）。
+ */
+function clccFields(line) {
+	let out = [];
+	let s = trim(line);
+	while (length(s) > 0) {
+		if (substr(s, 0, 1) == '"') {
+			let rest = substr(s, 1);
+			let q = index(rest, '"');
+			if (q < 0) {
+				break;
+			}
+			out[length(out)] = substr(rest, 0, q);
+			let tail = trim(substr(rest, q + 1));
+			if (substr(tail, 0, 1) != ',') {
+				break;
+			}
+			s = trim(substr(tail, 1));
+		} else {
+			let c = index(s, ',');
+			if (c < 0) {
+				out[length(out)] = s;
+				break;
+			}
+			out[length(out)] = trim(substr(s, 0, c));
+			s = trim(substr(s, c + 1));
+		}
+	}
+	return out;
+}
+
+/*
+ * 解析 AT+CLCC 应答，返回通话数组（可能多条：多方通话）。
+ * 单行格式（手册 5.11）：
+ *   +CLCC: <id>,<dir>,<state>,<mode>,<mpty>,"<number>",<type>
+ *     id     1~7 呼叫 ID
+ *     dir    0=本机发起(MO)  1=网络来电(MT)
+ *     state  0=active 1=held 2=dialing 3=alerting 4=incoming 5=waiting
+ *     mode   0=语音 1=data 2=fax …
+ *     mpty   多方通话标志
+ *     number 号码（带引号）
+ *     type   号码类型（145=国际 / 129=国内 / 161=未知…）
+ *
+ * ★ 无通话时模组只回 OK（无 +CLCC 行）→ 返回**空数组**。这与「读不到」
+ *   是两件事：读不到由调用方的 RPC 失败分支表达（红线 23），空数组才是
+ *   「确实没有通话」。
+ */
+function callParseClcc(data) {
+	let calls = [];
+	if (data == null) {
+		return calls;
+	}
+	let rest = data;
+	while (true) {
+		let k = index(rest, '+CLCC:');
+		if (k < 0) {
+			break;
+		}
+		rest = substr(rest, k + length('+CLCC:'));
+		let nl = index(rest, '\n');
+		let line = (nl < 0) ? rest : substr(rest, 0, nl);
+		let f = clccFields(line);
+		if (length(f) >= 6) {
+			calls[length(calls)] = {
+				id: int(f[0]),
+				dir: int(f[1]),
+				state: int(f[2]),
+				mode: int(f[3]),
+				mpty: int(f[4]),
+				number: f[5],
+				type: (length(f) >= 7 ? int(f[6]) : null)
+			};
+		}
+	}
+	return calls;
+}
+
+/*
+ * 拨号 / 接听 / 挂断 / DTMF 的统一出口。
+ *
+ * ★ 命令由本文件拼装，前端只传白名单内的参数 —— 前端没有任何把任意字符串
+ *   送进 AT 通道的路径（与 vowifi_set 同一约定）。
+ * ★ 回传 raw：ATD 的应答只有 OK，但 BUSY / NO CARRIER / +CME ERROR 会随后
+ *   出现（或以 ^CEND 收尾），原始应答留给前端展示，不在本层做语义猜测。
+ */
+function callDo(action, cmd) {
+	let r = rpcCall('at', { cmd: cmd });
+	if (r == null) {
+		return { success: false, action: action, sent: false, raw: '', error: 'AT 通道无响应' };
+	}
+	if (!r.success) {
+		return {
+			success: false, action: action, sent: false, raw: '',
+			error: (r.error || '命令执行失败')
+		};
+	}
+	return {
+		success: true, action: action, sent: true,
+		raw: (r.data == null ? '' : r.data), error: ''
+	};
+}
+
+/* 通话状态：AT+CLCC → 结构化通话数组 */
+function callStatus() {
+	let r = rpcCall('at', { cmd: 'AT+CLCC' });
+	if (r == null) {
+		return { success: false, action: 'status', error: 'AT 通道无响应' };
+	}
+	if (!r.success) {
+		return { success: false, action: 'status', error: (r.error || '查询失败') };
+	}
+	return { success: true, action: 'status', calls: callParseClcc(r.data) };
+}
+
 return {
 	mt5700: {
 		at: {
@@ -3026,6 +3186,68 @@ return {
 				}
 
 				return { success: false, error: '未知的 action：' + action };
+			}
+		},
+		/*
+		 * 语音通话：dial / answer / hangup / dtmf / status。
+		 *
+		 * ★ 为什么自成方法而不是让前端直接发 AT：号码是**用户输入**，而它会
+		 *   原样进 AT 命令行。放前端拼就等于给 AT 通道开一个注入面（分号可
+		 *   分隔多条命令）。收敛到这里之后，号码与 DTMF 码都只过白名单
+		 *   （callNumberOk / callDtmfOk），命令串在本文件拼装。
+		 * ★ 命令集（手册第 4 章 3GPP + 第 12 章鼎桥私有 URC）：
+		 *     dial   ATD<number>;   （分号＝语音呼叫，真机 2026-10-16 实测可用）
+		 *     answer ATA            （手册 4.2）
+		 *     hangup ATH            （单路挂断；多方时逐路断，手册 4.3）
+		 *     dtmf   AT+VTS=<d>     （通话中送 DTMF，手册 4.7）
+		 *     status AT+CLCC        （手册 5.11，返回全部在途呼叫）
+		 * ★ 状态机由前端轮询 status 驱动：CLCC 的 <state> 字段给全了
+		 *   dialing/alerting/active/incoming，不需要改 Rust、不需要开任何
+		 *   周期上报（^CURC 掩码未真机验证前不启用，避免开错位把
+		 *   ^DSFLOWRPT 之类的常驻上报放出来 —— 红线 22）。
+		 *   来电瞬间通知走既有 incoming_call 推送（urc.rs 的 RING/+CLIP）。
+		 */
+		call: {
+			args: { action: '', number: '', digit: '' },
+			call: function (req) {
+				let a = req.args;
+				let action = getStr(a, 'action');
+				if (action == null || action == '') {
+					return { success: false, error: '缺少参数 action' };
+				}
+				if (action == 'status') {
+					return callStatus();
+				}
+				if (action == 'answer') {
+					return callDo('answer', 'ATA');
+				}
+				if (action == 'hangup') {
+					return callDo('hangup', 'ATH');
+				}
+				if (action == 'dial') {
+					let num = getStr(a, 'number');
+					if (num == null || num == '') {
+						return { success: false, action: action, sent: false, error: '缺少参数 number' };
+					}
+					if (!callNumberOk(num)) {
+						return {
+							success: false, action: action, sent: false,
+							error: '号码含非法字符（只允许 0-9、*、# 与开头的 +）'
+						};
+					}
+					return callDo('dial', 'ATD' + num + ';');
+				}
+				if (action == 'dtmf') {
+					let d = getStr(a, 'digit');
+					if (!callDtmfOk(d)) {
+						return {
+							success: false, action: action, sent: false,
+							error: 'DTMF 码只允许单字符 0-9、A-D、*、#'
+						};
+					}
+					return callDo('dtmf', 'AT+VTS=' + d);
+				}
+				return { success: false, error: '未知 action（只支持 dial/answer/hangup/dtmf/status）' };
 			}
 		}
 	}
