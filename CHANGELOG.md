@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.18.3 (2026-10-16)
+
+### 修复：移动端看板娘头像被压成椭圆
+
+v1.18.2 修好了英雄卡片的行布局，但暴露/残留了头像变形问题。
+
+- **fix(ui)**: 移动端存在 `.mt-mascot-avatar { width: 75px !important; height: 65px !important }` 的**非等比**规则。桌面端另有一条 76×76 的规则在源码中更靠后、正常生效；但经 CSS 压缩重排后，75×65 这条在产物中反超，圆形头像被拉成**椭圆**（容器 75×65，内图 69×59）。
+- **fix(ui)**: 在移动端修复块内以高特异性强制头像**正方形** —— `.mt5700-hero-card .mt-mascot-avatar.mt-mascot-avatar { width:72px; height:72px; aspect-ratio:1/1 }`，并确保内图 `width/height:100% + object-fit:cover + border-radius:50%`。实机（360px）复测：头像容器 **75×65 → 72×72**（正方形，圆不变形）。
+- **note(ui)**: 样式版本戳 `MT5700_CSS_VERSION` 递增至 **`2.19.3`**。
+- **docs**: README 版本徽章与安装示例同步至 **v1.18.3**；新增 `docs/release-notes/v1.18.3.md` 发布说明。
+
 ## v1.18.2 (2026-10-16)
 
 ### 修复：移动端英雄区看板娘排版（压缩产物中样式被反超）
