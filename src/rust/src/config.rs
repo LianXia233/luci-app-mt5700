@@ -68,6 +68,11 @@ pub struct NotifyTypes {
 pub struct NotificationConfig {
     pub wechat_webhook: String,
     pub log_file: String,
+    /// 通知日志文件的大小上限（字节）。
+    ///
+    /// 默认见 [`crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES`]：写入前先按行边界裁剪，
+    /// 保证长期运行时日志文件不会无限增长（从 main 分支同步的修复）。
+    pub log_file_max_bytes: u64,
     pub types: NotifyTypes,
 }
 
@@ -148,6 +153,7 @@ pub fn default_config() -> Config {
         notification: NotificationConfig {
             wechat_webhook: String::new(),
             log_file: String::new(),
+            log_file_max_bytes: crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES,
             types: NotifyTypes {
                 sms: true,
                 call: true,
@@ -318,6 +324,14 @@ pub async fn load_config() -> Config {
 
     cfg.notification.wechat_webhook = values.str("wechat_webhook", "");
     cfg.notification.log_file = values.str("log_file", "");
+    // 通知日志文件上限：默认 256 KiB；填 0/负数/过小值都回落到默认，
+    // 避免手填一个「1」把日志直接废掉。
+    let max_bytes = values.int("log_file_max_bytes", crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES as i64);
+    cfg.notification.log_file_max_bytes = if max_bytes >= 4096 {
+        max_bytes as u64
+    } else {
+        crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES
+    };
     cfg.notification.types = NotifyTypes {
         sms: values.bool("notify_sms", true),
         call: values.bool("notify_call", true),

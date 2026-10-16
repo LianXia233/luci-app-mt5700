@@ -584,9 +584,9 @@ async fn syslog(lines: usize) -> Value {
                         chrono::NaiveDateTime::parse_from_str(&line[..19], "%Y-%m-%dT%H:%M:%S")
                             .ok()
                             .map(|t| t.and_utc().timestamp_millis())
-                            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis())
+                            .unwrap_or_else(|| crate::nettime::now_ms())
                     } else {
-                        chrono::Utc::now().timestamp_millis()
+                        crate::nettime::now_ms()
                     };
                     Some(json!({ "time": ts, "msg": msg }))
                 })

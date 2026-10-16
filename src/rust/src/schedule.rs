@@ -80,7 +80,7 @@ impl Scheduler {
         let s = self.state.read().await;
         SchedStatusDto {
             current_mode: s.current_mode.clone(),
-            next_switch: next_switch_at(&s.cfg, chrono::Local::now()),
+            next_switch: next_switch_at(&s.cfg, crate::nettime::now()),
             switch_count: s.switch_count,
             applied: s.applied,
         }
@@ -145,7 +145,7 @@ impl Scheduler {
     }
 
     async fn tick(&self) {
-        let now = chrono::Local::now();
+        let now = crate::nettime::now();
         let target = self.target_mode(now).await;
         let want = self.lock_for(&target).await;
 
@@ -319,7 +319,7 @@ impl Scheduler {
         let notifier = self.notifier.clone();
         let content = format!(
             "🔄 定时锁频切换\n时间: {}\n模式: {}\nLTE: {}\nNR: {}\n执行操作: {}\n切换次数: 第 {} 次\n结果: {}",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            crate::nettime::now().format("%Y-%m-%d %H:%M:%S"),
             mode,
             lock_summary("LTE", &cfg.lte),
             lock_summary("NR", &cfg.nr),
@@ -577,7 +577,7 @@ fn lock_summary(kind: &str, l: &BandLock) -> String {
     }
 }
 
-async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
+pub async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
     let mut ctx_c = ctx.clone();
     tokio::select! {
         _ = tokio::time::sleep(d) => true,

@@ -27,6 +27,7 @@
   "notify_memory_full": "1",
   "wechat_webhook": "",
   "log_file": "/tmp/at-notifications.log",
+  "log_file_max_bytes": "262144",
 
   "schedule_enabled": "0"
 }

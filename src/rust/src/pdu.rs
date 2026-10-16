@@ -104,7 +104,7 @@ fn bcd_digit(b: u8) -> i32 {
 
 fn decode_timestamp(ts: &[u8]) -> DateTime<Local> {
     if ts.len() < 7 {
-        return Local::now();
+        return crate::nettime::now();
     }
     let year = 2000 + bcd_digit(ts[0]);
     let month = bcd_digit(ts[1]);
@@ -114,12 +114,12 @@ fn decode_timestamp(ts: &[u8]) -> DateTime<Local> {
     let second = bcd_digit(ts[5]);
 
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
-        return Local::now();
+        return crate::nettime::now();
     }
     // 时区字节存在但沿用本地时区解释。
     match Local.with_ymd_and_hms(year, month as u32, day as u32, hour as u32, minute as u32, second as u32) {
         chrono::LocalResult::Single(dt) => dt,
-        _ => Local::now(),
+        _ => crate::nettime::now(),
     }
 }
 

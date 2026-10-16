@@ -54,6 +54,9 @@ jobs:
   build:
     name: 编译打包（${{ matrix.deb_arch }} · ${{ matrix.runner }}）
     runs-on: ${{ matrix.runner }}
+    # stale=true 表示「本次提交已被后续提交取代」，供 release job 判断是否跳过。
+    outputs:
+      stale: ${{ steps.stale.outputs.stale }}
     strategy:
       fail-fast: false
       matrix:
@@ -98,8 +101,30 @@ jobs:
           echo "DEB_ARCH=${{ matrix.deb_arch }}" >> "$GITHUB_ENV"
           echo "RUST_TARGET=${{ matrix.rust_target }}" >> "$GITHUB_ENV"
 
+      # ------------------------------------------------------------------
+      # 陈旧提交检查（与 main 分支同款修复）
+      #
+      # 批量改动若以「一次一个文件」的方式推送，每个文件都是独立 commit，
+      # push 事件逐 commit 触发 —— 中间态 commit（改了一半）编译必然失败，
+      # 还会白占每个架构矩阵跑一遍构建 + 打包。只有「仍是分支最新」的提交才构建。
+      # tag 推送与手动 dispatch 不受影响（本来就是终态）。
+      # ------------------------------------------------------------------
+      - name: 陈旧提交检查（已被后续提交取代则跳过构建）
+        id: stale
+        run: |
+          stale=false
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "branch" ]; then
+            head=$(git ls-remote https://github.com/${{ github.repository }} "refs/heads/${{ github.ref_name }}" 2>/dev/null | cut -f1)
+            if [ -n "$head" ] && [ "$head" != "${{ github.sha }}" ]; then
+              stale=true
+              echo "==> 本提交已被 ${head} 取代，跳过构建（避免为中间态 commit 白跑一遍）"
+            fi
+          fi
+          echo "stale=$stale" >> "$GITHUB_OUTPUT"
+
       # ---------- 3 ----------
       - name: 依赖安装（Rust 工具链 + 打包工具）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set -euo pipefail
           sudo apt-get update -qq
@@ -118,6 +143,7 @@ jobs:
 
       # ---------- 4 ----------
       - name: 构建执行（原生 cargo release）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set -euo pipefail
           echo "==> Runner 实测架构：$(uname -m)"
@@ -137,6 +163,7 @@ jobs:
 
       # ---------- 5 ----------
       - name: 产物校验（架构一致性与二进制闸门）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set -euo pipefail
           BIN="src/rust/target/release/at-webserver"
@@ -157,6 +184,7 @@ jobs:
 
       # ---------- 6 ----------
       - name: 打包执行（生成 .deb）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set -euo pipefail
           BIN="src/rust/target/release/at-webserver"
@@ -167,6 +195,7 @@ jobs:
 
       # ---------- 7 ----------
       - name: 产物校验（deb 元数据闸门）
+        if: steps.stale.outputs.stale != 'true'
         run: |
           set -euo pipefail
           DEB=$(ls -1 dist/at-webserver_*.deb | head -1)
@@ -199,6 +228,7 @@ jobs:
 
       # ---------- 8 ----------
       - name: 产物归档（上传 Actions 构件）
+        if: steps.stale.outputs.stale != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: at-webserver-deb-${{ matrix.deb_arch }}
@@ -206,6 +236,8 @@ jobs:
           if-no-files-found: error
 
   release:
+    # 构建被「陈旧提交」跳过时不能发布：没有产物，发布步骤必然失败
+    if: needs.build.outputs.stale != 'true'
     name: 统一发布（汇总全部架构产物并发布 Release）
     needs: build
     runs-on: ubuntu-latest

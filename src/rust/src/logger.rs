@@ -9,11 +9,8 @@
 //!     - syslog：历史记录（可能已滚动丢失），但包含 init.d 的 logger 输出。
 //!   LuCI 的日志页把两者合并展示，所以「拨号过程」与「接口拉起」都能看到。
 
-use chrono::TimeZone;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::OnceLock;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -40,73 +37,41 @@ pub fn level() -> Level {
 }
 
 fn timestamp() -> String {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    let secs = now.as_secs();
-    let millis = now.subsec_millis();
-    // 用 chrono 格式化本地时间
-    let dt = chrono::Local.timestamp_opt(secs as i64, 0).single().unwrap_or_else(|| chrono::Local::now());
-    format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), millis)
+    // 全仓库统一时间源（NTP 优先、设备时钟兜底）：日志时间必须和通知时间、
+    // 短信时间在同一条时间线上，否则排障时对不上「这条日志到底是几号」。
+    let ms = crate::nettime::now_ms();
+    // 时区交给系统的 tzdata（Debian 自带），这里只做展示格式化
+    let dt = crate::nettime::now();
+    format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), ms % 1000)
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::nettime::now_ms()
 }
 
 /* ----------------------------- 内存环形缓冲 ----------------------------- */
 
-/// 缓冲容量（条）。够覆盖一次完整启动 + 拨号 + 若干次重连与对账。
-const LOG_BUFFER_CAP: usize = 1200;
+/// 日志页的默认载体：**内存环形缓存**（条数 + 总字节双上限，见 [`crate::ringlog`]）。
+///
+/// 只限条数不够：一条很长的 URC / 短信正文照样能把内存撑大。
+/// 序列化结构（`seq` / `ts` / `level` / `msg`）保持不变，前端无需适配。
+pub type LogRecord = crate::ringlog::Entry;
 
-#[derive(Clone, serde::Serialize)]
-pub struct LogRecord {
-    /// 单调递增序号，前端据此做增量拉取（与 events 的 seq 语义一致）
-    pub seq: u64,
-    /// 毫秒时间戳（前端本地格式化，避免时区/时钟不同源）
-    pub ts: i64,
-    /// DBG / INF / WRN / ERR
-    pub level: String,
-    pub msg: String,
+static LOGS: OnceLock<crate::ringlog::RingLog> = OnceLock::new();
+
+fn ring() -> &'static crate::ringlog::RingLog {
+    LOGS.get_or_init(crate::ringlog::RingLog::with_defaults)
 }
 
-static LOG_SEQ: AtomicU64 = AtomicU64::new(0);
-static LOGS: Mutex<Option<VecDeque<LogRecord>>> = Mutex::new(None);
-
-fn buffer_push(rec: LogRecord) {
-    let mut guard = match LOGS.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if guard.is_none() {
-        *guard = Some(VecDeque::with_capacity(LOG_BUFFER_CAP));
-    }
-    if let Some(q) = guard.as_mut() {
-        q.push_back(rec);
-        while q.len() > LOG_BUFFER_CAP {
-            q.pop_front();
-        }
-    }
+/// 追加一条记录（**不受当前级别限制**，被级别挡掉的也要留在缓冲里）。
+fn buffer_push(ts: i64, level: &str, msg: &str) -> u64 {
+    ring().push(ts, level, msg)
 }
 
 /// 取日志快照：返回 (当前最新 seq, seq > since 的记录，最多 limit 条)。
 /// limit 超出时保留**最新**的部分（排障看最新的更有用）。
 pub fn snapshot(since: u64, limit: usize) -> (u64, Vec<LogRecord>) {
-    let guard = match LOGS.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let seq = LOG_SEQ.load(Ordering::Relaxed);
-    let mut out: Vec<LogRecord> = match guard.as_ref() {
-        Some(q) => q.iter().filter(|r| r.seq > since).cloned().collect(),
-        None => Vec::new(),
-    };
-    if limit > 0 && out.len() > limit {
-        let keep_from = out.len() - limit;
-        out.drain(..keep_from);
-    }
-    (seq, out)
+    ring().snapshot(since, limit)
 }
 
 /* -------------------------------- 输出 -------------------------------- */
@@ -115,13 +80,7 @@ pub fn emit(lv: Level, tag: &str, args: std::fmt::Arguments) {
     let msg = format!("{}", args);
 
     // 先入缓冲：**不受当前级别限制**，否则拨号/接口这类 info 日志在稳态下会完全消失
-    let seq = LOG_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
-    buffer_push(LogRecord {
-        seq,
-        ts: now_ms(),
-        level: tag.to_string(),
-        msg: msg.clone(),
-    });
+    buffer_push(now_ms(), tag, &msg);
 
     if lv < level() {
         return;
