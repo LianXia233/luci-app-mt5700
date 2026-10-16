@@ -11,9 +11,12 @@ mod atclient;
 mod config;
 mod logger;
 mod localtime;
+mod monthly;
+mod nettime;
 mod notify;
 mod pdu;
 mod qqbind;
+mod ringlog;
 mod rpcserver;
 mod schedconfig;
 mod schedule;
@@ -83,6 +86,12 @@ async fn run(verbose: bool) -> Result<(), String> {
         return Ok(());
     }
     log_config(&cfg);
+    log_info!(
+        "当前时间: {}（来源 {}，时区 {}）",
+        crate::nettime::now().format("%Y-%m-%d %H:%M:%S"),
+        crate::nettime::source_name(),
+        crate::localtime::describe()
+    );
 
     // 关闭信号：SIGINT / SIGTERM 触发优雅退出。
     let (ctx_tx, ctx_rx) = watch::channel(false);
@@ -100,7 +109,7 @@ async fn run(verbose: bool) -> Result<(), String> {
     let cache = crate::state::StateCache::new(client.clone(), ctx_rx.clone());
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
     // 使用量后台统计：常驻周期采样，与前端是否打开无关。
-    let usage = crate::usage::UsageTracker::new(cfg.usage_auto_reset_days);
+    let usage = crate::usage::UsageTracker::new(cfg.usage_reset_day);
     let mut rpc = RpcServer::new(
         client.clone(),
         cfg.websocket.auth_key.clone(),
@@ -192,6 +201,12 @@ async fn run(verbose: bool) -> Result<(), String> {
         let ctx = ctx_rx.clone();
         async move { cache.run(ctx).await }
     });
+    // 后台对时：NTP 优先（三个服务器依次尝试），失败回退设备时钟。
+    // 提前于使用量任务启动：按月清零靠日历判定，时钟不准会错月清零。
+    let nettime_task = tokio::spawn({
+        let ctx = ctx_rx.clone();
+        async move { crate::nettime::run(ctx).await }
+    });
     // 使用量后台统计：1 秒一采，前端关闭/刷新都不影响累计。
     let usage_task = tokio::spawn({
         let usage = usage.clone();
@@ -243,6 +258,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = timerpush_task.await;
         let _ = cache_task.await;
         let _ = usage_task.await;
+        let _ = nettime_task.await;
         let _ = task_cleanup_task.await;
         let _ = serve_handle.await;
     })
@@ -378,8 +394,9 @@ fn log_config(cfg: &Config) {
     }
     log_info!("定时锁频: {}", if cfg.schedule.enabled { "启用" } else { "禁用" });
     log_info!(
-        "使用量统计: 后台常驻采样（1s），自动清零 {} 天",
-        cfg.usage_auto_reset_days
+        "使用量统计: 后台常驻采样（1s），自动清零 {}（时间源 {}）",
+        crate::monthly::describe(cfg.usage_reset_day),
+        crate::nettime::source_name()
     );
 }
 
