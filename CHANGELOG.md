@@ -12,6 +12,21 @@
 >
 > **详细说明**：逐版本的完整设计说明与实测记录见 `docs/release-notes/`。
 
+## v2.1.0 (2026-10-17)
+
+### 同步 main 分支 v1.24.x：NTP 时间源 + 日志大小封顶 + 全局时间统一
+
+- **feat(nettime)**: 新增 `src/rust/src/nettime.rs`（与 main 分支同名模块，**时区实现按 Debian 调整**）—— 依次尝试 `ntp.tencent.com` → `ntp.aliyun.com` → `time.cloudflare.com`（NTPv4 / UDP 123），取到即记录「NTP − 设备时钟」偏移并本地计时；**成功后 20 分钟再同步**，失败按 `3 秒 ×10 → 1 分钟 ×10 → 20 分钟` 三级退避，任何一次成功都清零连续失败计数
+- **note(nettime) 时区仍读设备**：main 分支跑在 OpenWrt 上**没有 tzdata**，需要自己解析 POSIX TZ 串；**Debian 自带 tzdata**，本分支的 `Tz` 直接就是 `chrono::Local`（读 `/etc/localtime` + `TZ` 环境变量），NTP 只负责校正 UTC 时刻 —— 两者正交，不再重复实现一套时区解析
+- **fix(logs) 日志不再无限增长**：新增 `src/rust/src/ringlog.rs`（与 main 同款）。通知日志文件（默认 `/tmp/at-notifications.log`）原来是纯 append、**没有任何上限**；现在写入前按上限（默认 **256 KiB**，配置键 `log_file_max_bytes` 可调）先按行边界裁掉最旧的一半再追加，**绝不切出半行**
+- **refactor(logs) 内存环形缓存双上限**：`logger.rs` 的缓冲改用 `RingLog` —— **条数 1200 + 总字节 512 KiB** 同时生效（只限条数不够：一条超长 URC/短信正文照样能撑大内存）；序列化结构 `seq/ts/level/msg` 不变，WebUI 无需适配
+- **refactor(time) 全局时间统一走 nettime**：日志时间戳（`logger`）、任务创建时间（`async_runtime`）、短信 PDU 时间兜底（`pdu`）、通知与 URC 时间（`notify` / `urc`）、定时锁频（`schedule`）、HTTP 日志兜底时间戳（`httpserver`）全部改为 `nettime`，消除「日志一个时间、通知另一个时间」的两条时间线
+- **fix(atclient) 间隔测量改用单调时钟**：「长命令结束于何时」原本用 `SystemTime`（墙上时间）算差值，NTP 校正会让差值失真；改为基于 `Instant` 的进程单调毫秒 `mono_ms()`
+- **ci(debian) 陈旧提交跳过**：与 main 分支 v1.24.3 同款修复 —— build job 先用 `git ls-remote` 比对分支 HEAD，非最新提交则跳过依赖安装/构建/校验/打包/归档，release job 同步跳过。并发策略仍按 `github.sha` 分组且 `cancel-in-progress: false`（一次发布会同时产生分支 push 与 tag push 两个同 sha 的 run，必须串行避免 Release 竞态）
+- **note(config)**: `debian/config.json` 新增 `log_file_max_bytes`（默认 `262144`，小于 4096 的取值回落默认）
+- **test**: `cargo test` **53 passed / 0 failed，零警告**（新增 nettime 10 条 + ringlog 8 条；另含一条**源码级回归用例**：除 `nettime.rs` 外任何源文件出现 `chrono::Local::` / `Utc::now()` / `SystemTime::now()` 即失败）
+- **docs**: 新增 `docs/release-notes/v2.1.0.md`
+
 ## [未发布]
 
 ### 变更
