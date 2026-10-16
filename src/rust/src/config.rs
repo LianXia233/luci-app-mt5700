@@ -274,6 +274,11 @@ pub struct NotificationConfig {
     pub enabled: bool,
     pub wechat_webhook: String,
     pub log_file: String,
+    /// 通知日志文件的大小上限（字节）。
+    ///
+    /// 默认见 [`crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES`]：写入前先按行边界裁剪，
+    /// 保证 `/tmp`（tmpfs，占内存）不会被长期运行的通知日志吃满。
+    pub log_file_max_bytes: u64,
     pub types: NotifyTypes,
     /// QQ 机器人（官方 API v2）推送配置；AppSecret 建议走环境变量 QQ_BOT_APP_SECRET。
     pub qq: QqNotifyConfig,
@@ -335,11 +340,12 @@ pub struct Config {
     pub notification: NotificationConfig,
     pub websocket: WebSocketConfig,
     pub schedule: ScheduleConfig,
-    /// 使用量统计的自动清零天数（默认 30）。
+    /// 使用量统计的自动清零日：**每月几号**（默认 1 号，范围 1~31）。
     ///
     /// 放在 UCI 而不是使用量状态文件里：状态文件在「持久化关」时重启即失，
     /// 设置跟着一起丢会让用户每次重启后都要重填。
-    pub usage_auto_reset_days: u32,
+    /// 日历语义（大小月 / 闰年 / 跨年）见 [`crate::monthly`]。
+    pub usage_reset_day: u32,
 }
 
 pub fn default_config() -> Config {
@@ -366,6 +372,7 @@ pub fn default_config() -> Config {
             enabled: true,
             wechat_webhook: String::new(),
             log_file: String::new(),
+            log_file_max_bytes: crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES,
             types: NotifyTypes {
                 sms: true,
                 call: true,
@@ -406,7 +413,7 @@ pub fn default_config() -> Config {
             day_lte: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
             day_nr: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
         },
-        usage_auto_reset_days: crate::usage::DEFAULT_USAGE_AUTO_RESET_DAYS,
+        usage_reset_day: crate::monthly::DEFAULT_RESET_DAY,
     }
 }
 
@@ -599,6 +606,14 @@ pub async fn load_config() -> Config {
 
     cfg.notification.wechat_webhook = values.str("wechat_webhook", "");
     cfg.notification.log_file = values.str("log_file", "");
+    // 通知日志文件上限：默认 256 KiB；填 0/负数/过小值都回落到默认，
+    // 避免用户手填一个「1」把日志直接废掉。
+    let max_bytes = values.int("log_file_max_bytes", crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES as i64);
+    cfg.notification.log_file_max_bytes = if max_bytes >= 4096 {
+        max_bytes as u64
+    } else {
+        crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES
+    };
     cfg.notification.types = NotifyTypes {
         sms: values.bool("notify_sms", true),
         call: values.bool("notify_call", true),
@@ -690,14 +705,17 @@ pub async fn load_config() -> Config {
     s.day_lte = values.band_lock("schedule_day_lte");
     s.day_nr = values.band_lock("schedule_day_nr");
 
-    // 使用量自动清零天数：默认 30 天，夹在 [1, 3650]
-    cfg.usage_auto_reset_days = (values
-        .int("usage_auto_reset_days", crate::usage::DEFAULT_USAGE_AUTO_RESET_DAYS as i64)
-        .clamp(
-            crate::usage::MIN_USAGE_AUTO_RESET_DAYS as i64,
-            crate::usage::MAX_USAGE_AUTO_RESET_DAYS as i64,
-        ) as u32)
-        .max(crate::usage::MIN_USAGE_AUTO_RESET_DAYS);
+    // 使用量自动清零日：每月几号，默认 1 号。
+    // 只有 1~31 之间的值才被采纳，其余（0 / 负数 / 大于 31 / 非数字）
+    // 一律回落默认 —— 填了「不存在的日期」说明是误填，按默认走比夹到月末更可预期。
+    let raw_day = values.int("usage_reset_day", crate::monthly::DEFAULT_RESET_DAY as i64);
+    cfg.usage_reset_day = if (crate::monthly::MIN_RESET_DAY as i64..=crate::monthly::MAX_RESET_DAY as i64)
+        .contains(&raw_day)
+    {
+        raw_day as u32
+    } else {
+        crate::monthly::DEFAULT_RESET_DAY
+    };
 
     cfg
 }
@@ -881,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn usage_auto_reset_days_clamps() {
+    fn usage_reset_day_clamps() {
         let mk = |pairs: &[(&str, &str)]| {
             let mut m = HashMap::new();
             for (k, v) in pairs {
@@ -890,23 +908,24 @@ mod tests {
             UciReader(m)
         };
         let read = |v: &UciReader| -> u32 {
-            (v.int("usage_auto_reset_days", crate::usage::DEFAULT_USAGE_AUTO_RESET_DAYS as i64)
-                .clamp(
-                    crate::usage::MIN_USAGE_AUTO_RESET_DAYS as i64,
-                    crate::usage::MAX_USAGE_AUTO_RESET_DAYS as i64,
-                ) as u32)
-                .max(crate::usage::MIN_USAGE_AUTO_RESET_DAYS)
+            let raw = v.int("usage_reset_day", crate::monthly::DEFAULT_RESET_DAY as i64);
+            if (crate::monthly::MIN_RESET_DAY as i64..=crate::monthly::MAX_RESET_DAY as i64).contains(&raw) {
+                raw as u32
+            } else {
+                crate::monthly::DEFAULT_RESET_DAY
+            }
         };
-        // 没配：默认 30 天
-        assert_eq!(read(&mk(&[])), 30);
+        // 没配：默认每月 1 号
+        assert_eq!(read(&mk(&[])), 1);
         // 正常值透传
-        assert_eq!(read(&mk(&[("usage_auto_reset_days", "7")])), 7);
+        assert_eq!(read(&mk(&[("usage_reset_day", "15")])), 15);
         // 0 与负值夹到下限 1（不能退化成「永不自动清零」）
-        assert_eq!(read(&mk(&[("usage_auto_reset_days", "0")])), 1);
-        assert_eq!(read(&mk(&[("usage_auto_reset_days", "-5")])), 1);
-        // 超大值夹到上限
-        assert_eq!(read(&mk(&[("usage_auto_reset_days", "99999")])), 3650);
+        assert_eq!(read(&mk(&[("usage_reset_day", "0")])), 1);
+        assert_eq!(read(&mk(&[("usage_reset_day", "-5")])), 1);
+        // 超过 31 的日子（不存在的一天）与 0/负数一样，回落到默认 1 号
+        assert_eq!(read(&mk(&[("usage_reset_day", "32")])), 1);
+        assert_eq!(read(&mk(&[("usage_reset_day", "99999")])), 1);
         // 非数字回落默认
-        assert_eq!(read(&mk(&[("usage_auto_reset_days", "abc")])), 30);
+        assert_eq!(read(&mk(&[("usage_reset_day", "abc")])), 1);
     }
 }
