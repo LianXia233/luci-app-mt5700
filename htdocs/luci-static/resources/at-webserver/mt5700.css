@@ -535,7 +535,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 10px;
 }
 .mt-chart-legends {
   display: flex;
@@ -554,6 +556,114 @@
   width: 14px;
   height: 3px;
   border-radius: 2px;
+}
+/* 图例开关（点选显隐曲线） */
+.mt-legend-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+.mt-legend-btn.active {
+  opacity: 1;
+  background: var(--mt5700-card-bg-hover);
+  border-color: var(--mt5700-border);
+}
+.mt-legend-btn:hover {
+  opacity: 0.8;
+}
+/* 信号趋势：控件区（图例开关 + 范围选择） */
+.mt-chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.mt-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mt-chart-range {
+  display: flex;
+  border: 1px solid var(--mt5700-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.mt-range-btn {
+  background: transparent;
+  border: 0;
+  padding: 3px 9px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mt5700-text-muted);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.mt-range-btn.active {
+  background: var(--mt5700-accent);
+  color: #ffffff;
+}
+/* 信号趋势：读数条 */
+.mt-chart-readout {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  padding: 0 2px;
+}
+.mt-readout-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  transition: opacity 0.18s ease;
+}
+.mt-readout-cell.off {
+  opacity: 0.3;
+}
+.mt-readout-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  align-self: center;
+}
+.mt-readout-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--mt5700-text-muted);
+}
+.mt-readout-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--mt5700-text);
+}
+.mt-readout-val em {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--mt5700-text-muted);
+  margin-left: 2px;
+}
+.mt-readout-count {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--mt5700-text-muted);
+  white-space: nowrap;
+}
+.mt-chart-empty {
+  padding: 46px 12px;
+  text-align: center;
+  color: var(--mt5700-text-muted);
+  font-size: 12px;
 }
 .mt-chart-svg-box {
   width: 100%;
@@ -5147,5 +5257,40 @@ select option {
     height: 100% !important;
     border-radius: 50% !important;
     object-fit: cover !important;
+  }
+}
+
+/* ==========================================================================
+   信号趋势图 · 移动端专项（控件换行、读数条紧凑、字体适配）
+   ========================================================================== */
+@media (max-width: 768px) {
+  .mt-chart-head {
+    gap: 8px 10px !important;
+  }
+
+  .mt-chart-controls {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+
+  .mt-legend-btn {
+    padding: 3px 9px !important;
+  }
+
+  .mt-chart-readout {
+    gap: 10px 12px !important;
+  }
+
+  .mt-readout-val {
+    font-size: 14px !important;
+  }
+
+  .mt-readout-count {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .mt-chart-empty {
+    padding: 40px 10px !important;
   }
 }
