@@ -1877,12 +1877,48 @@ MUTATIONS = [
         "拨打只在 idle 可点（通话中不该还能再拨一个）",
     ),
     (
-        # 接听判定放宽到「任何非空闲都可接」：空闲时也能点接听。
-        "视图：接听判定放宽（空闲也能点接听）",
+        # 接听判定丢掉 blocked：通道忙/故障时接听键仍可点，对着一个
+        # 注定失败的通道反复点（厂商 usable 里 !s.status?.error 那一半）。
+        "视图：接听判定丢掉 blocked（通道故障时仍可点接听）",
         "voicejs",
         "answerBtn.disabled = blocked",
         "answerBtn.disabled = false && blocked",
-        "接听只在 ringing/waiting 可点（厂商口径：这两个状态之外一律灰化）",
+        "接听只在来电（incoming）可点 —— 判据用 phase 不用 stage 令牌",
+    ),
+    (
+        # 通话按钮退回 display 隐藏：用户原地反馈「没看到接停电话」——
+        # 来电只响几秒，藏起来的接听键根本指望不上。
+        "视图：通话按钮退回 display 隐藏（用户看不到接听/挂断）",
+        "voicejs",
+        "\t\thangupBtn.textContent = (st.phase === 'incoming') ? '拒接' : '挂断';\n\n\t\tapplyGates();",
+        "\t\tanswerBtn.style.display = (st.phase === 'incoming') ? '' : 'none';\n\t\thangupBtn.textContent = (st.phase === 'incoming') ? '拒接' : '挂断';\n\n\t\tapplyGates();",
+        "通话按钮常驻可见，不用 display 隐藏（用户原话：没看到接停电话）",
+    ),
+    (
+        # 铃声开关不纳入禁用判据：通道忙/故障时还能切铃声，判据漏一个按钮。
+        "视图：铃声开关不纳入 applyGates（禁用判据漏一个按钮）",
+        "voicejs",
+        "\t\tringBtn.disabled = blocked;\n",
+        "",
+        "铃声开关也纳入 applyGates（通道忙时不该切铃声）",
+    ),
+    (
+        # 接听判据从 phase 退回 stage 令牌：老后端没有 stage（st.stage=null）时，
+        # 来电振铃中接听键却是灰的 —— 令牌细但脆，现算的 phase 才稳。
+        "视图：接听判据退回 stage 令牌（老后端上来电接听键是灰的）",
+        "voicejs",
+        "answerBtn.disabled = blocked || (st.phase !== 'incoming');",
+        "answerBtn.disabled = blocked\n\t\t\t|| ((st.stage !== 'ringing') && (st.stage !== 'waiting'));",
+        "接听只在来电（incoming）可点 —— 判据用 phase 不用 stage 令牌",
+    ),
+    (
+        # 建页后不灰化：connectThen 握手完成前按钮是默认可用态，
+        # 空闲时「接听/挂断」亮着是个假象。
+        "视图：建页后不立即 applyGates（握手前按钮是可用态假象）",
+        "voicejs",
+        "\tapplyGates();\n\n\t/* 浏览器要求用户手势后才能出声",
+        "\n\t/* 浏览器要求用户手势后才能出声",
+        "建页后立即 applyGates 一次（connectThen 握手前按钮不能是可用态）",
     ),
     (
         # 读失败后不复位通道标志 ⇒ 一次抖动就让按钮永久灰化。

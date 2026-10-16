@@ -17,15 +17,18 @@
  *   · 通话记录（设备侧持久化 /etc/mt5700/call-log.json，跨浏览器可见）
  *   · 来电铃声（Web Audio 生成，手机浏览器可响）
  *
- * ★★★ 声音为什么不在本机（实测取证，2026-10-16）：
- *   MT5700 的语音音频出口是**模组自己的 PCM 引脚**，主机侧（USB）只有
- *   CDC-NCM 数据口 + 4 个 AT 串口 —— 无 audio class 接口（bInterfaceClass
- *   01 计数 = 0）。设备侧同样没有音频硬件：无 /dev/snd、无 /proc/asound、
- *   dmesg 无任何音频驱动、设备树无 sound/i2s 节点。AT+CLVL 读到 7
- *   （普通模式 0–5，**车载 PCM 模式 1–12**）⇒ 模组正处于车载 PCM 语音模式。
- *   结论：语音流到不了浏览器，本页**不可能**做软电话。要出声必须外接音频
- *   硬件（模组音频引脚接 codec），或换支持 USB Audio Class 的模组。
- *   本页做的是「通话管理台」：信令侧的功能全都有，音频侧没有。
+ * ★★★ 声音的断点在哪（2026-10-16 实测 + 专项研究，方案见 REFERENCE §声音实现方案）：
+ *   · 模组侧：`AT+CLVL=?` 真机回 **(1-12)** —— 手册 6.10 写明 1–12 是
+ *     「车载 PCM 语音特性开关」打开时的档位（普通模式是 0–5）⇒ **模组的
+ *     PCM 语音通路是开的**。但手册 90 条私有命令里没有任何配置 PCM/I2S
+ *     或 USB 组成的 AT 命令 ⇒ 音频只能走硬件引脚，软件改不了。
+ *   · 主机侧：模组 USB 面只有 CDC-NCM 数据口 + 4 个 AT 串口，无 audio
+ *     class 接口；MT7987 的 AFE（audio-controller@11210000）在主线内核
+ *     有驱动（CONFIG_SND_SOC_MT7986，兼容 mt7987），但本板设备树里
+ *     status=disabled、板面无 codec，厂商与上游 DTS 都没引用 i2s/pcm 引脚。
+ *   ⇒ 信令全通、音频断在主板。本页做「通话管理台」；想听到声音有两条路：
+ *     路由器跑 SIP（Asterisk 已装，零硬件）或把模组 PCM 飞线到 SoC AFE
+ *     （需先万用表验证 M.2 音频脚是否引出）。
  *
  * ★ 状态来源为什么是轮询而不是 URC：
  *   呼叫生命周期的私有 URC（^ORIG / ^CONF / ^CONN / ^CEND）受 AT^CURC 控制，
@@ -61,10 +64,12 @@ return L.view.extend({
 			'class': 'mt5700-hint',
 			style: 'padding:10px 12px;border-left:3px solid #c98a00;background:#fdf6e3;'
 				+ 'color:#6b4e00;border-radius:4px;margin-bottom:12px;line-height:1.7'
-		}, '本机无音频硬件 —— MT5700 的语音音频走模组 PCM 引脚，这台 CPE 既没有 codec'
-			+ '也没有音频设备（模组 USB 上也没有音频接口）。所以：拨号、接听、拒接、挂断、'
-			+ '状态、DTMF、通话记录都能用，来电时页面还会响铃；但通话内容听不到 ——'
-			+ '那需要外接音频硬件。'));
+		}, '这一页管「信令」不管「声音」：拨号、接听、拒接、挂断、状态、DTMF、'
+			+ '通话记录都能用，来电时页面还会响铃；但通话内容听不到。'
+			+ '实测（2026-10-16）：模组侧 PCM 语音模式已开启（AT+CLVL 档位 1–12），'
+			+ '断点在这台 CPE 的主板 —— 模组的音频引脚没有接到 SoC，板上也没有 codec。'
+			+ '想听到声音：可在路由器上跑 SIP 软电话（Asterisk 已安装），'
+			+ '或把模组 PCM 飞线到 SoC AFE（需先验证接线）。'));
 
 		/* ---------- 常量 ---------- */
 
@@ -182,13 +187,32 @@ return L.view.extend({
 
 		var statusActions = E('div', { 'class': 'mt5700-panel-actions' });
 		statusMain.appendChild(statusActions);
+		/*
+		 * 四个通话动作**常驻可见**，用灰化表达"此刻不可用"（厂商 modemwebui
+		 * call.js 的形态：答案/挂断/静音一直在位，只改 disabled）。
+		 *
+		 * ★ 为什么从 display 隐藏改成常驻：上一版把"接听/挂断/静音"按状态
+		 *   隐藏，用户在原地说"没看到接停电话"—— 找不到的按钮等于没有，
+		 *   尤其来电就响那么几秒，藏起来的接听键根本指望不上。
+		 * ★ 定宽：文案会在 挂断↔拒接、静音↔取消静音 之间切换，不定宽
+		 *   整行按钮会跟着抖（红线 41：固定尺寸，不按数据量动态撑开）。
+		 */
 		var answerBtn = Mt5700.successButton('接听', function () { doAnswer(); });
 		var hangupBtn = Mt5700.dangerButton('挂断', function () { doHangup(); });
-		var muteBtn = Mt5700.ghostButton('静音', function () { toggleMute(); });
+		var muteBtn = Mt5700.button('静音', function () { toggleMute(); }, 'secondary');
 		var ringBtn = Mt5700.ghostButton('铃声：开', function () {
 			st.ringEnabled = !st.ringEnabled;
 			if (!st.ringEnabled) { ringStop(); }
 			ringBtn.textContent = '铃声：' + (st.ringEnabled ? '开' : '关');
+		});
+		[answerBtn, hangupBtn].forEach(function (b) {
+			b.classList.add('mt5700-btn-lg');
+			b.style.minWidth = '112px';
+			b.style.fontSize = '15px';
+			b.style.fontWeight = '600';
+		});
+		[muteBtn, ringBtn].forEach(function (b) {
+			b.style.minWidth = '92px';
 		});
 		statusActions.appendChild(answerBtn);
 		statusActions.appendChild(hangupBtn);
@@ -226,7 +250,8 @@ return L.view.extend({
 		body.appendChild(dialerCard);
 
 		var numberInput = Mt5700.input('text', '输入号码（数字、*、#，国际号码以 + 开头）');
-		numberInput.style.cssText = 'font-size:20px;letter-spacing:1px;text-align:center';
+		numberInput.style.cssText = 'font-size:22px;letter-spacing:1px;text-align:center;'
+			+ 'padding:12px;font-weight:600';
 		numberInput.setAttribute('inputmode', 'tel');
 		numberInput.addEventListener('input', function () {
 			/* 即时过滤：把白名单外字符直接挡在外面，错误在输入时就消除 */
@@ -242,7 +267,7 @@ return L.view.extend({
 		});
 		dialerBody.appendChild(Mt5700.formGroup('号码', numberInput));
 
-		var keypad = E('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:320px' });
+		var keypad = E('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:336px' });
 		KEYPAD.forEach(function (row) {
 			row.forEach(function (key) {
 				var b = Mt5700.button(key, function () {
@@ -255,7 +280,7 @@ return L.view.extend({
 					 */
 					if (st.phase === 'active') { sendDtmf(key); }
 				}, 'secondary');
-				b.style.cssText = 'font-size:18px;padding:12px 0';
+				b.style.cssText = 'font-size:20px;padding:14px 0;font-weight:600';
 				keypad.appendChild(b);
 			});
 		});
@@ -264,6 +289,10 @@ return L.view.extend({
 		var dialerActions = E('div', { 'class': 'mt5700-panel-actions' });
 		dialerBody.appendChild(dialerActions);
 		var dialBtn = Mt5700.primaryButton('拨打', function () { doDial(); });
+		/* 与状态卡的通话键同规格：这一页的主角是「打」和「接」 */
+		dialBtn.classList.add('mt5700-btn-lg');
+		dialBtn.style.minWidth = '112px';
+		dialBtn.style.fontWeight = '600';
 		var backspaceBtn = Mt5700.ghostButton('退格', function () {
 			numberInput.value = numberInput.value.slice(0, -1);
 			st.number = numberInput.value;
@@ -278,7 +307,7 @@ return L.view.extend({
 
 		dialerBody.appendChild(E('p', { 'class': 'mt5700-hint' }, ''
 			+ '通话会产生运营商通话费（10086 等客服号通常免费）。'
-			+ '本页不通话音频 —— 音频在模组的 PCM 接口上，本机没有音频硬件。'));
+			+ '通话内容听不到 —— 音频断点见页面顶部说明。'));
 
 		/* ---------- 通话记录 ---------- */
 
@@ -330,15 +359,25 @@ return L.view.extend({
 			pfHost.appendChild(Mt5700.table(['', '检查项', '命令', '读数', '说明'], rows,
 				{ striped: true }));
 
-			var verdict;
+			/*
+			 * 结论做成色块：绿灯「可以拨」/红灯「卡在哪一环」。
+			 * 自检的意义就在于一眼看到结论，而不是让人读四行表格自己归纳。
+			 */
+			var verdict, verdictStyle;
 			if (st.pf.ready) {
 				verdict = '可以拨号。' + (st.pf.volte
 					? 'IMS 已注册，语音走 VoLTE/VoNR。'
-					: 'CS 域已注册，语音走电路域（2G/3G）。');
+					: 'IMS 未注册，语音走电路域（CS）。');
+				verdictStyle = 'padding:8px 12px;border-left:3px solid #059669;'
+					+ 'background:#ecfdf5;color:#065f46;border-radius:4px;'
+					+ 'margin-top:10px;line-height:1.7';
 			} else {
 				verdict = '当前不能拨号：' + (st.pf.blocked || '前置条件未满足');
+				verdictStyle = 'padding:8px 12px;border-left:3px solid #dc2626;'
+					+ 'background:#fef2f2;color:#991b1b;border-radius:4px;'
+					+ 'margin-top:10px;line-height:1.7';
 			}
-			pfHost.appendChild(E('p', { 'class': 'mt5700-hint' }, verdict));
+			pfHost.appendChild(E('p', { 'class': 'mt5700-hint', style: verdictStyle }, verdict));
 		}
 
 		function runPreflight() {
@@ -768,13 +807,17 @@ return L.view.extend({
 			}).catch(function () { });
 		}
 
-		function renderInfo() {
-			if (st.mute == null) {
-				muteBadge.textContent = '静音 —';
-				muteBadge.className = 'mt5700-badge mt5700-badge-neutral';
-				muteBtn.textContent = '静音';
-				muteBtn.disabled = false;
-			} else if (st.mute === 1) {
+	function renderInfo() {
+		if (st.mute == null) {
+			muteBadge.textContent = '静音 —';
+			muteBadge.className = 'mt5700-badge mt5700-badge-neutral';
+			muteBtn.textContent = '静音';
+			/*
+			 * ★ 不在这里写 muteBtn.disabled：applyGates 是 disabled 的
+			 *   唯一出处。此前这里有一句 disabled = false，等于在通话外
+			 *   又把静音键点亮，和 applyGates 的判定打架（两套判据必然漂移）。
+			 */
+		} else if (st.mute === 1) {
 				muteBadge.textContent = '已静音';
 				muteBadge.className = 'mt5700-badge mt5700-badge-warning';
 				muteBtn.textContent = '取消静音';
@@ -783,9 +826,11 @@ return L.view.extend({
 				muteBadge.className = 'mt5700-badge mt5700-badge-neutral';
 				muteBtn.textContent = '静音';
 			}
-			metricVolume.querySelector('.mt5700-metric-value').textContent =
-				(st.volume == null) ? '—' : String(st.volume);
-		}
+		metricVolume.querySelector('.mt5700-metric-value').textContent =
+			(st.volume == null) ? '—' : String(st.volume);
+		/* 静音键文案变了（静音↔取消静音），可点性重新算一遍 */
+		applyGates();
+	}
 
 		function renderStatus() {
 			var badgeText = '空闲', badgeVariant = 'neutral';
@@ -821,41 +866,39 @@ return L.view.extend({
 			metricDuration.querySelector('.mt5700-metric-value').textContent =
 				(st.phase === 'active' && st.activeAt) ? fmtDuration(Date.now() - st.activeAt) : '—';
 
-			/*
-			 * 按钮可见性跟着状态走：空闲只能拨；来电可接/拒接；
-			 * 在途（拨出/通话）只留挂断。静音只在通话中有意义。
-			 */
-			answerBtn.style.display = (st.phase === 'incoming') ? '' : 'none';
-			hangupBtn.style.display = (st.phase === 'idle') ? 'none' : '';
-			hangupBtn.textContent = (st.phase === 'incoming') ? '拒接' : '挂断';
-			muteBtn.style.display = (st.phase === 'active') ? '' : 'none';
-
-			applyGates();
-		}
-
 		/*
-		 * 移植厂商 modemwebui call.js 的 usable 纪律：按钮「能不能点」由
-		 * 两个条件与运算得出，而不是只看 busy。
-		 *   ① 通道路是否正常 —— 通道故障时按钮灰掉，避免用户对着一个
-		 *      注定失败的通道反复点（厂商：!s.status?.error）。
-		 *   ② 动作与状态匹配 —— 空闲时"接听"不该可点、通话中"拨打"
-		 *      更不该可点（厂商逐个按钮算 disabled）。
-		 * busy / pfBusy 也并进来 —— AT 通道独占，它俩在跑时谁都不许发。
-		 *
-		 * ★ 为什么保留 display 而不用纯 disabled：厂商把答案/挂断/静音
-		 *   全部常驻，靠灰化表达"此刻不可用"，视觉噪音大（页面有 5 个动作，
-		 *   空闲时有 3 个是灰的）。本页维持"只显示此刻有意义的动作"的既有
-		 *   风格，但**在显示出来的按钮上补上 disabled 判定** —— 可见性
-		 *   交给 display，可点性交给 disabled，两者职责不混。
+		 * 按钮常驻可见，这里只改文案：挂断键在来电时改叫「拒接」——
+		 * 后端是同一个 ATH，两种语境两个名字（记录里也按此区分结果）。
+		 * 能不能点一律由 applyGates 判，此处不碰 disabled/style。
 		 */
-		function applyGates() {
-			var blocked = st.busy || st.pfBusy || st.channelError;
-			dialBtn.disabled = blocked || (st.phase !== 'idle');
-			answerBtn.disabled = blocked
-				|| ((st.stage !== 'ringing') && (st.stage !== 'waiting'));
-			hangupBtn.disabled = blocked || (st.phase === 'idle');
-			muteBtn.disabled = blocked || (st.phase !== 'active');
+		hangupBtn.textContent = (st.phase === 'incoming') ? '拒接' : '挂断';
+
+		applyGates();
 		}
+
+	/*
+	 * 移植厂商 modemwebui call.js 的 usable 纪律：按钮「能不能点」由
+	 * 三个条件与运算得出，而不是只看 busy。
+	 *   ① 通道路是否正常 —— 通道故障时全部灰掉，避免用户对着一个
+	 *      注定失败的通道反复点（厂商：!s.status?.error）。
+	 *   ② 动作与当前通话态匹配 —— 空闲时"接听/挂断"不可点、通话中
+	 *      "拨打"不可点、只有接通后"静音"才有意义。
+	 *   ③ busy / pfBusy —— AT 通道独占，它俩在跑时谁都不许发。
+	 *
+	 * ★ 判据用 phase 而不是后端 stage 令牌：phase 由前端从 CLCC 原始
+	 *   state 现算，老后端没有 stage 也能正确灰化；stage 是给徽标做
+	 *   细粒度文案用的（令牌更细，现算更稳，各司其职）。
+	 * ★ 这里是**唯一**写 disabled 的地方：setBusy / renderStatus /
+	 *   refreshStatus / renderInfo 全部转交过来，避免两套判据漂移。
+	 */
+	function applyGates() {
+		var blocked = st.busy || st.pfBusy || st.channelError;
+		dialBtn.disabled = blocked || (st.phase !== 'idle');
+		answerBtn.disabled = blocked || (st.phase !== 'incoming');
+		hangupBtn.disabled = blocked || (st.phase === 'idle');
+		muteBtn.disabled = blocked || (st.phase !== 'active');
+		ringBtn.disabled = blocked;
+	}
 
 		/* ---------- 来电推送 ---------- */
 
@@ -873,9 +916,15 @@ return L.view.extend({
 			refreshStatus();
 		}
 
-		/* ---------- 初始化 ---------- */
+	/* ---------- 初始化 ---------- */
 
-		/* 浏览器要求用户手势后才能出声：首次点击时预热 AudioContext */
+	/*
+	 * 建页后先按初始 phase（idle）灰化一遍：connectThen 要等后端握手，
+	 * 那之前按钮是默认可用态 —— 空闲时"接听/挂断"亮着是个假象。
+	 */
+	applyGates();
+
+	/* 浏览器要求用户手势后才能出声：首次点击时预热 AudioContext */
 		function onGesture() {
 			primeRing();
 			document.removeEventListener('click', onGesture);

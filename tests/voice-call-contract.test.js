@@ -238,7 +238,8 @@ ok('来电时挂断按钮改文案为「拒接」', viewSrc.includes("'拒接'")
 ok('来电铃声用 Web Audio 生成（本页唯一能让手机出声的部分）',
 	viewSrc.includes('webkitAudioContext') && viewSrc.includes('createOscillator'));
 ok('铃声在离开页面时停掉', /_onDispose\(function[\s\S]*?ringStop\(\)/.test(viewSrc));
-ok('页面明示「本机无音频硬件」', viewSrc.includes('本机无音频硬件'));
+ok('页面明示「通话内容听不到」及断点（不让用户把没声音当成故障）',
+	viewSrc.includes('通话内容听不到') && viewSrc.includes('板上也没有 codec'));
 ok('静音未读到时显示「—」而不是当作 0（红线 23）',
 	/if \(st\.mute == null\)/.test(viewSrc));
 ok('通话结束落记录（回到 idle 触发 saveRecord）',
@@ -308,9 +309,21 @@ ok('setBusy 只改 busy 标志并转交 applyGates',
 	'setBusy 里直接写 dialBtn.disabled = on 就是第二套判据，会漂移');
 ok('applyGates 把「通道故障」算进禁用（厂商 !s.status?.error 那一半）',
 	viewSrc.includes('var blocked = st.busy || st.pfBusy || st.channelError;'));
-ok('接听只在 ringing/waiting 可点（厂商口径：这两个状态之外一律灰化）',
-	viewSrc.includes('answerBtn.disabled = blocked') &&
-	viewSrc.includes("(st.stage !== 'ringing') && (st.stage !== 'waiting')"));
+ok('接听只在来电（incoming）可点 —— 判据用 phase 不用 stage 令牌',
+	viewSrc.includes("answerBtn.disabled = blocked || (st.phase !== 'incoming')"),
+	'phase 由前端从 CLCC 原始 state 现算，老后端没有 stage 也能正确灰化');
+ok('通话按钮常驻可见，不用 display 隐藏（用户原话：没看到接停电话）',
+	!/answerBtn\.style\.display|hangupBtn\.style\.display|muteBtn\.style\.display/
+		.test(viewSrc),
+	'藏起来的按钮等于没有 —— 可见性交给 disabled 灰化（厂商形态）');
+ok('铃声开关也纳入 applyGates（通道忙时不该切铃声）',
+	viewSrc.includes('ringBtn.disabled = blocked;'));
+ok('建页后立即 applyGates 一次（connectThen 握手前按钮不能是可用态）',
+	(function () {
+		var i = viewSrc.indexOf('/* ---------- 初始化 ---------- */');
+		if (i < 0) { return false; }
+		return /applyGates\(\);/.test(viewSrc.slice(i, i + 500));
+	})());
 ok('拨打只在 idle 可点（通话中不该还能再拨一个）',
 	viewSrc.includes("dialBtn.disabled = blocked || (st.phase !== 'idle')"));
 ok('静音只在 active 可点',
