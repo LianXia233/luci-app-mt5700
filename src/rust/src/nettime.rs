@@ -8,11 +8,23 @@
 //! 本模块只做一件事：把「当前准确的 unix 秒」这个问题收敛到一处，
 //! 其它模块（usage / schedule / 日志）一律通过 [`now`] 取时间，不再自己判断。
 //!
+//! # 全仓库唯一墙上时间入口
+//!
+//! **插件里凡是「现在几点」的地方一律走本模块**：日志时间戳、短信 PDU 时间兜底、
+//! 通知时间、时段判定、使用量按月清零……都不再各自去取 `chrono::Utc::now()`。
+//! 只有两类例外（详见 [`now`] 的文档）：
+//!   - **耗时 / 间隔测量**（AT 超时、节流、凭证有效期）：用 `Instant`，
+//!     它不受 NTP 校正的跳变影响；
+//!   - 本模块内部（它自己就是时间源）。
+//!
+//! `tests` 里有一条源码级回归用例盯着这条约定：除 `localtime.rs` / `nettime.rs`
+//! 之外的任何源文件里出现 `chrono::Utc::now()`，测试直接失败。
+//!
 //! # 时间口径
 //!
 //! | 层次 | 取值 | 失败回退 |
 //! |:--|:--|:--|
-//! | UTC 时刻 | NTP（三个服务器依次尝试） | 设备时钟（`chrono::Utc::now()`） |
+//! | UTC 时刻 | NTP（三个服务器依次尝试） | 设备时钟（[`crate::localtime::now`]） |
 //! | 本地时区 | 系统时区（`/etc/TZ` → uci），见 [`crate::localtime`] | 北京时间 UTC+8 |
 //!
 //! 即：**时刻**优先 NTP、**时区**优先 OpenWrt 系统设置，两者正交。
@@ -72,14 +84,42 @@ pub fn source_name() -> &'static str {
     if from_ntp() { "NTP" } else { "设备时钟" }
 }
 
-/// 当前 UTC 秒（已叠加 NTP 偏移；未同步时即设备时钟）。
+/// **未经校正**的设备时钟（unix 秒）。
+///
+/// 只在对时逻辑内部使用：算偏移必须用原始设备时钟，否则偏移会自我叠加。
+fn device_ts() -> i64 {
+    crate::localtime::now().timestamp()
+}
+
+/// 当前 unix 秒（已叠加 NTP 偏移；未同步时即设备时钟）。
+///
+/// 底钟走 [`crate::localtime::now`]（设备时钟 + 系统时区）而不是 `chrono::Utc::now()`：
+/// 两者同一时刻、数值相同，但这样能保证「全仓库只有一个地方读设备时钟」。
 pub fn now_ts() -> i64 {
-    chrono::Utc::now().timestamp() + OFFSET_SECS.load(Ordering::Relaxed)
+    crate::localtime::now().timestamp() + OFFSET_SECS.load(Ordering::Relaxed)
+}
+
+/// 当前毫秒时间戳（前端按本地格式化展示）。
+///
+/// 秒部分随 NTP 偏移校正，毫秒部分取设备时钟的亚秒 —— NTP 只到秒级精度，
+/// 亚秒部分只能来自本机，二者相加即为「校正后的毫秒时刻」。
+pub fn now_ms() -> i64 {
+    let sys = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = sys.as_secs() as i64 + OFFSET_SECS.load(Ordering::Relaxed);
+    secs * 1000 + i64::from(sys.subsec_millis())
+}
+
+/// `%Y-%m-%d %H:%M:%S` 格式的当前时刻字符串（系统时区）。
+pub fn now_string() -> String {
+    now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// 当前时刻（**系统时区**，时区取不到时北京时间；时刻优先 NTP）。
 ///
-/// 全仓库新增代码请统一用这个，而不是 `chrono::Utc::now()` / `chrono::Local`。
+/// 全代码库请统一用这个，而不是 `chrono::Utc::now()` / `chrono::Local`。
+/// 不需要时区的场合用 [`now_ts`] / [`now_ms`]。
 pub fn now() -> DateTime<crate::localtime::Tz> {
     crate::localtime::from_unix(now_ts())
 }
@@ -124,7 +164,7 @@ fn build_request() -> [u8; 48] {
     let mut req = [0u8; 48];
     // LI=0(无告警) VN=4 Mode=3(客户端)
     req[0] = (4 << 3) | 3;
-    let ntp_secs = (chrono::Utc::now().timestamp() + NTP_TO_UNIX) & 0xFFFF_FFFF;
+    let ntp_secs = (device_ts() + NTP_TO_UNIX) & 0xFFFF_FFFF;
     req[40..44].copy_from_slice(&(ntp_secs as u32).to_be_bytes());
     req
 }
@@ -160,11 +200,13 @@ pub async fn sync_once() -> Option<i64> {
 /// 同步一次并把结果写进进程态；返回是否来自 NTP。
 ///
 /// 偏移按「请求前 / 应答后」两个设备时刻的中点计算，抵消一半往返延迟。
+/// 这里刻意用 **原始设备时钟**（[`device_ts`]）而不是 [`now_ts`]：后者已含偏移，
+/// 拿它跟 NTP 比会把上一轮的偏移算进去，越同步越歪。
 pub async fn sync_and_apply() -> bool {
-    let sys_before = chrono::Utc::now().timestamp();
+    let sys_before = device_ts();
     match sync_once().await {
         Some(ntp) => {
-            let sys_after = chrono::Utc::now().timestamp();
+            let sys_after = device_ts();
             let mid = sys_before + (sys_after - sys_before) / 2;
             OFFSET_SECS.store(ntp - mid, Ordering::Relaxed);
             SYNCED_AT.store(sys_after, Ordering::Relaxed);
@@ -194,7 +236,6 @@ pub async fn run(ctx: tokio::sync::watch::Receiver<bool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Offset;
 
     /// 造一个合法的服务端应答：mode=4 / vn=4 / stratum=2，Transmit = 给定 unix 秒。
     fn resp(unix: i64, mode: u8, stratum: u8) -> [u8; 48] {
@@ -259,7 +300,7 @@ mod tests {
     fn offset_is_applied_to_now_ts() {
         // 直接落偏移（NTP 不可达时无法真连，测的是叠加逻辑本身）
         OFFSET_SECS.store(3600, Ordering::Relaxed);
-        let sys = chrono::Utc::now().timestamp();
+        let sys = device_ts();
         let got = now_ts();
         OFFSET_SECS.store(0, Ordering::Relaxed);
         assert!((got - sys - 3600).abs() <= 2, "now_ts 应等于设备时间 + 偏移");
@@ -270,6 +311,52 @@ mod tests {
         // 时刻可以来自 NTP，但时区永远走 localtime（系统时区 → 北京时间兜底）
         let dt = now();
         assert_eq!(dt.offset().local_minus_utc(), crate::localtime::offset().local_minus_utc());
+    }
+
+    #[test]
+    fn no_direct_wall_clock_outside_time_modules() {
+        // 约定：除 localtime（时区层）与 nettime（时间源）外，
+        // 任何模块都不许直接取墙上时钟 —— 否则同一条日志/同一个判定会出现两条时间线。
+        // 耗时测量请用 Instant，绝对时刻请用 nettime::now / now_ts / now_ms。
+        let allowed = ["localtime.rs", "nettime.rs"];
+        let dir = std::fs::read_dir("src").expect("测试的工作目录应是 crate 根");
+        for entry in dir.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".rs") || allowed.contains(&name.as_str()) {
+                continue;
+            }
+            let body = std::fs::read_to_string(entry.path()).unwrap_or_default();
+            // 只查代码：注释里出现这些名字（例如说明「为什么不能用 chrono::Local」）不算违规
+            let code = {
+                let mut out = String::new();
+                let bytes = body.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() {
+                    if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                        if let Some(end) = body[i + 2..].find("*/") {
+                            i += 2 + end + 2;
+                            continue;
+                        }
+                    }
+                    if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                        if let Some(end) = body[i..].find('\n') {
+                            i += end + 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+                out
+            };
+            for pat in ["chrono::Utc::now(", "chrono::Local", "SystemTime::now()"] {
+                assert!(
+                    !code.contains(pat),
+                    "{name} 里出现了 `{pat}`：请改用 crate::nettime（耗时测量用 Instant）",
+                );
+            }
+        }
     }
 
     #[test]
