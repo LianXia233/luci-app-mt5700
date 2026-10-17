@@ -284,6 +284,22 @@ http://<host>:9000/_layout-test/status-mock.html
 样张内为静态占位数据，仅用于校验 2 列栅格、奇数末卡横跨全宽、温度网格等布局规则，
 不代表真实设备状态。
 
+## 沙箱实测截图（v2.2.0，模拟模组态）
+
+v2.2.0 在 Debian amd64 沙箱中完成整包实测：安装 `debian-v2.2.0` Release 资产后，
+以 **socat 伪终端对 + Fibocom 风格 AT 协议模拟器**替代实体模组，真实服务二进制走
+完整 AT 通道（探测 → 初始化 → 自动拨号对齐 → 遥测轮询），12 个视图全部渲染通过
+（**pageerror=0 / console.error=0**，按需求跳过「模组升级」页）：
+
+![v2.2.0 沙箱实测总览](docs/screenshots/v2.2.0/_overview.png)
+
+关键数据锚点（与手册换算口径交叉验证一致）：RSRP **-63 dBm** / SINR **27.2 dB**
+（`^HCSQ` 与 `^MONSC` 双源一致）、连接时长 500s、256QAM(DL)/64QAM(UL)、
+usage 清零日每月 1 号、服务运行时长正常渲染（`AtWs.formatDuration` 修复实证）。
+
+完整 12 视图截图、测试架构与复现要点见
+[`docs/screenshots/v2.2.0/README.md`](docs/screenshots/v2.2.0/README.md)。
+
 ## 与 main（OpenWrt）分支的差异
 
 | 项 | main | Debian |
