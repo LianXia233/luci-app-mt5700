@@ -541,14 +541,14 @@ luci-app-mt5700/
 | 版权所有者 | `Copyright (C) 2026 LianXia233` |
 | 许可证 | GNU General Public License v3.0 |
 | SPDX 标识 | `GPL-3.0-only` |
-| 版本判定依据 | `LICENSE` 为 GPLv3 全文；源码文件头统一为 `Licensed to the public under the GNU General Public License v3.0.`，未声明「or any later version」，故依 GPLv3 §14 锁定为 v3.0，不含升级至后续版本的选项 |
+| 版本判定依据 | `LICENSE` 为 GPLv3 全文；源码文件头统一为 `Licensed to the public under the GNU General Public License v3.0.`，未声明「or any later version」，故依 GPLv3 第 14 条锁定为 v3.0，不含升级至后续版本的选项 |
 | 覆盖范围 | `Makefile`、`src/`（Rust / Tokio 后端）、`root/`、`htdocs/`（除角色素材）、`po/`、`scripts/`、`tests/`，以及 `docs/` 中的原创文字 |
 
-**分发义务**（GPLv3 §4–§6、§10）
+**分发义务**（GPLv3 第 4–6 条、第 10 条）
 
 1. 对外分发二进制包（`.ipk` / `.apk`）或修改版时，须随附或以书面方式提供**完整的对应源码**；
-2. 须保留原有版权声明、许可证文本与免责声明（§0「Appropriate Legal Notices」）；
-3. 不得对本许可证授予的权利**附加额外限制**（§10）。
+2. 须保留原有版权声明、许可证文本与免责声明（第 0 条「Appropriate Legal Notices」）；
+3. 不得对本许可证授予的权利**附加额外限制**（第 10 条）。
 
 仅在本机安装、使用而不对外分发时，不触发上述义务。
 
@@ -571,7 +571,7 @@ luci-app-mt5700/
 
 GPL-3.0 许可证仅适用于本项目有权以该许可证发布的代码及相关原创内容，**不自动涵盖**「薄荷」角色形象、游戏原始素材及其他第三方知识产权。
 
-角色素材以**聚合（aggregate）**形式与本项目代码一并打包分发（GPLv3 §5 末段），其权利状态不因打包、也不因本项目采用 GPL-3.0 而发生改变。对上述内容的使用、复制、修改或再分发，须遵守相关权利人的授权条件及适用法律法规。
+角色素材以**聚合（aggregate）**形式与本项目代码一并打包分发（GPLv3 第 5 条末段），其权利状态不因打包、也不因本项目采用 GPL-3.0 而发生改变。对上述内容的使用、复制、修改或再分发，须遵守相关权利人的授权条件及适用法律法规。
 
 逐项清单、权利人、素材指纹与来源说明见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
 
@@ -581,6 +581,6 @@ GPL-3.0 许可证仅适用于本项目有权以该许可证发布的代码及相
 
 ### 5. 免责与权利主张
 
-本项目按「现状」提供，适用 GPLv3 §15–§16 的担保免责与责任限制条款；本节不额外排除或限制 GPL-3.0 已赋予使用者的权利。
+本项目按「现状」提供，适用 GPLv3 第 15–16 条的担保免责与责任限制条款；本节不额外排除或限制 GPL-3.0 已赋予使用者的权利。
 
 如权利人认为本项目的使用超出合理范围，请通过 [GitHub Issues](https://github.com/LianXia233/luci-app-mt5700/issues) 提出，并附权利证明与具体文件路径。维护者核实后将及时替换、补充署名或移除相关素材；具体授权事宜以权利人书面许可为准。
