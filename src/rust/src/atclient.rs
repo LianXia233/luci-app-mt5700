@@ -796,7 +796,9 @@ impl AtClient {
         };
 
         let mut cmd = command.to_string();
-        if !cmd.ends_with('\r') {
+        // PDU 短信正文以 Ctrl+Z (0x1A) 结束，必须原样写入；
+        // 末尾再补 CR 会破坏短信提交阶段的协议边界。
+        if !cmd.ends_with('\r') && !cmd.ends_with('\x1A') {
             cmd.push('\r');
         }
 
