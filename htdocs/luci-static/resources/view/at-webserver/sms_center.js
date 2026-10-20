@@ -563,7 +563,26 @@ return L.view.extend({
 					var chain2 = Promise.resolve();
 					for (var i = 0; i < parts.length; i++) {
 						chain2 = chain2.then(function (part) {
-							return AtWs.client.sendCommand('AT+CMGS=' + part.tpduLength + '\r' + part.pdu);
+							return AtWs.client.sendCommand('AT+CMGS=' + part.tpduLength).then(function (promptRes) {
+							if (!promptRes || promptRes.success === false) {
+								throw new Error(String((promptRes && promptRes.error) || '模组未接受短信发送命令'));
+							}
+							var prompt = String(promptRes.data || '').replace(/[\\r\\n]/g, '').trim();
+							if (prompt.indexOf('>') < 0) {
+								throw new Error('模组未返回短信输入提示符 >：' + (prompt || '无应答'));
+							}
+							// PDU 数据必须单独发送，并以 Ctrl+Z 结束；不要与 AT+CMGS 命令合并。
+							return AtWs.client.sendCommand(part.pdu + String.fromCharCode(26)).then(function (sendRes) {
+								if (!sendRes || sendRes.success === false) {
+									throw new Error(String((sendRes && sendRes.error) || '短信提交失败'));
+								}
+								var response = String(sendRes.data || '');
+							if (response.indexOf('+CMGS:') < 0 || !/(^|[\\r\\n])OK([\\r\\n]|$)/.test(response)) {
+									throw new Error('模组未返回 +CMGS 和最终 OK，不能确认短信已提交：' + (response.trim() || '无应答'));
+								}
+								return sendRes;
+							});
+						});
 						}.bind(null, parts[i]));
 					}
 					return chain2;
