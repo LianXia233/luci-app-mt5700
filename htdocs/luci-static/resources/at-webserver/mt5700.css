@@ -626,8 +626,19 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 12px;
   flex: 1;
-  /* 卡片被等高拉伸时，行不要跟着摊开（否则三行间距忽大忽小） */
-  align-content: start;
+  /* 等高拉伸时由三行**均分**剩余高度，而不是把空白全留在最底下。
+   *
+   * 背景：三张状态卡在同一行，网格会把它们拉成等高，本卡比「信号强度」矮
+   * 75px（信息格盒子 222px、内容 147px）。原来写 align-content: start，
+   * 多出来的 75px 全堆在信息格下方，从外面看就是「网络状态卡片下面空了一块」。
+   * 改成 grid-auto-rows: 1fr 后每行等分，行内再用 align-items: center 让单元格
+   * 居中，六格均匀铺满、最后一行正好落在卡片的底部内边距上，与相邻两张卡的
+   * 内容底边齐平。
+   *
+   * 单列布局（≤1024px）下卡片高度由内容决定，没有多余空间可分，行为不变。 */
+  grid-auto-rows: 1fr;
+  align-content: stretch;
+  align-items: center;
 }
 .mt-net-info-cell {
   display: flex;
