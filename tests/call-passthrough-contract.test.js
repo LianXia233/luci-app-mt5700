@@ -5,7 +5,7 @@
  * **绕过了 rpc.js 的 fetchCall**。于是「后端返回了 stage」被当成
  * 「页面拿到了 stage」—— 实际中间那层没搬，UI 上 stage 恒为 null。
  * 这个脚本用真机实抓的响应喂进**未修改的** fetchCall 源码，
- * 检查 stage / preflight 四字段能否活着到视图。
+ * 检查 stage 能否活着到视图，并钉死已下线字段（preflight）不再回来。
  */
 'use strict';
 const fs = require('fs');
@@ -21,14 +21,11 @@ function ok(name, cond, extra) {
 
 /* ---- 真机实抓的响应（2026-10-16，`ubus call mt5700 call ...` 原文） ---- */
 /*
- * ★ 这两份样本是**真机原样抓取**的，不是手编的：
- *   - status：空闲态，ucode 回了 "stage":"idle"
- *   - preflight：ready/volte/cs/blocked/steps 五字段全在，cs=false
- *     （+CREG: 0,0 但 +CIREG: 1,1 的假阴性现场），且 csreg 那行
- *     core=true 而 blocking=false —— 正是「未过但不阻断」的三态语义。
+ * ★ 这份样本是**真机原样抓取**的，不是手编的：空闲态，ucode 回了
+ *   "stage":"idle"。
  *   ★ 为什么必须用真数据：手写样本容易「恰好符合自己的假设」，
- *     而真机能暴露字段名/类型的不一致。上一轮我用 `ubus call` 直调
- *     验证到 ready:true 就以为页面没问题，恰恰漏掉了中间层。
+ *     而真机能暴露字段名/类型的不一致。上一轮用 `ubus call` 直调
+ *     验证到 read 就以为页面没问题，恰恰漏掉了中间层。
  *   脱敏：这份响应不含 IMSI/IMEI/ICCID/EID/号码（红线 73 已核）。
  */
 const DEVICE_STATUS = {
@@ -36,20 +33,6 @@ const DEVICE_STATUS = {
 	action: 'status',
 	calls: [],
 	stage: 'idle'
-};
-const DEVICE_PREFLIGHT = {
-	success: true,
-	action: 'preflight',
-	ready: true,
-	volte: true,
-	cs: false,
-	blocked: '',
-	steps: [
-		{ key: 'sim', title: 'SIM 卡就绪', cmd: 'AT^SIMSQ?', ok: true, core: true, blocking: false, value: 'sim_status=11', hint: 'SIM 卡已初始化（可接入网络），语音业务可用' },
-		{ key: 'csreg', title: 'CS 域已注册', cmd: 'AT+CREG?', ok: false, core: true, blocking: false, value: 'stat=0', hint: 'CS 域未注册，但 IMS 已注册：语音走 VoLTE/VoNR，不影响拨号' },
-		{ key: 'ims', title: 'IMS 域已注册', cmd: 'AT+CIREG?', ok: true, core: true, blocking: false, value: 'reg_info=1', hint: 'IMS 已注册，VoLTE/VoNR 可用' },
-		{ key: 'clip', title: '来电号码显示', cmd: 'AT+CLIP?', ok: false, core: false, blocking: false, value: '未识别', hint: '本模组不支持查询 CLIP（真机回 +CME ERROR: UNKNOWN）' }
-	]
 };
 
 /* ---- 取出 rpc.js 里未经改动的 fetchCall 函数体 ---- */
@@ -93,17 +76,6 @@ function makeRpc(behaviour) {
 	};
 }
 
-const sandbox = {
-	L: L,
-	withTimeout: withTimeout,
-	console: console,
-	Promise: Promise,
-	Array: Array,
-	JSON: JSON,
-	String: String,
-	Date: Date
-};
-
 /* eslint-disable no-new-func */
 const FN_TAIL = '\nreturn fetchCall;';
 /* rpcCall 在 rpc.js 里是模块级 var（= L.rpc.declare(...)），单独注入 */
@@ -123,22 +95,17 @@ const fn = new Function('L', 'withTimeout', 'rpcCall',
 	const stageText = res.stage === 'idle' ? '空闲' : '??';
 	ok('视图 STAGE_TEXT 查得到（idle 有对应文案）', stageText === '空闲');
 
-	console.log('== ② preflight：四字段能否活着到视图 ==');
-	RESP = DEVICE_PREFLIGHT;
-	res = await fetchCall('preflight');
-	ok('ready 透传为布尔 true', res.ready === true, '实际：' + JSON.stringify(res.ready));
-	ok('volte 透传为布尔 true', res.volte === true);
-	ok('blocked 透传为空串', res.blocked === '');
-	ok('steps 透传 4 条', Array.isArray(res.steps) && res.steps.length === 4,
-		'实际：' + JSON.stringify((res.steps || []).length));
-	/* 视图 renderPreflight 的真实判据 */
-	const marks = (res.steps || []).map(function (s) {
-		return s.ok ? '✓' : (s.blocking ? '✗' : '○');
-	});
-	ok('三态记号渲染成 ✓○✓○（CS 未过但不阻断 ⇒ ○ 不是 ✗）',
-		marks.join('') === '✓○✓○', '实际：' + marks.join(''));
-	ok('结论走 ready 分支（可以拨号）', res.ready === true);
-	ok('附带 VoLTE 提示（volte 为真）', res.ready === true && res.volte === true);
+	console.log('== ② preflight 已下线：字段不许再出现在返回对象里 ==');
+	/*
+	 * v2.4.27 删除了「语音可用性自检」：前端卡片、ucode callPreflight、
+	 * 本层的四字段透传一并移除。这里反向断言「它们真的没了」——
+	 * 防的是「删了 UI 但中间层还留着」这种半截状态（红线 62）。
+	 */
+	res = await fetchCall('status');
+	ok('ready 不再透传', res.ready === undefined, '实际：' + JSON.stringify(res.ready));
+	ok('volte 不再透传', res.volte === undefined);
+	ok('blocked 不再透传', res.blocked === undefined);
+	ok('steps 不再透传', res.steps === undefined);
 
 	console.log('== ③ 失败分支：不能伪装成「已就绪」 ==');
 	RESP = { success: false, error: 'AT 通道无响应' };
@@ -146,9 +113,8 @@ const fn = new Function('L', 'withTimeout', 'rpcCall',
 	ok('失败时 stage 为 null（不是 undefined）', res.stage === null,
 		'实际：' + JSON.stringify(res.stage));
 	ok('失败时 calls 为 null（视图走错误分支）', res.calls === null);
-	ok('失败时 ready 为 false（「没读到」不等于「就绪」，红线 23）', res.ready === false,
-		'实际：' + JSON.stringify(res.ready));
-	ok('失败时 steps 为空数组（渲染层不会抛）', Array.isArray(res.steps) && res.steps.length === 0);
+	ok('失败时不带 preflight 残留字段',
+		res.ready === undefined && res.steps === undefined);
 
 	console.log('== ④ 超时/异常兜底 ==');
 	const boom = fn(L, withTimeout, makeRpc(function () {

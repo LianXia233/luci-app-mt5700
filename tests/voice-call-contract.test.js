@@ -20,9 +20,10 @@
  *   ⑤ 状态机令牌（2026-10-16 从厂商「带电话功能beta」固件移植）：
  *      CLCC <state> → active/held/dialing/alerting/ringing/waiting 令牌，
  *      总态按优先级 active > held > waiting > ringing > alerting > dialing
- *   ⑥ 前置检查 preflight：四条**只读查询**（SIMSQ/CREG/CIREG/CLIP），
- *      核心项（SIM + CS 注册）决定 ready；★ 绝不照搬厂商的 Quectel 私有
- *      命令（AT+QCALLCFG / AT+QCFG，MT5700M 手册里没有 —— 红线 27）
+ *   ⑥ （v2.4.27 已删除）原「可用性自检 preflight」：四步只读查询 + 结论灯。
+ *      用户判定为无用功能（能不能拨早已知道，卡片只是噪音）→ 前端卡片、
+ *      ucode callPreflight、rpc 四字段透传一并移除；末尾一段反向断言守着
+ *      「别再长回来」。★ 厂商 Quectel 私有命令的禁令（红线 27）保留。
  *   ⑦ 通话记录双向字段：direction 字符串与 dir 整数同义、unanswered→failed、
  *      读侧补齐 direction（不落盘迁移）
  *   ⑧ ★★ 端到端透传（2026-10-16 真实故障）：ucode 真机确实回 "stage":"idle"，
@@ -270,22 +271,11 @@ ok('fetchCall 透传 records / mute / volume',
 ok('★ fetchCall 透传 stage（后端在回、前端在读，这一层不能漏）',
 	rpcSrc.includes('stage: (resp.stage == null) ? null : resp.stage'),
 	'漏了它 → st.stage 恒 null → 厂商粒度状态机在 UI 上完全不生效');
-ok('★ fetchCall 透传 preflight 四字段 ready/volte/blocked/steps',
-	rpcSrc.includes('ready: resp.ready === true') &&
-	rpcSrc.includes('volte: resp.volte === true') &&
-	rpcSrc.includes('blocked: resp.blocked') &&
-	rpcSrc.includes('steps: Array.isArray(resp.steps)'),
-	'漏了它们 → 自检卡片永远渲染不出那四行，只显示「检查失败」');
-ok('★ ready 严格取 true（不让 undefined 变 true，红线 23）',
-	rpcSrc.includes('resp.ready === true') &&
-	!rpcSrc.includes('ready: resp.ready ||'),
-	'「没读到」不等于「就绪」——宽松取值会把读失败显示成一切正常');
-ok('★ fetchCall 两条失败分支都显式给 stage: null 与 steps: []',
+ok('★ fetchCall 两条失败分支都显式给 stage: null',
 	(function () {
 		var n = (rpcSrc.match(/stage: null/g) || []).length;
-		var m = (rpcSrc.match(/steps: \[\]/g) || []).length;
 		/* 一条成功分支取 resp.stage，两条失败分支各一处 null ⇒ 共 3 */
-		return n >= 2 && m >= 2;
+		return n >= 2;
 	})(),
 	'失败时省略字段 → 前端读到 undefined，与「还没查到过」混同（红线 23）');
 ok('★ 视图读 res.stage 的前提是 rpc 层真的给了（两端钉在一起）',
@@ -308,7 +298,7 @@ ok('setBusy 只改 busy 标志并转交 applyGates',
 	!/function setBusy\(on\) \{[^}]*dialBtn\.disabled/.test(viewSrc),
 	'setBusy 里直接写 dialBtn.disabled = on 就是第二套判据，会漂移');
 ok('applyGates 把「通道故障」算进禁用（厂商 !s.status?.error 那一半）',
-	viewSrc.includes('var blocked = st.busy || st.pfBusy || st.channelError;'));
+	viewSrc.includes('var blocked = st.busy || st.channelError;'));
 ok('接听只在来电（incoming）可点 —— 判据用 phase 不用 stage 令牌',
 	viewSrc.includes("answerBtn.disabled = blocked || (st.phase !== 'incoming')"),
 	'phase 由前端从 CLCC 原始 state 现算，老后端没有 stage 也能正确灰化');
@@ -347,13 +337,6 @@ ok('读失败不清 stage/calls（别把故障渲染成空闲，红线 23）',
 	'失败分支里一旦重置 stage/calls，通道故障看起来就像空闲');
 ok('st 有 channelError 初值 false（未查询过 ≠ 故障）',
 	/channelError: false,/.test(viewSrc));
-ok('前置检查期间也调用 applyGates（它一次发 4 条 AT，独占通道）',
-	(function () {
-		var i = viewSrc.indexOf('function runPreflight(');
-		var seg = viewSrc.slice(i, viewSrc.indexOf('function setBusy('));
-		return (seg.match(/applyGates\(\);/g) || []).length >= 2;
-	})(),
-	'成功/失败/异常三条出口都要解锁，只解一条会留下永久灰化的按钮');
 
 /* ---------- ⑫ 状态机令牌（2026-10-16 从厂商 beta 固件移植） ---------- */
 
@@ -389,30 +372,26 @@ ok('callStatus 无响应分支显式回 calls: null',
 ok('callStatus 查询失败分支显式回 calls: null',
 	statusFn2.includes("calls: null, error: (r.error || '查询失败') }"));
 
-/* ---------- ⑬ preflight：厂商 voicePreparation 的安全移植 ---------- */
+/* ---------- ⑬ preflight 已下线：反向断言 + 厂商命令禁令仍有效 ---------- */
 
-const pfFn = grab('callPreflight', ucSrc);
-ok('callPreflight 存在', pfFn.length > 0);
-ok('四条查询齐全（SIMSQ / CREG / CIREG / CLIP）',
-	["'AT^SIMSQ?'", "'AT+CREG?'", "'AT+CIREG?'", "'AT+CLIP?'"].every(function (t) {
-		return pfFn.includes(t);
-	}));
-/* 每步的命令串出现两次（rpcCall 调用处 + 步骤对象的 cmd 字段）→ 先去重 */
-const pfCmdsRaw = pfFn.match(/cmd: 'AT[^']*'/g) || [];
-const pfCmds = pfCmdsRaw.filter(function (c, i) { return pfCmdsRaw.indexOf(c) === i; });
-ok('preflight 恰好 4 条唯一 AT 命令（不夹带隐藏调用）', pfCmds.length === 4,
-	'去重后实际：' + JSON.stringify(pfCmds));
-ok('preflight 就是那四条只读查询（多一条少一条都判红）',
-	JSON.stringify(pfCmds.slice().sort()) ===
-	JSON.stringify(["cmd: 'AT+CIREG?'", "cmd: 'AT+CLIP?'", "cmd: 'AT+CREG?'", "cmd: 'AT^SIMSQ?'"]));
-ok('preflight 每条命令都以 ? 结尾（只读查询）',
-	pfCmds.length > 0 && pfCmds.every(function (c) { return /\?'$/.test(c); }));
-ok('preflight 命令不含 = 号（无写参数）',
-	pfCmds.every(function (c) { return c.indexOf('=') < 0; }));
-ok('preflight 命令不含 ; 号（命令分隔符＝注入面）',
-	pfCmds.every(function (c) { return c.indexOf(';') < 0; }));
-ok('★ preflight 函数体里没有 Quectel 私有命令（红线 27）',
-	!/AT\+Q[A-Za-z]/.test(pfFn) && !pfFn.includes('QCALLCFG'));
+/*
+ * v2.4.27：用户判定「可用性自检」是无用功能（能不能拨早已知道，卡片只是噪音）
+ * —— 前端卡片、ucode callPreflight/callNumsAfter、rpc 四字段透传全部移除。
+ * 这里反向钉死「别再长回来」，避免出现「删了 UI、后端还留着」的半截状态（红线 62）。
+ */
+ok('ucode 不再有 callPreflight', !ucSrc.includes('function callPreflight('));
+ok('ucode 不再有 callNumsAfter（只被 preflight 使用）', !ucSrc.includes('function callNumsAfter('));
+ok("call 方法不再派发 preflight", !ucSrc.includes("if (action == 'preflight') {"));
+ok('未知 action 文案不再列 preflight',
+	/未知 action（/.test(ucSrc) && !/未知 action（[^）]*preflight/.test(ucSrc));
+ok('视图不再有自检卡片与入口按钮',
+	!viewSrc.includes('可用性自检') && !viewSrc.includes('检查能否拨号'));
+ok('视图不再调 preflight 动作', !viewSrc.includes("AtWs.call('preflight')"));
+ok('视图不再有 pfBusy / pf 状态', !/st\.pfBusy|st\.pf\b/.test(viewSrc));
+ok('rpc 层不再透传 preflight 四字段',
+	!rpcSrc.includes('resp.ready') && !rpcSrc.includes('resp.volte') &&
+	!rpcSrc.includes('resp.blocked') && !rpcSrc.includes('resp.steps'));
+
 /* ★★ 厂商的 voicePreparation 写的是 Quectel 的 AT+QCALLCFG="voice_disable",0
    与 AT+QCFG="ims" —— MT5700M-CN 手册里没有这两条，照搬就是给模组发未定义命令。
    本仓提到它们**只允许在注释里**（记录为什么没搬），一旦出现在代码行里就是回归。 */
@@ -425,58 +404,6 @@ ok('★ preflight 函数体里没有 Quectel 私有命令（红线 27）',
 	ok('★ Quectel 私有命令只出现在注释里（不得成为真实下发命令）',
 		bad.length === 0, bad.join('\n'));
 })();
-ok('core 标在 SIM / CS / IMS 三步，CLIP 为提示项',
-	(pfFn.match(/core: true/g) || []).length === 3 &&
-	(pfFn.match(/core: false/g) || []).length === 1);
-/* ★ 三态记号的判据是 blocking（"未过且确实挡住了"），不是 core（"是不是判据项"）：
-   本机能出现「CS 未注册但 IMS 已注册」，此时 CS 未过却不阻断拨号。 */
-ok('每步都带 blocking 字段（前端三态记号的判据）',
-	(pfFn.match(/blocking: /g) || []).length === 4);
-ok('blocked 是原因短语，不再直接回步骤标题',
-	!pfFn.includes('blocked.title') && pfFn.includes("blocked = '"));
-ok('SIM 就绪判据 = sim_status 11 或 12（手册 6.6.3：两者都是「已初始化」）',
-	pfFn.includes('simOk = (simStatus == 11 || simStatus == 12)'),
-	'12 说的是「短信和电话本可接入」，不是「才能打电话」——用 12 当语音门槛会把 11 误判成不可用');
-ok('IMS 注册判据 = reg_info 1', pfFn.includes('regInfo == 1'));
-ok('语音承载判据 = CS 或 IMS 任一可用（netOk）',
-	pfFn.includes('netOk = (csOk || imsOk)'));
-ok('ready = SIM 就绪 且 承载域可用（不是硬编码/写死结论）',
-	pfFn.includes('ready = (simOk && netOk)'),
-	'★ 手册 4.6 的 ^CCALLSTATE <voice_domain> 含「1：IMS 域语音电话」⇒ 语音呼叫不要求 CS 注册');
-ok('★ 允许「CS 未注册但 IMS 已注册」不阻断（真机实测的假阴性）',
-	pfFn.includes('CS 域未注册，但 IMS 已注册') &&
-	pfFn.includes('IMS 未注册，但 CS 域已注册'),
-	'只按 CS 注册判，本机（CREG=0,0 + CIREG=1,1）会被判成「不能打电话」');
-ok('★ 判据的真机依据写在注释里（红线 42/49：回真机量一次 + 带对照组）',
-	ucSrc.includes('^CCALLSTATE') && ucSrc.includes('+CREG: 0,0'));
-ok('CLIP 读失败区分「命令被拒」与「读到了但没此项」（红线 23）',
-	pfFn.includes("clipErr != ''") && pfFn.includes('本模组不支持查询 CLIP'));
-ok('CS 域注册判据 = stat 1 或 5', pfFn.includes('csOk = (stat == 1 || stat == 5)'));
-ok('来电号码显示判据 = m 1', pfFn.includes('clipOk = (clip == 1)'));
-ok('返回体含 ready / volte / cs / blocked / steps',
-	pfFn.includes('ready: ready') && pfFn.includes('volte: imsOk') &&
-	pfFn.includes('cs: csOk') && pfFn.includes('blocked: blocked') &&
-	pfFn.includes('steps: steps'));
-ok('preflight 无响应时不伪装成「都通过」（回 success:false）',
-	pfFn.includes("success: false, action: 'preflight'") &&
-	pfFn.includes("error: 'AT 通道无响应'"));
-ok('后三条各自独立：单条失败只让该项标红，不整体报错',
-	pfFn.includes('(r2 != null && r2.success) ?') &&
-	pfFn.includes('(r3 != null && r3.success) ?') &&
-	pfFn.includes('(r4 != null && r4.success) ?'));
-ok('解析走 callNumsAfter（不是硬编码下标，字段数变了也不崩）',
-	pfFn.includes("callNumsAfter(r1.data, '^SIMSQ:')"));
-
-const numsFn = grab('callNumsAfter', ucSrc);
-ok('callNumsAfter 存在', numsFn.length > 0);
-ok('callNumsAfter 只取第一行（遇换行停止，不被后续行污染）',
-	numsFn.includes("c == '\\n'") && numsFn.includes("c == '\\r'"));
-ok('callNumsAfter 空文本/空前缀回空数组（不抛异常）',
-	numsFn.includes('if (text == null || prefix == null)'));
-
-ok("call 方法派发 preflight", ucSrc.includes("if (action == 'preflight') {"));
-ok('未知 action 文案把 preflight 列进支持项',
-	/未知 action（[^）]*preflight[^）]*）/.test(ucSrc));
 
 /* ---------- ⑭ 通话记录：direction 双向字段 ---------- */
 
@@ -522,30 +449,14 @@ ok('视图记录写出 direction 字段',
 ok('视图方向优先读 direction 字符串，退回 dir 整数（老记录兼容）',
 	viewSrc.includes("r.direction === 'incoming'") && viewSrc.includes('(r.dir === 1)'));
 
-ok('视图调 preflight 动作', viewSrc.includes("AtWs.call('preflight')"));
-(function () {
-	const i = viewSrc.indexOf('Mt5700.interval(2000');
-	const ivBlock = (i < 0) ? '' : viewSrc.slice(i, i + 400);
-	ok('2 秒轮询里只有 status 查询，不含 preflight',
-		ivBlock.includes('refreshStatus()') && ivBlock.indexOf('preflight') < 0,
-		'preflight 一次发 4 条 AT，放进轮询会占满串口');
-})();
-ok('前置检查期间轮询让路（pfBusy 守卫）',
-	(viewSrc.match(/if \(st\.pfBusy\) \{ return; \}/g) || []).length >= 2,
-	'runPreflight 入口复入保护 + 轮询让路，两处都要有');
-ok('preflight 在途去重：pfBusy 置位/复位齐全',
-	viewSrc.includes('st.pfBusy = true;') && viewSrc.includes('st.pfBusy = false;'));
-ok('preflight 失败不伪装成「检查完都好」（红线 23）',
-	viewSrc.includes("st.pf = res || { success: false, error: '无响应' }") &&
-	viewSrc.includes("st.pf = { success: false, error:"));
-ok('三态记号 ✓/✗/○ 区分「通不过」与「通了但体验差」',
-	viewSrc.includes("s.ok ? '✓' : (s.blocking ? '✗' : '○')"),
-	'判据必须是 blocking（挡住拨号），不是 core（是不是判据项）');
-(function () {
-	const i = viewSrc.indexOf('var pfCard = Mt5700.card(');
-	ok('可用性自检卡片挂在页面上（且按钮触发 runPreflight）',
-		i >= 0 && viewSrc.indexOf("Mt5700.ghostButton('检查能否拨号', function () { runPreflight(); })") >= 0);
-})();
+/* ★ 2 秒轮询只允许 status 一条：串口独占、rpcd 单线程（红线 63/70）。
+   历史上自检曾一次发 4 条 AT，若混进轮询就会每 2 秒把 LuCI 卡住一次。 */
+ok('2 秒轮询里只有 status 查询（不许夹带别的动作）',
+	(function () {
+		const i = viewSrc.indexOf('Mt5700.interval(2000');
+		const ivBlock = (i < 0) ? '' : viewSrc.slice(i, i + 400);
+		return ivBlock.includes('refreshStatus()') && ivBlock.indexOf("AtWs.call('info'") < 0;
+	})());
 
 /* ---------- 汇总 ---------- */
 

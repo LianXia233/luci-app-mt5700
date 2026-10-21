@@ -163,9 +163,7 @@ return L.view.extend({
 			 */
 			channelError: false,
 			ringEnabled: true,
-			backendOk: true,  /* false＝rpcd 没有 mt5700.call（后端未升级） */
-			pfBusy: false,    /* 前置检查进行中（它一次发 4 条 AT，要独占通道） */
-			pf: null          /* 前置检查结果；null＝还没查过 */
+			backendOk: true   /* false＝rpcd 没有 mt5700.call（后端未升级） */
 		};
 
 		/* 通话跟踪：进入非 idle 时建，回到 idle 时落一条记录 */
@@ -234,24 +232,6 @@ return L.view.extend({
 		statusCard._body.appendChild(statusErr);
 
 		body.appendChild(statusCard);
-
-		/* ---------- 可用性自检 ---------- */
-
-		/*
-		 * 移植自厂商固件的 voicePreparation 思路：拨号前先把前置条件摊开。
-		 * 但**只在用户点按钮时才发 AT** —— 一次 4 条查询约 0.5 秒，串口独占
-		 * 且 rpcd 单线程（红线 63/70），放进轮询就是每 2 秒阻塞一次 LuCI。
-		 */
-		var pfCard = Mt5700.card('可用性自检',
-			'拨不出去时先点这里：逐项检查 SIM 卡 / CS 域注册 / IMS 注册 / 来电显示，'
-			+ '直接指出卡在哪一环');
-		var pfHost = E('div');
-		pfCard._body.appendChild(pfHost);
-		var pfActions = E('div', { 'class': 'mt5700-panel-actions' });
-		pfCard._body.appendChild(pfActions);
-		var pfBtn = Mt5700.ghostButton('检查能否拨号', function () { runPreflight(); });
-		pfActions.appendChild(pfBtn);
-		body.appendChild(pfCard);
 
 		/* ---------- 拨号盘 ---------- */
 
@@ -341,87 +321,6 @@ return L.view.extend({
 		logActions.appendChild(Mt5700.ghostButton('清空', function () { clearLog(); }));
 
 		body.appendChild(logCard);
-
-		/* ---------- 可用性自检：执行与渲染 ---------- */
-
-		function renderPreflight() {
-			pfHost.innerHTML = '';
-			if (!st.pf) {
-				pfHost.appendChild(E('p', { 'class': 'mt5700-hint' },
-					'未检查。点「检查能否拨号」会连发 4 条只读查询（约 0.5 秒）——'
-					+ '串口独占、rpcd 单线程，所以只在你要用时才跑，不放进 2 秒轮询。'));
-				return;
-			}
-			if (!st.pf.success) {
-				pfHost.appendChild(E('p', { 'class': 'mt5700-hint' },
-					'检查失败：' + (st.pf.error || '未知原因')));
-				return;
-			}
-			var steps = st.pf.steps || [];
-			var rows = steps.map(function (s) {
-				/*
-				 * ✓ 通过 / ✗ 未过且**确实挡住了拨号** / ○ 未过但不影响能否拨
-				 * —— 三种记号把「能不能拨」和「体验好不好」分开，避免用户看到
-				 * 一片红就以为完全不能用。
-				 * ★ 判据是后端的 blocking 而不是 core：本机能出现「CS 域没注册、
-				 *   但 IMS 已注册」这种状态，此时 CS 那一行未过却**不是**阻断项
-				 *   （真机 2026-10-16 实测，见 ucode callPreflight 函数头注释）。
-				 */
-				return [
-					s.ok ? '✓' : (s.blocking ? '✗' : '○'),
-					s.title,
-					s.cmd,
-					(s.value == null ? '—' : String(s.value)),
-					s.hint || ''
-				];
-			});
-			pfHost.appendChild(Mt5700.table(['', '检查项', '命令', '读数', '说明'], rows,
-				{ striped: true }));
-
-		/*
-		 * 结论做成色块：绿灯「可以拨」/红灯「卡在哪一环」。
-		 * 自检的意义就在于一眼看到结论，而不是让人读四行表格自己归纳。
-		 * 样式走 .mt5700-verdict（亮暗双模），不再手写内联配色。
-		 */
-		var verdict, verdictCls;
-		if (st.pf.ready) {
-			verdict = '可以拨号。' + (st.pf.volte
-				? 'IMS 已注册，语音走 VoLTE/VoNR。'
-				: 'IMS 未注册，语音走电路域（CS）。');
-			verdictCls = 'mt5700-verdict is-ok';
-		} else {
-			verdict = '当前不能拨号：' + (st.pf.blocked || '前置条件未满足');
-			verdictCls = 'mt5700-verdict is-bad';
-		}
-		pfHost.appendChild(E('p', { 'class': verdictCls }, verdict));
-		}
-
-		function runPreflight() {
-			if (st.pfBusy) { return; }
-			st.pfBusy = true;
-			pfBtn.disabled = true;
-			/* 自检期间也挡住拨号：它一次发 4 条 AT，通道是独占的 */
-			applyGates();
-			pfHost.innerHTML = '';
-			pfHost.appendChild(E('p', { 'class': 'mt5700-hint' }, '检查中…（4 条只读 AT 查询）'));
-			AtWs.call('preflight').then(function (res) {
-				st.pfBusy = false;
-				pfBtn.disabled = false;
-				applyGates();
-				/*
-				 * ★ 「没响应」不能伪装成「检查完了都好」（红线 23）：
-				 *   无响应时给 success:false，渲染层画错误，不画空表。
-				 */
-				st.pf = res || { success: false, error: '无响应' };
-				renderPreflight();
-			}).catch(function () {
-				st.pfBusy = false;
-				pfBtn.disabled = false;
-				applyGates();
-				st.pf = { success: false, error: '调用失败（后端可能未升级）' };
-				renderPreflight();
-			});
-		}
 
 		/* ---------- 动作 ---------- */
 
@@ -899,7 +798,7 @@ return L.view.extend({
 	 *      注定失败的通道反复点（厂商：!s.status?.error）。
 	 *   ② 动作与当前通话态匹配 —— 空闲时"接听/挂断"不可点、通话中
 	 *      "拨打"不可点、只有接通后"静音"才有意义。
-	 *   ③ busy / pfBusy —— AT 通道独占，它俩在跑时谁都不许发。
+	 *   ③ busy —— 单次操作在跑时谁都不许再发（AT 通道独占）。
 	 *
 	 * ★ 判据用 phase 而不是后端 stage 令牌：phase 由前端从 CLCC 原始
 	 *   state 现算，老后端没有 stage 也能正确灰化；stage 是给徽标做
@@ -908,7 +807,7 @@ return L.view.extend({
 	 *   refreshStatus / renderInfo 全部转交过来，避免两套判据漂移。
 	 */
 	function applyGates() {
-		var blocked = st.busy || st.pfBusy || st.channelError;
+		var blocked = st.busy || st.channelError;
 		dialBtn.disabled = blocked || (st.phase !== 'idle');
 		answerBtn.disabled = blocked || (st.phase !== 'incoming');
 		hangupBtn.disabled = blocked || (st.phase === 'idle');
@@ -958,8 +857,6 @@ return L.view.extend({
 			Mt5700.interval(2000, function () {
 				/* 操作进行中不叠加查询：AT 通道是独占串行的 */
 				if (st.busy) { return; }
-				/* 前置检查一次发 4 条 AT，同样独占通道：它跑的时候让路 */
-				if (st.pfBusy) { return; }
 				refreshStatus();
 			}, page);
 		});

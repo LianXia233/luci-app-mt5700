@@ -3061,206 +3061,6 @@ function callLogClear() {
 	return { success: true, cleared: true };
 }
 
-/* ---------- 语音前置检查（preflight） ---------- */
-
-/*
- * 取应答里某前缀之后的**全部整数**（按出现顺序）。
- *   '^SIMSQ: 1,12'        → [1, 12]
- *   '+CREG: 2,5,"1A2B",..' → [2, 5]
- * 只认第一行（遇 \n / \r 收工）—— URC 可能跟在后面，不能把 URC 里的数字
- * 当成这条命令的参数。
- */
-function callNumsAfter(text, prefix) {
-	let out = [];
-	if (text == null || prefix == null) {
-		return out;
-	}
-	let k = index(text, prefix);
-	if (k < 0) {
-		return out;
-	}
-	let rest = substr(text, k + length(prefix));
-	let cur = '';
-	for (let i = 0; i <= length(rest); i++) {
-		let c = (i < length(rest)) ? substr(rest, i, 1) : '';
-		if (c == '' || c == '\n' || c == '\r') {
-			if (length(cur) > 0) { out[length(out)] = int(cur); }
-			break;
-		}
-		if (index('0123456789', c) >= 0) {
-			cur = cur + c;
-			continue;
-		}
-		if (length(cur) > 0) {
-			out[length(out)] = int(cur);
-			cur = '';
-		}
-	}
-	return out;
-}
-
-/*
- * 语音可用性前置检查（preflight）。
- *
- * ★ 这是做什么的：拨号失败时，用户最常见的困惑是「为什么打不出去」。
- *   ATD 只会回 OK / ERROR / NO CARRIER，把"到底是卡没就绪、还是没驻网、
- *   还是 IMS 没注册"全糊成一句失败。本动作把手册第 0/3 节那条链**逐项摊开**，
- *   直接告诉用户卡在哪一环。
- *
- * ★ 出处与移植说明（2026-10-16 从 H5000M「带电话功能beta」固件逆向）：
- *   厂商 modemwebui-server 有一套 voicePreparation 机制
- *   （prepareQuectelVoice / ensureVoiceSetting / voicePreparationSnapshot /
- *   setVoiceStage / cancelVoicePreparation），会在拨号前**写**模组配置：
- *       AT+QCALLCFG="voice_disable",0
- *       AT+QCFG="ims"
- *   这两条是 **Quectel 私有命令**。MT5700M-CN 手册第 238 条命令里没有它们，
- *   按红线 27（不向未定义命令盲发）与项目"只用手册内命令"的约定，
- *   **本实现不移植任何一条 Quectel 命令**——只移植"先检查再拨号"这个
- *   方法论，并把检查落到 MT5700M 手册里真实存在的**只读查询**上：
- *     AT^SIMSQ?（手册 6.6）  → sim_status 必须 = 12（11 只是"可接入网络"）
- *     AT+CREG? （手册 5.x）  → <stat> 必须 = 1 或 5（CS 域注册，语音前提）
- *     AT+CIREG?（手册 7.6）  → <reg_info> = 1 表示 IMS 已注册（VoLTE/VoNR 前提）
- *     AT+CLIP? （手册 5.8）  → <m> = 1 表示来电号码会上报（排查"看不到号码"）
- *   四条全是 `?` 结尾的查询：不发写命令、不改模组状态、无副作用，
- *   不触碰红线 22（禁自动下发周期上报类 AT）。
- *
- * ★ 成本与调用纪律：一次 4 条 ≈ 300~550 ms（真机单条 65~133 ms）。
- *   串口独占串行、rpcd 单线程（红线 63/70），所以**只在用户点按钮时跑**，
- *   绝不进 2s 轮询。
- *
- * ★ 与「读不到」的区分（红线 23）：第一步拿不到读数就直接 success:false，
- *   不返回一份全是 ✗ 的表格去冒充"检查做了但都不通"。
- */
-/*
- * 语音可用性前置检查（四条只读查询）。
- *
- * ★★ 判据「能不能拨」＝ **SIM 已初始化 且（CS 域 或 IMS 域 任一可用）**。
- *   为什么不是「CS 注册了才算」——2026-10-16 真机实测到一个反直觉状态：
- *     +CGREG: 1,1（PS 已注册，数据通）  +CEREG: 2,1（EPS 已注册）
- *     +CIREG: 1,1（IMS 已注册）         +CREG: 0,0（**CS 域没注册**）
- *   若按 CS 判，这台机器会被判成「不能打电话」，而它其实可以走 VoLTE/VoNR。
- *   手册 4.6 的 ^CCALLSTATE 给了决定性依据：<voice_domain> 明确有
- *   「1：IMS 域语音电话」这一档 ⇒ **语音呼叫并不要求 CS 注册**。
- *   （红线 42：两个数字打架时必须回真机量一次；红线 49：判定要带对照组。）
- * ★ ^SIMSQ 的 <sim_status> 判据按手册 6.6.3 原文校准：
- *   11 = 卡初始化完成（可接入网络）、12 = 卡初始化完成（短信和电话本可接入）
- *   —— 12 说的是**短信/电话本**，不是「才能打电话」；11 与 12 都算已初始化。
- *   之前把 12 当成语音门槛是过度解读，11 会被误判成不可用。
- * ★ AT+CLIP? 本模组**不支持查询**：实测回 +CME ERROR: UNKNOWN，而
- *   AT+CLIP=? 正常回 +CLIP: (0,1)。故该项只作提示、不参与 ready，
- *   并且把「命令被拒」与「读到了但没有此项」分开报（红线 23）。
- */
-function callPreflight() {
-	let steps = [];
-
-	/* --- 1) SIM 卡：^SIMSQ: <mode>,<sim_status>（手册 6.6） --- */
-	let r1 = rpcCall('at', { cmd: 'AT^SIMSQ?' });
-	if (r1 == null) {
-		return { success: false, action: 'preflight', error: 'AT 通道无响应' };
-	}
-	if (!r1.success) {
-		return {
-			success: false, action: 'preflight',
-			error: (r1.error || 'AT 通道不可用')
-		};
-	}
-	let v1 = callNumsAfter(r1.data, '^SIMSQ:');
-	let simStatus = (length(v1) >= 2) ? v1[1] : null;
-
-	/* --- 2) CS 域注册：+CREG: <n>,<stat>，1=本地 5=漫游（手册 5.4） --- */
-	let r2 = rpcCall('at', { cmd: 'AT+CREG?' });
-	let v2 = (r2 != null && r2.success) ? callNumsAfter(r2.data, '+CREG:') : [];
-	let stat = (length(v2) >= 2) ? v2[1] : null;
-
-	/* --- 3) IMS 注册：+CIREG: <n>,<reg_info>，reg_info=1 表示已注册（手册 7.6） --- */
-	let r3 = rpcCall('at', { cmd: 'AT+CIREG?' });
-	let v3 = (r3 != null && r3.success) ? callNumsAfter(r3.data, '+CIREG:') : [];
-	let regInfo = (length(v3) >= 2) ? v3[1] : null;
-
-	/* --- 4) 来电号码显示：+CLIP: <n>,<m>（手册 5.8） --- */
-	let r4 = rpcCall('at', { cmd: 'AT+CLIP?' });
-	let v4 = (r4 != null && r4.success) ? callNumsAfter(r4.data, '+CLIP:') : [];
-	let clip = (length(v4) >= 2) ? v4[1] : null;
-	let clipErr = (r4 != null && r4.error != null) ? r4.error : '';
-
-	/* 判据（见函数头注释的真机依据） */
-	let simOk = (simStatus == 11 || simStatus == 12);
-	let csOk = (stat == 1 || stat == 5);
-	let imsOk = (regInfo == 1);
-	let netOk = (csOk || imsOk);
-	let clipOk = (clip == 1);
-
-	/* SIM 状态文案：取值与措辞按手册 6.6.3 原文，不自己加戏 */
-	let simText = null;
-	if (simStatus == 0) { simText = '卡不在位'; }
-	else if (simStatus == 1) { simText = '卡已插入但尚未初始化'; }
-	else if (simStatus == 2) { simText = '卡被 PIN/PUK 锁'; }
-	else if (simStatus == 10) { simText = '卡文件正在初始化'; }
-	else if (simStatus == 11) { simText = '已初始化（可接入网络）'; }
-	else if (simStatus == 12) { simText = '已初始化（短信与电话本可接入）'; }
-	else if (simStatus == 98) { simText = '卡物理失效（PUK 锁死或卡失效）'; }
-	else if (simStatus == 99) { simText = '卡已移除'; }
-	else if (simStatus == 100) { simText = '卡错误（初始化失败）'; }
-
-	steps[length(steps)] = {
-		key: 'sim', title: 'SIM 卡就绪', cmd: 'AT^SIMSQ?',
-		ok: simOk, core: true, blocking: !simOk,
-		value: (simStatus == null) ? '未识别' : ('sim_status=' + simStatus),
-		hint: simOk ? ('SIM 卡' + simText + '，语音业务可用')
-			: ((simText == null)
-				? '没读到 SIM 卡状态（卡未插好，或模组未识别）'
-				: ('SIM 卡' + simText + '，此时无法建立语音呼叫'))
-	};
-	steps[length(steps)] = {
-		key: 'csreg', title: 'CS 域已注册', cmd: 'AT+CREG?',
-		ok: csOk, core: true, blocking: !netOk,
-		value: (stat == null) ? '未识别' : ('stat=' + stat),
-		hint: csOk ? (stat == 5 ? '已注册到漫游网络，电路域语音可用'
-				: '已注册到本地网络，电路域语音可用')
-			: ((stat == null) ? '没读到 CS 域注册状态'
-				: (imsOk ? 'CS 域未注册，但 IMS 已注册：语音走 VoLTE/VoNR，不影响拨号'
-					: ('CS 域未注册（stat=' + stat + '，需为 1 或 5）')))
-	};
-	steps[length(steps)] = {
-		key: 'ims', title: 'IMS 域已注册', cmd: 'AT+CIREG?',
-		ok: imsOk, core: true, blocking: !netOk,
-		value: (regInfo == null) ? '未识别' : ('reg_info=' + regInfo),
-		hint: imsOk ? 'IMS 已注册，VoLTE/VoNR 可用'
-			: ((regInfo == null) ? '模组未返回 IMS 注册状态'
-				: (csOk ? 'IMS 未注册，但 CS 域已注册：语音走电路域，不影响拨号'
-					: ('IMS 未注册（reg_info=' + regInfo + '，需为 1）')))
-	};
-	steps[length(steps)] = {
-		key: 'clip', title: '来电号码显示', cmd: 'AT+CLIP?',
-		ok: clipOk, core: false, blocking: false,
-		value: (clip == null) ? '未识别' : ('m=' + clip),
-		hint: clipOk ? '来电会带上主叫号码'
-			: ((clipErr != '')
-				? ('本模组不支持查询 CLIP（' + clipErr + '），读数不可用；不影响能否拨号')
-				: ((clip == null) ? '读不到 CLIP 设置（不影响能否拨号）'
-					: ('未开启：来电可能只显示「未知号码」，可用 AT+CLIP=1 打开')))
-	};
-
-	/* 汇总：SIM 已就绪，且 CS 域或 IMS 域至少一个可用 */
-	let ready = (simOk && netOk);
-	let blocked = '';
-	if (!simOk) {
-		blocked = (simStatus == null) ? 'SIM 卡状态读不到'
-			: ('SIM 卡未就绪（sim_status=' + simStatus + '）');
-	} else if (!netOk) {
-		blocked = '未注册到任何语音承载域（CS 与 IMS 都不可用）';
-	}
-
-	return {
-		success: true, action: 'preflight',
-		ready: ready,
-		volte: imsOk,
-		cs: csOk,
-		blocked: blocked,
-		steps: steps
-	};
-}
-
 return {
 	mt5700: {
 		at: {
@@ -3677,20 +3477,17 @@ return {
 		 *     mute     AT+CMUT=0/1    （麦克风静音，通话中生效）
 		 *     dtmf     AT+VTS=<d>     （通话中送 DTMF，手册 4.7）
 		 *     status   AT+CLCC        （手册 5.11，返回全部在途呼叫，附 stage 令牌）
-		 *     preflight SIMSQ? + CREG? + CIREG? + CLIP?
-		 *                             （语音可用性前置检查，四步全是只读查询）
 		 *     info     CMUT? + CLVL?  （麦克风静音 + 扬声器音量，按需查询不进轮询）
 		 *     loglist / logadd / logclear
 		 *                             （通话记录，落 /etc/mt5700/call-log.json）
 		 *
-		 * ★★ 本方法与前置检查的**方法论来源**：H5000M「带电话功能beta」
+		 * ★★ 本方法的**方法论来源**：H5000M「带电话功能beta」
 		 *   官方固件里的 modemwebui-server（Go，2026-10-16 逆向）。它把
 		 *   通话拆成：voicePreparation（拨号前准备）+ 状态机 + 通话记录 +
 		 *   跨页来电通知，前端只做展示。移植时**只搬结构与语义，不搬命令**：
 		 *   厂商的 voicePreparation 写的是 Quectel 私有的
 		 *   AT+QCALLCFG="voice_disable",0 与 AT+QCFG="ims"，MT5700M-CN
 		 *   手册里没有这两条 —— 盲目照搬就是给模组发未定义命令（红线 27）。
-		 *   故本实现把"先准备/先检查"落地为四条手册内只读查询（见 callPreflight）。
 		 * ★ 状态机由前端轮询 status 驱动：CLCC 的 <state> 字段给全了
 		 *   dialing/alerting/active/incoming，不需要改 Rust、不需要开任何
 		 *   周期上报（^CURC 掩码未真机验证前不启用，避免开错位把
@@ -3713,9 +3510,6 @@ return {
 				}
 				if (action == 'status') {
 					return callStatus();
-				}
-				if (action == 'preflight') {
-					return callPreflight();
 				}
 				if (action == 'info') {
 					return callLineInfo();
@@ -3789,7 +3583,7 @@ return {
 				}
 				return {
 					success: false,
-					error: '未知 action（支持 dial/answer/hangup/mute/dtmf/status/preflight/info/loglist/logadd/logclear）'
+					error: '未知 action（支持 dial/answer/hangup/mute/dtmf/status/info/loglist/logadd/logclear）'
 				};
 			}
 		}

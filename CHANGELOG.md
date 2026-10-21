@@ -5,6 +5,24 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.27] - 2026-10-21
+
+### 移除（用户判定「语音通话 - 可用性自检」是无用功能，直接删除）
+
+- **删除「可用性自检」卡片与 `preflight` 全链路**。四步只读查询（SIMSQ/CREG/
+  CIREG/CLIP）+ 结论灯的定位是「拨不出去时指出卡在哪一环」，但本机拨号一直
+  正常，卡片只是每次都要读一遍的噪音。按红线 62「下线一个功能要四处同步清」：
+  · 前端 `voice_call.js`：卡片、`renderPreflight` / `runPreflight`、
+    `st.pf` / `st.pfBusy`、`applyGates` 与 2s 轮询里的 pfBusy 守卫全删；
+  · ucode `mt5700.uc`：`callPreflight()`（约 160 行含判据注释）、只被它用的
+    `callNumsAfter()`、`call` 分发分支、未知 action 文案里的 `preflight` 全删；
+  · `rpc.js#fetchCall`：`ready` / `volte` / `blocked` / `steps` 四字段透传与
+    两条失败分支里的对应默认值全删（`stage` 保留 —— 徽标还在用）；
+  · 测试：`voice-call-contract` 的 preflight 段换成**反向断言**（函数/分支/
+    卡片/字段都不许长回来），`call-passthrough-contract` 同理。
+- **保留的教训**：厂商 voicePreparation 的 Quectel 私有命令禁令（`AT+QCALLCFG`
+  / `AT+QCFG` 只许出现在注释里）继续由契约测试守着 —— 删功能不等于删纪律。
+
 ## [2.4.26] - 2026-10-16
 
 ### 变更（UI 全局优化，用户反馈「这个 UI 不好看，整个插件也要优化」）
