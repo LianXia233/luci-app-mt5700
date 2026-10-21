@@ -35,6 +35,22 @@ var rpcEvents = L.rpc.declare({
 });
 
 /*
+ * 语义化短信接口。
+ *
+ * 与 `at` 透传的根本差别：一个动作 = 后端一次事务（全程独占通道、享有最高
+ * 优先级），而不是前端连发几条各自排队的 AT 命令。多步骤流程（发送要
+ * CMGF→CSCA→CMGS×N，批量删除要 CMGD×N）因此不会被后台巡检从中间插进来。
+ *
+ * params 里每一项都是数据而非命令片段，ucode 侧逐项取值，不存在 AT 注入面。
+ */
+var rpcSms = L.rpc.declare({
+	object: 'mt5700',
+	method: 'sms',
+	params: ['action', 'destination', 'message', 'smsc', 'mem', 'indices', 'session_id', 'ttl_ms', 'dedup_key', 'enable'],
+	expect: {}
+});
+
+/*
  * 接口累计字节数（实时速率数据源）。
  * 由 mt5700.uc 的 netrate 方法直接读 /sys/class/net/<dev>/statistics/，
  * 全程不下发任何 AT 命令，不占用 AT 通道、不干扰模组。
@@ -511,6 +527,91 @@ ATClient.prototype.sendCommand = function (command, timeoutMs) {
 		});
 	});
 	return this.commandQueue;
+};
+
+/*
+ * 短信动作的默认预算（毫秒）。
+ *
+ * 必须与后端的预算同量级且略大（让后端先出结论）：
+ *   send / purge  —— 后端排队(10s) + 总预算(60s)，给 72s
+ *   list / 存储类 —— 后端排队(10s) + 列表(20s)，给 42s
+ *   其余          —— 走普通命令预算
+ */
+var SMS_ACTION_TIMEOUT_MS = {
+	send: 72000,
+	purge: 72000,
+	list: 42000,
+	capacity: 42000,
+	set_storage: 42000,
+	get_smsc: 42000,
+	set_smsc: 42000,
+	power: 72000,
+	set_ims: 42000,
+	get_ims: 42000
+};
+
+/*
+ * 调用一个短信动作。
+ *
+ * 说明：这里**不走** sendCommand 的全局命令队列 —— 短信动作的排队与互斥由
+ * 后端的事务锁负责，前端再排一次只会让「后端已经在跑」的请求被额外拖延。
+ * 但会尊重 AT 通道的整体不可用/熔断状态，后端挂掉时不会白白等满预算。
+ */
+ATClient.prototype.sms = function (action, params) {
+	var self = this;
+	params = params || {};
+	if (self.state === 'degraded' || self.state === 'error' || self.state === 'disconnected') {
+		return Promise.resolve({
+			success: false,
+			error: self.error || '未连接到调制解调器',
+			cause: 'not-connected'
+		});
+	}
+	if (self.circuitOpenUntil > Date.now()) {
+		return Promise.resolve({
+			success: false,
+			error: 'AT 通道连续失败，已暂停请求，请稍后重试',
+			cause: 'circuit-open'
+		});
+	}
+	if (self.backendKnownDown) {
+		return Promise.resolve({
+			success: false,
+			error: self.backendDownError || 'Rust 后端无应答，请稍后重试',
+			cause: 'circuit-open'
+		});
+	}
+	var budget = SMS_ACTION_TIMEOUT_MS[action] || self.commandTimeout;
+	var req = rpcSms(
+		action,
+		params.destination,
+		params.message,
+		params.smsc,
+		params.mem,
+		params.indices,
+		params.session_id,
+		params.ttl_ms,
+		params.dedup_key,
+		params.enable === true || params.enable === '1' || params.enable === 'true'
+	);
+	return withTimeout(req, budget, '短信操作超时（模组可能正忙或正在重连，请稍后重试）')
+		.then(function (resp) {
+			resp = resp || {};
+			if (resp.success === false) {
+				if (resp.cause === 'circuit-open') {
+					self.markBackendDown('circuit-open', resp.error);
+				}
+				self.noteCommandFailure(resp.cause);
+				return { success: false, error: resp.error || '短信操作失败', cause: resp.cause };
+			}
+			self.noteCommandSuccess();
+			self.markBackendUp();
+			return { success: true, result: resp };
+		})
+		.catch(function (err) {
+			self.noteCommandFailure('timeout');
+			return { success: false, error: (err && err.message) || '短信操作失败', cause: 'timeout' };
+		});
 };
 
 /*

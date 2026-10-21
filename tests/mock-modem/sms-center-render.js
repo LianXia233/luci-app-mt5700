@@ -54,22 +54,6 @@ function loadParse(ls) {
 	return sandbox.module.exports;
 }
 
-/* 装载真实的 smsEncode.js（剥 LuCI 语法糖）。
- * 发送流程必须用真编码器：stub 掉的 buildSubmitParts 会让「发不出短信」
- * 这类 bug 从测试的缝隙里溜过去（issue #19 正是如此）。 */
-function loadSmsEncode() {
-	const src = fs.readFileSync(path.join(RES, 'at-webserver/smsEncode.js'), 'utf8');
-	let code = src.replace("'require baseclass';", '').replace(/^'use strict';\s*$/m, '');
-	const tail = code.indexOf('var SmsEncodeClass = L.Class.extend(SmsEncode);');
-	if (tail < 0) throw new Error('smsEncode.js 尾部包装未找到，剥离逻辑需要更新');
-	code = code.slice(0, tail) + '\nmodule.exports = SmsEncode;\n';
-	const sandbox = { module: { exports: {} }, console: console };
-	vm.createContext(sandbox);
-	vm.runInContext(code, sandbox, { filename: 'smsEncode.js' });
-	return sandbox.module.exports;
-}
-
-const SmsEncode = loadSmsEncode();
 
 	function makeLocalStorage(initial) {
 	/* 允许预置内容：验证「模组有该条、缓存也有」时时间戳是否被正确吸收 */
@@ -176,11 +160,36 @@ function loadView(Parse, ls, opts) {
 		.replace(/^'require [^']*';\s*$/gm, '')
 		.replace(/^'use strict';\s*$/m, '');
 
-	const calls = { cmds: [], subscribed: [] };
+	const calls = { cmds: [], subscribed: [], smsActions: [], smsCalls: [] };
+
+	/*
+	 * 后端 `sms.list` 返回的条目：结构与 Rust 端一致。
+	 * 时间直接用夹具给出的显示串 —— 本测试要钉的是「后端给什么、界面显示什么」，
+	 * 而不是再算一遍时区（时区由 pdu.rs 的单元测试覆盖）。
+	 */
+	function backendEntries() {
+		return pduList.map(function (it) {
+			const d = Parse.decodeIncomingPdu(it.pdu);
+			return {
+				index: it.index,
+				stat: d.direction === 'received' ? 1 : 3,
+				direction: d.direction,
+				number: d.number,
+				content: d.content,
+				time: it.display,
+				timeApprox: !!d.timeApprox,
+				concat: null,
+				error: null
+			};
+		});
+	}
 
 	const documentStub = {
 		createElement: (tag) => new Node(tag),
-		body: new Node('body')
+		body: new Node('body'),
+		hidden: false,
+		/* 短信中心会订阅 visibilitychange（页面隐藏即释放前台会话） */
+		addEventListener: (t, fn) => { (documentStub._l = documentStub._l || {})[t] = fn; }
 	};
 
 	const toasts = [];
@@ -189,7 +198,12 @@ function loadView(Parse, ls, opts) {
 		primaryButton: (label) => E('button', { class: 'mt5700-btn' }, label),
 		dangerButton: (label) => E('button', { class: 'mt5700-btn mt5700-btn-danger' }, label),
 		ghostButton: (label) => E('button', { class: 'mt5700-btn' }, label),
-		button: (label) => E('button', { class: 'mt5700-btn' }, label),
+		/* 删除按钮靠第二个参数挂 click，桩必须接住，否则删除流程测不到 */
+		button: (label, fn) => {
+			const b = E('button', { class: 'mt5700-btn' }, label);
+			if (typeof fn === 'function') b.addEventListener('click', fn);
+			return b;
+		},
 		empty: (text) => E('div', { class: 'mt5700-empty' }, text),
 		panelActions: function () {
 			const wrap = E('div', { class: 'mt5700-panel-actions' });
@@ -200,7 +214,8 @@ function loadView(Parse, ls, opts) {
 		error: (t) => { toasts.push({ kind: 'error', text: String(t) }); },
 		info: (t) => { toasts.push({ kind: 'info', text: String(t) }); },
 		success: (t) => { toasts.push({ kind: 'success', text: String(t) }); },
-		confirm: () => {}
+		/* 真机上 confirm 等用户点确定；这里直接确认，让删除流程跑完 */
+		confirm: (msg, cb) => { if (typeof cb === 'function') cb(); }
 	};
 
 	const Ui = {
@@ -214,6 +229,7 @@ function loadView(Parse, ls, opts) {
 	 * 返回 undefined 时走下面的默认应答（CMGL / CPMS 真实样本，其余 OK）。
 	 */
 	const options = opts || {};
+	const STORAGE = { used: 6, total: 50, mem1: 'SM', mem2: 'SM', mem3: 'MT' };
 	const AtWs = {
 		client: {
 			sendCommand: (cmd) => {
@@ -226,11 +242,55 @@ function loadView(Parse, ls, opts) {
 				/*
 				 * 实机（MT5700M-CN）只认**标准** `AT+CPMS?`；发私有前缀的
 				 * `AT^CPMS?` 直接回 ERROR。这里刻意让私有写法失败 ——
-				 * 前端一旦退回 `^` 前缀，存储用量断言就会立刻挂掉。
+				 * 后端一旦退回 `^` 前缀，存储用量断言就会立刻挂掉。
 				 */
 				if (cmd === 'AT+CPMS?') return Promise.resolve({ success: true, data: '+CPMS: "SM",6,50,"SM",6,50,"MT",0,50' });
 				if (cmd === 'AT^CPMS?') return Promise.resolve({ success: false, error: 'ERROR' });
 				return Promise.resolve({ success: true, data: 'OK' });
+			},
+			/*
+			 * 语义化短信接口：一个动作 = 后端一次事务。
+			 * 条目由夹具生成，结构与 Rust `sms.list` 的返回一致。
+			 */
+			sms: (action, params) => {
+				calls.smsActions.push(action);
+				calls.smsCalls.push({ action: action, params: params || {} });
+				if (options.smsRespond) {
+					const r = options.smsRespond(action, params || {});
+					if (r !== undefined) return Promise.resolve(r);
+				}
+				if (action === 'list') {
+					return Promise.resolve({ success: true, result: {
+						entries: backendEntries(), fetchedAt: Date.now(), totalLines: pduList.length
+					} });
+				}
+				if (action === 'capacity') {
+					return Promise.resolve({ success: true, result: { storage: STORAGE, memFull: false } });
+				}
+				if (action === 'session_open') {
+					return Promise.resolve({ success: true, result: { session_id: 1, ttl_ms: 90000 } });
+				}
+				if (action === 'session_renew') {
+					return Promise.resolve({ success: true, result: { renewed: true, sessions: 1 } });
+				}
+				if (action === 'session_release') {
+					return Promise.resolve({ success: true, result: { released: true, sessions: 0 } });
+				}
+				if (action === 'delete') {
+					const n = ((params || {}).indices || []).length;
+					return Promise.resolve({ success: true, result: { requested: n, deleted: n, failed: [] } });
+				}
+				if (action === 'send') {
+					return Promise.resolve({ success: true, result: {
+						outcome: 'accepted', encoding: 'UCS2', message: '模组已确认提交',
+						parts: [{ partNumber: 1, partsCount: 1, outcome: 'accepted', detail: '+CMGS: 1' }],
+						storage: STORAGE
+					} });
+				}
+				if (action === 'purge' || action === 'set_storage' || action === 'get_smsc' || action === 'set_smsc') {
+					return Promise.resolve({ success: true, result: { storage: STORAGE, smsc: '+8613800755500' } });
+				}
+				return Promise.resolve({ success: false, error: '未知短信动作 ' + action });
 			},
 			subscribe: (fn) => { calls.subscribed.push(fn); },
 			unsubscribe: () => {}
@@ -238,13 +298,13 @@ function loadView(Parse, ls, opts) {
 	};
 
 	const factory = new Function(
-		'L', 'E', 'Mt5700', 'Ui', 'Parse', 'AtWs', 'SmsEncode', 'document', 'localStorage', 'window', 'console',
+		'L', 'E', 'Mt5700', 'Ui', 'Parse', 'AtWs', 'document', 'localStorage', 'window', 'console',
 		body
 	);
 
 	const L = { view: { extend: (def) => def } };
 	const view = factory(
-		L, E, Mt5700, Ui, Parse, AtWs, SmsEncode, documentStub, ls || makeLocalStorage(), {}, console
+		L, E, Mt5700, Ui, Parse, AtWs, documentStub, ls || makeLocalStorage(), {}, console
 	);
 	const page = view.render.call(view);
 	return { page, calls, toasts };
@@ -275,15 +335,17 @@ async function main() {
 	await new Promise((r) => setImmediate(r));
 	await new Promise((r) => setImmediate(r));
 
-	check('确实请求了短信列表', calls.cmds.indexOf('AT+CMGL=4') >= 0, true);
+	check('确实请求了短信列表（语义化接口）', calls.smsActions.indexOf('list') >= 0, true);
+	check('不再自行下发 AT+CMGL=4（改由后端事务执行）', calls.cmds.indexOf('AT+CMGL=4') < 0, true);
 	check('订阅了新短信事件', calls.subscribed.length, 1);
+	/* 进入页面即申请前台短信模式：后台巡检自此让路 */
+	check('进入页面申请了前台短信模式会话', calls.smsActions.indexOf('session_open') >= 0, true);
 
 	/* 存储用量：实机只认标准 `AT+CPMS?`（私有 `AT^CPMS?` 回 ERROR 导致用量永远 0 / 0）。
 	   这里同时断言「用了标准写法」与「没用私有写法」，防止前缀再次写错 */
 	const hints = findAll(page._body, 'mt5700-hint');
-	check('请求了标准 CPMS 命令', calls.cmds.indexOf('AT+CPMS?') >= 0, true);
-	check('未使用私有 ^CPMS 前缀', calls.cmds.indexOf('AT^CPMS?') < 0, true);
-	check('存储用量按 +CPMS 应答解析', hints.length ? hints[0].textContent : null, '存储：6 / 50');
+	check('存储用量走后端 capacity（一次真实 AT+CPMS?）', calls.smsActions.indexOf('capacity') >= 0, true);
+	check('存储用量按后端读数渲染', hints.length ? hints[0].textContent : null, '存储：6 / 50');
 
 	const contactItems = findAll(page._body, 'mt5700-sms-item');
 	const contactNumbers = contactItems.map((n) => n.childNodes[0].textContent);
@@ -354,56 +416,52 @@ async function main() {
 	check('夹具期望值确实是北京时间口径', pduList[0].display.slice(0, 2),
 		String(fixtures.beijingParts(-32).year).padStart(2, '0'));
 
-	console.log('\n=== 6. 缓存里有本机发送时刻 → 补给模组那条（不丢时间信息）===');
+	console.log('\n=== 6. 本地缓存不再混入列表（无缓存回归） ===');
 	/*
-	 * 模组存回来的 SMS-SUBMIT 不含发送时刻，而缓存那条是本机发送当时打的时间戳
-	 * —— 缓存才是唯一带准确时间的一份。早先的实现去重时保留模组那份、丢掉缓存
-	 * 那份，等于把时间信息一并扔了。这里预置一条缓存记录验证它被「吸收」：
-	 * 气泡仍是 3 条（不重复），且发出那条拿到了本机时刻。
+	 * 旧实现把 localStorage 里的「已发记录」合并进列表：那些条目没有模组序号，
+	 * 删除时按着不存在的 index 下发一堆 AT+CMGD，全是 ERROR；模组里删掉的短信
+	 * 还会继续显示在界面上。现在列表一律以模组实时返回为准 ——
+	 * 这里预置一条同号码同正文的本地记录，断言它**不会**被合并进来。
 	 */
-	/*
-	 * 夹具里这条发出的短信实际发生在「现在 − 30 分钟」（见 sms-fixtures.js 的
-	 * defs 里 index 2 的 offset），而它的 SUBMIT PDU 不带发送时刻 ——
-	 * 这个真实时刻正是本机缓存要补上去的那份信息。
-	 */
-	const bp = fixtures.beijingParts(-30);
-	const pad2 = (n) => String(n).padStart(2, '0');
-	const cachedTime = `${pad2(bp.year)}/${pad2(bp.month)}/${pad2(bp.day)},`
-		+ `${pad2(bp.hour)}:${pad2(bp.minute)}:${pad2(bp.second)}`;
-	const ls2 = makeLocalStorage();
-	ls2.setItem(Parse.SMS_CACHE_KEY, JSON.stringify([{
-		index: -Date.now(),
-		content: pduList[1].content,
-		number: pduList[1].number,
-		time: cachedTime,
-		type: 'sent'
-	}]));
-	const Parse2 = loadParse(ls2);
-	const r2 = loadView(Parse2, ls2);
-	await new Promise((r) => setImmediate(r));
-	await new Promise((r) => setImmediate(r));
-	const items2 = findAll(r2.page._body, 'mt5700-sms-item');
-	const nums2 = items2.map((n) => n.childNodes[0].textContent);
-	items2[nums2.indexOf(pduList[1].number)].dispatch('click');
-	const b2 = findAll(r2.page._body, 'mt5700-sms-bubble');
-	check('缓存被吸收，气泡仍是 3 条（不重复显示）', b2.length, 3);
-	check('方向序列仍是 收-发-收', dirsOf(b2), 'RSR');
-	check('发出那条拿到了本机发送时刻（不再是「时间未知」）',
-		b2[1].childNodes[1].textContent, cachedTime.split(',')[1]);
+	{
+		const bp = fixtures.beijingParts(-30);
+		const pad2 = (n) => String(n).padStart(2, '0');
+		const cachedTime = `${pad2(bp.year)}/${pad2(bp.month)}/${pad2(bp.day)},`
+			+ `${pad2(bp.hour)}:${pad2(bp.minute)}:${pad2(bp.second)}`;
+		const ls2 = makeLocalStorage();
+		ls2.setItem(Parse.SMS_CACHE_KEY, JSON.stringify([{
+			index: -Date.now(),
+			content: pduList[1].content,
+			number: pduList[1].number,
+			time: cachedTime,
+			type: 'sent'
+		}]));
+		const Parse2 = loadParse(ls2);
+		const r2 = loadView(Parse2, ls2);
+		await new Promise((r) => setImmediate(r));
+		await new Promise((r) => setImmediate(r));
+		const items2 = findAll(r2.page._body, 'mt5700-sms-item');
+		const nums2 = items2.map((n) => n.childNodes[0].textContent);
+		check('本地缓存不再被合并进列表（会话数仍是 3）', items2.length, 3);
+		items2[nums2.indexOf(pduList[1].number)].dispatch('click');
+		const b2 = findAll(r2.page._body, 'mt5700-sms-bubble');
+		check('气泡仍是模组的 3 条（缓存不制造重复）', b2.length, 3);
+		check('方向序列仍是 收-发-收', dirsOf(b2), 'RSR');
+		/* 模组 SUBMIT 不含发送时刻时如实标注，不再拿本地时间冒充 */
+		check('模组没有时刻的那条仍如实标「时间未知」', b2[1].childNodes[1].textContent, '时间未知');
+	}
 
-	console.log('\n=== 7. 发送流程：两段式 CMGS + Ctrl+Z 提交（issue #19 回归） ===');
+	console.log('\n=== 7. 发送流程：走语义化接口，按三档结论处理 ===');
 	/*
-	 * bug 背景：旧实现把 `AT+CMGS=<长度>\r<PDU>` 拼成一条命令，后端收到
-	 * `> ` 提示符就认为应答结束，前端显示「发送成功」——但 Ctrl+Z(0x1A)
-	 * 从未下发，模组等在输入态，短信根本没发出去。
-	 *
-	 * 这里钉住正确协议：报长度与交 PDU 必须是**两条独立命令**，且第二条
-	 * 以 0x1A 结尾；任何一条命令里都不允许再出现 `\r` 拼 PDU 的旧写法。
+	 * 与旧实现的差别：
+	 *   1) 前端不再自己拼 `AT+CMGS=<长度>\r<PDU>`，也不再关心 PDU 编码 ——
+	 *      那是后端事务内部的事（字节级正确性由 Rust 侧的单测钉住）；
+	 *   2) 结果按 accepted / rejected / unknown 三档处理：unknown 必须明确
+	 *      提示「可能已发走，不要重复点击」，且前端绝不自动重发。
 	 */
 	const SEND_NUMBER = '13900139000';
 	const SEND_TEXT = '回归测试短信 hello';
 
-	/* 选中联系人 → 填输入框 → 派发回车，等 Promise 链完全落地 */
 	async function triggerSend(r, number, text) {
 		const items = findAll(r.page._body, 'mt5700-sms-item');
 		const nums = items.map((n) => n.childNodes[0].textContent);
@@ -417,102 +475,87 @@ async function main() {
 		return ta;
 	}
 
-	/* 场景 A：正常两段式。CMGS 报长度回 `> ` 提示符，PDU+0x1A 回 +CMGS/OK */
+	function sendCallOf(r) {
+		return r.calls.smsCalls.filter((c) => c.action === 'send')[0] || null;
+	}
+
+	/* 场景 A：模组确认 → 成功，输入框清空，刷新列表 */
 	{
 		const lsA = makeLocalStorage();
-		const ParseA = loadParse(lsA);
-		const respond = (cmd) => {
-			if (cmd === 'AT+CMGF?') return { success: true, data: '+CMGF: 0\r\nOK' };
-			if (cmd === 'AT+CSCA?') return { success: true, data: '+CSCA: "+8613800755500",145\r\nOK' };
-			if (/^AT\+CMGS=\d+$/.test(cmd)) return { success: true, data: '>' };
-			if (cmd.charCodeAt(cmd.length - 1) === 26) return { success: true, data: '+CMGS: 1\r\nOK' };
-			return undefined;
-		};
-		const rA = loadView(ParseA, lsA, { respond: respond });
+		const rA = loadView(loadParse(lsA), lsA);
 		await new Promise((r) => setImmediate(r));
 		await new Promise((r) => setImmediate(r));
 		const ta = await triggerSend(rA, SEND_NUMBER, SEND_TEXT);
 
-		const cmds = rA.calls.cmds;
-		check('先查模式再报长度：存在 AT+CMGS=<十进制长度>',
-			cmds.some((c) => /^AT\+CMGS=\d+$/.test(c)), true);
-		const submit = cmds.filter((c) => c.charCodeAt(c.length - 1) === 26);
-		check('PDU 提交是独立命令且以 Ctrl+Z(0x1A) 结尾', submit.length, 1);
-		check('提交内容去掉 0x1A 后是纯十六进制 PDU',
-			submit.length === 1 && /^[0-9A-F]+$/.test(submit[0].slice(0, -1)), true);
-		check('没有任何命令把 PDU 用 \r 拼进 CMGS（旧 bug 拼法）',
-			cmds.some((c) => c.indexOf('\r') >= 0), false);
+		const call = sendCallOf(rA);
+		check('发送走 sms(send) 而不是拼 AT 命令', !!call, true);
+		check('收件人与正文作为参数传递', call && call.params.destination, SEND_NUMBER);
+		check('正文原样传递', call && call.params.message, SEND_TEXT);
+		check('带去重键（防重复点击）', !!(call && call.params.dedup_key), true);
 		check('上报了发送成功', rA.toasts.some((t) => t.kind === 'success'), true);
 		check('没有误报错误', rA.toasts.some((t) => t.kind === 'error'), false);
 		check('输入框已清空', ta.value, '');
-		const sentBubbles = findAll(rA.page._body, 'mt5700-sms-bubble')
-			.filter((b) => b.className.indexOf('mt5700-sms-bubble-sent') >= 0);
-		check('会话里出现该条已发消息（右侧气泡）',
-			sentBubbles.some((b) => b.childNodes[0].textContent === SEND_TEXT), true);
-		check('已发消息写入 localStorage 缓存',
-			ParseA.getCachedSentMessages().some((m) => m.content === SEND_TEXT && m.number === SEND_NUMBER), true);
+		/* 成功后立即用模组真实数据刷新界面 */
+		check('发送后回读了列表', rA.calls.smsActions.filter((a) => a === 'list').length >= 2, true);
+		check('发送后回读了容量', rA.calls.smsActions.indexOf('capacity') >= 0, true);
 	}
 
-	/* 场景 B：假成功防护。提交只回 `> `（旧 bug 的应答形态）必须判失败 */
+	/* 场景 B：模组明确拒绝 → 报错，不写本地缓存 */
 	{
 		const lsB = makeLocalStorage();
 		const ParseB = loadParse(lsB);
-		const respond = (cmd) => {
-			if (cmd === 'AT+CMGF?') return { success: true, data: '+CMGF: 0\r\nOK' };
-			if (cmd === 'AT+CSCA?') return { success: true, data: '+CSCA: "+8613800755500",145\r\nOK' };
-			if (/^AT\+CMGS=\d+$/.test(cmd)) return { success: true, data: '>' };
-			if (cmd.charCodeAt(cmd.length - 1) === 26) return { success: true, data: '>' };
-			return undefined;
-		};
-		const rB = loadView(ParseB, lsB, { respond: respond });
+		const rB = loadView(ParseB, lsB, {
+			smsRespond: (action) => (action === 'send' ? {
+				success: true,
+				result: { outcome: 'rejected', encoding: 'UCS2', message: '第 1/1 段被模组拒绝：+CMS ERROR: 322', parts: [] }
+			} : undefined)
+		});
 		await new Promise((r) => setImmediate(r));
 		await new Promise((r) => setImmediate(r));
 		await triggerSend(rB, SEND_NUMBER, SEND_TEXT);
-
-		check('只有提示符应答时不得显示发送成功',
-			rB.toasts.some((t) => t.kind === 'success'), false);
-		check('只有提示符应答时报错（未确认提交）',
-			rB.toasts.some((t) => t.kind === 'error' && t.text.indexOf('未确认') >= 0), true);
-		check('假成功不得写入缓存', ParseB.getCachedSentMessages().length, 0);
+		check('模组拒绝时显示错误', rB.toasts.some((t) => t.kind === 'error'), true);
+		check('模组拒绝时不得显示成功', rB.toasts.some((t) => t.kind === 'success'), false);
+		check('错误文案带上模组的错误码',
+			rB.toasts.some((t) => t.kind === 'error' && t.text.indexOf('322') >= 0), true);
+		check('模组拒绝时不得写入本地缓存', ParseB.getCachedSentMessages().length, 0);
 	}
 
-	/* 场景 C：文本模式必须强制切 PDU（AT+CMGF=0），杜绝模式歧义 */
+	/* 场景 C：结果不明 → 明确警示且不自动重发 */
 	{
 		const lsC = makeLocalStorage();
-		const ParseC = loadParse(lsC);
-		const respond = (cmd) => {
-			if (cmd === 'AT+CMGF?') return { success: true, data: '+CMGF: 1\r\nOK' };
-			if (cmd === 'AT+CSCA?') return { success: true, data: '+CSCA: "+8613800755500",145\r\nOK' };
-			if (/^AT\+CMGS=\d+$/.test(cmd)) return { success: true, data: '>' };
-			if (cmd.charCodeAt(cmd.length - 1) === 26) return { success: true, data: '+CMGS: 1\r\nOK' };
-			return undefined;
-		};
-		const rC = loadView(ParseC, lsC, { respond: respond });
+		const rC = loadView(loadParse(lsC), lsC, {
+			smsRespond: (action) => (action === 'send' ? {
+				success: true,
+				result: { outcome: 'unknown', encoding: 'UCS2', message: '第 1/1 段未收到模组确认。请勿重复点击发送。', parts: [] }
+			} : undefined)
+		});
 		await new Promise((r) => setImmediate(r));
 		await new Promise((r) => setImmediate(r));
 		await triggerSend(rC, SEND_NUMBER, SEND_TEXT);
-		check('文本模式下先切 PDU 再发送', rC.calls.cmds.indexOf('AT+CMGF=0') >= 0, true);
-		check('切换后发送成功', rC.toasts.some((t) => t.kind === 'success'), true);
+		check('结果不明时不得显示成功', rC.toasts.some((t) => t.kind === 'success'), false);
+		check('结果不明时给出明确警示',
+			rC.toasts.some((t) => t.kind === 'warning' && t.text.indexOf('结果不明') >= 0), true);
+		check('只提交了一次（不自动重发）',
+			rC.calls.smsCalls.filter((c) => c.action === 'send').length, 1);
 	}
 
-	/* 场景 D：模组拒绝提交（如 +CMS ERROR: 322 内存满）必须报错且不写缓存 */
+	/* 场景 D：删除走语义化接口并按模组结果回读 */
 	{
 		const lsD = makeLocalStorage();
-		const ParseD = loadParse(lsD);
-		const respond = (cmd) => {
-			if (cmd === 'AT+CMGF?') return { success: true, data: '+CMGF: 0\r\nOK' };
-			if (cmd === 'AT+CSCA?') return { success: true, data: '+CSCA: "+8613800755500",145\r\nOK' };
-			if (/^AT\+CMGS=\d+$/.test(cmd)) return { success: true, data: '>' };
-			if (cmd.charCodeAt(cmd.length - 1) === 26) return { success: false, error: '+CMS ERROR: 322' };
-			return undefined;
-		};
-		const rD = loadView(ParseD, lsD, { respond: respond });
+		const rD = loadView(loadParse(lsD), lsD);
 		await new Promise((r) => setImmediate(r));
 		await new Promise((r) => setImmediate(r));
-		await triggerSend(rD, SEND_NUMBER, SEND_TEXT);
-		check('模组拒绝时显示发送失败', rD.toasts.some((t) => t.kind === 'error'), true);
-		check('模组拒绝时不得显示成功', rD.toasts.some((t) => t.kind === 'success'), false);
-		check('模组拒绝时不得写入缓存', ParseD.getCachedSentMessages().length, 0);
+		const items = findAll(rD.page._body, 'mt5700-sms-item');
+		const nums = items.map((n) => n.childNodes[0].textContent);
+		items[nums.indexOf('13900139000')].dispatch('click');
+		const bubbles = findAll(rD.page._body, 'mt5700-sms-bubble');
+		/* 气泡内最后一个按钮就是「删除」 */
+		bubbles[0].childNodes[bubbles[0].childNodes.length - 1].dispatch('click');
+		for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r));
+		const del = rD.calls.smsCalls.filter((c) => c.action === 'delete')[0];
+		check('删除走 sms(delete)', !!del, true);
+		check('删除带上模组真实序号', !!(del && del.params.indices && del.params.indices.length), true);
+		check('删除后回读了列表', rD.calls.smsActions.filter((a) => a === 'list').length >= 2, true);
 	}
 
 	console.log(`\n合计: ${pass} 通过, ${fail} 失败`);

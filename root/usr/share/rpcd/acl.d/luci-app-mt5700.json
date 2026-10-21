@@ -26,6 +26,7 @@
 				"logs",
 				"notify_test",
 				"qq_bind_status",
+				"sms",
 				"usb"
 			],
 				"log": [
@@ -113,6 +114,7 @@
 				"mt5700": [
 					"at",
 					"events",
+					"sms",
 					"usage_ctl"
 				],
 				"rc": [

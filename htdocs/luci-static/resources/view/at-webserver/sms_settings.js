@@ -109,101 +109,57 @@ return L.view.extend({
 		storeBody.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('保存存储位置', function () {
 				var loc = locSel.value;
-				AtWs.client.sendCommand('AT+CPMS="' + loc + '","' + loc + '","' + loc + '"').then(function (res) {
-					if (res.success) { Mt5700.success('存储位置已保存'); loadStorage(); }
-					else { Mt5700.error('保存失败'); }
+				AtWs.client.sms('set_storage', { mem: loc }).then(function (res) {
+					if (res.success && res.result && res.result.storage) {
+						Mt5700.success('存储位置已保存');
+						applyStorage(res.result.storage);
+					} else { Mt5700.error('保存失败：' + (res.error || '')); }
 				}).catch(function () { Mt5700.error('保存失败'); });
 			}),
 			Mt5700.dangerButton('清空全部短信', function () {
 				Mt5700.confirm('确定清空全部短信？此操作不可恢复。', function () {
-					AtWs.client.sendCommand('AT+CPMS?').then(function (res) {
-						var storages = [];
-						if (res.success && res.data) {
-							var m = String(res.data).match(/(?:,"(\w+)",\d+,\d+)/g) || [];
-							for (var i = 0; i < m.length; i++) {
-								var s = m[i].match(/"(\w+)"/);
-								if (s) storages.push(s[1]);
-							}
-						}
-						if (!storages.length) storages = ['SM', 'ME', 'MT'];
-						var unique = storages.filter(function (v, i, a) { return a.indexOf(v) === i; });
-						var chain = Promise.resolve();
-						unique.forEach(function (st) {
-							chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGF=0'); })
-								.then(function () { return AtWs.client.sendCommand('AT+CPMS="' + st + '","' + st + '","' + st + '"'); })
-								.then(function () { return AtWs.client.sendCommand('AT+CMGD=1,4'); });
-						});
-						return chain;
-					}).then(function () {
-						Mt5700.success('已清空全部短信');
-						loadStorage();
+					/*
+					 * 清空是「切存储区 + AT+CMGD=1,4」的循环，必须由后端在**一次事务**
+					 * 里跑完：中间被别的命令插进来会留下没清干净的存储区。
+					 */
+					AtWs.client.sms('purge').then(function (res) {
+						if (res.success && res.result && res.result.storage) {
+							Mt5700.success('已清空全部短信');
+							applyStorage(res.result.storage);
+						} else { Mt5700.error('清空短信失败：' + (res.error || '')); }
 					}).catch(function () { Mt5700.error('清空短信失败'); });
 				});
 			})
 		));
 
-		/* ---------- 本地已发缓存 ---------- */
-		var cacheCard = Mt5700.card('本地已发缓存', '发送记录保存在浏览器本地，可导出/导入/清空');
+		/* ---------- 旧版本本地缓存残留 ---------- */
+		/*
+		 * 这里**不再是短信的数据源**。
+		 *
+		 * 旧版本把已发短信存在浏览器 localStorage 里并混进列表，后果是：
+		 * 那些条目没有模组序号，删除时按着不存在的 index 下发一堆 AT+CMGD，
+		 * 全是 ERROR；模组里删掉/清空的短信还会继续显示在界面上。
+		 * 现在列表一律以模组实时返回为准，这一栏只用来清掉历史遗留数据。
+		 */
+		var cacheCard = Mt5700.card('旧版本本地缓存', '历史版本遗留的浏览器本地记录，已不再作为数据来源');
 		var cacheBody = E('div');
 		cacheCard._body.appendChild(cacheBody);
-		rowStore.appendChild(cacheCard);
-
-		var cacheEl = E('div', { 'class': 'mt5700-hint' }, '缓存条数：0');
+		cacheBody.appendChild(E('div', { 'class': 'mt5700-hint' },
+			'短信列表已改为实时读取模组，本地不再保存任何短信副本。'));
+		var cacheEl = E('div', { 'class': 'mt5700-hint' }, '残留条数：0');
 		cacheBody.appendChild(cacheEl);
 
-		function exportCache() {
-			var messages = Parse.getCachedSentMessages();
-			var exportData = { app: 'at-webserver', version: 1, exportedAt: new Date().toISOString(), messages: messages };
-			var blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-			var url = URL.createObjectURL(blob);
-			var link = document.createElement('a');
-			link.href = url;
-			link.download = 'sms-cache-export.json';
-			link.click();
-			URL.revokeObjectURL(url);
-			Mt5700.success('已导出 ' + messages.length + ' 条记录');
-		}
-
 		function refreshCacheCount() {
-			state.cacheCount = Parse.getCachedSentMessages().length;
-			cacheEl.textContent = '缓存条数：' + state.cacheCount;
+			state.cacheCount = Parse.countLegacySentMessages();
+			cacheEl.textContent = '残留条数：' + state.cacheCount;
 		}
 
 		cacheBody.appendChild(Mt5700.panelActions(
-			Mt5700.button('导出缓存', exportCache, 'primary'),
-			Mt5700.button('导入缓存', function () {
-				var input = document.createElement('input');
-				input.type = 'file';
-				input.accept = 'application/json';
-				input.addEventListener('change', function () {
-					var file = input.files && input.files[0];
-					if (!file) return;
-					var reader = new FileReader();
-					reader.onload = function (e) {
-						try {
-							var data = JSON.parse(String(e.target.result));
-							var messages = Array.isArray(data) ? data : (data.messages || []);
-							var valid = messages.filter(function (m) {
-								return m && typeof m.content === 'string' && typeof m.number === 'string' &&
-									typeof m.time === 'string' && (m.type === 'sent' || m.type === 'received');
-							});
-							if (!valid.length) { Mt5700.error('文件中没有有效的短信记录'); return; }
-							var list = Parse.getCachedSentMessages().concat(valid);
-							localStorage.setItem(Parse.SMS_CACHE_KEY, JSON.stringify(list));
-							Mt5700.success('导入成功，共 ' + valid.length + ' 条');
-							refreshCacheCount();
-						} catch (err) {
-							Mt5700.error('导入失败：文件格式不正确');
-						}
-					};
-					reader.readAsText(file);
-				});
-				input.click();
-			}, 'primary'),
-			Mt5700.dangerButton('清空缓存', function () {
-				Mt5700.confirm('确定清空本地已发缓存？', function () {
+			Mt5700.dangerButton('清除残留', function () {
+				if (!state.cacheCount) { Mt5700.success('没有残留数据'); return; }
+				Mt5700.confirm('清除旧版本遗留的本地记录？（不影响模组里的短信）', function () {
 					Parse.clearSentMessageCache();
-					Mt5700.success('已清空');
+					Mt5700.success('已清除');
 					refreshCacheCount();
 				});
 			})
@@ -296,94 +252,78 @@ return L.view.extend({
 
 		/* ---------- 短信开关步骤 ---------- */
 
+		/*
+		 * 短信功能开关。
+		 *
+		 * 旧实现在前端连发五条各自排队的 AT 命令，后台巡检随时会从中间插进来，
+		 * 把「射频刚被拉起来」的状态打断 —— 表现为开关看着勾上了、短信却发不出去。
+		 * 现在整串（含模组需要的处理间隔）由后端在**一次事务**里独占通道跑完，
+		 * 并把每一步的结果如实回传。
+		 */
 		function toggleSMS(enable) {
 			smsOnChk.disabled = true;
-			var steps = enable ? [
-				['AT+CEUS=1', 1000, '开启 CEUS'],
-				['AT^IMSSWITCH=1,0,0', 2000, '开启 IMS'],
-				['AT+CFUN=1', 2000, '恢复射频'],
-				['AT+CGDCONT=5,"IPV4V6","","",0,0,0,0,1,1,1,,,,,,0,,0,0,0,0', 1000, '配置数据承载'],
-				['AT+CSCA="' + (centerInput.value || '') + '"', 0, '配置中心号码']
-			] : [
-				['AT+CEUS=0', 500, '关闭 CEUS'],
-				['AT^IMSSWITCH=0,0,0', 500, '关闭 IMS'],
-				['AT+CFUN=0', 500, '关闭射频'],
-				['AT+CMGD=1,4', 0, '清空短信']
-			];
-			var chain = Promise.resolve();
-			for (var i = 0; i < steps.length; i++) {
-				(function (step) {
-					chain = chain.then(function () {
-						if (!step[0]) return { success: true };
-						return AtWs.client.sendCommand(step[0]).then(function (res) {
-							if (!res.success) {
-								Mt5700.error('步骤「' + step[2] + '」失败');
-								throw new Error(step[2] + ' 失败');
-							}
-							return Ui.sleep(step[1]);
-						});
-					});
-				})(steps[i]);
-			}
-			chain.then(function () {
-				Mt5700.success(enable ? '短信功能已开启' : '短信功能已关闭');
-				state.smsOn = enable;
-				smsOnChk.checked = enable;
-				loadStorage();
-				return AtWs.client.sendCommand('AT+CSCA?');
-			}).then(function (res) {
-				if (res.success && res.data) {
-					var m = String(res.data).match(/\+CSCA: "([^"]+)"/);
-					if (m) { state.centerNumber = m[1]; centerInput.value = m[1]; }
-				}
-				smsOnChk.disabled = false;
-			}).catch(function (err) {
-				Mt5700.error((err && err.message) || '操作失败');
-				smsOnChk.disabled = false;
-				loadIMS();
-			});
+			AtWs.client.sms('power', { enable: enable, smsc: centerInput.value || '' })
+				.then(function (res) {
+					if (!res.success) throw new Error(res.error || '操作失败');
+					var r = res.result || {};
+					if (r.failedAt) {
+						throw new Error('步骤「' + r.failedAt + '」失败');
+					}
+					Mt5700.success(enable ? '短信功能已开启' : '短信功能已关闭');
+					state.smsOn = enable;
+					smsOnChk.checked = enable;
+					/* 以模组回读到的真实值为准 */
+					if (r.smsc) { state.centerNumber = r.smsc; centerInput.value = r.smsc; }
+					if (r.storage) applyStorage(r.storage);
+				}).catch(function (err) {
+					Mt5700.error((err && err.message) || '操作失败');
+					loadIMS();
+				}).then(function () {
+					smsOnChk.disabled = false;
+				});
 		}
 
 		/* ---------- 加载 ---------- */
 
+		/*
+		 * IMS 与短信中心号码：都走短信接口的实时读取，不缓存、不猜测。
+		 * `enabled` 为 null 表示模组没给出可判定的值（界面保持原状，不硬勾）。
+		 */
 		function loadIMS() {
-			return AtWs.client.sendCommand('AT^IMSSWITCH?').then(function (res) {
-				if (res.success && res.data) {
-					var m = String(res.data).match(/\^IMSSWITCH:\s*(\d+),\d+,\d+/);
-					if (m) {
-						imsChk.checked = m[1] === '1';
-						if (m[1] === '1') {
-							return AtWs.client.sendCommand('AT+CSCA?').then(function (res2) {
-								if (res2.success && res2.data) {
-									var cm = String(res2.data).match(/\+CSCA: "([^"]+)"/);
-									if (cm) { state.centerNumber = cm[1]; centerInput.value = cm[1]; }
-								}
-								smsOnChk.checked = true;
-								state.smsOn = true;
-							});
+			return AtWs.client.sms('get_ims').then(function (res) {
+				if (res.success && res.result && res.result.enabled !== null && res.result.enabled !== undefined) {
+					state.imsOn = !!res.result.enabled;
+					imsChk.checked = state.imsOn;
+					smsOnChk.checked = state.imsOn;
+					state.smsOn = state.imsOn;
+					return AtWs.client.sms('get_smsc').then(function (r2) {
+						if (r2.success && r2.result && r2.result.smsc) {
+							state.centerNumber = r2.result.smsc;
+							centerInput.value = r2.result.smsc;
 						}
-						smsOnChk.checked = false;
-						state.smsOn = false;
-					}
+					});
 				}
 			}).catch(function () {});
 		}
 
+		/*
+		 * 存储用量：一次真实下发 `AT+CPMS?`（后端读），界面显示的永远是模组当次读数。
+		 * 旧实现把 `AT+CMGF=0` 与 `AT+CPMS?` 拆成两条独立命令，中间可能被巡检插进来；
+		 * 现在两条都在后端一次事务里完成。
+		 */
+		function applyStorage(st) {
+			if (!st) return;
+			state.storage = {
+				mem1: st.mem1 || '', used1: st.used || 0, total1: st.total || 0,
+				mem2: st.mem2 || '', used2: 0, total2: 0,
+				mem3: st.mem3 || '', used3: 0, total3: 0
+			};
+			renderStorage();
+		}
+
 		function loadStorage() {
-			return AtWs.client.sendCommand('AT+CMGF=0').then(function () {
-				return AtWs.client.sendCommand('AT+CPMS?');
-			}).then(function (res) {
-				if (res.success && res.data) {
-					var m = String(res.data).match(/\+CPMS: "(\w+)",(\d+),(\d+),"(\w+)",(\d+),(\d+),"(\w+)",(\d+),(\d+)/);
-					if (m) {
-						state.storage = {
-							mem1: m[1], used1: parseInt(m[2], 10), total1: parseInt(m[3], 10),
-							mem2: m[4], used2: parseInt(m[5], 10), total2: parseInt(m[6], 10),
-							mem3: m[7], used3: parseInt(m[8], 10), total3: parseInt(m[9], 10)
-						};
-						renderStorage();
-					}
-				}
+			return AtWs.client.sms('capacity').then(function (res) {
+				if (res.success && res.result && res.result.storage) applyStorage(res.result.storage);
 			}).catch(function () {});
 		}
 
