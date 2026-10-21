@@ -280,20 +280,28 @@
 /* Card 1: 信号强度 */
 .mt-sig-main-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 .mt-sig-val-group {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+/* 数值与单位基线对齐：单位不再跟着数字下坠 */
+.mt-sig-num-line {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
 }
 .mt-sig-large-num {
-  font-size: 34px;
+  font-size: 38px;
   font-weight: 900;
   font-family: "JetBrains Mono", Consolas, monospace;
   color: var(--mt5700-text);
-  line-height: 1;
+  line-height: 1.05;
   letter-spacing: -1px;
 }
 .mt-sig-unit {
@@ -314,10 +322,11 @@
   width: fit-content;
 }
 
+/* 三项关键指标：竖虚线分栏（RSRP | RSRQ | SINR） */
 .mt-sig-sub-metrics {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
   padding-top: 12px;
   border-top: 1px dashed var(--mt5700-border-subtle);
 }
@@ -325,27 +334,284 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  padding: 0 10px;
+  border-left: 1px dashed var(--mt5700-border-subtle);
+}
+.mt-sub-metric-item:first-child {
+  padding-left: 0;
+  border-left: none;
 }
 .mt-sub-metric-label {
   font-size: 11px;
   color: var(--mt5700-text-muted);
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 .mt-sub-metric-val {
   font-size: 14px;
   font-weight: 800;
   font-family: "JetBrains Mono", Consolas, monospace;
   color: var(--mt5700-text);
+  white-space: nowrap;
 }
 
-/* Card 2: 网络状态 */
-.mt-net-main-row {
+/* Card 1: SSB 波束电平矩阵（AT^NRSSBID?，服务小区 8 个波束的实测 RSRP）
+   颜色由 JS 注入的 --ssb-color 驱动（优/良/中/弱/差 五档）；
+   未上报的波束走 data-state="none"：灰色虚线 + 「—」，与弱信号明显区分。 */
+.mt-ssb-panel {
+  /* 撑到卡片底部，避免三卡等高时卡片一留下大片空白 */
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px dashed var(--mt5700-border-subtle);
+}
+.mt-ssb-head {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mt5700-text-secondary);
+  margin-bottom: 8px;
 }
+.mt-ssb-head .mt-card-title-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--mt5700-accent);
+}
+.mt-ssb-summary {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  color: var(--mt5700-text-muted);
+  white-space: nowrap;
+}
+.mt-ssb-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.mt-ssb-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--mt5700-border-subtle);
+  border-radius: 10px;
+  background: var(--mt5700-subtle-bg);
+  overflow: hidden;
+  transition: border-color 0.25s ease, opacity 0.25s ease, box-shadow 0.25s ease;
+}
+/* 档位色只做低透明度铺底：--ssb-color 是实心十六进制，
+   不用 color-mix()（老浏览器不支持），改用 ::before 叠一层再压 opacity。 */
+.mt-ssb-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ssb-color, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.mt-ssb-cell[data-state="ok"]::before {
+  opacity: 0.13;
+}
+.mt-ssb-cell[data-state="ok"] {
+  border-color: var(--ssb-color);
+}
+/* 无信号：虚线 + 整体弱化，和实线的「弱」一眼能分开 */
+.mt-ssb-cell[data-state="none"] {
+  border-style: dashed;
+  opacity: 0.6;
+}
+/* 实测最强的那个波束：同色细环标出，不额外编造"主用"之类的说法 */
+.mt-ssb-cell[data-best="1"][data-state="ok"] {
+  box-shadow: 0 0 0 1.5px var(--ssb-color);
+}
+.mt-ssb-cell-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+}
+.mt-ssb-id {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  color: var(--mt5700-text-secondary);
+  white-space: nowrap;
+}
+.mt-ssb-val {
+  font-size: 11px;
+  font-weight: 800;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  color: var(--ssb-color, var(--mt5700-text));
+  white-space: nowrap;
+  transition: color 0.25s ease;
+}
+.mt-ssb-cell[data-state="none"] .mt-ssb-val {
+  color: var(--mt5700-text-muted);
+}
+.mt-ssb-cell-bot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.mt-ssb-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ssb-color, var(--mt5700-text-muted));
+  transition: background 0.25s ease;
+}
+/* 无信号的点是空心，弱/差是实心，形状上也能区分 */
+.mt-ssb-cell[data-state="none"] .mt-ssb-dot {
+  background: transparent;
+  border: 1px solid var(--mt5700-text-muted);
+}
+.mt-ssb-tier {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ssb-color, var(--mt5700-text-muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mt-ssb-cell[data-state="none"] .mt-ssb-tier {
+  color: var(--mt5700-text-muted);
+}
+
+
+/* Card 2: 网络状态 —— 链路拓扑 (SIM 卡 → 基站 → 数据网络) */
+.mt-net-flow {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding-bottom: 13px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--mt5700-border-subtle);
+}
+.mt-net-node {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+}
+.mt-net-node-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mt5700-subtle-bg);
+  border: 1px solid var(--mt5700-border-subtle);
+  color: var(--mt5700-cyan);
+  margin-bottom: 2px;
+}
+.mt-net-node-icon .mt-card-title-icon {
+  width: 20px;
+  height: 20px;
+}
+/* 基站节点直接用信号塔图形本体，不加底框（保留原图形与动态配色） */
+.mt-net-node-icon.tower {
+  width: 40px;
+  height: 40px;
+  background: transparent;
+  border: none;
+}
+.mt-net-node-icon.tower .mt-tower-svg-box {
+  width: auto;
+  height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* .mt-tower-svg-box svg 的固定 72px 会盖掉内联 width/height，这里显式收小 */
+.mt-net-node-icon.tower .mt-tower-svg-box svg {
+  width: 40px;
+  height: 40px;
+}
+.mt-net-node-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mt5700-text);
+  white-space: nowrap;
+}
+.mt-net-node-sub {
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--mt5700-text-muted);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.mt-net-link {
+  flex: 0 0 26px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* 与图标垂直中心对齐（图标 40px + 下间距 2px，取一半） */
+  margin-top: 21px;
+}
+/*
+ * 链路虚线：靠 repeating-linear-gradient + background-position 位移做「流动」。
+ * 不用 border-top: dashed —— 边框的虚线段无法做位移动画，只能整条闪烁。
+ * 位移量取一个完整周期（5px 实线 + 4px 空隙 = 9px），循环接缝处不会跳帧。
+ */
+.mt-net-link-line {
+  flex: 1 1 auto;
+  height: 2px;
+  border-radius: 2px;
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--mt5700-text-muted) 0 5px,
+    transparent 5px 9px
+  );
+  background-size: 9px 2px;
+  background-repeat: repeat-x;
+  opacity: 0.72;
+  animation: mt-net-flow 0.9s linear infinite;
+}
+@keyframes mt-net-flow {
+  from { background-position: 0 0; }
+  to { background-position: 9px 0; }
+}
+/* 两端圆点轻微呼吸，与虚线流动呼应（错开相位，避免三处同时闪） */
+.mt-net-link-dot {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--mt5700-text-muted);
+  opacity: 0.55;
+  animation: mt-net-dot 1.8s ease-in-out infinite;
+}
+.mt-net-link-dot:last-child {
+  animation-delay: 0.45s;
+}
+@keyframes mt-net-dot {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mt-net-link-line,
+  .mt-net-link-dot {
+    animation: none !important;
+  }
+}
+
+/* 保留：信号塔图形容器（由 renderSignalUI 按真实状态着色） */
 .mt-tower-svg-box {
-  /* 不再使用圆形底色/描边：图标直接落在卡片背景上，尺寸贴合图形 */
   width: 72px;
   height: 72px;
   flex-shrink: 0;
@@ -353,16 +619,43 @@
   align-items: center;
   justify-content: center;
 }
+
+/* Card 2: 信息格（2 × 3，图标 + 标签 + 取值） */
 .mt-net-info-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
   flex: 1;
+  /* 卡片被等高拉伸时，行不要跟着摊开（否则三行间距忽大忽小） */
+  align-content: start;
 }
 .mt-net-info-cell {
   display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+}
+.mt-net-ico {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mt5700-accent-pale);
+  color: var(--mt5700-accent);
+}
+.mt-net-ico .mt-card-title-icon {
+  width: 13px;
+  height: 13px;
+  color: inherit;
+}
+.mt-net-info-txt {
+  display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  min-width: 0;
 }
 .mt-net-lbl {
   font-size: 11px;
@@ -374,9 +667,13 @@
   font-weight: 700;
   color: var(--mt5700-text);
   font-family: "JetBrains Mono", Consolas, monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+  min-width: 0;
 }
 
 /* Card 3: 流量统计 */
@@ -4533,23 +4830,45 @@ select option {
   }
 
                                    
-  .mt-net-main-row {
-    display: flex !important;
-    align-items: center !important;
-    gap: 10px !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
+  /* 链路拓扑：窄屏收窄图标与连线，保证三节点同行不溢出 */
+  .mt-net-flow {
+    gap: 2px !important;
   }
 
-  .mt-tower-svg-box {
-    width: 50px !important;
-    height: 50px !important;
-    flex-shrink: 0 !important;
+  .mt-net-node-icon {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 10px !important;
   }
 
-  .mt-tower-svg-box svg {
-    width: 50px !important;
-    height: 50px !important;
+  .mt-net-node-icon .mt-card-title-icon {
+    width: 17px !important;
+    height: 17px !important;
+  }
+
+  .mt-net-flow .mt-tower-svg-box,
+  .mt-net-flow .mt-tower-svg-box svg,
+  .mt-net-node-icon.tower .mt-tower-svg-box svg {
+    width: 34px !important;
+    height: 34px !important;
+  }
+
+  .mt-net-node-title {
+    font-size: 11px !important;
+  }
+
+  .mt-net-node-sub {
+    font-size: 9.5px !important;
+  }
+
+  .mt-net-link {
+    flex: 0 0 14px !important;
+    margin-top: 17px !important;
+  }
+
+  .mt-net-ico {
+    width: 20px !important;
+    height: 20px !important;
   }
 
   .mt-net-info-grid {
@@ -4684,10 +5003,20 @@ select option {
     height: 64px !important;
   }
   .mt-sig-sub-metrics {
-    gap: 8px !important;
+    gap: 0 !important;
+  }
+  .mt-sub-metric-item {
+    padding: 0 7px !important;
   }
   .mt-sub-metric-val {
-    font-size: 13px !important;
+    font-size: 12.5px !important;
+  }
+  /* 窄屏下 4 列放不下「SSB n」+「-63 dBm」，降为 2 列 */
+  .mt-ssb-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .mt-ssb-val {
+    font-size: 11.5px !important;
   }
 }
 
@@ -4972,4 +5301,209 @@ select option {
 		height: 15px;
 		margin-right: 5px;
 	}
+}
+
+/* ===========================================================================
+ * 表单两列网格（.mt5700-form-grid）
+ *
+ * 用途：纯表单卡片（服务配置页等）字段多、说明又长，一行一个字段时桌面端右侧
+ * 大片留白，整页能拉到 5000px 以上。把字段组排成两列后说明文字按列宽换行，
+ * 高度几乎减半，且不改动任何控件、取值与交互。
+ *
+ * 约定：容器**直接子级**里的 .mt5700-form-group 各占一格，其余元素（提示块、
+ * 按钮行、自定义容器）默认横跨整行，保持原本的视觉层次。所以把字段再包进别的
+ * div 里就会自动变成整行 —— 需要并排就别包，这是有意为之、可预测的行为。
+ * =========================================================================== */
+.mt5700-form-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px 20px !important;
+  align-items: start !important;
+}
+
+.mt5700-form-grid > * {
+  grid-column: 1 / -1 !important;
+  min-width: 0 !important;
+}
+
+.mt5700-form-grid > .mt5700-form-group {
+  grid-column: auto !important;
+  /* 行距交给 grid 的 gap：再叠一次 margin 会让网格出现疏密不均的行 */
+  margin-bottom: 0 !important;
+}
+
+/* 需要整行宽的字段（例如路径很长、下拉里会被截断的串口选择器）。
+ * 选择器比上面那条多一个类，保证优先级稳压「自动占一格」。 */
+.mt5700-form-grid > .mt5700-form-group.mt5700-span-2 {
+  grid-column: 1 / -1 !important;
+}
+
+/* 表单里的说明文字是次要信息，压一档字号与行高，省下来的高度很可观 */
+.mt5700-form-grid .mt5700-hint {
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+  margin-top: 4px !important;
+}
+
+.mt5700-form-grid .mt5700-label {
+  font-size: 12px !important;
+  margin-bottom: 4px !important;
+}
+
+.mt5700-form-grid .mt5700-input {
+  padding: 7px 11px !important;
+}
+
+/* 网格项的最小宽度必须显式归零。
+ *
+ * `min-width` 的默认值是 auto，作为 grid/flex 项时会被解析成**内容最小宽度**；
+ * 对 <select> 而言就是「最长选项不换行时的宽度」（实测固定 210px）。列宽一旦
+ * 小于它，下拉框就会顶破卡片右边界（1024px 略溢出，768/430px 溢出 3~30px）。
+ * input 里的长路径同理。给 min-width: 0 才能让它真正随列宽收缩。 */
+.mt5700-form-grid .mt5700-input,
+.mt5700-form-grid .mt5700-select {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+/* 下拉框的箭头要留位。
+ *
+ * 上面那条 `padding: 7px 11px` 是简写，会把 .mt5700-select 原本的
+ * `padding-right: 40px`（专门给背景 SVG 箭头让的位置）一并覆盖掉 ——
+ * 实测长选项文字会直接压到箭头上，看起来像「下拉框没有箭头」。
+ * 这里把右侧内边距补回来，并顺手把箭头位置对齐到新的内边距。 */
+.mt5700-form-grid .mt5700-select {
+  padding-right: 36px !important;
+  background-position: right 10px center !important;
+}
+
+/* 文本域：六段推送文案并排出现时不至于把卡片拉满整屏 */
+.mt5700-form-grid textarea.mt5700-input {
+  min-height: 54px !important;
+}
+
+/* 窄屏回落单列：手机上双列会把说明压成每行几个字的竖条，反而更难读 */
+@media (max-width: 900px) {
+  .mt5700-form-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .mt5700-form-grid > .mt5700-form-group {
+    margin-bottom: 10px !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 纯表单页（含 .mt5700-form-grid 的页面）整体紧凑化
+ *
+ * page-body 的 gap 与 .mt5700-card 的 margin-bottom 是**叠加**的，实测卡片空档
+ * 28px，只保留一份。
+ *
+ * 作用域用 :has(.mt5700-form-grid) 而不是页面级属性：本插件各页共用同一套
+ * 样式表，而这一页的旧版 mt5700.js 并没有页面标识属性，用 :has 可以只靠
+ * service.js 自己加上去的容器类把影响面锁死，其它页面维持原样。
+ * 不支持 :has 的旧浏览器只会退回原来的 28px 间距，不会错版。
+ * ------------------------------------------------------------------------- */
+.mt5700-page:has(.mt5700-form-grid) .mt5700-page-body {
+  gap: 12px !important;
+}
+
+.mt5700-page:has(.mt5700-form-grid) .mt5700-page-body > .mt5700-card,
+.mt5700-page:has(.mt5700-form-grid) .mt5700-grid > .mt5700-card {
+  margin-bottom: 0 !important;
+}
+
+/* 双列卡片行本身也带来一份 margin，与 page-body 的 gap 叠加后会比别处更松 */
+.mt5700-page:has(.mt5700-form-grid) .mt5700-page-body > .mt5700-grid {
+  gap: 12px !important;
+  margin-bottom: 0 !important;
+}
+
+.mt5700-page:has(.mt5700-form-grid) .mt5700-card-header {
+  margin-bottom: 10px !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * 手机端压缩：改「标签在上、控件在下」为「标签在左、控件在右」
+ *
+ * 手机上双列会把说明压成竖条，所以维持单列；但单列下每个字段要占「标签行 +
+ * 控件行」两行，四十多个字段就把页面拉到六千多像素。改成横排后一个字段只占
+ * 一行，是手机端最有效的一处压缩（实测约省 20%）。
+ *
+ * 说明文字仍然另起一行、横跨两列：塞进右侧那一列会被压成每行几个字，
+ * 反而更难读 —— 横排省的是「标签」那一行，不是「说明」那一行。
+ * ------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .mt5700-page:has(.mt5700-form-grid) .mt5700-page-body {
+    gap: 10px !important;
+  }
+
+  .mt5700-page:has(.mt5700-form-grid) .mt5700-page-body > .mt5700-grid {
+    gap: 10px !important;
+  }
+
+  .mt5700-form-grid {
+    gap: 8px !important;
+  }
+
+  .mt5700-form-grid > .mt5700-form-group {
+    margin-bottom: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(92px, 40%) minmax(0, 1fr) !important;
+    align-items: center !important;
+    column-gap: 10px !important;
+    row-gap: 2px !important;
+  }
+
+  .mt5700-form-grid > .mt5700-form-group > .mt5700-label {
+    margin-bottom: 0 !important;
+    line-height: 1.35 !important;
+  }
+
+  .mt5700-form-grid > .mt5700-form-group > .mt5700-hint {
+    grid-column: 1 / -1 !important;
+    margin-top: 0 !important;
+    font-size: 10.5px !important;
+    line-height: 1.45 !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .mt5700-form-grid > .mt5700-form-group {
+    grid-template-columns: minmax(84px, 42%) minmax(0, 1fr) !important;
+    column-gap: 8px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* 含多行文本框的分组在手机上恢复「标签在上、控件在下」并占满整行宽。
+   *
+   * 原因：textarea 不会跟着内容自动长高，高度只由 rows 决定。横排只给它右侧
+   * 一列（约 55% 宽），三行模板文案换行后远超三行，实测文字被直接裁掉
+   * （推送文案卡片的六个模板框都会中招）。给满宽度后 rows=3 就装得下。 */
+  .mt5700-form-grid > .mt5700-form-group:has(textarea) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    row-gap: 4px !important;
+  }
+
+  .mt5700-form-grid > .mt5700-form-group:has(textarea) > .mt5700-label {
+    margin-bottom: 0 !important;
+  }
+
+  /* 高度交给 rows：满宽度下三行模板文案正好装下，再加 min-height 只是白占地方 */
+  .mt5700-form-grid > .mt5700-form-group:has(textarea) > .mt5700-tpl-area {
+    min-height: 0 !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 按需显示的表单分组（hidden 属性）
+ *
+ * 「自定义串口路径」「IPv4/IPv6 接口名」这类分组默认收起，只有用户选了
+ * “自定义/手动填写”才出现。**必须用 hidden 属性 + 这条规则，不能用内联
+ * style.display**：移动端为了横排写了 `display: grid !important`，
+ * 内联样式压不住 !important，实测导致这些分组在手机上全部冒出来。
+ * ------------------------------------------------------------------------- */
+.mt5700-form-group[hidden],
+.mt5700-form-grid > .mt5700-form-group[hidden] {
+  display: none !important;
 }

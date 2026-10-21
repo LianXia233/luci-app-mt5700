@@ -60,6 +60,14 @@ return L.view.extend({
 				state: 'pending', // 'pending' | 'single' | 'ca' | 'none' | 'error' | 'expired'
 				lastSuccessTime: 0
 			},
+			/* SSB 波束遥测（AT^NRSSBID?，手册 13.28）：只存真实上报，无效值一律 null */
+			ssb: {
+				ok: false,          // 命令是否成功且解析出结构
+				queried: false,     // 是否至少查询过一次
+				lastSuccessTime: 0,
+				arfcn: null, pci: null, rsrp: null, sinr: null,
+				beams: [null, null, null, null, null, null, null, null]
+			},
 			carriers: [],
 			rtDown: 0,
 			rtUp: 0,
@@ -140,7 +148,7 @@ return L.view.extend({
 			]),
 			E('div', { 'class': 'mt-sig-main-row' }, [
 				E('div', { 'class': 'mt-sig-val-group' }, [
-					E('div', {}, [
+					E('div', { 'class': 'mt-sig-num-line' }, [
 						E('span', { 'class': 'mt-sig-large-num', 'id': 'sig-rsrp-display' }, '-'),
 						E('span', { 'class': 'mt-sig-unit' }, 'dBm')
 					]),
@@ -166,7 +174,9 @@ return L.view.extend({
 					E('span', { 'class': 'mt-sub-metric-label' }, 'SINR'),
 					E('span', { 'class': 'mt-sub-metric-val', 'id': 'sig-sub-sinr' }, '-')
 				])
-			])
+			]),
+			/* SSB 波束电平矩阵：8 个波束的实测 RSRP(dBm)，取自 AT^NRSSBID? */
+			buildSsbMatrix()
 		]);
 		statGrid.appendChild(cardSig);
 
@@ -182,28 +192,34 @@ return L.view.extend({
 					E('span', { 'id': 'net-status-text' }, '已连接')
 				])
 			]),
-			E('div', { 'class': 'mt-net-main-row' }, [
-				E('div', { 'class': 'mt-tower-svg-box' }, [
-					createCellularTowerSvg()
+			/* 链路拓扑：SIM 卡 → 蜂窝基站 → 数据网络。
+			   三个节点与下方信息格全部取自既有 state（无新增接口、无新增命令）。 */
+			E('div', { 'class': 'mt-net-flow' }, [
+				E('div', { 'class': 'mt-net-node' }, [
+					E('div', { 'class': 'mt-net-node-icon' }, [svgIcon('sim')]),
+					E('span', { 'class': 'mt-net-node-title' }, 'SIM 卡'),
+					E('span', { 'class': 'mt-net-node-sub', 'id': 'net-node-sim' }, '读取中...')
 				]),
-				E('div', { 'class': 'mt-net-info-grid' }, [
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, '运营商'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-operator' }, '读取中...')
-					]),
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, '频段'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-band' }, '读取中...')
-					]),
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, 'CA 状态'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-ca' }, '单载波')
-					]),
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, 'IP 地址'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-ip' }, '读取中...')
-					])
+				netFlowLink(),
+				E('div', { 'class': 'mt-net-node' }, [
+					E('div', { 'class': 'mt-net-node-icon tower' }, [createCellularTowerSvg(40)]),
+					E('span', { 'class': 'mt-net-node-title', 'id': 'net-node-tower-title' }, '蜂窝基站'),
+					E('span', { 'class': 'mt-net-node-sub', 'id': 'net-node-band' }, '读取中...')
+				]),
+				netFlowLink(),
+				E('div', { 'class': 'mt-net-node' }, [
+					E('div', { 'class': 'mt-net-node-icon' }, [svgIcon('internet')]),
+					E('span', { 'class': 'mt-net-node-title' }, '数据网络'),
+					E('span', { 'class': 'mt-net-node-sub', 'id': 'net-node-stack' }, '读取中...')
 				])
+			]),
+			E('div', { 'class': 'mt-net-info-grid' }, [
+				netInfoCell('sim', '运营商', 'net-val-operator', '读取中...'),
+				netInfoCell('bars', '网络类型', 'net-val-rat', '读取中...'),
+				netInfoCell('band', '频段', 'net-val-band', '读取中...'),
+				netInfoCell('layers', 'CA 状态', 'net-val-ca', '单载波'),
+				netInfoCell('ip', 'IP 地址', 'net-val-ip', '读取中...'),
+				netInfoCell('ipv6', 'IPv6 地址', 'net-val-ipv6', '—')
 			])
 		]);
 		statGrid.appendChild(cardNet);
@@ -498,19 +514,171 @@ return L.view.extend({
 				svg.innerHTML = '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>';
 			} else if (name === 'trend') {
 				svg.innerHTML = '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>';
+			} else if (name === 'bars') {
+				svg.innerHTML = '<path d="M4 20v-4M9 20v-8M14 20v-13M19 20v-17"/>';
+			} else if (name === 'sim') {
+				svg.innerHTML = '<rect x="3" y="3" width="18" height="18" rx="3.5"/><rect x="8.5" y="8.5" width="7" height="7" rx="1.2"/><path d="M12 3v3M12 18v3"/>';
+			} else if (name === 'band') {
+				svg.innerHTML = '<path d="M12 21V9"/><path d="M8.6 12.6a5 5 0 0 1 6.8 0"/><path d="M5.4 9.2a9.6 9.6 0 0 1 13.2 0"/>';
+			} else if (name === 'layers') {
+				svg.innerHTML = '<path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/>';
+			} else if (name === 'internet') {
+				svg.innerHTML = '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>';
+			} else if (name === 'ip') {
+				svg.innerHTML = '<path d="M9.5 15.5H7a3.5 3.5 0 0 1 0-7h2.5"/><path d="M14.5 8.5H17a3.5 3.5 0 0 1 0 7h-2.5"/><path d="M8.5 12h7"/>';
+			} else if (name === 'ipv6') {
+				svg.innerHTML = '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.8 2.8M16.2 16.2 19 19M19 5l-2.8 2.8M7.8 16.2 5 19"/>';
+			} else if (name === 'beam') {
+				/* 三条由一点发散的射线 + 源点，对应 SSB 波束扫描 */
+				svg.innerHTML = '<circle cx="12" cy="20" r="1.6"/><path d="M12 18.4 5.5 5.5"/><path d="M12 18.4V4"/><path d="M12 18.4 18.5 5.5"/>';
 			}
 			return svg;
 		}
 
-		function createCellularTowerSvg() {
+		function createCellularTowerSvg(size) {
+			var px = size || 72;
 			var wrap = E('div', { 'class': 'mt-tower-svg-box' });
-			var svg = '<svg viewBox="0 0 1024 1024" width="72" height="72" fill="currentColor" aria-hidden="true">';
+			var svg = '<svg viewBox="0 0 1024 1024" width="' + px + '" height="' + px + '" fill="currentColor" aria-hidden="true">';
 			for (var i = 0; i < BROADCAST_TOWER_PATHS.length; i++) {
 				svg += '<path d="' + BROADCAST_TOWER_PATHS[i] + '"></path>';
 			}
 			svg += '</svg>';
 			wrap.innerHTML = svg;
 			return wrap;
+		}
+
+		/* ==========================================================================
+		   SSB 波束电平（AT^NRSSBID?，手册 13.28 / PDF 第 378~381 页）
+		   --------------------------------------------------------------------------
+		   模组逐 SSB 上报服务小区 8 个波束的 Beam 测量结果（RSRP，单位 dBm）。
+		   上报顺序不保证按 ID 升序，parseNRSSBID 已按 ID 归位到数组下标，此处只负责渲染。
+		   无效值（SSB ID 0xFF / RSRP 0x7FFF）在解析层已置为 null，
+		   这里一律显示「—」+「无信号」，绝不拿 0 或 -140 之类的假数占位。
+		   ========================================================================== */
+
+		/*
+		 * 波束电平分级：比 SIGNAL_TIERS（4 档）更细，共 5 档。
+		 * 单独一张表，不动 SIGNAL_TIERS —— 后者服务趋势图背景分区且有单测依赖。
+		 * 「弱」与「无信号」必须一眼可辨：弱是橙色实心，无信号是灰色虚线且显示「—」。
+		 */
+		var SSB_TIERS = [
+			{ label: '优', min: -80, max: 0, color: '#10b981' },
+			{ label: '良', min: -90, max: -80, color: '#38bdf8' },
+			{ label: '中', min: -100, max: -90, color: '#eab308' },
+			{ label: '弱', min: -110, max: -100, color: '#f97316' },
+			{ label: '差', min: -156, max: -110, color: '#ef4444' }
+		];
+
+		/* RSRP(dBm) → 波束档位；无测量值返回 null（不是返回最低档） */
+		function ssbTierOf(rsrp) {
+			if (rsrp === null || rsrp === undefined || rsrp === '' || isNaN(rsrp)) return null;
+			var v = Number(rsrp);
+			for (var i = 0; i < SSB_TIERS.length; i++) {
+				if (v >= SSB_TIERS[i].min && v < SSB_TIERS[i].max) return SSB_TIERS[i];
+			}
+			return null;
+		}
+
+		/* 单个波束格子：上排「SSB n」+ 实测 dBm，下排色点 + 档位名 */
+		function ssbCell(idx) {
+			return E('div', { 'class': 'mt-ssb-cell', 'data-ssb': String(idx), 'data-state': 'none' }, [
+				E('div', { 'class': 'mt-ssb-cell-top' }, [
+					E('span', { 'class': 'mt-ssb-id' }, 'SSB ' + idx),
+					E('span', { 'class': 'mt-ssb-val', 'id': 'ssb-val-' + idx }, '—')
+				]),
+				E('div', { 'class': 'mt-ssb-cell-bot' }, [
+					E('i', { 'class': 'mt-ssb-dot' }),
+					E('span', { 'class': 'mt-ssb-tier', 'id': 'ssb-tier-' + idx }, '无信号')
+				])
+			]);
+		}
+
+		function buildSsbMatrix() {
+			var cells = [];
+			for (var i = 0; i < 8; i++) cells.push(ssbCell(i));
+			return E('div', { 'class': 'mt-ssb-panel' }, [
+				E('div', { 'class': 'mt-ssb-head' }, [
+					svgIcon('beam'),
+					E('span', { 'class': 'mt-ssb-title' }, 'SSB 波束电平'),
+					E('span', { 'class': 'mt-ssb-summary', 'id': 'ssb-summary' }, '读取中...')
+				]),
+				E('div', { 'class': 'mt-ssb-grid' }, cells)
+			]);
+		}
+
+		/*
+		 * 按 state.ssb 的真实上报刷新矩阵：
+		 *   · 有值 → 显示「-63 dBm」+ 档位色点（优 / 良 / 中 / 弱 / 差）
+		 *   · 无值 → 显示「—」+「无信号」，灰色虚线弱化，与弱信号明显区分
+		 *   · 最强波束额外标注 data-best，纯由实测 RSRP 比较得出，不猜测“主用”
+		 */
+		function refreshSsbMatrix() {
+			var grid = document.querySelector('.mt-ssb-grid');
+			if (!grid) return;
+			var ssb = state.ssb;
+			var beams = (ssb && ssb.beams) || [];
+			var measured = 0;
+			var bestIdx = -1;
+			var bestVal = null;
+			for (var i = 0; i < 8; i++) {
+				var bv = (beams[i] === undefined) ? null : beams[i];
+				if (bv === null || bv === undefined) continue;
+				measured++;
+				if (bestVal === null || bv > bestVal) { bestVal = bv; bestIdx = i; }
+			}
+			for (var k = 0; k < 8; k++) {
+				var cell = grid.children[k];
+				if (!cell) continue;
+				var valEl = document.getElementById('ssb-val-' + k);
+				var tierEl = document.getElementById('ssb-tier-' + k);
+				var val = (beams[k] === undefined) ? null : beams[k];
+				var tier = ssbTierOf(val);
+				if (tier === null) {
+					cell.setAttribute('data-state', 'none');
+					cell.style.removeProperty('--ssb-color');
+					if (valEl) valEl.textContent = '—';
+					if (tierEl) tierEl.textContent = '无信号';
+				} else {
+					cell.setAttribute('data-state', 'ok');
+					cell.style.setProperty('--ssb-color', tier.color);
+					if (valEl) valEl.textContent = val + ' dBm';
+					if (tierEl) tierEl.textContent = tier.label;
+				}
+				cell.setAttribute('data-best', (k === bestIdx) ? '1' : '0');
+			}
+			var summary = document.getElementById('ssb-summary');
+			if (summary) {
+				if (!ssb || !ssb.queried) summary.textContent = '读取中...';
+				else if (!ssb.ok) summary.textContent = '未上报';
+				else if (measured === 0) summary.textContent = '网侧未配置测量';
+				else summary.textContent = '实测 ' + measured + '/8 · 最强 SSB ' + bestIdx;
+				if (measured > 0) {
+					summary.setAttribute('title',
+						'服务小区 PCI ' + (ssb.pci == null ? '—' : ssb.pci) +
+						' · 最强波束 SSB ' + bestIdx + ' = ' + bestVal + ' dBm');
+				}
+			}
+		}
+
+
+		/* 拓扑连线：两端圆点 + 中间虚线 */
+		function netFlowLink() {
+			return E('div', { 'class': 'mt-net-link' }, [
+				E('span', { 'class': 'mt-net-link-dot' }),
+				E('span', { 'class': 'mt-net-link-line' }),
+				E('span', { 'class': 'mt-net-link-dot' })
+			]);
+		}
+
+		/* 网络状态卡信息格：图标 + 标签 + 取值（id 与原实现保持一致） */
+		function netInfoCell(icon, label, id, placeholder) {
+			return E('div', { 'class': 'mt-net-info-cell' }, [
+				E('span', { 'class': 'mt-net-ico' }, [svgIcon(icon)]),
+				E('div', { 'class': 'mt-net-info-txt' }, [
+					E('span', { 'class': 'mt-net-lbl' }, label),
+					E('span', { 'class': 'mt-net-val', 'id': id }, placeholder)
+				])
+			]);
 		}
 
 		function renderMiniSparkline(targetId, data, color) {
@@ -702,6 +870,15 @@ return L.view.extend({
 			return s;
 		}
 
+		/* 数据承载协议栈文案（AT+CGDCONT 的 <PDP_type>）；取不到就如实显示 — ，不猜测 */
+		function pdpStackText() {
+			var t = String(state.pdpType || '').toUpperCase();
+			if (t === 'IPV4V6') return 'IPv4 / IPv6';
+			if (t === 'IP') return '仅 IPv4';
+			if (t === 'IPV6') return '仅 IPv6';
+			return t || '—';
+		}
+
 		function renderSignalUI() {
 			var c = state.cell;
 			var rsrp = c.rsrp;
@@ -745,6 +922,9 @@ return L.view.extend({
 			var celBox = document.getElementById('sig-cellular-box');
 			var celEl = celBox ? celBox.querySelector('.cellular') : null;
 			if (celEl && typeof celEl.setCellularState === 'function') celEl.setCellularState(sigState);
+
+			/* SSB 波束矩阵：按 AT^NRSSBID? 的真实上报刷新（未上报则显示「无信号」） */
+			refreshSsbMatrix();
 
 			/* 信号塔图标配色与状态同源（不再写死紫色） */
 			var towerBox = document.querySelector('.mt-tower-svg-box');
@@ -791,7 +971,13 @@ return L.view.extend({
 		   曲线经 Catmull-Rom → 三次贝塞尔平滑，末端点带呼吸脉冲标记“当前”。
 		   ========================================================================== */
 
-		/* RSRP 质量分区（阈值与 computeCellularState 的分档保持一致） */
+		/*
+		 * RSRP 质量分区（阈值与 computeCellularState 的分档保持一致）。
+		 * 这张表驱动信号趋势图的背景分区与悬浮数据卡的「质量」字段——一处定义，
+		 * 图表分区与真实评级不会各说各话。
+		 * 注：卡片一底部的 SSB 波束矩阵用的是更细的 SSB_TIERS（优/良/中/弱/差），
+		 *     那张表只服务波束电平，与本表互不干扰。
+		 */
 		/* 档位中文名（用于悬浮数据卡的“质量”字段；图内不再绘制档位文字） */
 		var SIGNAL_TIERS = [
 			{ label: '较差', min: -125, max: -110, color: '#ef4444' },
@@ -1408,6 +1594,38 @@ return L.view.extend({
 				ipEl.textContent = curIp;
 			}
 
+			/* 链路拓扑三节点的副标题与两个新增信息格（全部复用既有 state，不新增命令） */
+			var nodeSim = document.getElementById('net-node-sim');
+			if (nodeSim) nodeSim.textContent = state.operator || '—';
+
+			var nodeTower = document.getElementById('net-node-tower-title');
+			if (nodeTower) {
+				var ratShort = ratBadgeText(c.sysMode || prim.sysMode);
+				nodeTower.textContent = ratShort ? (ratShort + ' 基站') : '蜂窝基站';
+			}
+
+			var nodeBand = document.getElementById('net-node-band');
+			if (nodeBand) nodeBand.textContent = bandCombo;
+
+			var nodeStack = document.getElementById('net-node-stack');
+			if (nodeStack) nodeStack.textContent = pdpStackText();
+
+			var ratCell = document.getElementById('net-val-rat');
+			if (ratCell) {
+				var rawRat = String(c.sysMode || prim.sysMode || '').toUpperCase();
+				var shortRat = ratBadgeText(c.sysMode || prim.sysMode);
+				if (!shortRat) ratCell.textContent = '—';
+				else if (rawRat === 'NR' || rawRat === 'LTE') ratCell.textContent = shortRat + ' ' + rawRat;
+				else ratCell.textContent = shortRat;
+			}
+
+			var ipv6Cell = document.getElementById('net-val-ipv6');
+			if (ipv6Cell) {
+				/* 变量名避开下方 APN 分组里已有的 pdpIpv6，避免同函数内重复声明 */
+				var addrIpv6 = (state.diag.addrs || []).filter(function (a) { return a.family === 'IPv6'; })[0];
+				ipv6Cell.textContent = state.dhcpv6.ipv6Address || (addrIpv6 ? addrIpv6.address : '—');
+			}
+
 			// Tab 1: 网络信息
 			var dlModText = state.mcs.dlMod ? state.mcs.dlMod + ' (DL)' : '—';
 			var ulModText = state.mcs.ulMod ? state.mcs.ulMod + ' (UL)' : '—';
@@ -2002,6 +2220,45 @@ return L.view.extend({
 			}).catch(function () {});
 		}
 
+		/*
+		 * SSB 波束遥测（AT^NRSSBID?，手册 13.28）：
+		 *   · 仅在 NR 连接态、且网侧配置了 Beam 测量时才会有有效值，其余情况模组
+		 *     整包填无效值（SSB ID 0xFF / RSRP 0x7FFF），解析层已统一置 null；
+		 *   · 单条回包较长，逐轮查询会挤占串口带宽，因此按轮次节流（每 3 轮 ≈ 15s）；
+		 *   · 查询失败或网侧未配置时如实回落到「未上报 / 无信号」，不保留过期假象。
+		 */
+		var ssbPollTick = 0;
+		var SSB_POLL_EVERY = 3;
+
+		function loadSSB() {
+			ssbPollTick++;
+			/* 已经拿到过数据就按节流间隔走；从未成功过则每轮都试，尽快给出真值 */
+			if (ssbPollTick % SSB_POLL_EVERY !== 1 && state.ssb.lastSuccessTime > 0) {
+				return Promise.resolve();
+			}
+			return AtWs.client.sendCommand('AT^NRSSBID?').then(function (res) {
+				state.ssb.queried = true;
+				var parsed = (res && res.success && res.data) ? AtWs.parseNRSSBID(res.data) : null;
+				if (parsed && parsed.beams) {
+					state.ssb.ok = true;
+					state.ssb.lastSuccessTime = Date.now();
+					state.ssb.arfcn = parsed.arfcn;
+					state.ssb.pci = parsed.pci;
+					state.ssb.rsrp = parsed.rsrp;
+					state.ssb.sinr = parsed.sinr;
+					state.ssb.beams = parsed.beams;
+				} else {
+					/* 命令通了但解析不出结构：本次视为无有效上报 */
+					state.ssb.ok = false;
+				}
+				refreshSsbMatrix();
+			}).catch(function () {
+				state.ssb.queried = true;
+				state.ssb.ok = false;
+				refreshSsbMatrix();
+			});
+		}
+
 		function getPSReg() {
 			return AtWs.client.sendCommand('AT+CGREG?').then(function (res) {
 				if (res.success && res.data) {
@@ -2343,7 +2600,8 @@ return L.view.extend({
 				getFlow,
 				getTemp,
 				getMCS,
-				loadDiagnostics
+				loadDiagnostics,
+				loadSSB
 			];
 
 			return tasks.reduce(function (p, fn) {
@@ -2359,6 +2617,9 @@ return L.view.extend({
 				refreshing = false;
 			});
 		}
+
+		/* 首屏先画一版 SSB 矩阵（尚未查询 → 全部「无信号」）；真实数据到达后由 loadSSB 刷新 */
+		refreshSsbMatrix();
 
 		// 初始触发
 		refreshAll();

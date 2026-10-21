@@ -17,9 +17,10 @@ USE_PROCD=1
 #   实际函数一直都在（type 能查到）。排查时会严重误导方向。
 #   且 rc.common 的 list_contains 校验**只检查名字在不在列表里**，
 #   不检查对应函数是否存在 —— 所以这个错误完全不会被提前拦住。
-EXTRA_COMMANDS="ensure_interfaces on_uplink sync_serial_by_id"
+EXTRA_COMMANDS="ensure_interfaces on_uplink on_downlink sync_serial_by_id"
 EXTRA_HELP="	ensure_interfaces	确保 V4/V6 模组接口存在并登记到上行防火墙区域（安装/升级后自动调用）
-	on_uplink		拉起模组接口（后端确认拨号就绪时调用）
+	on_uplink		拉起模组接口并下发默认 DNS（后端确认拨号就绪时调用）
+	on_downlink		链路断开时撤掉 IPv6 默认 DNS（接口 ifdown 时自动调用；IPv4 不撤）
 	sync_serial_by_id	重建 /dev/serial/by-id 稳定符号链接（模组拔插后自动调用）"
 
 PROG=/usr/bin/at-webserver-rust
@@ -1104,6 +1105,13 @@ stop_service() {
 	timeout 8 /etc/init.d/firewall reload >/dev/null 2>&1 || true
 	logger -t at-webserver "已清理所有防火墙规则"
 
+	# 撤掉下发过的默认 DNS：服务停止即代表本插件不再管理这些接口。
+	# 选在 stop 而不是 ifdown 上做，是因为 stop 是一次明确、不会自我触发的动作，
+	# 不存在「刚写完就被自己清掉」的竞态（详见 hotplug.d/iface/99-at-webserver）。
+	if resolve_ifaces; then
+		clear_default_dns
+	fi
+
 	sleep 1
 	logger -t at-webserver "服务已停止"
 	echo "AT WebServer stopped"
@@ -1127,13 +1135,285 @@ reload_service() {
 
 	start_service
 
+	# DNS 相关配置（地址 / 开关）可能刚被改过：立刻按新配置重算一次，让改动
+	# 当场生效，而不是等到下一次拨号才看见效果。
+	# uci commit network 会触发 netifd 重新配置接口，这里不需要额外 ifup。
+	if resolve_ifaces; then
+		apply_default_dns || true
+	fi
+
 	logger -t at-webserver "配置重新加载完成"
 }
 
+# ---------------------------------------------------------------------------
+# 默认 DNS 下发（拨号成功后写入承载接口，作为兜底且实际优先的解析服务器）
+#
+# 为什么需要：
+#   蜂窝拨号下发的 DNS 完全由运营商决定，实测拿到的是 221.179.38.7 /
+#   120.196.165.7 这类省内递归节点，可用性与污染情况都不可控；IPv6 接口更常见的
+#   是一条都不给（实测 ifstatus MT5700Mv6 的 dns-server 为空数组），此时 IPv6
+#   域名解析直接不可用。这里在拨号成功后把一组**可配置的公共 DNS**写进承载
+#   接口的 dns 列表，让解析不再依赖运营商的心情。
+#
+# 「兜底」的确切含义（本机实测，这条结论不要凭直觉改写）：
+#   netifd 把 UCI 里手写的 dns 排在 DHCP/RA 下发的 DNS **之前** ——
+#   实测 resolv.conf.auto 顺序为 119.29.29.29、223.5.5.5、221.179.38.7、
+#   120.196.165.7。所以写 dns 不会「被运营商覆盖而白写」，它同时是优先项，
+#   peerdns 保持默认 1 即可；确需完全忽略运营商 DNS 时才用 dns_exclusive=1。
+#
+# IPv6 的下发条件是硬要求，不是可选优化：
+#   只有本次拨号**实际分配到 IPv6** 才写；否则必须把上一次留下的 IPv6 DNS 一并
+#   清掉。留着会造成「没有 IPv6 连通性却配着 IPv6 DNS」的长期错位，表现为解析
+#   随机超时，现象与「网速慢」难以区分，排障成本极高。
+#
+# 地址集中定义在 UCI（at-webserver.config.dns_*），改配置即可，不必改脚本。
+# ---------------------------------------------------------------------------
+
+# 内置默认地址：仅在该 UCI 键**不存在**时回落（老配置升级上来的场景）。
+# 键存在但被显式留空时尊重留空 —— 那是用户「不要这一条」的明确选择。
+DEFAULT_DNS_V4_1='119.29.29.29'
+DEFAULT_DNS_V4_2='223.5.5.5'
+DEFAULT_DNS_V6_1='2402:4e00::'
+DEFAULT_DNS_V6_2='2400:3200::1'
+
+dns_push_enabled() {
+	[ "$(uci -q get at-webserver.config.dns_enable)" != "0" ]
+}
+
+# 读取一个 DNS 地址配置项：$1=UCI 键  $2=内置默认
+dns_conf() {
+	local v
+	if v=$(uci -q get "at-webserver.config.$1") && [ -n "$v" ]; then
+		echo "$v"
+		return 0
+	fi
+	# 键存在（哪怕为空）→ 尊重用户；键不存在 → 用内置默认
+	if uci -q get "at-webserver.config.$1" >/dev/null 2>&1; then
+		echo ''
+		return 0
+	fi
+	echo "$2"
+}
+
+# 把地址列表拼成日志用的字符串（空列表显示「（无）」）
+dns_list_str() {
+	local out='' d
+	for d in "$@"; do
+		[ -n "$d" ] && out="${out:+$out }$d"
+	done
+	echo "${out:-（无）}"
+}
+
+# 经后端 ubus 接口发一条 AT 命令，返回原始应答文本；失败返回 1。
+#
+# 为什么走 ubus 而不是自己开串口：串口是后端的独占资源，init.d 再去读会与后端
+# 抢设备（表现为 AT 超时、后端状态掉线）。后端本来就对外提供了 mt5700.at 方法
+# （LuCI 的 AT 终端页正是用它），复用它既不冲突，也不需要 init.d 知道模组
+# 当前在哪个 /dev/ttyUSB* 上。
+at_query() {
+	local raw
+	raw=$(timeout 5 ubus -S call mt5700 at "{\"cmd\":\"$1\"}" 2>/dev/null) || return 1
+	[ -n "$raw" ] || return 1
+	command -v jsonfilter >/dev/null 2>&1 || return 1
+	printf '%s' "$raw" | jsonfilter -e '@.data'
+}
+
+# 本次拨号是否**实际分配到 IPv6 地址**。
+#   返回 0 = 确认拿到，1 = 确认没拿到，2 = **无法判定**（AT 通道未就绪等）。
+#
+# 为什么必须区分「没有」和「不知道」：
+#   reload_service 会在**后端刚重启完**时调用重算，那一刻 ubus 的 mt5700 对象
+#   可能还没注册，AT 查询必然失败。若把失败当成「没有 IPv6」，就会在一次
+#   普通的配置保存里把原本正常的 IPv6 DNS 清掉 —— 实测踩到过，表现为「改个
+#   IPv4 DNS，IPv6 解析跟着挂了」。所以无法判定时调用方必须保持现状。
+dial_has_ipv6() {
+	local cgpaddr cgdcont cid pdp
+
+	# 1) AT+CGPADDR 只列出「已激活且已分配到地址」的上下文，用它定位本次拨号
+	#    实际使用的 CID，并检查它有没有带出 IPv6 地址。
+	#    运营商把 PDP 配成 IPV4V6 却只给 v4 的情况并不罕见，只看 PDP 类型会误判。
+	cgpaddr=$(at_query 'AT+CGPADDR') || return 2
+	[ -n "$cgpaddr" ] || return 2
+	cid=$(printf '%s\n' "$cgpaddr" | awk '
+		/^\+CGPADDR:/ {
+			line = $0
+			sub(/^\+CGPADDR:[ ]*/, "", line)
+			n = split(line, f, ",")
+			c = f[1]; gsub(/[^0-9]/, "", c)
+			for (i = 2; i <= n; i++) {
+				a = f[i]
+				gsub(/[^0-9A-Fa-f:.]/, "", a)
+				if (a ~ /:/) { print c; exit }              # 冒号形式 2409:8d5a:...
+				if (gsub(/\./, ".", a) == 15) { print c; exit }  # 点分十进制形式（16 段）
+			}
+		}')
+	# 有应答但没有任何 CID 带 IPv6 地址 → 确认本次没有 IPv6
+	[ -n "$cid" ] || return 1
+
+	# 2) 再核对该 CID 的 PDP 类型（用户约定的口径：IPV6 / IPV4V6）。
+	#    取不到 PDP 类型时以「确实分配到 IPv6 地址」为准 —— 不因为少一条 AT
+	#    应答就把已经拿到 v6 的拨号判成没有。
+	# PDP 类型查不到但地址已确认有 v6 → 按「有」处理，不因少一条 AT 就判否
+	cgdcont=$(at_query 'AT+CGDCONT?') || return 0
+	pdp=$(printf '%s\n' "$cgdcont" | awk -v cid="$cid" '
+		/^\+CGDCONT:/ {
+			line = $0
+			n = split(line, f, ",")
+			c = f[1]; gsub(/[^0-9]/, "", c)
+			if (c + 0 == cid + 0) {
+				t = f[2]; gsub(/[^A-Za-z0-9]/, "", t)
+				print toupper(t)
+				exit
+			}
+		}')
+	case "$pdp" in
+		''|IPV6|IPV4V6) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# 覆盖式写入接口的 dns 列表。$1=接口名  $2..=DNS 地址（空值自动跳过）
+# 返回 0=有改动并已 commit，1=已经是目标状态（避免每次拨号都动一次 UCI）。
+iface_set_dns() {
+	local iface="$1"; shift
+	local d cur want peer
+
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 1
+
+	want=''
+	for d in "$@"; do
+		[ -n "$d" ] || continue
+		want="$want$d "
+	done
+	cur=$(uci -q get "network.$iface.dns" 2>/dev/null | tr '\n' ' ')
+
+	# 独占模式 = 忽略运营商下发的 DNS（peerdns=0）；否则显式写回 peerdns=1。
+	# 显式写回而不是删掉：开关来回切换时状态始终可预测，不会残留上一次的值。
+	# 默认独占（peerdns=0）：只有明确关掉才保留运营商下发的 DNS
+	peer=0
+	[ "$(uci -q get at-webserver.config.dns_exclusive)" = "0" ] && peer=1
+
+	if [ "$cur" = "$want" ] && [ "$(uci -q get "network.$iface.peerdns")" = "$peer" ]; then
+		return 1
+	fi
+
+	uci -q delete "network.$iface.dns" 2>/dev/null
+	for d in "$@"; do
+		[ -n "$d" ] || continue
+		uci -q add_list "network.$iface.dns=$d" || true
+	done
+	uci -q set "network.$iface.peerdns=$peer"
+	uci -q commit network
+	return 0
+}
+
+# 撤掉接口上由本插件写入的 dns / peerdns（$1=接口名；0=有改动，1=无需改动）
+iface_clear_dns() {
+	local iface="$1" changed=0
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 1
+	uci -q delete "network.$iface.dns" 2>/dev/null && changed=1
+	uci -q delete "network.$iface.peerdns" 2>/dev/null && changed=1
+	[ "$changed" -eq 1 ] || return 1
+	uci -q commit network
+	return 0
+}
+
+# 拨号成功后下发默认 DNS。
+#   $1 可选：'1'/'0' 由调用方显式指定本次是否拿到 IPv6；留空则按 AT 实际状态判定。
+#
+# 与 manage_interface 的语义保持一致：该开关关闭时本插件不修改任何 network 配置，
+# 包括 DNS —— 那时接口是用户自己的，写进去只会覆盖他手工配的解析服务器。
+apply_default_dns() {
+	local flag="$1" v4_1 v4_2 v6_1 v6_2 has6
+
+	if ! dns_push_enabled; then
+		# 开关关闭：把之前写进去的都撤掉，避免「关了开关但 DNS 还在」的错觉
+		clear_default_dns
+		return 0
+	fi
+	manage_interface_enabled || return 0
+
+	v4_1=$(dns_conf dns_v4_1 "$DEFAULT_DNS_V4_1")
+	v4_2=$(dns_conf dns_v4_2 "$DEFAULT_DNS_V4_2")
+	v6_1=$(dns_conf dns_v6_1 "$DEFAULT_DNS_V6_1")
+	v6_2=$(dns_conf dns_v6_2 "$DEFAULT_DNS_V6_2")
+
+	# IPv4：每次拨号成功都下发（无附加条件）
+	if iface_set_dns "$IFACE_4G" "$v4_1" "$v4_2"; then
+		logger -t at-webserver "已向 $IFACE_4G 下发默认 DNS：$(dns_list_str "$v4_1" "$v4_2")"
+		apply_dns_restart "$IFACE_4G"
+	fi
+
+	[ -n "$IFACE_6G" ] || return 0
+
+	case "$flag" in
+		1) has6=1 ;;
+		0) has6=0 ;;
+		*)
+			dial_has_ipv6
+			case $? in
+				0) has6=1 ;;
+				1) has6=0 ;;
+				*)
+					# 无法判定：既不写也不清，保持现状。
+					# 这里「保守」的方向和 IPv4 不同 —— 乱清会让已经在用的
+					# IPv6 解析凭空失效，比暂时不更新更糟。
+					logger -t at-webserver "AT 通道暂不可用，无法判定是否获取 IPv6：保留 $IFACE_6G 现有 DNS 配置"
+					return 0
+					;;
+			esac
+			;;
+	esac
+
+	if [ "$has6" = "1" ]; then
+		if iface_set_dns "$IFACE_6G" "$v6_1" "$v6_2"; then
+			logger -t at-webserver "本次拨号已获取 IPv6，已向 $IFACE_6G 下发默认 DNS：$(dns_list_str "$v6_1" "$v6_2")"
+			apply_dns_restart "$IFACE_6G"
+		fi
+	else
+		# 重拨时网络类型可能从 IPV4V6 变成 IPv4-only，残留的 IPv6 DNS 会让解析
+		# 先去试一个永远不通的地址 —— 必须清掉，这是「重拨即更新」的另一半。
+		if iface_clear_dns "$IFACE_6G"; then
+			logger -t at-webserver "本次拨号未获取 IPv6，已清除 $IFACE_6G 的默认 DNS（避免无 IPv6 连通性却配 IPv6 DNS）"
+			apply_dns_restart "$IFACE_6G"
+		fi
+	fi
+	return 0
+}
+
+# 让刚改动的 DNS 真正进入 resolv.conf。
+#
+# UCI 写完不等于生效：netifd 只在协议重新协商时才会把 dns 写进
+# resolv.conf.auto，光 uci commit 不会触发（实测改完地址，resolv.conf 里仍是
+# 旧值）。因此改了配置就得重启一次接口。
+# 只在「接口已经在稳态（有地址）」时补这一次重启：还没有地址的场合，调用方
+# （on_uplink / ensure_modem_interface）本来就会 ifup，不必重复。
+apply_dns_restart() {
+	local iface="$1"
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 0
+	iface_has_address "$iface" || return 0
+	ifup "$iface" 2>&1 | logger -t at-webserver || true
+}
+
+# 撤掉本插件下发过的 DNS（开关关闭 / 链路断开时调用）
+clear_default_dns() {
+	manage_interface_enabled || return 0
+	[ -n "$IFACE_4G" ] && {
+		iface_clear_dns "$IFACE_4G" && logger -t at-webserver "已清除 $IFACE_4G 的默认 DNS"
+	}
+	[ -n "$IFACE_6G" ] && {
+		iface_clear_dns "$IFACE_6G" && logger -t at-webserver "已清除 $IFACE_6G 的默认 DNS"
+	}
+	return 0
+}
+
 # 由后端在「自动拨号达成」时调用（on-uplink 钩子），也可手动执行：
-#   /etc/init.d/at-webserver on_uplink
-# 只做一件事：把模组接口 ifup 一次。让「拨号成功」与「网卡要地址」这两件事
-# 有明确先后关系，而不是靠 init.d 在后端拨号之前抢跑 + 猜时间。
+#   /etc/init.d/at-webserver on_uplink [1|0]
+# 1 = 本次拨号已拿到 IPv6，0 = 未拿到；不传则按 AT 实际状态判定。
+#
+# 做两件事：把模组接口 ifup 一次；按本次拨号结果下发/更新默认 DNS。
+# 让「拨号成功」与「网卡要地址」有明确先后关系，而不是靠 init.d 在后端拨号
+# 之前抢跑 + 猜时间。
 on_uplink() {
 	local i
 	if ! manage_interface_enabled; then
@@ -1150,6 +1430,9 @@ on_uplink() {
 	resolve_ifaces || return 0
 	ensure_iface_created "$IFACE_4G" dhcp || return 1
 	[ -z "$IFACE_6G" ] || ensure_iface_created "$IFACE_6G" dhcpv6 || true
+	# 在接口建好之后、ifup 之前下发：本次 ifup 就能直接用上新 DNS，
+	# 不必等到下一次接口重建才生效。
+	apply_default_dns "$1"
 	ensure_firewall_zone
 	for i in "$IFACE_4G" "$IFACE_6G"; do
 		[ -n "$i" ] || continue
@@ -1160,6 +1443,31 @@ on_uplink() {
 		ifup "$i" 2>&1 | logger -t at-webserver || true
 	done
 	fw_reload_if_dirty
+	return 0
+}
+
+# 链路断开时撤掉默认 DNS（由 hotplug 的 ifdown 事件调用，也可手动执行：
+#   /etc/init.d/at-webserver on_downlink）。
+#
+# **只撤 IPv6 那一份**，IPv4 不动 —— 这点很关键，本喵第一版写成「两边都清」
+# 实测就翻车了：
+#   - IPv4 DNS 是无条件下发的兜底值，接口重启 / 重拨期间把它清掉，等于在最需要
+#     兜底的时候凭空抽掉解析服务器；
+#   - netifd 的 ifup 语义是「down → up」，手动或自动重启接口都会发一次 ifdown，
+#     于是出现「on_uplink 刚写完 → ifup 触发 ifdown → 立刻被自己清掉」的竞态，
+#     现象是 DNS 时有时无，且日志上看不出是谁干的。
+#
+# IPv6 那份相反：它严格跟随链路状态存在，链路断了留着就是「无 IPv6 连通性却
+# 配着 IPv6 DNS」。重拨时 on_uplink 会按新的拨号结果重新判定并下发，
+# 所以这里只负责撤掉，不承担重新下发的职责 —— 两边分工明确。
+on_downlink() {
+	# 注意：本动作**不挂 hotplug ifdown**（原因见 hotplug.d/iface/99-at-webserver
+	# 里的说明），只作为手动排查入口与 stop_service 的清理步骤。
+	resolve_ifaces || return 0
+	manage_interface_enabled || return 0
+	[ -n "$IFACE_6G" ] || return 0
+	iface_clear_dns "$IFACE_6G" &&
+		logger -t at-webserver "链路断开，已清除 $IFACE_6G 的默认 DNS（等下次拨号按实际情况重新下发）"
 	return 0
 }
 
