@@ -239,8 +239,13 @@ ok('来电时挂断按钮改文案为「拒接」', viewSrc.includes("'拒接'")
 ok('来电铃声用 Web Audio 生成（本页唯一能让手机出声的部分）',
 	viewSrc.includes('webkitAudioContext') && viewSrc.includes('createOscillator'));
 ok('铃声在离开页面时停掉', /_onDispose\(function[\s\S]*?ringStop\(\)/.test(viewSrc));
+/*
+ * 断点描述换了口径（2026-10-22 实测定版）：旧的「板上也没有 codec」来自
+ * 10-16 的推断，现在有更硬的证据 —— USB 双配置里根本没有 Audio Class 接口。
+ * 断言盯的是「页面必须说清断点在哪」，不是某一句原文，所以跟着事实改锚点。
+ */
 ok('页面明示「通话内容听不到」及断点（不让用户把没声音当成故障）',
-	viewSrc.includes('通话内容听不到') && viewSrc.includes('板上也没有 codec'));
+	viewSrc.includes('通话内容听不到') && viewSrc.includes('没有任何 Audio Class'));
 ok('静音未读到时显示「—」而不是当作 0（红线 23）',
 	/if \(st\.mute == null\)/.test(viewSrc));
 ok('通话结束落记录（回到 idle 触发 saveRecord）',
@@ -456,6 +461,97 @@ ok('2 秒轮询里只有 status 查询（不许夹带别的动作）',
 		const i = viewSrc.indexOf('Mt5700.interval(2000');
 		const ivBlock = (i < 0) ? '' : viewSrc.slice(i, i + 400);
 		return ivBlock.includes('refreshStatus()') && ivBlock.indexOf("AtWs.call('info'") < 0;
+	})());
+
+/* ---------- ⑩ URC 事件驱动（2026-10-22 真机实测后新增） ----------
+ *
+ * 背景：实测拨 10086，从 ATD 到挂断的每一条状态变化都由鼎桥私有 URC 主动
+ * 报出来（^CCALLSTATE / ^ORIG / ^CONF / ^CONN / ^CEND），一条开启命令都没发。
+ * 而 +CLCC 到 t+12s 才反映「已接通」，URC 在 t+7s 就报了 —— 轮询慢 5 秒。
+ * 于是把 URC 接成触发器：变化一到就立刻读一次 CLCC，状态值仍由 CLCC 现算。
+ */
+
+ok('视图消费通话类 URC（rpc.js 产出的 {type:"CALL"}）',
+	viewSrc.includes("ev.data.type === 'CALL'") && viewSrc.includes('function handleCallUrc'));
+
+/*
+ * ★ 这条是整个改造的核心纪律，也是最容易被后来者「顺手优化」掉的地方：
+ *   ^CCALLSTATE 的 <state>（0 originate / 1 proceeding / 2 alerting /
+ *   3 connected / 4 released / 5 incoming / 6 waiting / 7 hold / 8 retrieve）
+ *   与 +CLCC 的 <stat>（0 active / 1 held / 2 dialing / 3 alerting /
+ *   4 incoming / 5 waiting）**是两套编号**。同一个「接通」一个是 3、一个是 0。
+ *   一旦有人把 URC 的 state 直接写进 applyCalls，全部状态会静默错位
+ *   —— 而且页面看起来「还在动」，最难查。所以反向断言：
+ *   handleCallUrc 体内不许出现 st.phase 赋值，只许调 urcKick()。
+ */
+ok('URC 只当触发器，不直接改 phase（两套编号不许混用）',
+	(function () {
+		const i = viewSrc.indexOf('function handleCallUrc');
+		const j = viewSrc.indexOf('function urcKick');
+		if (i < 0 || j < 0 || j <= i) { return false; }
+		const body = viewSrc.slice(i, j);
+		return body.includes('urcKick()') && body.indexOf('st.phase') < 0;
+	})());
+
+ok('URC 触发刷新带 250ms 合并窗口（同批 URC 不连发 CLCC）',
+	/function urcKick\(\)[\s\S]*?now - lastStatusAt < 250[\s\S]*?setTimeout/.test(viewSrc) &&
+	viewSrc.includes('lastStatusAt = Date.now()'));
+
+ok('通话时长优先用 ^CEND 给的秒数，前端差值只作降级',
+	/duration: \(t\.endedDuration != null\) \? t\.endedDuration\s*: \(t\.answeredAt/.test(viewSrc));
+
+ok('新一通开始清掉上一通的 ^CEND 残留时长（否则会记到下一通头上）',
+	/if \(!track\) \{[\s\S]{0,200}pendingDuration = null/.test(viewSrc));
+
+ok('语音域（IMS/CS）取自 ^CCALLSTATE 第三字段，空闲时清掉',
+	viewSrc.includes('st.domain = d.domain') &&
+	viewSrc.includes("stateText += ' · IMS'") &&
+	/st\.phase === 'idle'\) \{ st\.domain = null; \}/.test(viewSrc));
+
+/*
+ * 事件轮询间隔必须压小再还原。
+ * 不压：URC 再即时也要等下一次 pollEvents（默认 1500ms）才被看见，
+ *       相对原来 2s 的 CLCC 轮询只快 0.4 秒 —— 等于白做。
+ * 不还原：pollInterval 是 AtWs.client 共享单例的属性，之后每个页面都按
+ *       500ms 频率拉 events，白挤 rpcd 单线程（红线 63）。
+ */
+ok('本页把事件轮询压到 500ms，离开时还原共享单例的间隔',
+	/c\.pollInterval = 500;/.test(viewSrc) &&
+	/savedPollInterval = c\.pollInterval;/.test(viewSrc) &&
+	/c\.pollInterval = savedPollInterval;/.test(viewSrc) &&
+	/if \(savedPollInterval == null\) \{ savedPollInterval = c\.pollInterval; \}/.test(viewSrc));
+
+ok('离开页面清掉 URC 合并定时器（否则走后还会打一条 CLCC）',
+	/_onDispose\(function[\s\S]{0,400}if \(kickTimer\) \{ clearTimeout\(kickTimer\); kickTimer = 0; \}/.test(viewSrc));
+
+ok('rpc.js 解析 ^CCALLSTATE 与 ^CEND，数值字段归一到 number 或 null',
+	rpcSrc.includes('function parseCcallState') &&
+	rpcSrc.includes('function parseCend') &&
+	rpcSrc.includes('isNaN(n) ? null : n') &&
+	rpcSrc.includes('numOrNull(f[1])'));
+
+ok('parseRawData 认领通话 URC（不认就等于后端白转发）',
+	rpcSrc.includes("line.indexOf('^CCALLSTATE:') === 0") &&
+	rpcSrc.includes("line.indexOf('^CEND:') === 0") &&
+	rpcSrc.includes("line.indexOf('^ORIG:') === 0"));
+
+/*
+ * ★ 跨层断言（红线 85 的教训：「后端返回正确」≠「页面拿到」）。
+ *   atclient.rs 的 is_exclusive_urc 只管「要不要 emit」，broadcast 位取的是
+ *   is_passthrough_urc —— 只加前者不加后者，URC 会被并进 AT+CLCC 的应答体，
+ *   前端一条都收不到，而所有本地测试依然全绿。两处必须同时含这五个前缀。
+ */
+ok('后端 is_passthrough_urc 登记了五条通话 URC（命令等待期才带 broadcast）',
+	(function () {
+		const p = path.join(ROOT, 'src', 'rust', 'src', 'atclient.rs');
+		if (!fs.existsSync(p)) { return false; }
+		const src = fs.readFileSync(p, 'utf8');
+		const i = src.indexOf('pub fn is_passthrough_urc');
+		const j = src.indexOf('\n}', i);
+		if (i < 0 || j < 0) { return false; }
+		const body = src.slice(i, j);
+		const need = ['"^CCALLSTATE:"', '"^ORIG:"', '"^CONF:"', '"^CONN:"', '"^CEND:"'];
+		return need.every(function (k) { return body.includes('line.starts_with(' + k + ')'); });
 	})());
 
 /* ---------- 汇总 ---------- */

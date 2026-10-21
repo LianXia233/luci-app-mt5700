@@ -10,36 +10,41 @@
  * 功能（手册第 4 章呼叫控制 + 第 5 章网络服务 + 第 12 章鼎桥私有 URC）：
  *   · 拨号盘（0-9 / * / # / 国际前缀 +，退格、清空）
  *   · 拨打 / 接听 / 拒接 / 挂断 / 通话中 DTMF
- *   · 通话状态（AT+CLCC 2s 轮询：dialing / alerting / active / incoming / waiting）
- *   · 通话时长（active 起算）
+ *   · 通话状态（^CCALLSTATE 等 URC 即时触发刷新 + AT+CLCC 2s 轮询兜底）
+ *   · 通话时长（通话中按 active 起算；结束后以 ^CEND 给的秒数为准）
  *   · 麦克风静音（AT+CMUT）与扬声器音量读数（AT+CLVL）
  *   · 通话记录（设备侧持久化 /etc/mt5700/call-log.json，跨浏览器可见）
  *   · 来电铃声（Web Audio 生成，手机浏览器可响）
  *
- * ★★★ 声音的断点在哪（2026-10-16 实测 + 专项研究，方案见 REFERENCE §声音实现方案）：
- *   · 模组侧：`AT+CLVL=?` 真机回 **(1-12)** —— 手册 6.10 写明 1–12 是
- *     「车载 PCM 语音特性开关」打开时的档位（普通模式是 0–5）⇒ **模组的
- *     PCM 语音通路是开的**。但手册 90 条私有命令里没有任何配置 PCM/I2S
- *     或 USB 组成的 AT 命令 ⇒ 音频只能走硬件引脚，软件改不了。
- *   · 主机侧：模组 USB 面只有 CDC-NCM 数据口 + 4 个 AT 串口，无 audio
- *     class 接口；MT7987 的 AFE（audio-controller@11210000）在主线内核
- *     有驱动（CONFIG_SND_SOC_MT7986，兼容 mt7987），但本板设备树里
- *     status=disabled、板面无 codec，厂商与上游 DTS 都没引用 i2s/pcm 引脚。
- *   ⇒ 信令全通、音频断在主板。本页做「通话管理台」；想听到声音有两条路：
- *     路由器跑 SIP（Asterisk 已装，零硬件）或把模组 PCM 飞线到 SoC AFE
- *     （需先万用表验证 M.2 音频脚是否引出）。
+ * ★★★ 声音的断点在哪（2026-10-22 六出口实测封死，详见 REFERENCE §声音）：
+ *   本模组的语音音频在物理上就没引到软件能读到的地方：
+ *   · USB：两个配置都解析过，六个接口全是 CDC-NCM / CDC-Data / vendor(ff/06)×4，
+ *     **没有 Audio Class、没有等时端点**。
+ *   · 手册：244 条命令里没有任何音频数据通道（^CSCHANNELINFO 只报带宽状态）。
+ *   · AT 串口：通话中 ttyUSB 各 0 字节。
+ *   · 模式切换：AT^SETMODE 九种模式全是数据口，无一种带音频。
+ *   · 蓝牙：手册零条蓝牙命令，没有 HFP 可走。
+ *   · SoC：AFE 节点 status=disabled，无 /dev/snd；通话中 PCM 引脚采样 120 次全 0。
+ *   ⇒ 信令全通、音频断在硬件。想听到声音只有一条路：**换带 USB Audio Class
+ *     的模组**。软件侧已经备好 —— 插件随包带了 11 个 ALSA 内核模块，
+ *     检测到 UAC 接口就自动装载，不需要重编固件（见 root/usr/share/mt5700/audio-ko.sh）。
  *
- * ★ 状态来源为什么是轮询而不是 URC：
- *   呼叫生命周期的私有 URC（^ORIG / ^CONF / ^CONN / ^CEND）受 AT^CURC 控制，
- *   而真机（2026-10-16）实测 ^CURC=0 —— 一个都不报。开它需要 mode=2 的
- *   位图掩码，而掩码位序（大端/小端）**未经真机验证**：猜错一位就会把
- *   ^DSFLOWRPT 之类的常驻上报放出来，那正是红线 22 要防的事故形态。
- *   在掩码验证之前，本页只用 AT+CLCC 轮询拿全量状态 —— 真机实测该命令
- *   在通话中照样应答（12.3s 时返回 +CLCC: 1,0,0,0,0,"1008611",161）。
+ * ★ 状态来源：URC 打头，CLCC 兜底（2026-10-22 实测推翻了此前这里的结论）。
+ *   此前写着「私有 URC 受 AT^CURC 控制、实测一个都不报」—— 那是误判：它们
+ *   是**呼叫期** URC，空闲时自然安静，当时只是没有通话可报。
+ *   实测拨 10086 全程一条开启命令都没发，事件链完整到达：
+ *     ATD 响应内 ^CCALLSTATE:1,0,1 + ^ORIG:1,0
+ *     t+2s 1,1,1 → t+6s 1,2,1 + ^CONF:1 → t+7s ^CONN:1,0 + 1,3,1
+ *     CHUP 后 ^CEND:1,25,104,0 + 1,4,1
+ *   而 +CLCC 到 t+12s 才变 stat=0，晚了 5 秒。
+ *   ⇒ 不需要 AT+CRC，更不需要会卡死整条串口 12~15 秒的 AT+CLIP（红线 73）。
  *
- * ★ 来电的瞬间通知走既有 incoming_call 推送（urc.rs 的 RING/+CLIP），
- *   但 +CLIP 是否上报取决于模组的 CLIP 设置，所以**来电检测以 CLCC 轮询
- *   为准**（dir=1 即网络来电），推送只是让号码早一两秒出现。
+ * ★ 但状态值仍由 CLCC 现算：^CCALLSTATE 的 <state> 与 CLCC 的 <stat> 是两套
+ *   编号（同一个「接通」，一个是 3、一个是 0），且 CLCC 带方向、号码、呼叫 ID，
+ *   是唯一能渲染完整那一行的来源。URC 只负责「现在就去读一次」，见 urcKick。
+ *
+ * ★ 来电仍以 CLCC 为准：+CLIP 是否上报取决于模组的 CLIP 设置，
+ *   而 incoming_call 推送里没有呼叫 ID 与方向。
  *
  * ★ 号码校验前后端各一道：前端为了即时反馈，后端 callNumberOk 是真门禁
  *   （号码会原样进 AT 命令行，分号能分隔多条命令）。
@@ -68,10 +73,10 @@ return L.view.extend({
 			'class': 'mt5700-notice mt5700-notice-warning'
 		}, '这一页管「信令」不管「声音」：拨号、接听、拒接、挂断、状态、DTMF、'
 			+ '通话记录都能用，来电时页面还会响铃；但通话内容听不到。'
-			+ '实测（2026-10-16）：模组侧 PCM 语音模式已开启（AT+CLVL 档位 1–12），'
-			+ '断点在这台 CPE 的主板 —— 模组的音频引脚没有接到 SoC，板上也没有 codec。'
-			+ '想听到声音：可在路由器上跑 SIP 软电话（Asterisk 已安装），'
-			+ '或把模组 PCM 飞线到 SoC AFE（需先验证接线）。'));
+			+ '实测（2026-10-22）：MT5700M-CN 的 USB 六个接口里没有任何 Audio Class，'
+			+ '手册 244 条命令也没有音频数据通道 —— 语音音频在这块模组上就没引出来。'
+			+ '要听到声音需要换带 USB Audio Class 的模组：插件已随包带上 ALSA 驱动，'
+			+ '检测到 UAC 接口会自动装载，不用重编固件。'));
 
 		/* ---------- 常量 ---------- */
 
@@ -147,6 +152,12 @@ return L.view.extend({
 		var st = {
 			phase: 'idle',
 			stage: null,      /* 后端 callStageOf 给的令牌；null＝还没读到过（红线 23） */
+			/*
+			 * voice_domain：只有 ^CCALLSTATE 的第三字段有，CLCC 不报。
+			 * 0＝3GPP CS / 1＝IMS / 2＝3GPP2 CS / 3＝不在任何域。
+			 * null＝本轮还没有 URC 观测（与「0 就是 CS 域」不是一回事，红线 23）。
+			 */
+			domain: null,
 			number: '',       /* 拨号盘输入 / 在途呼叫号码 */
 			activeAt: 0,      /* 首个 active 出现的时刻（时长基准） */
 			calls: [],        /* 最近一次 status 的全部在途呼叫 */
@@ -167,6 +178,67 @@ return L.view.extend({
 
 		/* 通话跟踪：进入非 idle 时建，回到 idle 时落一条记录 */
 		var track = null;
+
+		/* ---------- 事件驱动的辅助状态 ---------- */
+
+		/*
+		 * ^CEND 带来的权威通话时长（秒）。
+		 * 为什么需要它：CLCC 在通话结束时直接消失，轮询拿不到时长；而前端用
+		 * Date.now() 差值算，切后台、页面重载都会失准。实测 `^CEND: 1,25,104,0`
+		 * 的第二个字段就是 25 秒 —— 后端直接给了答案，不用自己推。
+		 */
+		var pendingDuration = null;
+
+		/* 上一次 CLCC 刷新的时刻 + 合并定时器，见 urcKick() */
+		var lastStatusAt = 0;
+		var kickTimer = 0;
+
+		/*
+		 * 事件轮询间隔（rpc.js 默认 1500ms）。
+		 *
+		 * ★ 为什么本页要压小：模组把 ^CCALLSTATE 写进事件总线是即时的，但前端
+		 *   要等下一次 pollEvents 才看得到。默认 1500ms 意味着「URC 事件驱动」
+		 *   相对原来的 2s CLCC 轮询只快 0.4 秒 —— 差不多等于没做。
+		 *   通话是唯一「秒级可感知」的场景（来电响铃、通话计时），所以只在
+		 *   本页压到 500ms，离开立刻还原。
+		 *
+		 * ★ 为什么敢压：events 是纯内存方法（读 500 条环形缓冲），不碰串口，
+		 *   也不占用 AT 通道 —— 真正打在模组上的仍然只有那条 2s 的 CLCC。
+		 *   500ms × 1 次 = 每秒 2 次轻量调用，占 rpcd 的量级在个位数百分比。
+		 *
+		 * ★ 为什么必须还原：pollInterval 是 AtWs.client 这个**共享单例**的属性。
+		 *   不还原会让之后每个页面都按 500ms 拉 events，白白挤 rpcd 单线程
+		 *   （红线 63：一条慢调用能拖住整个 LuCI）。
+		 */
+		var savedPollInterval = null;
+
+		function tightenPoll() {
+			var c = AtWs.client;
+			if (!c || typeof c.pollInterval !== 'number') { return; }
+			if (savedPollInterval == null) { savedPollInterval = c.pollInterval; }
+			c.pollInterval = 500;
+			/* setInterval 已按旧间隔在跑，要重开才会用新值；
+			 * 没有订阅者时不动定时器 —— subscribe 时会用新的间隔启动 */
+			if (c.subscribers && c.subscribers.length &&
+				c.stopPolling && c.startPolling) {
+				c.stopPolling();
+				c.startPolling();
+			}
+		}
+
+		function restorePoll() {
+			var c = AtWs.client;
+			if (!c || savedPollInterval == null) { return; }
+			c.pollInterval = savedPollInterval;
+			savedPollInterval = null;
+			/* 此处本页仍在订阅，重启定时器是安全的；紧接着 unsubscribe 会在
+			 * 订阅者为空时自动 stopPolling（见 rpc.js 的 unsubscribe） */
+			if (c.subscribers && c.subscribers.length &&
+				c.stopPolling && c.startPolling) {
+				c.stopPolling();
+				c.startPolling();
+			}
+		}
 
 		/* ---------- DOM ---------- */
 
@@ -525,7 +597,13 @@ return L.view.extend({
 				 * （以及换语言/换主题时的展示）不必再各自维护 0/1 → 文案映射 */
 				direction: (t.dir === 1) ? 'incoming' : 'outgoing',
 				result: result,
-				duration: t.answeredAt ? Math.round((Date.now() - t.answeredAt) / 1000) : 0,
+				/*
+				 * 优先用 ^CEND 给的秒数：模组自己是计时方，切后台、页面重载都不影响。
+				 * 没有（老后端没转发这条 URC，或轮询先看到空闲而错过窗口）才回落到
+				 * 前端差值 —— 那是降级路径，不是等价路径。
+				 */
+				duration: (t.endedDuration != null) ? t.endedDuration
+					: (t.answeredAt ? Math.round((Date.now() - t.answeredAt) / 1000) : 0),
 				time: Math.round(t.startedAt / 1000)
 			};
 			AtWs.call('logadd', null, null, JSON.stringify(rec)).then(function (res) {
@@ -643,6 +721,12 @@ return L.view.extend({
 				ringStop();
 			}
 
+			/*
+			 * 语音域是「这一通」的属性，不是设备的属性：空闲时不清掉，
+			 * 状态栏会一直挂着「空闲 · IMS」这种误导性的残留。
+			 */
+			if (st.phase === 'idle') { st.domain = null; }
+
 			updateTrack(first);
 			renderStatus();
 		}
@@ -654,6 +738,11 @@ return L.view.extend({
 		function updateTrack(first) {
 			if (st.phase !== 'idle') {
 				if (!track) {
+					/*
+					 * 新一通开始：上一通若因「轮询先看到空闲」而没来得及用上
+					 * ^CEND 的时长，那个残留值必须作废，否则会被记到这一通头上。
+					 */
+					pendingDuration = null;
 					track = { number: '', dir: 0, startedAt: Date.now(), answeredAt: 0, rejected: false };
 				}
 				if (first) {
@@ -668,11 +757,17 @@ return L.view.extend({
 			} else if (track) {
 				var t = track;
 				track = null;
+				if (pendingDuration != null) {
+					t.endedDuration = pendingDuration;
+					pendingDuration = null;
+				}
 				saveRecord(t);
 			}
 		}
 
 		function refreshStatus() {
+			/* 记发车时刻：urcKick 用它算防抖窗口（从发出算，不含 AT 往返） */
+			lastStatusAt = Date.now();
 			AtWs.call('status').then(function (res) {
 				if (!res.success) {
 					/*
@@ -774,7 +869,16 @@ return L.view.extend({
 			if (stageText == null && first) {
 				stageText = CALL_STATE[first.state] || ('状态 ' + first.state);
 			}
-			metricState.querySelector('.mt5700-metric-value').textContent = stageText || '空闲';
+			/*
+			 * 语音域挂在状态文案后面，不新开一格：状态卡已有 5 格，
+			 * 再加一格会让窄屏换行（红线 41：固定尺寸，不按数据量撑开）。
+			 * 这一项有诊断价值 —— 实测本机 `+CREG: 0,0` 却能拨通，正是因为
+			 * voice_domain=1 走 IMS，不依赖 CS 注册。
+			 */
+			var stateText = stageText || '空闲';
+			if (st.domain === 1) { stateText += ' · IMS'; }
+			else if (st.domain === 0) { stateText += ' · CS'; }
+			metricState.querySelector('.mt5700-metric-value').textContent = stateText;
 			metricDir.querySelector('.mt5700-metric-value').textContent =
 				first ? (CALL_DIR[first.dir] || '—') : '—';
 			metricDuration.querySelector('.mt5700-metric-value').textContent =
@@ -814,18 +918,87 @@ return L.view.extend({
 		ringBtn.disabled = blocked;
 	}
 
-		/* ---------- 来电推送 ---------- */
+		/* ---------- 推送消费（来电 + 通话类 URC） ---------- */
 
 		/*
-		 * urc.rs 的 RING/+CLIP 会推 incoming_call。它让号码比轮询早 ~2s 出现，
-		 * 但**判定不能依赖它**：+CLIP 是否上报取决于模组 CLIP 设置，
-		 * 而推送里没有呼叫 ID 与方向。所以这里只拿它做「预提示」——
-		 * 立即刷一次状态，其余仍以 CLCC 为准。
+		 * 两类推送：
+		 *   · incoming_call —— urc.rs 从 RING/+CLIP/^CEND 派生的结构化事件，
+		 *     只带号码与状态，没有呼叫 ID、方向、时长。
+		 *   · urc_data —— 模组原始上报行，由 rpc.js::parseRawData 解析。
+		 *     通话类的五条（^CCALLSTATE/^ORIG/^CONF/^CONN/^CEND）在这里。
 		 */
 		function onPush(ev) {
-			if (!ev || ev.type !== 'incoming_call') { return; }
-			if (ev.data && ev.data.number) {
-				st.number = String(ev.data.number);
+			if (!ev) { return; }
+
+			if (ev.type === 'incoming_call') {
+				/* 让号码比轮询早一两秒出现。判定仍以 CLCC 为准：+CLIP 是否上报
+				 * 取决于模组 CLIP 设置，而这个推送里没有方向与呼叫 ID。 */
+				if (ev.data && ev.data.number) {
+					st.number = String(ev.data.number);
+				}
+				urcKick();
+				return;
+			}
+
+			if (ev.type === 'urc_data' && ev.data && ev.data.type === 'CALL') {
+				handleCallUrc(ev.data);
+			}
+		}
+
+		/*
+		 * URC 与轮询的分工，是这次改造的核心边界：
+		 *
+		 *   URC 只当**信号**用 —— 「模组的状态已经变了，现在就去读一次」；
+		 *   状态值仍由 CLCC 现算（applyCalls）。这是有意的：^CCALLSTATE 的
+		 *   state 编号（0 originate … 8 retrieve）与 CLCC 的 <stat>
+		 *   （0 active … 5 waiting）是两套体系，混用必然错位，而且 CLCC 带
+		 *   方向、号码、呼叫 ID，是唯一能渲染完整那一行的来源。
+		 *
+		 * 效果：状态可见延迟从「最多 2 秒」降到「一次 AT 往返」（实测 65~133ms）。
+		 */
+		function handleCallUrc(d) {
+			if (d.event === 'CEND') {
+				/* 通话时长以模组给的为准，落记录时优先用它 */
+				if (d.duration != null) { pendingDuration = d.duration; }
+				urcKick();
+				return;
+			}
+
+			if (d.event === 'CCALLSTATE') {
+				if (d.domain != null) { st.domain = d.domain; }
+				/*
+				 * state 5=InComing / 6=Waiting：来电第一时间响铃，不必等
+				 * 下一次轮询。这是「来电就响那么几秒，藏起来的提醒等于没有」
+				 * 的直接落点 —— 但响铃本身仍由 applyCalls 触发（它拿到号码
+				 * 与方向后再响），这里只负责尽快把状态读回来。
+				 */
+				urcKick();
+				return;
+			}
+
+			/* ^ORIG / ^CONF / ^CONN：只是「状态该变了」的信号 */
+			urcKick();
+		}
+
+		/*
+		 * 合并刷新请求。
+		 *
+		 * 同一批 URC 常常前后脚到达（实测 ^CONN 与 ^CCALLSTATE:1,3,1 在同一毫秒），
+		 * 一条一条刷会把 AT 通道连占好几次（单条 65~133ms，串行执行）。
+		 * 250ms 内的重复请求合并成一次延迟刷新，超窗口的直接发。
+		 */
+		function urcKick() {
+			if (st.busy) { return; }
+
+			var now = Date.now();
+			if (now - lastStatusAt < 250) {
+				if (!kickTimer) {
+					kickTimer = setTimeout(function () {
+						kickTimer = 0;
+						if (!st.busy) { refreshStatus(); }
+					}, 250);
+				}
+				return;
 			}
 			refreshStatus();
 		}
@@ -846,12 +1019,16 @@ return L.view.extend({
 		document.addEventListener('click', onGesture);
 
 		Mt5700.connectThen(function () {
+			/* 本页需要「秒级」状态可见性 —— 把事件轮询压到 500ms（见 tightenPoll） */
+			tightenPoll();
 			refreshStatus();
 			refreshInfo();
 			loadLog();
 			/*
 			 * 2s 轮询：CLCC 单条 65~133ms，与网络状态页的信号轮询同量级。
 			 * interval 自带 scopeEl 检查——离开页面自动停，不会跟用户抢串口。
+			 * ★ 它现在是**兜底**而不是主通道：状态变化由 URC 触发即时刷新，
+			 *   这一条负责兜住「URC 丢了 / 老后端没转发」的情况。
 			 */
 			Mt5700.interval(2000, function () {
 				/* 操作进行中不叠加查询：AT 通道是独占串行的 */
@@ -866,6 +1043,14 @@ return L.view.extend({
 
 		page._onDispose(function () {
 			ringStop();
+			/*
+			 * ★ 必须清掉合并定时器：它不在 Mt5700.interval 的托管名单里
+			 *   （那是周期定时器，这个是一次性延迟），页面走了还会触发一次
+			 *   refreshStatus —— 等于离开语音页之后仍有一条 CLCC 打到模组上。
+			 */
+			if (kickTimer) { clearTimeout(kickTimer); kickTimer = 0; }
+			/* 先还原轮询间隔再退订：此刻本页还订阅着，重启定时器用的是原值 */
+			restorePoll();
 			document.removeEventListener('click', onGesture);
 			if (AtWs.client && AtWs.client.unsubscribe) {
 				AtWs.client.unsubscribe(onPush);

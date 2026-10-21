@@ -962,6 +962,30 @@ pub fn is_passthrough_urc(line: &str) -> bool {
     if line.starts_with("^REJINFO") {
         return true;
     }
+    /*
+     * 通话生命周期的鼎桥私有 URC（手册第 12 章，属性 NA/NA —— 无开关、默认就发）。
+     *
+     * ★ 为什么必须登记在这里，而不是只丢进 is_exclusive_urc：
+     *   handle_line 在「有命令在等应答」时只 emit is_exclusive_urc 为真的行，
+     *   而那一行的 broadcast 位取的是**本函数**的返回值 —— 不登记就会被并进
+     *   那条命令的应答体里，前端一条都收不到。
+     *   实测（2026-10-22）：`ATD10086;` 的响应体内就带着
+     *   `^CCALLSTATE: 1,0,1` 与 `^ORIG: 1,0`，而那正是「拨号已被接受」的第一个
+     *   信号；通话期间前端每 2 秒发一次 AT+CLCC，落在命令等待窗口里的概率不低。
+     *
+     * ★ 安全边界：这五条只存在 URC 形态，手册里没有对应的读取命令，不可能与
+     *   任何 AT 应答混淆；单通电话合计 5~10 条，不会淹没事件总线（500 条环形）。
+     *   `^CEND` 另在 is_exclusive_urc 里单列过，两处都留着不冲突 ——
+     *   那边管「命令等待期要不要 emit」，这边管「emit 时带不带 broadcast」。
+     */
+    if line.starts_with("^CCALLSTATE:")
+        || line.starts_with("^ORIG:")
+        || line.starts_with("^CONF:")
+        || line.starts_with("^CONN:")
+        || line.starts_with("^CEND:")
+    {
+        return true;
+    }
     line.starts_with("+CUSD:") && line.contains(',')
 }
 
@@ -1329,5 +1353,36 @@ mod tests {
         // 前缀匹配必须是「从头开始」：正文里出现不算
         assert!(should_broadcast("OK"));
         assert!(should_broadcast("^HCSQ: \"LTE\",45,34,106"), "其他信号 URC 不受影响");
+    }
+
+    /*
+     * 通话类 URC 必须能被「命令等待期」放行。
+     *
+     * 这条守卫盯的是一个很容易回归的坑：is_exclusive_urc 管「要不要 emit」，
+     * is_passthrough_urc 管「emit 时带不带 broadcast」—— 两者是两件事。
+     * 只往前面加、忘了后面，URC 会被安静地并进 AT+CLCC 的应答体里：
+     * 前端收不到，也不会有任何报错，症状只是「状态更新慢两秒」。
+     * 2026-10-22 实测就踩到了：ATD 的响应体内带着 ^CCALLSTATE 和 ^ORIG。
+     */
+    #[test]
+    fn 通话类_urc_在命令等待期也要推给前端() {
+        let call_urcs = [
+            "^CCALLSTATE: 1,3,1",
+            "^CCALLSTATE: 1,5,1",
+            "^ORIG: 1,0",
+            "^CONF: 1",
+            "^CONN: 1,0",
+            "^CEND: 1,25,104,0",
+        ];
+        for l in call_urcs.iter() {
+            assert!(is_passthrough_urc(l), "{} 必须在命令等待期带上 broadcast", l);
+            assert!(is_exclusive_urc(l), "{} 必须是独占 URC，否则会被当成 CLCC 应答", l);
+        }
+
+        // 不能误伤：CLCC 应答自己不是 URC
+        assert!(!is_passthrough_urc("+CLCC: 1,0,0,0,0,\"10086\",129"));
+        assert!(!is_exclusive_urc("+CLCC: 1,0,0,0,0,\"10086\",129"));
+        // 前缀必须从头匹配，行首空白不算
+        assert!(!is_passthrough_urc("  ^CEND: 1,25,104,0"));
     }
 }

@@ -14,3 +14,8 @@
 *.woff binary
 *.woff2 binary
 *.ttf binary
+
+# 内核模块：必须声明 binary，否则首行 `* text=auto eol=lf` 会把 .ko 当文本
+# 做换行转换 —— ELF 里任何 0x0D0A 序列都会被改写，模块直接无法 insmod，
+# 而 git 侧看不出异常（红线 47 同源坑）。
+*.ko binary

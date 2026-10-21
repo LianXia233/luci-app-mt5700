@@ -5,6 +5,102 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.30] - 2026-10-22
+
+### 新增：通话状态改用 URC 事件驱动
+
+此前语音页头部写着「呼叫生命周期的私有 URC 受 `AT^CURC` 控制，实测一个都不报，
+所以只用 `AT+CLCC` 轮询」。**这个结论是错的**：它们是**呼叫期** URC，空闲时
+自然安静——当时没有通话可报而已。
+
+2026-10-22 真机拨 10086 全程**一条开启命令都没发**，事件链完整到达：
+
+```
+ATD10086;  →  ^CCALLSTATE: 1,0,1 + ^ORIG: 1,0 + OK     ← 同一条响应体内
+  t+2s     →  ^CCALLSTATE: 1,1,1                       Proceeding
+  t+6s     →  ^CCALLSTATE: 1,2,1 + ^CONF: 1            对方振铃
+  t+7s     →  ^CONN: 1,0 + ^CCALLSTATE: 1,3,1          ★ 接通
+  t+12s    →  +CLCC: 1,0,0,...                         ★ 轮询晚 5 秒
+AT+CHUP    →  OK
+  t+1s     →  ^CEND: 1,25,104,0 + ^CCALLSTATE: 1,4,1   结束，通话 25 秒
+```
+
+于是：
+
+- **`rpc.js`** 新增 `parseCcallState` / `parseCend`，在 `parseRawData` 里认领
+  五条通话 URC（`^CCALLSTATE` / `^ORIG` / `^CONF` / `^CONN` / `^CEND`），产出
+  `{type:'CALL', event, ...}`。数值字段一律归一到 `number | null`，不用 `NaN`。
+- **`voice_call.js`** 消费它们，但**只当触发器**：URC 到达即立刻读一次 CLCC，
+  状态值仍由 CLCC 现算。这是有意的边界——`^CCALLSTATE` 的 `<state>`
+  （0 originate / 1 proceeding / 2 alerting / 3 connected / 4 released /
+  5 incoming / 6 waiting / 7 hold / 8 retrieve）与 `+CLCC` 的 `<stat>`
+  （0 active / 1 held / 2 dialing / 3 alerting / 4 incoming / 5 waiting）
+  **是两套编号**，同一个「接通」一个是 3、一个是 0，混用会整体错位且不报错。
+  CLCC 还是唯一带方向、号码、呼叫 ID 的来源。
+- **事件轮询压到 500ms（仅本页）**：`^CCALLSTATE` 写进事件总线是即时的，但前端
+  要等下一次 `pollEvents`（默认 1500ms）才看见——不压的话相对原来 2s 的 CLCC
+  轮询只快 0.4 秒，等于白做。`pollInterval` 是 `AtWs.client` 共享单例的属性，
+  离开页面立刻还原（否则之后每个页面都按 500ms 拉 events，白挤 rpcd 单线程）。
+- **通话时长以 `^CEND` 为准**：第二个字段就是秒数（实测 25）。前端 `Date.now()`
+  差值降级为兜底——切后台、页面重载都不再丢时长。
+- **语音域显示**：`^CCALLSTATE` 第三字段（0 CS / 1 IMS / 2 3GPP2 / 3 无域）挂在
+  状态文案后面，不新开一格（状态卡已有 5 格，红线 41）。实测全程为 1，正好解释
+  了「`+CREG: 0,0` 却能拨通——语音走 IMS，不依赖 CS 注册」。
+- **`atclient.rs`**：把五条前缀登记进 `is_passthrough_urc`。这一处必须改——
+  `is_exclusive_urc` 管「要不要 emit」，而 broadcast 位取的是 `is_passthrough_urc`；
+  只加前者，通话期间每 2 秒一次的 `AT+CLCC` 命令等待窗口里，URC 会被并进应答体，
+  前端一条都收不到，而本地测试仍全绿。
+
+### 新增：ALSA 内核模块随包分发，「换模组即出声」
+
+本机声音做不到（见下），但**换成带 USB Audio Class 的模组**这件事，软件侧
+已经被实测证明是零成本的：厂商固件 239 个 `.ko` 的 vermagic 全部是
+`6.12.112 SMP mod_unload aarch64`，与本机内核字节一致；11 个音频模块逐个
+`insmod` 全部 `rc=0`，dmesg 出现
+
+```
+usbcore: registered new interface driver snd-usb-audio
+```
+
+`/proc/asound/cards` 仍是 `no soundcards`（正常：没有 UAC 硬件）。
+
+随包内容（`root/usr/share/mt5700/audio/6.12.112/`，953KB，附 `SHA256SUMS`
+与 `MANIFEST.md` 说明来源与 GPL-2.0 许可）：
+
+```
+soundcore → snd → snd-timer → snd-pcm → snd-hwdep → snd-seq-device
+→ snd-rawmidi → snd-usbmidi-lib → mc → input-core → snd-usb-audio
+```
+
+- `audio-ko.sh`：`probe` / `load` / `unload` / `status`。**先判 UAC 再进装载
+  循环**——当前这台机器上 `load` 直接返回 3，一个模块都不装（零开销、零内存）。
+  装载失败即中止并记录原因，不「跳过去继续装半套」（半套音频栈不会报错，只会让
+  `/proc/asound` 空着）。
+- 模块名做连字符→下划线转换（lsmod 里叫 `snd_usb_audio`），否则 `is_loaded`
+  永远不命中，每次 load 都重复 insmod。
+- 双入口：`etc/hotplug.d/usb/99-mt5700-audio`（插入即装）+ `init.d` 开机兜底。
+- `.gitattributes` 新增 `*.ko binary`——否则首行 `* text=auto eol=lf` 会把 ELF
+  当文本做换行转换，模块无法 insmod，而 git 侧看不出异常。
+
+### 修正：语音页「听不到声音」的说明
+
+旧文案推荐「在路由器上跑 SIP 软电话（Asterisk 已安装）」，而实测证明那条路
+打不了 10086（没有 PSTN 出口），属于误导。新文案指向真实断点：MT5700M-CN 的
+USB 六个接口里没有任何 Audio Class，手册 244 条命令也没有音频数据通道。
+
+### 守卫
+
+- `voice-call-contract`：115 → 126 项。跨层断言把「后端 `is_passthrough_urc`
+  登记了这五条」与「前端认领了这五条」钉在一起（红线 85：「后端返回正确」
+  ≠「页面拿到」）。
+- 新增 `audio-ko-contract`：21 项。守文件集与装载清单一一对应、拓扑序、无 UAC
+  时零动作、模块名转换、`.gitattributes` 的 binary 声明、`SHA256SUMS` 格式。
+- `tools/verify-guards.py`：180 → 190 条变异，新增 `rustat` / `audioko` /
+  `audiosum` 三个目标键。
+- ★ 本次变异验证逮到两处**恒绿断言**：两条新断言写成
+  `(function () { ... })` 而漏了调用括号 `()`，传进去的是函数对象（truthy），
+  无论源码怎么改都通过。已修正为 `})())`。
+
 ## [2.4.29] - 2026-10-21
 
 ### 移除：旧 `.at-*` 命名空间整条下线

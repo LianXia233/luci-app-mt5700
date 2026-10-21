@@ -176,6 +176,17 @@ TARGETS = {
     #     at-batch / cellscan / busy-fastfail / at-read-classification / sms-sent-log），
     #     变异生效却没人判红 —— 红线 16b。
     "voicejs": ATWB.parent / "view" / "at-webserver" / "voice_call.js",
+    # ★ 2026-10-22 通话事件驱动改造：Rust 侧的 URC 分类是**另一层**
+    #   ——is_exclusive_urc 管「要不要 emit」，is_passthrough_urc 管
+    #   「emit 时带不带 broadcast」，两者只改一处就会出现「URC 被并进
+    #   AT+CLCC 应答体、前端一条收不到、而所有本地测试全绿」。
+    #   跨层断言写在 voice-call-contract 里，所以单独挂键，别复用 voicejs。
+    "rustat": ROOT / "src" / "rust" / "src" / "atclient.rs",
+    # ★ 2026-10-22 音频内核模块（换带 UAC 的模组后自动装载）：
+    #   装载器与它的哈希清单各挂一个键 —— 清单格式错一次就是 11 条全 FAILED，
+    #   而这件事只能在部署时才发现，所以让静态断言也能被变异验证。
+    "audioko": ROOT / "root" / "usr" / "share" / "mt5700" / "audio-ko.sh",
+    "audiosum": ROOT / "root" / "usr" / "share" / "mt5700" / "audio" / "6.12.112" / "SHA256SUMS",
     "uc9": ROOT / "root" / "usr" / "share" / "rpcd" / "ucode" / "mt5700.uc",
 }
 
@@ -254,6 +265,9 @@ TARGET_TEST = {
     "nsjs3": ROOT / "tests" / "sysmode-label.test.js",
     # ★ 厂商 beta 固件电话功能移植（2026-10-16）：两个键都跑语音契约。
     "voicejs": ROOT / "tests" / "voice-call-contract.test.js",
+    "rustat": ROOT / "tests" / "voice-call-contract.test.js",
+    "audioko": ROOT / "tests" / "audio-ko-contract.test.js",
+    "audiosum": ROOT / "tests" / "audio-ko-contract.test.js",
     "uc9": ROOT / "tests" / "voice-call-contract.test.js",
     # ★ rpc.js 的第三个键：**通话响应透传**（2026-10-16 真实故障）。
     #   既有 7 个 rpcjs* 键分别跑 single-source / vowifi / retry-offload /
@@ -1990,6 +2004,100 @@ MUTATIONS = [
     ),
     # 原「视图：三态记号退回 core（CS 未过 + IMS 已过…）」条目已随 v2.4.27
     # 的 preflight 下线一并删除：被变异的代码与被守卫的断言同时不存在了。
+    # ★ 2026-10-22 通话事件驱动（^CCALLSTATE）：四条视图 + 一条 Rust。
+    #   锚点唯一性已核（各出现 1 次）。
+    (
+        # 把 URC 的 state 直接当 phase 用 —— 这是最容易犯、也最难查的错：
+        # ^CCALLSTATE 的 3=connected 与 CLCC 的 0=active 是两套编号，
+        # 写进 applyCalls 会整体错位，而页面「看起来还在动」。
+        "视图：URC 直接改 phase（两套状态编号混用）",
+        "voicejs",
+        "\t\t\tif (d.domain != null) { st.domain = d.domain; }",
+        "\t\t\tif (d.domain != null) { st.domain = d.domain; }\n\t\t\tst.phase = 'active';",
+        "URC 只当触发器",
+    ),
+    (
+        # 去掉合并窗口：同一批 URC（^CONN 与 ^CCALLSTATE 常常同毫秒到）
+        # 会连发几条 CLCC，串行占满 AT 通道（单条 65~133ms）。
+        "视图：URC 触发刷新没有合并窗口（同批 URC 连发 CLCC）",
+        "voicejs",
+        "\t\t\tif (now - lastStatusAt < 250) {",
+        "\t\t\tif (now - lastStatusAt < 0) {",
+        "250ms 合并窗口",
+    ),
+    (
+        # 时长退回前端差值：切后台、页面重载就丢，而 ^CEND 的第二个字段
+        # 本来就是模组给的秒数（实测 25 对应 25 秒通话）。
+        "视图：通话时长不用 ^CEND（回落到前端差值）",
+        "voicejs",
+        "duration: (t.endedDuration != null) ? t.endedDuration\n"
+        "\t\t\t\t\t: (t.answeredAt ? Math.round((Date.now() - t.answeredAt) / 1000) : 0),",
+        "duration: (t.answeredAt ? Math.round((Date.now() - t.answeredAt) / 1000) : 0),",
+        "通话时长优先用 ^CEND",
+    ),
+    (
+        # 新一通不清残留：上一通没来得及用上的 ^CEND 时长会被记到这一通头上。
+        "视图：新一通开始不清 ^CEND 残留（时长记到下一通）",
+        "voicejs",
+        "\t\t\t\t\tpendingDuration = null;\n\t\t\t\t\ttrack = {",
+        "\t\t\t\t\ttrack = {",
+        "新一通开始清掉",
+    ),
+    (
+        # 后端不再把 ^CCALLSTATE 登记为 passthrough：命令等待期（每 2 秒一次
+        # AT+CLCC）这条 URC 会被并进应答体，前端收不到 —— 而本地测试仍全绿，
+        # 因为断言只查了前端。变异它验证的正是那条跨层断言。
+        "Rust：is_passthrough_urc 漏掉 ^CCALLSTATE（命令等待期广播位丢失）",
+        "rustat",
+        '    if line.starts_with("^CCALLSTATE:")\n',
+        '    if line.starts_with("^XXCCALLSTATE:")\n',
+        "is_passthrough_urc 登记了五条通话 URC",
+    ),
+    (
+        # 不还原共享单例的 pollInterval：切走之后每个页面都按 500ms 拉 events，
+        # 白挤 rpcd 单线程（红线 63）。
+        "视图：离开页面不还原事件轮询间隔（其它页面被按 500ms 拉 events）",
+        "voicejs",
+        "\t\t\tc.pollInterval = savedPollInterval;\n",
+        "\t\t\t/* 未还原 */\n",
+        "把事件轮询压到 500ms",
+    ),
+    (
+        # 不清合并定时器：离开语音页之后还会触发一次 refreshStatus，
+        # 等于对着一张已卸载的页面往模组打一条 CLCC。
+        "视图：离开页面不清 URC 合并定时器（走后仍打一条 CLCC）",
+        "voicejs",
+        "\t\t\tif (kickTimer) { clearTimeout(kickTimer); kickTimer = 0; }\n",
+        "\n",
+        "离开页面清掉 URC 合并定时器",
+    ),
+    (
+        # 去掉 UAC 判据：插任何 USB 设备（U 盘、键鼠）都会往内核塞 11 个音频模块。
+        # 当前这台机器上就是每次都白装一遍再失败，日志刷屏。
+        "装载器：不判 UAC 就装载（插个 U 盘也装 11 个音频模块）",
+        "audioko",
+        "\thas_uac || return 3\n",
+        "\n",
+        "先判 UAC 再进装载循环",
+    ),
+    (
+        # 不做连字符→下划线转换：lsmod 里叫 snd_usb_audio，比对永远不命中，
+        # 于是每次 load 都重复 insmod，第二次起全报 File exists 并被当失败。
+        "装载器：模块名不转换（snd-usb-audio 永远判为「未加载」→ 重复 insmod）",
+        "audioko",
+        'echo "$1" | tr \'-\' \'_\'\n',
+        'echo "$1"\n',
+        "模块名做 连字符→下划线 转换",
+    ),
+    (
+        # SHA256SUMS 写成三段（名字 大小 哈希）：sha256sum -c 把大小当文件名，
+        # 11 条全 FAILED —— 2026-10-22 真踩过，部署到设备时才发现。
+        "哈希清单：格式写成三段（sha256sum -c 全部 FAILED）",
+        "audiosum",
+        "  soundcore.ko\n",
+        "  soundcore.ko 14552\n",
+        "sha256sum -c 认的",
+    ),
 ]
 
 

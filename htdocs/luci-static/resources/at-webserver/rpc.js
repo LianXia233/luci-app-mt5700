@@ -1385,6 +1385,62 @@ function isUnsolicitedText(text) {
 
 /* ---- raw_data 拆分（^PDCPDATAINFO / URC） ---- */
 
+/* ---- 通话类 URC ---- */
+
+/*
+ * 通话生命周期的鼎桥私有 URC（手册第 12 章，属性 NA/NA：无开关、默认就发）。
+ *
+ * ★ 为什么前端要自己解析：后端把这些行作为 raw_data 原样转过来（urc.rs 没有为
+ *   它们做结构化推送），而 AT+CLCC 轮询最快也要 2 秒才反映一次状态变化。
+ *   实测（2026-10-22）一次拨号的状态跃迁是：ATD 响应体内 `^CCALLSTATE:1,0,1`
+ *   → t+2s 1,1,1 → t+6s 1,2,1 → t+7s `^CONN:1,0` + 1,3,1 → CHUP 后
+ *   `^CEND:1,25,104,0` → 1,4,1。而 CLCC 到 t+12s 才变成 stat=0，晚了 5 秒。
+ *
+ * ★ state 与 CLCC 的 <stat> 是**两套编号**，绝不能混用：
+ *   ^CCALLSTATE state: 0 originate / 1 proceeding / 2 alerting / 3 connected
+ *                      / 4 released / 5 incoming / 6 waiting / 7 hold / 8 retrieve
+ *   +CLCC <stat>:      0 active / 1 held / 2 dialing / 3 alerting / 4 incoming / 5 waiting
+ *   同一个「接通」，一个是 3，一个是 0 —— 直接套用会全部错位。
+ */
+function numOrNull(s) {
+	var n = parseInt(s, 10);
+	return isNaN(n) ? null : n;
+}
+
+function parseCcallState(line) {
+	var f = line.slice('^CCALLSTATE:'.length).split(',');
+	if (f.length < 3) return null;
+	return {
+		type: 'CALL',
+		event: 'CCALLSTATE',
+		callId: numOrNull(f[0]),
+		state: numOrNull(f[1]),
+		/* 0 3GPP CS / 1 IMS / 2 3GPP2 CS / 3 不在任何域。实测本机全程为 1，
+		 * 正好解释了「+CREG: 0,0 却能拨通」—— 语音走 IMS，不依赖 CS 注册。*/
+		domain: numOrNull(f[2]),
+		raw: line
+	};
+}
+
+/*
+ * ^CEND: <call_id>,<duration>,<end_Source>,<cc_cause>
+ * duration 直接就是秒数（实测 `1,25,104,0` 对应 25 秒通话），
+ * 比前端 Date.now() 差值可靠：切后台、页面重载都不会丢。
+ */
+function parseCend(line) {
+	var f = line.slice('^CEND:'.length).split(',');
+	if (f.length < 2) return null;
+	return {
+		type: 'CALL',
+		event: 'CEND',
+		callId: numOrNull(f[0]),
+		duration: numOrNull(f[1]),
+		source: numOrNull(f[2]),
+		cause: numOrNull(f[3]),
+		raw: line
+	};
+}
+
 function parseRawData(text) {
 	var out = [];
 	var re = /\^PDCPDATAINFO:\s*([^\r\n]+)/g;
@@ -1414,6 +1470,19 @@ function parseRawData(text) {
 		} else if (line.indexOf('^REJINFO') === 0) {
 			// 网络拒绝原因主动上报，解析后进 REJINFO 类型
 			out.push({ type: 'REJINFO', raw: line, parsed: Parse.parseRejInfo(line) });
+		} else if (line.indexOf('^CCALLSTATE:') === 0) {
+			var cs = parseCcallState(line);
+			if (cs) out.push(cs);
+		} else if (line.indexOf('^CEND:') === 0) {
+			var ce = parseCend(line);
+			if (ce) out.push(ce);
+		} else if (line.indexOf('^ORIG:') === 0 || line.indexOf('^CONF:') === 0 ||
+			line.indexOf('^CONN:') === 0) {
+			/*
+			 * 这三条只当「状态该变了的信号」用：它们的参数是呼叫标识与厂商
+			 * 自定义位，没有 CLCC 那样完整的状态枚举。保留 raw 便于排查。
+			 */
+			out.push({ type: 'CALL', event: line.slice(1, line.indexOf(':')), raw: line });
 		}
 		/*
 		 * ^SRVST（服务状态）**不再解析分发**：对应功能「服务状态监听」已整块下线
@@ -1927,6 +1996,8 @@ var AtWs = {
 	parseMONSC: parseMONSC,
 	parseHFREQINFO: parseHFREQINFO,
 	parseRawData: parseRawData,
+	parseCcallState: parseCcallState,
+	parseCend: parseCend,
 	psRegText: psRegText,
 	operatorFromCode: operatorFromCode,
 	qciLabel: qciLabel,
