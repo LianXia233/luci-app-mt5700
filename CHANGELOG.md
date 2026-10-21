@@ -8,6 +8,14 @@
 
 ---
 
+## 未发布
+
+### 升级 rustls-webpki，修复证书校验可能接受不受信任中间证书的问题（RUSTSEC-2026-0382）
+
+- **security(deps)**：`rustls-webpki` 0.103.15 → 0.103.16（`src/rust/Cargo.lock`）。公告指出 0.103.16 之前的版本在校验证书路径时，只要配置的信任锚允许，可能接受包含不受信任 emSign 中间公钥的路径（对应私钥已公开）；0.103.16 / 0.104.0-alpha.8 起拒绝这些公钥
+- **security(影响面)**：本项目两条出站 TLS 链路都经 rustls → rustls-webpki 做证书校验，属实际暴露面 —— `ureq`（HTTPS 调用 `https://api.bot.qq.com`，QQ 绑定与消息推送）与 `tokio-tungstenite`（`rustls-tls-webpki-roots`，QQ WebSocket 网关）；代码中未关闭证书校验
+- **test**：`cargo check --locked` 通过，依赖解析无冲突，升级后正常编译
+
 ## v1.25.2 (2026-10-22)
 
 ### 修复短信「显示发送成功但实际发不出去」（issue #19 真正成因）
