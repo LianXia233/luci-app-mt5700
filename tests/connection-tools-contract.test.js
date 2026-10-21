@@ -341,12 +341,14 @@ ok('★ 排查只给建议命令，没有自动修复按钮（续约/重启服�
 	&& !/Mt5700\.confirm\([\s\S]{0,120}ifdown/.test(nsSrc));
 /* 2026-09-18 真机反馈：一排读数被挤成竖向堆叠。根因是容器 .mt5700-grow
    （flex:1 1 240px）在窄栏里被压到内容宽度以下，再撞上 .mt5700-mono 的
-   word-break:break-all，就地断行。这两条是防回退的钉子（读数胶囊是通用组件，
-   ADC 下线后仍被保留，故断言也保留）。 */
-ok('★ 读数胶囊不许被压扁（flex:0 0 auto + nowrap）',
-	/\.mt5700-readout \{[\s\S]*?flex: 0 0 auto;[\s\S]*?white-space: nowrap;/.test(cssSrc));
-ok('★ 读数容器允许整块换行而不是压扁子项（min-width:0）',
-	/\.mt5700-readouts \{[\s\S]*?flex-wrap: wrap;[\s\S]*?min-width: 0;/.test(cssSrc));
+   word-break:break-all，就地断行。当时钉了两条 flex/nowrap 断言。
+   2026-10-21：取证发现 `.mt5700-readout` / `.mt5700-readouts` 在全仓
+   （htdocs + root，含 ucode 与 shell）**已无任何元素挂载** —— 只有 mt5700.css
+   和本文件自己提到它们。ADC 下线后组件其实一起下线了，CSS 与断言都成了空壳。
+   按「功能只留适配本设备的」改为反向断言：谁再把这两个类加回来，得先同时
+   补组件与样式，否则这里会红。 */
+ok('★ 读数胶囊类已随组件下线（CSS 不许留空壳规则）',
+	!/\.mt5700-readout\s*[,{]/.test(cssSrc) && !/\.mt5700-readouts\s*[,{]/.test(cssSrc));
 
 /* ---------- 7. 沿用：PDCP / CGSMS 解析（解析器仍在 parse.js） ---------- */
 

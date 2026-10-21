@@ -131,39 +131,6 @@
 /* ==========================================================================
    L1 - 应用壳与环境背景层
    ========================================================================== */
-.mt5700-app {
-  position: relative;
-  min-height: 100%;
-  padding: var(--mt5700-space-lg);
-  font-family: var(--mt5700-font-sans);
-  color: var(--mt5700-text);
-  font-size: var(--mt5700-font-size-base);
-  line-height: 1.6;
-}
-
-.mt5700-app::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(ellipse 60% 45% at 15% 8%, rgba(59, 130, 246, 0.09), transparent 62%),
-    radial-gradient(ellipse 50% 40% at 85% 12%, rgba(16, 185, 129, 0.07), transparent 60%),
-    radial-gradient(ellipse 55% 45% at 50% 100%, rgba(99, 102, 241, 0.07), transparent 65%),
-    var(--mt5700-bg);
-  backdrop-filter: blur(var(--mt5700-blur)) saturate(var(--mt5700-saturate));
-  -webkit-backdrop-filter: blur(var(--mt5700-blur)) saturate(var(--mt5700-saturate));
-}
-
-@media (prefers-color-scheme: dark) {
-  .mt5700-app::before {
-    background:
-      radial-gradient(ellipse 60% 45% at 15% 8%, rgba(59, 130, 246, 0.12), transparent 62%),
-      radial-gradient(ellipse 50% 40% at 85% 12%, rgba(16, 185, 129, 0.08), transparent 60%),
-      radial-gradient(ellipse 55% 45% at 50% 100%, rgba(99, 102, 241, 0.1), transparent 65%),
-      var(--mt5700-bg);
-  }
-}
 
 /* ---------- 页面容器 ---------- */
 .mt5700-page {
@@ -251,12 +218,6 @@
   padding: var(--mt5700-space-lg);
 }
 
-.mt5700-card-footer {
-  padding: var(--mt5700-space-md) var(--mt5700-space-lg);
-  border-top: 1px solid var(--mt5700-divider);
-  background: rgba(0, 0, 0, 0.02);
-}
-
 /* ==========================================================================
    网格布局
    ========================================================================== */
@@ -267,22 +228,16 @@
 }
 
 .mt5700-grid-2 { grid-template-columns: repeat(2, 1fr); }
-.mt5700-grid-3 { grid-template-columns: repeat(3, 1fr); }
-.mt5700-grid-4 { grid-template-columns: repeat(4, 1fr); }
 
 @media (max-width: 1024px) {
-  .mt5700-grid-2,
-  .mt5700-grid-3,
-  .mt5700-grid-4 {
+  .mt5700-grid-2 {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 640px) {
   .mt5700-grid,
-  .mt5700-grid-2,
-  .mt5700-grid-3,
-  .mt5700-grid-4 {
+  .mt5700-grid-2 {
     grid-template-columns: 1fr;
   }
 }
@@ -480,29 +435,6 @@
 
 .mt5700-chart-tip.show { opacity: 1; }
 
-.mt5700-chart-legend {
-  display: flex;
-  align-items: center;
-  gap: var(--mt5700-space-md);
-  flex-wrap: wrap;
-  margin-top: var(--mt5700-space-sm);
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-secondary);
-}
-
-.mt5700-chart-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mt5700-chart-legend-swatch {
-  width: 14px;
-  height: 3px;
-  border-radius: 2px;
-  display: inline-block;
-}
-
 /* ==========================================================================
    按钮 (L4)
    ========================================================================== */
@@ -688,12 +620,6 @@
   opacity: 0.6;
   cursor: not-allowed;
   background: rgba(0, 0, 0, 0.02);
-}
-
-.mt5700-input-error { border-color: var(--mt5700-danger); }
-
-.mt5700-input-error:focus {
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
 }
 
 .mt5700-hint {
@@ -903,15 +829,12 @@
 
 /* 普通复选框（.mt5700-checkbox / .mt5700-autorefresh）按原生渲染 + 主题色，
    屏蔽主题的自定义盒与对勾 */
-.mt5700-checkbox input[type="checkbox"],
-.mt5700-autorefresh input[type="checkbox"] {
+.mt5700-checkbox input[type="checkbox"] {
   appearance: auto;
 }
 
 .mt5700-checkbox input[type="checkbox"]::before,
-.mt5700-checkbox input[type="checkbox"]::after,
-.mt5700-autorefresh input[type="checkbox"]::before,
-.mt5700-autorefresh input[type="checkbox"]::after {
+.mt5700-checkbox input[type="checkbox"]::after {
   content: none;
 }
 
@@ -1237,6 +1160,26 @@
   font-weight: 600;
 }
 
+/* 标题文案过长时收省略号，不把标题行挤歪（固定尺寸区域，不按内容撑开） */
+.at-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* SIM 芯片告警态。JS 侧 renderConnectionBar 会 toggle('is-warn', sim.warn)，
+   早先 CSS 缺这条规则 ⇒ 状态类挂上了却没有样式，告警永远看不见。 */
+.at-status-sim.is-warn {
+  background: rgba(231, 166, 59, .16);
+  border-color: rgba(231, 166, 59, .42);
+}
+
+.at-status-sim.is-warn .at-status-rpc-label,
+.at-status-sim.is-warn .at-status-rpc-value {
+  color: #a8681b;
+}
+
 /* 状态配色 */
 .at-status-card.is-online { --at-color: #35b879; }
 .at-status-card.is-connecting { --at-color: #e7a63b; }
@@ -1320,6 +1263,16 @@
 
   .at-status-rpc-value {
     color: var(--at-text);
+  }
+
+  .at-status-sim.is-warn {
+    background: rgba(231, 166, 59, .12);
+    border-color: rgba(231, 166, 59, .34);
+  }
+
+  .at-status-sim.is-warn .at-status-rpc-label,
+  .at-status-sim.is-warn .at-status-rpc-value {
+    color: #f0b45c;
   }
 }
 
@@ -1444,23 +1397,6 @@
   color: var(--mt5700-text-muted);
 }
 
-.mt5700-skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--mt5700-border-subtle) 25%,
-    rgba(0, 0, 0, 0.05) 50%,
-    var(--mt5700-border-subtle) 75%
-  );
-  background-size: 200% 100%;
-  animation: mt5700-skeleton 1.5s ease-in-out infinite;
-  border-radius: var(--mt5700-radius-sm);
-}
-
-@keyframes mt5700-skeleton {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
 /* ---------- Empty / Error ---------- */
 .mt5700-empty {
   display: flex;
@@ -1470,13 +1406,6 @@
   padding: var(--mt5700-space-xl) var(--mt5700-space-lg);
   text-align: center;
   gap: var(--mt5700-space-sm);
-}
-
-.mt5700-empty-icon {
-  width: 48px;
-  height: 48px;
-  color: var(--mt5700-text-muted);
-  opacity: 0.5;
 }
 
 .mt5700-empty-text {
@@ -1494,46 +1423,12 @@
   gap: var(--mt5700-space-md);
 }
 
-.mt5700-error-icon {
-  width: 48px;
-  height: 48px;
-  color: var(--mt5700-danger);
-}
-
 .mt5700-error-text {
   font-size: var(--mt5700-font-size-sm);
   color: var(--mt5700-text-secondary);
 }
 
 /* ---------- 自动刷新 ---------- */
-.mt5700-autorefresh {
-  display: flex;
-  align-items: center;
-  gap: var(--mt5700-space-md);
-  font-size: var(--mt5700-font-size-sm);
-  color: var(--mt5700-text-secondary);
-}
-
-.mt5700-autorefresh label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--mt5700-space-sm);
-  cursor: pointer;
-}
-
-.mt5700-autorefresh input[type="checkbox"] {
-  accent-color: var(--mt5700-accent);
-}
-
-.mt5700-autorefresh select {
-  padding: 4px 8px;
-  font-size: var(--mt5700-font-size-xs);
-  border: 1px solid var(--mt5700-border-subtle);
-  border-radius: var(--mt5700-radius-sm);
-  background: var(--mt5700-card-bg);
-  color: var(--mt5700-text);
-  cursor: pointer;
-}
 
 /* ---------- 面板操作区 ---------- */
 .mt5700-panel-actions {
@@ -1620,33 +1515,6 @@
 }
 
 /* ---------- 标签页 ---------- */
-.mt5700-tabs {
-  display: flex;
-  gap: var(--mt5700-space-xs);
-  border-bottom: 1px solid var(--mt5700-divider);
-  margin-bottom: var(--mt5700-space-lg);
-  overflow-x: auto;
-}
-
-.mt5700-tab {
-  padding: 10px 16px;
-  font-size: var(--mt5700-font-size-sm);
-  font-weight: 500;
-  color: var(--mt5700-text-muted);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  transition: all var(--mt5700-transition-fast);
-  white-space: nowrap;
-}
-
-.mt5700-tab:hover { color: var(--mt5700-text); }
-
-.mt5700-tab.active {
-  color: var(--mt5700-accent);
-  border-bottom-color: var(--mt5700-accent);
-}
 
 /* ---------- 短信布局 ---------- */
 .mt5700-sms-layout {
@@ -1923,8 +1791,6 @@
   flex-wrap: wrap;
 }
 
-.mt5700-grow { flex: 1 1 240px; }
-
 .mt5700-log-ok { color: #0d9e6e; }
 .mt5700-log-err { color: #dc2626; }
 .mt5700-log-cmd { color: #1a5eab; font-weight: 600; }
@@ -2007,7 +1873,7 @@
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 768px) {
-  .mt5700-app { padding: var(--mt5700-space-md); }
+  
   .mt5700-page-title { font-size: var(--mt5700-font-size-2xl); }
   .mt5700-card-body { padding: var(--mt5700-space-md); }
   .mt5700-grid { gap: var(--mt5700-space-md); }
@@ -2022,22 +1888,10 @@
 }
 
 /* ---------- 工具类 ---------- */
-.mt5700-text-center { text-align: center; }
-.mt5700-text-left { text-align: left; }
-.mt5700-text-right { text-align: right; }
+
 .mt5700-mt-sm { margin-top: var(--mt5700-space-sm); }
 .mt5700-mt-md { margin-top: var(--mt5700-space-md); }
 .mt5700-mt-lg { margin-top: var(--mt5700-space-lg); }
-.mt5700-mb-sm { margin-bottom: var(--mt5700-space-sm); }
-.mt5700-mb-md { margin-bottom: var(--mt5700-space-md); }
-.mt5700-mb-lg { margin-bottom: var(--mt5700-space-lg); }
-.mt5700-w-full { width: 100%; }
-.mt5700-flex { display: flex; }
-.mt5700-flex-center { display: flex; align-items: center; justify-content: center; }
-.mt5700-flex-between { display: flex; align-items: center; justify-content: space-between; }
-.mt5700-gap-sm { gap: var(--mt5700-space-sm); }
-.mt5700-gap-md { gap: var(--mt5700-space-md); }
-.mt5700-gap-lg { gap: var(--mt5700-space-lg); }
 
 /* 减少动态效果偏好 */
 @media (prefers-reduced-motion: reduce) {
@@ -2058,33 +1912,8 @@
    ========================================================================== */
 
 /* ---------- 页面骨架 ---------- */
-.at-page { }
-.at-page-head { margin-bottom: 14px; }
-.at-page-title { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
-.at-page-subtitle { color: #888; font-size: 13px; }
-.at-page-body { }
 
 /* ---------- 面板 ---------- */
-.at-panel {
-	background: #fff;
-	border: 1px solid #dfe2e5;
-	border-radius: 8px;
-	margin-bottom: 16px;
-	overflow: hidden;
-}
-.at-panel-head {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 10px 14px;
-	border-bottom: 1px solid #f0f2f5;
-	background: #fafbfc;
-}
-.at-panel-title { margin: 0; font-size: 15px; font-weight: 600; }
-.at-panel-hint { color: #999; font-size: 12px; }
-.at-panel-extra { font-size: 12px; color: #666; }
-.at-panel-body { padding: 12px 14px; }
-.at-panel-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 
 /* ---------- 字段 ---------- */
 .at-field { display: flex; align-items: flex-start; margin-bottom: 10px; }
@@ -2124,71 +1953,16 @@
 	outline: none;
 }
 /* 复选/开关：保持原尺寸，仅统一主题强调色 */
-.at-panel .cbi-input-checkbox {
-	width: auto;
-	height: auto;
-	accent-color: #1668dc;
-}
+
 .at-field-hint { color: #999; font-size: 12px; margin-top: 3px; }
 
 /* ---------- 键值表 ---------- */
-.at-kv { width: 100%; border-collapse: collapse; }
-.at-kv td { padding: 6px 10px; border-bottom: 1px solid #f4f5f7; font-size: 13px; }
-.at-kv-label { color: #666; white-space: nowrap; width: 1%; }
-.at-kv-value { color: #222; word-break: break-all; }
 
 /* ---------- 表格 ---------- */
 /* 视图动态创建的表格元素同时带有 cbi-section-table 与 at-table 两个类。
    此处统一用 .at-panel 作用域提升优先级，保证外观由本文件决定、不受 LuCI 主题影响。 */
-.at-panel .at-table {
-	width: 100%;
-	border-collapse: collapse;
-	border: 1px solid #e5e8ec;
-	border-radius: 6px;
-	font-size: 13px;
-	background: #fff;
-	color: #333;
-}
-.at-panel .at-table th {
-	background: #fafbfc;
-	color: #555;
-	font-weight: 600;
-	text-align: left;
-	padding: 8px 10px;
-	border-bottom: 1px solid #e5e8ec;
-	white-space: nowrap;
-}
-.at-panel .at-table td {
-	padding: 8px 10px;
-	border-bottom: 1px solid #f0f2f5;
-	vertical-align: middle;
-	word-break: break-all;
-}
-.at-panel .at-table tbody tr:nth-child(even) { background: #fafbfc; }
-.at-panel .at-table tbody tr:hover { background: #f4f8fe; }
-.at-panel .at-table tbody tr:last-child td { border-bottom: 0; }
-.at-panel .at-table .at-btn,
-.at-panel .at-table .cbi-button {
-	padding: 3px 10px;
-	font-size: 12px;
-	line-height: 18px;
-}
 
 /* ---------- 标签 ---------- */
-.at-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.at-tag {
-	display: inline-block;
-	padding: 2px 10px;
-	border-radius: 12px;
-	font-size: 12px;
-	line-height: 20px;
-	border: 1px solid transparent;
-}
-.at-tag-green { color: #1a7f37; background: #e6f4ea; border-color: #b7dfc2; }
-.at-tag-red { color: #c62828; background: #fdeaea; border-color: #f3c0c0; }
-.at-tag-orange { color: #b26a00; background: #fff3e0; border-color: #ffd591; }
-.at-tag-blue { color: #1565c0; background: #e7f0fd; border-color: #bcd8f5; }
-.at-tag-gray { color: #555; background: #f0f0f0; border-color: #ddd; }
 
 /* ---------- 按钮 ---------- */
 .at-btn {
@@ -2228,11 +2002,6 @@
 	transition: opacity .4s;
 	max-width: 80vw;
 }
-.at-toast-success { background: #1a7f37; }
-.at-toast-error { background: #c62828; }
-.at-toast-warning { background: #b26a00; }
-.at-toast-info { background: #1565c0; }
-.at-toast-hide { opacity: 0; }
 
 /* ---------- 弹窗 ---------- */
 .at-modal-mask {
@@ -2256,99 +2025,19 @@
 }
 .at-modal-wide { max-width: 640px; }
 .at-modal-title { margin: 0 0 12px; font-size: 16px; }
-.at-modal-text { margin: 0 0 14px; font-size: 14px; color: #333; }
+
 .at-modal-body { }
 .at-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .at-modal .at-field { margin-bottom: 10px; }
 
 /* ---------- 连接状态条 ---------- */
-.at-conn-bar {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 10px 14px;
-	border-radius: 10px;
-	margin-bottom: 14px;
-	font-size: 13px;
-	border: 1px solid transparent;
-	box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-	line-height: 1.35;
-}
-.at-conn-idle { background: #f8fafc; border-color: #e2e8f0; color: #64748b; }
-.at-conn-connecting { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
-.at-conn-connected { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
-.at-conn-disconnected { background: #f8fafc; border-color: #e2e8f0; color: #64748b; }
-.at-conn-error { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
-.at-conn-dot {
-	width: 8px; height: 8px; border-radius: 50%;
-	background: currentColor;
-	flex: 0 0 auto;
-	box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
-}
-.at-conn-connecting .at-conn-dot {
-	animation: at-conn-pulse 1.2s ease-in-out infinite;
-}
-@keyframes at-conn-pulse {
-	0%, 100% { opacity: 1; transform: scale(1); }
-	50% { opacity: 0.45; transform: scale(0.85); }
-}
-.at-conn-text { font-weight: 500; letter-spacing: 0.01em; }
-.at-conn-actions { margin-left: auto; display: flex; gap: 6px; }
 
 /* ---------- 进度条 ---------- */
-.at-progress-bar {
-	height: 8px;
-	background: #eef0f3;
-	border-radius: 4px;
-	overflow: hidden;
-	margin-top: 6px;
-}
-.at-progress-fill {
-	height: 100%;
-	background: #1668dc;
-	border-radius: 4px;
-	transition: width .4s;
-}
-.at-progress-danger { background: #e5484d; }
 
 /* ---------- 空状态 / 提示 ---------- */
-.at-empty { color: #999; font-size: 13px; padding: 18px 8px; text-align: center; }
-.at-hint { color: #888; font-size: 12px; margin-top: 4px; }
 
 /* ---------- 短信中心 ---------- */
-.at-sms-layout { display: flex; gap: 14px; min-height: 480px; }
-.at-sms-left { flex: 0 0 280px; border: 1px solid #e5e8ec; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
-.at-sms-right { flex: 1 1 auto; border: 1px solid #e5e8ec; border-radius: 8px; display: flex; flex-direction: column; min-width: 0; }
-.at-sms-storage { padding: 8px 12px; background: #fafbfc; border-bottom: 1px solid #eef0f3; font-size: 12px; color: #666; }
-.at-sms-contacts { flex: 1 1 auto; overflow-y: auto; }
-.at-sms-contact { padding: 10px 12px; border-bottom: 1px solid #f4f5f7; cursor: pointer; }
-.at-sms-contact:hover { background: #f7f9fc; }
-.at-sms-contact-active { background: #e7f0fd; }
-.at-sms-contact-num { font-weight: 600; font-size: 14px; }
-.at-sms-contact-last { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.at-sms-contact-time { color: #aaa; font-size: 11px; }
-.at-sms-left > .at-btn { margin: 8px; }
-.at-sms-conv-head {
-	padding: 10px 14px; background: #fafbfc; border-bottom: 1px solid #eef0f3;
-	font-weight: 600;
-}
-.at-sms-conv-body {
-	flex: 1 1 auto; overflow-y: auto; padding: 12px;
-	display: flex; flex-direction: column; gap: 8px;
-	background: #f8f9fb;
-}
-.at-sms-bubble {
-	max-width: 76%;
-	padding: 8px 12px;
-	border-radius: 10px;
-	font-size: 13px;
-	position: relative;
-	word-break: break-all;
-}
-.at-sms-sent { align-self: flex-end; background: #1668dc; color: #fff; border-bottom-right-radius: 2px; }
-.at-sms-recv { align-self: flex-start; background: #fff; border: 1px solid #e5e8ec; border-bottom-left-radius: 2px; }
-.at-sms-msg-meta { font-size: 11px; opacity: .7; margin-top: 3px; }
-.at-sms-msg-part { font-size: 11px; opacity: .75; }
+
 /* 短信气泡上的删除按钮。JS（sms_center.js）实际挂的类名是 .mt5700-sms-del，
    而这里原写作 .at-sms-del —— 类名不一致，导致下面这套「小号 ✕」样式从未生效过。
    现改用与 JS 一致的类名；同时去掉 display:none + hover 显隐：触屏没有 hover，
@@ -2401,199 +2090,52 @@
 	white-space: nowrap;
 }
 
-.at-sms-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #eef0f3; align-items: flex-end; flex-wrap: wrap; }
-.at-sms-textarea {
-	flex: 1 1 auto; min-width: 200px; min-height: 44px; resize: vertical;
-	border: 1px solid #d0d5dd; border-radius: 6px; padding: 6px 8px; font-size: 13px;
-}
-.at-sms-hint { flex: 0 0 auto; color: #999; font-size: 11px; max-width: 220px; }
-.at-batch-list { max-height: 300px; overflow-y: auto; border: 1px solid #eef0f3; border-radius: 6px; padding: 6px; }
-.at-batch-item { display: flex; gap: 8px; align-items: flex-start; padding: 5px 6px; font-size: 13px; }
-.at-storage-info { font-size: 13px; color: #333; margin-bottom: 4px; }
-
 /* ---------- USSD ---------- */
-.at-ussd-reply {
-	margin-top: 8px; padding: 10px 12px; background: #f8f9fb;
-	border: 1px solid #e5e8ec; border-radius: 6px;
-	font-size: 14px; color: #222; min-height: 24px; word-break: break-all;
-}
 
 /* ---------- AT 终端 ---------- */
-.at-console {
-	background: #1e1e1e; color: #e6e6e6;
-	border: 1px solid #333; border-radius: 6px;
-	padding: 10px; max-height: 480px; overflow-y: auto;
-	font-family: ui-monospace, Menlo, Consolas, monospace;
-	font-size: 12px; line-height: 1.6;
-	white-space: pre-wrap; word-break: break-all;
-}
-.at-console-entry { margin-bottom: 10px; }
-.at-console-cmd { color: #9cdcfe; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.at-console-prompt { color: #6a9955; }
-.at-console-cmd time { color: #8b949e; font-size: 11px; }
-.at-console-res {
-	margin: 4px 0 0;
-	padding: 6px 8px;
-	/* 主题会给 pre 铺底色（aurora: background-color: var(--surface-sunken)，浅色下 #f4f7fa），
-	   只覆盖 color 会变成「浅底 + 浅黄字」，深色终端里结果完全看不清。
-	   这里显式重置 pre 的底色/边框，保证与终端深色背景一致。 */
-	background: rgba(255, 255, 255, .05);
-	border: 0;
-	border-radius: 4px;
-	color: #dcdcaa;
-	font-family: inherit;
-	font-size: inherit;
-	line-height: inherit;
-	white-space: pre-wrap;
-	word-break: break-all;
-	overflow-x: auto;
-}
-.at-console-res--err { color: #f48771; }
-.at-terminal-input { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.at-terminal-input .cbi-input-text { flex: 1 1 260px; }
-.at-log-console {
-	background: #1e1e1e; color: #e6e6e6;
-	border: 1px solid #333; border-radius: 6px;
-	padding: 12px; max-height: 600px; overflow-y: auto;
-	font-family: ui-monospace, Menlo, Consolas, monospace;
-	font-size: 12px; line-height: 1.6;
-	white-space: pre-wrap; word-break: break-all;
-	margin: 0 0 10px;
-}
 
 /* ---------- 常用命令 / 已保存命令 ---------- */
-.at-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.at-chip { display: inline-flex; align-items: center; gap: 2px; }
-.at-chip-del { color: #c62828; cursor: pointer; padding: 0 4px; font-size: 14px; }
 
 /* ---------- 指标网格（网络状态页） ---------- */
-.at-metrics {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-	gap: 10px;
-	margin-bottom: 10px;
-}
-.at-metric {
-	background: #f8f9fb;
-	border: 1px solid #eef0f3;
-	border-radius: 8px;
-	padding: 8px 10px;
-}
-.at-metric-label { color: #888; font-size: 11px; margin-bottom: 2px; }
-.at-metric-value { font-size: 15px; font-weight: 600; color: #222; word-break: break-all; }
 
 /* ---------- 速率显示（PDCP 实时速率） ---------- */
-.at-speed-row {
-	display: flex;
-	gap: 12px;
-	flex-wrap: wrap;
-	margin-bottom: 8px;
-}
-.at-speed-box {
-	display: flex;
-	align-items: baseline;
-	gap: 6px;
-	background: #f8f9fb;
-	border: 1px solid #eef0f3;
-	border-radius: 8px;
-	padding: 6px 12px;
-}
-.at-speed-num { font-size: 20px; font-weight: 700; color: #1668dc; }
-.at-speed-label { color: #888; font-size: 12px; }
-.at-speed-value { font-size: 13px; color: #444; }
-.at-speed-dir { color: #999; font-size: 12px; }
 
 /* ---------- 曲线图（SVG） ---------- */
-.at-chart {
-	width: 100%;
-	height: 120px;
-	background: #fafbfc;
-	border: 1px solid #eef0f3;
-	border-radius: 6px;
-	margin: 6px 0;
-}
 
 /* ---------- 锁频编辑器 ---------- */
-.at-lock-editor { border: 1px solid #eef0f3; border-radius: 6px; padding: 10px; margin: 8px 0; }
-.at-lock-items { display: flex; flex-direction: column; gap: 6px; }
-.at-lock-item {
-	display: flex;
-	gap: 8px;
-	align-items: center;
-	flex-wrap: wrap;
-	padding: 6px 8px;
-	background: #fafbfc;
-	border: 1px solid #f0f2f5;
-	border-radius: 6px;
-}
-.at-lock-item .cbi-input-text { width: 90px; }
-.at-lock-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 
 /* ---------- 通用提示 / 内联 / 等宽 ---------- */
-.at-note { color: #888; font-size: 12px; margin: 4px 0; }
-.at-inline { display: inline-block; margin-right: 10px; }
-.at-mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
 
 /* ---------- 定时时段 ---------- */
-.at-period {
-	display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-	padding: 10px; border: 1px solid #eef0f3; border-radius: 8px; margin: 8px 0;
-}
-.at-period-kind { font-weight: 600; min-width: 48px; }
-.at-period .at-lock-editor { width: 100%; }
 
 /* ---------- 升级步骤进度 ---------- */
-.at-steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-.at-step {
-	padding: 4px 10px; border-radius: 12px; font-size: 12px;
-	background: #f0f0f0; color: #666;
-}
-.at-step.at-step-done { background: #e6f4ea; color: #1a7f37; }
-.at-step.at-step-active { background: #e7f0fd; color: #1565c0; font-weight: 600; }
-.at-progress { margin: 8px 0; }
 
 /* ---------- 短信内容 ---------- */
-.at-sms-msg-content { word-break: break-all; white-space: pre-wrap; }
 
 /* ---------- 免责声明列表 ---------- */
-.at-agree-list { margin: 8px 0 12px; padding-left: 18px; }
-.at-agree-list li { margin-bottom: 4px; font-size: 13px; color: #444; }
 
 /* ---------- 网络拒绝（REJINFO） ---------- */
-.at-reject-title {
-	font-weight: 700;
-	font-size: 14px;
-	color: #b3261e;
-	margin-bottom: 4px;
-}
-.at-reject-line {
-	font-size: 13px;
-	color: #444;
-	margin-bottom: 2px;
-	word-break: break-all;
-}
 
 /* ---------- 自动刷新 ---------- */
 .at-autorefresh { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font-size: 13px; color: #555; }
 .at-autorefresh-label { color: #666; }
 
 /* ---------- Spinner ---------- */
-.at-spinner { text-align: center; padding: 30px; color: #888; }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 768px) {
 	.at-field { flex-direction: column; }
 	.at-field-label { flex: none; padding-top: 0; margin-bottom: 4px; }
-	.at-sms-layout { flex-direction: column; }
-	.at-sms-left { flex: none; width: 100%; }
-	.at-sms-right { min-height: 400px; }
-	.at-sms-bubble { max-width: 92%; }
-	.at-panel-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+	
+	
+	
+	
+	
 	.at-btn { width: 100%; text-align: center; }
 	.at-modal-actions { flex-direction: column; }
 	.at-modal-actions .at-btn { width: 100%; }
 	/* 表格在窄屏下改为横向滚动，避免挤压列宽 */
-	.at-panel .at-table { display: block; overflow-x: auto; white-space: nowrap; }
+	
 }
 
 /* ==========================================================================
@@ -2704,19 +2246,6 @@
    ^NRSSBID 会报服务小区的 8 个 SSB 波束（含各自 RSRP）。每行「波束号 + 强度条 +
    读数」，窄屏自动换列。这些类只被新加的「SSB 与邻区扫描」卡使用。
    ========================================================================== */
-.mt5700-beams {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--mt5700-space-sm) var(--mt5700-space-md);
-}
-.mt5700-beam {
-  display: flex;
-  align-items: center;
-  gap: var(--mt5700-space-sm);
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-secondary);
-}
-.mt5700-beam .mt5700-signal-bar { flex: 1 1 auto; }
 
 /* ==========================================================================
    分段选择器与卡内分区（CSS v5.3.0）
@@ -2754,17 +2283,6 @@
   color: #fff;
   box-shadow: var(--mt5700-sh-1);
 }
-.mt5700-subsection {
-  padding: var(--mt5700-space-md);
-  border: 1px solid var(--mt5700-border-subtle);
-  border-radius: var(--mt5700-radius-md);
-}
-.mt5700-subsection-title {
-  font-size: var(--mt5700-font-size-base);
-  font-weight: 600;
-  color: var(--mt5700-text);
-  margin-bottom: var(--mt5700-space-sm);
-}
 
 /* ==========================================================================
    波束高亮与锁频条目隐藏（CSS v5.4.0）
@@ -2772,13 +2290,7 @@
    .mt5700-beam.is-best 标出当前最强 SSB 波束；.mt5700-lock-items.is-hidden
    用于锁频类型为「关闭」时收起条目容器（该状态下只显示空态说明）。
    ========================================================================== */
-.mt5700-beam.is-best {
-  color: var(--mt5700-text);
-  font-weight: 600;
-}
-.mt5700-beam.is-best .mt5700-mono {
-  color: var(--mt5700-accent);
-}
+
 .mt5700-lock-items.is-hidden {
   display: none;
 }
@@ -2861,23 +2373,6 @@
 }
 
 /* ⑤ 一键诊断 */
-.mt5700-diag-summary {
-  padding: 12px 14px;
-  border-radius: var(--mt5700-radius-md, 8px);
-  border-left: 3px solid var(--mt5700-accent);
-  background: var(--mt5700-bg-subtle, rgba(148, 163, 184, .12));
-  margin-bottom: var(--mt5700-space-md, 12px);
-}
-.mt5700-diag-summary.is-ok   { border-left-color: #22c55e; }
-.mt5700-diag-summary.is-warn { border-left-color: #f59e0b; }
-.mt5700-diag-summary.is-bad  { border-left-color: #ef4444; }
-
-.mt5700-diag-summary-head { margin-bottom: 5px; }
-.mt5700-diag-summary-text {
-  color: var(--mt5700-text-secondary);
-  font-size: 13px;
-  line-height: 1.65;
-}
 
 /* 结论列：配色取在浅底与深底上都还能看清的中亮度值，不复用 accent 蓝
    （蓝色在项目里已代表「信息/中性」，拿来当「正常」会和告警色混淆）
@@ -2947,38 +2442,6 @@
       被挤成竖向堆叠 —— 用户实测就是这样。给容器 min-width:0 让它在放不下时
       整块换行，而不是把单个胶囊压扁。
    ========================================================================== */
-.mt5700-readouts {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.mt5700-readout {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  flex: 0 0 auto;
-  padding: 4px 10px;
-  border-radius: var(--mt5700-radius-full);
-  background: rgba(127, 127, 127, 0.07);
-  white-space: nowrap;
-}
-.mt5700-readout-name {
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-secondary);
-}
-.mt5700-readout-value {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--mt5700-text);
-}
-.mt5700-readout-unit {
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-secondary);
-}
 
 /* 2026-09-19（P08）：断网排查明细收进右列卡内，限宽 509px 排版预算下
    明细表整体降字号、钉列宽、sticky 表头、限高滚动。全部走 --mt5700-*，
@@ -3337,41 +2800,6 @@
  * 与 .mt5700-notice 的分工：notice 带 ! 图标做过程提示，
  * verdict 是纯结论块（可拨 / 不可拨 / 有风险），不做图标。
  */
-.mt5700-verdict {
-  margin-top: 10px;
-  padding: 10px 14px;
-  font-size: var(--mt5700-font-size-sm);
-  line-height: 1.7;
-  color: var(--mt5700-text-secondary);
-  background: rgba(59, 130, 246, 0.06);
-  border: 1px solid rgba(59, 130, 246, 0.18);
-  border-left-width: 3px;
-  border-radius: var(--mt5700-radius-md);
-}
-
-.mt5700-verdict.is-ok {
-  background: rgba(16, 185, 129, 0.07);
-  border-color: rgba(16, 185, 129, 0.24);
-  color: #065f46;
-}
-
-.mt5700-verdict.is-bad {
-  background: rgba(239, 68, 68, 0.06);
-  border-color: rgba(239, 68, 68, 0.22);
-  color: #991b1b;
-}
-
-.mt5700-verdict.is-warn {
-  background: rgba(245, 158, 11, 0.07);
-  border-color: rgba(245, 158, 11, 0.24);
-  color: #92400e;
-}
-
-@media (prefers-color-scheme: dark) {
-  .mt5700-verdict.is-ok { color: #6ee7b7; }
-  .mt5700-verdict.is-bad { color: #fca5a5; }
-  .mt5700-verdict.is-warn { color: #fcd34d; }
-}
 
 /* ==========================================================================
    动效降级（v5.6.0）
@@ -3388,7 +2816,6 @@
   .mt5700-speed-box,
   .mt5700-btn,
   .mt5700-keypad-key,
-  .mt5700-tab,
   .mt5700-step,
   .mt5700-sms-item {
     transition: none !important;
@@ -3405,7 +2832,7 @@
     transform: none;
   }
 
-  .mt5700-skeleton,
+  
   .at-status-card.is-online .at-status-dot,
   .mt5700-gauge-bar {
     animation: none !important;

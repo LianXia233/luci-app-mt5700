@@ -233,6 +233,38 @@ ok('未读会话渲染徽章', /Mt5700\.badge\(/.test(smsJs) && /'未读'/.test(
 ok('徽章 variant 在 CSS 里有定义（否则落到无配色的基类）',
 	/\.mt5700-badge-info\s*\{/.test(css));
 
+/* ---------- 状态类必须与配对样式同进同退 ----------
+ * 2026-10-21 发现的真实故障：mt5700.js 的 renderConnectionBar 里
+ *   simBox.classList.toggle('is-warn', sim.warn)
+ * 挂了很久，而 mt5700.css 从来没有 `.at-status-sim.is-warn` —— 状态类切了，
+ * 界面毫无变化。页面不报错、全部测试也是绿的，用户只看到"告警了但没反应"。
+ *
+ * ★ 断言必须**先取出规则块再判**。早先写成
+ *   /\.at-status-text\s*\{[\s\S]*?min-width:\s*0;…/ —— 看起来对，实际
+ *   [\s\S]*? 能一路跳到后面别的规则里去匹配，把 min-width 从别处"借"过来，
+ *   于是把本条 CSS 删干净测试照样绿（变异验证已证实）。
+ */
+function cssBlock(sel) {
+	const i = css.indexOf(sel + ' {');
+	if (i < 0) return '';
+	const j = css.indexOf('}', i);
+	return j < 0 ? '' : css.slice(i, j + 1);
+}
+ok('★ SIM 芯片告警态有配对样式（JS toggle is-warn，CSS 必须有规则）',
+	/simBox\.classList\.toggle\('is-warn'/.test(mt5700)
+	=== /\.at-status-sim\.is-warn\s*\{/.test(css));
+const warnBlock = cssBlock('.at-status-sim.is-warn');
+ok('SIM 告警态同时改底色与描边（只改文字色几乎看不出来）',
+	warnBlock.indexOf('background:') > 0 && warnBlock.indexOf('border-color:') > 0,
+	'实际块：' + warnBlock);
+/* 标题行是固定尺寸行：文案再长也只能收略号，不许把标题挤歪/换行 */
+const stTextBlock = cssBlock('.at-status-text');
+ok('★ 状态标题文本收略号（min-width:0 + ellipsis + nowrap）',
+	stTextBlock.indexOf('min-width: 0;') > 0
+	&& stTextBlock.indexOf('text-overflow: ellipsis;') > 0
+	&& stTextBlock.indexOf('white-space: nowrap;') > 0,
+	'实际块：' + stTextBlock);
+
 /* ---------- 汇总 ---------- */
 console.log('通过 ' + pass + ' 项，失败 ' + fails.length + ' 项');
 if (fails.length) {

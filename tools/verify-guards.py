@@ -283,6 +283,51 @@ def _resolve_node() -> str:
 
 NODE = _resolve_node()
 
+# ---------------------------------------------------------------------------
+# 崩溃恢复：本工具会**就地改仓库源码**做变异。一旦上一轮没跑完（被 kill、
+# 断电、CI 取消），变异的文件就留在工作区里。更糟的是下一轮启动时会把
+# **残留的变异当成基线**（ORIG 从磁盘读）—— 于是「基线绿、还原逐字节一致」，
+# 而仓库其实已经被改坏，只有那条被跳过的断言能发现。
+#
+# 2026-10-21 真踩过两次：`sms_center.js` 的 warning 被留成 success；
+# `mt5700.js` 的 '重新尝试' 被留成 '再来一次'，之后连续两轮把所有测试都
+# 报成"全部通过"，实际那两条断言一直在红。
+#
+# 做法：开跑前把 ORIG 备份到 .workbuddy/tmp/verify-guards.bak/（恢复用的
+# 唯一权威来源，和磁盘当前状态无关）；正常收尾时删掉。启动时发现备份还在
+# ＝ 上一轮不正常，先按备份还原再继续。
+# ---------------------------------------------------------------------------
+BAK_DIR = ROOT / ".workbuddy" / "tmp" / "verify-guards.bak"
+
+
+def _save_backups():
+    BAK_DIR.mkdir(parents=True, exist_ok=True)
+    for k, blob in ORIG.items():
+        (BAK_DIR / (k + ".bak")).write_bytes(blob)
+
+
+def _clear_backups():
+    shutil.rmtree(BAK_DIR, ignore_errors=True)
+
+
+def _recover_stale():
+    """若存在上一轮的备份，先还原。返回是否发生了恢复。"""
+    if not BAK_DIR.is_dir():
+        return False
+    restored = []
+    for k, path in TARGETS.items():
+        b = BAK_DIR / (k + ".bak")
+        if b.exists():
+            path.write_bytes(b.read_bytes())
+            restored.append(path.name)
+    _clear_backups()
+    if restored:
+        print("⚠ 检测到上一轮未正常结束，已按备份还原：" + "、".join(sorted(restored)))
+    return bool(restored)
+
+
+_recover_stale()
+
 ORIG = {k: v.read_bytes() for k, v in TARGETS.items()}
 
 # (名字, 目标, 旧片段, 新片段, 期望被点名的断言关键词)
@@ -1742,9 +1787,12 @@ MUTATIONS = [
         " ? (count + ' 载波聚合中') : dcActive ? 'EN-DC 双连接' : '单载波');",
         "renderCarriers 改用 aggregationBadge",
     ),
-    # ★ 2026-10-16 厂商 beta 固件电话功能移植。八条覆盖三组新守卫：
-    #   状态机令牌（uc9）/ preflight 只读结构（uc9）/ 记录 direction（voicejs）
-    #   / 视图 preflight 接线（voicejs）。锚点唯一性已核（每条在各自文件里只出现 1 次）。
+    # ★ 2026-10-16 厂商 beta 固件电话功能移植。此处现存三条，守的是
+    #   「通道故障不许被渲染成空闲」与「禁用判据只准一处」。
+    #   原 preflight 相关的六条（只读结构 CIREG? / QCFG 混入 / SIM 判据 /
+    #   承载域判据 / 四字段透传 / ready 宽松取值）已随 v2.4.27 preflight 下线
+    #   一并删除 —— 变异条目必须与断言同生共死，否则每次跑守卫都报
+    #   "锚点出现 0 次"，把真问题淹掉。
     (
         # 把「不是数组」判据退回 `=== null`：后端若不回 calls 字段，
         # undefined === null 为假 ⇒ 报错分支不可达 ⇒ 通道故障看起来像空闲
@@ -1754,15 +1802,6 @@ MUTATIONS = [
         "if (!Array.isArray(res.calls)) {",
         "if (res.calls === null) {",
         "视图判据用 Array.isArray，不是 === null（否则报错分支是死代码）",
-    ),
-    (
-        # 去掉轮询让路：preflight 跑（一次 4 条 AT）时 2 秒轮询照样发 status，
-        # 两个调用争同一根串口。
-        "视图：去掉 pfBusy 的轮询让路（前置检查与轮询抢串口）",
-        "voicejs",
-        "\t\t\t\tif (st.pfBusy) { return; }\n",
-        "\t\t\t\tif (false) { return; }\n",
-        "前置检查期间轮询让路（pfBusy 守卫）",
     ),
     (
         # 令牌表缺一项：后端给出 held 时前端查不到 → 退回「状态未知」。
@@ -1789,20 +1828,12 @@ MUTATIONS = [
         "callStatus 无响应分支显式回 calls: null",
     ),
     (
-        # 只读查询丢掉 ?：CIREG 从查询变成写命令，preflight 会真的改模组状态。
-        "ucode：preflight 的 AT+CIREG? 丢掉问号（只读查询变成写命令）",
-        "uc9",
-        "{ cmd: 'AT+CIREG?' }",
-        "{ cmd: 'AT+CIREG' }",
-        "preflight 每条命令都以 ? 结尾（只读查询）",
-    ),
-    (
         # 把厂商的 Quectel 私有命令当成「数据」留在代码行里（注释外）。
         # 它是 MT5700M-CN 手册里没有的命令，一旦被下发就是未定义行为（红线 27）。
         "ucode：代码行里混进 Quectel 私有命令 AT+QCFG（红线 27）",
         "uc9",
-        "title: 'IMS 域已注册', cmd: 'AT+CIREG?',",
-        "title: 'IMS 域已注册', cmd: 'AT+CIREG?', atq: 'AT+QCFG=\"ims\"',",
+        "let r = rpcCall('at', { cmd: 'AT+CLCC' });",
+        "let r = rpcCall('at', { cmd: 'AT+CLCC', qcfg: 'AT+QCFG=\"ims\"' });",
         "★ Quectel 私有命令只出现在注释里（不得成为真实下发命令）",
     ),
     (
@@ -1812,25 +1843,6 @@ MUTATIONS = [
         "['active', 'held', 'waiting', 'ringing', 'alerting', 'dialing']",
         "['dialing', 'alerting', 'ringing', 'waiting', 'held', 'active']",
         "总态优先级序 active > held > waiting > ringing > alerting > dialing",
-    ),
-    (
-        # 2026-10-16 真机校准：把 SIM 判据退回「必须 12」。手册 6.6.3 里 12 说的是
-        # 「短信和电话本可接入」，11（已初始化、可接入网络）同样已初始化 ——
-        # 用 12 当语音门槛会把 11 误判成不可用。
-        "ucode：SIM 判据退回「必须 sim_status=12」（11 被误判成不可用）",
-        "uc9",
-        "let simOk = (simStatus == 11 || simStatus == 12);",
-        "let simOk = (simStatus == 12);",
-        "SIM 就绪判据 = sim_status 11 或 12（手册 6.6.3：两者都是「已初始化」）",
-    ),
-    (
-        # 2026-10-16 真机校准确认的假阴性：本机 +CREG: 0,0（CS 未注册）但
-        # +CIREG: 1,1（IMS 已注册），按 CS 单腿判会被判成「不能打电话」。
-        "ucode：承载域判据只留 CS（IMS 已注册也被判成不能拨 —— 真机假阴性）",
-        "uc9",
-        "let netOk = (csOk || imsOk);",
-        "let netOk = csOk;",
-        "语音承载判据 = CS 或 IMS 任一可用（netOk）",
     ),
     (
         # ★★ 2026-10-16 真实故障（不是假想）：rpc.js 的 fetchCall 没搬 stage。
@@ -1845,27 +1857,11 @@ MUTATIONS = [
         "★ fetchCall 透传 stage（后端在回、前端在读，这一层不能漏）",
     ),
     (
-        # 同一个故障的第二个表现：自检四字段也被吃掉，卡片永远显示「检查失败」。
-        "rpc.js：fetchCall 漏搬 preflight 四字段（自检卡片永远渲染不出来）",
-        "rpcjs8",
-        "ready: resp.ready === true,",
-        "/* ready 未透传 */",
-        "★ fetchCall 透传 preflight 四字段 ready/volte/blocked/steps",
-    ),
-    (
-        # ready 取值放宽成 resp.ready || —— 「没读到」会被显示成「已就绪」。
-        "rpc.js：ready 宽松取值（undefined 变 true，读失败伪装成就绪）",
-        "rpcjs8",
-        "ready: resp.ready === true,",
-        "ready: resp.ready || false,",
-        "★ ready 严格取 true（不让 undefined 变 true，红线 23）",
-    ),
-    (
         # 按钮禁用不再看通道故障：用户对着一个已经断了的通道反复点。
         "视图：applyGates 不再把通道故障算进禁用",
         "voicejs",
-        "var blocked = st.busy || st.pfBusy || st.channelError;",
-        "var blocked = st.busy || st.pfBusy;",
+        "var blocked = st.busy || st.channelError;",
+        "var blocked = st.busy;",
         "applyGates 把「通道故障」算进禁用（厂商 !s.status?.error 那一半）",
     ),
     (
@@ -1936,15 +1932,8 @@ MUTATIONS = [
         "\t\t\tdialBtn.disabled = on;\n\t\t}\n\n\t\tfunction setErr(msg) {",
         "setBusy 只改 busy 标志并转交 applyGates",
     ),
-    (
-        # 三态记号退回 core：CS 未注册但 IMS 已注册时，CS 那行会显示成
-        # 「✗ 挡住拨号」，而实际可以拨（一片红让人以为完全不能用）。
-        "视图：三态记号退回 core（CS 未过 + IMS 已过时误标成「挡住拨号」）",
-        "voicejs",
-        "s.ok ? '✓' : (s.blocking ? '✗' : '○')",
-        "s.ok ? '✓' : (s.core ? '✗' : '○')",
-        "三态记号 ✓/✗/○ 区分「通不过」与「通了但体验差」",
-    ),
+    # 原「视图：三态记号退回 core（CS 未过 + IMS 已过…）」条目已随 v2.4.27
+    # 的 preflight 下线一并删除：被变异的代码与被守卫的断言同时不存在了。
 ]
 
 
@@ -2046,6 +2035,39 @@ def restore_all():
         path.write_bytes(ORIG[k])
 
 
+def _install_signal_guard():
+    """被 SIGTERM / SIGINT 杀掉时也要还原。
+
+    ★ 2026-10-21 真踩过：一次 `python tools/verify-guards.py` 被 SIGTERM 打断
+    （命令超时），进程直接终止，`finally` 根本没跑 —— `sms_center.js` 里
+    `Mt5700.warning(...)` 被留成了变异后的 `Mt5700.success(...)`。表面上
+    `run-all.js` 还「全部通过」，实际那条契约测试正在红：断言要的是 warning。
+    变异残留比崩溃更危险，因为它把仓库改成了「看起来正常但其实坏了」的状态。
+
+    `finally` 只能兜异常，兜不住信号；信号处理器里必须用 os._exit，
+    否则 KeyboardInterrupt 会再抛一次、把还原流程自己打断。
+    """
+    import signal
+
+    def _handler(signum, _frame):
+        try:
+            restore_all()
+        except Exception:
+            pass
+        sys.stderr.write(f"\n收到信号 {signum}，已还原被变异的文件后退出\n")
+        sys.stderr.flush()
+        os._exit(130)
+
+    for name in ("SIGTERM", "SIGINT", "SIGBREAK", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass        # 非主线程 / 平台不支持，忽略
+
+
 def main():
     for tgt in ("js", "esimjs", "js2", "mt5700js"):
         rc0, out0 = run_test(tgt)
@@ -2055,6 +2077,8 @@ def main():
             return 1
 
     bad = 0
+    # 基线确认是绿的之后才落备份：此刻磁盘状态就是干净的 ORIG
+    _save_backups()
     try:
         for i, (name, tgt, old, new, key) in enumerate(MUTATIONS, 1):
             path = TARGETS[tgt]
@@ -2101,6 +2125,8 @@ def main():
 
     same = all(TARGETS[k].read_bytes() == ORIG[k] for k in TARGETS)
     print("还原复核:", "逐字节一致" if same else "*** 不一致！***")
+    if same:
+        _clear_backups()        # 只有确认还原到位才销账，否则留着给下一轮恢复
     rc, _ = run_test("esimjs")
     print("还原后基线:", "绿色" if rc == 0 else "红！")
     return 1 if (bad or rc != 0 or not same) else 0
@@ -2131,4 +2157,6 @@ if __name__ == "__main__":
             _stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+    # 先装信号兜底再进门：一旦开始变异，任何中断都必须先还原
+    _install_signal_guard()
     sys.exit(main())

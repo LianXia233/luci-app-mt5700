@@ -48,7 +48,7 @@ const js = fs.readFileSync(JSP, 'utf8');
  *              prefers-reduced-motion 降级）→ 5.6.0
  *   2026-09-20  eSIM 管理页重排（EID 等宽块 / Profile 行卡 / 卡内分区标题）→ 5.5.20
  */
-const CSS_FINGERPRINT = '54d8a4143a6d8676';
+const CSS_FINGERPRINT = '947a41e28694d16a';
 
 let pass = 0;
 const fails = [];

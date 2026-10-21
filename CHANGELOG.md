@@ -5,6 +5,57 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.28] - 2026-10-21
+
+### 性能 / 体积：样式表删掉 20.8% 的死规则
+
+样式表是**追加式**长出来的：旧 WebUI 的 `.at-*` 命名空间一直留在文件里，之后
+每版都往末尾叠一层补丁。3419 行里有 204 个选择器永远匹配不到任何元素
+（对应的类全仓库无人挂载）。删除的依据是可证明的：一个选择器只有当它引用的
+每个自有类都被某个元素真实挂着时才可能命中；只要有一个从未被应用，它就是个
+恒假条件。
+
+- 结果：`94367 → 74767` 字符 / `3419 → 2816` 行（**−20.8%**），删除 204 个
+  选择器，其中 14 个是从组选择器里摘出来的（`.mt5700-grid-2, .mt5700-grid-3,
+  .mt5700-grid-4 {}` 之前一个活类就整组保留）。
+- **零内容改动**：diff 里除选择器组收敛外，新增行全是空白。
+- 清理掉的具体死块：旧 WebUI 迁移层（`.at-page` / `.at-panel` / `.at-kv` /
+  `.at-sms-*` / `.at-conn-*` / `.at-console-*` / `.at-batch-*` / `.at-lock-*`
+  等 109 个孤儿类）、`.mt5700-app` / `.mt5700-tabs` / `.mt5700-verdict` /
+  `.mt5700-readout*` / `.mt5700-diag-summary*` / `.mt5700-beams*` /
+  `.mt5700-autorefresh` 等改版后遗留的重复定义。
+- 顺带删掉 `.mt5700-readout` / `.mt5700-readouts` 的两条**空壳契约断言**：
+  取证确认这两个类在 htdocs + root（含 ucode / shell）里已经没有任何元素挂载，
+  只剩下 mt5700.css 和断言自己提到它们。改为反向断言，谁再加回来就必须同时
+  补组件与样式。
+- `MT5700_CSS_VERSION` 5.6.0 → 5.7.0（样式内容变了，浏览器缓存必须失效）。
+
+### 修复：SIM 告警态挂了状态类却没有样式
+
+`mt5700.js#renderConnectionBar` 里 `simBox.classList.toggle('is-warn', sim.warn)`
+一直在切状态类，而 `mt5700.css` 从来没有 `.at-status-sim.is-warn` —— 告警永远
+看不见。页面不报错、测试全绿，属于「功能白写」的典型形态。补上亮/暗两套规则
+（底色 + 描边 + 文字色，不只改字色）。同时给 `.at-status-text` 补
+`min-width:0` + 省略号收敛，长 SIM/RPC 文案不再把标题行挤歪。
+
+### 新增：三个样式表工具（把这次的手工核对固化成可复跑）
+
+- `tools/css_scan.py`：类使用面扫描，两种口径——宽松（全源码切词，服务裁剪，
+  宁可多留）与精确（只认 class 属性/classList/setAttribute/`cls +=`，服务
+  MISSING 审计）。堵住三类实测假阳性：子串误伤（`mt5700-app` 命中
+  `mt5700-applybar`）、后缀拼接（`cls += ' mt5700-notice-success'`）、
+  注释里的 `xxx-*` 被当成动态前缀通配。
+- `tools/css-prune.py`：死选择器裁剪，选择器级判定（不是规则级），
+  `@media` 递归、空壳自动丢弃、`@keyframes` 只留被引用的、排版零漂移、幂等。
+- `tools/css-class-audit.py`：MISSING / DEAD / 状态类配对三段报告。
+  状态类配对这一段就是上面那个 bug 的通用化——`X.classList.toggle('is-y')` 的
+  宿主类若在 CSS 里没有配对规则，直接报出来。
+
+### 当前状态
+
+- `node tests/run-all.js`：82 个测试文件全部通过（ui-contract 275 项）。
+- 审计结论：MISSING 0 / DEAD 0 / 状态类配对无误。
+
 ## [2.4.27] - 2026-10-21
 
 ### 移除（用户判定「语音通话 - 可用性自检」是无用功能，直接删除）
