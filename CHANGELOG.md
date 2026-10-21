@@ -607,6 +607,19 @@ v1.18.1 的看板娘移动端排版在**源码预览下正常**，但装到实�
 
 ## [未发布]
 
+### LuCI Tab 菜单：滚动位置保持 + 统一 SVG 图标
+
+- **feat(tabmenu) 新增 `at-webserver/tabmenu.js`**：针对 `admin/modem/5g` 下 12 个兄弟页面的 LuCI Tab 菜单做纯 DOM 增强（由 `mt5700.js` 统一 require，12 个视图全覆盖），**不改动 LuCI 与主题本身，不拦截点击、不改 href、不删节点**，原有路由与功能逻辑零改动
+  - **滚动位置保持**：横向可滚动主题（如 argon 的 `.tabs { overflow-x:auto }`）在整页跳转后 `scrollLeft` 归零，选中项（如「运行日志」「服务配置」）被滚出可视区，用户要重新滑到底部找当前页。现在每次页面加载自动把选中项水平滚入可视区（仅操作 Tab 条自身 `scrollLeft`，**不动窗口滚动**，避免刷新时页面被顶回顶部）；返回 / 刷新同样生效
+  - **手动偏移记忆**：用 `sessionStorage` 按路径记住用户手动滚动的位置，点击 Tab / 离开页面前保存；返回或刷新时若选中项在该偏移处仍完整可见则恢复原偏移，否则回退为「选中项居中」
+  - **自适应校正**：视口缩放、横竖屏切换、Web 字体加载完成后（debounce 150ms）重新校正选中项位置
+  - **统一 SVG 图标**：按 `li.tabmenu-item-<name>` 为 12 个页签注入 24×24 线性图标（`stroke=currentColor`，`stroke-width=1.8`，round 线帽线角），颜色随主题 tab 文字色变化，激活态由 CSS 提亮；桌面端 16px、≤600px 视口 15px，语义逐项匹配（网络状态=脉冲、网络设置=滑杆、拨号=插头、扫频=雷达、锁频=时钟、模组设置=芯片、升级=圆内上箭头、短信=气泡、短信设置=气泡+省略号、终端=提示符、日志=文件、服务配置=齿轮），未知页签走同心圆兜底
+- **feat(compat) 主题无关**：只识别 `li[class*="tabmenu-item-"]`（bootstrap / material / argon / openwrt-2020 的 DOM 约定一致，激活类名 `active` / `cbi-tab` 均支持，另有 href 与当前路径一致的兜底识别）；footstrap 等无 Tab 栏的主题自动跳过；仅当路径含 `/admin/modem/` 时启用，其他 LuCI 页面零副作用；换行布局主题（bootstrap/material）不会产生横向滚动
+- **feat(css)**: `mt5700.css` 末尾新增「LuCI Tab 菜单增强」样式块（`.at-tabmenu-icon` 尺寸/间距/激活态/移动端适配），`MT5700_CSS_VERSION` 2.24.0 → 2.25.0 保证缓存刷新
+- **test**: 新增 `tests/tabmenu-test.js`（28 项断言：图标库与 menu.d 12 页签对齐、纯函数边界、argon/openwrt-2020/换行/异步渲染/非本插件页面守卫/兜底图标全场景）
+- **verify**: 本地以 Chromium 复刻 LuCI `#tabmenu` 异步渲染链路（含 argon 横向滚动与 bootstrap 换行两套 Tab 条）跑真实模块，18 项浏览器断言全部通过（图标注入、选中项居中、点击切换不重置、刷新恢复/回退、移动端 15px、视口缩放重校正）；`node tests/*.js` 存量用例无回归（`cellular-icon-test.js` 的 1 处失败为改动前已存在：测试期望 `api.CELLULAR_LABELS` 而源码为局部变量，与本次无关）
+- **scope**: 仅新增 1 个前端资源文件 + 2 处挂载/样式改动，AT 命令、RPC、后端与 IMEI 相关代码流零改动
+
 ### CI 不再向仓库写入构建日志
 
 - **ci(workflow)**: **移除「日志归档（推送构建日志到 ci-logs 分支）」步骤，云编译不再产出 `ci-logs-<fmt>-<arch>` 分支** —— 原步骤（`if: always()` + `continue-on-error: true`）会用 `git checkout --orphan` 创建 `ci-logs-<fmt>-<arch>` 孤儿分支，把 `build.log` / `deps.log` / `ARCH.txt` / `artifacts.txt` 推到该分支并 force push。移除后 Actions 不再向仓库写入任何内容，构建日志仅保留在 Actions 运行日志中（保留期由 GitHub 侧控制）。
