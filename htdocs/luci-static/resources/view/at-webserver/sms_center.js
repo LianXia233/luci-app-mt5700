@@ -6,6 +6,14 @@
 'require at-webserver/mt5700';
 /* global L, AtWs, Parse, Ui, SmsEncode, Mt5700 */
 
+/*
+ * 短信提交的预算（毫秒）。模组要把 TPDU 交给网络侧，`+CMGS` 回执取决于信号与
+ * 基站排队；本机弱信号（RSRP −107dBm）实测要数秒。与后端 SMS_SUBMIT_TIMEOUT
+ * （40s）同一量级、略大一点：让后端先超时，前端拿到的是可读的错误而不是
+ * 自己先掐断连接。
+ */
+var SMS_SUBMIT_TIMEOUT_MS = 45000;
+
 /**
  * 短信中心页面：
  *
@@ -597,17 +605,21 @@ return L.view.extend({
 				var chain2 = Promise.resolve();
 				for (var i = 0; i < parts.length; i++) {
 					chain2 = chain2.then(function (part) {
-						// 第一步：报 TPDU 长度，等模组的 `> ` 输入提示符
-						return AtWs.client.sendCommand('AT+CMGS=' + part.tpduLength).then(function (r) {
-							if (!r || r.success === false) {
-								throw new Error(String((r && r.error) || '模组拒绝短信发送（AT+CMGS 报长度被拒）'));
-							}
-							return r;
-						}).then(function () {
-							// 第二步：PDU + Ctrl+Z 提交。缺 0x1A 模组会永远等在输入态，
-							// 这就是「显示成功但发不出去」的直接原因。
-							return AtWs.client.sendCommand(part.pdu + '\x1A');
-						});
+						/*
+						 * 一条命令里同时给出长度与 PDU：`AT+CMGS=<长度>\r<PDU>`
+						 * —— 手册 9.14.5 的示例就是这种写法，上游 3.0.2 也是这么发的。
+						 *
+						 * 为什么不再分两步、也不再发 Ctrl+Z(0x1A)：0x1A 要穿过
+						 * 「浏览器 JSON → rpcd → ucode → nc → Rust」四层才到串口，
+						 * 实测这一路会把控制字节的转义吃掉，串口上收到的是**字面量**
+						 * "u001a" 六个字符（hexdump 核对过），模组因此永远等不到提交
+						 * 字符；而前端拿到 `> ` 提示符就当成功 —— 这正是 issue #19 的
+						 * 真实成因。单次写入完全不涉及控制字符，天然免疫这类转义问题，
+						 * 尾部 `\r` 由后端统一补，与上游行为一致。
+						 */
+						return AtWs.client.sendCommand(
+							'AT+CMGS=' + part.tpduLength + '\r' + part.pdu,
+							SMS_SUBMIT_TIMEOUT_MS);
 					}.bind(null, parts[i]));
 				}
 				return chain2;

@@ -18,6 +18,17 @@ use tokio::sync::{mpsc, Mutex, Notify};
 
 const COMMAND_GAP: Duration = Duration::from_millis(100);
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// 短信提交（`AT+CMGS=<长度>\r<PDU>`）的应答预算。
+///
+/// 为什么必须单独给：普通查询是「模组本地算一下就回」，2 秒足够；而提交短信要
+/// 把 TPDU 交给网络侧，`+CMGS` 的回执取决于信号与基站排队，实测弱信号下要好几秒
+/// 甚至十几秒。原来统一 2 秒，提交必然超时 —— 前端于是显示
+/// 「模组无响应（已等待 2000ms）」，而短信其实可能已经发出去了。
+///
+/// 40 秒的依据：3GPP 27.005 允许模组在网络侧排队较久；这里取一个既能容忍弱信号、
+/// 又不会让用户觉得「卡死」的值（前端另有同量级的上限）。
+pub const SMS_SUBMIT_TIMEOUT: Duration = Duration::from_secs(40);
 /// 等待命令锁的独立预算。
 ///
 /// 背景（AT 终端「只有 ATI 有回复」的根因）：

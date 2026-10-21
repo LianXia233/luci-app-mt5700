@@ -487,19 +487,33 @@ impl RpcServer {
             _ => {}
         }
 
+        // 短信提交单独给足预算：`AT+CMGS=<长度>\r<PDU>` 要把 TPDU 交给网络侧，
+        // 回 `+CMGS` 的耗时取决于信号与基站排队，弱信号下好几秒甚至十几秒。
+        // 其余命令仍按 2 秒算 —— 不能因为短信把整页的失败检测一起拖慢。
+        //
+        // 判据：以 `AT+CMGS=` 开头且命令里含 CR（即同一串里还带 PDU）。
+        // 只报长度的那一半（`AT+CMGS=14`，不含 CR）仍走短超时，它只等提示符。
+        let is_sms_submit = command.starts_with("AT+CMGS=") && command.contains('\r');
+        let cmd_timeout = if is_sms_submit {
+            crate::atclient::SMS_SUBMIT_TIMEOUT
+        } else {
+            crate::atclient::COMMAND_TIMEOUT
+        };
+        if is_sms_submit {
+            log_info!("短信提交：等待模组回执，预算 {}s", cmd_timeout.as_secs());
+        }
+
         // 外层超时 = 排队预算 + 应答预算 + 余量。
         // 排队预算单独给足，避免初始化/重连期间用户的终端命令被外层提前掐断，
         // 从而出现「模组无响应」的假失败（终端页只有 ATI 有回复的根因）。
         let result = tokio::time::timeout(
-            crate::atclient::QUEUE_WAIT_TIMEOUT
-                + crate::atclient::COMMAND_TIMEOUT
-                + Duration::from_secs(3),
+            crate::atclient::QUEUE_WAIT_TIMEOUT + cmd_timeout + Duration::from_secs(3),
             // 用户主动的 AT 操作属于 High 优先级，可越过后台刷新的 Low/Background。
             self.client.send_command_pri(
                 &self.ctx,
                 crate::at_queue::AtPriority::High,
                 &command,
-                crate::atclient::COMMAND_TIMEOUT,
+                cmd_timeout,
                 None,
             ),
         )
