@@ -197,6 +197,17 @@ function jsonParse(s) {
 const RPCCALL_TIMEOUT_SEC = 12;
 
 /*
+ * 短信提交（`AT+CMGS=<长度>\r<PDU>`）的 nc 硬超时。
+ *
+ * 后端为这条命令单独放宽到 40s（atclient::SMS_SUBMIT_TIMEOUT）：模组要把 TPDU
+ * 交给网络侧，`+CMGS` 回执取决于信号与基站排队。若这里仍按 12s 掐断，用户看到
+ * 的是「RPC 应答超时」而不是模组的真实结果 —— 一条本来成功的短信被报成失败，
+ * 重新发送又会重复计费，比慢一点更糟。取 50s：比后端预算大 10s，保证先拿到
+ * 后端给的明确结论（成功/模组拒绝/模组无响应）。
+ */
+const SMS_RPC_TIMEOUT_SEC = 50;
+
+/*
  * 「后端不可用」共享熔断标记。
  *
  * 为什么必须做（实测暴露的严重问题）：
@@ -581,7 +592,11 @@ function usbCall(req) {
 	return { success: true, speed_mbps: mbps, product: product, version: version };
 }
 
-function rpcCall(method, params) {
+/*
+ * timeoutSec 可选：单次调用的 nc 硬超时覆盖（秒）。目前只有短信提交用到，
+ * 其余调用维持 RPCCALL_TIMEOUT_SEC，避免后端真挂掉时每条命令都白等更久。
+ */
+function rpcCall(method, params, timeoutSec) {
 	const rpcCfg = readRpcConfig();
 	const port = rpcCfg.port;
 	const authKey = rpcCfg.authKey;
@@ -718,8 +733,9 @@ function rpcCall(method, params) {
 	 * 意外引入的空白/元字符拼接问题），busybox sh 支持单引号。 */
 	let raw = ncBin + " 127.0.0.1 " + port + " < '" + tmp + "'";
 	let timedOut = false;
+	const budgetSec = (timeoutSec != null && timeoutSec > 0) ? timeoutSec : RPCCALL_TIMEOUT_SEC;
 	if (timeoutBin != '') {
-		raw = timeoutBin + ' ' + RPCCALL_TIMEOUT_SEC + ' ' + raw;
+		raw = timeoutBin + ' ' + budgetSec + ' ' + raw;
 	}
 
 	let p;
@@ -759,7 +775,7 @@ function rpcCall(method, params) {
 		if (timeoutBin != '') {
 			return {
 				success: false,
-				error: 'Rust 后端应答超时（超过 ' + RPCCALL_TIMEOUT_SEC
+				error: 'Rust 后端应答超时（超过 ' + budgetSec
 					+ 's 未返回）：模组可能正在重连或执行长命令，请稍后重试',
 				cause: 'timeout'
 			};
@@ -806,7 +822,11 @@ return {
 				if (cmd == null || cmd == '') {
 					return { success: false, error: '缺少参数 cmd' };
 				}
-				return rpcCall('at', { cmd: cmd, _rid: getStr(a, '_rid') });
+				/* 短信提交：命令里同时带长度与 PDU（以 CR 分隔）。
+				 * 只报长度的那半步不含 CR，仍走默认超时。 */
+				const smsSubmit = match(cmd, /^AT\+CMGS=[0-9]+\r/) != null;
+				return rpcCall('at', { cmd: cmd, _rid: getStr(a, '_rid') },
+					smsSubmit ? SMS_RPC_TIMEOUT_SEC : null);
 			}
 		},
 		events: {
