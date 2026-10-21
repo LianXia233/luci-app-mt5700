@@ -234,9 +234,14 @@ function replyFor(cmd) {
 	if (c === 'AT^CELLSCAN=ABORT') return '^CELLSCAN: 0,0\r\nOK';
 	if (c.startsWith('AT^CELLSCAN=')) return '^CELLSCAN: 0,0\r\nOK';
 	if (c === 'AT+NWTIME?') return '+NWTIME: 25/09/10,10:30:00+32\r\nOK';
-	if (c === 'AT+CMGS=0') return 'ERROR'; // 实际发送由带 \rPDU 的命令触发
-	if (c.startsWith('AT+CMGS=')) return '\r\nOK';
-	if (c === 'AT+CMGS') return '>';
+	if (c === 'AT+CMGS=0') return 'ERROR'; // 零长度 TPDU 非法，真实模组直接拒绝
+	/*
+	 * AT+CMGS=<len> 与 PDU 提交不在 replyFor 里处理：前者要回**无换行结尾**的
+	 * `> ` 提示符（ replyFor 的返回值会被统一补 \r\n，会破坏提示符语义），
+	 * 后者要以 Ctrl+Z(0x1A) 结尾才提交。两者都在 socket 数据层按真实模组的
+	 * 两段式协议处理，见下面的连接处理部分。
+	 */
+	if (c.startsWith('AT+CMGS')) return 'ERROR'; // 裸 AT+CMGS / 带 \rPDU 的旧拼法一律报错
 	if (c === 'AT+CUSD') return 'ERROR';
 	if (c.startsWith('AT+CUSD=')) return '\r\nOK';
 	if (c.startsWith('AT+SCHED') || c.startsWith('AT^CELLSCAN')) return 'ERROR'; // 伪命令由后端处理
@@ -298,14 +303,42 @@ const server = net.createServer(function (socket) {
 		while ((idx = buf.indexOf('\r')) >= 0) {
 			const cmd = buf.slice(0, idx);
 			buf = buf.slice(idx + 1);
-			if (!cmd) continue;
-			// 处理 > 提示符后的 PDU（CMGS）
-			if (cmd.indexOf('\n') >= 0) {
-				// 多行 PDU 内容，仅确认
-				console.log('[mock] #' + id + ' PDU: ' + cmd.replace(/\n/g, '\\n').slice(0, 60) + '…');
-				push('+CMGS: 1\r\nOK');
+		if (!cmd) continue;
+		/*
+		 * CMGS 两段式交互（3GPP TS 27.005 §3.4.1），与真实模组逐字节对齐：
+		 *   第一步 `AT+CMGS=<len>` → 回 `\r\n> ` 输入提示符。
+		 *     注意**结尾不能带换行** —— 后端的 consume() 正是靠「行尾残留
+		 *     全是空白与 >」来识别提示符并结束本次应答的，补了 \r\n 就退化
+		 *     成一条普通 OK，测不出提示符路径。
+		 *   第二步 `<PDU hex>\x1A` → 回 `+CMGS: <mr>\r\nOK\r\n`。
+		 *     结尾的 `\r\n` 不能省：后端按 `\n` 切行，只有 `OK` 单独成行
+		 *     才会触发终止符结束应答；少了它应答会被截断成半条 `+CMGS: 1`。
+		 *     0x1A（Ctrl+Z）是提交字符；缺了它模组会一直等在输入态，
+		 *     这正是 issue #19「显示成功但发不出去」的根因，mock 必须复现。
+		 */
+		if (/^AT\+CMGS=\d+$/.test(cmd)) {
+			if (cmd === 'AT+CMGS=0') {
+				console.log('[mock] #' + id + ' < ' + cmd + '  > ERROR');
+				push('ERROR\r\n');
 				continue;
 			}
+			console.log('[mock] #' + id + ' < ' + cmd + '  > (prompt)');
+			push('\r\n> ');
+			continue;
+		}
+		if (cmd.indexOf('\x1a') >= 0) {
+			const shown = cmd.replace(/\x1a/g, '<^Z>');
+			console.log('[mock] #' + id + ' PDU submit: ' + shown.slice(0, 60) + (shown.length > 60 ? '…' : ''));
+			push('+CMGS: 1\r\nOK\r\n');
+			continue;
+		}
+		// 处理 > 提示符后的 PDU（CMGS）
+		if (cmd.indexOf('\n') >= 0) {
+			// 多行 PDU 内容，仅确认
+			console.log('[mock] #' + id + ' PDU: ' + cmd.replace(/\n/g, '\\n').slice(0, 60) + '…');
+			push('+CMGS: 1\r\nOK\r\n');
+			continue;
+		}
 			console.log('[mock] #' + id + ' < ' + cmd);
 			const action = specialAction(cmd);
 			if (action === 'push-call') {

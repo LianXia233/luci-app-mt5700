@@ -139,6 +139,44 @@ async function main() {
 		check('events 拉取结构 {seq,events}', ok, 'seq=' + sinceRef.val);
 	}
 
+	/* 5b. 短信发送两段式协议（issue #19 回归）
+	 *
+	 * 正确协议（3GPP TS 27.005 §3.4.1）：
+	 *   1. `AT+CMGS=<长度>`        → 模组回 `> ` 输入提示符（无换行结尾），
+	 *                              后端 consume() 据此结束本次应答；
+	 *   2. `<PDU hex>` + Ctrl+Z    → 模组回 `+CMGS: <mr>` + `OK`。
+	 * 旧实现把两步拼成一条命令且从不发 0x1A，模组永远停在 PDU 输入等待态，
+	 * 前端却因「提示符被当成成功应答」显示发送成功 —— 即「显示成功但发不出去」。
+	 * 这里沿「JSON RPC → 后端 → mock 模组」全链路钉住每一跳。
+	 */
+	{
+		/* 第一步：报 TPDU 长度。PDU 共 21 字节，SMSC 占 1 字节 → TPDU 20 字节 */
+		const r1 = atResult(await at('AT+CMGS=20'));
+		check('AT+CMGS=20 拿到输入提示符应答',
+			r1.success && String(r1.data).indexOf('>') >= 0,
+			(r1.data ? String(r1.data).replace(/\r/g, '\\r').slice(0, 20) : r1.error) || '无应答');
+
+		/* 第二步：PDU + Ctrl+Z(0x1A)。0x1A 经 JSON \u001a 转义穿过 RPC 链路，
+		 * serde_json 解析还原后原样写入串口 —— 这条链路本身也是被测对象。 */
+		const pdu = '0001000B815221214365F70000AA0B4F60C6A21';
+		const r2 = atResult(await at(pdu + '\x1A'));
+		check('PDU+Ctrl+Z 提交拿到 +CMGS 回执',
+			r2.success && String(r2.data).indexOf('+CMGS') >= 0 && String(r2.data).indexOf('OK') >= 0,
+			(r2.data ? String(r2.data).replace(/\r/g, '\\r').slice(0, 40) : r2.error) || '无应答');
+
+		/* 零长度 TPDU 必须被拒：畸形请求不能悄悄走完提交路径 */
+		const r3 = atResult(await at('AT+CMGS=0'));
+		check('AT+CMGS=0（零长度 TPDU）被拒', r3.success === false,
+			r3.error || String(r3.data).slice(0, 30));
+
+		/* 旧 bug 拼法（PDU 用 \r 接在长度后）不得被当成成功：
+		 * 真实模组对这种输入只回提示符，没有任何提交确认。 */
+		const r4 = atResult(await at('AT+CMGS=20\r' + pdu));
+		check('旧拼法（长度+\\r+PDU 一条命令）拿不到提交回执',
+			!(r4.success && String(r4.data).indexOf('+CMGS') >= 0),
+			(r4.data ? String(r4.data).replace(/\r/g, '\\r').slice(0, 30) : r4.error) || '无应答');
+	}
+
 	/* 7a. incoming_call 事件 */
 	{
 		const r = await at('AT+TESTPUSH=1');
@@ -148,7 +186,10 @@ async function main() {
 		let ok = false;
 		if (ev) {
 			detail = ev.data.number + ' state=' + ev.data.state;
-			ok = ev.data.number === '+8613800138000' && ev.data.state === 'ringing';
+			/* 号码是归一化后的：+CLIP 给国际格式 +8613800138000，
+			 * 后端按 normalize_phone_number 剥掉 +86（与前端 Parse.normalizePhoneNumber
+			 * 同规则，保证推送与短信中心界面口径一致），故事件里是 13800138000。 */
+			ok = ev.data.number === '13800138000' && ev.data.state === 'ringing';
 		}
 		check('incoming_call 事件', ok, detail);
 	}
