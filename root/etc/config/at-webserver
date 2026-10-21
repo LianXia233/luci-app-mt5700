@@ -23,9 +23,27 @@ config at-webserver 'config'
 	#   （用以 '@IPv4接口' 为设备的接口，没有则为 IPv4 接口名 + v6），none=不处理 IPv6。
 	option iface_v4 'auto'
 	option iface_v6 'auto'
-	# 接口管理：1=承载接口缺失时创建、设为开机自启并登记到上行防火墙区域（默认）；
-	# 0=不创建、不修改任何接口与防火墙，拨号就绪后只对选定的承载接口补一次 ifup。
-	option manage_interface '1'
+# 接口管理：1=承载接口缺失时创建、设为开机自启并登记到上行防火墙区域（默认）；
+# 0=不创建、不修改任何接口与防火墙，拨号就绪后只对选定的承载接口补一次 ifup。
+option manage_interface '1'
+
+# 默认 DNS 下发（拨号成功后写入承载接口）。地址集中在这里定义，改这一处即可生效。
+# 写入的 dns 会被 netifd 排在运营商（DHCP/RA）下发的 DNS **之前**，因此它同时
+# 是「运营商没给时的兜底」和「实际优先使用的解析服务器」。
+#   dns_enable      1=下发（默认），0=不下发并清除此前已写入的 dns / peerdns
+#   dns_v4_1/2      IPv4 首选 / 备用，每次拨号成功后都下发；留空表示不写这一条
+#   dns_v6_1/2      IPv6 首选 / 备用，仅当本次拨号确实拿到 IPv6（PDP 类型为
+#                   IPV6/IPV4V6 且 AT+CGPADDR 给出了 IPv6 地址）才下发；
+#                   未拿到 IPv6 时会把上一次留下的 IPv6 DNS 清掉，避免出现
+#                   「无 IPv6 连通性却配了 IPv6 DNS」的长期错位（表现为解析随机超时）
+#   dns_exclusive   1=忽略运营商下发的 DNS（peerdns=0，只用自己的，默认）；
+#                   0=保留运营商 DNS 排在自己后面
+option dns_enable '1'
+option dns_v4_1 '119.29.29.29'
+option dns_v4_2 '223.5.5.5'
+option dns_v6_1 '2402:4e00::'
+option dns_v6_2 '2400:3200::1'
+option dns_exclusive '1'
 	option websocket_port '8765'           # LuCI RPC 监听端口
 	option websocket_allow_wan '0'          # 1=RPC 监听 0.0.0.0 可被外部访问（建议同时设置 auth_key）
 	option websocket_bind ''               # 可选：覆盖监听地址，如 0.0.0.0 或 192.168.10.1

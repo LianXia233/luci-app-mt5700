@@ -271,7 +271,9 @@ return L.view.extend({
 		body.appendChild(rowConn);
 
 		var connCard = Mt5700.card('调制解调器连接', '后端连接模组的通道');
-		var connBody = E('div');
+		/* 两列表单网格（.mt5700-form-grid）：本页字段多、说明长，一行一个字段
+		 * 在桌面端会拉出 5000px 以上的滚动距离；两列后说明文字按列宽换行即可。 */
+		var connBody = E('div', { 'class': 'mt5700-form-grid' });
 		connCard._body.appendChild(connBody);
 		rowConn.appendChild(connCard);
 
@@ -339,14 +341,23 @@ return L.view.extend({
 			}
 		}
 		var serialCustom = Mt5700.input('text', '例如 /dev/ttyUSB2', '');
-		serialCustom.style.display = 'none';
+		/* 自定义路径整组一起收起：只藏输入框的话，标号和说明会留下一个空占位，
+		 * 在两列网格里尤其像渲染坏了。 */
+		var serialCustomGroup = Mt5700.formGroup('自定义串口路径', serialCustom,
+			'仅在选择「自定义路径」时生效');
+		serialCustomGroup.hidden = true;
 		serialSel.addEventListener('change', function () {
-			serialCustom.style.display = serialSel.value === '__custom__' ? '' : 'none';
+			/* 用 hidden 而不是 style.display：移动端为横排写了
+			 * `display: grid !important`，内联样式压不住它（见 mt5700.css）。 */
+			serialCustomGroup.hidden = serialSel.value !== '__custom__';
 		});
-		connBody.appendChild(Mt5700.formGroup('串口设备', serialSel,
+		/* 串口选择器占整行：by-id 路径很长，两列宽度下会被下拉框截断到看不出区别。 */
+		var serialGroup = Mt5700.formGroup('串口设备', serialSel,
 			'优先选「稳定路径」分组：它由 VID:PID 与接口描述符生成，换 USB 口或重启后路径不变；' +
-			'「内核编号」分组在插口变化时会整体平移，仅作回退。'));
-		connBody.appendChild(Mt5700.formGroup('自定义串口路径', serialCustom, '仅在选择「自定义路径」时生效'));
+			'「内核编号」分组在插口变化时会整体平移，仅作回退。');
+		serialGroup.classList.add('mt5700-span-2');
+		connBody.appendChild(serialGroup);
+		connBody.appendChild(serialCustomGroup);
 
 		var baudInput = Mt5700.input('number', '115200', '');
 		connBody.appendChild(Mt5700.formGroup('波特率', baudInput));
@@ -367,8 +378,7 @@ return L.view.extend({
 		var ifaceV4Custom = Mt5700.input('text', '例如 wan', '');
 		var ifaceV6Sel = Mt5700.select([], 'auto');
 		var ifaceV6Custom = Mt5700.input('text', '例如 wan6', '');
-		ifaceV4Custom.style.display = 'none';
-		ifaceV6Custom.style.display = 'none';
+
 		function fillIfaceOptions(sel, input, current, autoLabel, allowNone) {
 			while (sel.firstChild) sel.removeChild(sel.firstChild);
 			function add(v, label) {
@@ -385,11 +395,15 @@ return L.view.extend({
 			}
 			if (!exists) add(cur, cur + '（当前配置，接口暂不存在）');
 			sel.value = cur;
-			input.style.display = 'none';
+			/* 「接口名」这一格只在「手动填写」时才有意义；整组收起比只藏输入框
+			 * 干净 —— 否则会留下一个只有标号与说明的空行。 */
+			if (input.parentElement) input.parentElement.hidden = (cur !== '__custom__');
 		}
 		[[ifaceV4Sel, ifaceV4Custom], [ifaceV6Sel, ifaceV6Custom]].forEach(function (pair) {
 			pair[0].addEventListener('change', function () {
-				pair[1].style.display = pair[0].value === '__custom__' ? '' : 'none';
+				if (pair[1].parentElement) {
+					pair[1].parentElement.hidden = pair[0].value !== '__custom__';
+				}
 			});
 		});
 		connBody.appendChild(Mt5700.formGroup('IPv4 承载接口', ifaceV4Sel,
@@ -409,7 +423,7 @@ return L.view.extend({
 
 		/* ---------- RPC 服务 ---------- */
 		var wsCard = Mt5700.card('RPC 服务', 'LuCI 经 rpcd/ucode 代理连接后端使用的端口与密钥（仅回环监听，不对外暴露）');
-		var wsBody = E('div');
+		var wsBody = E('div', { 'class': 'mt5700-form-grid' });
 		wsCard._body.appendChild(wsBody);
 		rowConn.appendChild(wsCard);
 
@@ -430,8 +444,57 @@ return L.view.extend({
 		var authKeyInput = Mt5700.input('text', '留空表示无需认证', '');
 		wsBody.appendChild(Mt5700.formGroup('认证密钥', authKeyInput, 'ucode 代理自动附带该密钥；LuCI 登录态由 rpcd 会话保证'));
 
-		/* ---------- 定时锁频 ---------- */
-		var schedCard = Mt5700.card('定时锁频', '总开关与默认参数');
+	/* ---------- 默认 DNS 下发 ----------
+	 *
+	 * 地址集中定义在 UCI（at-webserver.config.dns_*），拨号成功后由 init.d 的
+	 * apply_default_dns 写入承载接口。这里只负责让用户改地址 / 关开关。 */
+	var DNS_DEFAULTS = {
+		v4_1: '119.29.29.29',
+		v4_2: '223.5.5.5',
+		v6_1: '2402:4e00::',
+		v6_2: '2400:3200::1'
+	};
+
+	var dnsCard = Mt5700.card('默认 DNS 下发', '拨号成功后写入承载接口的解析服务器，可自行更换或关闭');
+	var dnsBody = E('div', { 'class': 'mt5700-form-grid' });
+	dnsCard._body.appendChild(dnsBody);
+	body.appendChild(dnsCard);
+
+	/* 优先级口径必须写在页面上：很多人以为「兜底」等于「运营商没给才用」，
+	 * 实测 netifd 把 UCI 手写的 dns 排在 DHCP/RA 下发的 DNS 之前，
+	 * 所以它同时是实际优先使用的那一个 —— 不写清楚会被当成配置没生效。 */
+	dnsBody.appendChild(E('div', { 'class': 'mt5700-hint' },
+		'实测行为：写入的 DNS 会被 netifd 排在运营商下发的 DNS 之前；'
+		+ '默认还开启了「独占」，即只使用下面填写的地址，运营商下发的DNS排在后面。'));
+
+	var dnsEnableSwitch = E('div', { 'class': 'mt5700-switch' });
+	var dnsEnableChk = E('input', { type: 'checkbox' });
+	dnsEnableSwitch.appendChild(dnsEnableChk);
+	dnsBody.appendChild(Mt5700.formGroup('启用默认 DNS 下发', dnsEnableSwitch,
+		'关闭后不再下发，并清除此前已写入的 dns / peerdns（接口恢复系统默认行为）。'
+		+ '若上方「自动管理网络接口」关闭，本插件不改动任何接口配置，此项也不生效。'));
+
+	var dnsV4A = Mt5700.input('text', DNS_DEFAULTS.v4_1, '');
+	var dnsV4B = Mt5700.input('text', DNS_DEFAULTS.v4_2, '');
+	var dnsV6A = Mt5700.input('text', DNS_DEFAULTS.v6_1, '');
+	var dnsV6B = Mt5700.input('text', DNS_DEFAULTS.v6_2, '');
+
+	dnsBody.appendChild(Mt5700.formGroup('IPv4 首选 DNS', dnsV4A, '每次拨号成功后都会下发；留空表示不写这一条'));
+	dnsBody.appendChild(Mt5700.formGroup('IPv4 备用 DNS', dnsV4B, '每次拨号成功后都会下发；留空表示不写这一条'));
+	dnsBody.appendChild(Mt5700.formGroup('IPv6 首选 DNS', dnsV6A,
+		'仅当本次拨号确实拿到 IPv6（PDP 类型为 IPv6 / IPv4v6）时才下发'));
+	dnsBody.appendChild(Mt5700.formGroup('IPv6 备用 DNS', dnsV6B,
+		'同上；本次未拿到 IPv6 时会清掉上一次留下的 IPv6 DNS，'
+		+ '避免出现「无 IPv6 连通性却配着 IPv6 DNS」（表现为解析随机超时）'));
+
+	var dnsExclSwitch = E('div', { 'class': 'mt5700-switch' });
+	var dnsExclChk = E('input', { type: 'checkbox' });
+	dnsExclSwitch.appendChild(dnsExclChk);
+	dnsBody.appendChild(Mt5700.formGroup('独占 DNS（忽略运营商下发的 DNS）', dnsExclSwitch,
+		'默认开启：只使用上面填写的地址（peerdns=0）。关闭后保留运营商下发的 DNS，但排在自己后面。'));
+
+	/* ---------- 定时锁频 ---------- */
+	var schedCard = Mt5700.card('定时锁频', '总开关与默认参数');
 		var schedBody = E('div');
 		schedCard._body.appendChild(schedBody);
 		rowTop.appendChild(schedCard);
@@ -443,7 +506,7 @@ return L.view.extend({
 
 		/* ---------- 通知配置 ---------- */
 		var notifCard = Mt5700.card('通知', '事件通知与 WebHook');
-		var notifBody = E('div');
+		var notifBody = E('div', { 'class': 'mt5700-form-grid' });
 		notifCard._body.appendChild(notifBody);
 		body.appendChild(notifCard);
 
@@ -566,7 +629,7 @@ return L.view.extend({
 		pollRow.appendChild(E('span', { 'class': 'mt5700-poll-sep' }, '至'));
 		pollRow.appendChild(pollEndInput);
 
-		var pollBox = E('div', { 'class': 'mt5700-poll-box' });
+		var pollBox = E('div', { 'class': 'mt5700-poll-box mt5700-form-grid' });
 		pollBox.appendChild(E('div', { 'class': 'mt5700-poll-title' }, '信号定时巡检'));
 		pollBox.appendChild(Mt5700.formGroup('启用信号定时巡检', pollEnable.wrap,
 			'仅「信号变化通知」依赖它；短信与来电由模组主动上报，不受影响'));
@@ -733,7 +796,7 @@ return L.view.extend({
 		 * 因此升级后未被改动过的文案仍会跟随版本更新。
 		 */
 		var tplCard = Mt5700.card('推送文案', '四类事件各自的推送正文；留空则使用内置默认文案');
-		var tplBody = E('div');
+		var tplBody = E('div', { 'class': 'mt5700-form-grid' });
 		tplCard._body.appendChild(tplBody);
 		body.appendChild(tplCard);
 
@@ -754,7 +817,10 @@ return L.view.extend({
 		var tplCallInput = mkTplArea(3);
 		var tplSignalInput = mkTplArea(3);
 		var tplMemInput = mkTplArea(3);
-		var tplBatchInput = Mt5700.input('text', '批量通知汇总', '');
+		/* 与上面五项用同一种文本框（两行，和「前缀」一致）：
+		 * 原来这里是普通单行 input，等宽字体、高度、边框都和相邻的模板框不同，
+		 * 在卡片里显得像另一个控件。它和「前缀」一样是短文本，两行足够。 */
+		var tplBatchInput = mkTplArea(2);
 
 		var PLACEHOLDER_HINT =
 			'可用占位符：{sender} 发送者 · {content} 事件正文 · {time} 事件时刻 · ' +
@@ -841,8 +907,15 @@ return L.view.extend({
 		manageIfaceChk.checked = get('manage_interface', '1') !== '0';
 		fillIfaceOptions(ifaceV4Sel, ifaceV4Custom, String(get('iface_v4', 'auto')),
 			'自动扫描（推荐）', false);
-		fillIfaceOptions(ifaceV6Sel, ifaceV6Custom, String(get('iface_v6', 'auto')),
-			'自动（跟随 IPv4 接口）', true);
+	fillIfaceOptions(ifaceV6Sel, ifaceV6Custom, String(get('iface_v6', 'auto')),
+		'自动（跟随 IPv4 接口）', true);
+	/* 默认 DNS：缺省值写在脚本里，老配置升级上来（UCI 里没有这些键）也能显示出厂值 */
+	dnsEnableChk.checked = get('dns_enable', '1') !== '0';
+	dnsV4A.value = String(get('dns_v4_1', DNS_DEFAULTS.v4_1));
+	dnsV4B.value = String(get('dns_v4_2', DNS_DEFAULTS.v4_2));
+	dnsV6A.value = String(get('dns_v6_1', DNS_DEFAULTS.v6_1));
+	dnsV6B.value = String(get('dns_v6_2', DNS_DEFAULTS.v6_2));
+	dnsExclChk.checked = get('dns_exclusive', '1') !== '0';
 		wsHostInput.value = '';
 		wsPortInput.value = String(get('websocket_port', '8765'));
 		var bindCur = get('websocket_bind', '');
@@ -928,8 +1001,15 @@ return L.view.extend({
 			set('serial_port', serialVal || 'auto');
 			set('serial_baudrate', String(parseInt(baudInput.value, 10) || 115200));
 			set('manage_interface', manageIfaceChk.checked ? '1' : '0');
-			set('iface_v4', ifaceV4);
-			set('iface_v6', ifaceV6);
+		set('iface_v4', ifaceV4);
+		set('iface_v6', ifaceV6);
+		/* 默认 DNS：留空是合法的（表示「不写这一条」），所以不做非空回落 */
+		set('dns_enable', dnsEnableChk.checked ? '1' : '0');
+		set('dns_v4_1', dnsV4A.value.trim());
+		set('dns_v4_2', dnsV4B.value.trim());
+		set('dns_v6_1', dnsV6A.value.trim());
+		set('dns_v6_2', dnsV6B.value.trim());
+		set('dns_exclusive', dnsExclChk.checked ? '1' : '0');
 			set('websocket_port', String(parseInt(wsPortInput.value, 10) || 8765));
 			var bind = wsBindSel.value === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
 			set('websocket_bind', bind);
