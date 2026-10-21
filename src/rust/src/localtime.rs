@@ -112,6 +112,7 @@ pub fn from_unix(secs: i64) -> DateTime<Tz> {
 ///
 /// 短信 PDU 里的时间戳是「对方交换机时区的本地时间」，本身不带时区信息，
 /// 按 POSIX 惯例用本地时区解释，这里即系统时区。
+#[allow(dead_code)] // 由本模块测试与 PDU 时间解析的回退路径使用
 pub fn from_ymdhms(
     year: i32,
     month: u32,

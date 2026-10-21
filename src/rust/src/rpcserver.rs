@@ -43,6 +43,17 @@ pub struct AtCommandResponse {
     pub error: Option<String>,
 }
 
+/// 短信存储用量 → 前端 JSON。
+fn storage_json(s: &crate::sms::StorageInfo) -> serde_json::Value {
+    serde_json::json!({
+        "used": s.used,
+        "total": s.total,
+        "mem1": s.mem1,
+        "mem2": s.mem2,
+        "mem3": s.mem3,
+    })
+}
+
 /// 扫频推给前端的事件 data。state 取值 running/done/aborted/error。
 #[derive(Serialize)]
 #[allow(dead_code)] // 扫频推送结构保留（后续断点续扫扩展）
@@ -140,6 +151,8 @@ pub struct RpcServer {
     tasks: Arc<TaskManager>,
     /// 通知器：notify_test 直发测试消息，验证推送通道链路。
     notify: Arc<crate::notify::Notifier>,
+    /// 短信业务：列表/发送/删除/容量/存储/短信中心，全部实时走模组。
+    sms: Arc<crate::sms::SmsService>,
     /// QQ 绑定进度（bind 模式时由绑定任务更新，qq_bind_status 读取；未设置则返回 idle）
     bind_status: Option<std::sync::Arc<crate::qqbind::BindStatus>>,
     /// 使用量后台统计器：`usage` / `usage_ctl` 读写的都是它。
@@ -148,6 +161,7 @@ pub struct RpcServer {
 }
 
 impl RpcServer {
+    #[allow(clippy::too_many_arguments)] // 依赖随模块增长而增长，拆分收益低于可读性的损失
     pub fn new(
         client: Arc<AtClient>,
         auth_key: String,
@@ -157,6 +171,7 @@ impl RpcServer {
         tasks: Arc<TaskManager>,
         notify: Arc<crate::notify::Notifier>,
         usage: Arc<crate::usage::UsageTracker>,
+        sms: Arc<crate::sms::SmsService>,
     ) -> RpcServer {
         RpcServer {
             client,
@@ -171,6 +186,7 @@ impl RpcServer {
             notify,
             bind_status: None,
             usage,
+            sms,
         }
     }
 
@@ -197,6 +213,7 @@ impl RpcServer {
             notify: self.notify.clone(),
             bind_status: self.bind_status.clone(),
             usage: self.usage.clone(),
+            sms: self.sms.clone(),
         }
     }
 
@@ -309,6 +326,15 @@ impl RpcServer {
                 let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
                 let (seq, events) = self.hub.bus.since(since);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "events": events } })
+            }
+            // 短信业务：列表/发送/删除/容量/存储/短信中心/前台优先会话。
+            //
+            // 与 `at` 通道的关键差别：这里的每个动作都是**一次真实的模组交互**，
+            // 不经过状态缓存，也不返回任何历史快照；多步骤动作（发送分片、批量
+            // 删除）在后端一次事务里跑完，期间其它 AT 命令拿不到通道。
+            "sms" => {
+                let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                self.handle_sms(&id, action, &req.params).await
             }
             // 通知通道测试（LuCI「发送测试通知」按钮）：绕过事件链路直发一条测试消息。
             // channel 分两组语义：
@@ -448,6 +474,189 @@ impl RpcServer {
             }
             _ => serde_json::json!({ "id": id, "error": { "code": -32601, "message": format!("未知方法: {}", req.method) } }),
         }
+    }
+
+    /// 短信业务入口。所有动作都实时下发 AT，不含任何缓存分支。
+    async fn handle_sms(
+        &self,
+        id: &serde_json::Value,
+        action: &str,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        use crate::sms::SendRequest;
+
+        fn ok(id: &serde_json::Value, result: serde_json::Value) -> serde_json::Value {
+            serde_json::json!({ "id": id, "result": result })
+        }
+        fn err(id: &serde_json::Value, msg: impl Into<String>) -> serde_json::Value {
+            serde_json::json!({ "id": id, "error": { "code": -32010, "message": msg.into() } })
+        }
+
+        // 会话租约：进入短信中心 / 执行短信操作前登记，页面退出或超时自动解除。
+        // 它是「后台轮询暂停」的开关 —— 不登记就不会暂停，避免了误伤其它页面。
+        match action {
+            "session_open" => {
+                let ttl = params.get("ttl_ms").and_then(|v| v.as_u64());
+                let id2 = self.sms.session_open(ttl).await;
+                return ok(id, serde_json::json!({ "session_id": id2, "ttl_ms": ttl.unwrap_or(crate::sms::SMS_MODE_LEASE.as_millis() as u64) }));
+            }
+            "session_renew" => {
+                let sid = params.get("session_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let ttl = params.get("ttl_ms").and_then(|v| v.as_u64());
+                let renewed = self.sms.session_renew(sid, ttl).await;
+                return ok(id, serde_json::json!({ "renewed": renewed, "sessions": self.sms.session_count().await }));
+            }
+            "session_release" => {
+                let sid = params.get("session_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                self.sms.session_release(sid).await;
+                return ok(id, serde_json::json!({ "released": true, "sessions": self.sms.session_count().await }));
+            }
+            _ => {}
+        }
+
+        // 以下都是「短信事务」级操作：全程独占通道，且享有最高优先级。
+        let result = match action {
+            "list" => match self.sms.list().await {
+                Ok(r) => {
+                    let entries: Vec<serde_json::Value> = r
+                        .entries
+                        .iter()
+                        .map(|e| {
+                            serde_json::json!({
+                                "index": e.index,
+                                "stat": e.stat,
+                                "direction": e.direction,
+                                "number": e.number,
+                                "content": e.content,
+                                "time": e.time,
+                                "timeApprox": e.time_approx,
+                                "concat": e.concat.as_ref().map(|c| serde_json::json!({
+                                    "reference": c.reference,
+                                    "partsCount": c.parts_count,
+                                    "partNumber": c.part_number,
+                                })),
+                                "error": e.error,
+                            })
+                        })
+                        .collect();
+                    ok(id, serde_json::json!({
+                        "entries": entries,
+                        "fetchedAt": r.fetched_at_ms,
+                        "totalLines": r.total_lines,
+                    }))
+                }
+                Err(e) => err(id, e),
+            },
+            "send" => {
+                let destination = params.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+                let message = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                let smsc = params
+                    .get("smsc")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let dedup = params
+                    .get("dedup_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                match self.sms.send(SendRequest { destination: destination.to_string(), message: message.to_string(), smsc, dedup_key: dedup }).await {
+                    Ok(r) => ok(id, serde_json::json!({
+                        "outcome": r.outcome.as_str(),
+                        "encoding": r.encoding,
+                        "message": r.message,
+                        "parts": r.parts.iter().map(|p| serde_json::json!({
+                            "partNumber": p.part_number,
+                            "partsCount": p.parts_count,
+                            "outcome": p.outcome.as_str(),
+                            "detail": p.detail,
+                        })).collect::<Vec<_>>(),
+                        "storage": r.storage.as_ref().map(storage_json),
+                    })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "delete" => {
+                let indices: Vec<u32> = params
+                    .get("indices")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as u32).collect())
+                    .unwrap_or_default();
+                match self.sms.delete(indices).await {
+                    Ok(r) => ok(id, serde_json::json!({
+                        "requested": r.requested,
+                        "deleted": r.deleted,
+                        "failed": r.failed,
+                        "storage": r.storage.as_ref().map(storage_json),
+                    })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "purge" => match self.sms.purge_all().await {
+                Ok(r) => ok(id, serde_json::json!({
+                    "requested": r.requested,
+                    "deleted": r.deleted,
+                    "storage": r.storage.as_ref().map(storage_json),
+                })),
+                Err(e) => err(id, e),
+            },
+            "capacity" => match self.sms.capacity().await {
+                Ok(s) => ok(id, serde_json::json!({
+                    "storage": storage_json(&s),
+                    /* 模组告知过「存储已满」且尚未回落：界面据此提示用户清理 */
+                    "memFull": self.sms.memory_full(),
+                })),
+                Err(e) => err(id, e),
+            },
+            "set_storage" => {
+                let mem = params.get("mem").and_then(|v| v.as_str()).unwrap_or("");
+                match self.sms.set_storage(mem).await {
+                    Ok(s) => ok(id, serde_json::json!({ "storage": storage_json(&s) })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "get_smsc" => match self.sms.get_smsc().await {
+                Ok(n) => ok(id, serde_json::json!({ "smsc": n })),
+                Err(e) => err(id, e),
+            },
+            // 短信功能开关（CEUS/IMSSWITCH/CFUN/CGDCONT/CSCA 整串）与 IMS 开关。
+            // 两者都是「会改变模组状态」的操作，同样必须独占通道跑完。
+            "power" => {
+                let enable = params.get("enable").and_then(|v| v.as_bool()).unwrap_or(false);
+                let smsc = params
+                    .get("smsc")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                match self.sms.power_set(enable, smsc).await {
+                    Ok(r) => ok(id, serde_json::json!({
+                        "enabled": r.enabled,
+                        "stepsDone": r.steps_done,
+                        "failedAt": r.failed_at,
+                        "smsc": r.smsc,
+                        "storage": r.storage.as_ref().map(storage_json),
+                    })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "set_ims" => {
+                let enable = params.get("enable").and_then(|v| v.as_bool()).unwrap_or(false);
+                match self.sms.ims_set(enable).await {
+                    Ok(()) => ok(id, serde_json::json!({ "enabled": enable })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "get_ims" => match self.sms.ims_state().await {
+                Ok(v) => ok(id, serde_json::json!({ "enabled": v })),
+                Err(e) => err(id, e),
+            },
+            "set_smsc" => {
+                let number = params.get("smsc").and_then(|v| v.as_str()).unwrap_or("");
+                match self.sms.set_smsc(number).await {
+                    Ok(n) => ok(id, serde_json::json!({ "smsc": n })),
+                    Err(e) => err(id, e),
+                }
+            }
+            other => err(id, format!("未知短信动作: {other}")),
+        };
+        result
     }
 
     /// 把前端发来的字符串当作 AT 命令执行并整理成应答。

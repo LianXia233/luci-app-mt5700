@@ -208,6 +208,32 @@ const RPCCALL_TIMEOUT_SEC = 12;
 const SMS_RPC_TIMEOUT_SEC = 50;
 
 /*
+ * 语义化短信接口（method=sms）的 nc 硬超时，按动作分档。
+ *
+ * 与后端预算的对应关系（后端 = 排队 + 执行 + 余量，这里必须比后端大）：
+ *   send / purge  70s —— 后端 SMS_QUEUE_WAIT(10) + SMS_SEND_TOTAL_BUDGET(60) + 余量。
+ *                        长短信要连续提交多片，总预算是**整个事务**的而不是每片的，
+ *                        所以这里给的是总预算的量级；短信提交慢一点没关系，
+ *                        被掐断才会出现「其实发出去了却报失败」。
+ *   list / capacity / set_storage / get_smsc / set_smsc
+ *                  40s —— 排队(10) + SMS_LIST_TIMEOUT(20) + 余量。
+ *                        AT+CMGL=4 要吐出全部 PDU，几十条时远不止 12s。
+ *   session_*      12s —— 纯内存操作，走默认预算。
+ */
+const SMS_ACTION_TIMEOUT = {
+	'send': 70,
+	'purge': 70,
+	'list': 40,
+	'capacity': 40,
+	'set_storage': 40,
+	'get_smsc': 40,
+	'set_smsc': 40,
+	'power': 70,
+	'set_ims': 40,
+	'get_ims': 40
+};
+
+/*
  * 「后端不可用」共享熔断标记。
  *
  * 为什么必须做（实测暴露的严重问题）：
@@ -827,6 +853,62 @@ return {
 				const smsSubmit = match(cmd, /^AT\+CMGS=[0-9]+\r/) != null;
 				return rpcCall('at', { cmd: cmd, _rid: getStr(a, '_rid') },
 					smsSubmit ? SMS_RPC_TIMEOUT_SEC : null);
+			}
+		},
+		/*
+		 * 语义化短信接口。
+		 *
+		 * 为什么不继续用 `at` 透传一串 AT+CMGF/CSCA/CMGS：那些命令是**多步**的，
+		 * 每一步都是一次独立的 RPC，中间随时可能被后台巡检（信号、缓存、流量、
+		 * 自动拨号对账）插进来，把「刚切到 PDU 模式 / 刚收到 > 提示符」的模组
+		 * 上下文打乱。这里改成一次 RPC 交一个动作，由后端在**一次事务**里跑完
+		 * 全部步骤，全程独占通道。
+		 *
+		 * action 走白名单，参数逐项取值后透传，不做命令拼接，杜绝 AT 注入。
+		 */
+		sms: {
+			args: { action: '', destination: '', message: '', smsc: '', mem: '', indices: '', session_id: 0, ttl_ms: 0, dedup_key: '', enable: '', _rid: '' },
+			call: function (req) {
+				let a = req.args;
+				let action = getStr(a, 'action');
+				if (action == null || action == '') {
+					return { success: false, error: '缺少参数 action' };
+				}
+				let known = ['list', 'send', 'delete', 'purge', 'capacity', 'set_storage',
+					'get_smsc', 'set_smsc', 'power', 'set_ims', 'get_ims',
+					'session_open', 'session_renew', 'session_release'];
+				if (index(known, action) < 0) {
+					return { success: false, error: '不支持的短信动作: ' + action };
+				}
+				let params = { action: action, _rid: getStr(a, '_rid') };
+				if (action == 'send') {
+					params.destination = getStr(a, 'destination') || '';
+					params.message = getStr(a, 'message') || '';
+					let sc = getStr(a, 'smsc');
+					if (sc != null && sc != '') params.smsc = sc;
+					let dk = getStr(a, 'dedup_key');
+					if (dk != null && dk != '') params.dedup_key = dk;
+				} else if (action == 'delete') {
+					params.indices = a.indices;
+				} else if (action == 'set_storage') {
+					params.mem = getStr(a, 'mem') || '';
+				} else if (action == 'set_smsc') {
+					params.smsc = getStr(a, 'smsc') || '';
+				} else if (action == 'power' || action == 'set_ims') {
+					params.enable = (getStr(a, 'enable') == '1' || getStr(a, 'enable') == 'true');
+					if (action == 'power') {
+						let sc = getStr(a, 'smsc');
+						if (sc != null && sc != '') params.smsc = sc;
+					}
+				} else if (action == 'session_renew' || action == 'session_release') {
+					params.session_id = int(getStr(a, 'session_id')) || 0;
+					let ttl = int(getStr(a, 'ttl_ms'));
+					if (ttl != null && ttl > 0) params.ttl_ms = ttl;
+				} else if (action == 'session_open') {
+					let ttl = int(getStr(a, 'ttl_ms'));
+					if (ttl != null && ttl > 0) params.ttl_ms = ttl;
+				}
+				return rpcCall('sms', params, SMS_ACTION_TIMEOUT[action]);
 			}
 		},
 		events: {

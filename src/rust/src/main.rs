@@ -28,6 +28,7 @@ mod serial_linux;
 mod serialdetect;
 mod signalgrade;
 mod signalwatch;
+mod sms;
 mod state;
 mod state_cfg;
 mod timerpush;
@@ -110,6 +111,8 @@ async fn run(verbose: bool) -> Result<(), String> {
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
     // 使用量后台统计：常驻周期采样，与前端是否打开无关。
     let usage = crate::usage::UsageTracker::new(cfg.usage_reset_day);
+    // 短信业务：与 AT 客户端共用同一条通道，短信操作享有最高优先级。
+    let sms = crate::sms::SmsService::new(client.clone(), ctx_rx.clone(), client.sms_mode());
     let mut rpc = RpcServer::new(
         client.clone(),
         cfg.websocket.auth_key.clone(),
@@ -119,6 +122,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         tasks.clone(),
         notifier.clone(),
         usage.clone(),
+        sms.clone(),
     );
     // QQ 绑定进度：bind 模式下由绑定任务更新，LuCI 经 qq_bind_status 轮询展示倒计时
     let qq_bind_status = std::sync::Arc::new(crate::qqbind::BindStatus::default());

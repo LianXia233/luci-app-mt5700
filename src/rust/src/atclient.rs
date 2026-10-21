@@ -8,7 +8,7 @@
 //! - `abcd` 打断绕过命令锁直接写入（供扫频使用）。
 
 use crate::{log_debug, log_info, log_warn};
-use crate::at_queue::{AtPriority, PriLock};
+use crate::at_queue::{AtPriority, PriLock, SmsMode, SmsTransaction};
 use crate::config::AtConfig;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -29,6 +29,12 @@ pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 /// 40 秒的依据：3GPP 27.005 允许模组在网络侧排队较久；这里取一个既能容忍弱信号、
 /// 又不会让用户觉得「卡死」的值（前端另有同量级的上限）。
 pub const SMS_SUBMIT_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// 短信列表（`AT+CMGL=4`）与短信正文读取的应答预算。
+///
+/// 同样是短信链路，但比提交短得多：列全量短信时模组要一条条吐 PDU，几十条
+/// 时远超普通查询的 2 秒，又不需要像提交那样等网络侧回执。25 秒是实测留的余量。
+pub const SMS_LIST_TIMEOUT: Duration = Duration::from_secs(25);
 /// 等待命令锁的独立预算。
 ///
 /// 背景（AT 终端「只有 ATI 有回复」的根因）：
@@ -186,6 +192,12 @@ pub struct PendingCmd {
     pub done: Arc<Notify>,
     /// 非空时每收到一行应答就回调一次（^CELLSCAN 边扫边显示用）。
     pub stream: Option<Box<dyn Fn(String) + Send + Sync>>,
+    /// true 时忽略 `> ` 输入提示符，必须等到真正的结束码。
+    ///
+    /// 仅用于「一次写完整条 `AT+CMGS=<长度>\r<PDU>`」的短信提交：模组收到长度后
+    /// 先吐 `> ` 提示符，再收 PDU，最后才回 `+CMGS: <mr>` / OK。若把 `> ` 当成
+    /// 应答结束，命令会提前返回 success，而此刻短信可能压根没提交完。
+    pub ignore_prompt: bool,
 }
 
 #[allow(dead_code)] // describe 当前仅构造未读取，保留字段以免改动构造函数签名
@@ -218,12 +230,22 @@ pub struct AtClient {
     /// AT 通道的「唯一放行闸」：所有命令按优先级排队申请。
     /// 业务模块不能直接碰 TTY，只能经 send_command 走这个闸。
     gate: Arc<PriLock>,
+    /// 短信优先模式的暂停门：非短信命令在它的入口等待模式解除。
+    sms_mode: Arc<SmsMode>,
     long_cmd: Arc<AtomicI32>,
     long_cmd_end: Arc<AtomicU64>,
     last_cmd_at: Arc<Mutex<Instant>>,
 
     pending: Arc<Mutex<Option<PendingCmd>>>,
 }
+
+/// 非短信命令在短信优先模式下的最长等待时间。
+///
+/// 取 30s 的依据：一次短信事务最坏情况（长短信多片 + 弱信号重提交）远小于此，
+/// 后台巡检（信号、缓存、流量）错过一轮不影响功能，下一轮补上即可；
+/// 而用户层面的等待若超过这个值，宁可让他看到「短信操作进行中」的明确提示，
+/// 也不要无限期排在队里等待。
+const SMS_MODE_MAX_WAIT: Duration = Duration::from_secs(30);
 
 impl AtClient {
     pub fn new(cfg: AtConfig, urc_tx: mpsc::Sender<Unsolicited>) -> Arc<Self> {
@@ -234,11 +256,17 @@ impl AtClient {
             scan_active: Arc::new(AtomicBool::new(false)),
             urc_tx,
             gate: PriLock::new(),
+            sms_mode: SmsMode::new(),
             long_cmd: Arc::new(AtomicI32::new(0)),
             long_cmd_end: Arc::new(AtomicU64::new(0)),
             last_cmd_at: Arc::new(Mutex::new(Instant::now())),
             pending: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// 短信优先模式的句柄（供 RPC 层登记/释放会话租约）。
+    pub fn sms_mode(&self) -> Arc<SmsMode> {
+        self.sms_mode.clone()
     }
 
     pub fn connection_type(&self) -> &str {
@@ -270,6 +298,14 @@ impl AtClient {
             let client = self.clone();
             let ctx_w = ctx.clone();
             tokio::spawn(async move { client.autodial_watchdog(ctx_w).await });
+        }
+
+        // 短信优先模式的租约清扫：即使前端没发释放请求，到期租约也会自动失效，
+        // 后台巡检不会被永久挡在门外。
+        {
+            let mode = self.sms_mode.clone();
+            let ctx_w = ctx.clone();
+            tokio::spawn(async move { mode.run(ctx_w).await });
         }
 
         while !*ctx.borrow() {
@@ -332,6 +368,10 @@ impl AtClient {
 
     async fn teardown(&self) {
         self.connected_flag.store(false, Ordering::Relaxed);
+        // 链路断开关对会造成影响：短信事务无法再完成，租约必须马上清掉，
+        // 否则后台巡检会在重连后整段地被挡住。
+        self.sms_mode.release_all().await;
+
         let mut guard = self.conn.lock().await;
         guard.take(); // drop transport → 读循环退出
         drop(guard);
@@ -742,6 +782,75 @@ impl AtClient {
         Instant::now().checked_sub(Duration::from_millis(now - end))
     }
 
+    // ============= 短信事务：多步骤操作的通道独占 =============
+
+    /// 开启一次短信事务，返回独占通道的句柄。
+    ///
+    /// 事务内的所有命令通过 [Self::run_in_transaction] 下发，中间**不释放**通道，
+    /// 因此「长短信分片发送」「批量删除」「读列表 + 读正文」这类多步骤流程
+    /// 不会被任何其它 AT 命令从中间插进来。
+    ///
+    /// `label` 仅用于日志，便于在命令日志里看出某一串命令属于哪个事务。
+    pub async fn open_sms_transaction(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        label: &str,
+        wait: Duration,
+    ) -> Result<SmsTransaction, String> {
+        let permit = self.gate.acquire(AtPriority::Sms, ctx, wait).await?;
+        log_debug!("短信事务开始: {}", label);
+        Ok(SmsTransaction::new(permit, label.to_string()))
+    }
+
+    /// 在事务持有的通道上下发一条 AT 命令。
+    ///
+    /// 与 `send_command_pri` 的区别：不再申请闸（已持有），也不经过短信模式的
+    /// 暂停门（短信命令本就该优先）。短信提交类命令自动按一次完整提交处理：
+    /// `> ` 提示符不算应答结束，必须等到 `+CMGS:` / OK / ERROR。
+    pub async fn run_in_transaction(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        tx: &SmsTransaction,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<AtResponse, String> {
+        if !tx.holds_channel().await {
+            return Err(format!("短信事务 {} 已失效，拒绝下发 {}", tx.label(), command.trim()));
+        }
+        let single_shot_submit = is_single_shot_cmgs(command);
+        self.exec_locked(ctx, command, timeout, None, single_shot_submit).await
+    }
+
+    /// 以短信最高优先级发送单条命令（事务之外的短信读任务，例如 `+CMTI` 触发的 CMGR）。
+    ///
+    /// 它会越过短信模式的暂停门（否则短信自己把自己挡在门外），并以 Sms 优先级
+    /// 排在所有其它命令之前。
+    pub async fn send_sms_command(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<AtResponse, String> {
+        self.send_command_pri(ctx, AtPriority::Sms, command, timeout, None)
+            .await
+    }
+
+    /// 测试专用：把一条双向管道装成模组连接。
+    ///
+    /// 生产代码里连接只由 `run()` 建立，测试没有第二条通道可用，所以要留一个
+    /// 注入点。它不参与 release 构建。
+    #[cfg(test)]
+    pub(crate) async fn attach_test_channel(
+        &self,
+        writer: Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+    ) {
+        *self.conn.lock().await = Some(Connection {
+            writer: Arc::new(Mutex::new(writer)),
+            describe: "test-duplex".into(),
+        });
+        self.connected_flag.store(true, Ordering::Relaxed);
+    }
+
     /// 绕过命令锁直接向模组写入原始字符串（打断扫频用）。
     pub async fn interrupt(&self, payload: &str) -> Result<(), String> {
         let writer = {
@@ -777,14 +886,39 @@ impl AtClient {
         timeout: Duration,
         stream: Option<Box<dyn Fn(String) + Send + Sync>>,
     ) -> Result<AtResponse, String> {
+        // 第 0 段预算：短信优先模式。
+        // 非短信命令在短信模式生效期间一律停在入口等待 —— 后台巡检、自动拨号对账、
+        // 缓存刷新此时不能产生新的 AT，否则会和正在进行的短信事务抢同一条 TTY。
+        // 等待本身有上限：超时给出明确文案，不会把命令硬塞进通道造成响应串线。
+        if !prio.is_sms() {
+            self.sms_mode.wait_clear(ctx, SMS_MODE_MAX_WAIT, command).await?;
+        }
+
         // 第一段预算：排队（按优先级申请放行闸 + 最小命令间隔）。
         // 这段不计入应答超时，否则初始化/重连期间用户的命令会被误判为「模组无响应」。
         // acquire 内部已处理 wait 超时与 ctx 取消，这里直接收其结果即可。
+        // 下划线前缀不是「不用」，而是「它唯一的用途就是活着」：
+        // permit 的存在期间即通道独占期间，Drop 才让出。
         let _gate_permit = self
             .gate
             .acquire(prio, ctx, QUEUE_WAIT_TIMEOUT)
             .await?;
 
+        self.exec_locked(ctx, command, timeout, stream, false).await
+    }
+
+    /// 通道已被本调用方持有时下发一条命令（不重复申请闸）。
+    ///
+    /// 调用方必须自己持有 [GatePermit]（直接地、或通过 [SmsTransaction] 间接地）
+    /// 并在整段 await 期间不释放它 —— 这就是「通道由谁独占」的唯一凭据。
+    async fn exec_locked(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        command: &str,
+        timeout: Duration,
+        stream: Option<Box<dyn Fn(String) + Send + Sync>>,
+        ignore_prompt: bool,
+    ) -> Result<AtResponse, String> {
         // 两条命令之间最小间隔。
         {
             let last = self.last_cmd_at.lock().await;
@@ -817,6 +951,9 @@ impl AtClient {
             lines: Vec::new(),
             done: done.clone(),
             stream,
+            // 单次提交的短信：`> ` 提示符不能当作应答结束，必须等到真正的
+            // `+CMGS:` / OK / ERROR，否则会重演「Modem 还在收 PDU，前端已报成功」。
+            ignore_prompt,
         };
         *self.pending.lock().await = Some(pending);
 
@@ -932,8 +1069,15 @@ impl AtClient {
         }
 
         // AT+CMGS 的输入提示符 "> " 后面没有换行，单独识别成一次应答结束。
+        // 单次提交（命令串里同带长度与 PDU）例外：必须等真正的结束码，
+        // 见 PendingCmd::ignore_prompt。
         if data.iter().all(|b| b.is_ascii_whitespace() || *b == b'>') && data.contains(&b'>') {
             let mut pending = self.pending.lock().await;
+            let ignore = pending.as_ref().map(|p| p.ignore_prompt).unwrap_or(false);
+            if ignore {
+                drop(pending);
+                return Vec::new();
+            }
             if let Some(p) = pending.as_mut() {
                 p.lines.push(">".into());
             }
@@ -1005,6 +1149,13 @@ pub fn is_terminator(line: &str) -> bool {
         _ => {}
     }
     line.starts_with("+CMS ERROR:") || line.starts_with("+CME ERROR:")
+}
+
+/// 判断是否为「一次性写完整条提交串」的 `AT+CMGS`：含 CR 即说明后面还跟着 PDU。
+///
+/// 只报长度的那一半（`AT+CMGS=14`）不算 —— 它确实要停在 `> ` 提示符上。
+pub fn is_single_shot_cmgs(command: &str) -> bool {
+    command.starts_with("AT+CMGS=") && command.contains('\r')
 }
 
 /// 只匹配不可能出现在查询应答里的主动上报。
@@ -1321,5 +1472,155 @@ mod tests {
         );
 
         holder.abort();
+    }
+}
+
+/// 模拟模组的测试装置。
+///
+/// 目标是用**真实的 AtClient + 真实的读循环 + 真实的命令闸**跑短信流程，
+/// 只把「模组那一端」换成可编程的应答器。这样测出来的命令顺序、字节序列、
+/// 优先级行为才和实机一致 —— mock 掉太多层就只剩下自娱自乐。
+#[cfg(test)]
+pub(crate) mod testutil {
+    use super::AtClient;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// 一次应答的形态。
+    pub(crate) enum Reply {
+        /// 回若干行（每行自带结束码语义），例如 `vec!["+CMGS: 1".into(), "OK".into()]`。
+        Lines(Vec<String>),
+        /// 回 `> ` 输入提示符（**不带换行**），随后的一段被当作 PDU。
+        Prompt,
+        /// 什么都不回（模拟模组无响应，用于验证超时不被当成失败）。
+        Silent,
+    }
+
+    impl Reply {
+        pub(crate) fn ok(extra: &[&str]) -> Reply {
+            let mut v: Vec<String> = extra.iter().map(|s| s.to_string()).collect();
+            v.push("OK".into());
+            Reply::Lines(v)
+        }
+    }
+
+    /// 装好并返回记录器：`written` 是**原始写入字节**（字节级验证用），
+    /// `commands` 是按 `\r` 切出的命令段（顺序验证用）。
+    pub(crate) struct MockModem {
+        pub written: Arc<StdMutex<Vec<Vec<u8>>>>,
+        pub commands: Arc<StdMutex<Vec<String>>>,
+    }
+
+    impl MockModem {
+        /// 截至目前写入串口的全部字节（按写入批次拼接后的完整流）。
+        pub fn stream(&self) -> Vec<u8> {
+            let guard = self.written.lock().unwrap_or_else(|e| e.into_inner());
+            guard.iter().flatten().copied().collect()
+        }
+        pub fn cmds(&self) -> Vec<String> {
+            self.commands.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+    }
+
+    /// 把 `client` 接到一个可编程的模拟模组上，并启动读循环。
+    ///
+    /// `responder` 按「以 \r 结尾的一段」回调，返回该段的应答。
+    /// 对 `Reply::Prompt`，紧接着的下一段（PDU）自动回 `+CMGS` + OK，
+    /// 这与真实模组「先吐提示符、收到 PDU 后才给回执」的行为一致。
+    pub(crate) async fn attach_mock_modem(
+        client: Arc<AtClient>,
+        ctx: tokio::sync::watch::Receiver<bool>,
+        responder: impl Fn(&str) -> Reply + Send + Sync + 'static,
+    ) -> MockModem {
+        let (host, device) = tokio::io::duplex(8192);
+        let (mut dev_rd, mut dev_wr) = tokio::io::split(device);
+        let (host_rd, host_wr) = tokio::io::split(host);
+
+        client.attach_test_channel(Box::new(host_wr)).await;
+
+        let written: Arc<StdMutex<Vec<Vec<u8>>>> = Arc::new(StdMutex::new(Vec::new()));
+        let commands: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let w = written.clone();
+        let c = commands.clone();
+        tokio::spawn(async move {
+            let mut buf: Vec<u8> = Vec::new();
+            let mut tmp = [0u8; 1024];
+            let mut expect_pdu = false;
+            let mut silence = false;
+            let mut swallow = false;
+            loop {
+                match dev_rd.read(&mut tmp).await {
+                    Ok(0) => return,
+                    Ok(n) => {
+                        buf.extend_from_slice(&tmp[..n]);
+                        w.lock().unwrap_or_else(|e| e.into_inner()).push(tmp[..n].to_vec());
+                    }
+                    Err(_) => return,
+                }
+                while let Some(i) = buf.iter().position(|&b| b == b'\r') {
+                    let mut seg: Vec<u8> = buf.drain(..=i).collect();
+                    seg.pop(); // 去掉结尾的 \r
+                    let seg_str = String::from_utf8_lossy(&seg).to_string();
+                    c.lock().unwrap_or_else(|e| e.into_inner()).push(seg_str.clone());
+
+                    let is_cmd = seg_str.starts_with("AT");
+                    let out: String = if expect_pdu && !is_cmd {
+                        // 上一段回了 `> ` 提示符，这一段就是 PDU 载荷：
+                        // 真实模组在收完 PDU 之后才给出 +CMGS 回执。
+                        expect_pdu = false;
+                        if silence {
+                            String::new()
+                        } else {
+                            "+CMGS: 1\r\n\r\nOK\r\n".to_string()
+                        }
+                    } else if !is_cmd {
+                        // 既不是命令、也不是被期待的 PDU：真实模组会报错。
+                        // 早期版本这里一律回 OK，于是「模组其实没回话」的场景
+                        // 被误判成发送成功，测试完全失去了意义。
+                        if silence || swallow {
+                            swallow = false;
+                            String::new()
+                        } else {
+                            "ERROR\r\n".to_string()
+                        }
+                    } else {
+                        silence = false;
+                        match responder(&seg_str) {
+                            Reply::Lines(lines) => {
+                                // 一次性提交（`AT+CMGS=<len>\r<PDU>\r`）：模组把整串
+                                // 当作一次输入，紧随其后的 PDU 段已被消费，不再单独应答。
+                                swallow = seg_str.starts_with("AT+CMGS=");
+                                let mut s = String::new();
+                                for l in lines {
+                                    s.push_str(&l);
+                                    s.push_str("\r\n");
+                                }
+                                s
+                            }
+                            Reply::Prompt => {
+                                expect_pdu = true;
+                                "> ".to_string()
+                            }
+                            Reply::Silent => {
+                                // 模组彻底不回话：连随后的 PDU 也不应答
+                                silence = true;
+                                String::new()
+                            }
+                        }
+                    };
+                    if !out.is_empty() && dev_wr.write_all(out.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        // 启动唯一读循环（与生产路径同一份实现）。
+        let c2 = client.clone();
+        let ctx2 = ctx.clone();
+        tokio::spawn(async move { c2.read_loop(&ctx2, Box::new(host_rd)).await });
+
+        MockModem { written, commands }
     }
 }

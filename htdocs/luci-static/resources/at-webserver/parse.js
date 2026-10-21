@@ -746,7 +746,18 @@ var Parse = (function () {
 		return sms;
 	};
 
-	// 短信中心保存的已发消息缓存（localStorage sms_sent_messages_cache）
+	/*
+	 * 【已废弃的数据源】localStorage sms_sent_messages_cache
+	 *
+	 * 旧版本把已发短信存在浏览器本地、并在渲染短信列表时合并进来。它带来两个
+	 * 实打实的问题：
+	 *   1) 本地条目没有模组序号（用负数代替），删除时按着不存在的 index 下发
+	 *      AT+CMGD，模组一律回 ERROR；
+	 *   2) 模组里已经删掉的短信仍会显示在界面上，用旧数据掩盖了模组的真实状态。
+	 *
+	 * 现在短信列表一律以模组实时返回为准，这两个函数只保留给「清除历史残留」
+	 * 使用，任何页面都不应再把它们当数据源。
+	 */
 	api.SMS_CACHE_KEY = 'sms_sent_messages_cache';
 	api.MAX_SMS_CACHE = 1000;
 
@@ -770,6 +781,15 @@ var Parse = (function () {
 
 	api.clearSentMessageCache = function () {
 		try { localStorage.removeItem(api.SMS_CACHE_KEY); } catch (e) { /* ignore */ }
+	};
+
+	/* 历史遗留条数（仅供「清除残留」显示，不作为数据源） */
+	api.countLegacySentMessages = function () {
+		try {
+			return api.getCachedSentMessages().length;
+		} catch (e) {
+			return 0;
+		}
 	};
 
 	/* ================= 锁频 ================= */
