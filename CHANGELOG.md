@@ -10,6 +10,18 @@
 
 ## 未发布
 
+### 短信模块深度重构：最高优先级调度、事务级互斥、无缓存实时语义
+
+- **refactor(sms) 短信命令不再逐条透传**：原链路把 AT+CMGF/CSCA/CMGS/CMGR/CMGL/CMGD/CPMS 拆成多次独立 RPC，每步之间后台巡检（信号/缓存/流量/自动拨号对账）都能插队，打乱模组上下文（如刚切 PDU 模式就被别的命令打断）。现改为一次 RPC 交一个语义动作（list/send/delete/purge/capacity/set_storage/get_smsc/set_smsc/power/set_ims/get_ims），由后端在**一次事务**里跑完全部步骤，全程独占通道
+- **feat(sms) Sms 最高优先级 + 暂停门（SmsMode）**：`AtPriority` 新增 `Sms=4` 最高档，短信命令排队时优先于一切其它命令放行，正在执行的普通命令不被打断、等其自然结束后下一个放行的就是短信任务；进入短信中心登记带 TTL 的租约，非短信命令申请通道前必须等模式解除（后台轮询不再插队）。租约 300s 封顶且由后台 sweep 清扫——前端崩溃 / WebSocket 断开 / 忘记释放都会自动失效，不会永久停掉其它模块轮询；AT 接收循环与 URC 派发在暂停期间保持工作
+- **feat(sms) 事务级互斥（SmsTransaction）**：长短信分片发送、批量删除、开关短信功能等多步操作全程持有 `GatePermit`，中间不释放，杜绝其它命令插入事务中间；事务与取消安全绑定，超时/取消不泄漏许可
+- **feat(sms) 无缓存实时语义**：列表/正文/容量/删除结果全部来自模组实时回包；localStorage 已读/已发快照依赖移除（仅保留旧缓存清理）；每次操作后回读列表+容量，删除按模组真实序号并回读确认。`AT+CMGL=4` 的结果会随新短信、删除、存储切换而变化，缓存回包会让删除按着不存在的 index 下发 `AT+CMGD` 全是 ERROR
+- **fix(sms) 发送结论三档，结果不明绝不自动重发**：Accepted（模组回 `+CMGS: <ref>`）/ Rejected（`+CMS ERROR`/`+CME ERROR`）/ Unknown（超时或无响应）。结果不明时不重发已提交的片段，避免重复计费；前端对 Unknown 给出明确警示而非假成功；同一目标+正文 10 秒内去重（浏览器重试/连点保护）
+- **refactor(sms) PDU 编解码后端化**：删除前端 `smsEncode.js`，编码自动选择（GSM7/UCS2/8bit）、UDH 长短信分片（8bit/16bit 参考号、septet 边界 fill bits 精确处理）、SCTS 时区四分之一小时有符号解码全部收敛到后端 `pdu.rs`；保持单次提交 `AT+CMGS=<TPDU长度>\r<PDU>`，PDU 以字符串参数直达串口不经任何转义层；提交单独超时（总预算 60s 覆盖长短信全事务），与 ucode/前端三层超时口径一致且前端大于后端
+- **feat(rpc) 语义化 `sms` 方法**：ucode 侧动作白名单 + 参数逐项取值，不做命令拼接防 AT 注入；分动作超时表（send/purge/power 70s，list/capacity 40s，session 12s）；ACL 补 `sms` 读写授权
+- **feat(urc) +CMTI 走短信最高优先级**：新短信到达立即调度 `AT+CMGR` 读取并推送，绕过暂停门，不被后台轮询延迟；索引必须纯数字，防 URC 注入 AT 命令
+- **test**：cargo check/clippy/test 全过 —— 233 passed, 0 failed（mock 模组 e2e 覆盖：优先级排序、事务不交叉、暂停/恢复、租约过期、实时数据非缓存、发送三档、不自动重发、重复点击去重、长短信分片顺序、并发串行、删除真实结果、取消不挂起）；新增/修改代码 clippy 0 warning（基线遗留 27 条未动）；前端 `sms-center-render` 57 断言重写全过，其余既有测试全过（cellular-icon-test 为基线既有失败与本次无关）。**遗留实机项**：真实模组 CMGS 提示符时序与分片节奏、+CMTI 端到端时延、长短信 60s 预算余量、短信功能开关后模组状态观察
+
 ### 升级 rustls-webpki，修复证书校验可能接受不受信任中间证书的问题（RUSTSEC-2026-0382）
 
 - **security(deps)**：`rustls-webpki` 0.103.15 → 0.103.16（`src/rust/Cargo.lock`）。公告指出 0.103.16 之前的版本在校验证书路径时，只要配置的信任锚允许，可能接受包含不受信任 emSign 中间公钥的路径（对应私钥已公开）；0.103.16 / 0.104.0-alpha.8 起拒绝这些公钥
