@@ -52,6 +52,9 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 </div>
 
 > [!TIP]
+> **Tab 菜单增强**  
+> `admin/modem/5g` 下的 12 个兄弟页面共用 LuCI 原生 Tab 菜单，插件在页面加载后对其做纯 DOM 增强（`at-webserver/tabmenu.js`，不改 LuCI 与主题、不拦截点击）：① **滚动位置保持** —— 横向可滚动主题下切换 / 返回 / 刷新页面后，菜单自动把当前选中项滚入可视区，不再重置到首项；用户手动滚动过的位置按路径记忆在 `sessionStorage`，刷新时选中项仍完整可见则原样恢复，否则回退为选中项居中；② **统一 SVG 图标** —— 12 个页签各配一枚 24×24 线性图标（`stroke=currentColor` 随主题配色，桌面 16px / 窄屏 15px），语义逐项匹配（网络状态=脉冲、网络设置=滑杆、拨号=插头、扫频=雷达、锁频=时钟、模组设置=芯片、升级=圆内上箭头、短信=气泡、短信设置=气泡+省略号、终端=提示符、日志=文件、服务配置=齿轮）。换行布局主题（bootstrap / material）不产生横向滚动，footstrap 等无 Tab 栏主题自动跳过。
+>
 > **看板实时状态说明**  
 > 控制台每秒同步模组底层射频指标：实时监测 RSRP、RSRQ、SINR 及动态信号综合评分；精确显示驻网制式（如 5G NR 中频 2565 MHz / 100 MHz 带宽）与小区 PCI / EARFCN 标识。  
 > 页面图形全部按实时数据驱动、纯原生 SVG 绘制：**信号强度卡片**用四格动态信号图标（无信号 / 1~4 格 / 搜索中 / 连接中 / 已断开 / 连接错误共 9 态，状态由 `^MONSC`、`+CGREG`、`+CPIN` 的真实读数推导）与信号发射塔指标，右上角**制式角标**与驻网制式同源（5G / 4G / 3G / 2G）；**信号趋势图**为双 Y 轴（左 RSRP `-125~-53 dBm`、右 SINR `-5~35 dB`）曲线，背景按 RSRP 质量分区（`Poor / Fair / Good / Excellent`）着色，RSRQ 以虚线参考 —— 图例可点选开关、显示范围可切 15/30 点，鼠标悬浮或**触摸点选常显**可查看任一采样点的时间 / RSRP / SINR / RSRQ 与质量档位，且只画真实采样点、**缺口按断点断开**；**流量统计卡片**含实时上下行速率火花线与「本次使用量」累计（设备侧存储，**刷新页面不失效**、重启归零，可选持久化、可一键清零）；另有**载波聚合频谱占用图**、**芯片温度矩阵**、**按当前 MCS 动态生成的 I/Q 星座点阵**。
@@ -496,7 +499,7 @@ luci-app-mt5700/
 ├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.24.3)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本（见上方功能矩阵）
-│   └── at-webserver/                       # 前端支撑库 (rpc.js / parse.js / mt5700.js / ui.js / mt5700.css)
+│   └── at-webserver/                       # 前端支撑库 (rpc.js / parse.js / mt5700.js / ui.js / mt5700.css / tabmenu.js)
 ├── root/                                   # 系统文件系统镜像结构
 │   ├── etc/config/at-webserver             # UCI 默认配置文件
 │   ├── etc/init.d/at-webserver             # 核心 init.d 守护脚本 (含接口拉起与自愈)
