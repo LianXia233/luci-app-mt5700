@@ -55,8 +55,25 @@ at-webserver.config.schedule_day_nr_pcis=''
 EOF
 	exit 0
 fi
-# 其它 uci 调用回退真实 uci（若存在）
-REAL_UCI=$(command -v uci 2>/dev/null)
+# 时区查询（localtime 启动时调用）：回 OpenWrt 常见的 POSIX TZ 串（CST-8 = UTC+8）
+if [ "$1" = "-q" ] && [ "$2" = "get" ] && [ "$3" = "system.@system[0].timezone" ]; then
+	echo "CST-8"
+	exit 0
+fi
+# 其它 uci 调用回退真实 uci（若存在）。
+# 必须排除自身：测试目录就在 PATH 前端，command -v uci 会命中本脚本的 uci 符号链接，
+# 直接 exec 会变成无限自递归空转（后端曾因此卡死在启动第一步，一条日志都不打）。
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+REAL_UCI=""
+for d in $(echo "$PATH" | tr ':' ' '); do
+	[ -n "$d" ] || d="."
+	c="$d/uci"
+	[ -x "$c" ] || continue
+	r=$(readlink -f "$c" 2>/dev/null || echo "$c")
+	[ "$r" = "$SELF" ] && continue
+	REAL_UCI="$c"
+	break
+done
 if [ -n "$REAL_UCI" ]; then
 	exec "$REAL_UCI" "$@"
 fi

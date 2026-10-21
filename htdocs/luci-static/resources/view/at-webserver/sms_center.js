@@ -534,61 +534,114 @@ return L.view.extend({
 				',' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 		}
 
-		function send(explicitTarget) {
-			var content = msgInput.value.trim();
-			if (!content) { Mt5700.warning('请输入短信内容'); return; }
-			var target = (explicitTarget || '').trim() || state.selectedContact || '';
-			if (!target) { Mt5700.warning('请输入联系人号码'); return; }
-			if (!Parse.isValidPhoneNumber(target)) { Mt5700.warning('请输入正确的 5-19 位手机号码'); return; }
+	/*
+	 * 短信发送：PDU 模式两段式交互（3GPP TS 27.005 §3.4.1）。
+	 *
+	 * 历史 bug（issue #19「点发送显示成功但短信没发出去」）的根因：
+	 * 旧实现把 `AT+CMGS=<长度>\r<PDU>` 拼成**一条**命令交给后端，后端原样
+	 * 写入串口（仅末尾补 \r）。真实模组收到 `AT+CMGS=<长度>\r` 后只回
+	 * `> ` 输入提示符并进入 PDU 等待态；而后端 consume() 又把 `> ` 判定为
+	 * 「应答结束」，于是前端拿到 success=true 显示「发送成功」——可是
+	 * **Ctrl+Z（0x1A）提交字符从未下发**，模组一直停在 PDU 输入等待态，
+	 * 短信根本没有发出去。mock 模组不模拟 `> ` 提示符，所以测试里看不出来。
+	 *
+	 * 正确协议分两步：
+	 *   1. `AT+CMGS=<tpduLength>`          → 模组回 `> ` 提示符
+	 *   2. `<PDU hex>` + `\x1A`（Ctrl+Z）  → 模组回 `+CMGS: <mr>` + `OK`
+	 *
+	 * 0x1A 过链路的可行性已逐段核实：浏览器 JSON.stringify 转义为 \u001a →
+	 * rpcd/ubus 解析还原 → ucode 侧参数原样传递 → mt5700.uc 的
+	 * sprintf('%J') 对 <0x20 的字符输出 \u001a（ucv_to_string_json_encoded）
+	 * → Rust serde_json 解析还原成 0x1A 字节写入串口。
+	 */
+	function send(explicitTarget) {
+		var content = msgInput.value.trim();
+		if (!content) { Mt5700.warning('请输入短信内容'); return; }
+		var target = (explicitTarget || '').trim() || state.selectedContact || '';
+		if (!target) { Mt5700.warning('请输入联系人号码'); return; }
+		if (!Parse.isValidPhoneNumber(target)) { Mt5700.warning('请输入正确的 5-19 位手机号码'); return; }
 
-			sendBtn.disabled = true;
-			var chain = Promise.resolve();
-			// 确保 PDU 模式
-			chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGF?'); })
-				.then(function (res) {
-					if (res.success && String(res.data).indexOf('+CMGF: 1') >= 0) {
-						return AtWs.client.sendCommand('AT+CMGF=0');
-					}
-					return { success: true };
-				})
-				.then(function () { return AtWs.client.sendCommand('AT+CSCA?'); })
-				.then(function (res) {
-					var smsc = '';
-					if (res.success && res.data) {
-						var m = String(res.data).match(/\+CSCA: "([^"]+)"/);
-						if (m) smsc = m[1];
-					}
-					var formatted = target.replace(/^\+/, '');
-					var parts = SmsEncode.buildSubmitParts({ smsc: smsc, destination: formatted, message: content });
-					var chain2 = Promise.resolve();
-					for (var i = 0; i < parts.length; i++) {
-						chain2 = chain2.then(function (part) {
-							return AtWs.client.sendCommand('AT+CMGS=' + part.tpduLength + '\r' + part.pdu);
-						}.bind(null, parts[i]));
-					}
-					return chain2;
-				});
+		sendBtn.disabled = true;
+		var chain = Promise.resolve();
+		/*
+		 * 确保 PDU 模式。旧逻辑只在 `AT+CMGF?` 查询成功且显示文本模式时才
+		 * 切 PDU；查询一旦失败就假定模式没问题直接往下发 —— 万一丝毫在文本
+		 * 模式，`AT+CMGS=<长度>` 会被模组当成「发到号码 <长度>」的文本模式
+		 * 语法，又是一次假成功。CMGF=0 是幂等的（已是 PDU 模式也只会回 OK），
+		 * 因此查询失败时也强制切一次，把模式歧义彻底消掉。
+		 */
+		chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGF?'); })
+			.then(function (res) {
+				/*
+				 * 只有**能确认当前已是 PDU 模式**（应答含 `+CMGF: 0`）才跳过；
+				 * 其余情况（文本模式、查询失败、应答无法解析）一律强制切一次。
+				 * CMGF=0 幂等，多花一次命令换掉整个「模式歧义」类假成功。
+				 * 空格容错：少数固件回 `+CMGF:0`（无空格）。
+				 *
+				 * 切模式失败不在此处阻断：少数固件对幂等设置也回 ERROR，
+				 * 但只要当前确是 PDU 模式，CMGS 照样能成；真正拒绝时
+				 * 下一步 CMGS 会带着明确错误上来。
+				 */
+				if (res.success && /\+CMGF:\s*0/.test(String(res.data))) return;
+				return AtWs.client.sendCommand('AT+CMGF=0');
+			})
+			.then(function () { return AtWs.client.sendCommand('AT+CSCA?'); })
+			.then(function (res) {
+				var smsc = '';
+				if (res.success && res.data) {
+					var m = String(res.data).match(/\+CSCA: "([^"]+)"/);
+					if (m) smsc = m[1];
+				}
+				var formatted = target.replace(/^\+/, '');
+				var parts = SmsEncode.buildSubmitParts({ smsc: smsc, destination: formatted, message: content });
+				var chain2 = Promise.resolve();
+				for (var i = 0; i < parts.length; i++) {
+					chain2 = chain2.then(function (part) {
+						// 第一步：报 TPDU 长度，等模组的 `> ` 输入提示符
+						return AtWs.client.sendCommand('AT+CMGS=' + part.tpduLength).then(function (r) {
+							if (!r || r.success === false) {
+								throw new Error(String((r && r.error) || '模组拒绝短信发送（AT+CMGS 报长度被拒）'));
+							}
+							return r;
+						}).then(function () {
+							// 第二步：PDU + Ctrl+Z 提交。缺 0x1A 模组会永远等在输入态，
+							// 这就是「显示成功但发不出去」的直接原因。
+							return AtWs.client.sendCommand(part.pdu + '\x1A');
+						});
+					}.bind(null, parts[i]));
+				}
+				return chain2;
+			});
 
-			chain.then(function (lastRes) {
-				if (lastRes && lastRes.success === false) throw new Error(String(lastRes.error || '发送失败'));
-				var sent = {
-					index: -Date.now(),
-					content: content,
-					number: target,
-					time: nowTimeStr(),
-					type: 'sent'
-				};
-				Parse.saveSentMessageToCache(sent);
-				state.messages.push(sent);
-				msgInput.value = '';
-				renderHint();
-				renderConversation();
-				Mt5700.success('发送成功');
-				refresh();
-			}).catch(function (err) {
-				Mt5700.error((err && err.message) || '发送失败');
-			}).then(function () { sendBtn.disabled = false; });
-		}
+		chain.then(function (lastRes) {
+			if (!lastRes || lastRes.success === false) throw new Error(String(lastRes.error || '发送失败'));
+			/*
+			 * 假成功防护：提交的应答必须出现 `+CMGS` 或 `OK`。
+			 * 只看 success 标志不够 —— `> ` 提示符也曾被算作成功应答，
+			 * 那种响应里没有任何提交确认，必须判失败。
+			 */
+			var data = String(lastRes.data || '');
+			if (data.indexOf('+CMGS') < 0 && !/\bOK\b/.test(data)) {
+				throw new Error('模组未确认短信提交（响应：' + data.slice(0, 80) + '）');
+			}
+			var sent = {
+				index: -Date.now(),
+				content: content,
+				number: target,
+				time: nowTimeStr(),
+				type: 'sent'
+			};
+			Parse.saveSentMessageToCache(sent);
+			state.messages.push(sent);
+			msgInput.value = '';
+			renderHint();
+			renderConversation();
+			Mt5700.success('发送成功');
+			refresh();
+		}).catch(function (err) {
+			Mt5700.error((err && err.message) || '发送失败');
+		}).then(function () { sendBtn.disabled = false; });
+	}
 
 		/* ---------- 删除 ---------- */
 
