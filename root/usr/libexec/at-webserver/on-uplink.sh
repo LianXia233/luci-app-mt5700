@@ -9,7 +9,11 @@
 #
 # 尽力而为：失败静默。接口侧的兜底重试在 init.d 的 ensure_modem_interface，
 # 以及 hotplug 的 iface/usb 钩子，本脚本只是让时序更准。
+#
+# 参数透传：调用方可传 '1' / '0' 显式声明本次拨号是否拿到 IPv6（用于决定要不要
+# 下发 IPv6 DNS）。不传时 init.d 会自己经 ubus 向后端查 AT+CGPADDR / AT+CGDCONT?
+# 判定，功能不依赖调用方传参。
 
 [ -x /etc/init.d/at-webserver ] || exit 0
-/etc/init.d/at-webserver on_uplink >/dev/null 2>&1 || true
+/etc/init.d/at-webserver on_uplink "$@" >/dev/null 2>&1 || true
 exit 0

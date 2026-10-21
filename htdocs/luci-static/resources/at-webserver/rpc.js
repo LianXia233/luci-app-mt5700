@@ -1210,6 +1210,104 @@ function parseHFREQINFO(data) {
 }
 
 /*
+ * AT^NRSSBID? —— 查询小区 SSB 信息（手册 13.28，PDF 第 378~381 页）
+ * --------------------------------------------------------------------------
+ * 语法：^NRSSBID: <ARFCN-NR>,<CID>,<PCI>,<RSRP>,<SINR>,<TA>,
+ *                <Scell_description>,<N_NB_CELL>[,<Ncell_description>]
+ *
+ * <Scell_description>（服务小区 SSB 信息 = Beam 测量结果）固定 8 组、16 个字段：
+ *   <S_SSBID0>,<S_ID0_RSRP>, <S_SSBID1>,<S_ID1_RSRP>, ... <S_SSBID7>,<S_ID7_RSRP>
+ *   · <S_SSBIDx>    无符号 8 位，服务区 SSB ID，范围 0~7，无效值 0xFF(255)
+ *   · <S_IDx_RSRP>  有符号 16 位，该 SSB ID 对应 RSRP(dBm)，无效值 0x7FFF(32767)
+ *
+ * <Ncell_description>（邻区，每个 4 + 8 个字段，最多 N_NB_CELL=4 个）：
+ *   <NB_PCI>,<NB_ARFCN>,<NB_RSRP>,<NB_SINR>,
+ *   <NB_SSBID0>,<NB_ID0_RSRP>, ... 共 4 组（按 Beam 能量排序的前 4 个）
+ *
+ * 实测样例（192.168.88.1，SA 驻网）：
+ *   ^NRSSBID: 504990,0000000c2840c002,128,-64,24,-1,
+ *             1,-62,0,-63,2,-80,3,-81,4,-79,5,-78,6,-81,255,32767,
+ *             1,643,504990,-66,24,7,-62,6,-75,5,-77,4,-78
+ *   解读：服务小区 PCI=128 / RSRP=-64 / SINR=24；
+ *         SSB 0~6 分别 -63/-62/-80/-81/-79/-78/-81 dBm，SSB 7 无效未上报；
+ *         1 个邻区 PCI=643 / RSRP=-66 / SINR=24。
+ *
+ * 生效条件（手册原文，务必如实传达给 UI）：
+ *   · SA  场景：仅在主模连接态、且网侧配置了测量时生效；
+ *   · ENDC场景：仅在 ENDC 建立成功、且网侧配置了测量时生效；
+ *   · 否则全部字段填无效值（SSB ID 0xFF / RSRP 0x7FFF），UI 必须显示「—」而不是 0。
+ *
+ * 无效值一律解析为 null，绝不转成 0 或 -140 之类的"看起来像真数"的占位值。
+ */
+var SSB_INVALID_ID = 0xFF;      /* 手册：SSB ID 无效值 0xFF */
+var SSB_INVALID_RSRP = 0x7FFF;  /* 手册：RSRP/SINR 无效值 0x7FFF */
+
+/* 单个数值：越界/无效/非数字一律返回 null */
+function ssbNum(raw, isUnsigned) {
+	if (raw === undefined || raw === null || raw === '') return null;
+	var v = parseInt(raw, 10);
+	if (isNaN(v)) return null;
+	if (isUnsigned) return v === SSB_INVALID_ID ? null : v;
+	return v === SSB_INVALID_RSRP ? null : v;
+}
+
+/*
+ * 把「ID,RSRP」成对切片解析成按 SSB ID 0~7 索引的数组。
+ * 上报顺序不保证按 ID 升序（实测就是 1,0,2,3,...），因此按 ID 归位；
+ * 未出现的 ID 保留为 null（= 该波束本次未测量）。
+ */
+function ssbPairs(count, off, parts) {
+	var byId = [];
+	for (var i = 0; i < 8; i++) byId.push(null);
+	for (var k = 0; k < count; k++) {
+		var id = ssbNum(parts[off + k * 2], true);
+		var rsrp = ssbNum(parts[off + k * 2 + 1], false);
+		if (id === null || rsrp === null) continue;
+		if (id < 0 || id > 7) continue;
+		byId[id] = rsrp;
+	}
+	return byId;
+}
+
+function parseNRSSBID(data) {
+	/* AT 回包为空 / 非字符串时不要抛错——轮询里失败是常态，返回 null 由 UI 显示「—」 */
+	if (typeof data !== 'string' || !data) return null;
+	var str = extractATData(data, '^NRSSBID');
+	if (!str) return null;
+	var parts = str.split(',').map(function (s) { return s.trim(); });
+	/* 最小长度：6 个头字段 + 8 组服务小区（16 个）+ 1 个邻区计数 = 23 */
+	if (parts.length < 23) return null;
+
+	var scell = ssbPairs(8, 6, parts);
+	var nbCount = ssbNum(parts[22], true) || 0;
+	var neighbors = [];
+	var base = 23;
+	for (var n = 0; n < nbCount && base + 11 < parts.length + 1; n++) {
+		var nb = {
+			pci: ssbNum(parts[base], true),
+			arfcn: ssbNum(parts[base + 1], true),
+			rsrp: ssbNum(parts[base + 2], false),
+			sinr: ssbNum(parts[base + 3], false),
+			beams: ssbPairs(4, base + 4, parts)
+		};
+		neighbors.push(nb);
+		base += 12;
+	}
+
+	return {
+		arfcn: ssbNum(parts[0], true),
+		cid: parts[1] || '',
+		pci: ssbNum(parts[2], true),
+		rsrp: ssbNum(parts[3], false),
+		sinr: ssbNum(parts[4], false),
+		ta: parts[5] !== undefined ? parseInt(parts[5], 10) : null,
+		/* 服务小区 8 个波束的实测 RSRP(dBm)，下标 = SSB ID，未测量为 null */
+		beams: scell,
+		neighbors: neighbors
+	};
+}
+
+/*
  * <sysmode> 制式编码（手册 13.16.3，^HFREQINFO 专用）：
  *   1 GSM（不支持）  3 WCDMA（不支持）  6 LTE  7 NR
  * 与 ^SYSINFOEX 的 <sysmode>（6=LTE、11=NR-5GC）不同，勿混用。
@@ -1399,6 +1497,7 @@ var AtWs = {
 	parseHCSQ: parseHCSQ,
 	parseMONSC: parseMONSC,
 	parseHFREQINFO: parseHFREQINFO,
+	parseNRSSBID: parseNRSSBID,
 	sysModeName: sysModeName,
 	parsePDCP: parsePDCP,
 	parseRawData: parseRawData,
