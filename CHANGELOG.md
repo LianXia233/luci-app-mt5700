@@ -605,7 +605,7 @@ v1.18.1 的看板娘移动端排版在**源码预览下正常**，但装到实�
 - **style(review)**: 复核兼容块发现回归 —— 基础覆盖的 `background !important` 会压掉原有 hover / focus-visible / disabled 规则（无 `!important`），已在兼容块内补充同优先级状态覆盖，恢复悬停反馈、键盘焦点环与禁用态。
 - **docs**: README 版本号与安装示例同步至 v1.14.10；新增 `docs/release-notes/v1.14.10.md` 发布说明。
 
-## [未发布]
+## v1.24.4 (2026-10-21)
 
 ### LuCI Tab 菜单：滚动位置保持 + 统一 SVG 图标
 
