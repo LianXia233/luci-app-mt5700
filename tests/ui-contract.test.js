@@ -339,6 +339,25 @@ ok('★ ui.js 的按钮卡口不再输出 cbi-button-* 到元素上',
 	!/['"]class['"]\s*:\s*'[^']*cbi-button/.test(uiSrc)
 	&& /Mt5700\.button\(label, onClick, variant\)/.test(uiSrc));
 
+/* ---------- 前端 JS 语法合法 ----------
+ * 一个错位的括号就能让整个视图白屏，而所有"读文本做断言"的契约测试照样全绿
+ * —— 它们只 grep 字面量，不解析语法。这里用 Function 构造函数真解析一遍。
+ * （LuCI 模块的 `'require xxx'` 是普通字符串表达式语句，语法上合法，可直接解析。）
+ */
+const syntaxBad = [];
+let syntaxOk = 0;
+for (const f of walkJs(RES_DIR, [])) {
+	try {
+		new Function(fs.readFileSync(f, 'utf8'));   // eslint-disable-line no-new-func
+		syntaxOk++;
+	} catch (e) {
+		syntaxBad.push(path.relative(ROOT, f) + ' → ' + e.message);
+	}
+}
+ok('前端 JS 全部语法合法', syntaxBad.length === 0, syntaxBad.join('; '));
+ok('语法检查确实扫到了文件（扫描器本身没失效）', syntaxOk >= 15,
+	'只解析了 ' + syntaxOk + ' 个文件');
+
 /* ---------- 汇总 ---------- */
 console.log('通过 ' + pass + ' 项，失败 ' + fails.length + ' 项');
 if (fails.length) {
