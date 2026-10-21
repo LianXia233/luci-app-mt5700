@@ -1,8 +1,7 @@
 'use strict';
 'require at-webserver/rpc';
-'require at-webserver/parse';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Mt5700 */
+/* global L, AtWs, Mt5700 */
 
 /**
  * 服务配置 - 新 UI 视觉 + 基准 v1.3.4 功能

@@ -450,7 +450,14 @@
   border: 1px solid transparent;
   border-radius: var(--mt5700-radius-md);
   cursor: pointer;
-  transition: all var(--mt5700-transition-base);
+  /* 只过渡真正会变的这几项。原先是 `all` —— 将来只要有人给按钮加个
+     padding/width 变化，就会变成布局属性参与动画，每帧重排重绘。 */
+  transition:
+    background-color var(--mt5700-transition-base),
+    border-color var(--mt5700-transition-base),
+    color var(--mt5700-transition-base),
+    box-shadow var(--mt5700-transition-base),
+    transform var(--mt5700-transition-base);
   white-space: nowrap;
   user-select: none;
   outline: none;
@@ -961,12 +968,13 @@
 .mt5700-badge-neutral { background: rgba(0, 0, 0, 0.05); color: var(--mt5700-text-secondary); }
 
 /* ---------- AT 服务状态卡片 (L2，独立命名空间，不依赖 LuCI 主题) ---------- */
-.at-status-card {
-  --at-color: #35b879;
-  --at-bg: rgba(255, 255, 255, 0.62);
-  --at-border: rgba(255, 255, 255, 0.72);
-  --at-text: #17211d;
-  --at-muted: #7b8781;
+.mt5700-status-card {
+  /* 本卡只保留两个专属变量：状态色（在线/连接中/离线/未知）与次级灰度。
+     底色 / 描边 / 正文一律回到全局令牌 —— 原先这张卡自带一套 --at-* 色板
+     （绿 #35b879、正文 #17211d、底色 0.62 alpha），与同一页上的徽章、仪表
+     用的是两个绿、两种白，并排看就是「不像一套东西」。 */
+  --mt5700-status-color: var(--mt5700-success);
+  --mt5700-status-muted: #7b8781;
 
   width: 100%;
   box-sizing: border-box;
@@ -977,19 +985,19 @@
 
   padding: 18px 22px;
 
-  border: 1px solid var(--at-border);
+  border: 1px solid var(--mt5700-border);
   border-radius: 20px;
 
-  background: var(--at-bg);
+  background: var(--mt5700-card-bg);
 
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: var(--mt5700-glass);
+  -webkit-backdrop-filter: var(--mt5700-glass);
 
   box-shadow:
     0 10px 35px rgba(35, 55, 48, 0.10),
     inset 0 1px 0 rgba(255,255,255,.55);
 
-  color: var(--at-text);
+  color: var(--mt5700-text);
 
   transition:
     background .3s ease,
@@ -999,7 +1007,7 @@
 }
 
 /* SVG 状态图标 */
-.at-status-icon {
+.mt5700-status-icon {
   width: 52px;
   height: 52px;
 
@@ -1013,18 +1021,18 @@
 
   background: color-mix(
     in srgb,
-    var(--at-color) 12%,
+    var(--mt5700-status-color) 12%,
     transparent
   );
 
-  color: var(--at-color);
+  color: var(--mt5700-status-color);
 
   transition:
     color .3s ease,
     background .3s ease;
 }
 
-.at-status-icon svg {
+.mt5700-status-icon svg {
   width: 30px;
   height: 30px;
 
@@ -1039,19 +1047,19 @@
 }
 
 /* 在线 / 连接中旋转 */
-.at-status-card.is-online .at-status-icon svg,
-.at-status-card.is-connecting .at-status-icon svg {
+.mt5700-status-card.is-online .mt5700-status-icon svg,
+.mt5700-status-card.is-connecting .mt5700-status-icon svg {
   animation: at-spin 1.8s linear infinite;
 }
 
 /* 连接中稍微快一点 */
-.at-status-card.is-connecting .at-status-icon svg {
+.mt5700-status-card.is-connecting .mt5700-status-icon svg {
   animation-duration: 1.1s;
 }
 
 /* 离线 / 未知不旋转 */
-.at-status-card.is-offline .at-status-icon svg,
-.at-status-card.is-unknown .at-status-icon svg {
+.mt5700-status-card.is-offline .mt5700-status-icon svg,
+.mt5700-status-card.is-unknown .mt5700-status-icon svg {
   animation: none;
 }
 
@@ -1061,12 +1069,12 @@
 }
 
 /* 主信息 */
-.at-status-main {
+.mt5700-status-main {
   min-width: 0;
   flex: 1;
 }
 
-.at-status-title {
+.mt5700-status-title {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1077,10 +1085,10 @@
   line-height: 1.4;
   font-weight: 700;
 
-  color: var(--at-text);
+  color: var(--mt5700-text);
 }
 
-.at-status-dot {
+.mt5700-status-dot {
   width: 8px;
   height: 8px;
 
@@ -1088,12 +1096,12 @@
 
   border-radius: 50%;
 
-  background: var(--at-color);
+  background: var(--mt5700-status-color);
 
   box-shadow:
     0 0 0 4px color-mix(
       in srgb,
-      var(--at-color) 12%,
+      var(--mt5700-status-color) 12%,
       transparent
     );
 
@@ -1101,7 +1109,7 @@
 }
 
 /* 在线状态点呼吸 */
-.is-online .at-status-dot {
+.is-online .mt5700-status-dot {
   animation: at-pulse 2s ease-in-out infinite;
 }
 
@@ -1110,13 +1118,13 @@
   50% { opacity: .45; }
 }
 
-.at-status-description {
+.mt5700-status-description {
   margin-top: 5px;
 
   font-size: 12px;
   line-height: 1.5;
 
-  color: var(--at-muted);
+  color: var(--mt5700-status-muted);
 
   white-space: nowrap;
   overflow: hidden;
@@ -1124,7 +1132,7 @@
 }
 
 /* RPC 地址 */
-.at-status-rpc {
+.mt5700-status-rpc {
   flex: 0 0 auto;
 
   display: flex;
@@ -1146,22 +1154,22 @@
 
   font-size: 12px;
 
-  color: var(--at-muted);
+  color: var(--mt5700-status-muted);
 
   white-space: nowrap;
 }
 
-.at-status-rpc-label {
+.mt5700-status-rpc-label {
   opacity: .72;
 }
 
-.at-status-rpc-value {
-  color: var(--at-text);
+.mt5700-status-rpc-value {
+  color: var(--mt5700-text);
   font-weight: 600;
 }
 
 /* 标题文案过长时收省略号，不把标题行挤歪（固定尺寸区域，不按内容撑开） */
-.at-status-text {
+.mt5700-status-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1170,26 +1178,27 @@
 
 /* SIM 芯片告警态。JS 侧 renderConnectionBar 会 toggle('is-warn', sim.warn)，
    早先 CSS 缺这条规则 ⇒ 状态类挂上了却没有样式，告警永远看不见。 */
-.at-status-sim.is-warn {
+.mt5700-status-sim.is-warn {
   background: rgba(231, 166, 59, .16);
   border-color: rgba(231, 166, 59, .42);
 }
 
-.at-status-sim.is-warn .at-status-rpc-label,
-.at-status-sim.is-warn .at-status-rpc-value {
+.mt5700-status-sim.is-warn .mt5700-status-rpc-label,
+.mt5700-status-sim.is-warn .mt5700-status-rpc-value {
   color: #a8681b;
 }
 
 /* 状态配色 */
-.at-status-card.is-online { --at-color: #35b879; }
-.at-status-card.is-connecting { --at-color: #e7a63b; }
-.at-status-card.is-offline { --at-color: #e45d5d; }
-.at-status-card.is-unknown { --at-color: #8a938e; }
+/* 状态配色一律引用全局令牌：和徽章 / 仪表 / 图表里同一个「成功」是同一个绿 */
+.mt5700-status-card.is-online { --mt5700-status-color: var(--mt5700-success); }
+.mt5700-status-card.is-connecting { --mt5700-status-color: var(--mt5700-warning); }
+.mt5700-status-card.is-offline { --mt5700-status-color: var(--mt5700-danger); }
+.mt5700-status-card.is-unknown { --mt5700-status-color: var(--mt5700-text-muted); }
 
 /* 手机端 */
 @media (max-width: 600px) {
 
-  .at-status-card {
+  .mt5700-status-card {
     gap: 13px;
 
     padding: 15px 16px;
@@ -1197,7 +1206,7 @@
     border-radius: 17px;
   }
 
-  .at-status-icon {
+  .mt5700-status-icon {
     width: 44px;
     height: 44px;
 
@@ -1206,26 +1215,26 @@
     border-radius: 13px;
   }
 
-  .at-status-icon svg {
+  .mt5700-status-icon svg {
     width: 25px;
     height: 25px;
   }
 
-  .at-status-title {
+  .mt5700-status-title {
     font-size: 14px;
   }
 
-  .at-status-description {
+  .mt5700-status-description {
     font-size: 11px;
   }
 
-  .at-status-rpc {
+  .mt5700-status-rpc {
     padding: 7px 9px;
 
     font-size: 10px;
   }
 
-  .at-status-rpc-label {
+  .mt5700-status-rpc-label {
     display: none;
   }
 }
@@ -1233,11 +1242,11 @@
 /* 很窄的手机 */
 @media (max-width: 430px) {
 
-  .at-status-card {
+  .mt5700-status-card {
     gap: 11px;
   }
 
-  .at-status-rpc {
+  .mt5700-status-rpc {
     display: none;
   }
 }
@@ -1245,33 +1254,33 @@
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
 
-  .at-status-card {
-    --at-bg: rgba(30, 37, 34, .76);
-    --at-border: rgba(255,255,255,.07);
-    --at-text: #eaf2ed;
-    --at-muted: #87938d;
+  .mt5700-status-card {
+    /* 暗色下只改次级灰度；底色/描边/正文跟随 --mt5700-card-bg / --mt5700-border /
+       --mt5700-text 的暗色值（原来自带的是偏绿的 rgba(30,37,34)，和别的卡片发青的
+       rgba(32,38,54) 放一起明显不同色） */
+    --mt5700-status-muted: #87938d;
 
     box-shadow:
       0 12px 40px rgba(0,0,0,.24),
       inset 0 1px 0 rgba(255,255,255,.035);
   }
 
-  .at-status-rpc {
+  .mt5700-status-rpc {
     background: rgba(255,255,255,.035);
     border-color: rgba(255,255,255,.06);
   }
 
-  .at-status-rpc-value {
-    color: var(--at-text);
+  .mt5700-status-rpc-value {
+    color: var(--mt5700-text);
   }
 
-  .at-status-sim.is-warn {
+  .mt5700-status-sim.is-warn {
     background: rgba(231, 166, 59, .12);
     border-color: rgba(231, 166, 59, .34);
   }
 
-  .at-status-sim.is-warn .at-status-rpc-label,
-  .at-status-sim.is-warn .at-status-rpc-value {
+  .mt5700-status-sim.is-warn .mt5700-status-rpc-label,
+  .mt5700-status-sim.is-warn .mt5700-status-rpc-value {
     color: #f0b45c;
   }
 }
@@ -1712,7 +1721,10 @@
   background: var(--mt5700-glass-bg);
   border: 1px solid var(--mt5700-border-subtle);
   color: var(--mt5700-text-muted);
-  transition: all var(--mt5700-transition-base);
+  transition:
+    background-color var(--mt5700-transition-base),
+    border-color var(--mt5700-transition-base),
+    color var(--mt5700-transition-base);
 }
 
 .mt5700-step-done {
@@ -1883,7 +1895,7 @@
   .mt5700-chart { height: 140px; }
   .mt5700-btn-group { width: 100%; }
   .mt5700-btn-group .mt5700-btn { flex: 1; }
-  .at-status-card { flex-direction: row; flex-wrap: wrap; }
+  .mt5700-status-card { flex-direction: row; flex-wrap: wrap; }
   .mt5700-modal { max-width: 100%; }
 }
 
@@ -1899,8 +1911,8 @@
   .mt5700-btn {
     transition: none;
   }
-  .at-status-icon svg,
-  .at-status-dot {
+  .mt5700-status-icon svg,
+  .mt5700-status-dot {
     animation: none !important;
     transition: none;
   }
@@ -1915,46 +1927,25 @@
 
 /* ---------- 面板 ---------- */
 
-/* ---------- 字段 ---------- */
-.at-field { display: flex; align-items: flex-start; margin-bottom: 10px; }
-.at-field-label { flex: 0 0 160px; padding-top: 6px; font-weight: 500; color: #333; }
-.at-field-control { flex: 1 1 auto; }
-/* 输入控件覆盖层：表单控件保留了 cbi-input-* 类名，部分视图（dial.js 等）按类名查找控件，
-   不能改类名；此处以 .at-field-control 作用域统一覆盖主题对 input/select 的默认外观，
-   保证视觉由本文件决定：浅色底、细边框、圆角、蓝色聚焦环。 */
-.at-field-control .cbi-input-text,
-.at-field-control .cbi-input-select,
-.at-field-control input[type="text"],
-.at-field-control input[type="number"],
-.at-field-control input[type="password"],
-.at-field-control select {
-	width: 100%;
-	max-width: 420px;
-	box-sizing: border-box;
-	height: 32px;
-	padding: 0 10px;
-	border: 1px solid #d0d5dd;
-	border-radius: 6px;
-	background: #fff;
-	color: #222;
-	font-size: 13px;
-	line-height: normal;
-	box-shadow: none;
-	transition: border-color .15s, box-shadow .15s;
+/* ---------- 字段（弹窗表单行） ----------
+   输入控件一律用 .mt5700-input（597 行那套令牌实现），不再叠 LuCI 主题的 cbi-input-*。
+   旧实现给每个控件同时挂 at-field-control + cbi-input-*，靠一层作用域覆盖去
+   "盖住"主题外观 —— 换主题就漏，且与 .mt5700-input 的圆角/内距是两套数。 */
+.mt5700-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mt5700-space-sm);
+  margin-bottom: var(--mt5700-space-sm);
 }
-.at-field-control .cbi-input-text:focus,
-.at-field-control .cbi-input-select:focus,
-.at-field-control input[type="text"]:focus,
-.at-field-control input[type="number"]:focus,
-.at-field-control input[type="password"]:focus,
-.at-field-control select:focus {
-	border-color: #1668dc;
-	box-shadow: 0 0 0 3px rgba(22, 104, 220, .12);
-	outline: none;
+/* 与 .mt5700-label 并用：基类给字号/字重，这里只负责行内定宽与垂直对齐 */
+.mt5700-field-label {
+  flex: 0 0 160px;
+  margin-bottom: 0;
+  padding-top: 11px;
+  color: var(--mt5700-text-secondary);
 }
-/* 复选/开关：保持原尺寸，仅统一主题强调色 */
-
-.at-field-hint { color: #999; font-size: 12px; margin-top: 3px; }
+.mt5700-field-control { flex: 1 1 auto; min-width: 0; }
+.mt5700-field-control .mt5700-input { max-width: 420px; }
 
 /* ---------- 键值表 ---------- */
 
@@ -1964,71 +1955,11 @@
 
 /* ---------- 标签 ---------- */
 
-/* ---------- 按钮 ---------- */
-.at-btn {
-	display: inline-block;
-	padding: 5px 14px;
-	border-radius: 6px;
-	border: 1px solid #ccc;
-	background: #f7f8fa;
-	color: #333;
-	font-size: 13px;
-	cursor: pointer;
-	line-height: 20px;
-	transition: background .15s, border-color .15s;
-}
-.at-btn:hover { background: #fff; border-color: #aaa; }
-.at-btn:disabled { opacity: .55; cursor: not-allowed; }
-.at-btn-primary { background: #1668dc; border-color: #1668dc; color: #fff; }
-.at-btn-primary:hover { background: #1f76ee; border-color: #1f76ee; color: #fff; }
-.at-btn-danger { background: #e5484d; border-color: #e5484d; color: #fff; }
-.at-btn-danger:hover { background: #f05a5f; border-color: #f05a5f; color: #fff; }
-.at-btn-action { background: #f2f4f7; border-color: #d0d5dd; }
-.at-btn-neutral { background: #f7f8fa; }
-
-/* ---------- Toast ---------- */
-.at-toast {
-	position: fixed;
-	top: 70px;
-	left: 50%;
-	transform: translateX(-50%);
-	z-index: 10000;
-	padding: 10px 22px;
-	border-radius: 8px;
-	color: #fff;
-	font-size: 14px;
-	box-shadow: 0 4px 16px rgba(0,0,0,.18);
-	opacity: 1;
-	transition: opacity .4s;
-	max-width: 80vw;
-}
-
-/* ---------- 弹窗 ---------- */
-.at-modal-mask {
-	position: fixed;
-	inset: 0;
-	background: rgba(0,0,0,.45);
-	z-index: 9999;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-}
-.at-modal {
-	background: #fff;
-	border-radius: 10px;
-	width: 90%;
-	max-width: 420px;
-	max-height: 85vh;
-	overflow-y: auto;
-	padding: 18px 20px;
-	box-shadow: 0 10px 40px rgba(0,0,0,.25);
-}
-.at-modal-wide { max-width: 640px; }
-.at-modal-title { margin: 0 0 12px; font-size: 16px; }
-
-.at-modal-body { }
-.at-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.at-modal .at-field { margin-bottom: 10px; }
+/* ---------- 按钮 / Toast / 弹窗 ----------
+   旧 WebUI 迁移期的 at-btn-* / at-toast / at-modal-* 三套已全部下线，全站只留
+   .mt5700-btn+变体（441 行）、.mt5700-toast（1339 行）、.mt5700-modal*（1282 行）。
+   那几套旧规则用的是硬编码 #1668dc / #ccc，与令牌体系是两套配色；元素同时挂
+   新旧两类时谁生效取决于样式表层叠顺序，换主题就变样。 */
 
 /* ---------- 连接状态条 ---------- */
 
@@ -2117,25 +2048,28 @@
 /* ---------- 网络拒绝（REJINFO） ---------- */
 
 /* ---------- 自动刷新 ---------- */
-.at-autorefresh { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font-size: 13px; color: #555; }
-.at-autorefresh-label { color: #666; }
+.mt5700-autorefresh {
+  display: flex;
+  align-items: center;
+  gap: var(--mt5700-space-sm);
+  margin: 0;
+  font-size: var(--mt5700-font-size-sm);
+  color: var(--mt5700-text-secondary);
+}
+.mt5700-autorefresh-label { color: var(--mt5700-text-secondary); }
+.mt5700-autorefresh-interval { width: 110px; }
+.mt5700-autorefresh-custom { width: 72px; }
 
 /* ---------- Spinner ---------- */
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 768px) {
-	.at-field { flex-direction: column; }
-	.at-field-label { flex: none; padding-top: 0; margin-bottom: 4px; }
-	
-	
-	
-	
-	
-	.at-btn { width: 100%; text-align: center; }
-	.at-modal-actions { flex-direction: column; }
-	.at-modal-actions .at-btn { width: 100%; }
-	/* 表格在窄屏下改为横向滚动，避免挤压列宽 */
-	
+	.mt5700-field { flex-direction: column; gap: var(--mt5700-space-xs); }
+	.mt5700-field-label { flex: none; padding-top: 0; }
+	.mt5700-field-control .mt5700-input { max-width: none; }
+	/* 弹窗按钮窄屏竖排撑满：两个小按钮挤在一角时手指很难点准 */
+	.mt5700-modal-footer { flex-direction: column-reverse; }
+	.mt5700-modal-footer .mt5700-btn { width: 100%; }
 }
 
 /* ==========================================================================
@@ -2146,7 +2080,7 @@
      - .mt5700-cards        网络状态页中部双列卡区（连接状态 | SIM 与设备）
      - .mt5700-carrier-*    载波卡头部的主小区身份行与聚合状态徽章
      - .mt5700-toolbar      卡片内小工具条（如 SIM 卡「本机号码备注」）
-     - .at-autorefresh      自动刷新控件的 label 布局
+     - .mt5700-autorefresh  自动刷新控件的 label 布局
    ========================================================================== */
 
 /* 双列卡区：宽屏两列、窄屏自动回单列（与上游快照 pv-grid2 等价） */
@@ -2195,7 +2129,7 @@
 }
 
 /* 自动刷新控件 */
-.at-autorefresh label {
+.mt5700-autorefresh label {
   display: inline-flex;
   align-items: center;
   gap: var(--mt5700-space-xs);
@@ -2833,7 +2767,7 @@
   }
 
   
-  .at-status-card.is-online .at-status-dot,
+  .mt5700-status-card.is-online .mt5700-status-dot,
   .mt5700-gauge-bar {
     animation: none !important;
     transition: none !important;

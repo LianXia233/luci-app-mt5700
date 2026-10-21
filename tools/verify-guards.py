@@ -8,6 +8,8 @@
 用法：python tools/verify-guards.py
 新增守卫时应在上面的 MUTATIONS 里补一条「故意违反」样例。
 """
+import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -293,40 +295,94 @@ NODE = _resolve_node()
 # `mt5700.js` 的 '重新尝试' 被留成 '再来一次'，之后连续两轮把所有测试都
 # 报成"全部通过"，实际那两条断言一直在红。
 #
-# 做法：开跑前把 ORIG 备份到 .workbuddy/tmp/verify-guards.bak/（恢复用的
-# 唯一权威来源，和磁盘当前状态无关）；正常收尾时删掉。启动时发现备份还在
-# ＝ 上一轮不正常，先按备份还原再继续。
+# 做法：开跑前把每个目标的 sha256 写进 .workbuddy/tmp/verify-guards.bak/
+# manifest.json，正常收尾时删掉。启动时发现清单还在 ⇒ 上一轮不正常，
+# **报警并中止**（详见 _check_stale 里那段事故记录）。
 # ---------------------------------------------------------------------------
 BAK_DIR = ROOT / ".workbuddy" / "tmp" / "verify-guards.bak"
+BAK_MANIFEST = BAK_DIR / "manifest.json"
 
 
 def _save_backups():
+    """只落一份哈希清单，**不复制文件内容**。
+
+    ★ 2026-10-21 两处改动：
+      ① 崩溃恢复不再自动还原（见 _check_stale），于是"文件内容备份"失去了
+         唯一的用途 —— 还原走内存里的 ORIG，报告差异只需哈希。
+      ② 原来要写 65 个 .bak，销账时一次删 65 个文件会撞上外层的批量删除
+         保护（阈值 50），结果是 18 个删不掉、目录留着，下一轮又被误判成
+         "上一轮没结束"。清单只有一个文件，销账不可能失败。
+    """
     BAK_DIR.mkdir(parents=True, exist_ok=True)
-    for k, blob in ORIG.items():
-        (BAK_DIR / (k + ".bak")).write_bytes(blob)
+    manifest = {k: hashlib.sha256(blob).hexdigest() for k, blob in ORIG.items()}
+    BAK_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=1),
+                            encoding="utf-8")
 
 
 def _clear_backups():
-    shutil.rmtree(BAK_DIR, ignore_errors=True)
+    for f in (BAK_MANIFEST,):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    try:
+        BAK_DIR.rmdir()
+    except OSError:
+        pass
 
 
-def _recover_stale():
-    """若存在上一轮的备份，先还原。返回是否发生了恢复。"""
+def _check_stale():
+    """上一轮留下的备份：只**报告**，绝不自动写回目标文件。
+
+    ★ 这里曾经是"发现备份还在就按备份还原"，2026-10-21 因此真实丢过改动：
+      上一轮跑测试被 SIGTERM 打断 → 备份留在盘上；此后又改了一批源码；
+      下一次启动直接把一小时的工作覆盖成备份里的旧内容，而且**一声不响**，
+      因为那些文件本来就"有改动"，看起来像正常状态。
+
+      自动还原的根本问题：它拿"存在备份"推断"磁盘上是残留变异"，但同一个
+      现象也完全可能是"用户在新一轮工作里改了这些文件"。这两种情况从磁盘
+      状态上无法区分，所以只能交给人判断。
+
+    现在的语义：备份还在 ⇒ 报警并中止。要么确认工作区没问题后手工删掉
+    .workbuddy/tmp/verify-guards.bak，要么用 git 还原被变异的那几个文件。
+    """
     if not BAK_DIR.is_dir():
-        return False
-    restored = []
+        return
+    try:
+        manifest = json.loads(BAK_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = {}
+    diff = []
     for k, path in TARGETS.items():
-        b = BAK_DIR / (k + ".bak")
-        if b.exists():
-            path.write_bytes(b.read_bytes())
-            restored.append(path.name)
-    _clear_backups()
-    if restored:
-        print("⚠ 检测到上一轮未正常结束，已按备份还原：" + "、".join(sorted(restored)))
-    return bool(restored)
+        want = manifest.get(k)
+        if want is None:
+            continue
+        if hashlib.sha256(path.read_bytes()).hexdigest() != want:
+            diff.append(path.name)
+    print("")
+    print("=" * 72)
+    print("⛔ 发现上一轮 verify-guards 留下的备份目录：")
+    print("   " + str(BAK_DIR))
+    print("   这说明上一轮没有正常收尾（被强杀 / 崩溃），工作区可能停在被变异的中间态。")
+    if diff:
+        print("   与备份内容不一致的文件（很可能就是被变异的）：")
+        for n in sorted(diff):
+            print("     · " + n)
+    else:
+        print("   磁盘内容与备份逐字节一致 —— 上一轮没来得及变异，属于干净状态。")
+    print("")
+    print("   本工具**不会**自动还原（那会把新一轮的改动覆盖成旧内容）。请自行确认：")
+    print("     git diff <上面列出的文件>     # 是不是残留变异")
+    print("     git checkout -- <文件>        # 确认后还原")
+    print("   确认工作区干净后，删掉该目录再重跑：")
+    print("     rm -rf .workbuddy/tmp/verify-guards.bak")
+    print("=" * 72)
+    return 2
 
 
-_recover_stale()
+_rc = _check_stale()
+if _rc:
+    raise SystemExit(_rc)
 
 ORIG = {k: v.read_bytes() for k, v in TARGETS.items()}
 

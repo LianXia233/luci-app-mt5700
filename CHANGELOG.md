@@ -5,6 +5,89 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.29] - 2026-10-21
+
+### 移除：旧 `.at-*` 命名空间整条下线
+
+上一个版本把「永远匹配不到元素」的规则删掉了，但**还在用的** 24 个 `.at-*`
+类仍在，于是同一份样式表里长期并存两套命名空间与两套配色：
+
+| | 旧 `.at-*` | 现役 `.mt5700-*` |
+|---|---|---|
+| 主色 | `#1668dc` | `--mt5700-accent` `#3b82f6` |
+| 边框 | `#ccc` / `#d0d5dd` | `--mt5700-border-subtle` |
+| 圆角 | 6px | 8 / 12 / 16 / 20px |
+
+迁移到一套之后：
+
+- **按钮** `ui.js` 的 `api.button` 直接转交 `Mt5700.button`，全站只剩
+  `.mt5700-btn` + 变体。原先把调用方传的 `cbi-button-*` **原样留在元素上**，
+  同一个按钮同时被本文件与 LuCI 主题命中，外观取决于两份样式表的层叠顺序
+  —— 换主题就变样，Argon 下两边 padding/圆角互相打架。
+- **弹窗** `at-modal*` → `mt5700-modal*`（复用已有的 mask/title/body/footer，
+  `at-modal-actions` 由 `mt5700-modal-footer` 取代）。
+- **字段** `at-field*` → `mt5700-field*`；输入控件改用 `.mt5700-input`，
+  不再叠主题的 `cbi-input-*`。label/hint 复用已有 `.mt5700-label` / `.mt5700-hint`。
+- **状态卡** `at-status-*` → `mt5700-status-*`，局部变量 `--at-*` → `--mt5700-status-*`。
+- **自动刷新** `at-autorefresh*` → `mt5700-autorefresh*`，两处内联 `style.width` 收进类。
+
+### 美化：状态卡不再是自成一套的色板
+
+`.mt5700-status-card` 原先自带 `--at-bg` / `--at-border` / `--at-text` 与一组
+状态色（`#35b879` 绿、`#e7a63b` 琥珀、`#e45d5d` 红、`#8a938e` 灰）。同一个
+「成功」在徽章/仪表里是 `#10b981`，在状态卡里是 `#35b879`，并排看是两个绿；
+底色 0.62 alpha 与其它卡片的 0.82 也不同。现在只保留「状态色」和「次级灰度」
+两个专属变量，其余全部接回全局令牌；四态颜色改指
+`--mt5700-success` / `--mt5700-warning` / `--mt5700-danger` / `--mt5700-text-muted`。
+
+### 性能
+
+- `transition: all` 清零（2 处：`.mt5700-btn` / `.mt5700-step`）—— 改成显式
+  属性表。`all` 会让引擎为每个属性建过渡，将来谁给按钮加个 padding/width 变化，
+  就变成布局属性参与动画，每帧重排重绘。
+- `.mt5700-status-card` 把写死的 `blur(18px)` 改回 `var(--mt5700-glass)`，
+  以后调模糊半径只需改一处。
+- 删掉 4 个空壳依赖：`logs.js` / `service.js` / `voice_call.js` / `ui.js` 都
+  `require at-webserver/parse` 却一次都没用 `Parse`（94KB 的模块）。
+
+### 新增守卫（防止老毛病长回来）
+
+`tests/ui-contract.test.js` 末尾加了一段全量类名对齐扫描：按 `class` /
+`className` 字面量、`className` 赋值、`classList.add|remove|toggle|contains`、
+`+ ' mt5700-xxx'` 后缀拼接这几个「真会落到元素上」的位置提取类名，逐个断言
+CSS 里有定义。历史上真出过多次「改了类名、样式没跟上」（`.at-sms-del`、
+`is-warn` 无配对规则、两套命名空间只改一边），这一条把整类问题一次兜住。
+
+同时钉住三条反向约束：JS 不许再产出 `at-*`、CSS 不许再定义 `.at-*`、
+按钮卡口不许再把 `cbi-button-*` 落到 DOM 上。四条都做了「故意违反」变异
+验证，确认会红。
+
+### 工具链修复：`tools/verify-guards.py` 的崩溃恢复会静默覆盖改动
+
+它就地改仓库源码做变异，为防「上一轮被强杀 → 变异留在工作区 → 下一轮把残留当
+基线」，原先的语义是「启动时发现备份还在 ⇒ 按备份还原」。**这个推断不成立**：
+备份还在的成因有两种 —— ① 上一轮没跑完；② 用户在新一轮里改了这些文件。两者从
+磁盘状态上无法区分。本次真实踩中 ②：上一轮被 SIGTERM，备份留着，之后又改了一批
+源码，下一次启动就把一小时的工作覆盖成备份里的旧内容，而且**一声不响**
+（那些文件本来就"有改动"，`git status` 看着完全正常）。
+
+- 恢复逻辑改为**只报告不落笔**：点名「当前内容 ≠ 备份」的文件，`exit 2` 中止，
+  由人用 `git diff` / `git checkout` 判断。
+- 备份从「复制 65 个文件」改为**只存 sha256 清单**。原因之二：销账时一次删 65 个
+  文件会撞上外层的批量删除保护（阈值 50），结果 18 个删不掉、目录留着，下一轮又
+  被误判成"上一轮没结束"。清单只有一个文件，销账不会失败。
+- 端到端验证：伪造一份残缺清单 → `exit=2`、目标文件哈希不变、清单不被擅自删除、
+  正确点名被改动的文件。
+
+### 验证
+
+- `tests/run-all.js`：83 个文件全部通过（ui-contract 280 项）
+- `tools/verify-guards.py`：180 条变异全部被断言检出，还原逐字节一致
+- `tools/css-class-audit.py`：MISSING 0 / DEAD 0 / 状态类配对无误
+- `tools/css-prune.py` 复跑 0 条（幂等）
+- `tools/check-line-endings.py`：全部 LF
+- `MT5700_CSS_VERSION` 5.8.0 → 5.9.0
+
 ## [2.4.28] - 2026-10-21
 
 ### 性能 / 体积：样式表删掉 20.8% 的死规则

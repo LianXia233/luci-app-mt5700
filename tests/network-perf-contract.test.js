@@ -51,11 +51,11 @@ ok('★ 清零按钮挂在速率卡头部容器 rateExtra 上',
 
 ok('★ 卡头容器用 .mt5700-toolbar（零新增样式，且窄屏会换行）',
 	/var rateBar = E\('div', \{ 'class': 'mt5700-toolbar' \}\)/.test(nsCode));
-/* .at-autorefresh 是 Ui.autoRefresh 的私有类（ui.js），自带 margin 6/10px 与
+/* .mt5700-autorefresh 是 Ui.autoRefresh 的私有类（ui.js），自带 margin 6/10px 与
    硬编码 #555（无深色变体）、且没有 flex-wrap —— 借来当卡头容器会顶高卡头、
    暗色下发灰、窄屏溢出。防回退钉子打在这里。 */
-ok('★ 卡头容器不再借用 .at-autorefresh（私有类，带硬编码色与外边距）',
-	!/var rateBar = E\('div', \{ 'class': 'at-autorefresh' \}\)/.test(nsCode));
+ok('★ 卡头容器不再借用 .mt5700-autorefresh（私有类，带硬编码色与外边距）',
+	!/var rateBar = E\('div', \{ 'class': 'mt5700-autorefresh' \}\)/.test(nsCode));
 
 ok('★ 连接工具里不再 append 清零块',
 	!/toolsBody\.appendChild\(buildFlowClearBlock\(\)\)/.test(nsCode));

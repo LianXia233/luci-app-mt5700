@@ -19,7 +19,7 @@
  * 后，设备上 CSS 内容已经是新的，用户浏览器却还在用旧副本 —— 代码改了界面没变。
  * 守卫：tests/css-cachebust-contract.test.js（mt5700.css 内容指纹一变就必须改这里）。
  */
-var MT5700_CSS_VERSION = '5.7.0';
+var MT5700_CSS_VERSION = '5.9.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -377,15 +377,15 @@ var Mt5700 = (function () {
 	};
 
 	/* ================= 连接状态卡片 ================= */
-	// 独立 at-status-* 命名空间，样式自包含于 mt5700.css，不依赖 LuCI 主题
+	// 独立 mt5700-status-* 命名空间，样式自包含于 mt5700.css，不依赖 LuCI 主题
 
 	api.renderConnectionBar = function (container) {
 		var cl = AtWs.client;
 
-		var card = E('div', { 'class': 'at-status-card is-connecting', 'id': 'at-service-status' });
+		var card = E('div', { 'class': 'mt5700-status-card is-connecting', 'id': 'at-service-status' });
 
 		// SVG 状态图标（在线/连接中旋转，离线/未知静止）
-		var icon = E('div', { 'class': 'at-status-icon' });
+		var icon = E('div', { 'class': 'mt5700-status-icon' });
 		var svg = svgEl('svg', { viewBox: '0 0 32 32', 'aria-hidden': 'true' });
 		svg.appendChild(svgEl('circle', { cx: 16, cy: 16, r: 11, 'stroke-dasharray': '5 3' }));
 		svg.appendChild(svgEl('circle', { cx: 16, cy: 16, r: 4 }));
@@ -394,26 +394,26 @@ var Mt5700 = (function () {
 		icon.appendChild(svg);
 
 		// 主信息：标题（状态点 + 文本）与描述
-		var main = E('div', { 'class': 'at-status-main' });
-		var title = E('div', { 'class': 'at-status-title' });
-		var dot = E('span', { 'class': 'at-status-dot' });
-		var text = E('span', { 'class': 'at-status-text' }, '正在连接 AT 服务');
+		var main = E('div', { 'class': 'mt5700-status-main' });
+		var title = E('div', { 'class': 'mt5700-status-title' });
+		var dot = E('span', { 'class': 'mt5700-status-dot' });
+		var text = E('span', { 'class': 'mt5700-status-text' }, '正在连接 AT 服务');
 		title.appendChild(dot);
 		title.appendChild(text);
-		var desc = E('div', { 'class': 'at-status-description' }, '正在建立 AT 服务连接');
+		var desc = E('div', { 'class': 'mt5700-status-description' }, '正在建立 AT 服务连接');
 		main.appendChild(title);
 		main.appendChild(desc);
 
 		// RPC 地址芯片
-		var rpcBox = E('div', { 'class': 'at-status-rpc' });
-		rpcBox.appendChild(E('span', { 'class': 'at-status-rpc-label' }, 'RPC'));
-		var rpcValue = E('span', { 'class': 'at-status-rpc-value' }, '未连接');
+		var rpcBox = E('div', { 'class': 'mt5700-status-rpc' });
+		rpcBox.appendChild(E('span', { 'class': 'mt5700-status-rpc-label' }, 'RPC'));
+		var rpcValue = E('span', { 'class': 'mt5700-status-rpc-value' }, '未连接');
 		rpcBox.appendChild(rpcValue);
 
 		// SIM 卡状态芯片（AT^SIMSQ?）
-		var simBox = E('div', { 'class': 'at-status-rpc at-status-sim' });
-		simBox.appendChild(E('span', { 'class': 'at-status-rpc-label' }, 'SIM'));
-		var simValue = E('span', { 'class': 'at-status-rpc-value' }, '—');
+		var simBox = E('div', { 'class': 'mt5700-status-rpc mt5700-status-sim' });
+		simBox.appendChild(E('span', { 'class': 'mt5700-status-rpc-label' }, 'SIM'));
+		var simValue = E('span', { 'class': 'mt5700-status-rpc-value' }, '—');
 		simBox.appendChild(simValue);
 
 		card.appendChild(icon);

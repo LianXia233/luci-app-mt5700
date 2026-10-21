@@ -236,11 +236,11 @@ ok('徽章 variant 在 CSS 里有定义（否则落到无配色的基类）',
 /* ---------- 状态类必须与配对样式同进同退 ----------
  * 2026-10-21 发现的真实故障：mt5700.js 的 renderConnectionBar 里
  *   simBox.classList.toggle('is-warn', sim.warn)
- * 挂了很久，而 mt5700.css 从来没有 `.at-status-sim.is-warn` —— 状态类切了，
+ * 挂了很久，而 mt5700.css 从来没有 `.mt5700-status-sim.is-warn` —— 状态类切了，
  * 界面毫无变化。页面不报错、全部测试也是绿的，用户只看到"告警了但没反应"。
  *
  * ★ 断言必须**先取出规则块再判**。早先写成
- *   /\.at-status-text\s*\{[\s\S]*?min-width:\s*0;…/ —— 看起来对，实际
+ *   /\.mt5700-status-text\s*\{[\s\S]*?min-width:\s*0;…/ —— 看起来对，实际
  *   [\s\S]*? 能一路跳到后面别的规则里去匹配，把 min-width 从别处"借"过来，
  *   于是把本条 CSS 删干净测试照样绿（变异验证已证实）。
  */
@@ -252,18 +252,92 @@ function cssBlock(sel) {
 }
 ok('★ SIM 芯片告警态有配对样式（JS toggle is-warn，CSS 必须有规则）',
 	/simBox\.classList\.toggle\('is-warn'/.test(mt5700)
-	=== /\.at-status-sim\.is-warn\s*\{/.test(css));
-const warnBlock = cssBlock('.at-status-sim.is-warn');
+	=== /\.mt5700-status-sim\.is-warn\s*\{/.test(css));
+const warnBlock = cssBlock('.mt5700-status-sim.is-warn');
 ok('SIM 告警态同时改底色与描边（只改文字色几乎看不出来）',
 	warnBlock.indexOf('background:') > 0 && warnBlock.indexOf('border-color:') > 0,
 	'实际块：' + warnBlock);
 /* 标题行是固定尺寸行：文案再长也只能收略号，不许把标题挤歪/换行 */
-const stTextBlock = cssBlock('.at-status-text');
+const stTextBlock = cssBlock('.mt5700-status-text');
 ok('★ 状态标题文本收略号（min-width:0 + ellipsis + nowrap）',
 	stTextBlock.indexOf('min-width: 0;') > 0
 	&& stTextBlock.indexOf('text-overflow: ellipsis;') > 0
 	&& stTextBlock.indexOf('white-space: nowrap;') > 0,
 	'实际块：' + stTextBlock);
+
+/* ---------- 全量类名对齐：JS 挂的每个自有类，CSS 都必须有定义 ----------
+ * 这是把「改了类名、样式没跟上」这类故障一次性兜住的通用网。历史上真出过多次：
+ *   · .mt5700-sms-del 的样式写成了 .at-sms-del → 删除按钮一直没有样式
+ *   · simBox 挂了 is-warn 却没有配对规则 → 告警永远看不见
+ *   · v2.4.29 之前 at-* 与 mt5700-* 两套命名空间并存，容易只改一边
+ *
+ * 口径（与 tools/css_scan.py 的开发期扫描一致，此处是 CI 期守卫）：
+ *   只认「真会落到元素上」的位置 —— class/className 字面量、className 赋值、
+ *   classList.add/remove/toggle/contains，以及 `+ ' mt5700-xxx'` 这种后缀拼接。
+ *   注释里的类名不算：早先把注释里的通配写法当代码，导致 mt5700- 整个前缀
+ *   被当成"在用"，判断全废。
+ * 动态族（`'mt5700-btn mt5700-btn-' + variant`）以 `-` 结尾，单独收进前缀集合，
+ * 成员由上面几组变体断言逐个钉住。
+ */
+const RES_DIR = path.join(ROOT, 'htdocs', 'luci-static', 'resources');
+function walkJs(dir, out) {
+	for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+		const p = path.join(dir, e.name);
+		if (e.isDirectory()) walkJs(p, out);
+		else if (e.name.endsWith('.js') && e.name !== 'jsqr.js') out.push(p);
+	}
+	return out;
+}
+const CLASS_POS_RES = [
+	/['"]?class['"]?\s*:\s*'([^']*)'/g,
+	/['"]?className['"]?\s*:\s*'([^']*)'/g,
+	/className\s*=\s*'([^']*)'/g,
+	/classList\.(?:add|remove|toggle|contains)\(\s*'([^']+)'/g,
+	/\+\s*'\s((?:mt5700|at)-[A-Za-z0-9_-]+)'/g,
+	/\+=\s*'\s((?:mt5700|at)-[A-Za-z0-9_-]+)'/g
+];
+const cssNoComment = css.replace(/\/\*[\s\S]*?\*\//g, '');
+const cssDefined = new Set();
+for (const m of cssNoComment.matchAll(/\.([A-Za-z0-9_-]+)/g)) cssDefined.add(m[1]);
+
+const jsClasses = new Map();     // 类名 → 首次出现的文件（便于定位）
+const dynamicPrefixes = new Set();
+for (const f of walkJs(RES_DIR, [])) {
+	const src = fs.readFileSync(f, 'utf8');
+	for (const re of CLASS_POS_RES) {
+		for (const m of src.matchAll(re)) {
+			for (const tok of m[1].split(/\s+/)) {
+				if (!/^(mt5700|at)-/.test(tok)) continue;
+				if (tok.endsWith('-')) { dynamicPrefixes.add(tok); continue; }
+				if (!jsClasses.has(tok)) jsClasses.set(tok, path.relative(ROOT, f));
+			}
+		}
+	}
+}
+
+ok('★ 扫描到了预期量级的自有类名（扫描器本身没失效）',
+	jsClasses.size >= 150,
+	'只扫到 ' + jsClasses.size + ' 个，扫描正则可能已经匹配不上写法了');
+
+const undefinedClasses = [...jsClasses].filter(([c]) => !cssDefined.has(c));
+ok('★ JS 挂的每个自有类 CSS 都有定义（缺一个＝样式静默失效）',
+	undefinedClasses.length === 0,
+	undefinedClasses.map(([c, f]) => c + ' ← ' + f).join('; '));
+
+/* 旧 at-* 命名空间已在 v2.4.29 全量下线：JS 与 CSS 都不许再出现，
+   否则「两套命名空间并存、只改一边」的老毛病会重新长回来。 */
+const atLeftInJs = [...jsClasses.keys()].filter((c) => c.startsWith('at-'));
+ok('JS 不再产出 at-* 类名（旧命名空间已下线）',
+	atLeftInJs.length === 0, atLeftInJs.join(', '));
+ok('CSS 不再定义 at-* 类（旧命名空间已下线）',
+	!/\.at-[a-z]/.test(cssNoComment));
+
+/* 按钮卡口不许再把调用方传的 cbi-button-* 落到 DOM 上：
+   落到 DOM 就同时被主题 CSS 和本文件的按钮样式命中，外观取决于层叠顺序。 */
+const uiSrc = fs.readFileSync(path.join(RES_DIR, 'at-webserver', 'ui.js'), 'utf8');
+ok('★ ui.js 的按钮卡口不再输出 cbi-button-* 到元素上',
+	!/['"]class['"]\s*:\s*'[^']*cbi-button/.test(uiSrc)
+	&& /Mt5700\.button\(label, onClick, variant\)/.test(uiSrc));
 
 /* ---------- 汇总 ---------- */
 console.log('通过 ' + pass + ' 项，失败 ' + fails.length + ' 项');

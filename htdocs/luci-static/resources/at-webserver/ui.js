@@ -2,7 +2,6 @@
 'require baseclass';
 'require at-webserver/compat';
 'require at-webserver/rpc';
-'require at-webserver/parse';
 /* ★ 必须显式 require mt5700：本文件第 30 行 `var E = Mt5700.E;` 取的就是
    mt5700.js 的实现（经 api.E 导出）。此前缺这一行，Mt5700 未定义 → E 取不到，
    promptModal 每次调用都抛 `ReferenceError: E is not defined` ——
@@ -12,7 +11,7 @@
    cbi.js:135 另有一个全局 E（L.dom.create 转发），视图层 362 处裸 E(...) 用的是它。
    本文件**刻意**取 Mt5700.E 而不依赖全局，两套的行为差异见 mt5700.js:1131 的说明。） */
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, baseclass, Mt5700 */
+/* global L, AtWs, baseclass, Mt5700 */
 
 /**
  * LuCI 页面公共 UI 辅助。
@@ -33,19 +32,28 @@ var Ui = (function () {
 	   取一次赋给局部 E，下面所有 E(...) 调用写法不变，也不必再引入第二份实现。 */
 	var E = Mt5700.E;
 
-	// 所有按钮都经由此卡口创建。cls 接收视图传入的 cbi-button-* 变体，
-	// 通过映射附加 at-btn-* 系列类：外观完全由 mt5700.css 决定，不受 LuCI 主题影响。
+	/* 所有按钮都经由此卡口创建，而卡口直接转交 Mt5700.button —— 全站只有
+	   一套按钮实现（mt5700-btn + mt5700-btn-<variant>，样式来自设计变量）。
+
+	   ★ 旧实现把调用方传来的 cbi-button-* **原样保留**到元素上，于是同一个
+	     按钮身上同时挂着本文件自有的按钮类和 LuCI 主题自己的按钮类 —— 外观
+	     最后取决于两份样式表的层叠顺序，换个主题就变样，在 Argon 下更是两边
+	     的 padding/圆角互相打架。现在**只输出一套类**：cbi-button-* 仅作为
+	     「调用方意图」在下面的映射表里被读取，不再落到 DOM 上。 */
+	var BTN_VARIANT = {
+		'cbi-button-positive': 'primary',
+		'cbi-button-negative': 'danger',
+		'cbi-button-neutral': 'secondary',
+		'cbi-button-action': 'primary',
+		'cbi-button-reset': 'ghost'
+	};
+
 	api.button = function (label, cls, onClick) {
-		var map = {
-			'cbi-button-positive': 'at-btn-primary',
-			'cbi-button-negative': 'at-btn-danger',
-			'cbi-button-neutral': 'at-btn-neutral',
-			'cbi-button-action': 'at-btn-action'
-		};
-		var extra = (cls || '').split(/\s+/).map(function (c) { return map[c] || ''; }).join(' ');
-		var btn = E('button', { 'class': 'at-btn ' + extra + ' ' + (cls || '') }, label);
-		btn.addEventListener('click', onClick);
-		return btn;
+		var variant = 'secondary';
+		(cls || '').split(/\s+/).forEach(function (c) {
+			if (BTN_VARIANT[c]) variant = BTN_VARIANT[c];
+		});
+		return Mt5700.button(label, onClick, variant);
 	};
 
 	/*
@@ -62,20 +70,21 @@ var Ui = (function () {
 
 
 	api.promptModal = function (title, fields, onOk) {
-		var mask = E('div', { 'class': 'at-modal-mask' });
-		var box = E('div', { 'class': 'at-modal at-modal-wide' });
-		var h = E('h4', { 'class': 'at-modal-title' }, title);
-		var body = E('div', { 'class': 'at-modal-body' });
+		var mask = E('div', { 'class': 'mt5700-modal-mask' });
+		var box = E('div', { 'class': 'mt5700-modal mt5700-modal-wide' });
+		var head = E('div', { 'class': 'mt5700-modal-header' });
+		var h = E('div', { 'class': 'mt5700-modal-title' }, title);
+		var body = E('div', { 'class': 'mt5700-modal-body' });
 		var inputs = {};
 		for (var i = 0; i < fields.length; i++) {
 			var f = fields[i];
-			var row = E('div', { 'class': 'at-field' });
-			row.appendChild(E('div', { 'class': 'at-field-label' }, f.label));
-			var ctrl = E('div', { 'class': 'at-field-control' });
+			var row = E('div', { 'class': 'mt5700-field' });
+			row.appendChild(E('div', { 'class': 'mt5700-label mt5700-field-label' }, f.label));
+			var ctrl = E('div', { 'class': 'mt5700-field-control' });
 			var input;
 			if (f.type === 'select') {
 				input = document.createElement('select');
-				input.className = 'cbi-input-select';
+				input.className = 'mt5700-input mt5700-select';
 				for (var j = 0; j < f.options.length; j++) {
 					var opt = document.createElement('option');
 					opt.value = String(f.options[j].value);
@@ -86,17 +95,17 @@ var Ui = (function () {
 			} else {
 				input = document.createElement('input');
 				input.type = f.type === 'password' ? 'password' : 'text';
-				input.className = 'cbi-input-text';
+				input.className = 'mt5700-input';
 				if (f.value != null) input.value = String(f.value);
 				if (f.placeholder) input.placeholder = f.placeholder;
 			}
 			ctrl.appendChild(input);
-			if (f.hint) ctrl.appendChild(E('div', { 'class': 'at-field-hint' }, f.hint));
+			if (f.hint) ctrl.appendChild(E('div', { 'class': 'mt5700-hint' }, f.hint));
 			row.appendChild(ctrl);
 			body.appendChild(row);
 			inputs[f.key] = input;
 		}
-		var actions = E('div', { 'class': 'at-modal-actions' });
+		var actions = E('div', { 'class': 'mt5700-modal-footer' });
 		var cancel = api.button('取消', 'cbi-button-neutral', function () {
 			if (mask.parentNode) mask.parentNode.removeChild(mask);
 		});
@@ -108,7 +117,8 @@ var Ui = (function () {
 		});
 		actions.appendChild(cancel);
 		actions.appendChild(ok);
-		box.appendChild(h);
+		head.appendChild(h);
+		box.appendChild(head);
 		box.appendChild(body);
 		box.appendChild(actions);
 		mask.appendChild(box);
@@ -216,17 +226,16 @@ var Ui = (function () {
 
 	// 自动刷新开关 + 间隔（六档预设 + 自定义秒数）。返回 { el, setEnabled, setInterval, getInterval, isEnabled }
 	api.autoRefresh = function (onChange) {
-		var wrap = E('div', { 'class': 'at-autorefresh' });
+		var wrap = E('div', { 'class': 'mt5700-autorefresh' });
 		var enabled = true;
 		var interval = 5;
 		var chk = document.createElement('input');
 		chk.type = 'checkbox';
 		chk.checked = true;
-		var label = E('label', { 'class': 'at-autorefresh-label' }, '自动刷新 ');
+		var label = E('label', { 'class': 'mt5700-autorefresh-label' }, '自动刷新 ');
 		label.insertBefore(chk, label.firstChild);
 		var sel = document.createElement('select');
-		sel.className = 'cbi-input-select';
-		sel.style.width = '110px';
+		sel.className = 'mt5700-input mt5700-select mt5700-autorefresh-interval';
 		[3, 5, 10, 15, 30, 60].forEach(function (s) {
 			var opt = document.createElement('option');
 			opt.value = String(s);
@@ -244,11 +253,10 @@ var Ui = (function () {
 		   真值仍以 clampRefreshSec 为准（type=number 挡不住手敲的 0）。 */
 		var custom = document.createElement('input');
 		custom.type = 'number';
-		custom.className = 'cbi-input-text';
+		custom.className = 'mt5700-input mt5700-autorefresh-custom';
 		custom.min = String(AR_MIN_SEC);
 		custom.max = String(AR_MAX_SEC);
 		custom.step = '1';
-		custom.style.width = '72px';
 		custom.style.display = 'none';
 		custom.title = '自定义刷新间隔，' + AR_MIN_SEC + '~' + AR_MAX_SEC + ' 秒';
 

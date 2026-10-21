@@ -1,9 +1,8 @@
 'use strict';
 'require at-webserver/rpc';
-'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Ui, Mt5700 */
+/* global L, AtWs, Ui, Mt5700 */
 
 /**
  * 语音通话 - 通话管理台（拨号 / 接听 / 拒接 / 挂断 / DTMF / 记录）
