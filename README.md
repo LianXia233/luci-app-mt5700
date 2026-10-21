@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.24.5-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.25.0-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -225,11 +225,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-   ./<ARCH>-luci-app-mt5700-1.24.5-r1.apk \
+   ./<ARCH>-luci-app-mt5700-1.25.0-r1.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.24.5_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.25.0_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -474,6 +474,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 | 版本 | 主题 |
 |:--|:--|
+| [v1.25.0](docs/release-notes/v1.25.0.md) | 网络状态卡片重做：信号强度改为 SSB 波束矩阵（8 波束实测 RSRP、五档 + 无信号）、链路拓扑与 IPv6 信息格；拨号成功后下发默认 DNS（IPv4 每次、IPv6 仅实际拿到时）；服务配置页排版压缩 −34% |
 | [v1.24.5](docs/release-notes/v1.24.5.md) | 修复短信中心「显示发送成功但短信没发出去」（issue #19）：PDU 提交补 Ctrl+Z，两段式协议 + 假成功防护 |
 | [v1.24.4](docs/release-notes/v1.24.4.md) | LuCI Tab 菜单滚动位置保持 + 统一 SVG 图标；CI 不再向仓库写入构建日志 |
 | [v1.24.3](docs/release-notes/v1.24.3.md) | 修复 CI：中间态 commit 不再触发完整构建（陈旧提交自动跳过），远端代码已验证可编译 |
@@ -498,7 +499,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.24.5)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.25.0)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本（见上方功能矩阵）
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / parse.js / mt5700.js / ui.js / mt5700.css / tabmenu.js)
