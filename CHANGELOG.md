@@ -8,7 +8,7 @@
 
 ---
 
-## 未发布
+## v1.26.0 (2026-10-22)
 
 ### 短信模块深度重构：最高优先级调度、事务级互斥、无缓存实时语义
 
@@ -23,6 +23,8 @@
 - **test**：cargo check/clippy/test 全过 —— 233 passed, 0 failed（mock 模组 e2e 覆盖：优先级排序、事务不交叉、暂停/恢复、租约过期、实时数据非缓存、发送三档、不自动重发、重复点击去重、长短信分片顺序、并发串行、删除真实结果、取消不挂起）；新增/修改代码 clippy 0 warning（基线遗留 27 条未动）；前端 `sms-center-render` 57 断言重写全过，其余既有测试全过（cellular-icon-test 为基线既有失败与本次无关）。**遗留实机项**：真实模组 CMGS 提示符时序与分片节奏、+CMTI 端到端时延、长短信 60s 预算余量、短信功能开关后模组状态观察
 
 ### 升级 rustls-webpki，修复证书校验可能接受不受信任中间证书的问题（RUSTSEC-2026-0382）
+
+> 本节改动随 v1.26.0 一同发布。
 
 - **security(deps)**：`rustls-webpki` 0.103.15 → 0.103.16（`src/rust/Cargo.lock`）。公告指出 0.103.16 之前的版本在校验证书路径时，只要配置的信任锚允许，可能接受包含不受信任 emSign 中间公钥的路径（对应私钥已公开）；0.103.16 / 0.104.0-alpha.8 起拒绝这些公钥
 - **security(影响面)**：本项目两条出站 TLS 链路都经 rustls → rustls-webpki 做证书校验，属实际暴露面 —— `ureq`（HTTPS 调用 `https://api.bot.qq.com`，QQ 绑定与消息推送）与 `tokio-tungstenite`（`rustls-tls-webpki-roots`，QQ WebSocket 网关）；代码中未关闭证书校验
