@@ -1,8 +1,22 @@
-//! SMS PDU 解码（SMS-DELIVER），GSM7/UCS2/8bit + UDH 长短信。
+//! SMS PDU 编解码。
+//!
+//! 解码侧负责 SMS-DELIVER（模组收进来、我们用 `AT+CMGR` / `AT+CMGL` 读出来的东西）：
+//! GSM7 / UCS2 / 8bit 三种编码、UDH 长短信、字母数字发送方、时区。
+//!
+//! 编码侧负责 SMS-SUBMIT（我们发出去的）：自动选编码、自动分片、自动加 UDH，
+//! 输出可直接喂给 `AT+CMGS=<TPDU 长度>\r<PDU>` 的分片列表。
+//!
+//! 两侧共用同一张 GSM 03.38 字母表，避免「收蝭得对、发蝭得错」这种只在一个
+//! 方向暴露的偏差。
+
+// 手动写 `(x + n - 1) / n` / `% n != 0` 而不是用 `div_ceil` / `is_multiple_of`：
+// 本包要进 OpenWrt 各版本交叉编译，而这两个方法分别稳定于 Rust 1.73 / 1.87，
+// 老版本 OpenWrt 自带的 Rust 工具链会直接编译失败。可移植性优先于 lint。
+#![allow(clippy::manual_div_ceil, clippy::manual_is_multiple_of)]
 
 use crate::localtime;
 use crate::nettime;
-use chrono::DateTime;
+use chrono::{DateTime, TimeZone};
 
 /// 3GPP TS 23.038 默认字母表（按码位索引）。
 const GSM7_ALPHABET: &str = concat!(
@@ -24,6 +38,76 @@ fn gsm7_extension(c: u8) -> Option<char> {
         0x40 => Some('|'),
         0x65 => Some('€'),
         _ => None,
+    }
+}
+
+/// 反查扩展表：扩展字符 → 0x1B 之后的码位。
+fn gsm7_extension_code(c: char) -> Option<u8> {
+    match c {
+        '\u{000C}' => Some(0x0A),
+        '^' => Some(0x14),
+        '{' => Some(0x28),
+        '}' => Some(0x29),
+        '\\' => Some(0x2F),
+        '[' => Some(0x3C),
+        '~' => Some(0x3D),
+        ']' => Some(0x3E),
+        '|' => Some(0x40),
+        '€' => Some(0x65),
+        _ => None,
+    }
+}
+
+/// 用户数据的编码方式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmEncoding {
+    Gsm7,
+    Ucs2,
+    EightBit,
+}
+
+impl SmEncoding {
+    pub fn name(self) -> &'static str {
+        match self {
+            SmEncoding::Gsm7 => "GSM7",
+            SmEncoding::Ucs2 => "UCS2",
+            SmEncoding::EightBit => "8BIT",
+        }
+    }
+}
+
+/// 按 3GPP TS 23.038 Table 4 判定 DCS 的字符编码。
+///
+/// 关键点：DCS 的 **高 4 位（bits 7-4）决定编码组**，只有离开组别的语境直接看
+/// bits 3-2 是不成立的。先前照着 Go 参考实现写成的 `(dcs >> 2) & 0x03` 会把
+/// `0xF6`（ bits7-4 = 1111 的消息类别组 + GSM7 ）判成 8-bit，于是运营商下发的
+/// SIM 卡短信 / 端口短信全部变成 Latin-1 乱码。
+fn resolve_encoding(dcs: u8) -> SmEncoding {
+    match dcs >> 4 {
+        // 通用数据编码组：bits 3-2 直接选字符集（bit5 为压缩位，不影响字符集）
+        0x0..=0x3 => match (dcs >> 2) & 0x03 {
+            0x02 => SmEncoding::Ucs2,
+            0x01 => SmEncoding::EightBit,
+            _ => SmEncoding::Gsm7,
+        },
+        // 消息等待指示组：bit2 选字符集（0=GSM7 / 1=UCS2）
+        0xC | 0xD => {
+            if dcs & 0x04 != 0 {
+                SmEncoding::Ucs2
+            } else {
+                SmEncoding::Gsm7
+            }
+        }
+        0xE => SmEncoding::Ucs2,
+        // 数据编码 / 消息类别组：bit3 选字符集（0=GSM7 / 1=8bit）
+        0xF => {
+            if dcs & 0x08 != 0 {
+                SmEncoding::EightBit
+            } else {
+                SmEncoding::Gsm7
+            }
+        }
+        _ => SmEncoding::Gsm7,
     }
 }
 
@@ -104,6 +188,29 @@ fn bcd_digit(b: u8) -> i32 {
     (b & 0x0F) as i32 * 10 + (b >> 4) as i32
 }
 
+/// 32 位 BCD 反向交换（编码用）：`12` → `0x21`。
+fn bcd_swap(hi: u8, lo: u8) -> u8 {
+    (hi << 4) | lo
+}
+
+/// 时区字节还原为分钟偏移。
+///
+/// SCTS 的第 7 字节同样按半字节交换存放「以 15 分钟为单位的偏移」，
+/// 最高位为符号位。丢掉它等于把短信中心所在时区的时间直接当成本地时间，
+/// 跨时区时会整体偏数小时。
+fn timezone_offset_minutes(tz: u8) -> i32 {
+    // SCTS 的时区字节与其它时间字段一样按半字节交换存放（十位在低半字节），
+    // 单位是「一刻钟」，最高位 bit7 为符号位。
+    let tens = (tz & 0x0F) as i32;
+    let ones = ((tz >> 4) & 0x07) as i32;
+    let minutes = (tens * 10 + ones) * 15;
+    if tz & 0x80 != 0 {
+        -minutes
+    } else {
+        minutes
+    }
+}
+
 fn decode_timestamp(ts: &[u8]) -> DateTime<localtime::Tz> {
     if ts.len() < 7 {
         return nettime::now();
@@ -118,9 +225,17 @@ fn decode_timestamp(ts: &[u8]) -> DateTime<localtime::Tz> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
         return nettime::now();
     }
-    // 时区字节存在但沿用本机时区解释（PDU 时间戳不带时区，协议惯例即如此）。
-    localtime::from_ymdhms(year, month as u32, day as u32, hour as u32, minute as u32, second as u32)
-        .unwrap_or_else(nettime::now)
+
+    // SCTS 记录的是「短信中心本地时间 + 时区偏移」。先按 UTC 还原出真正的时刻，
+    // 再按设备时区呈现；此前忽略时区字节直接按墙上时钟解释，跨时区会整体偏数小时。
+    let naive_wall = match chrono::NaiveDate::from_ymd_opt(year, month as u32, day as u32)
+        .and_then(|d| d.and_hms_opt(hour as u32, minute as u32, second as u32))
+    {
+        Some(n) => n,
+        None => return nettime::now(),
+    };
+    let utc = naive_wall - chrono::Duration::minutes(timezone_offset_minutes(ts[6]) as i64);
+    TimeZone::from_utc_datetime(&localtime::offset(), &utc)
 }
 
 /// 解码 BCD 电话号码，digits 为号码位数。
@@ -129,7 +244,7 @@ fn decode_number(data: &[u8], digits: usize) -> String {
     for &b in data {
         let lo = b & 0x0F;
         let hi = b >> 4;
-        if lo <= 9 {
+        if lo <= 9 && sb.len() < digits {
             sb.push((b'0' + lo) as char);
         }
         if sb.len() < digits && hi <= 9 {
@@ -139,12 +254,26 @@ fn decode_number(data: &[u8], digits: usize) -> String {
     sb
 }
 
+/// TON = 101 的地址字段是字母数字方式打包的 7 位字符，不是 BCD 数字。
+fn is_alphanumeric_toa(toa: u8) -> bool {
+    (toa >> 4) & 0x07 == 0x05
+}
+
+/// 字母数字地址占用的字节数。
+///
+/// TS 23.040 §9.1.2.5： alnum 地址的 `<address-length>` 是**字符数（septets）**，
+/// 占用字节数为 ceil(digits * 7 / 8)。此前复用 BCD 的 `(digits + 1) / 2` 会把
+/// 5 字符的 "hello"（应占 5 字节）当成 3 字节，剩下两个字节被当 PID/DCS 吃掉，
+/// 整条 PDU 随即错位。
+fn alnum_address_bytes(septets: usize) -> usize {
+    (septets * 7 + 7) / 8
+}
+
 /// 解码地址字段，区分数字号码与字母数字发送方（如 "CMCC"）。
 fn decode_address(data: &[u8], digits: usize, toa: u8) -> String {
-    // TON = 101 表示 alphanumeric，内容是打包的 7 位字符而不是 BCD 数字。
-    if (toa >> 4) & 0x07 == 0x05 {
-        let septets = (digits * 4) / 7;
-        return septets_to_string(&unpack_septets(data, septets));
+    if is_alphanumeric_toa(toa) {
+        // septets 本身就是字符数 —— alnum 的 address-length 不按 BCD 位数换算。
+        return septets_to_string(&unpack_septets(data, digits));
     }
     decode_number(data, digits)
 }
@@ -170,7 +299,12 @@ pub fn decode_incoming_pdu(pdu_hex: &str) -> Result<Sms, String> {
 
     let sender_digits = cut(&raw, &mut pos, 1)?[0] as usize;
     let sender_toa = cut(&raw, &mut pos, 1)?[0];
-    let sender_bytes = cut(&raw, &mut pos, (sender_digits + 1) / 2)?;
+    let sender_len = if is_alphanumeric_toa(sender_toa) {
+        alnum_address_bytes(sender_digits)
+    } else {
+        (sender_digits + 1) / 2
+    };
+    let sender_bytes = cut(&raw, &mut pos, sender_len)?;
     let sender = decode_address(sender_bytes, sender_digits, sender_toa);
 
     cut(&raw, &mut pos, 1)?; // 协议标识符 PID
@@ -179,37 +313,7 @@ pub fn decode_incoming_pdu(pdu_hex: &str) -> Result<Sms, String> {
     let udl = cut(&raw, &mut pos, 1)?[0] as usize;
     let ud = &raw[pos..];
 
-    // DCS 低 2 位为消息类别；bit3-2 选编码：00=GSM7 01=8bit 10=UCS2
-    let encoding = (dcs >> 2) & 0x03;
-
-    let mut udh_len = 0usize;
-    let mut partial: Option<PartialInfo> = None;
-    if pdu_type & 0x40 != 0 && !ud.is_empty() {
-        udh_len = ud[0] as usize + 1;
-        if udh_len > ud.len() {
-            return Err("UDH 长度超出用户数据".into());
-        }
-        partial = parse_udh_concat(&ud[1..udh_len]);
-    }
-
-    let content = match encoding {
-        0x02 => decode_ucs2(&ud[udh_len..]),
-        0x01 => ud[udh_len..].iter().map(|&b| b as char).collect(),
-        _ => {
-            // 7 位编码里 UDH 也按码位计数，且正文需要对齐到 7 位边界。
-            let udh_septets = (udh_len * 8 + 6) / 7;
-            let mut total = udl;
-            if total < udh_septets {
-                total = udh_septets;
-            }
-            let septets = unpack_septets(ud, total);
-            if udh_septets <= septets.len() {
-                septets_to_string(&septets[udh_septets..])
-            } else {
-                String::new()
-            }
-        }
-    };
+    let (content, partial) = decode_user_data(ud, udl, dcs, pdu_type & 0x40 != 0);
 
     Ok(Sms {
         sender,
@@ -217,6 +321,254 @@ pub fn decode_incoming_pdu(pdu_hex: &str) -> Result<Sms, String> {
         date: decode_timestamp(ts_bytes),
         partial,
     })
+}
+
+/// 解出用户数据（正文 + 分段信息）。DELIVER 与 SUBMIT 共用这一段布局。
+fn decode_user_data(
+    ud: &[u8],
+    udl: usize,
+    dcs: u8,
+    udhi: bool,
+) -> (String, Option<PartialInfo>) {
+    let encoding = resolve_encoding(dcs);
+
+    let mut udh_len = 0usize;
+    let mut partial = None;
+    if udhi && !ud.is_empty() {
+        udh_len = ud[0] as usize + 1;
+        if udh_len > ud.len() {
+            return (String::new(), None);
+        }
+        partial = parse_udh_concat(&ud[1..udh_len]);
+    }
+
+    let content = match encoding {
+        SmEncoding::Ucs2 => {
+            let body = &ud[udh_len..];
+            let end = body.len().min(udl.saturating_sub(udh_len));
+            decode_ucs2(&body[..end])
+        }
+        SmEncoding::EightBit => {
+            let body = &ud[udh_len..];
+            let end = body.len().min(udl.saturating_sub(udh_len));
+            body[..end].iter().map(|&b| b as char).collect()
+        }
+        SmEncoding::Gsm7 => {
+            // 7 位编码里 UDH 也按码位计数，正文需对齐到 septet 边界。
+            let udh_septets = (udh_len as u32 * 8 + 6) / 7;
+            let mut total = udl;
+            if total < udh_septets as usize {
+                total = udh_septets as usize;
+            }
+            let septets = unpack_septets(ud, total);
+            if udh_septets as usize <= septets.len() {
+                septets_to_string(&septets[udh_septets as usize..])
+            } else {
+                String::new()
+            }
+        }
+    };
+    (content, partial)
+}
+
+// ==================== 模组存储里的短信（AT+CMGL / AT+CMGR 返回） ====================
+
+/// 从存储区读出的一条短信。
+#[derive(Debug, Clone)]
+pub struct StoredSms {
+    /// true = 对方发来的（SMS-DELIVER）；false = 本机发出、模组存下来的（SMS-SUBMIT）。
+    pub incoming: bool,
+    /// 对方号码（DELIVER 是发件人，SUBMIT 是收件人）。
+    pub number: String,
+    pub content: String,
+    /// 时刻；SUBMIT 在没有绝对有效期时没有发送时刻，为 None。
+    pub time: Option<DateTime<localtime::Tz>>,
+    /// true 表示时刻来自 TP-VP 有效期，而不是真正的发送时刻。
+    pub time_approx: bool,
+    pub partial: Option<PartialInfo>,
+    pub error: Option<String>,
+}
+
+/// 解析模组存储里的 PDU：按 TP-MTI 分派 DELIVER / SUBMIT。
+///
+/// `AT+CMGL=4` 会把**存下来的已发短信**也列出来（SMS-SUBMIT），把它当成
+/// DELIVER 解会整条错位：SUBMIT 里没有 SCTS 时间戳、多了一个 TP-MR。
+/// 参考实现就是一律按 DELIVER 解，于是已发短信的时间、号码全是错的。
+pub fn decode_stored_pdu(pdu_hex: &str) -> StoredSms {
+    let raw = match hex::decode(pdu_hex.trim()) {
+        Ok(r) => r,
+        Err(_) => {
+            return StoredSms {
+                incoming: true,
+                number: String::new(),
+                content: String::new(),
+                time: None,
+                time_approx: false,
+                partial: None,
+                error: Some("PDU 不是合法的十六进制".into()),
+            }
+        }
+    };
+
+    fn cut<'a>(raw: &'a [u8], pos: &mut usize, n: usize) -> Result<&'a [u8], String> {
+        if *pos + n > raw.len() {
+            return Err("PDU 数据不完整".into());
+        }
+        let b = &raw[*pos..*pos + n];
+        *pos += n;
+        Ok(b)
+    }
+
+    let mut pos = 0usize;
+    let parsed = (|| -> Result<StoredSms, String> {
+        let smsc_len = cut(&raw, &mut pos, 1)?[0] as usize;
+        cut(&raw, &mut pos, smsc_len)?;
+        let first = cut(&raw, &mut pos, 1)?[0];
+        let mti = first & 0x03;
+        let udhi = first & 0x40 != 0;
+
+        match mti {
+            0x00 => {
+                // SMS-DELIVER：对方发来的
+                let digits = cut(&raw, &mut pos, 1)?[0] as usize;
+                let toa = cut(&raw, &mut pos, 1)?[0];
+                let addr_bytes = if is_alphanumeric_toa(toa) {
+                    alnum_address_bytes(digits)
+                } else {
+                    (digits + 1) / 2
+                };
+                let addr = cut(&raw, &mut pos, addr_bytes)?;
+                let number = decode_address(addr, digits, toa);
+                cut(&raw, &mut pos, 1)?; // PID
+                let dcs = cut(&raw, &mut pos, 1)?[0];
+                let ts = cut(&raw, &mut pos, 7)?;
+                let udl = cut(&raw, &mut pos, 1)?[0] as usize;
+                let ud = &raw[pos..];
+                let (content, partial) = decode_user_data(ud, udl, dcs, udhi);
+                Ok(StoredSms {
+                    incoming: true,
+                    number,
+                    content,
+                    time: Some(decode_timestamp(ts)),
+                    time_approx: false,
+                    partial,
+                    error: None,
+                })
+            }
+            0x01 => {
+                // SMS-SUBMIT：本机发出的
+                cut(&raw, &mut pos, 1)?; // TP-MR
+                let digits = cut(&raw, &mut pos, 1)?[0] as usize;
+                let toa = cut(&raw, &mut pos, 1)?[0];
+                let addr_bytes = if is_alphanumeric_toa(toa) {
+                    alnum_address_bytes(digits)
+                } else {
+                    (digits + 1) / 2
+                };
+                let addr = cut(&raw, &mut pos, addr_bytes)?;
+                let number = decode_address(addr, digits, toa);
+                cut(&raw, &mut pos, 1)?; // PID
+                let dcs = cut(&raw, &mut pos, 1)?[0];
+                // TP-VP：由 first octet 的 bit4:bit3 决定长度
+                let vpf = (first >> 3) & 0x03;
+                let mut time = None;
+                let mut time_approx = false;
+                match vpf {
+                    0 => {} // 无有效期
+                    2 => {
+                        cut(&raw, &mut pos, 1)?; // 相对格式，1 字节，不含发送时刻
+                    }
+                    1 | 3 => {
+                        // 增强/绝对格式：7 字节的 TP-VP，可以拿来近似当作发送时刻
+                        let vp = cut(&raw, &mut pos, 7)?;
+                        time = Some(decode_timestamp(vp));
+                        time_approx = true;
+                    }
+                    _ => {}
+                }
+                let udl = cut(&raw, &mut pos, 1)?[0] as usize;
+                let ud = &raw[pos..];
+                let (content, partial) = decode_user_data(ud, udl, dcs, udhi);
+                Ok(StoredSms {
+                    incoming: false,
+                    number,
+                    content,
+                    time,
+                    time_approx,
+                    partial,
+                    error: None,
+                })
+            }
+            _ => Err("暂不支持的 PDU 类型（状态报告/命令）".into()),
+        }
+    })();
+
+    match parsed {
+        Ok(s) => s,
+        Err(e) => StoredSms {
+            incoming: true,
+            number: String::new(),
+            content: String::new(),
+            time: None,
+            time_approx: false,
+            partial: None,
+            error: Some(e),
+        },
+    }
+}
+
+/// `AT+CMGL` / `AT+CMGR` 应答里的一条记录。
+#[derive(Debug, Clone)]
+pub struct CmglEntry {
+    pub index: u32,
+    /// TS 27.005 `<stat>`：0=未读 1=已读 2=未发 3=已发
+    pub stat: u32,
+    pub direction_incoming: bool,
+    pub number: String,
+    pub content: String,
+    /// `YY/MM/DD,HH:MM:SS` 字符串（与前端现有口径一致）；无时刻时为 None。
+    pub time: Option<String>,
+    pub time_approx: bool,
+    pub partial: Option<PartialInfo>,
+    pub error: Option<String>,
+}
+
+/// 解析 `AT+CMGL=...` / `AT+CMGR=...` 的应答行。
+///
+/// 注意 `+CMGL:` 前缀会同时匹配 `+CMGR:`（单条读取），这是有意为之：
+/// 两条命令的应答形状一样（同一行给 index/stat/len，下一行给 PDU）。
+/// 解析失败的单条会带着 error 保留下来，界面上如实提示，而不是静默丢掉。
+pub fn parse_cmgl_response(lines: &[String]) -> Vec<CmglEntry> {
+    let mut out: Vec<CmglEntry> = Vec::new();
+    let mut i = 0usize;
+    while i + 1 < lines.len() {
+        let line = lines[i].trim();
+        let Some(rest) = line.strip_prefix("+CMGL:").or_else(|| line.strip_prefix("+CMGR:")) else {
+            i += 1;
+            continue;
+        };
+        let fields: Vec<&str> = rest.split(',').map(|p| p.trim()).collect();
+        let index = fields.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+        let stat = fields.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+        let pdu = lines[i + 1].trim();
+        i += 2;
+        if pdu.is_empty() || !pdu.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let sms = decode_stored_pdu(pdu);
+        out.push(CmglEntry {
+            index,
+            stat,
+            direction_incoming: sms.incoming,
+            number: sms.number,
+            content: sms.content,
+            time: sms.time.map(|t| t.format("%y/%m/%d,%H:%M:%S").to_string()),
+            time_approx: sms.time_approx,
+            partial: sms.partial,
+            error: sms.error,
+        });
+    }
+    out
 }
 
 /// 从 UDH 中取出长短信分段信息（IEI 0x00 为 8 位序号，0x08 为 16 位）。
@@ -249,6 +601,423 @@ fn parse_udh_concat(udh: &[u8]) -> Option<PartialInfo> {
         i = body + ie_len;
     }
     None
+}
+
+// ==================== 发送侧：SMS-SUBMIT 编码 ====================
+
+/// 单条 SMS-SUBMIT 的分片上限（用户数据部分，不含 SMSC 头）。
+const UD_MAX_OCTETS: usize = 140;
+/// 8 位连接头 UDH：UDHL + IEI + IEDL + ref + total + seq = 6 字节。
+const CONCAT_UDH_LEN: usize = 6;
+/// 6 字节 UDH 在 7 位编码里占用的 septet 数 = ceil(6*8/7)。
+const CONCAT_UDH_SEPTETS: usize = 7;
+
+/// 一个 go-submit 分片。
+#[derive(Debug, Clone)]
+pub struct SubmitPart {
+    /// 完整 PDU（含 SMSC 字段）的十六进制串，大写。
+    pub pdu: String,
+    #[allow(dead_code)] // 逐片的编码与参考号：整体信息见 SubmitPlan，保留供排查
+    pub encoding: SmEncoding,
+    /// `AT+CMGS` 要的长度：**不含** SMSC 字段的 TPDU 字节数。
+    pub tpdu_length: usize,
+    pub part_number: u8,
+    pub parts_count: u8,
+    #[allow(dead_code)]
+    pub reference: u16,
+}
+
+/// 编码结果的整体描述，供上层组装提示文案。
+#[derive(Debug, Clone)]
+pub struct SubmitPlan {
+    pub parts: Vec<SubmitPart>,
+    pub encoding: SmEncoding,
+    pub reference: u16,
+}
+
+/// 地址是否可以按 GSM 7bit 默认字母表表示。
+fn is_gsm7_char(c: char) -> bool {
+    GSM7_ALPHABET.contains(c) || gsm7_extension_code(c).is_some() || c == '\r' || c == '\n'
+}
+
+/// 一个字符占几个 septet（扩展字符占 2 个：ESC + 码位）。
+fn septets_of(c: char) -> usize {
+    if GSM7_ALPHABET.contains(c) {
+        1
+    } else {
+        2 // 只可能是扩展表里的字符，调用方已用 is_gsm7_char 预检
+    }
+}
+
+/// 整个消息能否按 GSM 7bit 编码。含任何表外字符（中英文之外的 emoji、中文…
+/// 严格说是所有非 GSM 字符，中文必然不行）都要转 UCS2。
+pub fn pick_encoding(message: &str) -> SmEncoding {
+    if message.chars().all(is_gsm7_char) {
+        SmEncoding::Gsm7
+    } else {
+        SmEncoding::Ucs2
+    }
+}
+
+/// 把地址打包成 PDU 地址字段。
+///
+/// `include_len` 为真时在前面加一个长度字节：
+///   - SMSC（TP-SCCC 的第一字节）记的是 **TOA + 号码** 的总字节数；
+///   - TP-DA（目的地址）记的是 **号码位数**，两者不是一回事。
+///     参考实现里两者混用了同一套算法，号码位数或 SMSC 字节数会被算错。
+fn encode_address(number: &str, is_smsc: bool, include_len: bool) -> Result<Vec<u8>, String> {
+    let trimmed = number.trim();
+    let has_plus = trimmed.starts_with('+');
+    let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return Err("地址不含可编码的号码".into());
+    }
+    if digits.len() > 20 {
+        return Err("号码过长（超过 20 位）".into());
+    }
+    // TOA：国际格式（带 +）用 0x91，国内/unknown 用 0x81。
+    let toa: u8 = if has_plus { 0x91 } else { 0x81 };
+
+    let mut packed = digits.clone();
+    if packed.len() % 2 != 0 {
+        packed.push('F'); // 奇数位补 F
+    }
+    let mut body: Vec<u8> = Vec::new();
+    let bytes: Vec<char> = packed.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        let hi = bytes[i].to_digit(16).unwrap_or(0) as u8;
+        let lo = bytes[i + 1].to_digit(16).unwrap_or(0) as u8;
+        body.push(bcd_swap(lo, hi)); // 半字节交换
+        i += 2;
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    if include_len {
+        let len = if is_smsc {
+            body.len() + 1 // 号码字节 + TOA
+        } else {
+            digits.len() // 号码位数
+        };
+        out.push(len as u8);
+    }
+    out.push(toa);
+    out.extend_from_slice(&body);
+    Ok(out)
+}
+
+/// GSM 7bit 打包（低位在前），把 septet 逐个写进给定的比特流。
+/// 返回写入的 septet 数。
+fn write_septets(w: &mut BitWriter, chars: &[char]) -> usize {
+    let mut n = 0usize;
+    for &c in chars {
+        match GSM7_ALPHABET.chars().position(|x| x == c) {
+            Some(code) => w.push_lsb(code as u32, 7),
+            None => {
+                if let Some(ext) = gsm7_extension_code(c) {
+                    w.push_lsb(0x1B, 7);
+                    w.push_lsb(ext as u32, 7);
+                    n += 1; // 转义多占一个 septet
+                } else {
+                    // 调用方必须先用 pick_encoding 检查，这里用 '?' 兜底而不是 panic
+                    w.push_lsb(b'?' as u32, 7);
+                }
+            }
+        }
+        n += 1;
+    }
+    n
+}
+
+/// 低位在前的比特写入器。
+///
+/// GSM 的做法是把 UDH 与正文当成**同一条 LSB-first 比特流**：UDH 按字节排在前面，
+/// 补若干填充位让正文对齐到 septet 边界，正文再按 septet 依次排下去。
+/// 参考实现（以及本项目更早的版本）到这里往往直接按字节拼 UDH 与正文，
+/// 于是 UDH 尾部残余的几个比特会把正文整体错位 —— 表现为「7bit 长短信除了
+/// 第一段全是乱码」。用统一的比特流写就不会错位。
+struct BitWriter {
+    bytes: Vec<u8>,
+    nbits: usize,
+}
+
+impl BitWriter {
+    fn new() -> BitWriter {
+        BitWriter { bytes: Vec::new(), nbits: 0 }
+    }
+
+    /// 写入 `n` 个比特，第 i 位取自 `value` 的第 i 位（低位在前）。
+    fn push_lsb(&mut self, value: u32, n: usize) {
+        for i in 0..n {
+            let bit = ((value >> i) & 1) as u8;
+            let idx = self.nbits;
+            if idx / 8 >= self.bytes.len() {
+                self.bytes.push(0);
+            }
+            self.bytes[idx / 8] |= bit << (idx % 8);
+            self.nbits += 1;
+        }
+    }
+
+    /// 补 0 直到总比特数是 `unit` 的整数倍。
+    fn align_to(&mut self, unit: usize) {
+        while self.nbits % unit != 0 {
+            self.push_lsb(0, 1);
+        }
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        self.align_to(8);
+        self.bytes
+    }
+}
+
+/// UCS2（UTF-16BE）编码，返回字节。
+fn encode_ucs2(s: &str) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    for unit in s.encode_utf16() {
+        out.push((unit >> 8) as u8);
+        out.push((unit & 0xFF) as u8);
+    }
+    out
+}
+
+/// 构造 UDH 的 8 位连接头。
+fn concat_udh(reference: u8, parts_count: u8, part_number: u8) -> Vec<u8> {
+    vec![
+        (CONCAT_UDH_LEN - 1) as u8, // UDHL：不含自身
+        0x00,                       // IEI：8 位参考号的连接头
+        0x03,                       // IEDL
+        reference,
+        parts_count,
+        part_number,
+    ]
+}
+
+/// 一条消息的用户数据配额（单个 septet/字符数，不含 UDH）。
+fn per_part_capacity(encoding: SmEncoding, concat: bool) -> usize {
+    match encoding {
+        SmEncoding::Gsm7 => {
+            if concat {
+                UD_MAX_OCTETS * 8 / 7 - CONCAT_UDH_SEPTETS // 153
+            } else {
+                UD_MAX_OCTETS * 8 / 7 // 160
+            }
+        }
+        // UCS2 每个字符 2 字节
+        _ => {
+            let avail = if concat {
+                UD_MAX_OCTETS - CONCAT_UDH_LEN
+            } else {
+                UD_MAX_OCTETS
+            };
+            avail / 2 // 67 / 70
+        }
+    }
+}
+
+/// 按配额把消息切成若干片，GSM7 按 septet 计、UCS2 按 UTF-16 码元计。
+///
+/// UCS2 分片必须**按字符边界**切，不能把一个代理对（emoji 等增补平面字符）
+/// 劈成两半，否则两片各自解出替身字符。
+fn split_message(message: &str, encoding: SmEncoding, concat: bool) -> Vec<String> {
+    let per = per_part_capacity(encoding, concat);
+    if per == 0 {
+        return vec![message.to_string()];
+    }
+    match encoding {
+        SmEncoding::Gsm7 => {
+            let mut parts: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            let mut used = 0usize;
+            for c in message.chars() {
+                let cost = septets_of(c);
+                if used + cost > per && !cur.is_empty() {
+                    parts.push(cur.clone());
+                    cur.clear();
+                    used = 0;
+                }
+                cur.push(c);
+                used += cost;
+            }
+            if !cur.is_empty() || parts.is_empty() {
+                parts.push(cur);
+            }
+            parts
+        }
+        _ => {
+            let mut parts: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            let mut used = 0usize;
+            for c in message.chars() {
+                let cost = c.len_utf16(); // 代理对记 2 个码元
+                if used + cost > per && !cur.is_empty() {
+                    parts.push(cur.clone());
+                    cur.clear();
+                    used = 0;
+                }
+                cur.push(c);
+                used += cost;
+            }
+            if !cur.is_empty() || parts.is_empty() {
+                parts.push(cur);
+            }
+            parts
+        }
+    }
+}
+
+/// 短信提交的选项。
+#[derive(Debug, Clone, Default)]
+pub struct SubmitOptions {
+    /// 对方号码（可带 `+`；不带 `+` 时按国内号码编码）。
+    pub destination: String,
+    /// 正文。
+    pub message: String,
+    /// 短信中心号码，留空表示用 SIM 卡里存的那一个（SMSC 长度字节写 0）。
+    pub smsc: Option<String>,
+    /// 相对有效期（TP-VP 字节），默认 0xAA = 24 小时。
+    pub validity: Option<u8>,
+    /// 8 位连接头参考号；不给则随机取 1..=255。
+    pub reference: Option<u8>,
+}
+
+/// 构造真正要发出去的分片列表（按片序排列）。
+///
+/// 每条都可直接用于 `AT+CMGS={tpdu_length}\r{pdu}`。
+pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
+    let destination = opts.destination.trim();
+    if destination.is_empty() {
+        return Err("缺少收件人号码".into());
+    }
+    let message = &opts.message;
+    if message.is_empty() {
+        return Err("短信内容为空".into());
+    }
+
+    let encoding = pick_encoding(message);
+    let da = encode_address(destination, false, true)?;
+
+    // 先试单条；超限时才引入 UDH。
+    let mut chunks = split_message(message, encoding, false);
+    let concat = chunks.len() > 1;
+    if concat {
+        chunks = split_message(message, encoding, true);
+    }
+    let parts_count = chunks.len().min(255) as u8;
+    let reference = opts.reference.unwrap_or_else(|| {
+        // 参考号只需在同一收件人的短窗口内不重复；用单调时钟的低字节足够。
+        let seed = (monotonic_seed() % 255) as u8;
+        seed.saturating_add(1)
+    });
+
+    let sca: Vec<u8> = match opts.smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(sc) => encode_address(sc, true, true)?,
+        None => vec![0x00], // 0 长度 = 用卡里配的短信中心
+    };
+    let vp = opts.validity.unwrap_or(0xAA);
+    let dcs: u8 = match encoding {
+        SmEncoding::Gsm7 => 0x00,
+        SmEncoding::Ucs2 => 0x08,
+        SmEncoding::EightBit => 0x04,
+    };
+
+    let mut parts = Vec::with_capacity(parts_count as usize);
+    for (i, chunk) in chunks.iter().enumerate() {
+        // TP-MTI = SMS-SUBMIT(0x01) | TP-RD(0x20，拒绝重复) | TP-VPF=相对(0x10)
+        let mut first_octet: u8 = 0x01 | 0x20 | 0x10;
+        let udh_value = if concat {
+            first_octet |= 0x40; // TP-UDHI
+            Some(concat_udh(reference, parts_count, (i + 1) as u8))
+        } else {
+            None
+        };
+        let chars: Vec<char> = chunk.chars().collect();
+
+        let (ud, udl) = if let Some(udh) = udh_value {
+            match encoding {
+                // 7bit：UDH 与正文共享同一条 LSB-first 比特流，中间由 align_to(7)
+                // 补出规范要求的填充位；TP-UDL 计的是 septet 总数（含 UDH 与填充）。
+                SmEncoding::Gsm7 => {
+                    let mut w = BitWriter::new();
+                    for b in &udh {
+                        w.push_lsb(*b as u32, 8);
+                    }
+                    w.align_to(7);
+                    let body = write_septets(&mut w, &chars);
+                    let ud = w.finish();
+                    let udl = (CONCAT_UDH_LEN * 8 + 6) / 7 + body;
+                    (ud, udl)
+                }
+                // UCS2：UDH 按字节前置即可（本身就是字节对齐），TP-UDL 是字节数。
+                _ => {
+                    let mut ud: Vec<u8> = Vec::new();
+                    ud.extend_from_slice(&udh);
+                    ud.extend_from_slice(&encode_ucs2(chunk));
+                    let udl = ud.len();
+                    (ud, udl)
+                }
+            }
+        } else {
+            match encoding {
+                SmEncoding::Gsm7 => {
+                    let mut w = BitWriter::new();
+                    let body = write_septets(&mut w, &chars);
+                    (w.finish(), body)
+                }
+                _ => {
+                    let ud = encode_ucs2(chunk);
+                    let udl = ud.len();
+                    (ud, udl)
+                }
+            }
+        };
+
+        if ud.len() > UD_MAX_OCTETS {
+            return Err(format!("短信分片超出 {} 字节上限（{}）", UD_MAX_OCTETS, ud.len()));
+        }
+
+        // TPDU：不含 SMSC 字段
+        let mut tpdu: Vec<u8> = Vec::new();
+        tpdu.push(first_octet);
+        tpdu.push(0x00); // TP-MR（模组自行填写）
+        tpdu.extend_from_slice(&da);
+        tpdu.push(0x00); // TP-PID
+        tpdu.push(dcs);
+        tpdu.push(vp);
+        tpdu.push(udl.min(255) as u8);
+        tpdu.extend_from_slice(&ud);
+
+        let mut full: Vec<u8> = Vec::new();
+        full.extend_from_slice(&sca);
+        full.extend_from_slice(&tpdu);
+
+        parts.push(SubmitPart {
+            pdu: hex_upper(&full),
+            tpdu_length: tpdu.len(),
+            encoding,
+            part_number: (i + 1) as u8,
+            parts_count,
+            reference: reference as u16,
+        });
+    }
+
+    Ok(SubmitPlan { parts, encoding, reference: reference as u16 })
+}
+
+fn hex_upper(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{b:02X}"));
+    }
+    s
+}
+
+fn monotonic_seed() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEED: AtomicU64 = AtomicU64::new(0x9E3779B97F4A7C15);
+    let v = SEED.fetch_add(0x6C078965, Ordering::Relaxed);
+    v ^ (v >> 33)
 }
 
 #[cfg(test)]
@@ -310,15 +1079,240 @@ mod tests {
 
     #[test]
     fn test_decode_alphanumeric_sender() {
-        // TOA=0xD0 字母数字发送方，5 个 7 位字符 "hello"。
-        let pdu = "00040AD0E8329BFD06000852805221000023026D4B";
+        // TOA=0xD0 字母数字发送方，5 个 7 位字符 "hello"（address-length 记字符数）。
+        let pdu = "000405D0E8329BFD06000852805221000023026D4B";
         let sms = decode_incoming_pdu(pdu).unwrap();
-        assert_eq!(sms.sender, "hello");
+        assert_eq!(sms.sender, "hello", "alnum 地址应按字符数取 septet");
+        assert_eq!(sms.content, "测");
+    }
+
+    #[test]
+    fn test_alnum_address_reads_full_bytes() {
+        // 回归：alnum 地址占 ceil(digits*7/8) 字节而非 (digits+1)/2 字节。
+        // 若仍按 BCD 算法取 3 字节，后面两个地址字节会被错当成 PID/DCS，
+        // 整条 PDU 随即错位（表现是发送方乱码 + 时间错乱）。
+        assert_eq!(alnum_address_bytes(5), 5);
+        assert_eq!(alnum_address_bytes(10), 9);
     }
 
     #[test]
     fn test_gsm7_extension() {
         // 0x1B 0x65 是扩展表里的欧元符号。
         assert_eq!(septets_to_string(&[0x1B, 0x65, b'a']), "€a");
+    }
+
+    #[test]
+    fn resolve_encoding_handles_message_class_dcs() {
+        // 0xF6 = 消息类别组 + GSM7：bits7-4=1111 → bit3=0 → GSM7。
+        // 早期实现直接算 (dcs>>2)&0x03 得 1，判成 8-bit，SIM 卡/端口短信全乱码。
+        assert_eq!(resolve_encoding(0xF6), SmEncoding::Gsm7);
+        assert_eq!(resolve_encoding(0xF5), SmEncoding::Gsm7);
+        assert_eq!(resolve_encoding(0x00), SmEncoding::Gsm7);
+        assert_eq!(resolve_encoding(0x04), SmEncoding::EightBit);
+        assert_eq!(resolve_encoding(0x08), SmEncoding::Ucs2);
+        assert_eq!(resolve_encoding(0xD0), SmEncoding::Gsm7);
+        assert_eq!(resolve_encoding(0xD4), SmEncoding::Ucs2);
+    }
+
+    #[test]
+    fn timezone_offset_is_signed_quarters() {
+        // 时区字节与其它 BCD 字段一样半字节交换（十位在低半字节），单位是一刻钟。
+        // 0x21 → 十位 1、个位 2 → 12 刻 = +180 分钟；最高位 bit7 为负号。
+        assert_eq!(timezone_offset_minutes(0x21), 180);
+        assert_eq!(timezone_offset_minutes(0x21 | 0x80), -180);
+        assert_eq!(timezone_offset_minutes(0x00), 0);
+        // 东八区：8 小时 = 32 刻 → 十位 3、个位 2 → 0x23
+        assert_eq!(timezone_offset_minutes(0x23), 480);
+    }
+
+    #[test]
+    fn scts_timezone_is_applied() {
+        // 同一时刻、不同时区字节应得到不同的绝对时间戳；忽略时区会把
+        // 短信中心的墙上时钟直接当成本机时间。
+        let same = |tz: u8| -> i64 {
+            let mut ts = [0u8; 7];
+            // 2025-08-25 12:00:00（半字节交换 BCD）
+            ts[0] = 0x52; ts[1] = 0x80; ts[2] = 0x52; ts[3] = 0x21; ts[4] = 0x00; ts[5] = 0x00;
+            ts[6] = tz;
+            decode_timestamp(&ts).timestamp()
+        };
+        // UTC(+0) 比东八区晚 8 小时
+        assert_eq!(same(0x23) + 8 * 3600, same(0x00));
+    }
+
+    /* ---------- 发送侧编码 ---------- */
+
+    #[test]
+    fn encode_address_counts_digits_for_destination() {
+        // TP-DA 的长度字节记**号码位数**：8613800138000 共 13 位。
+        let da = encode_address("8613800138000", false, true).unwrap();
+        assert_eq!(da[0], 13, "TP-DA 长度应是号码位数而不是字节数");
+        assert_eq!(da[1], 0x81, "不带 + 时按国内号码编码");
+        // 13 位 → 补 F 后 7 字节，半字节交换：86→68, 13→31, 80→08, 01→10, 38→83, 00→00, 0F→F0
+        assert_eq!(hex_upper(&da[2..]), "683108108300F0");
+    }
+
+    #[test]
+    fn encode_address_counts_octets_for_smsc() {
+        // SMSC 的长度字节记 TOA + 号码字节数。
+        let sca = encode_address("+8613800755500", true, true).unwrap();
+        let digits = "8613800755500".len();
+        let body_len = (digits + 1) / 2 + 1; // 号码字节（补 F）+ TOA
+        assert_eq!(sca[0] as usize, body_len);
+        assert_eq!(sca[1], 0x91, "带 + 时按国际号码编码");
+    }
+
+    #[test]
+    fn ascii_message_uses_gsm7_single_part() {
+        let plan = build_submit_parts(&SubmitOptions {
+            destination: "+8613800138000".into(),
+            message: "hello".into(),
+            smsc: None,
+            validity: None,
+            reference: Some(7),
+        })
+        .unwrap();
+        assert_eq!(plan.encoding, SmEncoding::Gsm7);
+        assert_eq!(plan.parts.len(), 1);
+        assert_eq!(plan.parts[0].parts_count, 1);
+        // SMSC 长度写 0（用卡里配的中心号），其后紧跟 TPDU
+        assert!(plan.parts[0].pdu.starts_with("00"));
+        assert_eq!(plan.parts[0].tpdu_length * 2 + 2, plan.parts[0].pdu.len());
+    }
+
+    #[test]
+    fn chinese_message_uses_ucs2_and_round_trips() {
+        let text = "你好，这是一条测试短信";
+        let plan = build_submit_parts(&SubmitOptions {
+            destination: "+8613800138000".into(),
+            message: text.into(),
+            smsc: None,
+            validity: None,
+            reference: Some(3),
+        })
+        .unwrap();
+        assert_eq!(plan.encoding, SmEncoding::Ucs2);
+        for part in &plan.parts {
+            assert!(part.tpdu_length * 2 + 2 <= part.pdu.len() + 4);
+            // SMSC 字段 1 字节后即 TPDU
+            let tpdu_hex = &part.pdu[2..];
+            assert_eq!(tpdu_hex.len() / 2, part.tpdu_length, "tpdu_length 必须等于去掉 SMSC 后的字节数");
+        }
+        // 把每一片当作 DELIVER 反向解回去，确认 UCS2 正文无损。
+        let mut decoded = String::new();
+        for part in &plan.parts {
+            decoded.push_str(&decode_submit_body(&part.pdu, plan.encoding));
+        }
+        assert_eq!(decoded, text);
+    }
+
+    #[test]
+    fn emoji_and_long_message_split_on_char_boundary() {
+        // 构造足够长、且夹杂 emoji（代理对）的文本，必须按字符边界切分。
+        let mut message = String::from("出发！");
+        for _ in 0..40 {
+            message.push_str("这是一句比较长的测试内容😀");
+        }
+        let plan = build_submit_parts(&SubmitOptions {
+            destination: "+8613800138000".into(),
+            message: message.clone(),
+            smsc: None,
+            validity: None,
+            reference: Some(9),
+        })
+        .unwrap();
+        assert_eq!(plan.encoding, SmEncoding::Ucs2);
+        assert!(plan.parts.len() > 1, "长文本应自动分片");
+        // 每片按 init-char 边界切：反向解回来不应出现 U+FFFD
+        let mut merged = String::new();
+        for (i, part) in plan.parts.iter().enumerate() {
+            assert_eq!(part.part_number, (i + 1) as u8);
+            assert_eq!(part.parts_count, plan.parts.len() as u8);
+            merged.push_str(&decode_submit_body(&part.pdu, plan.encoding));
+        }
+        assert_eq!(merged, message, "分片后重组必须逐字符一致（含 emoji）");
+        assert!(!merged.contains('\u{FFFD}'), "代理对被劈开会产出 U+FFFD");
+    }
+
+    #[test]
+    fn long_gsm7_message_adds_concat_udh_and_aligns() {
+        let text = "a".repeat(200);
+        let plan = build_submit_parts(&SubmitOptions {
+            destination: "13800138000".into(),
+            message: text.clone(),
+            smsc: Some("+8613800755500".into()),
+            validity: None,
+            reference: Some(0x2A),
+        })
+        .unwrap();
+        assert_eq!(plan.encoding, SmEncoding::Gsm7);
+        assert_eq!(plan.parts.len(), 2, "200 个 septet 应拆成 2 条 153-septet 分片");
+        let mut merged = String::new();
+        for part in &plan.parts {
+            merged.push_str(&decode_submit_body(&part.pdu, SmEncoding::Gsm7));
+        }
+        assert_eq!(merged, text, "7bit 长短信不得因 UDH 填充位错位而乱码");
+    }
+
+    #[test]
+    fn empty_destination_or_message_is_rejected() {
+        assert!(build_submit_parts(&SubmitOptions {
+            destination: "".into(),
+            message: "hi".into(),
+            ..Default::default()
+        })
+        .is_err());
+        assert!(build_submit_parts(&SubmitOptions {
+            destination: "13800138000".into(),
+            message: "".into(),
+            ..Default::default()
+        })
+        .is_err());
+        assert!(build_submit_parts(&SubmitOptions {
+            destination: "13800138000".into(),
+            message: "hi".into(),
+            smsc: Some("not-a-number".into()),
+            ..Default::default()
+        })
+        .is_err());
+    }
+
+    /// 把我们自己编出来的 SMS-SUBMIT 反向解出正文，验证「编得对不对」。
+    ///
+    /// 直 HTTP 走的 TPDU 布局：skips SMSC → 跳过 first octet / MR / PID / DCS / VP
+    /// 才到 UDL，与 DELIVER 的字段顺序不同，所以这里单独实现而不是复用 decode。
+    fn decode_submit_body(pdu: &str, encoding: SmEncoding) -> String {
+        let raw = hex::decode(pdu).unwrap();
+        let mut pos = 1 + raw[0] as usize; // SMSC 字段
+        let first = raw[pos];
+        pos += 1;
+        pos += 1; // TP-MR
+        let _da_len = raw[pos] as usize;
+        pos += 1;
+        pos += (_da_len + 1) / 2 + 1; // 号码 + TOA + TP-PID... 号码位数 → 字节在上一句已算
+        pos += 1; // TP-PID
+        pos += 1; // TP-DCS
+        pos += 1; // TP-VP
+        let udl = raw[pos] as usize;
+        pos += 1;
+        let ud = &raw[pos..];
+
+        if first & 0x40 == 0 {
+            match encoding {
+                SmEncoding::Gsm7 => septets_to_string(&unpack_septets(ud, udl)),
+                _ => decode_ucs2(&ud[..ud.len().min(udl)]),
+            }
+        } else {
+            let udh_len = ud[0] as usize + 1;
+            let body = &ud[udh_len..];
+            match encoding {
+                SmEncoding::Gsm7 => {
+                    let udh_septets = (udh_len * 8 + 6) / 7;
+                    let septets = unpack_septets(ud, udl);
+                    septets_to_string(&septets[udh_septets..])
+                }
+                _ => decode_ucs2(&body[..body.len().min(udl - udh_len)]),
+            }
+        }
     }
 }

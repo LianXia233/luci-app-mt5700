@@ -207,7 +207,13 @@ impl Dispatcher {
     async fn handle_new_sms(&mut self, storage: String, index: String) {
         log_info!("收到新短信，存储区: {}，索引: {}", storage, index);
 
-        let resp = match self.client.send_command(&self.ctx, &format!("AT+CMGR={index}"), crate::atclient::COMMAND_TIMEOUT, None).await {
+        // 短信到达后的读取必须走短信最高优先级：它不能被后台巡检（信号/缓存/
+        // 流量/自动拨号对账）排在后面，否则用户要等好几秒才看到新短信。
+        let resp = match self.client.send_sms_command(
+            &self.ctx,
+            &format!("AT+CMGR={index}"),
+            crate::atclient::SMS_LIST_TIMEOUT,
+        ).await {
             Ok(r) => r,
             Err(e) => {
                 log_warn!("读取短信 {} 失败: {}", index, e);

@@ -1,9 +1,10 @@
-//! AT 请求优先级门（Priority Gate）。
+//! AT 请求优先级门（Priority Gate）与短信优先调度。
 //!
 //! 所有业务模块（RPC、缓存刷新、定时任务、自动拨号等）都通过这里申请独占模组通道的
 //! 使用权，由同一把异步锁按**优先级**放行，而不是谁先抢到锁谁先执行。
 //!
 //! 优先级约定（与需求文档一致）：
+//!   - Sms        ：短信收发相关（最高，仅在短信事务/短信读任务中使用）
 //!   - High       ：AT Console 用户主动操作、紧急恢复
 //!   - Normal     ：状态查询、网络信息、SIM 信息
 //!   - Low        ：后台统计、温度采集、周期性状态刷新
@@ -13,12 +14,19 @@
 //!   - 完全异步，排队的等待者不再自旋占 CPU；
 //!   - `acquire` 自带超时与上下文取消，取带可让出通道；
 //!   - 用 Notify + 显式 pump 派发，取消者直接从堆里移除，不会占着不放。
+//!
+//! 短信优先由两层构成（缺一不可）：
+//!   1. [SmsMode] ——「暂停门」。短信中心进入活动状态时登记租约，非短信命令在
+//!      申请通道前必须等模式解除；这样一来后台轮询不会在短信操作期间插队。
+//!      租约带 TTL 且由后台清扫，前端忘记释放也会自动失效，不会永久停止轮询。
+//!   2. [SmsTransaction] ——「事务锁」。一次多步骤短信操作（如长短信分片发送、
+//!      批量删除）全程持有 [GatePermit]，中间不释放，杜绝其它命令插入事务中间。
 
 use std::cmp::Ordering as CmpOrdering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify, watch};
 
 /// 命令优先级，数值越大越优先。
@@ -29,6 +37,203 @@ pub enum AtPriority {
     Low = 1,
     Normal = 2,
     High = 3,
+    /// 短信专用：最高优先级，且在 [SmsMode] 生效时是唯一被放行的命令。
+    Sms = 4,
+}
+
+impl AtPriority {
+    pub fn is_sms(self) -> bool {
+        matches!(self, AtPriority::Sms)
+    }
+}
+
+/// 短信优先模式的租约上限。
+///
+/// 单次续期最多给这么久，防止某个会话无限续期把其它模块的轮询永久停掉。
+pub const SMS_MAX_LEASE: Duration = Duration::from_secs(300);
+
+pub struct SmsModeState {
+    /// 租约 id -> 到期时刻。空即表示短信模式未启用。
+    leases: HashMap<u64, Instant>,
+    next_id: u64,
+}
+
+/// 短信优先模式的暂停门。
+///
+/// 语义：
+///   - 持有一份租约 = 「短信中心正在活动」；同一时刻可有多个租约（多标签页），
+///     全部释放或过期后模式解除；
+///   - 非短信命令在申请通道前调用 [Self::wait_clear]，模式生效期间一律等待，
+///     直到解除或超过 `max_wait`；
+///   - 租约带 TTL 且由 [Self::sweep] 清扫，前端崩了 / WebSocket 断了 /
+///     忘记发送释放请求，都不会让其它模块永久停轮询。
+pub struct SmsMode {
+    inner: Mutex<SmsModeState>,
+    changed: Notify,
+}
+
+impl SmsMode {
+    pub fn new() -> Arc<Self> {
+        Arc::new(SmsMode {
+            inner: Mutex::new(SmsModeState { leases: HashMap::new(), next_id: 1 }),
+            changed: Notify::new(),
+        })
+    }
+
+    /// 登记一份租约。返回租约 id，调用方需负责释放（或等待其过期）。
+    pub async fn acquire(&self, ttl: Duration) -> u64 {
+        self.sweep().await;
+        let ttl = ttl.min(SMS_MAX_LEASE);
+        let mut state = self.inner.lock().await;
+        let id = state.next_id;
+        state.next_id += 1;
+        state.leases.insert(id, Instant::now() + ttl);
+        log_sms_mode_change(true, &state);
+        id
+    }
+
+    /// 续期一份已存在的租约。租约已过期/不存在时返回 false。
+    pub async fn renew(&self, id: u64, ttl: Duration) -> bool {
+        let mut state = self.inner.lock().await;
+        match state.leases.get_mut(&id) {
+            Some(deadline) => {
+                *deadline = Instant::now() + ttl.min(SMS_MAX_LEASE);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 释放租约。幂等。
+    pub async fn release(&self, id: u64) {
+        let mut state = self.inner.lock().await;
+        if state.leases.remove(&id).is_some() {
+            log_sms_mode_change(false, &state);
+            drop(state);
+            self.changed.notify_waiters();
+        }
+    }
+
+    /// 清空全部租约（服务关闭 / 模组断连等场景）。
+    pub async fn release_all(&self) {
+        let mut state = self.inner.lock().await;
+        if state.leases.is_empty() {
+            return;
+        }
+        state.leases.clear();
+        log_sms_mode_change(false, &state);
+        drop(state);
+        self.changed.notify_waiters();
+    }
+
+    /// 短信模式是否生效。
+    pub async fn active(&self) -> bool {
+        let state = self.inner.lock().await;
+        !state.leases.is_empty()
+    }
+
+    /// 当前租约数（供状态展示与测试观察）。
+    pub async fn lease_count(&self) -> usize {
+        self.inner.lock().await.leases.len()
+    }
+
+    /// 清扫已过期租约。清理掉至少一个时唤醒所有等待者。
+    ///
+    /// 每次 [Self::wait_clear] 都会顺带扫一遍：即使清扫任务因故没跑起来，
+    /// 等待者也能在自己这里纠正「模式卡住」。
+    async fn sweep(&self) {
+        let mut state = self.inner.lock().await;
+        if state.leases.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        let expired: Vec<u64> = state
+            .leases
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now)
+            .map(|(id, _)| *id)
+            .collect();
+        if expired.is_empty() {
+            return;
+        }
+        for id in &expired {
+            state.leases.remove(id);
+        }
+        let remain = state.leases.len();
+        drop(state);
+        crate::log_warn!("短信优先模式租约到期自动释放（回收 {} 个，剩余 {} 个）", expired.len(), remain);
+        self.changed.notify_waiters();
+    }
+
+    /// 非短信命令的入口：短信模式生效期间在此等待，直到解除或超过 `max_wait`。
+    ///
+    /// 超时返回 Err 让调用方拿到「短信操作进行中」的明确结论，
+    /// 而不是假装成功或把命令硬塞进通道造成响应串线。
+    pub async fn wait_clear(
+        &self,
+        ctx: &watch::Receiver<bool>,
+        max_wait: Duration,
+        command: &str,
+    ) -> Result<(), String> {
+        // 快速路径：绝大多数时候根本没有短信会话。
+        self.sweep().await;
+        if !self.active().await {
+            return Ok(());
+        }
+        crate::log_debug!("命令 {} 等待短信优先模式让出通道", command.trim());
+
+        let deadline = Instant::now() + max_wait;
+        let mut ctx_c = ctx.clone();
+        loop {
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let timeout = tokio::time::sleep(remaining);
+            tokio::pin!(timeout);
+            tokio::select! {
+                _ = &mut notified => {}
+                _ = &mut timeout => break,
+                _ = ctx_c.changed() => return Err("上下文取消".into()),
+            }
+            self.sweep().await;
+            if !self.active().await {
+                return Ok(());
+            }
+        }
+
+        Err(format!(
+            "短信操作进行中，通道已被占用 {}s：{}",
+            max_wait.as_secs(),
+            command.trim()
+        ))
+    }
+
+    /// 后台清扫任务：到期租约自动失效。挂到 AtClient 生命周期里即可。
+    pub async fn run(self: Arc<Self>, mut ctx: watch::Receiver<bool>) {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                _ = ctx.changed() => {
+                    self.release_all().await;
+                    return;
+                }
+            }
+            self.sweep().await;
+        }
+    }
+}
+
+fn log_sms_mode_change(entered: bool, state: &SmsModeState) {
+    if state.leases.is_empty() {
+        if entered {
+            crate::log_info!("短信优先模式启用：后台巡检暂停");
+        }
+    } else {
+        crate::log_debug!("短信优先模式租约变更，当前 {} 个会话", state.leases.len());
+    }
 }
 
 struct GateState {
@@ -225,6 +430,45 @@ impl Drop for GatePermit {
     }
 }
 
+impl GatePermit {
+    /// 当前该令牌是否仍是通道持有者。
+    pub async fn still_holds(&self) -> bool {
+        let state = self.owner.inner.lock().await;
+        state.holder == Some(self.token)
+    }
+}
+
+/// 一次短信事务持有的通道独占权。
+///
+/// 为什么需要它：短信的很多操作是**多步骤**的 —— 发送要 CMGF/CSCA/CMGS×N，
+/// 批量删除要逐条 CMGD，长短信要连续提交多片。若每步各拿一次 [GatePermit]，
+/// 两步之间通道就会被后台巡检或其它页面抢走（它们插入的不是短信命令本身，
+/// 而是把「模组刚进 PDU 会话」的上下文打乱），表现为半途失败或 PDU 串线。
+///
+/// 持有期间：
+///   - 通道不释放，任何非事务命令都排不到；
+///   - 事务内部的命令直接下发，不再重复 acquire（否则会与自己死锁）；
+///   - Drop 即释放，异常/取消/超时都不会把通道永久占住。
+pub struct SmsTransaction {
+    permit: GatePermit,
+    label: String,
+}
+
+impl SmsTransaction {
+    pub(crate) fn new(permit: GatePermit, label: String) -> SmsTransaction {
+        SmsTransaction { permit, label }
+    }
+
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// 供 AtClient 在事务内下发命令前做归属校验。
+    pub async fn holds_channel(&self) -> bool {
+        self.permit.still_holds().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +525,86 @@ mod tests {
         assert_eq!(r2, "Normal", "Normal 应排在 Low 之前");
         let r3 = tokio::time::timeout(Duration::from_secs(2), low).await.unwrap().unwrap();
         assert_eq!(r3, "Low");
+    }
+
+    /// 短信优先级必须压过包括 High（AT 终端用户操作）在内的所有其它优先级。
+    ///
+    /// 这是「短信优先」的落点：后台巡检（Low/Background）与终端命令（High）
+    /// 都排在短信之后，短信任务不会因为它们先到而被挡住。
+    #[tokio::test]
+    async fn sms_priority_beats_everything_else() {
+        let lock = PriLock::new();
+        let (_ctx_tx, ctx) = watch::channel(false);
+
+        let held = lock
+            .acquire(AtPriority::Normal, &ctx, Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        // 依次入队：Background → Low → Normal → High → Sms
+        let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+        let spawn = |prio: AtPriority, name: &'static str| {
+            let lock = lock.clone();
+            let ctx = ctx.clone();
+            let order = order.clone();
+            tokio::spawn(async move {
+                let _p = lock.acquire(prio, &ctx, Duration::from_secs(5)).await.unwrap();
+                order.lock().unwrap().push(name);
+            })
+        };
+        let bg = spawn(AtPriority::Background, "Background");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let low = spawn(AtPriority::Low, "Low");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let normal = spawn(AtPriority::Normal, "Normal");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let high = spawn(AtPriority::High, "High");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let sms = spawn(AtPriority::Sms, "Sms");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        drop(held);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let got = order.lock().unwrap().clone();
+        assert_eq!(got.first().copied(), Some("Sms"), "短信必须第一个拿到通道，实际 {got:?}");
+        assert_eq!(got, vec!["Sms", "High", "Normal", "Low", "Background"], "完整次序应为优先级降序");
+
+        // 让剩余任务收尾，避免 JoinHandle 泄漏到测试外
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            let _ = bg.await;
+            let _ = low.await;
+            let _ = normal.await;
+            let _ = high.await;
+            let _ = sms.await;
+        })
+        .await;
+    }
+
+    /// 短信事务的持有权是一次性的：drop 之后才轮到下一个。
+    #[tokio::test]
+    async fn sms_transaction_holds_channel_until_dropped() {
+        let lock = PriLock::new();
+        let (_ctx_tx, ctx) = watch::channel(false);
+
+        let tx = lock.acquire(AtPriority::Sms, &ctx, Duration::from_secs(1)).await.unwrap();
+        assert!(tx.still_holds().await);
+
+        // 事务存续期间，后来的短信请求只能排队
+        let second = {
+            let lock = lock.clone();
+            let ctx = ctx.clone();
+            tokio::spawn(async move { lock.acquire(AtPriority::Sms, &ctx, Duration::from_secs(3)).await.is_ok() })
+        };
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(!second.is_finished(), "第一个事务还持有通道时，第二个必须排队等待");
+
+        drop(tx);
+        let ok = tokio::time::timeout(Duration::from_secs(3), second)
+            .await
+            .expect("释放后第二个事务应放行")
+            .unwrap();
+        assert!(ok, "释放后第二个短信事务应拿到通道");
     }
 
     #[tokio::test]

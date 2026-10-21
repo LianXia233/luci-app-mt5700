@@ -2,27 +2,28 @@
 'require at-webserver/rpc';
 'require at-webserver/parse';
 'require at-webserver/ui';
-'require at-webserver/smsEncode';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Ui, SmsEncode, Mt5700 */
-
-/*
- * 短信提交的预算（毫秒）。模组要把 TPDU 交给网络侧，`+CMGS` 回执取决于信号与
- * 基站排队；本机弱信号（RSRP −107dBm）实测要数秒。与后端 SMS_SUBMIT_TIMEOUT
- * （40s）同一量级、略大一点：让后端先超时，前端拿到的是可读的错误而不是
- * 自己先掐断连接。
- */
-var SMS_SUBMIT_TIMEOUT_MS = 45000;
+/* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 短信中心页面：
+ * 短信中心页面。
  *
- * - 联系人聚合（按号码分组，按最后消息时间排序）
- * - 会话视图（聊天样式）、发送（自动编码 PDU + 长短信分片）
- * - 新短信推送实时更新（new_sms）
- * - 单条删除 / 批量删除、存储量显示
- * - 缓存已发消息到 localStorage
+ * 本次重构的三条硬约束：
+ *
+ * 1. **短信优先**：进入页面即向后端口申请「前台短信模式」会话，离开/隐藏时释放。
+ *    会话期间后台巡检（信号、缓存、流量、自动拨号对账）让出通道；多步骤操作
+ *    （发送分片、批量删除）由后端在**一次事务**里跑完，中途不会被插进来。
+ * 2. **无缓存**：列表、容量、发送结果、删除结果全部来自本次真实下发，
+ *    不再把 localStorage 里的「已发记录」混进列表 —— 旧实现里那些条目没有
+ *    模组序号，删除时会按着不存在的 index 下发一堆 AT+CMGD，全是 ERROR。
+ * 3. **不臆造结果**：后端把发送结论分成 accepted / rejected / unknown 三档，
+ *    unknown（超时或模组无响应）明确提示「可能已发走，不要重复点击」，
+ *    前端也不会替用户自动重发。
  */
+
+/* 前台短信模式的心跳间隔：必须明显小于后端租约（90s），否则会被判为已离开 */
+var SMS_SESSION_TTL_MS = 90000;
+var SMS_SESSION_HEARTBEAT_MS = 30000;
 
 return L.view.extend({
 	render: function () {
@@ -35,7 +36,9 @@ return L.view.extend({
 			contacts: [],        // [{ number, lastMessage, lastTime, unreadCount, messages: [] }]
 			selectedContact: '',
 			messages: [],        // 当前联系人消息
-			storage: { used: 0, total: 0 }
+			storage: { used: 0, total: 0 },
+			/* 本次列表数据的抓取时刻（后端给出），用于确认界面不是旧快照 */
+			fetchedAt: 0
 		};
 
 		/* ---------- 布局 ---------- */
@@ -112,6 +115,7 @@ return L.view.extend({
 		var sendBtn = Mt5700.primaryButton('发送', function () { send(); });
 		inputWrap.appendChild(Mt5700.panelActions(
 			sendBtn,
+			Mt5700.ghostButton('刷新', function () { refreshAll(); }),
 			Mt5700.dangerButton('批量删除', function () { batchDelete(); })
 		));
 		right.appendChild(inputWrap);
@@ -121,13 +125,18 @@ return L.view.extend({
 
 		function normalizeNumber(n) { return Parse.normalizePhoneNumber(n); }
 
-		// 长短信拼接：把同一发件人、同一拼接引用号的各段合并为一条完整消息
+		/*
+		 * 长短信合并：把同一号码、同一拼接参考号的各段拼成一条。
+		 *
+		 * 分段信息来自后端解析的 UDH（reference / 总段数 / 当前段号），
+		 * 不再依赖任何本地缓存：缺段就是缺段，界面如实标注「已合并 x/y」。
+		 */
 		function mergeConcatenated(list) {
 			var groups = {};
 			var result = [];
 			for (var i = 0; i < list.length; i++) {
 				var m = list[i];
-				if (m && m.type === 'received' && m.isConcatenated && m.concatenatedRef != null && m.concatenatedSeq != null) {
+				if (m && m.isConcatenated && m.concatenatedRef != null && m.concatenatedSeq != null) {
 					var key = (m.number || '') + '|' + m.concatenatedRef;
 					if (!groups[key]) groups[key] = [];
 					groups[key].push(m);
@@ -150,11 +159,10 @@ return L.view.extend({
 					content: full,
 					number: first.number,
 					time: last.time,
-					type: 'received',
+					timeApprox: last.timeApprox,
+					type: first.type,
 					isConcatenated: false,
 					concatenatedRef: first.concatenatedRef,
-					concatenatedTotal: undefined,
-					concatenatedSeq: undefined,
 					partsCount: parts.length,
 					partsExpected: first.concatenatedTotal
 				});
@@ -230,6 +238,9 @@ return L.view.extend({
 				bubble.appendChild(E('div', { 'class': 'mt5700-sms-time' },
 					'长短信已合并 ' + m.partsCount + '/' + m.partsExpected + ' 段（部分缺失）'));
 			}
+			if (m.error) {
+				bubble.appendChild(E('div', { 'class': 'mt5700-sms-time' }, '该条解析失败：' + m.error));
+			}
 			var del = Mt5700.button('删除', function (mm) {
 				return function () {
 					Mt5700.confirm('确定删除该短信？', function () { deleteMessage(mm); });
@@ -261,10 +272,6 @@ return L.view.extend({
 		 * 聊天式单条时间轴（用户要求「像 QQ 那样显示」）：
 		 * 收发消息按时间顺序**混排在同一条轴上**，靠气泡左右位置区分方向 ——
 		 * 对方在左、自己在右，跨天处插一条日期分隔条。
-		 *
-		 * 早期版本为了「对面的消息和自己的消息不能挤在一起」改成上下分区，
-		 * 代价是丢失「来一回一」的对话对应关系；现按用户要求回到聊天式排布，
-		 * 分区所需的块标题与空态一并去掉。
 		 */
 		function renderConversation() {
 			convHead.innerHTML = '';
@@ -293,62 +300,77 @@ return L.view.extend({
 		function renderHint() {
 			var text = msgInput.value.trim();
 			if (!text) { hintEl.textContent = ''; return; }
-			var stats = SmsEncode.messageStats(text);
-			var parts = stats.encoding === 'UCS2' ? '含中文等字符，按 UCS2 编码' : '纯 ASCII，按 GSM 7bit 编码';
-			hintEl.textContent = stats.chars + ' 字 · ' + parts + (stats.parts > 1 ? ' · 将拆成 ' + stats.parts + ' 条' : '');
+			/*
+			 * 字数提示改为本地估算（后端才是唯一权威）：只是给个「会拆成几条」的
+			 * 预期，真正的编码与分片在后端完成，避免前端与后端算出不同片数。
+			 */
+			var ucs2 = !/^[\x20-\x7E\r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ¡ÄÖÑÜ§¿äöñüà]*$/.test(text);
+			var per = ucs2 ? 67 : 153;
+			var chars = Array.from(text).length;
+			var parts = chars <= (ucs2 ? 70 : 160) ? 1 : Math.ceil(chars / per);
+			hintEl.textContent = chars + ' 字 · ' + (ucs2 ? '含非 ASCII 字符，按 UCS2 编码' : '纯 ASCII，按 GSM 7bit 编码') +
+				(parts > 1 ? ' · 将拆成 ' + parts + ' 条' : '');
 		}
 		msgInput.addEventListener('input', renderHint);
 
-		/* ---------- 数据 ---------- */
+		/* ---------- 数据：全部实时，无缓存 ---------- */
 
 		function refreshStorage() {
-			/*
-			 * 必须用**标准** `AT+CPMS?`：本模组（MT5700M-CN）不认私有前缀的
-			 * `AT^CPMS?`，实测直接回 ERROR，存储用量会永远停在 0 / 0。
-			 * 同项目的「短信设置」页用的也是 `AT+CPMS?`，此处曾误写成 `^` 前缀。
-			 */
-			return AtWs.client.sendCommand('AT+CPMS?').then(function (res) {
-				if (res.success && res.data) {
-					/*
-					 * 应答前缀两种都要收：标准 `+CPMS: "SM",<used>,<total>,...`，
-					 * 少数固件（如 SIMCom 系）回私有 `^CPMS:`。只匹配 `\+CPMS`
-					 * 会在那些固件上让用量永远停在 0 / 0。
-					 */
-					var m = String(res.data).match(/[\^+]CPMS: "\w+",(\d+),(\d+)/);
-					if (m) {
-						state.storage = { used: parseInt(m[1], 10), total: parseInt(m[2], 10) };
-						renderStorage();
-					}
+			return AtWs.client.sms('capacity').then(function (res) {
+				if (res.success && res.result && res.result.storage) {
+					state.storage = {
+						used: res.result.storage.used,
+						total: res.result.storage.total
+					};
+					renderStorage();
 				}
 			}).catch(function () {});
 		}
 
 		function refresh() {
-			return AtWs.client.sendCommand('AT+CMGL=4').then(function (res) {
+			return AtWs.client.sms('list').then(function (res) {
 				if (!res.success) {
-					if (res.error && String(res.error).indexOf('CME ERROR') >= 0) {
-						Mt5700.warning('短信功能可能未开启，请到「短信设置」开启');
-					} else {
-						Mt5700.error(String(res.error || '获取短信列表失败'));
-					}
+					Mt5700.error(String(res.error || '获取短信列表失败'));
 					return;
 				}
-				var raw = typeof res.data === 'string' ? res.data : '';
-				var parsed = (raw && raw !== 'OK' && raw !== 'NO SMS') ? Parse.parseCMGL(raw) : [];
-				/*
-				 * 已发短信可能同时来自两处：模组存储（CMGL 返回的 SMS-SUBMIT PDU）
-				 * 与浏览器缓存（localStorage）。解析器支持 SUBMIT 之后两边会撞车，
-				 * 直接 concat 就会显示两条一样的已发消息，所以先去重。
-				 */
-				buildContacts(parsed.concat(mergeCachedSent(parsed, Parse.getCachedSentMessages())));
+				var r = res.result || {};
+				state.fetchedAt = r.fetchedAt || 0;
+				buildContacts((r.entries || []).map(toUiMessage));
 			}).catch(function () {
 				Mt5700.error('获取短信列表失败');
 			});
 		}
 
 		/*
-		 * 单元格排序键：模组存储的序号。已发缓存用负数序号（-Date.now()），
-		 * 数值越大表示越新，与模组序号无关但只用于「同一时刻」的兜底排序。
+		 * 后端条目 → 界面消息。
+		 *
+		 * 关键点：index 一律来自本次 `list` 的真实返回。旧实现会把 localStorage
+		 * 里的「已发记录」（index 为负数）混进来，那些条目在模组里不存在，
+		 * 删除时下发的 AT+CMGD 必然失败；现在本地只保留**本次会话内**刚发出、
+		 * 且后端尚未在模组里列出的那条，用 `pendingLocal` 标记单独区分。
+		 */
+		function toUiMessage(e) {
+			return {
+				index: e.index,
+				content: e.content || '',
+				number: normalizeNumber(e.number || ''),
+				time: e.time || null,
+				timeApprox: !!e.timeApprox,
+				type: e.direction === 'sent' ? 'sent' : 'received',
+				isConcatenated: !!e.concat,
+				concatenatedRef: e.concat ? e.concat.reference : null,
+				concatenatedSeq: e.concat ? e.concat.partNumber : null,
+				concatenatedTotal: e.concat ? e.concat.partsCount : null,
+				error: e.error || null
+			};
+		}
+
+		function refreshAll() {
+			return refresh().then(refreshStorage);
+		}
+
+		/*
+		 * 单元格排序键：模组存储的序号。数值越大表示越新。
 		 */
 		function sortIndex(m) {
 			return m && typeof m.index === 'number' ? m.index : 0;
@@ -360,15 +382,11 @@ return L.view.extend({
 		 * 时间轴成立的前提是每条消息都有时刻。收到短信没问题（PDU 的 TP-SCTS 一定
 		 * 有），但**发出短信按 3GPP TS 23.040 就没有发送时刻**，只有 TP-VP 有效期 ——
 		 * 模组存下来再读回去，时间是真的不知道。早先的实现把这类消息一律排到会话
-		 * 末尾，后果是「对面两句挤在一起、自己那句跑到最后」，一次来回被打散，
-		 * 看起来根本不像对话。
+		 * 末尾，后果是「对面两句挤在一起、自己那句跑到最后」，一次来回被打散。
 		 *
 		 * 这里改为借**存储顺序**给它找位置：AT+CMGL 的序号就是存储先后，取该条
 		 * 前面最近那条有确切时刻的消息的时刻作锚点，让它落在那个位置附近。
 		 * 锚点只用于排序与日期分隔，气泡里照旧如实标「时间未知」——借位置，不伪造时刻。
-		 *
-		 * 返回 { sorted, keyOf }；keyOf 交给日期分隔条复用，免得「排序用的锚点」
-		 * 与「显示的日期」各算一套、互相对不上。
 		 */
 		function conversationOrder(msgs) {
 			var keyOf = {};
@@ -384,7 +402,7 @@ return L.view.extend({
 				if (t !== null) { anchorMs = t; anchorTime = stored[s].time; }
 				keyOf[stored[s]] = { ms: anchorMs, anchorTime: anchorTime, relaxed: t === null };
 			}
-			/* 缓存条目（index 为负）自带本机发送时刻，不参与存储顺序这条线索 */
+			/* 本地暂存条目（index 为负）自带本机发送时刻，不参与存储顺序这条线索 */
 			for (var j = 0; j < msgs.length; j++) {
 				if (keyOf[msgs[j]]) continue;
 				var tj = Parse.messageTimeMs(msgs[j].time);
@@ -403,62 +421,6 @@ return L.view.extend({
 				return sortIndex(x) - sortIndex(y);
 			});
 			return { sorted: sorted, keyOf: keyOf };
-		}
-
-		/*
-		 * 把浏览器缓存里的「已发」记录与模组返回的合并（同一条则去重）。
-		 *
-		 * 判定：号码 + 正文相同即视为同一条；两边都有时间时，还要求时间相差不超过
-		 * 10 分钟（否则只是内容恰好相同的另一条短信）。
-		 *
-		 * 关键点：模组存回来的 SMS-SUBMIT 按规范**不含发送时刻**，只有 TP-VP 有效期，
-		 * 而缓存那条是本机发送当时打的时间戳 —— **缓存那条才是唯一带准确时间的**。
-		 * 早先的实现在去重时保留模组那份、丢掉缓存那份，等于把唯一的时间信息一并
-		 * 扔了，于是自己发的消息全部变成「时间未知」并沉到会话末尾。现在改为反向
-		 * 吸收：把缓存的时间戳补给模组那条。模组的 index 仍然保留 —— 删除要走
-		 * AT+CMGD，不能换成缓存的负数 index。
-		 */
-		function mergeCachedSent(modemList, cached) {
-			function keyOf(m) { return normalizeNumber(m.number) + '|' + (m.content || ''); }
-			/*
-			 * 同一个「号码+正文」在模组里可能有不止一条（同内容重复发送），
-			 * 所以按 key 分桶后用游标逐条配对，避免一条缓存把多条模组记录都
-			 * 当成自己的副本而误消。
-			 */
-			var buckets = {};
-			for (var i = 0; i < modemList.length; i++) {
-				var m = modemList[i];
-				if (m.type !== 'sent') continue;
-				var k = keyOf(m);
-				if (!buckets[k]) buckets[k] = [];
-				buckets[k].push(m);
-			}
-
-			var cursor = {};
-			return cached.filter(function (c) {
-				var k = keyOf(c);
-				var arr = buckets[k];
-				if (!arr) return true;              /* 模组里没有 → 缓存这条独立保留 */
-
-				var tCached = Parse.messageTimeMs(c.time);
-				for (var i = cursor[k] || 0; i < arr.length; i++) {
-					var tModem = Parse.messageTimeMs(arr[i].time);
-					if (tModem !== null && !(tCached !== null && Math.abs(tModem - tCached) <= 10 * 60 * 1000)) {
-						continue;                   /* 两边都有时间且差得远 → 是另一条 */
-					}
-					if (tModem === null && tCached !== null) {
-						/*
-						 * 模组那条没有时刻，把本机记录的时刻补上 ——
-						 * 这是这条消息唯一的准确时间来源。
-						 */
-						arr[i].time = c.time;
-						arr[i].timeApprox = false;
-					}
-					cursor[k] = i + 1;
-					return false;                   /* 缓存这条已被模组记录吸收 */
-				}
-				return true;
-			});
 		}
 
 		function buildContacts(list) {
@@ -529,11 +491,8 @@ return L.view.extend({
 		/*
 		 * 本机（浏览器）当前时间，用于给「刚发出去的消息」盖时间戳。
 		 *
-		 * 口径说明：这里用的是**浏览器所在终端的本地时间**，而插件后端
-		 * （日志 / 推送 / 定时锁频）统一走设备系统时区（见 crate::localtime）。
-		 * 日常使用中 LuCI 就在同一台设备所在的局域网内，两者一致；
-		 * 若用异时区的电脑远程登录 LuCI，这条本地缓存的时间戳会按浏览器时区显示，
-		 * 而从模组读到的收发短信时间始终以设备时区给出（PDU 时间戳原样保留）。
+		 * 只在本次页面会话里作为**临时展示**使用：本地条目带 `pendingLocal` 标记，
+		 * 下一次刷新列表时会以模组的真实返回为准，不会留在界面上冒充模组数据。
 		 */
 		function nowTimeStr() {
 			var d = new Date();
@@ -542,141 +501,81 @@ return L.view.extend({
 				',' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 		}
 
-	/*
-	 * 短信发送：PDU 模式两段式交互（3GPP TS 27.005 §3.4.1）。
-	 *
-	 * 历史 bug（issue #19「点发送显示成功但短信没发出去」）的根因：
-	 * 旧实现把 `AT+CMGS=<长度>\r<PDU>` 拼成**一条**命令交给后端，后端原样
-	 * 写入串口（仅末尾补 \r）。真实模组收到 `AT+CMGS=<长度>\r` 后只回
-	 * `> ` 输入提示符并进入 PDU 等待态；而后端 consume() 又把 `> ` 判定为
-	 * 「应答结束」，于是前端拿到 success=true 显示「发送成功」——可是
-	 * **Ctrl+Z（0x1A）提交字符从未下发**，模组一直停在 PDU 输入等待态，
-	 * 短信根本没有发出去。mock 模组不模拟 `> ` 提示符，所以测试里看不出来。
-	 *
-	 * 正确协议分两步：
-	 *   1. `AT+CMGS=<tpduLength>`          → 模组回 `> ` 提示符
-	 *   2. `<PDU hex>` + `\x1A`（Ctrl+Z）  → 模组回 `+CMGS: <mr>` + `OK`
-	 *
-	 * 0x1A 过链路的可行性已逐段核实：浏览器 JSON.stringify 转义为 \u001a →
-	 * rpcd/ubus 解析还原 → ucode 侧参数原样传递 → mt5700.uc 的
-	 * sprintf('%J') 对 <0x20 的字符输出 \u001a（ucv_to_string_json_encoded）
-	 * → Rust serde_json 解析还原成 0x1A 字节写入串口。
-	 */
-	function send(explicitTarget) {
-		var content = msgInput.value.trim();
-		if (!content) { Mt5700.warning('请输入短信内容'); return; }
-		var target = (explicitTarget || '').trim() || state.selectedContact || '';
-		if (!target) { Mt5700.warning('请输入联系人号码'); return; }
-		if (!Parse.isValidPhoneNumber(target)) { Mt5700.warning('请输入正确的 5-19 位手机号码'); return; }
-
-		sendBtn.disabled = true;
-		var chain = Promise.resolve();
 		/*
-		 * 确保 PDU 模式。旧逻辑只在 `AT+CMGF?` 查询成功且显示文本模式时才
-		 * 切 PDU；查询一旦失败就假定模式没问题直接往下发 —— 万一丝毫在文本
-		 * 模式，`AT+CMGS=<长度>` 会被模组当成「发到号码 <长度>」的文本模式
-		 * 语法，又是一次假成功。CMGF=0 是幂等的（已是 PDU 模式也只会回 OK），
-		 * 因此查询失败时也强制切一次，把模式歧义彻底消掉。
+		 * 短信发送。
+		 *
+		 * 与旧实现的两点本质差别：
+		 *   1. PDU 编码、模式切换、短信中心号读取、分片提交全部由后端在**一次
+		 *      事务**里完成，前端不再连发四五条各自排队的 AT 命令；
+		 *   2. 结果按 accepted / rejected / unknown 三档处理，unknown 明确提示
+		 *      「可能已发走」，前端绝不会自动重发（那才是重复计费的真凶）。
 		 */
-		chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGF?'); })
-			.then(function (res) {
-				/*
-				 * 只有**能确认当前已是 PDU 模式**（应答含 `+CMGF: 0`）才跳过；
-				 * 其余情况（文本模式、查询失败、应答无法解析）一律强制切一次。
-				 * CMGF=0 幂等，多花一次命令换掉整个「模式歧义」类假成功。
-				 * 空格容错：少数固件回 `+CMGF:0`（无空格）。
-				 *
-				 * 切模式失败不在此处阻断：少数固件对幂等设置也回 ERROR，
-				 * 但只要当前确是 PDU 模式，CMGS 照样能成；真正拒绝时
-				 * 下一步 CMGS 会带着明确错误上来。
-				 */
-				if (res.success && /\+CMGF:\s*0/.test(String(res.data))) return;
-				return AtWs.client.sendCommand('AT+CMGF=0');
-			})
-			.then(function () { return AtWs.client.sendCommand('AT+CSCA?'); })
-			.then(function (res) {
-				var smsc = '';
-				if (res.success && res.data) {
-					var m = String(res.data).match(/\+CSCA: "([^"]+)"/);
-					if (m) smsc = m[1];
-				}
-				var formatted = target.replace(/^\+/, '');
-				var parts = SmsEncode.buildSubmitParts({ smsc: smsc, destination: formatted, message: content });
-				var chain2 = Promise.resolve();
-				for (var i = 0; i < parts.length; i++) {
-					chain2 = chain2.then(function (part) {
-						/*
-						 * 一条命令里同时给出长度与 PDU：`AT+CMGS=<长度>\r<PDU>`
-						 * —— 手册 9.14.5 的示例就是这种写法，上游 3.0.2 也是这么发的。
-						 *
-						 * 为什么不再分两步、也不再发 Ctrl+Z(0x1A)：0x1A 要穿过
-						 * 「浏览器 JSON → rpcd → ucode → nc → Rust」四层才到串口，
-						 * 实测这一路会把控制字节的转义吃掉，串口上收到的是**字面量**
-						 * "u001a" 六个字符（hexdump 核对过），模组因此永远等不到提交
-						 * 字符；而前端拿到 `> ` 提示符就当成功 —— 这正是 issue #19 的
-						 * 真实成因。单次写入完全不涉及控制字符，天然免疫这类转义问题，
-						 * 尾部 `\r` 由后端统一补，与上游行为一致。
-						 */
-						return AtWs.client.sendCommand(
-							'AT+CMGS=' + part.tpduLength + '\r' + part.pdu,
-							SMS_SUBMIT_TIMEOUT_MS);
-					}.bind(null, parts[i]));
-				}
-				return chain2;
-			});
+		function send(explicitTarget) {
+			var content = msgInput.value.trim();
+			if (!content) { Mt5700.warning('请输入短信内容'); return; }
+			var target = (explicitTarget || '').trim() || state.selectedContact || '';
+			if (!target) { Mt5700.warning('请输入联系人号码'); return; }
+			if (!Parse.isValidPhoneNumber(target)) { Mt5700.warning('请输入正确的 5-19 位手机号码'); return; }
 
-		chain.then(function (lastRes) {
-			if (!lastRes || lastRes.success === false) throw new Error(String(lastRes.error || '发送失败'));
-			/*
-			 * 假成功防护：提交的应答必须出现 `+CMGS` 或 `OK`。
-			 * 只看 success 标志不够 —— `> ` 提示符也曾被算作成功应答，
-			 * 那种响应里没有任何提交确认，必须判失败。
-			 */
-			var data = String(lastRes.data || '');
-			if (data.indexOf('+CMGS') < 0 && !/\bOK\b/.test(data)) {
-				throw new Error('模组未确认短信提交（响应：' + data.slice(0, 80) + '）');
-			}
-			var sent = {
-				index: -Date.now(),
-				content: content,
-				number: target,
-				time: nowTimeStr(),
-				type: 'sent'
-			};
-			Parse.saveSentMessageToCache(sent);
-			state.messages.push(sent);
-			msgInput.value = '';
-			renderHint();
-			renderConversation();
-			Mt5700.success('发送成功');
-			refresh();
-		}).catch(function (err) {
-			Mt5700.error((err && err.message) || '发送失败');
-		}).then(function () { sendBtn.disabled = false; });
-	}
+			sendBtn.disabled = true;
+			var label = sendBtn.textContent;
+			sendBtn.textContent = '发送中…';
+
+			AtWs.client.sms('send', {
+				destination: target,
+				message: content,
+				/* 重复提交保护键：同一号码 + 同一正文在后端 10s 窗口内只接受一次，
+				 * 覆盖浏览器重试、用户连点、按钮还没来得及置灰这几种情况 */
+				dedup_key: target + '|' + content
+			}).then(function (res) {
+				if (!res.success) throw new Error(String(res.error || '发送失败'));
+				var r = res.result || {};
+				if (r.outcome === 'accepted') {
+					msgInput.value = '';
+					renderHint();
+					Mt5700.success('发送成功' + (r.parts && r.parts.length > 1 ? '（' + r.parts.length + ' 段长短信）' : ''));
+				} else if (r.outcome === 'unknown') {
+					/*
+					 * 结果不明：绝不自动重发。如实告诉用户可能已经发走了，
+					 * 并让他用「刷新」去模组里看真实状态再决定。
+					 */
+					Mt5700.warning('发送结果不明：' + (r.message || '') + '。请勿重复点击发送。');
+				} else {
+					throw new Error(r.message || '模组拒绝了这条短信');
+				}
+				/* 无论哪一档，都用模组的真实数据刷新界面 */
+				return refreshAll();
+			}).catch(function (err) {
+				Mt5700.error((err && err.message) || '发送失败');
+			}).then(function () {
+				sendBtn.disabled = false;
+				sendBtn.textContent = label;
+			});
+		}
 
 		/* ---------- 删除 ---------- */
 
+		function indicesOf(msg) {
+			if (msg.partIndices && msg.partIndices.length) return msg.partIndices.slice();
+			return (msg.index != null && msg.index >= 0) ? [msg.index] : [];
+		}
+
 		function deleteMessage(msg) {
-			var storedIndices = (msg.partIndices && msg.partIndices.length)
-				? msg.partIndices
-				: (msg.index != null && msg.index >= 0 ? [msg.index] : []);
-			if (storedIndices.length) {
-				var chain = Promise.resolve();
-				storedIndices.forEach(function (ix) {
-					if (ix != null && ix >= 0) {
-						chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGD=' + ix); });
-					}
-				});
-				chain.then(function () { Mt5700.success('删除成功'); refresh(); })
-					.catch(function () { Mt5700.error('删除失败'); });
-			} else {
-				// 缓存中的已发消息
-				var updated = Parse.getCachedSentMessages().filter(function (m) { return m.index !== msg.index; });
-				try { localStorage.setItem(Parse.SMS_CACHE_KEY, JSON.stringify(updated)); } catch (e) {}
-				Mt5700.success('删除成功');
-				refresh();
+			var idxs = indicesOf(msg);
+			if (!idxs.length) {
+				Mt5700.warning('该条不在模组存储中，刷新后即消失');
+				return;
 			}
+			AtWs.client.sms('delete', { indices: idxs }).then(function (res) {
+				if (!res.success) { Mt5700.error(String(res.error || '删除失败')); return; }
+				var r = res.result || {};
+				if (r.deleted > 0) {
+					Mt5700.success('删除成功');
+				} else {
+					Mt5700.error('模组未能删除该短信');
+				}
+				return refreshAll();
+			}).catch(function () { Mt5700.error('删除失败'); });
 		}
 
 		function batchDelete() {
@@ -709,25 +608,17 @@ return L.view.extend({
 			actions.appendChild(Mt5700.dangerButton('删除所选', function () {
 				if (mask.parentNode) mask.parentNode.removeChild(mask);
 				if (!checked.length) { Mt5700.warning('请先选择要删除的短信'); return; }
-				var chain = Promise.resolve();
+				/* 一次事务里删完：后端逐条 AT+CMGD，中途不会被别的命令插进来 */
+				var idxs = [];
 				checked.forEach(function (m) {
-					var idxs = (m.partIndices && m.partIndices.length)
-						? m.partIndices
-						: (m.index != null && m.index >= 0 ? [m.index] : []);
-					idxs.forEach(function (ix) {
-						if (ix != null && ix >= 0) {
-							chain = chain.then(function () { return AtWs.client.sendCommand('AT+CMGD=' + ix); });
-						}
-					});
+					indicesOf(m).forEach(function (ix) { if (idxs.indexOf(ix) < 0) idxs.push(ix); });
 				});
-				chain.then(function () {
-					var cachedIds = checked.filter(function (m) { return m.index < 0; }).map(function (m) { return m.index; });
-					if (cachedIds.length) {
-						var updated = Parse.getCachedSentMessages().filter(function (m) { return cachedIds.indexOf(m.index) < 0; });
-						try { localStorage.setItem(Parse.SMS_CACHE_KEY, JSON.stringify(updated)); } catch (e) {}
-					}
-					Mt5700.success('成功删除 ' + checked.length + ' 条短信');
-					refresh();
+				if (!idxs.length) { Mt5700.warning('所选条目都不在模组存储中'); return; }
+				AtWs.client.sms('delete', { indices: idxs }).then(function (res) {
+					if (!res.success) { Mt5700.error(String(res.error || '批量删除失败')); return; }
+					var r = res.result || {};
+					Mt5700.success('已删除 ' + r.deleted + ' 条' + (r.failed && r.failed.length ? '，' + r.failed.length + ' 条失败' : ''));
+					return refreshAll();
 				}).catch(function () { Mt5700.error('批量删除失败'); });
 			}));
 			box.appendChild(listEl);
@@ -743,30 +634,67 @@ return L.view.extend({
 
 		var newSmsHandler = function (resp) {
 			if (!resp || resp.type !== 'new_sms' || !resp.data) return;
-			var d = resp.data;
-			var msg = {
-				index: d.index != null ? d.index : -Date.now(),
-				content: d.content || '',
-				number: normalizeNumber(d.sender || d.number || ''),
-				time: d.time || nowTimeStr(),
-				type: 'received',
-				isConcatenated: d.isComplete === false ? true : false
-			};
-			// 完整消息直接进列表；长短信由服务端拼接后推送（isComplete=true）
-			if (d.isComplete !== false) {
-				buildContacts(state.contacts.reduce(function (acc, c) { return acc.concat(c.messages); }, []).concat([msg]));
-				Mt5700.info('收到来自 ' + msg.number + ' 的新短信');
-			}
+			/*
+			 * 收到到达通知后立刻拉一次真实列表：通知只是「有新短信」这个信号，
+			 * 正文、时间、序号都必须以模组里读到的为准。
+			 */
+			refreshAll();
+			Mt5700.info('收到新短信');
 		};
 		AtWs.client.subscribe(newSmsHandler);
 
-		self._dispose = function () { AtWs.client.unsubscribe(newSmsHandler); };
+		/* ---------- 前台短信模式：生命周期 ---------- */
+
+		var sessionId = 0;
+		var heartbeat = null;
+
+		function openSession() {
+			AtWs.client.sms('session_open', { ttl_ms: SMS_SESSION_TTL_MS }).then(function (res) {
+				if (!res.success || !res.result) return;
+				sessionId = res.result.session_id || 0;
+				/* 心跳续期：页面还在就一直占着；后端另有租约上限兜底，
+				 * 即便这里的心跳因为浏览器休眠停了，也会自动释放 */
+				if (heartbeat) clearInterval(heartbeat);
+				heartbeat = setInterval(function () {
+					if (!sessionId) return;
+					AtWs.client.sms('session_renew', {
+						session_id: sessionId,
+						ttl_ms: SMS_SESSION_TTL_MS
+					}).then(function (r) {
+						/* 续不上（租约已被自动回收）→ 重新申请，不要静默失效 */
+						if (!r.success || (r.result && r.result.renewed === false)) {
+							sessionId = 0;
+							openSession();
+						}
+					});
+				}, SMS_SESSION_HEARTBEAT_MS);
+			}).catch(function () {});
+		}
+
+		function closeSession() {
+			if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+			if (!sessionId) return;
+			var id = sessionId;
+			sessionId = 0;
+			AtWs.client.sms('session_release', { session_id: id }).catch(function () {});
+		}
+
+		/* 页面隐藏（切到别的页签/熄屏）也视为离开：释放让后台巡检恢复 */
+		document.addEventListener('visibilitychange', function () {
+			if (document.hidden) closeSession();
+			else if (!sessionId) openSession();
+		});
+
+		self._dispose = function () {
+			AtWs.client.unsubscribe(newSmsHandler);
+			closeSession();
+		};
 
 		/* ---------- 初始化 ---------- */
 
 		Ui.startup(body, function () {
-			refreshStorage();
-			refresh();
+			openSession();
+			refreshAll();
 		});
 
 		renderStorage();
