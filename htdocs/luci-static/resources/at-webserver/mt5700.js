@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
 'require at-webserver/compat';
+'require at-webserver/tabmenu';
 /* global L */
 /**
  * MT5700 LuCI 前端公共组件库：页面骨架、卡片/面板、表单控件、
@@ -8,7 +9,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.24.0';
+var MT5700_CSS_VERSION = '2.25.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');

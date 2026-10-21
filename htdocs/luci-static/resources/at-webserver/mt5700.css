@@ -4927,3 +4927,49 @@ select option {
     padding: 40px 10px !important;
   }
 }
+
+/* ==========================================================================
+   LuCI Tab 菜单增强（tabmenu.js 注入的 SVG 图标）
+   - .at-tabmenu-icon 由 tabmenu.js 插入每个 Tab 链接文字之前；
+   - 颜色用 currentColor，自动继承主题 tab 文字配色；激活/悬停提亮；
+   - 仅匹配 #tabmenu 下的页签，不影响其他插件页面与主题本身。
+   ========================================================================== */
+
+#tabmenu .at-tabmenu-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 16px;
+	height: 16px;
+	margin-right: 6px;
+	vertical-align: -0.18em;
+	opacity: 0.72;
+	transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+#tabmenu .at-tabmenu-icon > svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+/* 选中态（bootstrap/material/argon 用 active，openwrt-2020 用 cbi-tab） */
+#tabmenu li.active .at-tabmenu-icon,
+#tabmenu li.cbi-tab .at-tabmenu-icon {
+	opacity: 1;
+}
+
+#tabmenu .tabs > li > a:hover .at-tabmenu-icon,
+#tabmenu .cbi-tabmenu > li > a:hover .at-tabmenu-icon {
+	opacity: 1;
+}
+
+/* 移动端收窄图标与间距，保证窄屏下一行容纳更多页签 */
+@media (max-width: 600px) {
+	#tabmenu .at-tabmenu-icon {
+		width: 15px;
+		height: 15px;
+		margin-right: 5px;
+	}
+}
