@@ -438,7 +438,14 @@ ATClient.prototype.handlePush = function (ev) {
  * 把「模组无响应」和「后端还在排队」混为一谈。故前端放宽到 14s，
  * 留出网络与 rpcd 代理余量，让用户看到后端给出的准确原因。
  */
-ATClient.prototype.sendCommand = function (command) {
+/*
+ * 发一条 AT 命令。
+ *
+ * timeoutMs 可选：仅少数命令需要比默认 14s 更长的预算（目前只有短信提交）。
+ * 默认值与 ucode 的 nc 硬超时（12s）配套，不能全局调大 —— 那样后端真挂掉时
+ * 每条命令都要白等更久，整页的失败反馈会变得很迟钝。
+ */
+ATClient.prototype.sendCommand = function (command, timeoutMs) {
 	var self = this;
 	this.commandQueue = this.commandQueue.then(function () {
 		/*
@@ -483,7 +490,8 @@ ATClient.prototype.sendCommand = function (command) {
 				cause: 'circuit-open'
 			};
 		}
-		return withTimeout(rpcAt(command), self.commandTimeout,
+		var budget = (typeof timeoutMs === 'number' && timeoutMs > 0) ? timeoutMs : self.commandTimeout;
+		return withTimeout(rpcAt(command), budget,
 			'命令执行超时（模组可能正忙或正在重连，请稍后重试）').then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
