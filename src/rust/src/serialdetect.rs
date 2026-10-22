@@ -114,12 +114,15 @@ fn port_interface_name(dev: &str) -> Option<String> {
 
 /// 读取 USB 接口描述符里的 bInterfaceProtocol（十六进制文本，如 "12"）。
 ///
-/// 这是 interface 名缺失时的**二级兜底**，本喵实测它与接口角色一一对应且极稳定：
-///   0x12 = PC UI / AT 口（AT 命令口，就是我们要找的）
-///   0x13 = Application Interface（应用/数据口）
-///   0x14 = GPS Interface
-///   0x1b = SerialB、0x1c = SerialC（厂商自定义数据口）
-/// 换 USB 口 / 换 xHCI 控制器 / 换主机，这些值都不变（写死在模组固件里），
+/// 这是 interface 名缺失时的**二级兜底**，本喵实测它与接口角色一一对应且极稳定。
+/// 取值口径以《MT5700M-CN USB 接口应用指南》的端口描述符表为准：
+///   0x12 = PCUI（AT 命令口，就是我们要找的，bInterfaceNumber 0x03）
+///   0x13 = DIAG（调试/日志口，bInterfaceNumber 0x02，class 0xFF / subclass 0x06）
+///   0x14 = GPS（NMEA 输出口）
+///   0x1b = Serial_B、0x1c = Serial_C（厂商自定义数据口）
+/// 本机的 sysfs 把 0x13 那个接口的字符串写成 "TDTECH Connect - Application Interface"
+/// （厂商对同一 DIAG/数据口的另一种叫法），命名与文档不同，但角色一致：都不是 AT 口。
+/// 换 USB 口 / 换 xHCI 控制器 / 换主机，协议号都不变（写死在模组固件里），
 /// 所以比「接口名字符串」更耐改版：某些固件/批次会把 interface 名留空或改成
 /// 厂商自定义描述，此时只能靠它认口。
 ///
@@ -141,12 +144,12 @@ fn port_interface_protocol(dev: &str) -> Option<String> {
 /// 只认「明确是/明确不是」的两头：不能因为协议号未知就把它当成 AT 口或彻底排除。
 fn protocol_score(proto: &str) -> Option<u8> {
     match proto {
-        // PC UI：MT5700 系列（含本机 TDTECH MT5700M-CN）的 AT 命令口
+        // PCUI：MT5700 系列（含本机 TDTECH MT5700M-CN）的 AT 命令口（USB 指南：0x12）
         "12" => Some(0),
-        // GPS：只吐 NMEA，明确不是 AT 口
+        // GPS：只吐 NMEA，明确不是 AT 口（USB 指南：0x14）
         "14" => Some(3),
-        // Application / SerialB / SerialC：都是数据口，明确不是 AT 口，
-        // 但也不该抢 AT 口位置，给 2 与「未知」同分即可
+        // DIAG / Serial_B / Serial_C：分别是日志口与厂商数据口，明确不是 AT 口，
+        // 但也不该抢 AT 口位置，给 2 与「未知」同分即可（USB 指南：0x13/0x1b/0x1c）
         "13" | "1b" | "1c" => Some(2),
         // 其余协议号（含 00/01 的网卡口）不表态
         _ => None,
