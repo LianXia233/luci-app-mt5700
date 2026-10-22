@@ -39,6 +39,9 @@ pub struct Dispatcher {
 
     memory_full_notified: bool,
 
+    /// 上一次为读短信设过的首选存储器（`AT+CPMS` 的 `<mem1>`）。
+    sms_mem: String,
+
     partials: HashMap<String, PartialSms>,
 }
 
@@ -61,6 +64,7 @@ impl Dispatcher {
             have_rsrp: false,
             last_sys_mode: String::new(),
             memory_full_notified: false,
+            sms_mem: String::new(),
             partials: HashMap::new(),
         }
     }
@@ -204,6 +208,44 @@ impl Dispatcher {
 
     async fn handle_new_sms(&mut self, storage: String, index: String) {
         log_info!("收到新短信，存储区: {}，索引: {}", storage, index);
+
+        // 先把读写介质对到上报的那个区。
+        //
+        // `AT+CMGR=<index>` 的 `<index>` 是「当前首选存储器（<mem1>）里的序号」，
+        // 而 +CMTI 报的是「这条短信落在哪个区、第几格」（8.1.1／9.9.1）。两个区各自
+        // 从自己的 0 号位排起，所以 `+CMTI: "SM",7` 落在 mem1="ME" 的时候去读
+        // `AT+CMGR=7`，读到的是**模组 FLASH 里第 7 格那条**，还把人家标成已读 ——
+        // 推送里出现的正文与真实新短信毫无关系。实机的读侧（`sendat 1 at+cmgl=4 |
+        // pdu_decoder --json`）之所以没这个问题，是因为它压根不指定区、只读当前 mem1。
+        //
+        // 手册 8.1.3 只承认 SM / ME 两个可写区名，别的区名不猜。切换后按
+        // CPMS_SWITCH_GAP 留出换区时间：`AT+CPMS` 回 OK 只代表命令被接受，
+        // 不代表介质已经换完（同 sms::purge_all）。
+        //
+        // 切与读是两次独立的 Sms 优先级下发，中间理论上可能被别人的短信事务插进去。
+        // 认下这点：切区只在「上报区与上次切到的区不同」时发生（见 mem_to_switch 的
+        // 缓存），而清空短信那条路径现在也会把区还原回去，剩下的这一丝窗口不值得
+        // 为它把每次新短信都变成一次长时间独占通道的事务。
+        if let Some(mem) = mem_to_switch(&self.sms_mem, &storage) {
+            let cmd = format!("AT+CPMS=\"{mem}\",\"{mem}\",\"{mem}\"");
+            match self
+                .client
+                .send_sms_command(&self.ctx, &cmd, crate::atclient::COMMAND_TIMEOUT)
+                .await
+            {
+                Ok(resp) if resp.ok() && !resp.has_error() => {
+                    self.sms_mem = mem.clone();
+                    tokio::time::sleep(crate::sms::CPMS_SWITCH_GAP).await;
+                }
+                other => log_warn!(
+                    "把读写介质切到 {mem} 没成功，仍按当前区读第 {index} 格：{}",
+                    match other {
+                        Ok(r) => r.text(),
+                        Err(e) => e,
+                    }
+                ),
+            }
+        }
 
         // 短信到达后的读取必须走短信最高优先级：它不能被后台巡检（信号/缓存/
         // 流量/自动拨号对账）排在后面，否则用户要等好几秒才看到新短信。
@@ -516,6 +558,18 @@ fn cmti_capture(line: &str) -> Option<(String, String)> {
         return None;
     }
     Some((storage, index.to_string()))
+}
+
+/// 这次上报要不要先切读写介质、切到哪个区（`AT+CPMS` 的 `<mem1>`）。
+///
+/// 只认手册 8.1.3 定义的两个可写区名（SM / ME），大小写与多带的引号都先抹平；
+/// 已经停在同一个区就不必再写一遍 `AT+CPMS`。
+fn mem_to_switch(current: &str, reported: &str) -> Option<String> {
+    let mem = reported.trim().trim_matches('"').to_ascii_uppercase();
+    match mem.as_str() {
+        "SM" | "ME" if mem != current.trim().to_ascii_uppercase() => Some(mem),
+        _ => None,
+    }
 }
 
 /// 从 `AT+CMGR=<index>`（手册 9.10.1）/ `AT+CMGL`（9.8.1）的应答里取出 PDU 并解码。
@@ -880,6 +934,18 @@ mod tests {
         assert_eq!(c.band, Some(41), "band_classN 必须取到，否则推送显示不出 n41");
         assert_eq!(c.dl_freq_khz, 2_565_000.0);
         assert_eq!(c.dl_bw_khz, 100_000.0);
+    }
+
+    #[test]
+    fn mem_to_switch_only_moves_for_a_writable_area() {
+        // 手册 8.1.3 只给 SM / ME 两个可写区名，别的一律不猜。
+        assert_eq!(mem_to_switch("", "SM").as_deref(), Some("SM"), "第一次读到上报区要先对上");
+        assert_eq!(mem_to_switch("SM", "SM"), None, "已经在同一个区，不再写一遍 CPMS");
+        assert_eq!(mem_to_switch("ME", "\"sm\"").as_deref(), Some("SM"), "大小写与引号都要抹平");
+        assert_eq!(mem_to_switch("sm", "SM"), None, "当前区的大小写不同也不算要切");
+        assert_eq!(mem_to_switch("ME", "SM").as_deref(), Some("SM"), "上报在卡上而当前是模组 FLASH");
+        assert_eq!(mem_to_switch("ME", "BM"), None, "BM/MT 这类手册没定义的区名不切");
+        assert_eq!(mem_to_switch("ME", ""), None);
     }
 
     #[test]

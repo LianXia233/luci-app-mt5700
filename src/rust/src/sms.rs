@@ -89,7 +89,8 @@ impl SendOutcome {
 /// 单条短信（含长短信的分段信息）。
 #[derive(Debug, Clone)]
 pub struct SmsEntry {
-    pub index: u32,
+    /// 存储槽位；None 表示头行里那个字段没读出来（0 是合法槽位，不能当哨兵）。
+    pub index: Option<u32>,
     /// 0=未读 1=已读 2=未发 3=已发（TS 27.005 `<stat>`）
     pub stat: u32,
     pub direction: &'static str,
@@ -554,6 +555,19 @@ impl SmsService {
                     SendOutcome::Accepted => String::new(),
                 };
                 log_warn!("短信提交异常：{}", message_out);
+                // 实机在每一片失败后都先往串口写一个 ESC(0x1B) 再继续用端口
+                // （`smssend` 里的 `at("\x1b", 3)`）：模组可能正卡在「等 PDU」的
+                // 半开输入态，这时候紧跟着的 `AT+CPMS?` 会被当成 PDU 吞掉，
+                // 于是一次发送失败连带把后面的读写一起拖死。清完再交还通道。
+                let _ = self
+                    .client
+                    .run_in_transaction(
+                        &self.ctx,
+                        &tx,
+                        "\u{1b}",
+                        crate::atclient::COMMAND_TIMEOUT,
+                    )
+                    .await;
                 break;
             }
         }
@@ -579,7 +593,8 @@ impl SmsService {
         })
     }
 
-    /// 删除若干条短信。逐个下发 `AT+CMGD=<index>`，同一事务内完成。
+    /// 删除若干条短信。模组不收槽位列表，所以**一个槽位一句 `AT+CMGD`**，
+    /// 并按槽位**从大到小**下发；同一事务内完成，末尾再回读一次容量。
     ///
     /// 索引来自上一次 `list` 的真实返回；删除后重新读一次容量，
     /// 让界面显示的用量与模组当前状态一致。
@@ -587,22 +602,23 @@ impl SmsService {
         if indices.is_empty() {
             return Err("没有要删除的短信".into());
         }
-        // 去重并保持顺序 —— 前端批量删除可能把同一条传进来多次。
+        // 去重，再**按槽位从大到小**下发。
         //
-        // 顺带挡掉 0：手册 8.6.3 只说 `<index>` 是「短信的存储位置」，没给取值范围，
-        // 而本插件把「头行里读不出序号」的记录统一记成 index=0（见 pdu::parse_cmgl_response），
-        // 于是 0 分不清「模组真有个 0 号位」和「这条压根没解出来」。宁可不删也不对着
-        // 一个来路不明的序号下发 CMGD —— 删错一条是不可逆的。前端同样禁用这类条目的勾选。
+        // 降序这条来自实机：厂商的删除路径（modem.lua 的 action_smsdel）注释写着
+        // 「一条命令一个槽位：模组不收槽位列表。从大到小删，免得剩下的槽位号在中途挪位」，
+        // 实机的实现就是把 idx 排序后倒着逐条 AT+CMGD。升序删到一半，后面的号可能已经
+        // 指向别的短信 —— 删错一条是不可逆的。
+        //
+        // 0 号槽位是真实的（实机一张存着分段短信的卡，头两条就在 0 和 1），所以这里
+        // 不再拿 0 当「序号来路不明」的哨兵；那种条目在解析层就是 index=None，
+        // 界面对它禁用勾选，永远走不到这条命令里。
         let mut ordered: Vec<u32> = Vec::new();
         for i in indices {
-            if i == 0 || ordered.contains(&i) {
-                continue;
+            if !ordered.contains(&i) {
+                ordered.push(i);
             }
-            ordered.push(i);
         }
-        if ordered.is_empty() {
-            return Err("没有合法的短信序号".into());
-        }
+        ordered.sort_unstable_by(|a, b| b.cmp(a));
 
         let tx = self
             .client
@@ -708,6 +724,27 @@ impl SmsService {
                 Ok(resp) if resp.ok() && !resp.has_error() => deleted += 1,
                 Ok(resp) => errors.push(format!("{mem}: {}", compact_detail(&resp.text()))),
                 Err(e) => errors.push(format!("{mem}: {e}")),
+            }
+        }
+
+        // 把读写介质还回用户原先的那一组。
+        //
+        // 上面为了逐区清空写了好几次 AT+CPMS，循环结束时 mem1 停在最后一个试过的区上。
+        // mem1 决定之后 list / delete / CMGR 落在哪个区（手册 8.1.1），不还的话
+        // 「清空短信」这一个动作会连带把之后所有短信读写的默认介质改掉 —— 用户看到的是
+        // 列表莫名其妙换了一个区。实机的清空压根不切区（`AT+CMGD=0,4` 清当前 mem1），
+        // 所以没有这个副作用；这里既然要切，就得切回去。
+        if let Some(s) = &storage {
+            let areas = [&s.mem1, &s.mem2, &s.mem3];
+            if areas.iter().all(|m| is_safe_mem_name(m)) {
+                let restore = format!(r#"AT+CPMS="{}","{}","{}""#, s.mem1, s.mem2, s.mem3);
+                if let Err(e) = self
+                    .client
+                    .run_in_transaction(&self.ctx, &tx, &restore, crate::atclient::COMMAND_TIMEOUT)
+                    .await
+                {
+                    log_warn!("清空后恢复原存储区设置失败：{e}");
+                }
             }
         }
 
@@ -1770,6 +1807,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn purge_restores_the_original_storage_areas() {
+        // 清空为了逐区删净，会把 mem1 一个个切过去；切完必须还回用户原先的那一组，
+        // 否则「清空短信」顺带把之后所有 list / delete / CMGR 的默认介质改了。
+        let (svc, modem, _ctx) = harness(move |cmd: &str| {
+            if cmd == "AT+CPMS?" {
+                return Reply::Lines(vec![
+                    "+CPMS: \"SM\",4,50,\"SM\",4,50,\"ME\",0,50".into(),
+                    "OK".into(),
+                ]);
+            }
+            Reply::ok(&[])
+        })
+        .await;
+        let r = svc.purge_all().await.unwrap();
+        let switches: Vec<String> = modem
+            .cmds()
+            .into_iter()
+            .filter(|c| c.starts_with("AT+CPMS=\""))
+            .collect();
+        assert_eq!(
+            switches.first().map(String::as_str),
+            Some(r#"AT+CPMS="SM","SM","SM""#),
+            "第一个被切到的区应是上报里排在最前的 SM：{switches:?}"
+        );
+        assert!(switches.iter().any(|c| c == r#"AT+CPMS="ME","ME","ME""#), "ME 区也要清：{switches:?}");
+        assert_eq!(
+            switches.last().map(String::as_str),
+            Some(r#"AT+CPMS="SM","SM","ME""#),
+            "收尾必须把三个区原样还回去：{switches:?}"
+        );
+        assert_eq!(r.requested, 2, "SM 与 ME 两个区都试过了");
+    }
+
+    #[tokio::test]
     async fn list_reports_modem_failure_instead_of_empty_list() {
         // 手册 9.8.1：CMGL 失败回 `+CMS ERROR: <err>`，成功才以 OK 收尾。
         // 没有 OK 就不能当成「一条短信也没有」，否则 SIM 卡没就绪会被洗成「本机没有短信」。
@@ -1907,7 +1978,7 @@ mod tests {
         let first = svc.list().await.unwrap();
         assert_eq!(first.entries.len(), 1, "第一次应读到 1 条");
         assert_eq!(first.entries[0].content, "测试");
-        assert_eq!(first.entries[0].index, 1);
+        assert_eq!(first.entries[0].index, Some(1));
 
         let second = svc.list().await.unwrap();
         assert_eq!(second.entries.len(), 0, "第二次必须是模组的真实状态（空），不能返回上一次的快照");
@@ -2068,6 +2139,37 @@ mod tests {
         assert_eq!(r.outcome, SendOutcome::Unknown);
         assert_eq!(submits.load(std::sync::atomic::Ordering::SeqCst), 1,
             "结果不明时绝不能自动重发（可能已经发走，重发=重复计费）");
+    }
+
+    #[tokio::test]
+    async fn send_clears_a_half_open_pdu_prompt_with_escape() {
+        // 实机每片提交失败后先往串口写一个 ESC 才继续用（smssend 的 `at("\x1b", 3)`）：
+        // 模组可能停在「等 PDU」的半开输入态，这时直接问 AT+CPMS? 会被当成 PDU 吞掉，
+        // 一次发送失败连带把后面的读写一起拖死。
+        let (svc, modem, _ctx) = harness(move |cmd: &str| {
+            if cmd.starts_with("AT+CMGS=") {
+                return Reply::Silent; // 模组不回话
+            }
+            if cmd.starts_with("AT+CPMS?") {
+                return Reply::ok(&["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"]);
+            }
+            Reply::ok(&["+CMGF: 0"])
+        })
+        .await;
+
+        let r = svc
+            .send(SendRequest { destination: "10000".into(), message: "102".into(), smsc: None, dedup_key: None })
+            .await
+            .unwrap();
+        assert_eq!(r.outcome, SendOutcome::Unknown);
+        // ESC 不是 AT 命令，只会出现在「写到串口的字节流」里，故取 modem 的记录。
+        let cmds = modem.cmds();
+        let cmgs_at = cmds.iter().position(|c| c.starts_with("AT+CMGS=")).expect("应有一次提交");
+        let esc_at = cmds.iter().position(|c| c == "\u{1b}").expect("失败后应写 ESC 清输入态");
+        let cpms_at = cmds.iter().position(|c| c.starts_with("AT+CPMS?")).expect("收尾应读一次容量");
+        assert!(cmgs_at < esc_at && esc_at < cpms_at, "ESC 必须夹在失败的提交与后续查询之间：{cmds:?}");
+        assert_eq!(cmds.iter().filter(|c| c.starts_with("AT+CMGS=")).count(), 1,
+            "清完输入态也不等于可以重发");
     }
 
     #[tokio::test]
@@ -2273,13 +2375,39 @@ mod tests {
         })
         .await;
 
-        let r = svc.delete(vec![1, 2, 3]).await.unwrap();
+        // 前端给的顺序是乱的，且 0 号槽位是真实存在的：下发必须去重后按槽位降序。
+        let r = svc.delete(vec![1, 3, 2, 3]).await.unwrap();
         assert_eq!(r.requested, 3);
         assert_eq!(r.deleted, 2, "模组明确拒绝的那条不能算成功");
         assert_eq!(r.failed, vec![3]);
-        assert_eq!(*ok_indices.lock().unwrap(), vec!["1".to_string(), "2".to_string(), "3".to_string()],
-            "应按顺序逐条下发");
+        assert_eq!(*ok_indices.lock().unwrap(), vec!["3".to_string(), "2".to_string(), "1".to_string()],
+            "应按槽位从大到小逐条下发，删一条挪一次位也不能碰错条目");
         assert!(r.storage.is_some(), "删除后应回读一次真实容量");
+    }
+
+    #[tokio::test]
+    async fn delete_accepts_slot_zero() {
+        // 实机的短信从 0 号位开始排（一张存着分段短信的卡，头两条就在 0 和 1），
+        // 所以 0 不能当「序号来路不明」的哨兵被丢掉 —— 那样最老的一条永远删不掉。
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let s = seen.clone();
+        let (svc, _modem, _ctx) = harness(move |cmd: &str| {
+            if cmd.starts_with("AT+CMGD=") {
+                s.lock().unwrap().push(cmd.trim_start_matches("AT+CMGD=").to_string());
+            }
+            Reply::ok(&[])
+        })
+        .await;
+
+        let r = svc.delete(vec![0, 1]).await.unwrap();
+        assert_eq!(r.requested, 2, "0 号槽位是一条合法删除请求");
+        assert_eq!(*seen.lock().unwrap(), vec!["1".to_string(), "0".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn delete_rejects_empty_index_list() {
+        let (svc, _modem, _ctx) = harness(|_| Reply::ok(&[])).await;
+        assert!(svc.delete(vec![]).await.is_err(), "空列表不该占用一次短信事务");
     }
 
     #[tokio::test]
