@@ -1070,7 +1070,15 @@ mod tests {
         let sms = decode_incoming_pdu(UCS2_PDU).unwrap();
         assert_eq!(sms.sender, "13800138000");
         assert_eq!(sms.content, "测试");
-        let want = localtime::from_ymdhms(2025, 8, 25, 12, 0, 0).unwrap();
+        // SCTS 是「短信中心本地时间 2025-08-25 12:00:00，偏移 +08:00」，
+        // 绝对时刻为 04:00 UTC。期望值必须按中心时区构造：早先用设备时区
+        // （localtime::from_ymdhms）换算，只有设备恰好也在东八区时才成立，
+        // 换到 UTC 环境就会误报。
+        let center = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+        let want = center
+            .with_ymd_and_hms(2025, 8, 25, 12, 0, 0)
+            .single()
+            .unwrap();
         assert_eq!(sms.date.timestamp(), want.timestamp());
         assert!(sms.partial.is_none());
     }
