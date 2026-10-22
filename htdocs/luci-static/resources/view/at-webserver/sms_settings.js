@@ -50,21 +50,24 @@ return L.view.extend({
 		rowSms.appendChild(smsCard);
 
 		var imsSwitch = mkCheck(function (checked, input) {
-			AtWs.client.sendCommand('AT^IMSSWITCH=' + (checked ? '1,0,0' : '0,0,0')).then(function (res) {
-				if (res.success) {
-					Mt5700.success((checked ? '开启' : '关闭') + ' IMS 成功');
-				} else {
-					Mt5700.error((checked ? '开启' : '关闭') + ' IMS 失败');
-					input.checked = !checked;
-				}
-			}).catch(function () { Mt5700.error('IMS 设置失败'); });
+			input.disabled = true;
+			AtWs.client.sms('set_ims', { enable: checked }).then(function (res) {
+				if (!res.success) throw new Error(res.error || '模组拒绝设置 IMS');
+				state.imsOn = checked;
+				state.smsOn = checked;
+				smsOnChk.checked = checked;
+				Mt5700.success((checked ? '开启' : '关闭') + ' IMS 成功');
+			}).catch(function (err) {
+				input.checked = state.imsOn;
+				Mt5700.error((err && err.message) || 'IMS 设置失败');
+			}).then(function () { input.disabled = false; });
 		});
 		var imsChk = imsSwitch.querySelector('input');
 		smsBody.appendChild(Mt5700.formGroup('IMS 短信', imsSwitch, '开启后可收发短信'));
 
 		var smsOnSwitch = mkCheck(function (checked) { toggleSMS(checked); });
 		var smsOnChk = smsOnSwitch.querySelector('input');
-		smsBody.appendChild(Mt5700.formGroup('短信功能', smsOnSwitch, '开启时按顺序下发 CEUS/IMSSWITCH/CFUN/CGDCONT/CSCA 配置'));
+		smsBody.appendChild(Mt5700.formGroup('短信功能', smsOnSwitch, '启用时重启射频以应用数据中心模式，再开启 LTE IMS；关闭时只关闭 IMS，不影响蜂窝数据连接。'));
 
 		/* ---------- 短信中心号码 ---------- */
 		var centerCard = Mt5700.card('短信中心号码', '用于发送短信的 SMSC');
@@ -72,16 +75,21 @@ return L.view.extend({
 		centerCard._body.appendChild(centerBody);
 		rowSms.appendChild(centerCard);
 
-		var centerInput = Mt5700.input('text', '+8613800755500', '');
+		var centerInput = Mt5700.input('text', '读取 SIM 卡短信中心号码…', '');
+		centerInput.value = '';
+		centerInput.disabled = true;
 		centerInput.addEventListener('input', function () { state.centerNumber = centerInput.value; });
 		centerBody.appendChild(Mt5700.formGroup('中心号码', centerInput));
 		centerBody.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('保存中心号码', function () {
 				var num = centerInput.value.trim();
 				if (!num) { Mt5700.error('请输入短信中心号码'); return; }
-				AtWs.client.sendCommand('AT+CSCA="' + num + '"').then(function (res) {
-					if (res.success) Mt5700.success('短信中心号码已保存');
-					else Mt5700.error('保存失败');
+				AtWs.client.sms('set_smsc', { smsc: num }).then(function (res) {
+					if (res.success && res.result) {
+						state.centerNumber = res.result.smsc || num;
+						centerInput.value = state.centerNumber;
+						Mt5700.success('短信中心号码已保存并回读校验');
+					} else Mt5700.error('保存失败：' + (res.error || ''));
 				}).catch(function () { Mt5700.error('保存失败'); });
 			})
 		));
@@ -123,10 +131,15 @@ return L.view.extend({
 					 * 里跑完：中间被别的命令插进来会留下没清干净的存储区。
 					 */
 					AtWs.client.sms('purge').then(function (res) {
-						if (res.success && res.result && res.result.storage) {
-							Mt5700.success('已清空全部短信');
-							applyStorage(res.result.storage);
-						} else { Mt5700.error('清空短信失败：' + (res.error || '')); }
+						if (res.success && res.result) {
+							if (res.result.storage) applyStorage(res.result.storage);
+							if (res.result.errors && res.result.errors.length)
+								Mt5700.warning('部分存储区未能清空：' + res.result.errors.join('；'));
+						else if (res.result.deleted > 0)
+							Mt5700.success('已完成清空操作（' + res.result.deleted + ' 个存储区）');
+						else
+							Mt5700.warning('没有存储区确认完成清空，请刷新核实');
+					} else { Mt5700.error('清空短信失败：' + (res.error || '')); }
 					}).catch(function () { Mt5700.error('清空短信失败'); });
 				});
 			})
@@ -262,24 +275,31 @@ return L.view.extend({
 		 */
 		function toggleSMS(enable) {
 			smsOnChk.disabled = true;
-			AtWs.client.sms('power', { enable: enable, smsc: centerInput.value || '' })
+			imsChk.disabled = true;
+			AtWs.client.sms('power', { enable: enable, smsc: centerInput.value.trim() || '' })
 				.then(function (res) {
 					if (!res.success) throw new Error(res.error || '操作失败');
 					var r = res.result || {};
 					if (r.failedAt) {
-						throw new Error('步骤「' + r.failedAt + '」失败');
+						throw new Error('步骤「' + r.failedAt + '」失败' + (r.failedDetail ? '：' + r.failedDetail : ''));
 					}
+					if (r.enabled !== enable) throw new Error('后端未确认短信功能状态变更');
 					Mt5700.success(enable ? '短信功能已开启' : '短信功能已关闭');
 					state.smsOn = enable;
+					state.imsOn = enable;
 					smsOnChk.checked = enable;
+					imsChk.checked = enable;
 					/* 以模组回读到的真实值为准 */
 					if (r.smsc) { state.centerNumber = r.smsc; centerInput.value = r.smsc; }
 					if (r.storage) applyStorage(r.storage);
 				}).catch(function (err) {
+					smsOnChk.checked = state.smsOn;
+					imsChk.checked = state.imsOn;
 					Mt5700.error((err && err.message) || '操作失败');
 					loadIMS();
 				}).then(function () {
 					smsOnChk.disabled = false;
+					imsChk.disabled = false;
 				});
 		}
 
@@ -293,17 +313,29 @@ return L.view.extend({
 			return AtWs.client.sms('get_ims').then(function (res) {
 				if (res.success && res.result && res.result.enabled !== null && res.result.enabled !== undefined) {
 					state.imsOn = !!res.result.enabled;
-					imsChk.checked = state.imsOn;
-					smsOnChk.checked = state.imsOn;
 					state.smsOn = state.imsOn;
-					return AtWs.client.sms('get_smsc').then(function (r2) {
-						if (r2.success && r2.result && r2.result.smsc) {
-							state.centerNumber = r2.result.smsc;
-							centerInput.value = r2.result.smsc;
-						}
-					});
+					imsChk.checked = state.imsOn;
+					smsOnChk.checked = state.smsOn;
 				}
-			}).catch(function () {});
+			}).catch(function (err) {
+				console.warn('读取 IMS 状态失败', err);
+			});
+		}
+
+		function loadSMSC() {
+			centerInput.disabled = true;
+			return AtWs.client.sms('get_smsc').then(function (res) {
+				if (!res.success) throw new Error(res.error || '读取短信中心号码失败');
+				var number = res.result && res.result.smsc ? String(res.result.smsc).trim() : '';
+				state.centerNumber = number;
+				centerInput.value = number;
+				centerInput.placeholder = number ? '' : 'SIM 卡未返回短信中心号码';
+			}).catch(function (err) {
+				state.centerNumber = '';
+				centerInput.value = '';
+				centerInput.placeholder = '读取 SIM 卡短信中心号码失败';
+				console.warn(err);
+			}).then(function () { centerInput.disabled = false; });
 		}
 
 		/*
@@ -343,9 +375,7 @@ return L.view.extend({
 		}
 
 		function loadAll() {
-			return Promise.resolve()
-				.then(loadIMS)
-				.then(loadStorage)
+			return Promise.all([loadIMS(), loadSMSC(), loadStorage()])
 				.then(refreshCacheCount)
 				.catch(function (err) { console.warn(err); });
 		}

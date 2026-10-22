@@ -133,6 +133,8 @@ pub struct DeleteResult {
     pub requested: usize,
     pub deleted: usize,
     pub failed: Vec<u32>,
+    /// 存储区操作失败原因（清空全部使用）；普通按序号删除时为空。
+    pub errors: Vec<String>,
     pub storage: Option<StorageInfo>,
 }
 
@@ -143,6 +145,8 @@ pub struct PowerResult {
     pub steps_done: Vec<String>,
     /// 失败在哪一步（成功时为 None）。
     pub failed_at: Option<String>,
+    /// 模组原始拒绝信息，供页面诊断。
+    pub failed_detail: Option<String>,
     pub smsc: String,
     pub storage: Option<StorageInfo>,
 }
@@ -239,10 +243,6 @@ impl SmsService {
 
         // 先确保 PDU 模式。查询只能确认「当前已经是 PDU 模式」时才跳过，
         // 查询失败/看不懂一律强制设一次 —— CMGF=0 幂等，代价远小于模式歧义。
-        let _ = self
-            .client
-            .run_in_transaction(&self.ctx, &tx, "AT+CMGF?", crate::atclient::COMMAND_TIMEOUT)
-            .await;
         let mut mode = false;
         if let Ok(resp) = self
             .client
@@ -252,10 +252,13 @@ impl SmsService {
             mode = resp.contains("+CMGF: 0");
         }
         if !mode {
-            let _ = self
-                .client
+            let set = self.client
                 .run_in_transaction(&self.ctx, &tx, "AT+CMGF=0", crate::atclient::COMMAND_TIMEOUT)
-                .await;
+                .await
+                .map_err(|e| format!("切换到 PDU 模式失败: {e}"))?;
+            if !set.ok() || set.has_error() {
+                return Err(format!("切换到 PDU 模式失败：{}", last_line(&set.text())));
+            }
         }
 
         let resp = self
@@ -342,12 +345,12 @@ impl SmsService {
             .await;
         let already_pdu = matches!(&mode_resp, Ok(r) if r.contains("+CMGF: 0"));
         if !already_pdu {
-            if let Err(e) = self
-                .client
+            let set = self.client
                 .run_in_transaction(&self.ctx, &tx, "AT+CMGF=0", crate::atclient::COMMAND_TIMEOUT)
                 .await
-            {
-                        return Err(format!("切换到 PDU 模式失败: {e}"));
+                .map_err(|e| format!("切换到 PDU 模式失败: {e}"))?;
+            if !set.ok() || set.has_error() {
+                return Err(format!("切换到 PDU 模式失败：{}", last_line(&set.text())));
             }
         }
 
@@ -505,6 +508,7 @@ impl SmsService {
             requested: ordered.len(),
             deleted,
             failed,
+            errors: Vec::new(),
             storage,
         })
     }
@@ -529,36 +533,34 @@ impl SmsService {
             mems = vec!["SM".into(), "ME".into(), "MT".into()];
         }
 
-        let failed: Vec<u32> = Vec::new();
+        let mut errors: Vec<String> = Vec::new();
         let mut deleted = 0usize;
         for mem in &mems {
             if !is_safe_mem_name(mem) {
+                errors.push(format!("{mem}: 不支持的存储区"));
                 continue;
             }
             let set = format!(r#"AT+CPMS="{mem}","{mem}","{mem}""#);
-            if self
-                .client
+            let selected = self.client
                 .run_in_transaction(&self.ctx, &tx, &set, crate::atclient::COMMAND_TIMEOUT)
+                .await;
+            if !matches!(selected, Ok(ref r) if r.ok() && !r.has_error()) {
+                errors.push(format!("{mem}: 切换存储区失败"));
+                continue;
+            }
+            match self.client
+                .run_in_transaction(&self.ctx, &tx, "AT+CMGD=1,4", SMS_LIST_TIMEOUT)
                 .await
-                .map(|r| r.ok())
-                .unwrap_or(false)
             {
-                match self
-                    .client
-                    .run_in_transaction(&self.ctx, &tx, "AT+CMGD=1,4", SMS_LIST_TIMEOUT)
-                    .await
-                {
-                    Ok(resp) if resp.ok() => deleted += 1,
-                    other => {
-                        log_warn!("清空存储区 {mem} 未完成：{:?}", other.map(|r| last_line(&r.text())));
-                    }
-                }
+                Ok(resp) if resp.ok() && !resp.has_error() => deleted += 1,
+                Ok(resp) => errors.push(format!("{mem}: {}", compact_detail(&resp.text()))),
+                Err(e) => errors.push(format!("{mem}: {e}")),
             }
         }
 
         let storage = self.read_storage_in_tx(&tx).await.ok();
         drop(tx);
-        Ok(DeleteResult { requested: mems.len(), deleted, failed, storage })
+        Ok(DeleteResult { requested: mems.len(), deleted, failed: Vec::new(), errors, storage })
     }
 
     /// 读取存储用量：一次真实下发 `AT+CPMS?`。
@@ -614,15 +616,15 @@ impl SmsService {
 
     /// 写短信中心号码，并回读校验（写成功不等于写对了）。
     pub async fn set_smsc(&self, number: &str) -> Result<String, String> {
-        let cleaned: String = number.trim().chars().filter(|c| c.is_ascii_digit() || *c == '+').collect();
-        if cleaned.len() < 3 || cleaned.len() > 20 {
-            return Err("短信中心号码格式不正确".into());
+        let cleaned = number.trim().to_string();
+        if !valid_phone_address(&cleaned) || cleaned.len() < 3 || cleaned.chars().filter(|c| c.is_ascii_digit()).count() > 20 {
+            return Err("短信中心号码格式不正确（仅允许可选前导 + 和数字）".into());
         }
         let tx = self
             .client
             .open_sms_transaction(&self.ctx, "sms.set_smsc", SMS_QUEUE_WAIT)
             .await?;
-        self.client
+        let set = self.client
             .run_in_transaction(
                 &self.ctx,
                 &tx,
@@ -630,6 +632,9 @@ impl SmsService {
                 crate::atclient::COMMAND_TIMEOUT,
             )
             .await?;
+        if !set.ok() || set.has_error() {
+            return Err(format!("模组拒绝设置短信中心号码：{}", last_line(&set.text())));
+        }
         let back = match self
             .client
             .run_in_transaction(&self.ctx, &tx, "AT+CSCA?", crate::atclient::COMMAND_TIMEOUT)
@@ -652,39 +657,39 @@ impl SmsService {
     /// 后台巡检随时会从中间插进来，把「射频刚被拉起来」的状态打断，
     /// 结果是短信开关看着勾上了、实际没生效。现在整串在一次事务里跑完。
     pub async fn power_set(&self, enable: bool, smsc: Option<String>) -> Result<PowerResult, String> {
+        if let Some(sc) = smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if !valid_phone_address(sc) {
+                return Err("短信中心号码格式不正确（仅允许 3–20 位数字和可选前导 +）".into());
+            }
+        }
         let tx = self
             .client
             .open_sms_transaction(&self.ctx, "sms.power", SMS_QUEUE_WAIT)
             .await?;
 
+        // CEUS 设置需经过一次 RF 重启才生效（模组手册 3.15.2）。先关闭 RF，
+        // 设置为数据中心，再恢复 RF，最后设置 IMS；旧顺序在 RF 关闭前设置 IMS，
+        // 且关闭短信时直接 CFUN=0 会把整张数据网卡一起关掉，导致之后的开关失败。
         let mut steps: Vec<(String, u64, &'static str)> = if enable {
             vec![
-                ("AT+CEUS=1".into(), 1000, "开启 CEUS"),
-                ("AT^IMSSWITCH=1,0,0".into(), 2000, "开启 IMS"),
-                ("AT+CFUN=1".into(), 2000, "恢复射频"),
-                (
-                    r#"AT+CGDCONT=5,"IPV4V6","","",0,0,0,0,1,1,1,,,,,,0,,0,0,0,0"#.into(),
-                    1000,
-                    "配置数据承载",
-                ),
+                ("AT+CFUN=0".into(), 500, "准备重启射频以应用短信模式"),
+                ("AT+CEUS=1".into(), 500, "设置数据中心模式"),
+                ("AT+CFUN=1".into(), 5000, "恢复射频并等待模组启动"),
+                ("AT^IMSSWITCH=1,0,0".into(), 1000, "开启 LTE IMS"),
             ]
         } else {
-            vec![
-                ("AT+CEUS=0".into(), 500, "关闭 CEUS"),
-                ("AT^IMSSWITCH=0,0,0".into(), 500, "关闭 IMS"),
-                ("AT+CFUN=0".into(), 500, "关闭射频"),
-            ]
+            // 关闭短信/IMS能力不应关闭 RF，也不应修改 CEUS 或数据承载配置。
+            vec![("AT^IMSSWITCH=0,0,0".into(), 0, "关闭 LTE IMS")]
         };
         if enable {
             if let Some(sc) = smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 steps.push((format!(r#"AT+CSCA="{sc}""#), 0, "配置短信中心号码"));
             }
-        } else {
-            steps.push(("AT+CMGD=1,4".into(), 0, "清空短信"));
         }
 
         let mut done: Vec<String> = Vec::new();
         let mut failed_at: Option<String> = None;
+        let mut failed_detail: Option<String> = None;
         for (cmd, gap_ms, label) in steps {
             match self
                 .client
@@ -695,24 +700,24 @@ impl SmsService {
                     done.push(label.to_string());
                 }
                 Ok(resp) => {
-                    log_warn!("短信开关步骤「{}」未返回 OK：{}", label, last_line(&resp.text()));
+                    let detail = compact_detail(&resp.text());
+                    log_warn!("短信开关步骤「{}」未返回 OK：{}", label, detail);
                     failed_at = Some(label.to_string());
+                    failed_detail = Some(detail);
                     break;
                 }
                 Err(e) => {
                     log_warn!("短信开关步骤「{}」失败：{}", label, e);
                     failed_at = Some(label.to_string());
+                    failed_detail = Some(e);
                     break;
                 }
             }
             if gap_ms > 0 {
-                // 事务持有通道期间 sleep：模组需要时间消化上一步，
-                // 这段间隔里也不允许其它命令插进来（这正是事务的意义）。
                 tokio::time::sleep(Duration::from_millis(gap_ms)).await;
             }
         }
 
-        // 结束后读一次真实状态，供界面回显（仍然是无缓存的实时读数）。
         let smsc_now = match self
             .client
             .run_in_transaction(&self.ctx, &tx, "AT+CSCA?", crate::atclient::COMMAND_TIMEOUT)
@@ -724,7 +729,14 @@ impl SmsService {
         let storage = self.read_storage_in_tx(&tx).await.ok();
         drop(tx);
 
-        Ok(PowerResult { enabled: failed_at.is_none() && enable, steps_done: done, failed_at, smsc: smsc_now, storage })
+        Ok(PowerResult {
+            enabled: failed_at.is_none() && enable,
+            steps_done: done,
+            failed_at,
+            failed_detail,
+            smsc: smsc_now,
+            storage,
+        })
     }
 
     /// IMS 开关（单条命令，但同样走短信事务：它直接决定短信能不能收发）。
@@ -810,6 +822,11 @@ fn text_preview(s: &str) -> String {
     }
 }
 
+fn valid_phone_address(s: &str) -> bool {
+    let digits = s.strip_prefix('+').unwrap_or(s);
+    (3..=20).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
 fn is_safe_mem_name(mem: &str) -> bool {
     matches!(mem, "SM" | "ME" | "MT" | "SR" | "BM" | "TA")
 }
@@ -885,10 +902,10 @@ fn classify_cmgs_result(res: &Result<crate::atclient::AtResponse, String>) -> (S
         Err(e) => (SendOutcome::Unknown, e.clone()),
         Ok(resp) => {
             let text = resp.text();
-            if text.contains("+CMGS") {
-                (SendOutcome::Accepted, text)
-            } else if text.contains("+CMS ERROR:") || text.contains("+CME ERROR:") || resp.has_error() {
+            if text.contains("+CMS ERROR:") || text.contains("+CME ERROR:") || resp.has_error() {
                 (SendOutcome::Rejected, text)
+            } else if text.contains("+CMGS") {
+                (SendOutcome::Accepted, text)
             } else if resp.ok() {
                 (SendOutcome::Accepted, text)
             } else {
@@ -947,6 +964,15 @@ fn worst_outcome(a: SendOutcome, b: SendOutcome) -> SendOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sms_phone_address_validation_is_strict() {
+        assert!(valid_phone_address("+8613800138000"));
+        assert!(valid_phone_address("13800138000"));
+        for bad in ["", "+", "12+3", "1,23", "123\rAT", "１２３"] {
+            assert!(!valid_phone_address(bad), "should reject {bad:?}");
+        }
+    }
 
     #[test]
     fn classify_accepted_on_cmgs_reference() {
