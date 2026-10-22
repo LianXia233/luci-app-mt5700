@@ -56,6 +56,14 @@ pub const RF_RECOVER_STEP: Duration = Duration::from_millis(1500);
 /// 手册 6.1.2：「cfun=0/1 生效至少大于 1s，建议 CFUN=0 与 CFUN=1 间隔至少大于 1s」。
 /// 取 1100ms 留一点余量 —— 原来只差 3ms，等于把约束写在悬崖边上。
 pub const CFUN_SWITCH_GAP: Duration = Duration::from_millis(1100);
+/// `AT+CPMS=` 切完存储区到 `AT+CMGD=1,4` 之间的等待。
+///
+/// 手册 8.1 没说切换何时生效，只说删除作用在 `<mem1>` 上（8.6.2）。厂商 WebUI 的
+/// 「清空全部短信」实测节奏是逐区 `AT+CMGF=0` → 500ms → `AT+CPMS="X","X","X"` →
+/// 500ms → `AT+CMGD=1,4` → 1s → 下一个区，这里对齐它那个 500ms：`AT+CPMS` 回 OK
+/// 只代表命令被接受，不代表 MT 内部的读/写/接收介质已经换完，抢在换完之前删的会是
+/// **上一个区**。多等半秒换的是「不会删错区」，成本可忽略（purge 动作有 70 秒预算）。
+pub const CPMS_SWITCH_GAP: Duration = Duration::from_millis(500);
 
 /// 发送结果的不确定状态：不要让上层把它当成成功或失败。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +327,16 @@ impl SmsService {
             .await?;
         drop(tx);
 
+        // 手册 9.8.1 给了两种结局：成功是若干组「`+CMGL:` 头行 + PDU 行」再以 OK 收尾，
+        // 失败是 `+CMS ERROR: <err>`。没有 OK 就别当成「存储区是空的」——
+        // 「读不出来」和「一条也没有」差得很远，静默返回空列表会把 SIM 卡未就绪
+        // 洗成「本机没有短信」，用户接着就会去删那些根本不存在的东西。
+        // 只看 OK 不看 has_error：`^SMMEMFULL` 那类附带 CMS ERROR 字样的上报行也会
+        // 混进同一次应答里（见 atclient 的读循环），那时候列表其实已经读出来了。
+        if !resp.ok() {
+            return Err(format!("读取短信列表失败：{}", last_line(&resp.text())));
+        }
+
         let parsed = parse_cmgl_response(&resp.lines);
         let total_lines = resp.lines.len();
         let entries = parsed
@@ -406,7 +424,11 @@ impl SmsService {
             }
         }
 
-        // 2) 短信中心号码：请求没给就读模组。
+        // 2) 短信中心号码：请求没给就读模组（`AT+CSCA?`）。
+        //    手册 9.5.2 规定 PDU 模式下模组只在该次 PDU 的「短信中心地址长度 = 0」时才
+        //    用自己存的 CSCA。这里读到就把它编进 PDU（`build_submit_parts` 的 sca 字段），
+        //    读不到才写 0 长度让模组兜底 —— 于是「在短信设置里改过中心号」必然反映到
+        //    这一次发送，而不是靠模组记得它被设成了什么。
         let smsc = match req.smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             Some(s) => Some(s.to_string()),
             None => match self
@@ -543,6 +565,11 @@ impl SmsService {
             return Err("没有要删除的短信".into());
         }
         // 去重并保持顺序 —— 前端批量删除可能把同一条传进来多次。
+        //
+        // 顺带挡掉 0：手册 8.6.3 只说 `<index>` 是「短信的存储位置」，没给取值范围，
+        // 而本插件把「头行里读不出序号」的记录统一记成 index=0（见 pdu::parse_cmgl_response），
+        // 于是 0 分不清「模组真有个 0 号位」和「这条压根没解出来」。宁可不删也不对着
+        // 一个来路不明的序号下发 CMGD —— 删错一条是不可逆的。前端同样禁用这类条目的勾选。
         let mut ordered: Vec<u32> = Vec::new();
         for i in indices {
             if i == 0 || ordered.contains(&i) {
@@ -593,6 +620,11 @@ impl SmsService {
     }
 
     /// 清空全部短信：按当前实际存在的存储区逐个 `AT+CMGD=1,4`。
+    ///
+    /// 一次 `AT+CMGD=1,4` 只清「首选存储器」（手册 8.6.3：delflag=4 = 删除首选存储器上
+    /// 所有短信，含未读；8.6.2 注明 delflag≠0 时 MT 忽略 `<index>`，所以那个 `1` 只是占位，
+    /// 且删除作用的介质是 8.1 里的 `<mem1>`）。要清干净就得先把三个区都指到目标区、
+    /// 再下一次 delflag=4，所以这里是「切区 → 删」的循环，而不是单下一条命令。
     pub async fn purge_all(&self) -> Result<DeleteResult, String> {
         let tx = self
             .client
@@ -609,14 +641,18 @@ impl SmsService {
             }
         }
         if mems.is_empty() {
-            mems = vec!["SM".into(), "ME".into(), "MT".into()];
+            // 读不到 `AT+CPMS?` 时的兜底：只试手册 8.1.3 承认的两个区。
+            mems = vec!["SM".into(), "ME".into()];
         }
 
         let mut errors: Vec<String> = Vec::new();
         let mut deleted = 0usize;
         for mem in &mems {
             if !is_safe_mem_name(mem) {
-                errors.push(format!("{mem}: 不支持的存储区"));
+                // 模组在 `AT+CPMS?` 里回了手册 8.1.3 之外的区名：读侧如实显示，
+                // 写侧不去碰它 —— 拼一个手册没记载的区名去下发，换来的是模组的
+                // `+CME ERROR`，用户看不出是「不支持」还是「操作失败」。
+                errors.push(format!("{mem}: 存储区名不在手册 8.1.3 的可选值（SM/ME）内，已跳过"));
                 continue;
             }
             let set = format!(r#"AT+CPMS="{mem}","{mem}","{mem}""#);
@@ -640,6 +676,8 @@ impl SmsService {
             if !switched {
                 continue;
             }
+            // 与厂商 WebUI 同一步的等待：见 CPMS_SWITCH_GAP —— 别在介质还没换完时删上一个区。
+            tokio::time::sleep(CPMS_SWITCH_GAP).await;
             match self.client
                 .run_in_transaction(&self.ctx, &tx, "AT+CMGD=1,4", SMS_LIST_TIMEOUT)
                 .await
@@ -675,9 +713,13 @@ impl SmsService {
     }
 
     /// 设置首选存储区（三个区指向同一处）。
+    ///
+    /// 区名只认手册 8.1.3 的两个值：`"SM"`（(U)SIM 卡）与 `"ME"`（FLASH）。
     pub async fn set_storage(&self, mem: &str) -> Result<StorageInfo, String> {
         if !is_safe_mem_name(mem) {
-            return Err("不支持的存储区名称".into());
+            return Err(format!(
+                "不支持的存储区 {mem}（手册 8.1.3 只定义了 SM=SIM 卡、ME=模组 FLASH）"
+            ));
         }
         let tx = self
             .client
@@ -707,13 +749,13 @@ impl SmsService {
     }
 
     /// 写短信中心号码，并回读校验（写成功不等于写对了）。
+    ///
+    /// 手册 9.5.4：`AT+CSCA` 掉电保存 = Y，写一次就长期有效，不需要每次开机重写。
+    /// 9.5.2 还有一条容易误读的规定 —— **PDU 模式下只有当 PDU 里短信中心地址长度为 0 时
+    /// 才用这个值**。本插件发送时是先用 `AT+CSCA?` 把号码读出来、直接编进 PDU
+    /// （见 `send` 第 2 步），所以「改完号码马上生效」靠的是那次读取，而不是模组的默认值。
     pub async fn set_smsc(&self, number: &str) -> Result<String, String> {
-        let cleaned = number.trim().to_string();
-        // 白名单只此一处：valid_phone_address 已经限定了「可选单个前导 +」
-        // 「全数字」「3–20 位」，再加一遍长度判断只会让人以为还有别的规则。
-        if !valid_phone_address(&cleaned) {
-            return Err("短信中心号码格式不正确（仅允许 3–20 位数字和可选前导 +）".into());
-        }
+        let cleaned = check_smsc_input(number)?;
         let tx = self
             .client
             .open_sms_transaction(&self.ctx, "sms.set_smsc", SMS_QUEUE_WAIT)
@@ -758,9 +800,8 @@ impl SmsService {
     ///    否则用户点一下「开启短信」得到的是整机断网，且界面已经报错了，没人知道要手动 `CFUN=1`。
     pub async fn power_set(&self, enable: bool, smsc: Option<String>) -> Result<PowerResult, String> {
         if let Some(sc) = smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            if !valid_phone_address(sc) {
-                return Err("短信中心号码格式不正确（仅允许 3–20 位数字和可选前导 +）".into());
-            }
+            // 与 set_smsc 同一条校验、同一句文案：同一个号码不该在两个入口拿到两种答案。
+            check_smsc_input(sc)?;
         }
         let tx = self
             .client
@@ -813,6 +854,13 @@ impl SmsService {
         // 1) 先读数据中心模式。手册 3.15.3 写「1 数据中心（默认值）」，但 3.15.5 的
         //    回读举例是 `+CEUS: 0`，而且本应用的旧版本确实写过 `CEUS=0` —— 出厂默认
         //    不能推定当前值，读不到就只能按「需要重启」处理，宁可多断一次网。
+        //
+        //    「开启短信要 CEUS 取几」本身**仍待真机确认**：手册通篇（3.15 与 4.10）都没
+        //    把 CEUS 和短信/IMS 绑定，1 还是 0 属推断。厂商自己的 WebUI 在开启短信时下发
+        //    `AT+CEUS=0`（语音中心）、关闭时下发 `AT+CEUS=1`（数据中心），方向与本插件
+        //    相反，而且它是在 `AT+CFUN=0` 之后才写 CEUS（本插件写之前）。真机验证办法：
+        //    分别按 0 与 1 走完开启流程、各发一条短信；若确认应为 0，本函数与
+        //    `power_requires_rf_restart` 里的目标值要一起翻转，别只改一处。
         let ceus = match self
             .client
             .run_in_transaction(&self.ctx, tx, "AT+CEUS?", crate::atclient::COMMAND_TIMEOUT)
@@ -828,6 +876,11 @@ impl SmsService {
         if power_requires_rf_restart(ceus) {
             // 2) 写 CEUS。这一步必须在 CFUN=0 之前：手册说它「设置后需要开关机生效」，
             //    放在射频已经关闭的时候写，等于赌模组还认这条命令。
+            //    下面这对 CFUN=0 → CFUN=1 是本插件对「开关机」的替代：手册 6.1.3 里
+            //    真正的复位是 `AT+CFUN=1,1`（且只支持 online 模式下发，复位范围由 NV2391
+            //    决定，可能连整机一起复），代价是承载接口全部重建，比关开射频重得多。
+            //    **CFUN=0/1 是否足以让 CEUS 生效，手册没有承诺，需要真机确认**；
+            //    确认不足时应当改用 CFUN=1,1，并把重启后的等待时间一起加进来。
             match self.step(tx, "AT+CEUS=1", "设置数据中心模式").await {
                 Ok(_) => out.done.push("设置数据中心模式".into()),
                 Err(detail) => return out.fail("设置数据中心模式", detail),
@@ -1063,13 +1116,17 @@ impl SmsService {
 
 /// `AT+CPMS?` 应答 → 三组存储区用量。
 ///
-/// 形如 `+CPMS: "ME",3,50,"ME",3,50,"ME",3,50`：每三段一组，依次是区名、已用、容量。
+/// 手册 8.1.1 的读命令形态：`+CPMS: <mem1>,<used1>,<total1>,<mem2>,<used2>,<total2>,
+/// <mem3>,<used3>,<total3>`，即每三段一组、组内依次是区名/已用/容量（区名带引号）。
+/// 同一章节的**设置**命令应答只有六个数（`<used1>,<total1>,…`，不带区名），
+/// 段数不够 9，正好被下面的 `segs.len() < 9` 挡掉，不会被误当成读命令。
 fn parse_storage(lines: &[String]) -> Option<StorageInfo> {
     for line in lines {
         let line = line.trim();
-        let body = line
-            .strip_prefix("+CPMS:")
-            .or_else(|| line.strip_prefix("^CPMS:"))?;
+        // 个别固件回私有前缀 ^CPMS，两种都认（与 urc.rs 的存储行解析同一口径）
+        let Some(body) = line.strip_prefix("+CPMS:").or_else(|| line.strip_prefix("^CPMS:")) else {
+            continue;
+        };
         let segs: Vec<String> = body.split(',').map(|p| p.trim().trim_matches('"').to_string()).collect();
         if segs.len() < 9 {
             continue;
@@ -1099,13 +1156,47 @@ fn text_preview(s: &str) -> String {
     }
 }
 
+/// 号码白名单：可选单个前导 `+`，其后 3～20 位**纯数字**。
+///
+/// 这是短信中心号码（`set_smsc` / `power_set`）的入口校验。手册 9.5.3 给 `<sca>` 写的
+/// 字符集是 `*`、`#`、`+`、`0`～`9`（长度不超过 20，不含 `+`），这里**有意不收** `*` 和 `#`：
+/// 本插件发送时要把中心号编进 PDU 的短信中心字段（见 `send` 第 2 步与 `pdu::encode_address`），
+/// 那一栏只有 BCD 数字的位置。放开的话，`AT+CSCA="86*123"` 可能被模组收下、回读也一致，
+/// 但下一次发信就在编码阶段失败 —— 「中心号设好了、短信反而发不出去」比当场拒绝难解释得多。
+/// 3 位下限同理是防手滑，手册没有下限。引号、逗号、CR/LF 一律过不去：那是往串口注入第二条
+/// AT 命令，这一条比格式美观重要得多。
+///
+/// 收件人号码在 `pdu::encode_address` 里还有一道同样的校验，两边口径一致。
 fn valid_phone_address(s: &str) -> bool {
     let digits = s.strip_prefix('+').unwrap_or(s);
     (3..=20).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// 短信中心号码的入口校验。`set_smsc` 与 `power_set` 共用，两处对「什么样的号码算合法」
+/// 必须给出同一句答案，否则用户在两个界面上拿到两种互不相同的规则。
+fn check_smsc_input(number: &str) -> Result<String, String> {
+    let cleaned = number.trim().to_string();
+    if !valid_phone_address(&cleaned) {
+        return Err(SMSC_FORMAT_HINT.into());
+    }
+    Ok(cleaned)
+}
+
+const SMSC_FORMAT_HINT: &str = "短信中心号码格式不正确：可选单个前导 +，其后 3～20 位数字\
+                                （手册 9.5.3 的字符集另含 * 与 #，但本插件要把中心号编进 PDU，\
+                                那一栏只放得下数字）";
+
+/// 可写入 `AT+CPMS` 的存储区名白名单。
+///
+/// 手册 8.1.3 只给了两个可选值：**“SM”（(U)SIM 卡）** 与 **“ME”（FLASH 存储）**，
+/// 三个参数 `<mem1>/<mem2>/<mem3>` 的可选值相同。TS 27.005 里的 `"MT"`/`"SR"`/`"BM"`/`"TA"`
+/// 本手册一概没有，照着拼进命令只会换来一句 `+CME ERROR`，用户看不出为什么。
+///
+/// 注意这是**写侧**的约束：`AT+CPMS?` 的读侧解析（`parse_storage`）照旧照单收下模组
+/// 实际回的区名，不在这里丢数据 —— 万一固件回了别的名字，界面仍显示真实状态，
+/// 只有真的要去切/清那个区时才会被拦下来并给出可读的原因。
 fn is_safe_mem_name(mem: &str) -> bool {
-    matches!(mem, "SM" | "ME" | "MT" | "SR" | "BM" | "TA")
+    matches!(mem, "SM" | "ME")
 }
 
 /// 从 `+XXX: "<number>",<...>` 应答里取出引号中的号码。
@@ -1343,6 +1434,46 @@ mod tests {
     }
 
     #[test]
+    fn smsc_input_rejects_what_pdu_cannot_encode() {
+        // 手册 9.5.3 的字符集含 * 与 #，但中心号要被编进 PDU 的短信中心字段（BCD 数字），
+        // 所以这两个字符在入口就拒掉，别让「设置成功、发信失败」这种状态出现。
+        assert_eq!(check_smsc_input(" +8613800755500 ").unwrap(), "+8613800755500");
+        for bad in ["86*123", "86#123", "+86+13800755500", "12", "861380075550000000001234",
+                    r#"8613800755500","SM"#, "8613800755500\r\nAT+CFUN=0"] {
+            let err = check_smsc_input(bad).expect_err("should reject {bad:?}");
+            assert!(err.contains(SMSC_FORMAT_HINT), "文案要指回 9.5.3：{err}");
+        }
+    }
+
+    #[test]
+    fn mem_name_whitelist_follows_manual_8_1_3() {
+        // 8.1.3 只定义 SM / ME。TS 27.005 里的 MT/SR/BM/TA 本手册没有，
+        // 拼进 AT+CPMS 只会换来一句 +CME ERROR，所以入口直接拒。
+        for ok in ["SM", "ME"] {
+            assert!(is_safe_mem_name(ok), "{ok} 应可用");
+        }
+        for bad in ["MT", "SR", "BM", "TA", "sm", "ME1", ""] {
+            assert!(!is_safe_mem_name(bad), "{bad:?} 不该进白名单");
+        }
+    }
+
+    #[test]
+    fn parse_storage_skips_noise_before_the_cpms_line() {
+        // 回归：曾经用 `?` 提前返回，只要第一行不是 +CPMS 就整体读不到。
+        let lines = vec![
+            "AT+CPMS?".to_string(),
+            String::new(),
+            r#"+CPMS: "SM",3,50,"SM",3,50,"ME",1,30"#.to_string(),
+            "OK".to_string(),
+        ];
+        let s = parse_storage(&lines).expect("应答里只要有 +CPMS 行就该读到");
+        assert_eq!((s.used, s.total), (3, 50));
+        assert_eq!(s.mem3, "ME");
+        // 设置命令的应答只有六个数字（8.1.1），不带区名，不能当成读命令解析
+        assert!(parse_storage(&[r#"+CPMS: 3,50,3,50,1,30"#.to_string(), "OK".into()]).is_none());
+    }
+
+    #[test]
     fn classify_accepted_on_cmgs_reference() {
         let ok: Result<crate::atclient::AtResponse, String> = Ok(crate::atclient::AtResponse {
             lines: vec!["+CMGS: 12".into(), "OK".into()],
@@ -1548,7 +1679,7 @@ mod tests {
             }
             if cmd == "AT+CPMS?" {
                 return Reply::Lines(vec![
-                    "+CPMS: \"SM\",1,50,\"ME\",1,50,\"MT\",0,50".into(),
+                    "+CPMS: \"SM\",1,50,\"SM\",1,50,\"ME\",0,50".into(),
                     "OK".into(),
                 ]);
             }
@@ -1559,11 +1690,54 @@ mod tests {
         })
         .await;
         let r = svc.purge_all().await.unwrap();
-        assert_eq!(r.requested, 3, "SM/ME/MT 三个区都该试一次");
-        assert_eq!(r.deleted, 2, "SM 没切过去，ME/MT 成功：{:?}", r.errors);
+        assert_eq!(r.requested, 2, "读到的 SM / ME 两个区各试一次");
+        assert_eq!(r.deleted, 1, "SM 没切过去，只有 ME 清空成功：{:?}", r.errors);
         assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
         assert!(r.errors[0].starts_with("SM: 切换存储区失败"), "{:?}", r.errors);
         assert!(r.errors[0].contains('4'), "模组原话要留在错误里：{:?}", r.errors);
+    }
+
+    #[tokio::test]
+    async fn purge_never_writes_a_mem_name_the_manual_does_not_define() {
+        // 固件在 AT+CPMS? 里回了手册 8.1.3 之外的区名（拿 "MT" 当例子）：
+        // 读侧照实显示，写侧一次都不能去碰 —— 拼一个手册没记载的区名只会换来
+        // 一句 +CME ERROR，用户分不清是「不支持」还是「清空功能坏了」。
+        let (svc, modem, _ctx) = harness(move |cmd: &str| {
+            if cmd == "AT+CPMS?" {
+                return Reply::Lines(vec![
+                    "+CPMS: \"SM\",1,50,\"SM\",1,50,\"MT\",0,50".into(),
+                    "OK".into(),
+                ]);
+            }
+            if cmd == "AT+CMGD=1,4" {
+                return Reply::Lines(vec!["OK".into()]);
+            }
+            Reply::ok(&[])
+        })
+        .await;
+        let r = svc.purge_all().await.unwrap();
+        let cmds = modem.cmds();
+        assert!(
+            !cmds.iter().any(|c| c.starts_with(r#"AT+CPMS="MT""#)),
+            "不该对 MT 区下发切换：{cmds:?}"
+        );
+        assert!(r.errors.iter().any(|e| e.contains("MT") && e.contains("8.1.3")), "{:?}", r.errors);
+        assert_eq!(r.deleted, 1, "SM 区仍然要清干净：{:?}", r.errors);
+    }
+
+    #[tokio::test]
+    async fn list_reports_modem_failure_instead_of_empty_list() {
+        // 手册 9.8.1：CMGL 失败回 `+CMS ERROR: <err>`，成功才以 OK 收尾。
+        // 没有 OK 就不能当成「一条短信也没有」，否则 SIM 卡没就绪会被洗成「本机没有短信」。
+        let (svc, _modem, _ctx) = harness(move |cmd: &str| {
+            if cmd.starts_with("AT+CMGL") {
+                return Reply::Lines(vec!["+CMS ERROR: 4".into()]);
+            }
+            Reply::ok(&["+CMGF: 0"])
+        })
+        .await;
+        let err = svc.list().await.expect_err("读不出来必须报错，不能返回空列表");
+        assert!(err.contains('4'), "要把模组原话带出来：{err}");
     }
 
     #[test]

@@ -16,11 +16,12 @@
  *   整串在一次后端事务里跑完。失败时若已下发过 `AT+CFUN=0`，后端会 best-effort
  *   补 `AT+CFUN=1` 并回读确认，结果写进 failedDetail，前端原样显示。
  *   关闭：只下发 `AT^IMSSWITCH=0,0,0`，不再关射频、不再写 CEUS、不再清空短信）
- * - 短信中心号码（AT+CSCA? / AT+CSCA="..."）
- * - 存储位置与用量（AT+CMGF=0 + AT+CPMS? / AT+CPMS=...）
+ * - 短信中心号码（AT+CSCA? / AT+CSCA="..."；手册 9.5.2：PDU 模式下模组只在
+ *   所发 PDU 的中心字段长度为 0 时才用它，本插件是把读到的号码编进 PDU）
+ * - 存储位置与用量（AT+CMGF=0 + AT+CPMS? / AT+CPMS=...；区名只认手册 8.1.3 的 SM / ME）
  * - 清空全部短信（后端在一次事务里逐存储区 `AT+CPMS=` + `AT+CMGD=1,4`，
  *   返回 requested/deleted/errors/storage）
- * - 本地已发缓存导出/导入/清空
+ * - 旧版本遗留在浏览器里的「已发短信」缓存：只显示条数并提供清除，不再当数据源
  * - USSD 查询（AT+CUSD，GSM7 打包，+CUSD URC 回复）
  */
 
@@ -86,11 +87,24 @@ return L.view.extend({
 		centerInput.value = '';
 		centerInput.disabled = true;
 		centerInput.addEventListener('input', function () { state.centerNumber = centerInput.value; });
-		centerBody.appendChild(Mt5700.formGroup('中心号码', centerInput));
+		/*
+		 * 这里只做**即时**的格式提醒，规则与后端 `sms::check_smsc_input` 一字不差：
+		 * 可选单个前导 +，其后 3～20 位数字。手册 9.5.3 的字符集其实另含 `*` 与 `#`，
+		 * 但本插件发送时要把中心号编进 PDU 的短信中心字段（9.5.2：PDU 模式下只有
+		 * 该字段长度为 0 时模组才用自己存的值），那一栏只放得下 BCD 数字 ——
+		 * 放开的话「保存成功、发信失败」这种状态就会真的出现，所以在两个入口都拒。
+		 * 校验不放行就别发 RPC：省一次往返，也让用户当场看到是自己打错了。
+		 */
+		centerBody.appendChild(Mt5700.formGroup('中心号码', centerInput,
+			'可选单个前导 +，其后 3～20 位数字；留空不保存。发送时插件会读取该号码编进 PDU。'));
 		centerBody.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('保存中心号码', function () {
 				var num = centerInput.value.trim();
 				if (!num) { Mt5700.error('请输入短信中心号码'); return; }
+				if (!/^\+?\d{3,20}$/.test(num)) {
+					Mt5700.error('短信中心号码格式不正确：可选单个前导 +，其后 3～20 位数字');
+					return;
+				}
 				AtWs.client.sms('set_smsc', { smsc: num }).then(function (res) {
 					if (res.success && res.result) {
 						state.centerNumber = res.result.smsc || num;
@@ -114,12 +128,19 @@ return L.view.extend({
 		var storageEl = E('div', { 'class': 'mt5700-hint' }, '存储用量：—');
 		storeBody.appendChild(storageEl);
 
+		/*
+		 * 存储位置只有两个可选值 —— 手册 8.1.3：<mem1>/<mem2>/<mem3> 的取值就是
+		 * “SM”（(U)SIM 卡）与 “ME”（模组 FLASH）。这里原来还挂着第三项
+		 * 「自动（SIM 优先）= MT」（那是 TS 27.005 的写法，本手册没有），
+		 * 选中它等于下发一条模组必然拒绝的 `AT+CPMS="MT",…`，用户只看到「保存失败」。
+		 * 后端 is_safe_mem_name 也已按 8.1.3 收窄，两边口径一致。
+		 */
 		var locSel = Mt5700.select([
-			{ label: 'SIM 卡', value: 'SM' },
-			{ label: '模组内存', value: 'ME' },
-			{ label: '自动（SIM 优先）', value: 'MT' }
+			{ label: 'SIM 卡（SM）', value: 'SM' },
+			{ label: '模组存储（ME）', value: 'ME' }
 		], 'SM');
-		storeBody.appendChild(Mt5700.formGroup('存储位置', locSel));
+		storeBody.appendChild(Mt5700.formGroup('存储位置', locSel,
+			'手册只定义 SM（SIM 卡）与 ME（模组 FLASH）两种存储介质。'));
 
 		storeBody.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('保存存储位置', function () {

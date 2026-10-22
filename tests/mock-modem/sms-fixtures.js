@@ -195,21 +195,44 @@ function buildConversations() {
 	return list;
 }
 
-/* 会话样本 → AT+CMGL=4 应答文本（PDU 模式） */
+/*
+ * 会话样本 → `AT+CMGL=4` 的应答文本，形状照手册 9.8.1（PDU 模式）：
+ *
+ *   +CMGL: <index>,<stat>,[<reserved>],<length>
+ *   <pdu>
+ *
+ * 两处容易写错、写错了也不会立刻暴露的地方，钉在这里：
+ *   - <stat> 是**数字**（9.8.3：0 收到的未读 / 1 收到的已读 / 2 存储的未发送 /
+ *     3 存储的已发送）。`"REC READ"` 那种带引号的字符串属于 9.9 的文本模式，
+ *     混进 PDU 夹具就等于伪造了一台不存在的模组；
+ *   - <length> 是**十进制**的 TPDU 字节数，不含整个短信中心字段。手册 9.8.5 的
+ *     例子是 34 字节 PDU、首字节 `08` 表示中心字段再跟 8 字节（合计 9），
+ *     所以头行写 `+CMGL: 1,0,,25`。本夹具的中心字段就只有一个 `00`（长度 0 =
+ *     用卡里配的中心号），于是 length = 总字节数 − 1。
+ * 解析侧（Rust `pdu::parse_cmgl_response`）不读 <stat>/<length>，所以夹具写错
+ * 形状时测试照样全绿；这两条注释和下面的构造就是这个漂移的唯一报警器。
+ */
 function cmglText(list) {
 	var out = '';
 	for (var i = 0; i < list.length; i++) {
 		var it = list[i];
-		var stat = it.direction === 'sent' ? 'STO SENT' : 'REC READ';
-		out += '+CMGL: ' + it.index + ',"' + stat + '",,,' + hex2(it.pdu.length / 2) + '\r\n'
+		var stat = it.direction === 'sent' ? 3 : 1;
+		var tpduBytes = it.pdu.length / 2 - 1;   /* 减去 SMSC 长度那一字节 */
+		out += '+CMGL: ' + it.index + ',' + stat + ',,' + tpduBytes + '\r\n'
 			+ it.pdu + '\r\n';
 	}
 	return out + 'OK';
 }
 
-/* 单条 PDU → AT+CMGR=<index> 应答文本（模块存的是收到的短信） */
+/*
+ * 单条 PDU → `AT+CMGR=<index>` 的应答文本（手册 9.10.1）。
+ *
+ * 头行**没有 index 字段**：`+CMGR: <stat>,[<reserved>],<length>`，
+ * 手册 9.10.5 的实例就是 `+CMGR: 1,,25`；序号由命令本身带着，应答不回传。
+ * 本函数只服务收件箱（mock 对已发短信回 ERROR），所以 <stat> 固定 1（收到的已读）。
+ */
 function cmgrText(hex) {
-	return '+CMGR: "REC READ",' + (hex.length / 2) + '\r\n' + hex + '\r\nOK';
+	return '+CMGR: 1,,' + (hex.length / 2 - 1) + '\r\n' + hex + '\r\nOK';
 }
 
 module.exports = {

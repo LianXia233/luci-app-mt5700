@@ -33,7 +33,7 @@ return L.view.extend({
 
 
 		var state = {
-			contacts: [],        // [{ number, lastMessage, lastTime, unreadCount, messages: [] }]
+			contacts: [],        // [{ number, lastMessage, lastTime, messages: [] }]
 			selectedContact: '',
 			messages: [],        // 当前联系人消息
 			storage: { used: 0, total: 0 },
@@ -176,9 +176,13 @@ return L.view.extend({
 
 		/*
 		 * 按当前 Tab 过滤会话。
-		 * 说明：后端没有"已读/未读"标志位，未读只能按「会话里最新一条是收到的、
-		 * 且本次页面会话中还没点开过」来判断；刷新页面后该状态会重置，
-		 * 所以这里只当作本页的快捷筛选，不冒充持久未读状态。
+		 *
+		 * 「未读」不能用模组给的标志位：手册 9.8.2 写明 `AT+CMGL` 一旦把某条
+		 * 「收到的未读短信」列出来，存储里的状态就同时变成「收到的已读」——
+		 * 我们每次刷新列表都是 CMGL=4，等结果回到界面时 stat 已经是 1 了。
+		 * （新短信的 +CMTI → AT+CMGR 也一样，9.10.2 同样会翻成已读。）
+		 * 所以未读只能按「最新一条是收到的、且本次页面会话里还没点开过」估，
+		 * 刷新后重置，不冒充持久未读状态。
 		 */
 		function latestMsg(c) {
 			return c.messages && c.messages.length ? c.messages[c.messages.length - 1] : null;
@@ -302,15 +306,24 @@ return L.view.extend({
 			var text = msgInput.value.trim();
 			if (!text) { hintEl.textContent = ''; return; }
 			/*
-			 * 字数提示改为本地估算（后端才是唯一权威）：只是给个「会拆成几条」的
-			 * 预期，真正的编码与分片在后端完成，避免前端与后端算出不同片数。
+			 * 字数提示是**本地估算**，权威永远是后端：编码与分片在 `pdu::build_submit_parts`
+			 * 里决定，这里只求「大概拆成几条」符合直觉，不让两处算出不同的片数。
+			 *
+			 * 上限与后端同源：单条 160 septet / 70 UCS2 字，长短信扣掉 6 字节 UDH 后
+			 * 153 septet / 67 UCS2 字（6×8/7 向上取整占 7 个 septet）。
+			 *
+			 * 判定 UCS2 用的字符表覆盖 GSM 7bit 默认表 + 扩展表：0x20–0x7E 里
+			 * **只有反引号 ` (0x60)** 两张表都没有，后端会因此转 UCS2，所以单独滤掉。
+			 * 不写这一条，正文里一个反引号就会让前端说「按 GSM 7bit」、后端实际按 UCS2 编，
+			 * 估算的条数差一倍。
 			 */
-			var ucs2 = !/^[\x20-\x7E\r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ¡ÄÖÑÜ§¿äöñüà]*$/.test(text);
+			var ucs2 = text.indexOf('`') >= 0
+				|| !/^[\x20-\x7E\r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ¡ÄÖÑÜ§¿äöñüà]*$/.test(text);
 			var per = ucs2 ? 67 : 153;
 			var chars = Array.from(text).length;
 			var parts = chars <= (ucs2 ? 70 : 160) ? 1 : Math.ceil(chars / per);
-			hintEl.textContent = chars + ' 字 · ' + (ucs2 ? '含非 ASCII 字符，按 UCS2 编码' : '纯 ASCII，按 GSM 7bit 编码') +
-				(parts > 1 ? ' · 将拆成 ' + parts + ' 条' : '');
+			hintEl.textContent = chars + ' 字 · ' + (ucs2 ? '需按 UCS2 编码' : '可按 GSM 7bit 编码') +
+				(parts > 1 ? ' · 预计拆成 ' + parts + ' 条' : '');
 		}
 		msgInput.addEventListener('input', renderHint);
 
@@ -433,7 +446,7 @@ return L.view.extend({
 				/* 解析失败的条目号码为空，归入特殊分组以便显示错误信息 */
 				var key = num || '__parse_error__';
 				if (!map[key]) {
-					map[key] = { number: num, lastMessage: msg.content, lastTime: msg.time, unreadCount: 0, messages: [] };
+					map[key] = { number: num, lastMessage: msg.content, lastTime: msg.time, messages: [] };
 				}
 				map[key].messages.push(msg);
 			}
@@ -558,9 +571,17 @@ return L.view.extend({
 
 		/* ---------- 删除 ---------- */
 
+		/*
+		 * 一条界面消息对应模组里的哪些序号。
+		 *
+		 * `> 0` 而不是 `>= 0`：解析失败的那几条后端把序号记成 0（手册 8.6.3 没给
+		 * <index> 的取值范围，0 分不清「真有 0 号位」和「这条没解出来」），
+		 * 后端 delete 也会把 0 挡掉。与其发一条注定被拒的 AT+CMGD，
+		 * 不如走「该条不在模组存储中」这条提示。
+		 */
 		function indicesOf(msg) {
 			if (msg.partIndices && msg.partIndices.length) return msg.partIndices.slice();
-			return (msg.index != null && msg.index >= 0) ? [msg.index] : [];
+			return (msg.index != null && msg.index > 0) ? [msg.index] : [];
 		}
 
 		function deleteMessage(msg) {

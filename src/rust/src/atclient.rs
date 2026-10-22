@@ -78,20 +78,25 @@ impl AtResponse {
 
 /// 从 `AT^SETAUTODIAL?` 的应答里取出「开关」与「拨号方式」。
 ///
-/// 手册回显形如 `^SETAUTODIAL: 1,1,"IP","cmnet","","",0`：
-///   字段 1 = 开关（0=关 / 1=开）
-///   字段 2 = 拨号方式（1=USB 网络接口 / 2=转网口模式）
-/// 部分固件只回 `^SETAUTODIAL: 1`，此时方式为 None（表示「无法判定」，不是「不匹配」）。
+/// 手册 16.18.1 给出两种应答形态，16.18.5 的实例是全字段那一种：
+///   `^SETAUTODIAL: 1,1,"IP","cmnet","","",0` → 字段 1 = 开关（0=关 / 1=开），
+///   字段 2 = 拨号方式（0=模组内部拨号 / 1=上位机 USB 数传 / 2=上位机 网口数传，16.18.3）
+///   `^SETAUTODIAL: 1`                        → 只有开关，方式为 None（「无法判定」，不是「不匹配」）
+/// 同一节的语法页还把全字段形态印作 `^SETAUTODAIL:`（DIA 与 DAI 顺序互换），
+/// 手册两处口径不一致，故两种拼写都接受，否则真机回这一种时会被当成「读不到」而反复重下配置。
 /// 解析失败返回 None，调用方据此决定是否直接下发设置。
 ///
 /// 为什么必须把方式一起解析出来：只看开关会造成
 /// 「开关已是 1、但方式停在 2（转网口模式）」时直接跳过下发，
 /// 而期望是 1（USB 网络接口）——USB 网口永远收不到模组下发的 DHCP，
 /// MT5700M 接口长期没有 IP。这是「模组在线却上不了网」的一条独立成因。
+///
+/// 方式只认 1/2：本插件的数据通道就是这两种，模组停在 0（内部拨号）时
+/// 按「无法判定」处理，走同一条重新对齐的路径。
 fn parse_autodial_state(text: &str) -> Option<(bool, Option<i64>)> {
     for line in text.replace('\r', "").lines() {
         let line = line.trim();
-        if !line.starts_with("^SETAUTODIAL:") {
+        if !line.starts_with("^SETAUTODIAL:") && !line.starts_with("^SETAUTODAIL:") {
             continue;
         }
         let payload = line[line.find(':')? + 1..].trim();
@@ -115,19 +120,33 @@ fn parse_autodial_state(text: &str) -> Option<(bool, Option<i64>)> {
     None
 }
 
-/// 从 `AT^NDISSTATQRY?` 应答取 USB 数据面状态（首字段 1=就绪）。
-/// 拿不到可判定字段时返回 None（表示无法判定，而不是「未就绪」）。
+/// 从 `AT^NDISSTATQRY?` 应答取 CID 1 的 USB 数据面连接状态。
+///
+/// 手册 16.4.1/16.4.5 的应答形如 `^NDISSTATQRY: 1,1,,,"IPV4",0,,,"IPV6"`，
+/// 结构是 `<cid>,<stat>[,<err>[,<wx_state>[,<PDP_type>]]] [<stat>,<err>,<wx_state>,<PDP_type>]`，
+/// 可以一次上报一组或两组（IPv4 / IPv6）状态。**首字段是 <cid>，不是连接状态**：
+/// 早先按「首字段 1=就绪」解析，只要模组回里带 CID 1 就永远判定为已连接 ——
+/// 数据面已经掉线（`1,0,,,"IPV4",...`）时拨号守护同样不再补拨，界面也显示已连接。
+/// <stat>：0=断开 1=已连接 2=连接中 3=断开中（后两个模组暂不上报，见 16.4.3）。
+/// 本插件的数据通道固定 CID 1，因此只看 CID 1 那一行的 IPv4 状态；
+/// 找不到该行或字段不可判定时返回 None（「无法判定」，不是「未就绪」）。
+/// 注意：带参数的 `AT^NDISSTATQRY=<cid>` 才是以 <ipv4_stat> 开头，插件只用 `?` 形式。
 fn parse_ndis_state(text: &str) -> Option<bool> {
     for line in text.replace('\r', "").lines() {
         let line = line.trim();
         if !line.starts_with("^NDISSTATQRY:") {
             continue;
         }
-        let payload = line[line.find(':')? + 1..].trim();
-        let first = payload.split(',').next()?.trim().trim_matches('"');
-        return match first {
-            "0" => Some(false),
+        let payload = &line[line.find(':')? + 1..];
+        let mut fields = payload.split(',').map(|f| f.trim().trim_matches('"'));
+        let cid = fields.next()?.trim();
+        let stat = fields.next()?.trim();
+        if cid != "1" {
+            continue;
+        }
+        return match stat {
             "1" => Some(true),
+            "0" | "2" | "3" => Some(false),
             _ => None,
         };
     }
@@ -393,8 +412,23 @@ impl AtClient {
             Ok(resp) => log_warn!("开启详细错误码未返回 OK: {}", resp.text()),
             Err(e) => log_warn!("开启详细错误码失败: {}", e),
         }
-        // 短信走 PDU 模式并开启新短信主动上报，来电开启号码显示。
-        // 查询失败或不含目标值时都要 SET，避免模组刚连上超时导致模式未启用。
+        /*
+         * AT+CNMI=2,1,0,2,0 —— 手册 8.3.3 的五个参数依次是 mode / mt / bm / ds / bfr：
+         *   mode=2  短信通知与状态报告都直接送 TE；送不出去时（例如 online data 模式）
+         *           先缓存在 ME，能发了再一次性补上。8.3.3 的说明还规定：mode=0 或 2
+         *           时 <mt> 不能取 2/3、<ds> 不能取 1，配错了模组直接报错。
+         *   mt=1    短信**存在 MT 里**并上报 `+CMTI: "<mem>",<index>`（8.4）。
+         *           这是本插件要的形状：列表、删除、容量都以存储里的真实条目为准；
+         *           mt=2/3 是把 PDU 甩成 `+CMT` 且不落盘，那样界面就没有可删的条目了。
+         *   bm=0    小区广播（CBM）不上报，本页不处理 CBS。
+         *   ds=2    短信回执存在 MT 里并上报 `+CDSI: "<mem>",<index>`（8.5）。
+         *           回执内容界面暂不展示，但这条上报必须被认成主动上报，
+         *           否则它会混进正在等待的那条命令的应答行里。
+         *   bfr=0   从 mode=0 切到 mode=1/2 后，把之前缓存的通知一次性发给 TE
+         *           （取 1 才是清空丢掉，用户会看不到断连期间来的短信）。
+         * 查询失败或应答不含目标值时都要重新 SET：手册 8.3.4 的掉电保存是 N，
+         * 8.3.2 也写明 MT 重启后 CNMI 会回到 0,0,0,0,0 —— 那样一条 +CMTI 都收不到。
+         */
         match self.send_command(ctx, "AT+CNMI?", COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.contains("+CNMI: 2,1,0,2,0") => {}
             _ => match self.send_command(ctx, "AT+CNMI=2,1,0,2,0", COMMAND_TIMEOUT, None).await {
@@ -1176,7 +1210,11 @@ pub fn is_exclusive_urc(line: &str) -> bool {
         "RING" | "IRING" | "^IRING" | "NO CARRIER" => return true,
         _ => {}
     }
+    // +CMTI（手册 8.4）与 +CDSI（8.5）都是纯上报：没有对应的读命令，永远不会
+    // 是某条命令的应答。CNMI 设成 mt=1、ds=2 后两者都会来，漏掉 +CDSI 就会被
+    // 塞进正在等待的那条命令的应答行里，打断「头行 + 下一行 PDU」的配对。
     if line.starts_with("+CMTI:")
+        || line.starts_with("+CDSI:")
         || line.starts_with("^CEND:")
         || line.starts_with("^SMMEMFULL")
         || line.contains("MEMORY FULL")
@@ -1194,6 +1232,11 @@ pub fn is_exclusive_urc(line: &str) -> bool {
 /// 没有结构化推送、必须原样转给前端的主动上报。
 pub fn is_passthrough_urc(line: &str) -> bool {
     if line.starts_with("^REJINFO") {
+        return true;
+    }
+    // 状态报告索引本插件暂不解析（短信中心页面不展示送达回执），
+    // 但也不能让它安静地消失：原样推给前端，日志里看得见「模组报过回执」。
+    if line.starts_with("+CDSI:") {
         return true;
     }
     line.starts_with("+CUSD:") && line.contains(',')
@@ -1306,6 +1349,16 @@ mod tests {
         assert_eq!(parse_autodial_state("^SETAUTODIAL: 1\r\nOK"), Some((true, None)));
         // 前导空白 / 多空格
         assert_eq!(parse_autodial_state("  ^SETAUTODIAL:  0  \r\nOK"), Some((false, None)));
+        // 手册 16.18.1 的语法页把同一行印作 ^SETAUTODAIL:（少一个 I），两种拼写都要认；
+        // 这里的 dial_mode=0（模组内部拨号）不在本插件的通道之内 → 方式为 None（需重新对齐）
+        assert_eq!(
+            parse_autodial_state("^SETAUTODAIL:1,0,\"IPV4V6\",\"\",\"\",\"\",0\r\nOK"),
+            Some((true, None))
+        );
+        assert_eq!(
+            parse_autodial_state("^SETAUTODAIL: 1,1\r\nOK"),
+            Some((true, Some(1)))
+        );
     }
 
     #[test]
@@ -1350,9 +1403,24 @@ mod tests {
     }
 
     #[test]
-    fn parse_ndis_state_reads_first_field() {
-        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1,1,0,0,0,0,0\r\nOK"), Some(true));
-        assert_eq!(parse_ndis_state("^NDISSTATQRY: 0,1,0,0,0,0,0\r\nOK"), Some(false));
+    fn parse_ndis_state_reads_cid_stat_pair() {
+        // 手册 16.4.5 举例：首字段是 CID，第二字段才是连接状态
+        assert_eq!(
+            parse_ndis_state("^NDISSTATQRY: 1,1,,,\"IPV4\",0,,,\"IPV6\"\r\nOK"),
+            Some(true)
+        );
+        // 同样带 CID 1，但状态是 0（断开）—— 旧实现读首字段会误判为「已连接」
+        assert_eq!(
+            parse_ndis_state("^NDISSTATQRY: 1,0,32,,\"IPV4\",,,,\"IPV6\"\r\nOK"),
+            Some(false)
+        );
+        // 多组上报：IPv6 组已连、IPv4 组断开 → 数据面（USB 网口按 IPv4 通道）未就绪
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1,0,,,\"IPV4\",1,,,\"IPV6\"\r\nOK"), Some(false));
+        // 只有 CID 2 的行：读不到本插件通道（CID 1）的状态 → 无法判定
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 2,1,,,\"IPV4\"\r\nOK"), None);
+        // 字段缺失 / 非数字 → 无法判定
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1\r\nOK"), None);
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1,x,,,\"IPV4\"\r\nOK"), None);
         assert_eq!(parse_ndis_state("OK"), None);
     }
 

@@ -83,7 +83,7 @@ var AtWs = {
 			 * 这里刻意让私有写法失败，截图才与真机同一个口径 —— 否则前端退回错误前缀后，
 			 * 截图仍然会「看起来正常」，反而掩盖问题。
 			 */
-			if (cmd === 'AT+CPMS?') return Promise.resolve({ success: true, data: '+CPMS: "SM",6,50,"SM",6,50,"MT",0,50' });
+			if (cmd === 'AT+CPMS?') return Promise.resolve({ success: true, data: '+CPMS: "SM",6,50,"SM",6,50,"ME",0,50' });
 			if (cmd === 'AT^CPMS?') return Promise.resolve({ success: false, error: 'ERROR' });
 			return Promise.resolve({ success: true, data: 'OK' });
 		},

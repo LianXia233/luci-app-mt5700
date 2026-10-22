@@ -527,11 +527,11 @@ pub fn decode_stored_pdu(pdu_hex: &str) -> StoredSms {
     }
 }
 
-/// `AT+CMGL` / `AT+CMGR` 应答里的一条记录。
+/// `AT+CMGL` 应答里的一条记录（手册 9.8.1）。
 #[derive(Debug, Clone)]
 pub struct CmglEntry {
     pub index: u32,
-    /// TS 27.005 `<stat>`：0=未读 1=已读 2=未发 3=已发
+    /// 手册 9.8.3 `<stat>`：0=收到的未读 1=收到的已读 2=存储的未发送 3=存储的已发送
     pub stat: u32,
     pub direction_incoming: bool,
     pub number: String,
@@ -543,17 +543,25 @@ pub struct CmglEntry {
     pub error: Option<String>,
 }
 
-/// 解析 `AT+CMGL=...` / `AT+CMGR=...` 的应答行。
+/// 解析 `AT+CMGL=<stat>` 的应答行（手册 9.8.1）。
 ///
-/// 注意 `+CMGL:` 前缀会同时匹配 `+CMGR:`（单条读取），这是有意为之：
-/// 两条命令的应答形状一样（同一行给 index/stat/len，下一行给 PDU）。
-/// 解析失败的单条会带着 error 保留下来，界面上如实提示，而不是静默丢掉。
+/// 形状是 `+CMGL: <index>,<stat>,[<reserved>],<length>` 紧跟一行 PDU，
+/// 手册 9.8.5 的实例是 `+CMGL: 1,0,,25`。`<length>` 按 9.8.3 是 TPDU 的字节数
+/// （十进制），本函数不读它：正文一律取下一行那串十六进制，长度只在模组侧用。
+///
+/// **别用它读 `AT+CMGR` 的应答**：手册 9.10.1 的形状是
+/// `+CMGR: <stat>,[<reserved>],<length>`，**没有 `<index>` 字段**，第一个字段是状态。
+/// 把两条命令当成同形就会把「已读」读成序号 1、把序号丢掉。单条读取走
+/// `urc::parse_sms_response`，它只取 PDU 那一行，序号由调用方自己带着。
+///
+/// 解析失败的单条会带着 error 保留下来，界面上如实提示，而不是静默丢掉；
+/// 这种条目的 `index` 落为 0，删除路径据此拒绝下发（见 `sms::delete`）。
 pub fn parse_cmgl_response(lines: &[String]) -> Vec<CmglEntry> {
     let mut out: Vec<CmglEntry> = Vec::new();
     let mut i = 0usize;
     while i + 1 < lines.len() {
         let line = lines[i].trim();
-        let Some(rest) = line.strip_prefix("+CMGL:").or_else(|| line.strip_prefix("+CMGR:")) else {
+        let Some(rest) = line.strip_prefix("+CMGL:") else {
             i += 1;
             continue;
         };
@@ -632,14 +640,12 @@ const CONCAT_UDH_SEPTETS: usize = 7;
 pub struct SubmitPart {
     /// 完整 PDU（含 SMSC 字段）的十六进制串，大写。
     pub pdu: String,
-    #[allow(dead_code)] // 逐片的编码与参考号：整体信息见 SubmitPlan，保留供排查
-    pub encoding: SmEncoding,
     /// `AT+CMGS` 要的长度：**不含** SMSC 字段的 TPDU 字节数。
+    /// 手册 9.14.3 只写了「长度指示」，取值以 9.14.5 的实例为准：
+    /// `AT+CMGS=18` 配的 PDU 是 19 字节（首字节 `00` 是 SMSC 长度），18 = TPDU 字节数。
     pub tpdu_length: usize,
     pub part_number: u8,
     pub parts_count: u8,
-    #[allow(dead_code)]
-    pub reference: u16,
 }
 
 /// 编码结果的整体描述，供上层组装提示文案。
@@ -897,7 +903,14 @@ pub struct SubmitOptions {
     pub message: String,
     /// 短信中心号码，留空表示用 SIM 卡里存的那一个（SMSC 长度字节写 0）。
     pub smsc: Option<String>,
-    /// 相对有效期（TP-VP 字节），默认 0xAA = 24 小时。
+    /// 相对有效期（TP-VP 字节），默认 0xA8 = 24 小时。
+    ///
+    /// TP-VP 用的是 3GPP TS 23.040 §9.2.3.12 的相对有效期编码（本 AT 手册不含该表，
+    /// 别按字面当小时数读）：`0～143` 为 `(n+1)×5` 分钟，`144～167` 为
+    /// `12 小时 + (n−144)×30` 分钟，`168～196` 为 `1 天 + (n−168)×1` 小时，
+    /// `197～255` 为 `1 周 + (n−197)×24` 小时。所以 **0xA8（168）正好是 24 小时**，
+    /// 而 0xAA（170）是 26 小时。厂商 WebUI 的短信发送用的是 0xA7（23.5 小时），
+    /// 取 0xA8 与它只差半小时，不影响送达。
     pub validity: Option<u8>,
     /// 8 位连接头参考号；不给则随机取 1..=255。
     pub reference: Option<u8>,
@@ -905,7 +918,10 @@ pub struct SubmitOptions {
 
 /// 构造真正要发出去的分片列表（按片序排列）。
 ///
-/// 每条都可直接用于 `AT+CMGS={tpdu_length}\r{pdu}`。
+/// 每片按手册 9.14.1／9.14.5 的**两段式**下发：先 `AT+CMGS=<tpdu_length>` 等 `> `
+/// 提示符，再写 `<PDU>` + 0x1A（见 `sms.rs::send`）。`tpdu_length` 是 TPDU 字节数、
+/// **不含前面的 SMSC 字段**，厂商 WebUI 的编码器算的也是这一个数（它把 SMSC 字段
+/// 单独拼在 TPDU 之前、长度只取 TPDU 部分），与本插件一致。
 pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
     let destination = opts.destination.trim();
     if destination.is_empty() {
@@ -939,7 +955,7 @@ pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
         Some(sc) => encode_address(sc, true, true)?,
         None => vec![0x00], // 0 长度 = 用卡里配的短信中心
     };
-    let vp = opts.validity.unwrap_or(0xAA);
+    let vp = opts.validity.unwrap_or(0xA8);
     let dcs: u8 = match encoding {
         SmEncoding::Gsm7 => 0x00,
         SmEncoding::Ucs2 => 0x08,
@@ -970,7 +986,8 @@ pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
                     w.align_to(7);
                     let body = write_septets(&mut w, &chars);
                     let ud = w.finish();
-                    let udl = (CONCAT_UDH_LEN * 8 + 6) / 7 + body;
+                    // TP-UDL = UDH 占的 septet 数（含 align_to(7) 补的填充位）+ 正文 septet 数。
+                    let udl = CONCAT_UDH_SEPTETS + body;
                     (ud, udl)
                 }
                 // UCS2：UDH 按字节前置即可（本身就是字节对齐），TP-UDL 是字节数。
@@ -1019,10 +1036,8 @@ pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
         parts.push(SubmitPart {
             pdu: hex_upper(&full),
             tpdu_length: tpdu.len(),
-            encoding,
             part_number: (i + 1) as u8,
             parts_count,
-            reference: reference as u16,
         });
     }
 
@@ -1224,6 +1239,29 @@ mod tests {
     }
 
     #[test]
+    fn default_validity_is_relative_24h() {
+        // 相对有效期编码（TS 23.040 §9.2.3.12）：n=168～196 表示「1 天 + (n−168) 小时」，
+        // 24 小时对应 0xA8；0xAA 是 26 小时，注释以前把它当 24 小时用。
+        let plan = build_submit_parts(&SubmitOptions {
+            destination: "+8613800138000".into(),
+            message: "vp".into(),
+            smsc: None,
+            validity: None,
+            reference: Some(1),
+        })
+        .unwrap();
+        let raw = hex::decode(&plan.parts[0].pdu).unwrap();
+        let mut pos = 1 + raw[0] as usize; // 跳过 SMSC 字段
+        let first = raw[pos];
+        pos += 2; // first octet + TP-MR
+        let da_len = raw[pos] as usize;
+        pos += 1 + (da_len + 1) / 2 + 1; // DA 长度 + 号码 BCD 字节 + TOA
+        pos += 2; // TP-PID + TP-DCS → TP-VP
+        assert_eq!(first & 0x18, 0x10, "TP-VPF 应为相对格式（bit4:bit3 = 10）");
+        assert_eq!(raw[pos], 0xA8, "默认 TP-VP 应为 0xA8 = 24 小时");
+    }
+
+    #[test]
     fn chinese_message_uses_ucs2_and_round_trips() {
         let text = "你好，这是一条测试短信";
         let plan = build_submit_parts(&SubmitOptions {
@@ -1320,10 +1358,52 @@ mod tests {
         .is_err());
     }
 
+    #[test]
+    fn cmgl_parses_manual_shape_and_ignores_cmgr() {
+        // 手册 9.8.5 的实例形状：`+CMGL: 1,0,,25` + 下一行 PDU；<length> 是十进制字节数。
+        let lines = vec![
+            "AT+CMGL=4".to_string(),
+            String::new(),
+            "+CMGL: 1,1,,25".to_string(),
+            "00040B913108108300F0000852805221000023046D4B8BD5".to_string(),
+            "OK".to_string(),
+        ];
+        let got = parse_cmgl_response(&lines);
+        assert_eq!(got.len(), 1, "回显行与空行都不该被当成记录");
+        assert_eq!(got[0].index, 1);
+        assert_eq!(got[0].stat, 1, "9.8.3：<stat>=1 是「收到的已读短信」");
+        assert_eq!(got[0].content, "测试");
+        assert!(got[0].error.is_none());
+
+        // 9.10.1 的 `+CMGR: <stat>,[<reserved>],<length>` 没有 <index> 字段，
+        // 绝不能被这个函数当成 CMGL 记录（那样会把状态读成序号）。
+        let cmgr = vec![
+            "+CMGR: 1,,25".to_string(),
+            "00040B913108108300F0000852805221000023046D4B8BD5".to_string(),
+            "OK".to_string(),
+        ];
+        assert!(parse_cmgl_response(&cmgr).is_empty(), "+CMGR 头行不属于 CMGL 解析器的输入");
+    }
+
+    #[test]
+    fn cmgl_keeps_unparsable_entry_with_error() {
+        // 解析失败的一条要带着原因留下，而不是静默丢掉；序号读不出时落为 0，
+        // 删除侧（sms::delete）正是用「0 不是来路明确的序号」拒绝下发的。
+        let lines = vec![
+            "+CMGL: 2,0,,30".to_string(),
+            "not-hex-at-all".to_string(),
+            "OK".to_string(),
+        ];
+        let got = parse_cmgl_response(&lines);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].index, 2);
+        assert!(got[0].error.is_some(), "{:?}", got[0].error);
+    }
+
     /// 把我们自己编出来的 SMS-SUBMIT 反向解出正文，验证「编得对不对」。
     ///
-    /// 直 HTTP 走的 TPDU 布局：skips SMSC → 跳过 first octet / MR / PID / DCS / VP
-    /// 才到 UDL，与 DELIVER 的字段顺序不同，所以这里单独实现而不是复用 decode。
+    /// SUBMIT 的字段顺序与 DELIVER 不同：跳过 SMSC 字段后是 first octet、TP-MR、TP-DA、
+    /// TP-PID、TP-DCS、TP-VP，才到 TP-UDL。所以这里单独走一遍，不复用收信侧的 decode。
     fn decode_submit_body(pdu: &str, encoding: SmEncoding) -> String {
         let raw = hex::decode(pdu).unwrap();
         let mut pos = 1 + raw[0] as usize; // SMSC 字段
@@ -1332,7 +1412,7 @@ mod tests {
         pos += 1; // TP-MR
         let _da_len = raw[pos] as usize;
         pos += 1;
-        pos += (_da_len + 1) / 2 + 1; // 号码 + TOA + TP-PID... 号码位数 → 字节在上一句已算
+        pos += (_da_len + 1) / 2 + 1; // 号码 BCD 字节 + TOA
         pos += 1; // TP-PID
         pos += 1; // TP-DCS
         pos += 1; // TP-VP

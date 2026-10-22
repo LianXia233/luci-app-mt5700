@@ -216,8 +216,8 @@ const SMS_RPC_TIMEOUT_SEC = 50;
  *                        所以这里给的是总预算的量级；短信提交慢一点没关系，
  *                        被掐断才会出现「其实发出去了却报失败」。
  *   list / capacity / set_storage / get_smsc / set_smsc
- *                  40s —— 排队(10) + SMS_LIST_TIMEOUT(20) + 余量。
- *                        AT+CMGL=4 要吐出全部 PDU，几十条时远不止 12s。
+ *                  40s —— 排队(10) + SMS_LIST_TIMEOUT(25) + 余量。
+ *                        AT+CMGL=4 要吐出全部 PDU，几十条时远不止普通查询的 2s。
  *   session_*      12s —— 纯内存操作，走默认预算。
  */
 const SMS_ACTION_TIMEOUT = {
