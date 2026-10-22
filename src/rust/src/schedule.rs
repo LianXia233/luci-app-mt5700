@@ -356,6 +356,11 @@ impl Scheduler {
         }
     }
 
+    /// 组装 `AT^LTEFREQLOCK=<operatetype>,<forbidFlag>,<num>,...`（手册 13.12）。
+    ///
+    /// `<forbidFlag>` 固定写 0：手册 13.12.3 定义 0=不允许重选和切换、1=允许，
+    /// 定时锁频的语义就是「到这个时间点必须驻留在指定频点/小区」，
+    /// 允许重选会让锁定形同虚设。
     async fn lte_command(&self, l: &BandLock) -> Option<(String, String)> {
         let sched = self.state.read().await.cfg.clone();
         if l.type_ <= 0 {

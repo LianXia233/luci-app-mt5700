@@ -218,7 +218,10 @@ fn parse_db(s: &str) -> Option<f64> {
 pub async fn sample_signal(client: &Arc<AtClient>, ctx: &watch::Receiver<bool>) -> Option<Sample> {
     let monsc = query_monsc(client, ctx).await;
     let mut rat = monsc.rat.clone();
-    // RSRP/RSRQ 恒为负值；0 与空串都表示「无有效读数」而不是真实值
+    // RSRP/RSRQ 恒为负值；0 与空串都表示「无有效读数」而不是真实值。
+    // 区间边界取自《AT 命令手册》13.9.3：LTE RSRP -140~-44、NR RSRP -156~-31
+    // （无效值 -1256）、NR RSRQ -43~20（无效值 -348）、SINR -23~40（无效值 -188），
+    // 下面的宽裕区间把三制式与无效值一并挡掉，无效读数会回退到 ^HCSQ。
     let mut rsrp = parse_db(&monsc.rsrp).filter(|v| *v < 0.0 && *v > -200.0);
     let rsrq = parse_db(&monsc.rsrq).filter(|v| *v < 0.0 && *v > -50.0);
     // SINR 可以为 0（对应「频发重传」档），故这里不能按「非零」过滤
