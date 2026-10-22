@@ -15,9 +15,7 @@ const MAX_PARTIAL_SMS: usize = 100;
 
 pub type Broadcaster = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 
-#[allow(dead_code)] // sender 随分段信息留存，当前仅写入，保留供后续归属核对
 struct PartialSms {
-    sender: String,
     total: u32,
     parts: HashMap<u32, String>,
     received: Instant,
@@ -209,6 +207,10 @@ impl Dispatcher {
 
         // 短信到达后的读取必须走短信最高优先级：它不能被后台巡检（信号/缓存/
         // 流量/自动拨号对账）排在后面，否则用户要等好几秒才看到新短信。
+        //
+        // 副作用要认账：手册 9.10.2 写明 `AT+CMGR` 读成功后，存储里那条「收到的未读」
+        // 就变成「收到的已读」（`AT+CMGL` 的 9.8.2 同理）。于是界面上的「未读」不可能
+        // 来自模组的标志位 —— 我们一读它就没了，短信中心页只按本页会话估（见 sms_center.js）。
         let resp = match self.client.send_sms_command(
             &self.ctx,
             &format!("AT+CMGR={index}"),
@@ -283,7 +285,6 @@ impl Dispatcher {
             .partials
             .entry(key)
             .or_insert_with(|| PartialSms {
-                sender: sms.sender.clone(),
                 total: info.parts_count,
                 parts: HashMap::new(),
                 received: now,
@@ -517,13 +518,18 @@ fn cmti_capture(line: &str) -> Option<(String, String)> {
     Some((storage, index.to_string()))
 }
 
-/// 从 +CMGR/+CMGL 的应答里取出 PDU 并解码。
+/// 从 `AT+CMGR=<index>`（手册 9.10.1）/ `AT+CMGL`（9.8.1）的应答里取出 PDU 并解码。
+///
+/// 两条命令的头行字段数不一样（CMGL 是 `<index>,<stat>,[<reserved>],<length>`，
+/// CMGR 没有 `<index>`），这里刻意不解析头行：序号本来就是调用方自己下发的那个，
+/// 状态和长度对解码没用。前缀要写全 —— `starts_with("+CMG")` 会把发送回执
+/// `+CMGS: <mr>` 也当头行，接着把下一行的 `OK` 当 PDU 去解。
 fn parse_sms_response(resp: &AtResponse) -> Vec<Sms> {
     let mut out = Vec::new();
     let mut i = 0;
     while i + 1 < resp.lines.len() {
         let line = resp.lines[i].trim();
-        if !line.starts_with("+CMG") {
+        if !(line.starts_with("+CMGR:") || line.starts_with("+CMGL:")) {
             i += 1;
             continue;
         }
@@ -557,18 +563,18 @@ pub fn split_fields(line: &str, prefix: &str) -> Vec<String> {
         .collect()
 }
 
-/// 查询服务小区信息（`AT^MONSC`）。
-///
-/// 抽成自由函数的原因：URC 分发（收到信号上报时补全明细）与定时巡检
-/// （主动取样）都要用它，而巡检并不持有 `Dispatcher`。
 /// 解析 `AT+CPMS?` 应答里的短信存储用量 → (已用, 容量)。
 ///
-/// 响应形如 `+CPMS: "ME",3,50,"ME",3,50,"ME",3,50`：每三段一组，依次是
-/// 存储区名、已用、容量。只取**第一组**（首选存储区），与前端短信中心的
-/// 「存储用量」同一口径。
+/// 手册 8.1.1 的读命令形态：`+CPMS: <mem1>,<used1>,<total1>,<mem2>,…`，每三段一组、
+/// 组内依次是区名/已用/容量。这里只要**第一组**（`<mem1>` 才是 8.1.3 里读取与删除
+/// 所用的介质，短信是否满也就看它），所以把非数字的区名滤掉、取头两个数就够。
+///
+/// 与 `sms::parse_storage` 是两件事，不是重复实现：那一个要给出三个区的区名给界面显示，
+/// 少一个字段就该整体判为「没读到」；这一个跑在定时推送里，宁可宽松地拿到第一组数字，
+/// 也不能因为固件少回了一组就把「存储已满」的通知关掉。两处都同时认私有前缀 `^CPMS`。
 fn parse_storage_line(line: &str) -> Option<(u64, u64)> {
     let line = line.trim();
-    // 个别固件回私有前缀 ^CPMS，两种都认（与前端短信中心的做法一致）
+    // 个别固件回私有前缀 ^CPMS，两种都认（与 sms::parse_storage 同一口径）
     let body = line.strip_prefix("+CPMS:").or_else(|| line.strip_prefix("^CPMS:"))?;
     // 存储区名（"ME" / "SM"）不是数字，会被过滤掉，剩下的就是 used,total,...
     let mut nums = body
@@ -602,6 +608,17 @@ pub(crate) async fn query_storage(
     resp.lines.iter().filter_map(|l| parse_storage_line(l)).next()
 }
 
+/// 查询驻留小区信息（`AT^MONSC`，《AT 命令手册》13.9.1/13.9.3）。
+///
+/// 应答恒为 `^MONSC: <RAT>[,<cell_paras>]`，<RAT> ∈ WCDMA / LTE / NR / NONE；
+/// NONE 或无服务时不带小区参数，字段长度不足会直接返回默认值（制式「未知」），
+/// 由调用方回退 `AT^HCSQ?`。LTE 与 NR 的 <cell_paras> 顺序不同，必须分支取值：
+///   LTE: MCC,MNC,ARFCN(十进制 0~133121),Cell_ID(hex),PCI(hex 0~0x1F7),TAC(hex),RSRP,RSRQ,RSSI
+///   NR:  MCC,MNC,ARFCN-NR,SCS(0~4),Cell_ID(hex),PCI(hex 0~0x3EF),TAC(hex),RSRP,RSRQ,SINR
+/// 下标须与前端 `rpc.js::parseMONSC` 完全一致，否则页面与推送会给出不同的小区参数。
+///
+/// 抽成自由函数的原因：URC 分发（收到信号上报时补全明细）与定时巡检
+/// （主动取样）都要用它，而巡检并不持有 `Dispatcher`。
 pub(crate) async fn query_monsc(
     client: &AtClient,
     ctx: &tokio::sync::watch::Receiver<bool>,
