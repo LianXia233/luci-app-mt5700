@@ -459,49 +459,72 @@ impl SmsService {
             plan.reference
         );
 
-        // 4) 逐片提交，**两段式**（3GPP TS 27.005 §3.4.1）：先 `AT+CMGS=<长度>` 等模组
-        //    给 `> ` 输入提示符，再单独写 `<PDU>` + 0x1A 收尾（尾部 CR 由底层补，
-        //    与本仓库两个模组模型 —— `tests/mock-modem/mock-modem.js` 与
-        //    `atclient::testutil` —— 以及 e2e 第 5 项实测过的字节形状一致：
-        //    0x1A 结束 PDU 输入，随后那个空行被模组忽略）。
-        //    旧写法把长度、CR、PDU 一次写完，是为了躲 0x1A 在
-        //    浏览器 → rpcd → ucode → nc 链路上的转义问题（见 65eee21）；现在提交由后端
-        //    事务直接 write_all，0x1A 就是 Rust 里的一个字节，不再经过任何转义，而一次性
-        //    写法在本仓库自己的 mock/e2e 里被明确判为「拿不到提交回执」（e2e 第 5b 项）。
-        //    失败点在片内，立即停下，不继续也不重试。
+        // 4) 逐片提交。形态取手册 9.14.1／9.14.5 与实机表现一致的那一种：
+        //    `AT+CMGS=<长度>` + **字面的 `\r` 两个字符** + `<PDU>`，整条一次写完，
+        //    模组直接回 `+CMGS: <mr>` / OK —— 全程没有 `> ` 输入提示符，也不需要
+        //    Ctrl-Z(0x1A)。手册 9.14.5 的举例正是 `AT+CMGS=18\r0011…`，并注明
+        //    「使用 SSCOM 工具时对应的 "\r" 应改为 "\\r"」—— 串口上要发的是反斜杠
+        //    加字母 r，不是回车。同一台 MT5700M-CN 的实机对照：
+        //      `AT+CMGS=19` + 真 CR + PDU + CR → 只回显命令本身，随后静默
+        //          （无 `>`、无 `+CMGS:`、无 ERROR）；
+        //      `AT+CMGS=19` + 字面 `\r` + PDU → 立即 `+CMGS: <mr>` / OK。
+        //    这条路上没有任何控制字节，也就不会再被「浏览器 JSON → rpcd → ucode → nc」
+        //    的转义链路打到（issue #19 里 0x1A 变成字面量 `u001a` 属同一类问题）。
+        //    失败点在片内，立即停下，不继续。只有模组**明确回本地 ERROR / +CME ERROR**
+        //    （PDU 还没进网络侧，换形态不算重发）时，才退回 3GPP TS 27.005 §3.4.1 的
+        //    标准两段式再试一次；`+CMS ERROR`（网络侧已拒）与超时静默（结果不明，
+        //    可能已经发出去）一律不重试，见 [needs_two_step_fallback]。
         let mut parts = Vec::with_capacity(plan.parts.len());
         let mut outcome = SendOutcome::Accepted;
         let mut message_out = String::new();
         let deadline = Instant::now() + self.total_budget;
 
         for part in &plan.parts {
-            let head = format!("AT+CMGS={}", part.tpdu_length);
             // 单段预算 = min(单段上限, 事务剩余额度)。剩余额度为 0 时给最小预算，
             // 让模组还有一次机会回话（此时判 Unknown 而不是 Accepted）。
             let remain = deadline.saturating_duration_since(Instant::now());
             let part_timeout = self.submit_timeout.min(remain).max(Duration::from_millis(500));
             let started = Instant::now();
-            // 第一步没等到 `> ` 就不写 PDU：那样做会把 PDU 当成一条新命令，模组回 ERROR，
-            // 用户看到的是一次莫名其妙的失败。
-            let prompt = self
+            // `\\r` 在 Rust 源里是「反斜杠 + r」两个字符，正是模组要的分隔符。
+            let one_shot = format!("AT+CMGS={}\\r{}", part.tpdu_length, part.pdu);
+            let res = self
                 .client
-                .run_in_transaction(&self.ctx, &tx, &head, part_timeout)
+                .run_in_transaction(&self.ctx, &tx, &one_shot, part_timeout)
                 .await;
-            let res = match prompt {
-                Ok(resp) if saw_input_prompt(&resp) => {
-                    let left = part_timeout
-                        .saturating_sub(started.elapsed())
-                        .max(Duration::from_millis(500));
-                    self.client
-                        .run_in_transaction(
-                            &self.ctx,
-                            &tx,
-                            &format!("{}\u{1a}", part.pdu),
-                            left,
-                        )
-                        .await
+            let res = if needs_two_step_fallback(&res) {
+                log_info!(
+                    "短信提交：第 {} 片的一次性形态被模组本地拒绝，退回标准两段式重试一次",
+                    part.part_number
+                );
+                let head = format!("AT+CMGS={}", part.tpdu_length);
+                let head_budget = part_timeout
+                    .saturating_sub(started.elapsed())
+                    .max(Duration::from_millis(500));
+                let head_started = Instant::now();
+                let prompt = self
+                    .client
+                    .run_in_transaction(&self.ctx, &tx, &head, head_budget)
+                    .await;
+                // 第一步没等到 `> ` 就不写 PDU：那样做会把 PDU 当成一条新命令，模组回
+                // ERROR，用户看到的是一次莫名其妙的失败；此时直接把第一步的应答报出去。
+                match prompt {
+                    Ok(resp) if saw_input_prompt(&resp) => {
+                        let left = head_budget
+                            .saturating_sub(head_started.elapsed())
+                            .max(Duration::from_millis(500));
+                        self.client
+                            .run_in_transaction(
+                                &self.ctx,
+                                &tx,
+                                &format!("{}\u{1a}", part.pdu),
+                                left,
+                            )
+                            .await
+                    }
+                    other => other,
                 }
-                other => other,
+            } else {
+                res
             };
             let (part_outcome, detail) = classify_cmgs_result(&res);
             if part_outcome == SendOutcome::Rejected {
@@ -1328,7 +1351,11 @@ fn last_line(text: &str) -> String {
     text.lines().last().unwrap_or("").trim().to_string()
 }
 
-/// 两段式提交的第一步是否等到了模组的 `> ` 输入提示符。
+/// 一次性提交的第一步（`AT+CMGS=<长度>`）是否等到了模组的 `> ` 输入提示符。
+///
+/// 只在 [needs_two_step_fallback] 触发的两段式重试里用到：这台模组正常路径上根本
+/// 不给提示符（手册 9.14.1 的「可能的返回结果」里也没有 `>`），所以「没等到提示符」
+/// 本身就是值得如实报出去的结果，而不是继续往下写 PDU 的理由。
 ///
 /// 底层把「只剩空白与 `>` 的残留字节」识别成一行 `">"`（见 `AtClient::consume`），
 /// 所以这里只认独立成行的提示符，不拿整段文本 `contains(">")` 凑数 —— 那样
@@ -1371,6 +1398,23 @@ fn classify_cmgs_result(res: &Result<crate::atclient::AtResponse, String>) -> (S
                 (SendOutcome::Unknown, format!("模组未给出提交确认（应答：{}）", first_line_capped(&text)))
             }
         }
+    }
+}
+
+/// 一次性形态被拒时，是否值得退回标准两段式再试一次。
+///
+/// 判据是「PDU 还没进网络侧」：`ERROR` 与 `+CME ERROR` 都发生在模组的命令解析层，
+/// 不存在已经投递成功的可能，所以换一种形态重发不构成重复投递。反过来两种情况
+/// 必须停手：`+CMS ERROR` 是短信层/网络侧的拒绝（换形态也是同样结果，白等一轮），
+/// 超时与静默是**结果不明**（模组可能已经发出去了），重试就是用户最不想看到的
+/// 「同一条短信收到两遍」。
+fn needs_two_step_fallback(res: &Result<AtResponse, String>) -> bool {
+    match res {
+        Ok(resp) => {
+            let text = resp.text();
+            !text.contains("+CMS ERROR:") && resp.has_error()
+        }
+        Err(_) => false,
     }
 }
 
@@ -1875,7 +1919,7 @@ mod tests {
         let (svc, modem, _ctx) = harness(script(vec![
             ("AT+CMGF?", Reply::Lines(vec!["+CMGF: 0".into(), "OK".into()])),
             ("AT+CSCA?", Reply::Lines(vec!["+CSCA: \"+8613800755500\",145".into(), "OK".into()])),
-            ("AT+CMGS=", Reply::Prompt),
+            ("AT+CMGS=", Reply::ok(&["+CMGS: 12"])),
             ("AT+CPMS?", Reply::Lines(vec!["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50".into(), "OK".into()])),
         ]))
         .await;
@@ -1888,38 +1932,97 @@ mod tests {
         assert_eq!(r.encoding, "UCS2");
         assert!(r.storage.is_some(), "发送后应带回一次真实容量读数");
 
-        // 字节级：两段式 —— 先 `AT+CMGS=<len>\r`，再 `<PDU>` + 0x1A + `\r`，
-        // 且 0x1A 必须是真实字节，不能是被转义成字面量的 "\\u001a"。
-        let stream = modem.stream();
-        let text = String::from_utf8_lossy(&stream).to_string();
-        assert!(text.contains("AT+CMGS="), "应下发 AT+CMGS：{text}");
-        assert!(stream.contains(&0x1A), "两段式提交必须以 Ctrl-Z 结束 PDU 输入");
-        assert!(!text.contains("\\u001a"), "不应出现被转义成字面量的 0x1A");
-        assert!(!text.contains("\\x1a"), "不应出现被转义成字面量的 0x1A");
-        // 长度与 PDU 之间必须是真实的 CR / 0x1A，而不是反斜杠转义串
-        let cmgs_pos = text.find("AT+CMGS=").unwrap();
-        assert!(stream[cmgs_pos..].contains(&0x0D), "命令结尾必须是真实 CR");
-        assert!(!text[cmgs_pos..].contains("\\r"), "CR 不能被转义成字面量 \\r");
-        // 一次性写法（长度与 PDU 同一条命令）不应再出现：mock/e2e 第 5b 项证明它拿不到回执。
-        // 看**写入批次**而不是整条流：两段式是两次 write_all，第一段必须只有 `AT+CMGS=<数字>`。
+        // 字节级：手册 9.14.5 的一次性形态 —— **同一次写入**里就有长度、字面 `\r`
+        // 分隔符与完整 PDU；全程没有 0x1A，也没有「只报长度」的独立一段。
         let batches: Vec<Vec<u8>> = {
             let guard = modem.written.lock().unwrap_or_else(|e| e.into_inner());
             guard.clone()
         };
-        let head = batches
+        let stream = modem.stream();
+        let text = String::from_utf8_lossy(&stream).to_string();
+        let submit = batches
             .iter()
-            .find(|b| String::from_utf8_lossy(b).contains("AT+CMGS="))
-            .cloned()
-            .unwrap_or_default();
-        let head_text = String::from_utf8_lossy(&head).to_string();
-        let head_body = head_text.trim_end_matches('\r');
-        let len_field = head_body.trim_start_matches("AT+CMGS=");
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .find(|s| s.starts_with("AT+CMGS="))
+            .unwrap_or_else(|| panic!("应下发 AT+CMGS，实际写入 {text:?}"));
+        assert!(submit.ends_with('\r'), "命令以真实 CR 结尾交给模组，实际 {submit:?}");
+        let body = submit.trim_end_matches('\r');
+        let rest = body.strip_prefix("AT+CMGS=").expect("前缀必须是 AT+CMGS=");
+        let (len, pdu) = rest.split_once("\\r").expect("长度与 PDU 之间必须是字面的 \\r 两个字符");
         assert!(
-            head_body.starts_with("AT+CMGS=")
-                && !len_field.is_empty()
-                && len_field.chars().all(|c| c.is_ascii_digit()),
-            "第一段只报长度、不带 PDU，实际写入 {head_text:?}"
+            !len.is_empty() && len.chars().all(|c| c.is_ascii_digit()),
+            "长度字段是十进制字节数，实际 {rest:?}"
         );
+        let want = len.parse::<usize>().unwrap();
+        let smsc_octets = usize::from_str_radix(pdu.get(0..2).unwrap_or("00"), 16).unwrap();
+        assert_eq!(
+            pdu.len() / 2,
+            want + 1 + smsc_octets,
+            "<length> 不含 SMSC 字段（手册 9.14.5：18 配 19 字节 PDU），实际 PDU {pdu}"
+        );
+        assert!(!stream.contains(&0x1A), "一次性形态不带 Ctrl-Z；出现 0x1A 说明走了两段式重试");
+        assert!(!text.contains("\\u001a") && !text.contains("\\x1a"), "不应出现被转义成字面量的 0x1A");
+    }
+
+    #[tokio::test]
+    async fn send_falls_back_to_two_step_only_after_local_error() {
+        // 一次性形态被模组**本地**拒绝（ERROR，PDU 没进网络侧）→ 允许退回标准
+        // 两段式再试一次；这条用例同时锁住「重试只发生一次」。
+        let submits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let submits2 = submits.clone();
+        let (svc, modem, _ctx) = harness(move |cmd: &str| {
+            if cmd.starts_with("AT+CMGS=") {
+                let n = submits2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // 第 0 次 = 一次性形态（带字面 \r）→ 本地 ERROR；
+                // 第 1 次 = 两段式第一步（只报长度）→ 给 `> ` 提示符，
+                // 随后的 PDU 由 attach_mock_modem 按真实模组回 +CMGS。
+                return if n == 0 {
+                    Reply::Lines(vec!["ERROR".into()])
+                } else {
+                    Reply::Prompt
+                };
+            }
+            if cmd.starts_with("AT+CPMS?") {
+                return Reply::ok(&["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"]);
+            }
+            Reply::ok(&["+CMGF: 0"])
+        })
+        .await;
+
+        let r = svc
+            .send(SendRequest { destination: "13800138000".into(), message: "重试".into(), smsc: None, dedup_key: None })
+            .await
+            .unwrap();
+        assert_eq!(r.outcome, SendOutcome::Accepted, "两段式重试拿到回执应算成功：{:?}", r.message);
+        assert_eq!(submits.load(std::sync::atomic::Ordering::SeqCst), 2, "一次性一次 + 两段式一次");
+        let stream = modem.stream();
+        assert!(stream.contains(&0x1A), "两段式重试必须以 Ctrl-Z 结束 PDU 输入");
+    }
+
+    #[tokio::test]
+    async fn send_does_not_change_shape_after_cms_error() {
+        // `+CMS ERROR` 是短信层/网络侧的拒绝：换形态也是同样结果，且已经白等一轮
+        // 网络交互，必须直接如实报失败，不再走两段式。
+        let submits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let submits2 = submits.clone();
+        let (svc, _modem, _ctx) = harness(move |cmd: &str| {
+            if cmd.starts_with("AT+CMGS=") {
+                submits2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Reply::Lines(vec!["+CMS ERROR: 500".into()]);
+            }
+            if cmd.starts_with("AT+CPMS?") {
+                return Reply::ok(&["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"]);
+            }
+            Reply::ok(&["+CMGF: 0"])
+        })
+        .await;
+
+        let r = svc
+            .send(SendRequest { destination: "13800138000".into(), message: "x".into(), smsc: None, dedup_key: None })
+            .await
+            .unwrap();
+        assert_eq!(r.outcome, SendOutcome::Rejected, "{:?}", r.message);
+        assert_eq!(submits.load(std::sync::atomic::Ordering::SeqCst), 1, "网络侧拒绝不得换形态重试");
     }
 
     #[tokio::test]
@@ -1974,7 +2077,7 @@ mod tests {
         let (svc, _modem, _ctx) = harness(move |cmd: &str| {
             if cmd.starts_with("AT+CMGS=") {
                 submits2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                return Reply::Prompt;
+                return Reply::ok(&["+CMGS: 12"]);
             }
             if cmd.starts_with("AT+CPMS?") {
                 return Reply::ok(&["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"]);
@@ -2001,7 +2104,7 @@ mod tests {
         let (svc, modem, _ctx) = harness(script(vec![
             ("AT+CMGF?", Reply::Lines(vec!["+CMGF: 0".into(), "OK".into()])),
             ("AT+CSCA?", Reply::ok(&["+CSCA: \"+8613800755500\",145"])),
-            ("AT+CMGS=", Reply::Prompt),
+            ("AT+CMGS=", Reply::ok(&["+CMGS: 12"])),
             ("AT+CPMS?", Reply::ok(&["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"])),
         ]))
         .await;

@@ -706,13 +706,14 @@ impl RpcServer {
             _ => {}
         }
 
-        // 短信提交单独给足预算：`AT+CMGS=<长度>\r<PDU>` 要把 TPDU 交给网络侧，
+        // 短信提交单独给足预算：`AT+CMGS=<长度>` 后面带 PDU 时，要把 TPDU 交给网络侧，
         // 回 `+CMGS` 的耗时取决于信号与基站排队，弱信号下好几秒甚至十几秒。
         // 其余命令仍按 2 秒算 —— 不能因为短信把整页的失败检测一起拖慢。
         //
-        // 判据：以 `AT+CMGS=` 开头且命令里含 CR（即同一串里还带 PDU）。
-        // 只报长度的那一半（`AT+CMGS=14`，不含 CR）仍走短超时，它只等提示符。
-        let is_sms_submit = command.starts_with("AT+CMGS=") && command.contains('\r');
+        // 判据复用 [atclient::is_single_shot_cmgs]，与读循环里「不能被 `> ` 提前结束」
+        // 是同一个判断：字面 `\r`（业务路径与厂商形态）与真 CR（终端页手敲）都算。
+        // 只报长度的那一半（`AT+CMGS=14`，两种分隔符都没有）仍走短超时，它只等提示符。
+        let is_sms_submit = crate::atclient::is_single_shot_cmgs(&command);
         let cmd_timeout = if is_sms_submit {
             crate::atclient::SMS_SUBMIT_TIMEOUT
         } else {
