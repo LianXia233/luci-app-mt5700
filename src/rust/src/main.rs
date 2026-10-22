@@ -29,6 +29,7 @@ mod serialdetect;
 mod signalgrade;
 mod signalwatch;
 mod sms;
+mod sms_store;
 mod state;
 mod state_cfg;
 mod timerpush;
@@ -113,6 +114,10 @@ async fn run(verbose: bool) -> Result<(), String> {
     let usage = crate::usage::UsageTracker::new(cfg.usage_reset_day);
     // 短信业务：与 AT 客户端共用同一条通道，短信操作享有最高优先级。
     let sms = crate::sms::SmsService::new(client.clone(), ctx_rx.clone(), client.sms_mode());
+    // 短信本地归档：发送成功与收到新短信时由后端落盘，
+    // 与模组格位的生命周期解耦（见 sms_store 模块头）。
+    let sms_archive = std::sync::Arc::new(crate::sms_store::SmsArchive::at_default_dir());
+    sms.set_archive(sms_archive.clone());
     let mut rpc = RpcServer::new(
         client.clone(),
         cfg.websocket.auth_key.clone(),
@@ -128,6 +133,8 @@ async fn run(verbose: bool) -> Result<(), String> {
     let qq_bind_status = std::sync::Arc::new(crate::qqbind::BindStatus::default());
     rpc.set_bind_status(qq_bind_status.clone());
     rpc.set_scan_timeout(cfg.websocket.scan_timeout);
+    // 归档句柄注入 RPC：让短信中心页能读统计、看归档、删归档。
+    rpc.set_archive(sms_archive.clone());
     let rpc = Arc::new(rpc);
 
     // 上报分发：Broadcast 走事件总线，前端轮询 events(since) 拉取。
@@ -171,6 +178,7 @@ async fn run(verbose: bool) -> Result<(), String> {
 
     let dispatch_task = tokio::spawn({
         let mut dispatcher = Dispatcher::new(client.clone(), notifier.clone(), broadcaster, ctx_rx.clone());
+        dispatcher.set_archive(sms_archive.clone());
         async move { dispatcher.run(urc_rx).await }
     });
     let sched_task = tokio::spawn({

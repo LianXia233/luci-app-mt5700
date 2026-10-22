@@ -157,6 +157,9 @@ pub struct RpcServer {
     bind_status: Option<std::sync::Arc<crate::qqbind::BindStatus>>,
     /// 使用量后台统计器：`usage` / `usage_ctl` 读写的都是它。
     usage: Arc<crate::usage::UsageTracker>,
+    /// 短信本地归档：`store_stats` / `store_read` / `store_drop` 读写的都是它。
+    /// 为 `None` 时（例如只跑单测的场合）归档动作返回「未启用」。
+    archive: Option<std::sync::Arc<crate::sms_store::SmsArchive>>,
     ctx: tokio::sync::watch::Receiver<bool>,
 }
 
@@ -187,12 +190,18 @@ impl RpcServer {
             bind_status: None,
             usage,
             sms,
+            archive: None,
         }
     }
 
     /// 注入 QQ 绑定进度句柄（main 在 spawn 绑定任务前调用）。
     pub fn set_bind_status(&mut self, s: std::sync::Arc<crate::qqbind::BindStatus>) {
         self.bind_status = Some(s);
+    }
+
+    /// 注入短信本地归档句柄（main 在建好归档目录后调用）。
+    pub fn set_archive(&mut self, a: std::sync::Arc<crate::sms_store::SmsArchive>) {
+        self.archive = Some(a);
     }
 
     pub fn hub(&self) -> Hub {
@@ -214,6 +223,7 @@ impl RpcServer {
             bind_status: self.bind_status.clone(),
             usage: self.usage.clone(),
             sms: self.sms.clone(),
+            archive: self.archive.clone(),
         }
     }
 
@@ -510,6 +520,153 @@ impl RpcServer {
                 let sid = params.get("session_id").and_then(|v| v.as_u64()).unwrap_or(0);
                 self.sms.session_release(sid).await;
                 return ok(id, serde_json::json!({ "released": true, "sessions": self.sms.session_count().await }));
+            }
+            _ => {}
+        }
+
+        // ============= 短信本地归档 =============
+        //
+        // 这三个动作只做文件读写，**不占用 AT 通道、不开短信事务** ——
+        // 因此必须放在事务段之前，否则浏览归档会把模组通道堵住。
+        match action {
+            "store_stats" => {
+                let Some(a) = self.archive.as_ref() else {
+                    return err(id, "短信本地归档未启用");
+                };
+                let st = a.stats();
+                let conversations: Vec<serde_json::Value> = st
+                    .conversations
+                    .iter()
+                    .map(|c| {
+                        serde_json::json!({
+                            "number": c.number,
+                            "count": c.count,
+                            "bytes": c.bytes,
+                            "updatedAtMs": c.updated_at_ms,
+                    "lastContent": c.last_content,
+                        })
+                    })
+                    .collect();
+                return ok(id, serde_json::json!({
+                    "dir": st.dir,
+                    "totalBytes": st.total_bytes,
+                    "maxBytes": st.max_bytes,
+                    "conversations": conversations,
+                }));
+            }
+            "store_read" => {
+                let Some(a) = self.archive.as_ref() else {
+                    return err(id, "短信本地归档未启用");
+                };
+                let number = params.get("number").and_then(|v| v.as_str()).unwrap_or("");
+                if number.is_empty() {
+                    return err(id, "缺少参数 number");
+                }
+                return match a.read(number) {
+                    Ok(recs) => {
+                        let entries: Vec<serde_json::Value> = recs
+                            .iter()
+                            .map(|r| {
+                                serde_json::json!({
+                                    "fingerprint": r.fingerprint,
+                                    "direction": r.direction,
+                                    "number": r.number,
+                                    "content": r.content,
+                                    "time": r.time,
+                                    "timeApprox": r.time_approx,
+                                    "index": r.index,
+                                    "archivedAtMs": r.archived_at_ms,
+                                })
+                            })
+                            .collect();
+                        ok(id, serde_json::json!({ "entries": entries }))
+                    }
+                    Err(e) => err(id, e),
+                };
+            }
+            "store_drop" => {
+                let Some(a) = self.archive.as_ref() else {
+                    return err(id, "短信本地归档未启用");
+                };
+                let number = params
+                    .get("number")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                let mut fingerprints = Vec::new();
+                let indices: Vec<u32> = params
+                    .get("indices")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as u32).collect())
+                    .unwrap_or_default();
+
+                /*
+                 * `items: [{ direction, content, time }]` 只传原始字段，
+                 * 指纹由**后端**按 `方向|号码|时间|正文` 计算 ——
+                 * 前端因此不必自己实现一次 SHA-256，两处口径也不会走偏。
+                 */
+                if let Some(items) = params.get("items").and_then(|v| v.as_array()) {
+                    for it in items {
+                        let d = it.get("direction").and_then(|v| v.as_str()).unwrap_or("");
+                        let c = it.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        let t = it.get("time").and_then(|v| v.as_str());
+                        let n = it.get("number").and_then(|v| v.as_str()).unwrap_or(&number);
+                        fingerprints.push(crate::sms_store::fingerprint(d, n, t, c));
+                    }
+                }
+
+                if all {
+                    match a.purge() {
+                        Ok((n, freed)) => {
+                            return ok(id, serde_json::json!({
+                                "scope": "all",
+                                "dropped": n,
+                                "freedBytes": freed,
+                                "totalBytes": a.total_bytes(),
+                                "maxBytes": a.max_bytes(),
+                            }));
+                        }
+                        Err(e) => return err(id, e),
+                    }
+                }
+
+                /*
+                 * 只给了号码、没给任何命中线索 → 整个会话的归档一起删。
+                 * 界面上「清空该会话」走这条路；按条删除则走下面的 remove_records。
+                 */
+                if fingerprints.is_empty() && indices.is_empty() {
+                    if number.is_empty() {
+                        return err(id, "缺少参数：需要 number，或 all=true");
+                    }
+                    return match a.drop_conversation(&number) {
+                        Ok(freed) => ok(id, serde_json::json!({
+                            "scope": "conversation",
+                            "dropped": 1,
+                            "freedBytes": freed,
+                            "totalBytes": a.total_bytes(),
+                            "maxBytes": a.max_bytes(),
+                        })),
+                        Err(e) => err(id, e),
+                    };
+                }
+
+                match a.remove_records(
+                    &number,
+                    &crate::sms_store::RecordSelector { fingerprints, indices },
+                ) {
+                    Ok((removed, touched)) => {
+                        return ok(id, serde_json::json!({
+                            "scope": "records",
+                            "dropped": removed,
+                            "touched": touched,
+                            "totalBytes": a.total_bytes(),
+                            "maxBytes": a.max_bytes(),
+                        }));
+                    }
+                    Err(e) => return err(id, e),
+                }
             }
             _ => {}
         }

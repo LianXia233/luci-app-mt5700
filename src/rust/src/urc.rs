@@ -43,6 +43,9 @@ pub struct Dispatcher {
     sms_mem: String,
 
     partials: HashMap<String, PartialSms>,
+
+    /// 短信本地归档句柄（main 注入）。未注入时只走通知、不落盘。
+    archive: Option<Arc<crate::sms_store::SmsArchive>>,
 }
 
 impl Dispatcher {
@@ -66,6 +69,29 @@ impl Dispatcher {
             memory_full_notified: false,
             sms_mem: String::new(),
             partials: HashMap::new(),
+            archive: None,
+        }
+    }
+
+    /// 注入短信本地归档句柄（main 装配时调用一次）。
+    pub fn set_archive(&mut self, a: Arc<crate::sms_store::SmsArchive>) {
+        self.archive = Some(a);
+    }
+
+    /// 把收到的短信写入本地归档。
+    ///
+    /// 归档失败只记日志：留档不是收发链路的一环，绝不能让「写文件失败」
+    /// 变成一条错误弹到用户脸上 —— 短信其实已经好好躺在模组里了。
+    fn archive_received(
+        &self,
+        sender: &str,
+        content: &str,
+        time: Option<String>,
+        index: Option<u32>,
+    ) {
+        let Some(a) = self.archive.as_ref() else { return };
+        if let Err(e) = a.append(vec![crate::sms::received_record(sender, content, time, index)]) {
+            log_warn!("写入短信本地归档失败（不影响收发）: {e}");
         }
     }
 
@@ -272,6 +298,19 @@ impl Dispatcher {
             }
             /* 归一化号码：PDU 里是 `8613800138000`，界面显示的是 `13800138000` */
             let sender = normalize_phone_number(&sms.sender);
+            /*
+             * 落盘：把「收到过什么」留在路由器本地。
+             *
+             * 时间用 PDU 的 TP-SCTS，格式与 `list` 返回的口径一致
+             * （`yy/MM/dd,HH:mm:ss`）—— 这样同一条短信无论从模组读到还是
+             * 从归档里读，指纹都相同，不会存成两条。
+             */
+            self.archive_received(
+                &sender,
+                &sms.content,
+                Some(sms.date.format("%y/%m/%d,%H:%M:%S").to_string()),
+                index.trim().parse::<u32>().ok(),
+            );
             self.notifier
                 .notify(Notification {
                     sender: sender.clone(),
@@ -351,6 +390,17 @@ impl Dispatcher {
         let sender = normalize_phone_number(&sms.sender);
         let sender_ws = sender.clone();
         let content = full.clone();
+        /*
+         * 长短信按**合并后的完整正文**记一条，与界面上看到的那条气泡一致。
+         * 槽位留空：拼装发生在 URC 侧，此时拿不到各段在模组里的格位，
+         * 删除这类记录靠内容指纹匹配。
+         */
+        self.archive_received(
+            &sender,
+            &full,
+            Some(date.format("%y/%m/%d,%H:%M:%S").to_string()),
+            None,
+        );
         tokio::spawn(async move {
             notifier
                 .notify(Notification {
