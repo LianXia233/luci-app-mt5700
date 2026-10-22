@@ -49,7 +49,7 @@ try {
 	const parseLib = loadLib('parse.js');
 	const Parse = (parseLib && parseLib.Parse) || parseLib;
 
-	/* ---------- 1. NR：PCI 为十六进制（手册 13.27.3，0~0x3EF） ---------- */
+	/* ---------- 1. NR：PCI 为十六进制（手册 13.9.3，0~0x3EF） ---------- */
 	{
 		// 实机抓取：^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25
 		const d = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25\r\nOK');
@@ -67,11 +67,23 @@ try {
 		check('NR PCI 十六进制越界回退十进制', d && d.pci === 999, d ? 'pci=' + d.pci : 'null');
 	}
 
-	/* ---------- 2. LTE：PCI 同样为十六进制，但不得越出 0~503 ---------- */
+	/* ---------- 2. LTE：p[3]=ARFCN(十进制)、p[6]=TAC(hex)，PCI 十六进制不越 0~503 ---------- */
 	{
-		// 手册实测样例：^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54
+		// 手册 13.9.5 例句：^MONSC: LTE,460,01,1650,A54933,1F3,183D,-98,-5,-72
+		const d = AtWs.parseMONSC('^MONSC: LTE,460,01,1650,A54933,1F3,183D,-98,-5,-72\r\nOK');
+		check('LTE 频点取 p[3]（1650 = B3 EARFCN），TAC 取 p[6]',
+			d && d.channel === '1650' && d.lac === '183D',
+			d ? 'channel=' + d.channel + ' lac=' + d.lac : 'null');
+		check('LTE cid/pci/rsrp/rsrq/rssi 按手册 13.9.3 顺序',
+			d && d.cid === 'A54933' && d.pci === 0x1F3 && d.rsrp === -98 && d.rsrq === -5 && d.rssi === -72,
+			d ? 'cid=' + d.cid + ' pci=' + d.pci + ' rsrp=' + d.rsrp + ' rsrq=' + d.rsrq + ' rssi=' + d.rssi : 'null');
+	}
+	{
+		// 实机样例：ARFCN 38400（B41）/ TAC 24C8，PCI=8
 		const d = AtWs.parseMONSC('^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54\r\nOK');
 		check('LTE PCI 十六进制保持 (0x8 -> 8)', d && d.pci === 8, d ? 'pci=' + d.pci : 'null');
+		check('LTE ARFCN 与 TAC 不再互换', d && d.channel === '38400' && d.lac === '24C8',
+			d ? 'channel=' + d.channel + ' lac=' + d.lac : 'null');
 		check('LTE 无 SINR 字段，由 HCSQ 兜底', d && d.sinr === null && d.rssi === -54, d ? 'sinr=' + d.sinr + ' rssi=' + d.rssi : 'null');
 	}
 	{
@@ -81,6 +93,40 @@ try {
 	{
 		const d = AtWs.parseMONSC('^MONSC: LTE,460,00,38400,D975244,500,24C8,-85,-10,-54\r\nOK');
 		check('LTE PCI 十六进制越界 (0x500=1280) 回退十进制 500', d && d.pci === 500, d ? 'pci=' + d.pci : 'null');
+	}
+
+	/* ---------- 2b. NR <SCS> 与无效值哨兵、NONE 无服务 ---------- */
+	{
+		// 手册 13.9.5 例句：^MONSC: NR,460,01,1650,1,AB12345678,1F3,1234AB,-80,-10,32
+		const d = AtWs.parseMONSC('^MONSC: NR,460,01,1650,1,AB12345678,1F3,1234AB,-80,-10,32\r\nOK');
+		check('NR SCS 编码 1 -> 30kHz（手册 13.9.3）', d && d.scs === 1 && d.scsKHz === 30,
+			d ? 'scs=' + d.scs + ' khz=' + d.scsKHz : 'null');
+		check('NR 手册例句字段对齐', d && d.channel === '1650' && d.cid === 'AB12345678' && d.pci === 0x1F3 && d.lac === '1234AB',
+			d ? 'ch=' + d.channel + ' cid=' + d.cid + ' pci=' + d.pci + ' tac=' + d.lac : 'null');
+	}
+	{
+		const d = AtWs.parseMONSC('^MONSC: NR,460,00,635558,2,C1A2B3C,80,12345,-1256,-348,-188\r\nOK');
+		check('NR 无效值哨兵(-1256/-348/-188)归一为 null，不当成真实读数',
+			d && d.rsrp === null && d.rsrq === null && d.sinr === null,
+			d ? 'rsrp=' + d.rsrp + ' rsrq=' + d.rsrq + ' sinr=' + d.sinr : 'null');
+		check('NR SCS 编码 2 -> 60kHz', d && d.scsKHz === 60, d ? 'khz=' + d.scsKHz : 'null');
+	}
+	{
+		const d = AtWs.parseMONSC('^MONSC: LTE,460,00,,D975244,8,24C8,-85,,\r\nOK');
+		check('LTE 留空参数（手册：未获取到则留空）解析为空串/null 而非 0',
+			d && d.channel === '' && d.rsrq === null && d.rssi === null,
+			d ? 'channel=' + JSON.stringify(d && d.channel) + ' rsrq=' + d.rsrq + ' rssi=' + d.rssi : 'null');
+	}
+	{
+		const d = AtWs.parseMONSC('^MONSC: NONE\r\nOK');
+		check('NONE（无服务，无小区参数）按读不到处理', d === null, JSON.stringify(d));
+	}
+	{
+		// 手册 13.9.3 WCDMA：<MCC>,<MNC>,<ARFCN>,<PSC>,<Cell_ID>,<LAC>,<RSCP>,<RXLEV>,<EC/N0>
+		const d = AtWs.parseMONSC('^MONSC: WCDMA,460,01,3925,120,1A2B3C,1234,-75,-70,-14,6,1\r\nOK');
+		check('WCDMA 按手册布局：PSC 十进制在 p[4]，RSCP 在 p[7]',
+			d && d.sysMode === 'WCDMA' && d.channel === '3925' && d.pci === 120 && d.lac === '1234' && d.rsrp === -75 && d.rssi === -70,
+			d ? 'ch=' + d.channel + ' psc=' + d.pci + ' lac=' + d.lac + ' rscp=' + d.rsrp + ' rxlev=' + d.rssi : 'null');
 	}
 
 	/* ---------- 3. 旧编码格式 B（无前导制式）：PCI 为十进制 ---------- */

@@ -1,8 +1,9 @@
 'use strict';
 'require at-webserver/rpc';
+'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Ui, Mt5700 */
+/* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
  * 拨号设置页面：
@@ -106,16 +107,26 @@ return L.view.extend({
 		var DIAL_MODE_OPTIONS = [
 			{ label: 'USB网络接口', value: 1 }, { label: '转网口模式', value: 2 }
 		];
+		/*
+		 * 手册 11.8.3 的 <mode>：0~6、8 各有定义，7=Windows MBIM 明确标注「暂不支持」，
+		 * 因此不提供该选项；读取到 7 时按下表的原文案显示，便于识别异常配置。
+		 */
 		var USB_MODE_OPTIONS = [
 			{ label: 'Linux-ECM正常模式', value: 0 }, { label: 'Windows-NCM正常模式', value: 1 },
 			{ label: 'Linux-ECM调试模式', value: 2 }, { label: 'Windows-NCM调试模式', value: 3 },
 			{ label: 'Linux-NCM正常模式', value: 4 }, { label: 'Linux-NCM调试模式', value: 5 },
 			{ label: 'Windows-RNDIS单端口模式', value: 6 }, { label: 'Windows/Linux-PPP端口模式', value: 8 }
 		];
+		/*
+		 * 手册 16.23.3 的 <mode_value> 只有两档：
+		 *   1 = USB Stick + 网口 E5 数传模式（缺省）
+		 *   2 = USB E5 + 网口 E5 数传模式
+		 * 早先这里多出一个「网口直通模式 (需执行拨号命令)」=3，全册没有出处，
+		 * 下发 `AT^TDCFG="infcfg","mode",3` 只会被模组拒绝，删掉。
+		 */
 		var INCFG_MODE_OPTIONS = [
 			{ label: 'USB Stick + 网口 E5 数传模式', value: 1 },
-			{ label: 'USB E5 + 网口 E5 数传模式', value: 2 },
-			{ label: '网口直通模式 (需执行拨号命令)', value: 3 }
+			{ label: 'USB E5 + 网口 E5 数传模式', value: 2 }
 		];
 		var AUTH_OPTIONS = [
 			{ label: '无认证', value: 0 }, { label: 'PAP 认证', value: 1 }, { label: 'CHAP 认证', value: 2 }
@@ -169,7 +180,10 @@ return L.view.extend({
 
 		function getDialModeText(mode) {
 			if (mode == null) return '未识别';
-			var map = { 1: 'USB网络接口', 2: '转网口模式' };
+			/* 手册 16.18.3：<dial_mode> 0=模组内部拨号 1=上位机拨号(USB 数传) 2=上位机拨号(网口数传)。
+			 * 界面只提供 1/2 两档（本插件自己管理 USB 数传通道，模组内部拨号不在此列），
+			 * 但模组停在 0 时必须如实读回，不能再显示「未知」。 */
+			var map = { 0: '模组内部拨号', 1: 'USB网络接口', 2: '转网口模式' };
 			return map[mode] || '未知';
 		}
 		function getUSBModeText(mode) {
@@ -181,9 +195,9 @@ return L.view.extend({
 			return map[mode] || '未知模式';
 		}
 		function getInfcfgModeText(mode) {
+			/* 手册 16.23.3 <mode_value>：1/2 之外没有定义值 */
 			if (mode === 1) return 'USB Stick + 网口 E5 数传模式';
 			if (mode === 2) return 'USB E5 + 网口 E5 数传模式';
-			if (mode === 3) return '网口直通模式';
 			return '未配置';
 		}
 		function getAuthTypeText(type) {
@@ -206,9 +220,17 @@ return L.view.extend({
 		var pdpList = [];
 
 		/* ---------- 解析 ---------- */
+		/*
+		 * 手册 16.18.1 给出两种应答形态，必须都能处理：
+		 *   ^SETAUTODIAL:<enable>,<dial_mode>,[[<protocol>],[<apn>],[<usrname>,<password>,<authtype>]]
+		 *   ^SETAUTODIAL:<enable>                       ← 只有开关，方式随后由 ^NDISSTATQRY? 兜底
+		 * 同一节里前一种还印作 "^SETAUTODAIL:"（DIA 与 DAI 顺序互换）——手册两处口径不一致，
+		 * 因此两种拼写都接受，否则真机回这一种时整页拨号状态读不出来。
+		 * 16.18.3：apn/username/password 最长 99/31/31 字符且带双引号，可为空。
+		 */
 		function parseAutoDialResponse(raw) {
 			var line = raw.replace(/\r/g, '').split('\n').map(function (i) { return i.trim(); })
-				.filter(function (i) { return i.indexOf('^SETAUTODIAL:') === 0; })[0];
+				.filter(function (i) { return /^\^SETAUTOD(?:IA|AI)L:/.test(i); })[0];
 			if (!line) return null;
 			var payload = line.slice(line.indexOf(':') + 1).trim();
 			var fields = (payload.match(/(?:[^,"]+|"[^"]*")+/g) || []).map(function (f) {
@@ -225,21 +247,13 @@ return L.view.extend({
 			return parsed;
 		}
 
+		/* 手册 16.4.1/16.4.5：应答形如 "^NDISSTATQRY: 1,1,,,\"IPV4\",0,,,\"IPV6\""，
+		 * 结构是 <cid>,<stat>,… —— 首字段是 CID，第二字段才是连接状态（1=已连接）。
+		 * 本插件的数据通道固定 CID 1，所以只认 CID 1 那一行；早先按「首字段是 1」判连接，
+		 * 模组回 1,0（CID 1 已断开）时界面同样显示已连接。 */
 		function ndisIsActive(raw) {
-			return /\^NDISSTATQRY:\s*1\s*,/i.test(String(raw).replace(/\r/g, ''));
-		}
-
-		function parseTDCFG(raw) {
-			var modeMatch = String(raw).match(/Mode\s*:\s*(\d+)/);
-			var postRouteMatch = String(raw).match(/PostRoute\s*:\s*(\d+)/);
-			var dmzLine = String(raw).replace(/\r/g, '').split('\n')
-				.filter(function (l) { return l.trim().indexOf('Dmz:') === 0; })[0];
-			var dmzValue = dmzLine ? dmzLine.split(':')[1].trim() : 'not cfg';
-			return {
-				mode: modeMatch ? parseInt(modeMatch[1], 10) : undefined,
-				postRoute: postRouteMatch ? parseInt(postRouteMatch[1], 10) : undefined,
-				dmz: { enabled: dmzValue !== 'not cfg', host: dmzValue !== 'not cfg' ? dmzValue : '' }
-			};
+			var m = String(raw).replace(/\r/g, '').match(/\^NDISSTATQRY:\s*1\s*,\s*(\d+)/i);
+			return !!m && m[1] === '1';
 		}
 
 		/* ---------- 卡片 1：自动拨号与 APN 设置 ---------- */
@@ -375,19 +389,27 @@ return L.view.extend({
 		modeCard._body.appendChild(usbCurrent);
 		modeCard._body.appendChild(Mt5700.formGroup('网口数传模式', infcfgSel, '修改应用后模组需重启以对齐'));
 
-		/* 卡片 3：网口模式与 DMZ */
-		var infCard = Mt5700.card('路由与 DMZ 高级转发', '网口后路由控制与外部端口映射 DMZ 主机');
+		/* 卡片 3：网口模式与 DMZ
+		 * 手册 16.23.2 的三条硬约束直接决定了这里的交互：
+		 *   · E5 拨号只支持 1 路 DMZ，重复配置以最后一次为准；
+		 *   · DMZ 与后路由**互斥**，不能同时配置；
+		 *   · 配置 DMZ/后路由要在拨号之前，删除要在断开拨号之后；
+		 *   · DMZ 目的地址只支持 IPv4 协议栈（16.23.3 <dmz_str>）。
+		 */
+		var infCard = Mt5700.card('路由与 DMZ 高级转发', '网口后路由与 DMZ 主机（两者互斥，需在拨号前配置）');
 		rowMode.appendChild(infCard);
 
 		var postRouteSel = Mt5700.select([
-			{ label: '关闭后路由', value: '0' }, { label: '开启后路由', value: '1' }
+			{ label: '不启用后路由', value: '0' }, { label: '开启后路由', value: '1' }
 		], '0');
 		postRouteSel.addEventListener('change', function () { handlePostRouteChange(parseInt(postRouteSel.value, 10)); });
 
 		var dmzInput = Mt5700.input('text', '如 192.168.1.100');
 
-		infCard._body.appendChild(Mt5700.formGroup('后路由模式', postRouteSel, '开启后路由将放通内网回源数据'));
-		infCard._body.appendChild(Mt5700.formGroup('DMZ 主机 IP', dmzInput, '将未配置端口的全部外网流量直通映射至内网该 IP'));
+		infCard._body.appendChild(Mt5700.formGroup('后路由模式', postRouteSel,
+			'开启后模组只负责拨号，由下游路由/设备做 NAT。开启前请先断开拨号，并且不要与 DMZ 同时使用（手册 16.23.2）。开启会自动关闭模组侧 IP 过滤，随后需一次射频重启（AT+CFUN=0/1）才生效。'));
+		infCard._body.appendChild(Mt5700.formGroup('DMZ 主机 IP', dmzInput,
+			'把未映射端口的全部外网 IPv4 流量直通到内网这台主机；仅支持 IPv4，且 E5 只支持 1 路 DMZ。请先断开拨号再配置（手册 16.23.2/16.23.3）。'));
 
 		var dmzStatus = E('div', { 'class': 'mt5700-hint', style: 'margin-bottom:12px;' }, 'DMZ 状态：未配置');
 		infCard._body.appendChild(dmzStatus);
@@ -472,7 +494,9 @@ return L.view.extend({
 				usbCurrent.textContent = '当前 USB 模式：' + getUSBModeText(settings.usbMode);
 			}
 			infcfgSel.value = String(settings.infcfgMode != null ? settings.infcfgMode : '');
-			postRouteSel.value = String(settings.postRoute != null ? settings.postRoute : '');
+			/* 手册 16.23.3 的 <pr_value> 有 0/1/2 三种，界面只有两档：
+			 * 1=开启，0（未配置）与 2（关闭）都归为「不启用」。 */
+			postRouteSel.value = settings.postRoute === 1 ? '1' : '0';
 			dmzStatus.textContent = 'DMZ 状态：' + (dmzConfig.enabled ? '已开启 → ' + dmzConfig.host : '未配置');
 			if (dmzConfig.enabled && dmzConfig.host) {
 				dmzInput.value = dmzConfig.host;
@@ -663,9 +687,28 @@ return L.view.extend({
 		}
 
 		function handleApnSettingChange() {
+			/*
+			 * 三个字符串原样拼进带双引号的 AT 参数里：双引号会把参数截断，
+			 * CR/LF 更会被模组当成命令结束符，直接下发一条额外指令。这里先挡住。
+			 */
+			if ([apnForm.apn, apnForm.username, apnForm.password].some(function (v) {
+				return /["\r\n]/.test(v || '');
+			})) {
+				Mt5700.error('APN、用户名与密码不能包含双引号或换行');
+				return;
+			}
 			staged.set('apn', 'APN 设置更新', function () {
-				var cmd = 'AT^SETAUTODIAL=' + settings.enable + ',' + settings.dialMode + ',"' + settings.protocol + '","' +
-					apnForm.apn + '","' + apnForm.username + '","' + apnForm.password + '",' + apnForm.authType;
+				/*
+				 * 手册 16.18.1 的参数位置固定：<enable> 之后必须是 <dial_mode>，
+				 * 再往后才是 protocol/apn/usrname/password/authtype。首次回读若只拿到
+				 * enable（16.18.1 的第二种应答），settings.dialMode/protocol 还是空，
+				 * 直接拼串会下发 "AT^SETAUTODIAL=1,undefined,,..."，模组只会回 ERROR，
+				 * 用户点了半天什么都没改进去。这里按 16.18.3 的合法值兜底。
+				 */
+				var proto = settings.protocol || 'IP';
+				var cmd = 'AT^SETAUTODIAL=' + (settings.enable === 1 ? 1 : 0) + ',' + (settings.dialMode || 1) +
+					',"' + proto + '","' + apnForm.apn + '","' + (apnForm.username || '') + '","' +
+					(apnForm.password || '') + '",' + (apnForm.authType || 0);
 				return Ui.sendCmd(cmd).then(function (res) {
 					if (!res.success) throw new Error('APN 设置失败');
 					settings.apn = apnForm.apn; settings.username = apnForm.username;
@@ -698,17 +741,22 @@ return L.view.extend({
 
 		function fetchUSBMode() {
 			return Ui.sendCmd('AT^SETMODE?').then(function (res) {
-				if (res.success && res.data) {
-					var mode = parseInt(String(res.data).trim(), 10);
-					if (!isNaN(mode)) { settings.usbMode = mode; renderDialStatus(); }
-				}
+				if (!res.success || !res.data) return;
+				/*
+				 * 手册 11.8 自身两处不一致：11.8.1 写应答是 "^SETMODE: <mode>"，
+				 * 11.8.5 的举例又只回一个裸数字 "3"。按 parseInt 直接取裸数字的写法
+				 * 遇到带前缀的固件会得到 NaN，USB 模式永远显示「未知」——
+				 * 这里取应答里的第一个整数，两种形态都吃得下。
+				 */
+				var m = String(res.data).match(/(\d+)/);
+				if (m) { settings.usbMode = parseInt(m[1], 10); renderDialStatus(); }
 			}).catch(function () { Mt5700.error('获取USB模式失败'); });
 		}
 
 		function fetchInfcfg() {
 			return Ui.sendCmd('AT^TDCFG?').then(function (res) {
 				if (res.success && res.data) {
-					var parsed = parseTDCFG(String(res.data));
+					var parsed = Parse.parseTdcfg(String(res.data));
 					if (parsed.mode !== undefined) settings.infcfgMode = parsed.mode;
 					if (parsed.postRoute !== undefined) settings.postRoute = parsed.postRoute;
 					dmzConfig = parsed.dmz;
@@ -728,25 +776,42 @@ return L.view.extend({
 		}
 
 		function handlePostRouteChange(value) {
+			/* 手册 16.23.2：DMZ 与后路由互斥，不能同时配置 */
+			if (value === 1 && dmzConfig.enabled) {
+				/* 拒绝这次开启：把下拉框按回真实状态，否则界面显示「开启」而模组没开 */
+				postRouteSel.value = settings.postRoute === 1 ? '1' : '0';
+				Mt5700.error('当前已配置 DMZ，两者互斥（手册 16.23.2），请先关闭 DMZ');
+				return;
+			}
 			staged.set('postroute', value === 1 ? '后路由：开启' : '后路由：关闭', function () {
 				if (value === 1) {
+					/* 手册 16.23.2：用后路由前先关 modem 侧 IP 过滤，
+					 * 再 AT+CFUN=0/1 重启射频，最后才拨号。射频重启会瞬断数据，
+					 * 这里不替用户按下重启，只在确认后提示手工执行。 */
 					return Ui.sendCmd('AT^IPFILTERSWITCH=0').then(function (ipFilter) {
 						if (!ipFilter.success) throw new Error('关闭IP过滤失败');
-						return Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",' + value);
+						return Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",1');
 					}).then(function (res) {
 						if (!res.success) throw new Error('设置后路由失败');
-						settings.postRoute = value;
+						settings.postRoute = 1;
+						Mt5700.info('后路由已开启：按手册 16.23.2 还需一次射频重启（AT+CFUN=0 后 AT+CFUN=1）再拨号才生效');
 					});
 				}
-				return Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",0').then(function (res) {
+				/* 手册 16.23.3：<pr_value> 2=关闭后路由，0 是「未配置」的缺省态；
+				 * 关掉一件已开启的功能应写 2，而不是把状态抹成未配置。 */
+				return Ui.sendCmd('AT^TDCFG="infcfg","PostRoute",2').then(function (res) {
 					if (!res.success) throw new Error('设置后路由失败');
-					settings.postRoute = 0;
+					settings.postRoute = 2;
 				});
 			});
 			stageHint();
 		}
 
 		function handleDMZ(action, ip) {
+			if (action === 'enable' && settings.postRoute === 1) {
+				Mt5700.error('后路由已开启，与 DMZ 互斥（手册 16.23.2），请先关闭后路由');
+				return;
+			}
 			staged.set('dmz', action === 'enable' ? 'DMZ 主机：' + ip : '关闭 DMZ', function () {
 				var cmd = action === 'enable' ? 'AT^TDCFG="infcfg","dmz","' + ip + '"' : 'AT^TDCFG="infcfg","dmz","0"';
 				return Ui.sendCmd(cmd).then(function (res) {

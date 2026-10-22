@@ -171,13 +171,16 @@ return L.view.extend({
 				var items = lockState[kind + 'Items'];
 				mobWrap.innerHTML = '';
 				if (type !== 0) {
+					/* 手册 13.12.3 / 13.13.3：第二个参数是 <forbidFlag>「禁止移动性 flag」，
+					 * 只有两个合法值 —— 0 = 不允许重选和切换（锁死），1 = 允许重选和切换。
+					 * 早先这里做成「低/中/高移动性」三档：2 是手册外的取值（模组会报错），
+					 * 名称也把语义讲偏了。 */
 					var mobSel = Mt5700.select([
-						{ label: '低移动性', value: '0' },
-						{ label: '中移动性', value: '1' },
-						{ label: '高移动性', value: '2' }
+						{ label: '不允许重选和切换（硬锁）', value: '0' },
+						{ label: '允许重选和切换（软锁）', value: '1' }
 					], String(lockState[kind + 'Mobility']));
 					mobSel.addEventListener('change', function () { lockState[kind + 'Mobility'] = parseInt(mobSel.value, 10); });
-					mobWrap.appendChild(Mt5700.formGroup('移动性', mobSel));
+					mobWrap.appendChild(Mt5700.formGroup('移动性限制', mobSel));
 				}
 				if (type === 1 || type === 2) {
 					for (var i = 0; i < items.length; i++) itemsWrap.appendChild(rowFor(items[i], i));
@@ -341,13 +344,22 @@ return L.view.extend({
 					var m = String(res.data).match(/\^C5GOPTION:\s*(\d+),(\d+),(\d+)/);
 					if (m) {
 						lockState.option5g = { nr_sa_support_flag: Number(m[1]), nr_dc_mode: Number(m[2]), gc_access_mode: Number(m[3]) };
-						var saLabels = { 0: '不支持 NR SA', 1: '支持 NR SA' };
-						var dcLabels = { 0: '不支持 DC', 1: '支持 EN-DC' };
-						var gcLabels = { 0: '仅 4G', 1: '5G NSA', 2: '5G SA', 3: '5G SA+NSA' };
+						/* 文案严格按手册 13.17.3 的三项定义：
+						 *   <nr_sa_support_flag> 0=不支持 NR 以 SA 工作 / 1=支持
+						 *   <nr_dc_mode>         0=不支持辅连接 / 1=仅 EN-DC /
+						 *                          2=仅 NEDC（暂不支持）/ 3=两者（暂不支持）
+						 *   <5gc_access_mode>    0=不允许接入 5GC / 1=仅允许 **NR** 接入 5GC /
+						 *                          2=仅允许 **LTE** 接入 5GC（暂不支持）/ 3=两者（暂不支持）
+						 * 早先把 1 写成「5G NSA」、2 写成「5G SA」，正好把 NR/LTE 谁接 5GC
+						 * 说反了（NR 接 5GC 才是 SA），会把用户的制式判断带到沟里。
+						 * 本页面只查询不写入（插件从未下发过 AT^C5GOPTION=）。 */
+						var saLabels = { 0: '不支持 NR 以 SA 工作', 1: '支持 NR 以 SA 工作' };
+						var dcLabels = { 0: '不支持辅连接', 1: '仅支持 EN-DC', 2: '仅支持 NEDC（模组暂不支持）', 3: 'EN-DC 与 NEDC（模组暂不支持）' };
+						var gcLabels = { 0: '不允许接入 5GC', 1: '仅允许 NR 接入 5GC', 2: '仅允许 LTE 接入 5GC（模组暂不支持）', 3: '允许 LTE 与 NR 接入 5GC（模组暂不支持）' };
 						var items = [
 							{ label: 'NR SA 支持', value: saLabels[m[1]] || m[1] },
 							{ label: 'NR DC 模式', value: dcLabels[m[2]] || m[2] },
-							{ label: '接入模式', value: gcLabels[m[3]] || m[3] }
+							{ label: '允许接入 5GC 的制式', value: gcLabels[m[3]] || m[3] }
 						];
 						for (var i = 0; i < items.length; i++) {
 							optBody.appendChild(Mt5700.metric(items[i].label, items[i].value));
@@ -410,6 +422,22 @@ return L.view.extend({
 			return null;
 		}
 
+		/* 邻区测量值取值（手册 13.10.3）：
+		 *   · 留空/非数字 → null —— 手册明确「没有为参数获取有效值，该参数将留空」，
+		 *     当 0 显示会变成「-0 dBm 满格」的假读数；
+		 *   · NR 三个无效哨兵 -1256 / -348 / -188 → null（invalid 传绝对值）；
+		 *   · 部分固件按 8 倍上报测量值，超出该字段量程（maxAbs）时 ÷8 还原。
+		 */
+		function ncMeasure(raw, maxAbs, invalid) {
+			var t = String(raw == null ? '' : raw).trim();
+			if (t === '') return null;
+			var n = Number(t);
+			if (!isFinite(n)) return null;
+			if (invalid != null && Math.abs(n) === invalid) return null;
+			if (maxAbs != null && Math.abs(n) > maxAbs) return parseFloat((n / 8).toFixed(1));
+			return n;
+		}
+
 		function scanNeighbors() {
 			if (scanning) return;
 			scanning = true;
@@ -424,25 +452,33 @@ return L.view.extend({
 						var type = matched[1];
 						var values = (matched[2] || '').split(',').map(function (v) { return v.trim().replace(/"/g, ''); });
 						if (type === 'LTE') {
+							/* 手册 13.10.3：LTE 邻区 = <ARFCN>(十进制 0~39649)、<PCI>(**十进制** 0~503)、
+							 * <RSRP>(-144~-28)、<RSRQ>(-44~3)、<RXLEV>(-130~0)。
+							 * 十六进制的 PCI 只有 NR 才有；按 16 进制读 LTE 的十进制 "25"
+							 * 会得到 37，锁频时就把用户锁到别的小区上。 */
 							var arfcnL = values[0];
 							cells.push({
-								type: type, arfcn: arfcnL, pci: parseInt(values[1], 16),
-								rsrp: values[2], rsrq: values[3], sinr: undefined,
+								type: type, arfcn: arfcnL, pci: parseInt(values[1], 10),
+								rsrp: ncMeasure(values[2], 144), rsrq: ncMeasure(values[3], 44), sinr: null,
+								rssi: ncMeasure(values[4], 130),
 								band: getBandFromArfcn('LTE', parseInt(arfcnL, 10))
 							});
 						} else if (type === 'NR') {
+							/* 手册 13.10.3：NR 邻区 = <ARFCN-NR>(十进制 0~2279166)、
+							 * <PCI>(十六进制 0~0x3EF)、<RSRP>(-156~-31，无效 -1256)、
+							 * <RSRQ>(-43~20，无效 -348)、<SINR>(-23~40，无效 -188)。
+							 * 个别固件把测量值按 8 倍上报，超出量程时再还原一次。 */
 							var arfcnN = values[0];
-							var scale = function (raw, big) {
-								var n = parseInt(raw, 10);
-								if (isNaN(n)) return raw;
-								return Math.abs(n) > big ? (n / 8).toFixed(1) : n;
-							};
 							cells.push({
 								type: type, arfcn: arfcnN, pci: parseInt(values[1], 16),
-								rsrp: scale(values[2], 157), rsrq: scale(values[3], 43.5), sinr: scale(values[4], 40),
+								rsrp: ncMeasure(values[2], 156, 1256), rsrq: ncMeasure(values[3], 43, 348),
+								sinr: ncMeasure(values[4], 40, 188), rssi: null,
 								band: getBandFromArfcn('NR', parseInt(arfcnN, 10))
 							});
 						}
+						/* GSM / WCDMA 邻区按手册 13.10.3 也可能出现在 L 下，
+						 * 但本插件的锁频命令只有 LTE/NR 两种（13.12/13.13），
+						 * 展示一排无法锁定的 2G/3G 邻区只会误导，故不列出。 */
 					});
 				}
 				neighbors = cells;
