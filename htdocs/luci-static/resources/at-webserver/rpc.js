@@ -931,10 +931,14 @@ function hexToIP(hex) {
 	return bytes.reverse().join('.');
 }
 
+/*
+ * 温度换算的唯一实现在 parse.js（Parse.parseTemperature，手册 17.1.3：
+ * 单位 0.1℃、65535 为查询失败归 null）。此处只做转接，避免两处判定走偏；
+ * 用函数包一层而非直接取 Parse.parseTemperature，是为了不在模块加载期
+ * 依赖 parse.js 的求值顺序。
+ */
 function parseTemperature(v) {
-	var n = typeof v === 'number' ? v : parseInt(v, 10);
-	if (n >= 65535 || isNaN(n) || n > 1500) return 0;
-	return parseFloat((n / 10).toFixed(1));
+	return Parse.parseTemperature(v);
 }
 
 function formatFlow(bytes) {
@@ -1140,19 +1144,31 @@ function parsePDCP(fields) {
 /* ---- MONSC ---- */
 
 /*
- * 3GPP 规定的 PCI / PSC 取值上限，用于判断十六进制解析是否越界。
+ * 3GPP 规定的 PCI 取值上限，用于判断十六进制解析是否越界。
  *   NR  : TS 38.211，N_ID^cell 共 1008 个 → 0~1007 (0x3EF)
  *   LTE : TS 36.211，共 504 个          → 0~503
- *   WCDMA: PSC 共 512 个                → 0~511
+ * （WCDMA 的 PSC 手册 13.9.3 明确是十进制 0~511，不走十六进制解析，故不在此列）
  */
 var PCI_MAX_NR = 1007;
 var PCI_MAX_LTE = 503;
-var PCI_MAX_OTHER = 511;
+
+/*
+ * 手册 13.9.3 给出的 NR 三个测量字段的「无效值」哨兵（模组没测到时就填这三个数）：
+ *   RSRP 无效 -1256（= -157 × 8）、RSRQ 无效 -348（= -43.5 × 8）、SINR 无效 -188。
+ * 它们会越出各自的合法区间（RSRP -156~-31、RSRQ -43~20、SINR -23~40），
+ * 当成真实读数显示会报出 -1256 dBm 这种荒谬值，故一律归一成 null。
+ */
+var NR_RSRP_INVALID = -1256;
+var NR_RSRQ_INVALID = -348;
+var NR_SINR_INVALID = -188;
+
+/* 手册 13.9.3 的 <SCS> 编码：0~4 → 15/30/60/120/240 kHz */
+var NR_SCS_KHZ = [15, 30, 60, 120, 240];
 
 /*
  * PCI 十六进制解析（带越界回退）。
  *
- * 背景：^MONSC 的 NR 分支 PCI 明确为十六进制（手册 13.27.3，取值 0~0x3EF，
+ * 背景：^MONSC 的 NR 分支 PCI 明确为十六进制（手册 13.9.3，取值 0~0x3EF，
  * 实测 0x80 → 128），LTE 分支实测同样为十六进制。但模组在部分制式/固件上
  * 会以十进制上报 PCI，此时把 "500" 按 16 进制解析会得到 1280，
  * 已越出该制式的取值上限，属于明显错误。
@@ -1186,80 +1202,111 @@ function parsePciDec(raw) {
 	return isFinite(dec) ? dec : 0;
 }
 
+/*
+ * ^MONSC 测量值取值：手册 13.9.3 说明「暂时未获取到的参数留空」，NR 另有
+ * 无效值哨兵。留空与哨兵都不是真实读数，统一归一为 null，由上层决定回落
+ * （例如 4G 的 SINR 一律改由 ^HCSQ 补齐）。
+ */
+function monscMeasure(raw, invalid) {
+	if (raw === undefined || raw === null || raw === '') return null;
+	var v = parseFloat(raw);
+	if (!isFinite(v)) return null;
+	if (invalid !== undefined && v === invalid) return null;
+	return v;
+}
+
 function parseMONSC(data) {
 	var str = extractATData(data, '^MONSC');
 	if (!str) return null;
 	var p = str.split(',').map(function (s) { return s.trim(); });
 	/*
-	 * 两种实测格式，按首字段是否为纯数字自动判别：
-	 *   格式 A（NR，带前导制式）:
-	 *     ^MONSC: NR,<mcc>,<mnc>,<tac>,<flag>,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<sinr>
-	 *     实测: ^MONSC: NR,460,00,<tac>,1,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<sinr>
-	 *     RSRP/RSRQ/SINR 为直接工程值（dBm/dB/dB），无需 convert* 换算。
-	 *     与 ^HCSQ: "NR",77,236,31 独立交叉验证一致（77→-63, 236→27.2）。
-	 *   格式 B（旧编码，无前导制式，直接给出编码值）:
-	 *     ^MONSC: <mcc>,<mnc>,<lac>,<cid>,<pci>,<ch>,<rsrp_raw>,<rsrq_raw>,<sinr_raw>,<sysmode>
+	 * 手册 13.9.1 的应答恒为 `^MONSC: <RAT>[,<cell_paras>]`，<RAT> ∈
+	 * WCDMA / LTE / NR / NONE（NONE = 无服务，其后不带小区参数）。
+	 * 三种制式的 <cell_paras> 顺序互不相同，必须分支取值（13.9.3 参数表 +
+	 * 13.9.5 例句）：
+	 *   LTE  ^MONSC: LTE,460,01,1650,A54933,1F3,183D,-98,-5,-72
+	 *        <MCC>,<MNC>,<ARFCN 十进制 0~133121>,<Cell_ID hex>,<PCI hex 0~0x1F7>,
+	 *        <TAC hex>,<RSRP -140~-44>,<RSRQ -19.5~-3>,<RSSI -90~-25>
+	 *   NR   ^MONSC: NR,460,01,1650,1,AB12345678,1F3,1234AB,-80,-10,32
+	 *        <MCC>,<MNC>,<ARFCN-NR 0~2279166>,<SCS 0~4>,<Cell_ID hex>,
+	 *        <PCI hex 0~0x3EF>,<TAC hex>,<RSRP>,<RSRQ>,<SINR>
+	 *   WCDMA
+	 *        <MCC>,<MNC>,<ARFCN 0~16383>,<PSC 0~511>,<Cell_ID hex>,<LAC hex>,
+	 *        <RSCP>,<RXLEV>,<EC/N0>,<DRX>,<URA>
+	 * 下标必须与 Rust 侧 urc.rs::query_monsc 保持一致，否则页面显示的小区参数
+	 * 与后台主动推送的会互相矛盾。RSRP/RSRQ/SINR 为直接工程值（dBm/dB/dB），
+	 * 不需要 convert* 还原。
+	 *
+	 * 历史坑（本次修正）：LTE 分支曾按「TAC,CID,PCI,ARFCN」取值，把 p[3] 当 TAC、
+	 * p[6] 当 ARFCN —— 手册与例句都表明 p[3] 是**十进制 ARFCN**、p[6] 是
+	 * **十六进制 TAC**（41134 / 1650 这类频点不可能是 TAC，8103 / 183D 这类
+	 * 十六进制不可能是 ARFCN）。错位会让 getBandFromLteArfcn 拿 TAC 去推频段，
+	 * 4G 下显示的频段/频点全是错的。
 	 */
 	var hasLeadingMode = p.length > 0 && !/^-?\d+$/.test(p[0]);
 	var d;
-	if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'LTE') {
-		/*
-		 * 手册 13.9.3/13.9.5：LTE 的 <cell_paras> 与 NR 布局差异很大（实测
-		 * ^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54）：
-		 *   LTE,<mcc>,<mnc>,<tac_hex>,<cid_hex>,<pci_hex>,<arfcn_hex>,<rsrp>,<rsrq>,<rssi>
-		 * 与 NR 相比：没有 flag 位、PCI/ARFCN/TAC 为十六进制、末位是 RSSI
-		 * （-90~-25 dBm 工程值），且 **没有 SINR 字段**——4G 的 SINR 一律由
-		 * ^HCSQ 兜底补齐（见 network_status 的 needHcsq 逻辑）。
-		 * 注意：若直接套用 NR 布局，4G 下 cid/pci/channel/rsrp/rsrq 会全部错位
-		 * （rsrp 取到 rsrq、rsrq 取到 RSSI、channel 变成 "-85"）。
-		 */
-		d = {
-			sysMode: 'LTE',
-			mcc: p[1] || '',
-			mnc: p[2] || '',
-			lac: p[3] || '',
-			cid: p[4] || '',
-			pci: parsePciHex(p[5], PCI_MAX_LTE),
-			channel: p[6] || '',
-			rsrp: p[7] !== undefined && p[7] !== '' ? parseFloat(p[7]) : null,
-			rsrq: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
-			sinr: null,
-			rssi: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null
-		};
-	} else if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'NR') {
-		/*
-		 * 手册 13.9.3/13.9.5：NR 的 <cell_paras>
-		 * 实测: ^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25
-		 *   NR,<mcc>,<mnc>,<arfcn>,<flag>,<cid_hex>,<pci_hex>,<tac_hex>,<rsrp>,<rsrq>,<sinr>
-		 * PCI 为十六进制（0x80 -> 128，与手册 13.27.3 取值 0~0x3EF 一致）
-		 * 频点 ARFCN 为 p[3]，小区 ID 为 p[5]，TAC 为 p[7]
-		 */
-		d = {
-			sysMode: 'NR',
-			mcc: p[1] || '',
-			mnc: p[2] || '',
-			channel: p[3] || '',
-			cid: p[5] || '',
-			pci: parsePciHex(p[6], PCI_MAX_NR),
-			lac: p[7] || '',
-			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
-			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
-			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
-		};
-	} else if (hasLeadingMode) {
-		d = {
-			sysMode: p[0] || '',
-			mcc: p[1] || '',
-			mnc: p[2] || '',
-			channel: p[3] || '',
-			cid: p[5] || '',
-			pci: parsePciHex(p[6], PCI_MAX_OTHER),
-			lac: p[7] || '',
-			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
-			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
-			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
-		};
+	if (hasLeadingMode) {
+		var rat = (p[0] || '').replace(/"/g, '').trim().toUpperCase();
+		/* 手册 13.9.3：NONE 表示无网络，其后不带小区参数，按「读不到」处理 */
+		if (rat === 'NONE') return null;
+		if (rat === 'LTE') {
+			d = {
+				sysMode: 'LTE',
+				mcc: p[1] || '',
+				mnc: p[2] || '',
+				/* <ARFCN> 十进制频点：频段由此反推（getBandFromLteArfcn） */
+				channel: p[3] || '',
+				cid: p[4] || '',
+				pci: parsePciHex(p[5], PCI_MAX_LTE),
+				/* <TAC> 十六进制跟踪区域码 */
+				lac: p[6] || '',
+				rsrp: monscMeasure(p[7]),
+				rsrq: monscMeasure(p[8]),
+				/* LTE 布局里没有 SINR 字段，末位是 RSSI；4G 的 SINR 由 ^HCSQ 兜底 */
+				sinr: null,
+				rssi: monscMeasure(p[9])
+			};
+		} else if (rat === 'NR') {
+			var scsCode = parseInt(p[4], 10);
+			d = {
+				sysMode: 'NR',
+				mcc: p[1] || '',
+				mnc: p[2] || '',
+				/* <ARFCN-NR>：手册 13.9.2 明确这是 SSB 频点，与上下行频点可以不一致 */
+				channel: p[3] || '',
+				/* <SCS> 子载波间隔编码 0~4（旧注释把它误称为「flag 位」） */
+				scs: isFinite(scsCode) ? scsCode : null,
+				scsKHz: NR_SCS_KHZ[scsCode] !== undefined ? NR_SCS_KHZ[scsCode] : null,
+				cid: p[5] || '',
+				pci: parsePciHex(p[6], PCI_MAX_NR),
+				lac: p[7] || '',
+				rsrp: monscMeasure(p[8], NR_RSRP_INVALID),
+				rsrq: monscMeasure(p[9], NR_RSRQ_INVALID),
+				sinr: monscMeasure(p[10], NR_SINR_INVALID)
+			};
+		} else {
+			/* WCDMA：PCI 位置其实是 PSC（十进制 0~511），信号量为 RSCP/RXLEV/EC-N0 */
+			d = {
+				sysMode: rat,
+				mcc: p[1] || '',
+				mnc: p[2] || '',
+				channel: p[3] || '',
+				pci: parsePciDec(p[4]),
+				cid: p[5] || '',
+				lac: p[6] || '',
+				rsrp: monscMeasure(p[7]),
+				rssi: monscMeasure(p[8]),
+				rsrq: monscMeasure(p[9]),
+				sinr: null
+			};
+		}
 	} else {
+		/*
+		 * 无前导 <RAT> 的旧固件编码格式：手册 13.9.1 不认这种布局，仅作为
+		 * 早期固件的兼容兜底保留（现网 MT5700M-CN 一律带 <RAT> 前缀）。
+		 * 该格式的 rsrp/rsrq/sinr 是需要 convert* 还原的编码值，与上面的
+		 * 直接工程值不同，不要与本手册布局混用。
+		 */
 		d = {
 			mcc: p[0] || '',
 			mnc: p[1] || '',

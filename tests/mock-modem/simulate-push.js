@@ -59,12 +59,12 @@ const MERGE_WINDOW_MS = 5000;
  * mock 模组侧还有一份同样的护栏，三层都拒绝，避免「测试跑通了、换真机出事」。
  */
 const FORBIDDEN_CMD = [
-	/EGMR/i, /WRIMEI/i, /\^IMEI/i, /\+SN=/i,
+	/EGMR/i, /WRIMEI/i, /\^IMEI/i, /\+SN=/i, /\^PHYNUM/i,
 	/&F/i, /NVDEFAULT/i, /RESET/i, /CFUN\s*=\s*1\s*,\s*1/i
 ];
 
 /* 护栏自检会**故意**发这些命令（发给 mock，必须被拒绝），审计时排除 */
-const SELFCHECK_CMDS = ['AT&F', 'AT+EGMR=1,7,"123456789012345"', 'AT^RESET'];
+const SELFCHECK_CMDS = ['AT&F', 'AT+EGMR=1,7,"123456789012345"', 'AT^PHYNUM=IMEI,123456789012345', 'AT^RESET'];
 
 function assertSafe(cmd) {
 	for (const re of FORBIDDEN_CMD) {
@@ -483,6 +483,9 @@ async function main() {
 	check('mock 拒绝 IMEI 写入命令 AT+EGMR', forbid2.indexOf('ERROR') >= 0, forbid2.trim().slice(0, 40));
 	const forbid3 = await rawModemCommand('AT^RESET');
 	check('mock 拒绝复位命令 AT^RESET', forbid3.indexOf('ERROR') >= 0, forbid3.trim().slice(0, 40));
+	/* ^PHYNUM 是文档里不存在的自造指令，历史版本用它写 IMEI，现在三层护栏都要拒绝 */
+	const forbid4 = await rawModemCommand('AT^PHYNUM=IMEI,123456789012345');
+	check('mock 拒绝自造 IMEI 写入命令 AT^PHYNUM', forbid4.indexOf('ERROR') >= 0, forbid4.trim().slice(0, 40));
 	const okRead = await rawModemCommand('AT+CGSN');
 	check('只读命令（读 IMEI）仍然可用，后端识别设备不受影响',
 		okRead.indexOf('OK') >= 0, okRead.indexOf('OK') >= 0 ? 'OK（返回模拟值，非真实 IMEI）' : okRead.trim().slice(0, 40));

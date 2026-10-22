@@ -1,34 +1,49 @@
 'use strict';
 'require at-webserver/rpc';
+'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Ui, Mt5700 */
+/* global L, AtWs, Parse, Ui, Mt5700 */
 
 /**
- * 模组升级页面：
- * - 免责声明（未同意前不允许开始升级）
- * - 当前版本 AT+CGMR
- * - FOTA 状态机轮询 AT^FOTASTATE?：11 查询中 / 12 发现新版本 / 13 查询失败 /
- *   14 无新版本 / 20 下载失败 / 30 下载中（AT^FOTADLQ 取进度）/ 31 挂起续传（AT^FOTADL=1）/
- *   40 下载完成（随后 AT^FWUP）/ 50 升级中
- * - 设置 FOTA 地址 AT^FOTAMODE=0,1,0,1 + AT^FOTAOEMDL="<url>/"
+ * 模组升级页面（依据《MT5700M-CN 5G 系列模组 FOTA 升级指南》与 AT 命令手册第 15 章）。
+ *
+ * 指令序列（指南 4.2 演示 + 手册 15.1/15.7）：
+ *   AT^FOTAMODE=0,1,0,1        手动检测 / 自动下载 / 手动升级 / 使能断点续传
+ *                              （当前模组只支持 dectect_mode=0、download_mode=1；
+ *                                update_mode=0 表示下载完成后需用户确认才升级）
+ *   AT^FOTAOEMDL="<url>/"      触发版本查询并开始下载，必须在 IDLE(10) 状态下下发（指南规范）
+ *   AT^FOTASTATE?              轮询状态；AT^FOTADLQ 取下载进度
+ *   AT^FWUP                    仅在 40（下载完成）后由用户确认触发（指南规范）
+ *
+ * 状态（手册 15.5.3）：10 空闲 / 11 查询 / 12 发现新版本 / 13 查询失败 / 14 未发现版本 /
+ * 20 下载失败 / 30 正在下载 / 31 下载挂起 / 40 下载完成 / 50 准备升级 /
+ * 70 升级失败（见手册 15.4.5 示例）。
+ * 13 与 20 带 <error_code>，界面必须把它显示出来，否则用户只能看到「失败」两个字。
+ * 30/31/40 可用 AT^FOTADL=0 取消并回到 IDLE（手册 15.3.3）。
+ *
+ * HTTPS 升级（指南 3.2「搭建 HTTPS 服务器(暂未支持)」）本版本不开放，只接受 http:// 地址。
  */
 
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('模组升级', 'FOTA 在线与本地固件版本升级、校验与刷新维护', 'upgrade', '固件更新 · FOTA 在线');
+		var page = Mt5700.page('模组升级', 'FOTA 在线升级：版本检测、下载进度与升级确认', 'upgrade', '固件更新 · FOTA 在线');
 		var body = page._body;
-
 
 		/* ---------- 状态 ---------- */
 		var agreed = false;
 		var upgrading = false;
-		var progress = 0;
-		var step = 0;            // 0 准备 1 初始化 2 下载 3 升级 4 完成
+		var progress = 0;          // 0~100，来自 ^FOTADLQ 的 dl_size / file_size
+		var dlBytes = null;        // 已下载字节数
+		var totalBytes = null;     // 文件总字节数
+		var step = 0;              // 0 准备 1 初始化 2 下载 3 等待确认 4 升级 5 完成
 		var version = '';
-		var fotaState = 10;
+		var fotaState = null;      // null = 尚未读到
+		var fotaError = null;      // 13/20 的 error_code
 		var timer = null;
+		var resumeTries = 0;       // 挂起续传次数，避免无限重试
+		var startAt = 0;           // 下发 OEMDL 的时刻，用于识别「模组还没离开 IDLE」
 
 		/* ---------- 当前版本卡片 ---------- */
 		var versionCard = Mt5700.card('当前版本', '模组固件版本信息');
@@ -49,12 +64,15 @@ return L.view.extend({
 
 		/* 提醒横幅绘制：按 FOTA 状态给出 icon、标题、说明与配色(variant) */
 		function bannerOf(state) {
+			var err = fotaError != null ? '（' + Parse.fotaErrorText(fotaError) + '）' : '';
 			switch (state) {
-				case 12: return { icon: '↑', variant: 'success', title: '发现新固件版本', desc: '服务器上存在可用新版本，点击上方「开始升级」即可拉取安装。' };
+				case 12: return { icon: '↑', variant: 'success', title: '发现新固件版本', desc: '服务器上存在可用新版本，模组正在自动下载固件包。' };
 				case 30: case 31: return { icon: '⭳', variant: 'info', title: '固件正在下载', desc: '正在从 FOTA 服务器拉取固件，请保持网络与供电稳定。' };
-				case 40: return { icon: '✓', variant: 'success', title: '固件下载完成', desc: '下载已就绪，即将触发模组执行升级，请勿断电。' };
+				case 40: return { icon: '✓', variant: 'success', title: '固件下载完成', desc: '下载已就绪。指南要求升级前由用户确认：点击下方「立即升级」开始写入，或取消下载回到空闲状态。' };
 				case 50: return { icon: '⚡', variant: 'danger', title: '固件升级中', desc: '模组正在写入固件，此过程请勿断电、勿做任何操作。' };
-				case 13: case 20: return { icon: '!', variant: 'danger', title: '升级失败', desc: '未完成升级，请检查 FOTA 地址与网络后重试。' };
+				case 70: return { icon: '!', variant: 'danger', title: '固件升级失败', desc: '模组上报升级失败' + err + '，可重新发起升级；反复失败请联系模组厂商。' };
+				case 13: return { icon: '!', variant: 'danger', title: '版本查询失败', desc: '检查 FOTA 地址与网络后重试' + err + '。' };
+				case 20: return { icon: '!', variant: 'danger', title: '固件下载失败', desc: '下载中断' + err + '，可在升级页面重新发起。' };
 				default: return null;
 			}
 		}
@@ -76,6 +94,8 @@ return L.view.extend({
 		urlInput.style.width = '100%';
 
 		var startBtn = Mt5700.primaryButton('开始升级', function () { start(); });
+		var confirmBtn = Mt5700.dangerButton('立即升级', function () { confirmUpgrade(); });
+		var cancelBtn = Mt5700.ghostButton('取消下载', function () { cancelDownload(); });
 		var stepsEl = E('div', { 'class': 'mt5700-steps' });
 		var progressEl = E('div', { 'class': 'mt5700-progress' });
 		var noteEl = E('div', { 'class': 'mt5700-hint' });
@@ -87,6 +107,7 @@ return L.view.extend({
 			var ol = E('ol', { 'class': 'mt5700-agree-list' });
 			['升级过程中请确保供电稳定，切勿断电。',
 				'升级过程中请勿进行其他操作。',
+				'FOTA 会被语音、数据与拨号业务阻塞，请先停止正在使用的业务。',
 				'完成后设备将自动重启，请耐心等待。',
 				'操作不当可能导致设备无法正常使用。',
 				'升级前请备份重要数据。'
@@ -98,26 +119,9 @@ return L.view.extend({
 			}, '同意并继续');
 		}
 
-
-		/* FOTA 状态 → 徽章变体与数值配色（让状态一眼可判） */
-		function fotaMeta(s) {
-			var map = {
-				11: { badge: 'info', color: 'accent', text: '正在查询新版本' },
-				12: { badge: 'success', color: 'success', text: '发现新版本' },
-				13: { badge: 'danger', color: 'danger', text: '查询失败' },
-				14: { badge: 'neutral', color: '', text: '无新版本' },
-				20: { badge: 'danger', color: 'danger', text: '下载失败' },
-				30: { badge: 'warning', color: 'warning', text: '下载中' },
-				31: { badge: 'warning', color: 'warning', text: '下载挂起' },
-				40: { badge: 'success', color: 'success', text: '下载完成' },
-				50: { badge: 'danger', color: 'danger', text: '升级中' }
-			};
-			return map[s] || { badge: 'neutral', color: '', text: (s ? '状态 ' + s : '未知') };
-		}
-
 		function renderVersion() {
 			versionBody.innerHTML = '';
-			var meta = fotaMeta(fotaState);
+			var meta = Parse.fotaStateMeta(fotaState);
 			versionBody.appendChild(Mt5700.metric('固件版本', version || '未知'));
 			/* 状态大字 + 语义配色（查询中=蓝 / 发现新版、完成=绿 / 失败、升级中=红 / 挂起=橙），一眼可判 */
 			versionBody.appendChild(Mt5700.metric('FOTA 状态', meta.text, meta.color));
@@ -126,7 +130,7 @@ return L.view.extend({
 		function renderUpgrade() {
 			upgradeBody.innerHTML = '';
 			stepsEl.innerHTML = '';
-			var labels = ['准备', '初始化', '下载', '升级', '完成'];
+			var labels = ['准备', '初始化', '下载', '确认升级', '升级', '完成'];
 			for (var i = 0; i < labels.length; i++) {
 				var cls = 'mt5700-step' + (i < step ? ' mt5700-step-done' : i === step ? ' mt5700-step-current' : '');
 				stepsEl.appendChild(E('div', { 'class': cls }, labels[i]));
@@ -138,12 +142,13 @@ return L.view.extend({
 					upgradeBody.appendChild(E('div', { 'class': 'mt5700-hint' },
 						'请先阅读并同意免责声明，然后填写 FOTA 服务器地址。'));
 				}
-				upgradeBody.appendChild(Mt5700.formGroup('FOTA 服务器地址', urlInput, '仅支持 http 协议，结尾自动补 /'));
+				upgradeBody.appendChild(Mt5700.formGroup('FOTA 服务器地址', urlInput,
+					'仅支持 http 协议，需指向升级文件所在目录（结尾自动补 /），长度不超过 255 字节'));
 				upgradeBody.appendChild(Mt5700.panelActions(startBtn));
 			}
 
-			if (step === 2 || step === 3) {
-				var isUpgrading = fotaState === 50;
+			if (step === 2 || step === 4) {
+				var isUpgrading = step >= 4 || fotaState === 50;
 				var phaseLabel = isUpgrading ? '升级进度' : '下载进度';
 				var phaseColor = isUpgrading ? 'danger' : 'accent';
 				var fillColor = isUpgrading ? '#c83d55' : '#3b82f6';
@@ -155,8 +160,15 @@ return L.view.extend({
 				bar.appendChild(E('div', { 'class': 'mt5700-progress-fill', style: 'width:' + progress + '%;background:' + fillColor }));
 				progressEl.appendChild(bar);
 				progressEl.appendChild(E('div', { 'class': 'mt5700-hint' },
-					isUpgrading ? '正在升级，请勿断电或执行其他操作' : '正在从 FOTA 服务器下载固件…'));
+					isUpgrading ? '正在升级，请勿断电或执行其他操作' : dlHint()));
 				upgradeBody.appendChild(progressEl);
+			}
+
+			/* 下载完成（状态 40）：指南要求「用户知情且可取消」，此处不自动下发 AT^FWUP */
+			if (step === 3) {
+				upgradeBody.appendChild(Mt5700.panelActions(confirmBtn, cancelBtn));
+			} else if (upgrading && Parse.isFotaCancellable(fotaState)) {
+				upgradeBody.appendChild(Mt5700.panelActions(Mt5700.ghostButton('取消下载', function () { cancelDownload(); })));
 			}
 
 			if (upgrading) {
@@ -166,6 +178,14 @@ return L.view.extend({
 
 			/* 同步升级提醒横幅(独立于上述内容，始终刷新) */
 			renderBanner();
+		}
+
+		/* 下载文案：把 ^FOTADLQ 的真实字节数带上，避免只有百分比时无从判断包体大小 */
+		function dlHint() {
+			if (totalBytes) {
+				return '已下载 ' + AtWs.formatFlow(dlBytes || 0) + ' / ' + AtWs.formatFlow(totalBytes) + '，请勿断电或执行其他操作';
+			}
+			return '正在从 FOTA 服务器下载固件…';
 		}
 
 		/* ---------- FOTA 流程 ---------- */
@@ -186,35 +206,99 @@ return L.view.extend({
 			});
 		}
 
+		/* 读一次 ^FOTASTATE?：状态与错误码同步进页面状态量。
+		 * 该指令已从后端状态缓存白名单移除，每秒轮询拿到的是模组实时状态。 */
 		function queryState() {
 			return AtWs.client.sendCommand('AT^FOTASTATE?').then(function (res) {
-				if (res.success && typeof res.data === 'string') {
-					var raw = AtWs.extractATData(res.data, '^FOTASTATE') || res.data.split(':')[1];
-					var st = parseInt(String(raw).trim(), 10);
-					if (!isNaN(st)) { fotaState = st; return st; }
-				}
-				return null;
+				if (!res.success || typeof res.data !== 'string') return null;
+				var parsed = Parse.parseFotaState(res.data);
+				if (!parsed) return null;
+				fotaState = parsed.state;
+				fotaError = parsed.errorCode;
+				if (parsed.version) version = parsed.version;
+				renderVersion();
+				return parsed.state;
 			});
+		}
+
+		function readProgress() {
+			return AtWs.client.sendCommand('AT^FOTADLQ').then(function (res) {
+				if (!res.success || typeof res.data !== 'string') return;
+				var dlq = Parse.parseFotaDlq(res.data);
+				if (!dlq || dlq.percent == null) return;
+				progress = dlq.percent;
+				dlBytes = dlq.downloaded;
+				totalBytes = dlq.total;
+				renderUpgrade();
+			}).catch(function () {});
 		}
 
 		function stopTimer() {
 			if (timer) { clearInterval(timer); timer = null; }
 		}
 
+		/* 一次升级会话结束：停轮询、回到准备页，并补读一次版本号 */
+		function finish(msg, kind) {
+			stopTimer();
+			upgrading = false;
+			step = 0;
+			if (msg) {
+				if (kind === 'error') Mt5700.error(msg); else Mt5700.success(msg);
+			}
+			renderUpgrade();
+			fetchVersion();
+		}
+
 		function start() {
 			if (!agreed) { showDisclaimer(); return; }
-			var url = (urlInput.value || '').trim();
-			if (!url) { Mt5700.error('请设置 FOTA 服务器地址'); return; }
-			if (url.indexOf('http://') !== 0) { Mt5700.error('仅支持 http 协议'); return; }
-			var formatted = url.charAt(url.length - 1) === '/' ? url : url + '/';
+			var formatted = Parse.normalizeFotaUrl(urlInput.value);
+			if (!formatted) {
+				Mt5700.error(urlInput.value && String(urlInput.value).trim()
+					? 'FOTA 地址不合法：仅支持 http://、不能含空格或引号，且不超过 255 字节'
+					: '请设置 FOTA 服务器地址');
+				return;
+			}
+			urlInput.value = formatted;
 
+			/*
+			 * 指南【规范】：^FOTAOEMDL 必须在 FOTA 处于 IDLE(10) 时下发。
+			 * 上一次会话可能停在 30/31/40（例如页面刷新后重进），此时直接下发
+			 * 会被模组拒绝或撞上「54 FOTA is in collision state」，所以先读状态。
+			 */
+			Mt5700.info('正在检查 FOTA 状态…');
+			queryState().then(function (state) {
+				if (state != null && state !== 10) {
+					if (Parse.isFotaCancellable(state)) {
+						fotaState = state;
+						step = 0;
+						upgrading = false;
+						renderUpgrade();
+						Mt5700.info('上一次下载尚未结束（' + Parse.fotaStateMeta(state).text + '），可点击「取消下载」回到空闲后重试');
+					} else {
+						Mt5700.error('模组当前处于 ' + Parse.fotaStateMeta(state).text + '，需等待其回到空闲后再发起');
+					}
+					return;
+				}
+				beginUpgrade(formatted);
+			}).catch(function () {
+				Mt5700.error('无法读取 FOTA 状态，请稍后重试');
+			});
+		}
+
+		function beginUpgrade(formatted) {
 			upgrading = true;
 			progress = 0;
+			dlBytes = null;
+			totalBytes = null;
+			fotaError = null;
+			resumeTries = 0;
 			step = 1;
 			renderUpgrade();
 			Mt5700.info('正在初始化 FOTA…');
 
+			/* ATE0：关掉回显，避免指令原文混进 ^FOTASTATE/^FOTADLQ 的应答里 */
 			AtWs.client.sendCommand('ATE0').then(function () {
+				/* 手动检测 + 自动下载 + 手动升级 + 断点续传（模组当前仅支持 dectect_mode=0） */
 				return AtWs.client.sendCommand('AT^FOTAMODE=0,1,0,1');
 			}).then(function () {
 				step = 2;
@@ -222,81 +306,116 @@ return L.view.extend({
 				return AtWs.client.sendCommand('AT^FOTAOEMDL="' + formatted + '"');
 			}).then(function (res) {
 				if (!res.success) {
-					Mt5700.error('设置 FOTA 地址失败');
-					upgrading = false; step = 0; renderUpgrade();
+					finish('设置 FOTA 地址失败', 'error');
 					return;
 				}
-				timer = setInterval(function () {
-					queryState().then(function (state) {
-						switch (state) {
-							case 11: Mt5700.info('正在查询新版本...'); break;
-							case 12: Mt5700.info('发现新版本'); break;
-							case 13:
-								stopTimer();
-								Mt5700.error('查询新版本失败');
-								upgrading = false; step = 0; renderUpgrade();
-								break;
-							case 14:
-								stopTimer();
-								Mt5700.error('服务器无新版本');
-								upgrading = false; step = 0; renderUpgrade();
-								break;
-							case 20:
-								stopTimer();
-								Mt5700.error('固件下载失败');
-								upgrading = false; step = 0; renderUpgrade();
-								break;
-							case 30:
-								AtWs.client.sendCommand('AT^FOTADLQ').then(function (dl) {
-									if (dl.success && typeof dl.data === 'string') {
-										var nums = dl.data.replace(/\r|\n/g, '').split(',')
-											.map(function (s) { return s.replace(/[^0-9]/g, ''); })
-											.filter(Boolean)
-											.map(function (s) { return parseInt(s, 10); });
-										if (nums.length >= 2) {
-											var total = nums[nums.length - 2];
-											var downloaded = nums[nums.length - 1];
-											if (total > 0) {
-												progress = Math.max(0, Math.min(100, Math.floor((downloaded / total) * 100)));
-												renderUpgrade();
-											}
-										}
-									}
-								});
-								break;
-							case 31:
-								Mt5700.info('下载挂起，尝试续传');
-								AtWs.client.sendCommand('AT^FOTADL=1').catch(function () {});
-								break;
-							case 40:
-								stopTimer();
-								Mt5700.success('固件下载完成');
-								step = 3;
-								renderUpgrade();
-								AtWs.client.sendCommand('AT^FWUP').then(function () {
-									Mt5700.success('固件升级已开始，设备即将重启');
-									step = 4;
-									upgrading = false;
-									renderUpgrade();
-								}).catch(function () {
-									Mt5700.error('触发固件升级失败');
-									upgrading = false;
-									renderUpgrade();
-								});
-								break;
-							case 50:
-								Mt5700.info('正在准备升级...');
-								renderUpgrade();
-								break;
-							default: break;
-						}
-					}).catch(function () {});
-				}, 1000);
+				startAt = Date.now();
+				timer = setInterval(tick, 1000);
+				tick();
 			}).catch(function () {
-				Mt5700.error('固件升级失败');
-				upgrading = false;
-				step = 0;
+				finish('固件升级初始化失败', 'error');
+			});
+		}
+
+		/* 状态机轮询（指南【规范】：按 ^FOTASTATE 的取值决定下一步动作） */
+		function tick() {
+			if (timer == null) return;
+			queryState().then(function (state) {
+				switch (state) {
+					case 10:
+						/* 刚下发 OEMDL 时模组可能还停在 IDLE，超过 10s 仍无迁移才判失败 */
+						if (Date.now() - startAt > 10000) finish('模组未开始查询版本，请检查 FOTA 地址与网络', 'error');
+						break;
+					case 11:
+						Mt5700.info('正在查询新版本...');
+						break;
+					case 12:
+						Mt5700.info('发现新版本，正在下载');
+						break;
+					case 13:
+						finish('查询新版本失败：' + (Parse.fotaErrorText(fotaError) || '请检查 FOTA 地址与网络'), 'error');
+						break;
+					case 14:
+						finish('服务器无新版本', 'success');
+						break;
+					case 20:
+						finish('固件下载失败：' + (Parse.fotaErrorText(fotaError) || '请检查网络与存储'), 'error');
+						break;
+					case 30:
+						resumeTries = 0;
+						if (step < 2) { step = 2; }
+						readProgress();
+						break;
+					case 31:
+						/* 指南建议：挂起时用 ^FOTADL=1 续传；连续 3 次无效则停止，避免无限重试 */
+						if (resumeTries >= 3) {
+							finish('下载持续挂起，续传无效，请检查网络后重新发起', 'error');
+							break;
+						}
+						resumeTries++;
+						Mt5700.info('下载挂起，正在尝试续传（第 ' + resumeTries + ' 次）');
+						AtWs.client.sendCommand('AT^FOTADL=1').catch(function () {});
+						readProgress();
+						break;
+					case 40:
+						/* 手册 15.1.3：update_mode=0 为手动升级，需用户确认后下发 ^FWUP */
+						stopTimer();
+						progress = 100;
+						step = 3;
+						upgrading = false;
+						renderUpgrade();
+						Mt5700.success('固件下载完成，请在下方确认是否立即升级');
+						break;
+					case 50:
+						if (step < 4) step = 4;
+						renderUpgrade();
+						break;
+					case 70:
+						finish('模组上报升级失败：' + (Parse.fotaErrorText(fotaError) || '可重新发起升级'), 'error');
+						break;
+					default: break;
+				}
+			}).catch(function () {});
+		}
+
+		/* 用户确认后才触发升级（指南【建议】：升级前必须提示用户，做到知情并可取消） */
+		function confirmUpgrade() {
+			Mt5700.confirm(E('div', {}, [
+				E('div', { 'class': 'mt5700-modal-title' }, '确认开始固件升级'),
+				E('div', { 'class': 'mt5700-hint' }, '模组将写入已下载的固件并自动重启，过程中请勿断电，也不要执行其他操作。')
+			]), function () {
+				step = 4;
+				upgrading = true;
 				renderUpgrade();
+				AtWs.client.sendCommand('AT^FWUP').then(function (res) {
+					if (!res.success) {
+						finish('触发固件升级失败', 'error');
+						return;
+					}
+					Mt5700.success('固件升级已开始，设备即将重启');
+					stopTimer();
+					step = 5;
+					upgrading = false;
+					renderUpgrade();
+					fetchVersion();
+				}).catch(function () {
+					finish('触发固件升级失败', 'error');
+				});
+			}, '开始升级');
+		}
+
+		/* 手册 15.3.3：^FOTADL=0 取消下载、删除已下载文件并回到 IDLE */
+		function cancelDownload() {
+			AtWs.client.sendCommand('AT^FOTADL=0').then(function (res) {
+				if (!res.success) {
+					Mt5700.error('取消下载失败');
+					return;
+				}
+				Mt5700.info('已取消下载，FOTA 回到空闲状态');
+				finish(null);
+				queryState();
+			}).catch(function () {
+				Mt5700.error('取消下载失败');
 			});
 		}
 
@@ -305,6 +424,10 @@ return L.view.extend({
 
 		Ui.startup(body, function () {
 			fetchVersion();
+			/* 进页面先读一次状态：停在 30/31/40 时直接给出「取消下载」出口 */
+			queryState().then(function (state) {
+				if (state != null && state !== 10) renderUpgrade();
+			}).catch(function () {});
 			if (!agreed) showDisclaimer();
 		});
 

@@ -441,25 +441,15 @@ var Mt5700 = (function () {
 		return el;
 	};
 
-	api.metric = function (label, value, color, status) {
+	api.metric = function (label, value, color) {
 		var m = E('div', { 'class': 'mt5700-metric' });
 		m.appendChild(E('div', { 'class': 'mt5700-metric-label', title: label || '' }, label));
 		var v = E('div', { 'class': 'mt5700-metric-value', title: (value == null ? '' : String(value)) });
 		api.metricValue(v, value);
 		if (color) v.classList.add(color);
 		m.appendChild(v);
-		/* status 为可选状态类（如温度 temp-normal），用于整卡背景着色；
-		 * 不传时不加任何状态类，仅渲染基础指标卡。 */
-		if (status) m.classList.add(status);
 		return m;
 	};
-
-
-	/* ================= 温度状态判定 ================= */
-
-
-
-
 
 
 
