@@ -48,6 +48,15 @@ function getStr(obj, key) {
 function jsonParse(s) {
 	let i = 0;
 	let n = length(s);
+	/* 失败标志放在**闭包内**而不是模块级：rpcd 每个请求独立线程，模块级变量
+	 * 会被并发请求互踩（红线 24）；解析器同步跑完，同一次调用的嵌套函数共享
+	 * 这个标志即可。
+	 * ★★ 为什么不用 throw（B08 第一版的教训，2026-10-22 真机实测）：
+	 *   本固件的 ucode **不支持 throw 语句** —— `try { throw "x"; }` 直接
+	 *   Syntax error，整个文件编译失败 → rpcd 不注册 mt5700 对象 → 所有页面
+	 *   -32000 Object not found。本仓既有代码里只有 try/catch，从无 throw，
+	 *   当时误把注释里「解析失败是抛异常」当成了证据。 */
+	let fail = 0;
 	let parseVal;
 
 	function ch() {
@@ -93,7 +102,8 @@ function jsonParse(s) {
 			}
 		}
 		/* 闭合引号前就到末尾 = 被 timeout 掐断的半截应答，按失败处理（B08） */
-		throw '字符串未闭合';
+		fail = 1;
+		return null;
 	}
 
 	function parseNum() {
@@ -118,14 +128,17 @@ function jsonParse(s) {
 		while (i < n) {
 			// 本固件 ucode 的数组没有 push 方法（调用会抛
 			// "left-hand side is not a function"），只能按下标追加。
+			if (fail) { return null; }
 			arr[length(arr)] = parseVal();
+			if (fail) { return null; }
 			ws();
 			if (ch() == ',') { i++; ws(); continue; }
 			if (ch() == ']') { i++; return arr; }
 			break;
 		}
 		/* 没吃到闭合 ] 就退出 = 输入被截断或夹了非法字符（B08） */
-		throw '数组未闭合';
+		fail = 1;
+		return null;
 	}
 
 	function parseObj() {
@@ -137,9 +150,11 @@ function jsonParse(s) {
 			ws();
 			if (ch() != '"') { break; }
 			let k = parseStr();
+			if (fail) { return null; }
 			ws();
 			if (ch() == ':') { i++; }
 			let v = parseVal();
+			if (fail) { return null; }
 			obj[k] = v;
 			ws();
 			if (ch() == ',') { i++; continue; }
@@ -147,10 +162,12 @@ function jsonParse(s) {
 			break;
 		}
 		/* 没吃到闭合 } 就退出 = 输入被截断或夹了非法字符（B08） */
-		throw '对象未闭合';
+		fail = 1;
+		return null;
 	}
 
 	parseVal = function () {
+		if (fail) { return null; }
 		ws();
 		let c = ch();
 		if (c == '{') { return parseObj(); }
@@ -164,12 +181,11 @@ function jsonParse(s) {
 
 	let v = parseVal();
 	ws();
-	/* 完整性校验：值之后必须恰好到末尾。被 timeout 掐断的半截应答、
-	 * 带垃圾尾巴的输入都在这里按失败处理（B08，2026-10-22 审计）。
-	 * 调用点全部已在 try/catch 内（rpcCall/读缓存/es9p/smslog/calllog），
-	 * 原先「解析失败会抛异常」的注释由此真正成立。 */
-	if (i != n) {
-		throw 'JSON 尾部有多余内容';
+	/* 完整性校验（B08）：值之后必须恰好到末尾；fail=1 表示结构未闭合或非法。
+	 * 解析失败返回 null —— 合法 JSON 的裸 null 只在 fail=0 时原样返回；
+	 * 本仓全部调用点的合法值都是对象或数组，不存在裸 null，判 null 即失败。 */
+	if (fail || i != n) {
+		return null;
 	}
 	return v;
 }
@@ -405,6 +421,9 @@ function rpcCall(method, params) {
 
 	try {
 		let resp = jsonParse(line);
+		if (resp == null) {
+			return { success: false, error: '解析后端应答失败（数据可能被截断）' };
+		}
 		if (resp.error) {
 			let msg = 'RPC 错误';
 			if (resp.error.message) {
@@ -3437,12 +3456,9 @@ return {
 				if (length(body) > 262144) {
 					return { success: false, error: '请求体过大（上限 256KB）' };
 				}
-				/* 注意：jsonParse 解析失败是**抛异常**，不是返回 null */
-				try {
-					if (jsonParse(body) == null) {
-						return { success: false, error: '请求体不是合法 JSON' };
-					}
-				} catch (e) {
+				/* jsonParse 解析失败返回 null（本固件 ucode 不支持 throw，
+				 * 见 jsonParse 头部注释） */
+				if (jsonParse(body) == null) {
 					return { success: false, error: '请求体不是合法 JSON' };
 				}
 				if (!es9pToolAvailable()) {

@@ -5,6 +5,41 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.34] - 2026-10-22
+
+### 修复：2.4.33 在本机 ucode 上不可用（重要，请从 2.4.33 直接升到本版）
+
+**2.4.33 的 ucode 层在 ZJJCKA 25.12.5 固件上完全不可用**：安装后所有 mt5700.* 调用报
+`-32000: Object not found`（日志/短信/状态/通话等全部页面），原因与处置如下。
+
+**根因**：2.4.33 给 jsonParse 加的 4 处 `throw` 语句 —— **本固件的 ucode 不支持
+throw 语句**（`try { throw "x"; }` 直接 `Syntax error`，真机实测）。ucode 是整个
+文件编译的，一处 throw = 整个 mt5700.uc 编译失败 = rpcd 不注册 `mt5700` 对象。
+当时误把既有注释里「解析失败是抛异常」当成了 throw 可用的证据 —— 那是错误注释，
+不是实测。
+
+**处置**：解析失败语义改用「**闭包内 fail 标志 + 返回 null**」（并发安全，不依赖
+throw/模块级全局）。`rpcCall` 入口对 null 显式报「解析后端应答失败」，截断应答
+不再按成功透传（B08 的语义完整保留）。
+
+**真机取证与恢复**（2026-10-22 14:28–15:00）：
+
+| 步骤 | 结果 |
+|---|---|
+| 设备 `md5sum` mt5700.uc | 与 2.4.33 逐字节一致（文件完整） |
+| `ucode mt5700.uc` 直接编译 | `Syntax error: Unexpected token`，落在线 96 = 第一处 throw |
+| 设备最小实验 `try { throw "x"; }` | `Syntax error` —— throw 不支持实锤 |
+| 换 2.4.32 版 / 300 字节 mini 对象 / 改对象名 / 去扩展名 | 全部「签名注册可见、分发 Not found」（与内容无关的假象，SSH `ubus call` CLI 在本固件不可作判据） |
+| 修复版部署 + `rpcd restart` | **session 链路 `mt5700.logs`/`mt5700.at` 全部恢复** |
+
+**新守卫** `tests/ucode-syntax-guard.test.js`：mt5700.uc 无 throw 语句（去注释后
+检查）+ fail 标志语义 + rpcCall 判空，共 3 项；故意加 throw 已验证精确报红。
+
+### 升级说明
+
+从 2.4.33 升级本版后 LuCI **需要重新登录**（rpcd 重启会清 session）。2.4.33 的
+其余修复（审计 24 项）不受影响，本版只替换 ucode 文件的 jsonParse 实现与注释。
+
 ## [2.4.33] - 2026-10-22
 
 ### 全仓库深度审计修复（四批次，24 项）

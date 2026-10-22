@@ -87,6 +87,8 @@ TARGETS = {
     #   single-source-contract、device-control-contract）→ 变异生效却没人判红
     #   → 比没守卫更危险（红线 16b）。
     "uc2": ROOT / "root" / "usr" / "share" / "rpcd" / "ucode" / "mt5700.uc",
+    # ucsyn：与 uc2 同文件、独立键（红线 16b）—— 挂 ucode 语法安全守卫
+    "ucsyn": ROOT / "root" / "usr" / "share" / "rpcd" / "ucode" / "mt5700.uc",
     "rpcjs2": ATWB / "rpc.js",
     # ★★ 2026-09-24 迁页：VoWiFi 已整块搬到**模组设置**页，它的变异必须跟着改挂
     #   vowifijs（同为 modem_settings.js，但跑 vowifi-contract，不是 device-control）。
@@ -223,6 +225,7 @@ TARGET_TEST = {
     "parsejs3": ROOT / "tests" / "sms-reachability-contract.test.js",
     "smssetjs2": ROOT / "tests" / "sms-reachability-contract.test.js",
     "uc2": ROOT / "tests" / "vowifi-contract.test.js",
+    "ucsyn": ROOT / "tests" / "ucode-syntax-guard.test.js",
     "rpcjs2": ROOT / "tests" / "vowifi-contract.test.js",
     "vowifijs": ROOT / "tests" / "vowifi-contract.test.js",
     "svcjs": ROOT / "tests" / "service-status-unknown-contract.test.js",
@@ -2126,6 +2129,15 @@ MUTATIONS = [
         "\t\t}, '这一页只管信令：能拨能接",
         "\t\t}, '实测（2026-10-22）这一页只管信令：能拨能接",
         "没有内部取证语言",
+    ),
+    (
+        # 本固件 ucode 不支持 throw 语句：一处 throw = 整个 mt5700.uc 编译失败 =
+        # rpcd 不注册 mt5700 对象 = 所有页面 -32000（2026-10-22 真机事故）。
+        "ucode：混入 throw 语句（本固件 ucode 直接 Syntax error，对象全体消失）",
+        "ucsyn",
+        "\tlet fail = 0;\n",
+        "\tlet fail = 0;\n\tfunction _t(){ throw \'x\'; }\n",
+        "mt5700.uc 无 throw 语句",
     ),
 ]
 

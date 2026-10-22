@@ -18,7 +18,7 @@ PKG_NAME:=luci-app-mt5700
 # 版本号是**发布契约**：make / CI / opkg 升级都认它。改动一旦合入 main
 # 就必须递增（PKG_RELEASE 用于同版本重新打包）。详见 CHANGELOG.md。
 # ─────────────────────────────────────────────────────────────
-PKG_VERSION:=2.4.33
+PKG_VERSION:=2.4.34
 PKG_RELEASE:=1
 
 # 许可与维护者：opkg/apk 的元数据与 OpenWrt 包索引都读这两个字段。
