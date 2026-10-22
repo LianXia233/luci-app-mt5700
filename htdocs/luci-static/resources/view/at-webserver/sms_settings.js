@@ -9,10 +9,17 @@
  * 短信设置页面（含 USSD 查询）：
  *
  * - IMS 开关（AT^IMSSWITCH? / AT^IMSSWITCH=1,0,0 等）
- * - 短信开关（开启步骤：CEUS=1/IMSSWITCH=1/CFUN=1/CGDCONT=5/CSCA；关闭步骤反向）
+ * - 短信开关（开启：先 `AT+CEUS?` 读数据中心模式，已为 1 则跳过射频重启，
+ *   只下发 `AT^IMSSWITCH=1,0,0`（+ 可选 `AT+CSCA`）；不为 1 才走
+ *   `AT+CEUS=1` → `AT+CFUN=0` → `AT+CFUN=1`（长超时并轮询 `AT+CFUN?`/`AT+CEREG?`
+ *   直到射频恢复）→ `AT^IMSSWITCH=1,0,0` → 可选 `AT+CSCA="..."`；
+ *   整串在一次后端事务里跑完。失败时若已下发过 `AT+CFUN=0`，后端会 best-effort
+ *   补 `AT+CFUN=1` 并回读确认，结果写进 failedDetail，前端原样显示。
+ *   关闭：只下发 `AT^IMSSWITCH=0,0,0`，不再关射频、不再写 CEUS、不再清空短信）
  * - 短信中心号码（AT+CSCA? / AT+CSCA="..."）
  * - 存储位置与用量（AT+CMGF=0 + AT+CPMS? / AT+CPMS=...）
- * - 清空全部短信（AT+CMGD=1,4 逐存储）
+ * - 清空全部短信（后端在一次事务里逐存储区 `AT+CPMS=` + `AT+CMGD=1,4`，
+ *   返回 requested/deleted/errors/storage）
  * - 本地已发缓存导出/导入/清空
  * - USSD 查询（AT+CUSD，GSM7 打包，+CUSD URC 回复）
  */
@@ -133,13 +140,18 @@ return L.view.extend({
 					AtWs.client.sms('purge').then(function (res) {
 						if (res.success && res.result) {
 							if (res.result.storage) applyStorage(res.result.storage);
-							if (res.result.errors && res.result.errors.length)
-								Mt5700.warning('部分存储区未能清空：' + res.result.errors.join('；'));
-						else if (res.result.deleted > 0)
-							Mt5700.success('已完成清空操作（' + res.result.deleted + ' 个存储区）');
-						else
-							Mt5700.warning('没有存储区确认完成清空，请刷新核实');
-					} else { Mt5700.error('清空短信失败：' + (res.error || '')); }
+							var errors = res.result.errors || [];
+							var deleted = res.result.deleted || 0;
+							if (errors.length && deleted > 0) {
+								Mt5700.warning('部分存储区未能清空：已清空 ' + deleted + ' 个，失败 ' + errors.length + ' 个（' + errors.join('；') + '）');
+							} else if (errors.length) {
+								Mt5700.warning('全部存储区均未清空：' + errors.join('；'));
+							} else if (deleted > 0) {
+								Mt5700.success('已完成清空操作（' + deleted + ' 个存储区）');
+							} else {
+								Mt5700.warning('没有存储区确认完成清空，请刷新核实');
+							}
+						} else { Mt5700.error('清空短信失败：' + (res.error || '')); }
 					}).catch(function () { Mt5700.error('清空短信失败'); });
 				});
 			})
