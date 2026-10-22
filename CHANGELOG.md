@@ -8,6 +8,32 @@
 
 ---
 
+## v1.26.2 (2026-10-23)
+
+### 短信中心重做成 IM 界面，并补上「发出去的短信」这条一直缺失的记录链
+
+> 两件事撞在一起。一是**界面上根本看不到自己发出去的短信** —— 这不是渲染问题，是 3GPP TS 23.040 的语义：`SMS-SUBMIT` 提交成功后模组**不往 SM/ME 写槽位**，`AT+CMGL=4` 读回来的永远只有收到的那一半；v1.26.1 之前界面只有「对方说的话」，一次来回在时间轴上被打散成两截。二是界面本身是列表式表单，与用户在用的 IM 客户端差得太远。这一版把发出记录**归档到路由本地**补全双向时间轴，界面按 IM 形态重做。
+>
+> 归档落 `/etc/at-webserver/SMS`：`/etc` 在 overlay 上持久化，而 `/var -> /tmp` 是 tmpfs，重启即失。文件名取 `sha256(归一化号码)` 前 40 位加 `.sms` —— 号码不出现在文件名里（`ls` 看不到联系人），顺带规避 `/`、`..` 这类路径穿越。容器格式：明文 JSON → ChaCha20 流加密 → 48 字节头（魔数 `AWSS` + 版本 + 每文件随机 salt + nonce + 明文长 + 写入时刻）→ 整帧位置相关异或混淆 → 尾部随机 padding（≤32 字节，让文件大小不泄露正文长度）。**威胁模型如实说明：防随手 `cat`/十六进制查看级别，密钥编译进二进制，不是抗攻击加密。**
+>
+> 真机验证：发 `102` 到 `10000`（本项目一贯的测试口径）后，归档 1 个会话 / 623 字节，`strings` 里搜不到 `10000` 与正文关键词，文件名是 sha256 前缀；`store_read` 能读回同一条会话里的 `sent`（`timeApprox=true`）与 `received`；勾「同时删除本地记录文件」删掉那条 sent，归档 623 B → 460 B，收到的气泡不受影响。
+
+- **feat(sms) 短信中心界面重构为 IM 形态**：左侧会话列表（搜索框 + 全部/未读/已发三档筛选 + 底部「+ 新短信」与归档概览），右侧聊天区（会话头部、日期分隔条、左右气泡、底部输入区）。**收发双方默认展示头像**：对方用粉色系、本机用薰衣草系，两张 192×192 的 PNG 随包安装到 `htdocs/luci-static/resources/at-webserver/`。配色沿用参考稿的蓝紫色系（页面底 `#edf3fc`、发送气泡 `#2997f3`、选中态 `#e0edfc`），未改主题色
+- **feat(sms) 发出记录本地归档（新增 `src/rust/src/sms_store.rs`）**：按会话独立文件、互不覆盖，单会话上限 500 条 / 512 KB，目录总配额 **2 MiB**、淘汰水位 4/5（超限先清最早记录）。去重键 `方向|正文|时刻` 是纯函数（`fingerprint()`），所以重复归档天然幂等。加密与混淆见上文容器格式；读写时自动加解密，不引入任何新依赖 —— SHA-256 与 ChaCha20 都是本文件内的纯 Rust 实现，随机数用时间戳混原子计数走 xorshift64\*（仅用于 salt/nonce/padding）
+- **feat(rpc) 归档三动作接入 RPC**：`store_stats` / `store_read` / `store_drop` 走 rpcd ucode 插件，**在事务段之前分支** —— 归档只做文件读写、不占 AT 通道，不该排在短信事务后面等锁。`store_drop` 三种形态：`all=true` 清全部；`fingerprints` 与 `indices` 均空则整会话删除；否则按记录逐条删。指纹一律由后端算，前端只回传 `{direction, content, time}`
+- **feat(sms) 收到与发出均归档**：`SmsService::send()` 在 `outcome == Accepted` 后记一条 `sent`（`time_approx=true` —— SUBMIT 里没有发送时刻，只有 TP-VP）；`urc.rs` 的 `handle_new_sms()` 读到正文、推送通知前记 `received`，长短信在 `assemble_partial()` 拼装完成后按**合并后的完整正文**记一条。归档失败只记日志，绝不影响收发结论 —— 留档是旁路，不是主链路
+- **feat(ui) 归档与模组存储合并成单条时间轴**：`selectContact()` 异步拉 `store_read` 再渲染，缓存按会话号持有、发送/删除后主动失效（`invalidateArchive`）。发出气泡带「时间未知」标注而不是伪造时刻
+- **fix(rpc) 短信 RPC 一直返回 `{"result":[2]}`、插件函数根本不执行**：`mt5700.uc` 的 `sms.args` 里 `indices: ''`、`enable: ''` 这些**字面量默认值就是 rpcd 的类型声明**（不是注释）—— 声明成字符串，前端传数组/布尔就被判 `UBUS_STATUS_INVALID_ARGUMENT`。改为 `indices: []`、`enable: false`，并新增 `number: ''` / `items: []` / `all: false`。这是「能发送但读不到状态和记录」「提示模组拒绝但有时候能发出」两条现象的共同根因
+- **fix(ucode) 布尔参数把 `true` 判成 `false`**：`getBool()` 原先拿 JSON 布尔直接比字符串，短信设置页的开关只能下发 `false`。ucode 不是完整 JS、**不支持 `typeof`**，改用 `lc(trim('' + v))` 比对 `'1'/'true'/'yes'/'on'`
+- **fix(sms) 会话内排序退化成按模组槽位号**：`conversationOrder()` 拿**消息对象当字典的键**（`keyOf[msg]`），JS 会把所有对象转成 `"[object Object]"`，于是每条消息共用同一个键、比较器恒等 —— 排序实际只按槽位号走。归档里的发出记录没有槽位号（`null`），被统一甩到会话最前面。改成与数组同下标的平行数组存排序键，归档消息用自己的真实时刻。实测顺序：`收 01:15:32 → 收 02:18:54 → 发 02:28:14 → 收 02:28:16 → 发 02:29:33 → 收 02:29:35`，一次来回不再被打散
+- **fix(ui) 批量删除弹窗里没有「删除所选」按钮，整个功能不可用**：按钮对象创建了却漏了 `actions.appendChild(confirmBtn)`，弹窗里只剩「取消」。这种「创建了没挂载」的漏写不会报错、只会静默消失，已顺手扫过全文件的同类写法
+- **fix(ui) 状态报告这类解析失败的 PDU 占着真实槽位却禁止勾选**：勾选框原按 `m.error` 禁用，而解析失败的条目**确实占着 SM/ME 的一个格子**，用户只能干看着它吃存储额度、删不掉。改成只看有没有真实槽位号（本地归档条目另按 `m.archived` 放行）。实测删除后存储 `used 15 → 14`
+- **fix(ui) 会话内容多了会把整页顶长**：纯 CSS 算不出会话区的可用高度（导航栏、页签、hero 都随主题和屏宽变），改用 JS 量 `layout` 的文档坐标定高，再**按实际溢出量迭代回扣**（最多 3 次）直到整页不再滚动。`render()` 返回时节点还没进文档、`rect.top` 是 0，所以定高要延后两帧并在 400/1500 ms 各重校一次
+- **fix(ui) 消息区与列表加触屏滚动并隔离滚动链**：`overscroll-behavior: contain` + `touch-action: pan-y` + `-webkit-overflow-scrolling: touch`，滚到尽头不把滚动甩给整页。实测消息区 `scrollTop 757 → 457` 而页面 `scrollY 0 → 0`；四种尺寸下 `docH == vh`（1440×900 / 390×844 / 360×740），1280×700 故意让整页滚 51px —— 再扣会话区就压到 320px 以下
+- **fix(ui) 手机端三处挤压**：标题被操作按钮挤成「10…」（收紧按钮尺寸与间距）；窄屏进会话后切不回去（补 `is-mobile-chat` 状态类与返回按钮 `showChat()`）；主题自带的固定 `#floating-toolbar` 压住输入区（给 `.mt5700-sms-shell` 留 `padding-right: 52px` 让位）
+- **chore(ui) `MT5700_CSS_VERSION` 2.29.0 → 2.37.0**：LuCI 的静态资源只有 `ETag`/`Last-Modified`、没有 `Cache-Control`，浏览器启发式缓存会继续用旧文件；CSS 靠 `mt5700.css?v=` 破缓存，改样式必须同步 bump。view 模块（`sms_center.js`）没有版本参数，**升级后需要一次硬刷新（Ctrl+F5）**
+- **test**：`cargo test --release` **267 项：265 passed / 0 failed / 2 ignored**，其中新增 `sms_store` 11 项（容器往返、指纹去重、单会话淘汰、跨会话隔离、超配淘汰最早、padding 不泄露长度、ChaCha20 与 SHA-256 均对 RFC 8439 / `hashlib` 交叉验证过的权威向量）。`cargo build --release` 零告警；`aarch64-unknown-linux-musl` 交叉编译通过（zig cc 作 linker 与 CC，产物 ELF64 / AArch64 / 静态 / 2.60 MB / 无 `PT_INTERP`）；前端 3 个 JS 语法校验通过；实机端到端跑通发送、归档读写、加密形态、只删本地记录、批量删除五条链路
+
 ## v1.26.1 (2026-10-22)
 
 ### 实机短信收发链路逐条对照（`modem.lua` + `pdul.lua` + `smssend` + `pdu_decoder` + `sendat`）：修 5 处、补 1 处超时、保留 2 处有意的差异

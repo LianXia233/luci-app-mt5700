@@ -46,7 +46,10 @@ var rpcEvents = L.rpc.declare({
 var rpcSms = L.rpc.declare({
 	object: 'mt5700',
 	method: 'sms',
-	params: ['action', 'destination', 'message', 'smsc', 'mem', 'indices', 'session_id', 'ttl_ms', 'dedup_key', 'enable'],
+	/* 末尾三个是本地归档动作用的：
+	 *   number —— 会话号码；items —— [{direction,content,time}]；all —— 清空全部。
+	 * 未传的项由 LuCI 省略（undefined 不进 JSON），不会触发 rpcd 的类型校验。 */
+	params: ['action', 'destination', 'message', 'smsc', 'mem', 'indices', 'session_id', 'ttl_ms', 'dedup_key', 'enable', 'number', 'items', 'all'],
 	expect: {}
 });
 
@@ -551,7 +554,11 @@ var SMS_ACTION_TIMEOUT_MS = {
 	set_smsc: 42000,
 	power: 72000,
 	set_ims: 42000,
-	get_ims: 42000
+	get_ims: 42000,
+	/* 归档动作只读写本地文件，超时预算可以短一些 */
+	store_stats: 22000,
+	store_read: 22000,
+	store_drop: 22000
 };
 
 /*
@@ -596,7 +603,10 @@ ATClient.prototype.sms = function (action, params) {
 		params.session_id,
 		params.ttl_ms,
 		params.dedup_key,
-		params.enable === true || params.enable === '1' || params.enable === 'true'
+		params.enable === true || params.enable === '1' || params.enable === 'true',
+		params.number,
+		params.items,
+		params.all === true || params.all === '1' || params.all === 'true'
 	);
 	return withTimeout(req, budget, '短信操作超时（模组可能正忙或正在重连，请稍后重试）')
 		.then(function (resp) {
