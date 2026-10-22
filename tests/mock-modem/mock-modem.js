@@ -414,12 +414,28 @@ function replyFor(cmd) {
 	if (c === 'AT^NWTIME?') return '^NWTIME: 25/09/10,10:30:00+32,00\r\nOK';
 	if (c === 'AT+CMGS=0') return 'ERROR'; // 零长度 TPDU 非法，真实模组直接拒绝
 	/*
-	 * AT+CMGS=<len> 与 PDU 提交不在 replyFor 里处理：前者要回**无换行结尾**的
-	 * `> ` 提示符（ replyFor 的返回值会被统一补 \r\n，会破坏提示符语义），
-	 * 后者要以 Ctrl+Z(0x1A) 结尾才提交。两者都在 socket 数据层按真实模组的
+	 * 一次性提交：`AT+CMGS=<len>` + **字面的 `\r`**（反斜杠 + 字母 r 两个字符）+ <PDU>。
+	 * 这是手册 9.14.5 的举例形态（`AT+CMGS=18\r0011…`，并注明「使用 SSCOM 工具时
+	 * 对应的 "\r" 应改为 "\\r"」），也是厂商 WebUI 实际下发的形态，同一台模组的
+	 * 实机对照：
+	 *   字面 `\r` 分隔 → 立即 `+CMGS: <mr>` / OK，全程没有 `> ` 提示符、不需要 Ctrl+Z；
+	 *   真实 CR 分隔（长度与 PDU 一次写完）→ 只回显命令，随后静默。
+	 * `<len>` 是**不含 SMSC 字段**的 TPDU 字节数（9.14.3／9.14.5：18 配 19 字节 PDU），
+	 * 所以整条 PDU 的字节数应为 len+1；对不上就是编码侧写错了，按真实模组回 ERROR。
+	 */
+	const oneShot = /^AT\+CMGS=(\d+)\\r([0-9A-Fa-f]*)$/.exec(c);
+	if (oneShot) {
+		const hex = oneShot[2];
+		if (hex.length % 2 !== 0 || hex.length / 2 !== Number(oneShot[1]) + 1) return 'ERROR';
+		return '+CMGS: 1\r\nOK';
+	}
+	/*
+	 * AT+CMGS=<len>（只报长度，等提示符）与 PDU 提交不在 replyFor 里处理：前者要回
+	 * **无换行结尾**的 `> ` 提示符（replyFor 的返回值会被统一补 \r\n，会破坏提示符
+	 * 语义），后者要以 Ctrl+Z(0x1A) 结尾才提交。两者都在 socket 数据层按真实模组的
 	 * 两段式协议处理，见下面的连接处理部分。
 	 */
-	if (c.startsWith('AT+CMGS')) return 'ERROR'; // 裸 AT+CMGS / 带 \rPDU 的旧拼法一律报错
+	if (c.startsWith('AT+CMGS')) return 'ERROR'; // 裸 AT+CMGS / 真 CR 拼 PDU 的形态：模组不认
 	if (c === 'AT+CUSD') return 'ERROR';
 	if (c.startsWith('AT+CUSD=')) return '\r\nOK';
 	if (c.startsWith('AT+SCHED') || c.startsWith('AT^CELLSCAN')) return 'ERROR'; // 伪命令由后端处理
@@ -450,6 +466,9 @@ const server = net.createServer(function (socket) {
 	const id = ++connId;
 	console.log('[mock] client #' + id + ' connected');
 	let buf = '';
+	/* 两段式提交的第二步标记：回过 `> ` 提示符之后，模组处在「只收 PDU」的
+	 * 输入态，此时进来的行不是命令。见下面 socket.on('data') 里的处理。 */
+	let awaitingPdu = false;
 
 	const push = function (text) {
 		if (!socket.destroyed) socket.write(text);
@@ -483,17 +502,38 @@ const server = net.createServer(function (socket) {
 			buf = buf.slice(idx + 1);
 		if (!cmd) continue;
 		/*
-		 * CMGS 两段式交互（3GPP TS 27.005 §3.4.1），与真实模组逐字节对齐：
-		 *   第一步 `AT+CMGS=<len>` → 回 `\r\n> ` 输入提示符。
-		 *     注意**结尾不能带换行** —— 后端的 consume() 正是靠「行尾残留
-		 *     全是空白与 >」来识别提示符并结束本次应答的，补了 \r\n 就退化
-		 *     成一条普通 OK，测不出提示符路径。
-		 *   第二步 `<PDU hex>\x1A` → 回 `+CMGS: <mr>\r\nOK\r\n`。
-		 *     结尾的 `\r\n` 不能省：后端按 `\n` 切行，只有 `OK` 单独成行
-		 *     才会触发终止符结束应答；少了它应答会被截断成半条 `+CMGS: 1`。
-		 *     0x1A（Ctrl+Z）是提交字符；缺了它模组会一直等在输入态，
-		 *     这正是 issue #19「显示成功但发不出去」的根因，mock 必须复现。
+		 * CMGS 提交的几种形态，与这台真实模组逐字节对齐（手册 9.14.1／9.14.5）：
+		 *   一次性 `AT+CMGS=<len>` + 字面 `\r` + <PDU> → 直接 `+CMGS: <mr>` / OK。
+		 *     整段里没有真实 CR，所以在下面按 CR 切行时它是完整的一条命令，
+		 *     由 replyFor 处理；模组这条路径不给 `> ` 提示符，也不需要 Ctrl+Z。
+		 *   两段式第一步 `AT+CMGS=<len>` → 回 `\r\n> ` 输入提示符。
+		 *     注意**结尾不能带换行** —— 后端的 consume() 正是靠「行尾残留全是空白
+		 *     与 >」识别提示符并结束本次应答，补了 \r\n 就退化成一条普通 OK，
+		 *     测不出提示符路径。这条路只为「一次性形态被本地 ERROR 拒掉之后的
+		 *     两段式重试」（sms::needs_two_step_fallback）服务。
+		 *   两段式第二步 <PDU hex> + Ctrl+Z(0x1A) → 回 `+CMGS: <mr>\r\nOK\r\n`。
+		 *     结尾的 `\r\n` 不能省：后端按 `\n` 切行，只有 `OK` 单独成行才会触发
+		 *     终止符结束应答；少了它应答会被截断成半条 `+CMGS: 1`。
+		 *   输入态里进来一段**没有 Ctrl+Z** 的数据 → 什么都不回。这正是实机上
+		 *     「长度 + 真 CR + PDU + CR 一次写完」的结局：PDU 被当成输入态数据
+		 *     吃掉，等不到提交字符就一直静默。issue #19「显示成功但发不出去」
+		 *     同属此类，mock 必须复现这份沉默，否则测试会以为任何写法都能拿到回执。
 		 */
+		if (awaitingPdu && !/^AT/.test(cmd)) {
+			if (cmd.indexOf('\x1a') >= 0) {
+				awaitingPdu = false;
+				const shown = cmd.replace(/\x1a/g, '<^Z>');
+				console.log('[mock] #' + id + ' PDU submit: ' + shown.slice(0, 60) + (shown.length > 60 ? '…' : ''));
+				push('+CMGS: 1\r\nOK\r\n');
+			} else {
+				console.log('[mock] #' + id + ' PDU 输入态、无 Ctrl+Z：不回任何应答（复现实机沉默）');
+			}
+			continue;
+		}
+		/* 输入态下又进来一条 AT 命令：按「上一条已作废」处理，退出输入态。
+		 * 真实模组会把这一行也当成 PDU 数据吃掉，但测试用的模组模型需要能自愈：
+		 * 后端超时后不会补发 Ctrl+Z，不清状态会连累后面所有用例。 */
+		awaitingPdu = false;
 		if (/^AT\+CMGS=\d+$/.test(cmd)) {
 			if (cmd === 'AT+CMGS=0') {
 				console.log('[mock] #' + id + ' < ' + cmd + '  > ERROR');
@@ -501,20 +541,8 @@ const server = net.createServer(function (socket) {
 				continue;
 			}
 			console.log('[mock] #' + id + ' < ' + cmd + '  > (prompt)');
+			awaitingPdu = true;
 			push('\r\n> ');
-			continue;
-		}
-		if (cmd.indexOf('\x1a') >= 0) {
-			const shown = cmd.replace(/\x1a/g, '<^Z>');
-			console.log('[mock] #' + id + ' PDU submit: ' + shown.slice(0, 60) + (shown.length > 60 ? '…' : ''));
-			push('+CMGS: 1\r\nOK\r\n');
-			continue;
-		}
-		// 处理 > 提示符后的 PDU（CMGS）
-		if (cmd.indexOf('\n') >= 0) {
-			// 多行 PDU 内容，仅确认
-			console.log('[mock] #' + id + ' PDU: ' + cmd.replace(/\n/g, '\\n').slice(0, 60) + '…');
-			push('+CMGS: 1\r\nOK\r\n');
 			continue;
 		}
 			console.log('[mock] #' + id + ' < ' + cmd);

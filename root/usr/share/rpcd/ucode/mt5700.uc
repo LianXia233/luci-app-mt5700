@@ -197,7 +197,8 @@ function jsonParse(s) {
 const RPCCALL_TIMEOUT_SEC = 12;
 
 /*
- * 短信提交（`AT+CMGS=<长度>\r<PDU>`）的 nc 硬超时。
+ * 短信提交（`AT+CMGS=<长度>` + 字面 `\r` + `<PDU>`，见 atclient::is_single_shot_cmgs）
+ * 的 nc 硬超时。
  *
  * 后端为这条命令单独放宽到 40s（atclient::SMS_SUBMIT_TIMEOUT）：模组要把 TPDU
  * 交给网络侧，`+CMGS` 回执取决于信号与基站排队。若这里仍按 12s 掐断，用户看到
@@ -848,9 +849,11 @@ return {
 				if (cmd == null || cmd == '') {
 					return { success: false, error: '缺少参数 cmd' };
 				}
-				/* 短信提交：命令里同时带长度与 PDU（以 CR 分隔）。
-				 * 只报长度的那半步不含 CR，仍走默认超时。 */
-				const smsSubmit = match(cmd, /^AT\+CMGS=[0-9]+\r/) != null;
+				/* 短信提交：命令里同时带长度与 PDU。分隔符有两种写法 ——
+				 * 字面的 `\r`（两个字符，业务路径与厂商 WebUI 的形态）与真实 CR
+				 * （裸 AT 终端页手敲）。只报长度的那半步两种都没有，仍走默认超时。 */
+				const smsSubmit = match(cmd, /^AT\+CMGS=[0-9]+/) != null &&
+					(index(cmd, '\\r') >= 0 || index(cmd, '\r') >= 0);
 				return rpcCall('at', { cmd: cmd, _rid: getStr(a, '_rid') },
 					smsSubmit ? SMS_RPC_TIMEOUT_SEC : null);
 			}
