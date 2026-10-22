@@ -12,12 +12,23 @@
 #   · 所以本模组的语音音频在物理上就没有引到软件能读到的地方。
 #   但厂商固件里那套 ALSA 模块的 vermagic 与本机内核字节一致，实测 11 个
 #   全部 insmod 成功、snd-usb-audio 已注册到 usbcore —— 也就是说**一旦有
-#   带 UAC 的模组插上，音频立刻就能出 /dev/snd**，代价只是装这批 .ko。
+#   带 UAC 的模组插上，音频立刻就能出 /dev/snd**，代价只是装这批模块。
+#
+# ★ 为什么文件后缀是 .kmod 而不是 .ko（2026-10-22 CI 实测）
+#   OpenWrt 打包时 scripts/gen-dependencies.sh 会对包内**每一个 -name '*.ko'**
+#   的文件 objcopy 出 .modinfo 的 depends=，展开成「需要哪些模块」，再与包自身
+#   .provides（同一套 *.ko 规则收的文件名）做差集，差集非空就 build 失败：
+#       Package luci-app-mt5700 is missing dependencies for the following libraries:
+#       usbcore.ko
+#   本批里 snd-usb-audio / snd-usbmidi-lib 的 depends 含 usbcore，而 usbcore 在
+#   各平台都是内建的、不存在 usbcore.ko 可供，于是差集恒为 {usbcore.ko}。
+#   改成 .kmod 后两处 glob 同时不再命中它，问题消失；insmod 靠 ELF 内容而非
+#   文件名装载，所以运行期行为一字未变。**别「顺手改回 .ko」**。
 #
 # 设计纪律：
 #   1. 没有 UAC 设备时**一个模块都不装**（probe 不过就静默返回），
 #      当前这台机器上是零开销、零内存占用，不存在「加载了但闲着」的假功能。
-#   2. 顺序是硬依赖序，不能交给 depmod —— 这些 .ko 不在 /lib/modules 的
+#   2. 顺序是硬依赖序，不能交给 depmod —— 这些模块不在 /lib/modules 的
 #      搜索路径里，模块名解析由本次 insmod 顺序保证。
 #   3. 任何一步 insmod 失败就停下并记录原因，绝不「跳过去继续装」：半套
 #      音频栈不会报错，只会让 /proc/asound 空着，看起来像「驱动没生效」。
@@ -34,7 +45,7 @@
 KO_ROOT=/usr/share/mt5700/audio
 
 # 拓扑序，改顺序前先读上面第 2 条纪律。
-# 依赖关系取自各 .ko 的 modinfo depends（2026-10-22 提取）：
+# 依赖关系取自各模块的 modinfo depends（2026-10-22 提取）：
 #   snd→soundcore / snd-timer→snd / snd-pcm→snd,snd-timer / snd-hwdep→snd
 #   snd-seq-device→snd / snd-rawmidi→snd,snd-seq-device
 #   snd-usbmidi-lib→usbcore,snd-rawmidi,snd / mc、input-core 无依赖
@@ -98,9 +109,9 @@ cmd_load() {
 		nm=$(mod_name "$m")
 		is_loaded "$nm" && continue
 
-		f="$dir/$m.ko"
+		f="$dir/$m.kmod"
 		if [ ! -f "$f" ]; then
-			log "失败：缺少模块文件 $m.ko"
+			log "失败：缺少模块文件 $m.kmod"
 			return 4
 		fi
 
@@ -133,7 +144,7 @@ cmd_status() {
 	local ver dir n_ko n_loaded card
 	ver=$(uname -r)
 	dir=$(ko_dir)
-	n_ko=$(ls "$dir"/*.ko 2>/dev/null | wc -l)
+	n_ko=$(ls "$dir"/*.kmod 2>/dev/null | wc -l)
 	n_loaded=$(lsmod 2>/dev/null | grep -c '^snd')
 	card=$(sed -n '2p' /proc/asound/cards 2>/dev/null)
 

@@ -9,15 +9,16 @@
  * 而换模组这件事，软件侧已经被实测验证过是零成本的：厂商固件那套 ALSA 模块
  * vermagic 与本机内核（6.12.112 SMP mod_unload aarch64）字节一致，11 个 insmod
  * 全部 rc=0，dmesg 出现 `usbcore: registered new interface driver snd-usb-audio`。
- * 于是把这批 .ko 随插件打包，插上新模组就自动装载。
+ * 于是把这批模块随插件打包，插上新模组就自动装载。
  *
  * 本测试守六件在真机上真出过问题的事：
  *   ① 文件集与装载清单一一对应（少一个 = 装到一半停住，而半套音频栈不报错）
  *   ② 装载顺序满足依赖（拓扑序错了 insmod 会报 Unknown symbol）
  *   ③ 没有 UAC 时不装任何模块（当前这台机器的正常态，零开销是设计意图）
  *   ④ 模块名连字符 → 下划线（lsmod 里叫 snd_usb_audio，不转换就永远「未加载」）
- *   ⑤ .ko 必须在 .gitattributes 里声明 binary（否则被 eol 转换静默损坏）
+ *   ⑤ 模块文件必须在 .gitattributes 里声明 binary（否则被 eol 转换静默损坏）
  *   ⑥ SHA256SUMS 必须是 sha256sum -c 认的两段格式（三段格式会 11 条全 FAILED）
+ *   ⑦ 文件后缀必须是 .kmod 而非 .ko（否则 OpenWrt 打包扫 depends 必失败）
  *
  * 运行：node tests/audio-ko-contract.test.js
  */
@@ -71,11 +72,11 @@ ok('装载清单是 11 个模块（snd 依赖链全长）', order.length === 11,
 	'实际 ' + order.length + ' 个：' + order.join(' '));
 
 const filesOnDisk = fs.readdirSync(MODDIR)
-	.filter(function (f) { return f.endsWith('.ko'); })
-	.map(function (f) { return f.slice(0, -3); })
+	.filter(function (f) { return f.endsWith('.kmod'); })
+	.map(function (f) { return f.slice(0, -5); })
 	.sort();
 
-ok('清单与目录里的 .ko 一一对应（不多不少）',
+ok('清单与目录里的 .kmod 一一对应（不多不少）',
 	JSON.stringify(order.slice().sort()) === JSON.stringify(filesOnDisk),
 	'清单独有：' + order.filter(function (x) { return filesOnDisk.indexOf(x) < 0; }).join(',')
 	+ ' / 目录独有：' + filesOnDisk.filter(function (x) { return order.indexOf(x) < 0; }).join(','));
@@ -83,7 +84,7 @@ ok('清单与目录里的 .ko 一一对应（不多不少）',
 /* ---------- ② 拓扑序 ---------- */
 
 /*
- * 依赖取自各 .ko 的 modinfo depends（2026-10-22 提取），不是照抄手册。
+ * 依赖取自各模块的 modinfo depends（2026-10-22 提取），不是照抄手册。
  * 顺序错了 insmod 会报 "Unknown symbol in module"，而半套装好的状态不会自动
  * 回滚 —— 表现是 /proc/asound 空着、看起来像「驱动没生效」。
  */
@@ -153,8 +154,8 @@ ok('is_loaded 用转换后的名字比对',
 
 /* ---------- ⑤ 二进制不能被 eol 转换 ---------- */
 
-ok('.gitattributes 声明 *.ko binary（否则 ELF 被当文本改坏，git 侧看不出来）',
-	/^\*\.ko binary$/m.test(gitattrSrc));
+ok('.gitattributes 声明 *.kmod binary（否则 ELF 被当文本改坏，git 侧看不出来）',
+	/^\*\.kmod binary$/m.test(gitattrSrc));
 
 /* ---------- ⑥ SHA256SUMS 格式 ---------- */
 
@@ -165,14 +166,14 @@ ok('SHA256SUMS 有 11 行', sums.length === 11, '实际 ' + sums.length + ' 行'
  * ★ 这条是真踩过的坑：一开始写成「名字  大小  哈希」三段，sha256sum -c 认不出，
  *   11 条全报 FAILED（它把大小当成了文件名）。格式必须是 "哈希  文件名"。
  */
-const badSum = sums.filter(function (l) { return !/^[0-9a-f]{64}  \S+\.ko$/.test(l); });
+const badSum = sums.filter(function (l) { return !/^[0-9a-f]{64}  \S+\.kmod$/.test(l); });
 ok('SHA256SUMS 每行都是 sha256sum -c 认的「哈希+两空格+文件名」',
 	badSum.length === 0, badSum.slice(0, 2).join(' | '));
 
 /* 哈希要与文件内容真的对得上 —— 否则清单只是装饰 */
 const badHash = [];
 sums.forEach(function (line) {
-	const mm = line.match(/^([0-9a-f]{64})  (\S+\.ko)$/);
+	const mm = line.match(/^([0-9a-f]{64})  (\S+\.kmod)$/);
 	if (!mm) { return; }
 	const p = path.join(MODDIR, mm[2]);
 	if (!fs.existsSync(p)) { badHash.push(mm[2] + ' 不存在'); return; }
@@ -199,6 +200,33 @@ const mkSrc = fs.readFileSync(path.join(ROOT, 'Makefile'), 'utf8');
 ok('Makefile 打包期给 hotplug 与装载器补 0755',
 	mkSrc.includes('hotplug.d/usb/99-mt5700-audio') &&
 	mkSrc.includes('usr/share/mt5700/audio-ko.sh'));
+
+/* ---------- ⑨ 后缀必须是 .kmod（2026-10-22 CI 真炸过） ---------- */
+
+/*
+ * OpenWrt 的 scripts/gen-dependencies.sh 对包内每个 `-name '*.ko'` 取 .modinfo
+ * 的 depends=，与包自身 .provides 做差集，差集非空即 build 失败。本批里
+ * snd-usb-audio / snd-usbmidi-lib 依赖 usbcore，而 usbcore 各平台内建、没有
+ * usbcore.ko 可供 ⇒ 差集恒为 {usbcore.ko}，包在任何平台都编不过。
+ *
+ * 这两条守的是「改了文件名却忘了改装载器」和「又有人把后缀改回去」——
+ * 前者让功能静默失效（找不到文件 → return 4），后者让 CI 直接红。
+ */
+ok('装载器取的是 .kmod 后缀（与磁盘实际文件名一致，否则永远是"缺少模块文件"）',
+	/\$dir\/\$m\.kmod/.test(koSrc));
+
+function walkKo(dir, out) {
+	fs.readdirSync(dir, { withFileTypes: true }).forEach(function (e) {
+		const p = path.join(dir, e.name);
+		if (e.isDirectory()) { walkKo(p, out); }
+		else if (e.name.endsWith('.ko')) { out.push(path.relative(ROOT, p)); }
+	});
+	return out;
+}
+const strayKo = walkKo(path.join(ROOT, 'root'), []);
+ok('root/ 下不存在任何 *.ko（存在即触发 OpenWrt 模块依赖扫描，usbcore.ko 必然缺失）',
+	strayKo.length === 0,
+	strayKo.slice(0, 3).join(', ') + (strayKo.length > 3 ? ' 等 ' + strayKo.length + ' 个' : ''));
 
 /* ---------- 汇总 ---------- */
 

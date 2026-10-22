@@ -1,6 +1,6 @@
 # 随包音频内核模块
 
-## 这批 .ko 是干什么的
+## 这批模块是干什么的
 
 它们让「把 MT5700M-CN 换成带 USB Audio Class 的模组」变成纯软件操作：
 插上新模组 → 检测到 Audio Class 接口 → 自动装载这 11 个模块 →
@@ -29,8 +29,20 @@ soundcore → snd → snd-timer → snd-pcm → snd-hwdep → snd-seq-device
 取自各模块 `modinfo` 的 `depends` 字段（2026-10-22 提取）。这些文件不在
 `/lib/modules` 的搜索路径里，因此不靠 `depmod` 解析，靠装载顺序保证。
 
-`src/snd-usb-audio.ko` 是唯一真正注册 USB 驱动的那个 —— dmesg 出现
+`snd-usb-audio.kmod` 是唯一真正注册 USB 驱动的那个 —— dmesg 出现
 `usbcore: registered new interface driver snd-usb-audio` 才算成功。
+
+## 为什么后缀是 `.kmod` 而不是 `.ko`
+
+OpenWrt 打包时 `scripts/gen-dependencies.sh` 会把包内每个 `*.ko` 的
+`.modinfo` 里 `depends=` 展开成模块依赖，再拿包自身提供的模块名做差集；
+差集非空就直接判打包失败。`snd-usb-audio` 与 `snd-usbmidi-lib` 依赖
+`usbcore`，而 `usbcore` 在 OpenWrt 各平台都是**内建**的、不存在
+`usbcore.ko` 可供，于是差集恒为 `usbcore.ko`，包在任何平台都编不过
+（2026-10-22 CI 实测）。
+
+改成 `.kmod` 后上述两处 `*.ko` glob 同时不再命中，问题消失；
+`insmod` 认的是 ELF 内容而非文件名，运行期行为完全不变。
 
 ## 为什么不在当前这台机器上生效
 

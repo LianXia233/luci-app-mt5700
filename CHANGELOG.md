@@ -5,6 +5,41 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.32] - 2026-10-22
+
+### 修复：随包内核模块让包在任何平台都编不过
+
+CI 报：
+
+```
+Package luci-app-mt5700 is missing dependencies for the following libraries:
+usbcore.ko
+```
+
+根因不在依赖声明（`LUCI_DEPENDS` 一直是空的），而在 OpenWrt 的打包期扫描：
+`scripts/gen-dependencies.sh` 会对包内**每一个 `-name '*.ko'`** 文件
+`objcopy -j .modinfo` 取出 `depends=`，展开成「需要哪些模块」，再与包自身
+`.provides`（同一套 `*.ko` 规则收的文件名）做差集，差集非空即 `Error 1`。
+
+本包随带的 11 个 ALSA 模块里，`snd-usb-audio` 与 `snd-usbmidi-lib` 的
+`depends` 含 `usbcore`。而 `usbcore` 在 OpenWrt 各平台都是**内建**的、
+根本不存在 `usbcore.ko` 可供 ⇒ 差集恒为 `{usbcore.ko}`，与目标平台无关，
+`ipq50xx` / `MT7987` 一样会炸。
+
+修法：11 个模块后缀由 `.ko` 改为 `.kmod`。两处 `*.ko` glob 同时不再命中，
+扫描需求与 provides 一起消失；`insmod` 认的是 ELF 内容而非文件名，
+运行期行为一字未变。`.gitattributes` 同步补 `*.kmod binary`（否则首行
+`* text=auto eol=lf` 会改坏 ELF）。
+
+### 新增守卫
+
+- `root/` 下出现任何 `*.ko` 即红 —— 这是本次故障的根因，不靠人记
+- 装载器取文件的后缀必须与磁盘一致（否则功能静默失效：找不到文件 → `return 4`）
+
+两条都做过「故意违反」验证：塞一个 `snd.ko` → 精确报出路径；把装载器改回
+`.ko` → 精确命中。第二条已固化进变异表（190 条），第一条属文件系统约束、
+无法用文本变异表达，只保留手工验证。
+
 ## [2.4.31] - 2026-10-22
 
 ### 变更：界面不再显示取证报告

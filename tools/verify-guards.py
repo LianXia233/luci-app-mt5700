@@ -2096,12 +2096,23 @@ MUTATIONS = [
         "模块名做 连字符→下划线 转换",
     ),
     (
+        # 后缀退回 .ko：OpenWrt 打包期 scripts/gen-dependencies.sh 会扫每个
+        # `*.ko` 的 .modinfo depends=，展开后与包自身 provides 做差集。本批
+        # 依赖 usbcore，而 usbcore 各平台内建、没有 usbcore.ko 可供 ⇒ 差集
+        # 恒非空，包在任何平台都编不过（2026-10-22 CI 真炸过）。
+        "装载器：模块后缀退回 .ko（打包扫 depends，usbcore.ko 必然缺失）",
+        "audioko",
+        'f="$dir/$m.kmod"\n',
+        'f="$dir/$m.ko"\n',
+        "装载器取的是 .kmod 后缀",
+    ),
+    (
         # SHA256SUMS 写成三段（名字 大小 哈希）：sha256sum -c 把大小当文件名，
         # 11 条全 FAILED —— 2026-10-22 真踩过，部署到设备时才发现。
         "哈希清单：格式写成三段（sha256sum -c 全部 FAILED）",
         "audiosum",
-        "  soundcore.ko\n",
-        "  soundcore.ko 14552\n",
+        "  soundcore.kmod\n",
+        "  soundcore.kmod 14552\n",
         "sha256sum -c 认的",
     ),
     (
