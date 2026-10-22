@@ -15,6 +15,7 @@
  *  7. incoming_call / new_sms / REJINFO(raw_data) 事件（TESTPUSH 触发后轮询）
  *  8. 新移植命令：^MONSSC / ^CASCELLINFO / ^SIMSQ
  *  9. cellscan 伪命令
+ * 10. 短信业务动作（5b 裸 AT 拼法 + 5c send/power/purge 全链路，含故障注入与射频回滚）
  *
  * 用法：node e2e-test.js [port] [authKey]
  */
@@ -175,6 +176,100 @@ async function main() {
 		check('旧拼法（长度+\\r+PDU 一条命令）拿不到提交回执',
 			!(r4.success && String(r4.data).indexOf('+CMGS') >= 0),
 			(r4.data ? String(r4.data).replace(/\r/g, '\\r').slice(0, 30) : r4.error) || '无应答');
+	}
+
+	/* 5c. 短信业务动作全链路（`sms` RPC → 后端事务 → mock 模组）
+	 *
+	 * 5b 验的是**裸 AT 拼法**，这里验的是**业务入口**：`send` 走两段式提交、
+	 * `power` 的先读 CEUS / 失败回滚 / 关闭只关 IMS。这几条路径过去只能靠手工
+	 * 故障注入复现，现在钉进仓库自带的 e2e（mock 提供 AT+TESTCEUS / TESTCEUSFAIL /
+	 * TESTCFUN1FAIL / TESTCPMSFAIL / TESTIMSFALSE 钩子，默认全关）。
+	 */
+	{
+		function smsRpc(action, extra, ms) {
+			return rpc('sms', Object.assign({ action: action, auth_key: AUTH_KEY }, extra || {}), ms || 30000);
+		}
+		function res(r) { return r.error ? null : (r.result || null); }
+		async function num(cmd, label) {
+			const r = atResult(await at(cmd));
+			const m = new RegExp('\\+' + label + ': *([0-9]+)').exec(String(r.data || ''));
+			return m ? parseInt(m[1], 10) : -1;
+		}
+		const cfun = function () { return num('AT+CFUN?', 'CFUN'); };
+		const ceus = function () { return num('AT+CEUS?', 'CEUS'); };
+		const hook = function (s) { return at('AT+TEST' + s); };
+		const clean = async function () {
+			await hook('CEUSFAIL=0'); await hook('CFUN1FAIL=0');
+			await hook('CPMSFAIL=0'); await hook('IMSFALSE=0');
+			await hook('CEUS=1');
+		};
+
+		/* 应用层发送：必须拿到模组的 +CMGS 回执（业务路径以前用的是拿不到回执的旧拼法） */
+		await clean();
+		const s = res(await smsRpc('send', { destination: '+8613800138000', message: 'e2e 两段式发送' }));
+		check('sms send 应用层拿到 +CMGS 回执',
+			!!s && s.outcome === 'accepted' && String((s.parts && s.parts[0] || {}).detail).indexOf('+CMGS') >= 0,
+			s ? s.outcome + ' / ' + String((s.parts && s.parts[0] || {}).detail).replace(/\r/g, '\\r').slice(0, 30) : '无结果');
+
+		/* CEUS 已是 1（出厂默认）：不该再关射频，点一次开启就断一次网是不可接受的 */
+		const p1 = res(await smsRpc('power', { enable: true }));
+		check('power(enable) 在 CEUS=1 时跳过射频重启',
+			!!p1 && p1.enabled === true && String((p1.stepsDone || []).join(' ')).indexOf('跳过射频重启') >= 0,
+			p1 ? JSON.stringify(p1.stepsDone) + ' detail=' + String(p1.failedDetail || '') : '无结果');
+		check('快路径执行后模组射频仍为 1', (await cfun()) === 1, 'CFUN=' + (await cfun()));
+
+		/* enable 传成字符串：必须报错，不能静默当成「关闭」执行反向动作 */
+		const bad = await smsRpc('power', { enable: 'true' });
+		check('power(enable 传字符串) 被拒而非执行关闭',
+			!!bad.error && String(bad.error.message || '').indexOf('布尔') >= 0,
+			bad.error ? String(bad.error.message) : JSON.stringify(bad.result));
+
+		/* 需要重启射频的设备（CEUS=0），且 AT+CFUN=1 被拒：
+		 * 这一条同时钉住两件事 —— 报失败，并且把射频回滚到 1。 */
+		await hook('CEUS=0'); await hook('CFUN1FAIL=1');
+		const p2 = res(await smsRpc('power', { enable: true }));
+		check('power(enable) 在 CFUN=1 被拒时报告失败在恢复射频',
+			!!p2 && p2.enabled === false && p2.failedAt === '恢复射频',
+			p2 ? String(p2.failedAt) + ' / ' + String(p2.failedDetail || '').slice(0, 60) : '无结果');
+		check('失败后已回滚射频（failedDetail 说明回滚结果）',
+			!!p2 && String(p2.failedDetail || '').indexOf('回滚') >= 0,
+			String((p2 || {}).failedDetail || ''));
+		check('回滚后模组侧射频确认为 1', (await cfun()) === 1, 'CFUN=' + (await cfun()));
+		await clean();
+
+		/* 射频已确认恢复时，失败不该再多补一次 AT+CFUN=1 */
+		await hook('CEUS=0'); await hook('IMSFALSE=1');
+		const p3 = res(await smsRpc('power', { enable: true }));
+		check('power(enable) 在 IMSSWITCH 被拒时带出模组原始错误码',
+			!!p3 && p3.enabled === false && p3.failedAt === '开启 LTE IMS' && String(p3.failedDetail || '').indexOf('308') >= 0,
+			p3 ? String(p3.failedAt) + ' / ' + String(p3.failedDetail || '').slice(0, 60) : '无结果');
+		check('射频恢复并注册的确认结果如实写进步骤',
+			!!p3 && String((p3.stepsDone || []).join(' ')).indexOf('注册网络') >= 0,
+			JSON.stringify((p3 || {}).stepsDone));
+		check('射频已 1 时不再重复补发（模组侧仍为 1）', (await cfun()) === 1, 'CFUN=' + (await cfun()));
+		await clean();
+
+		/* CEUS 写不进去：射频根本没动过，不该出现任何 CFUN 下发 */
+		await hook('CEUS=0'); await hook('CEUSFAIL=1');
+		const p4 = res(await smsRpc('power', { enable: true }));
+		check('CEUS 写入被拒时立即停住且不关射频',
+			!!p4 && p4.failedAt === '设置数据中心模式' && (await cfun()) === 1,
+			p4 ? String(p4.failedAt) + ' / ' + String(p4.failedDetail || '') : '无结果');
+		await clean();
+
+		/* 关闭：只关 IMS，不动射频、不改 CEUS、不清空短信 */
+		const p5 = res(await smsRpc('power', { enable: false }));
+		check('power(disable) 只关 IMS',
+			!!p5 && p5.enabled === false && !p5.failedAt && (await cfun()) === 1 && (await ceus()) === 1,
+			p5 ? JSON.stringify(p5.stepsDone) + ' CFUN=' + (await cfun()) + ' CEUS=' + (await ceus()) : '无结果');
+
+		/* 清空全部短信：部分存储区失败时，成功数与失败原因必须同时可见 */
+		await hook('CPMSFAIL=1');
+		const pg = res(await smsRpc('purge'));
+		await hook('CPMSFAIL=0');
+		check('purge 部分失败时 deleted 与 errors 同时可见',
+			!!pg && pg.deleted >= 1 && (pg.errors || []).length >= 1 && String((pg.errors || [])[0]).indexOf('4') >= 0,
+			pg ? 'deleted=' + pg.deleted + '/' + pg.requested + ' errors=' + JSON.stringify(pg.errors) : '无结果');
 	}
 
 	/* 7a. incoming_call 事件 */
