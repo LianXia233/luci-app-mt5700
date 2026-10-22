@@ -162,8 +162,9 @@ fn resolve() -> Resolved {
         std::env::set_var("TZ", t);
     }
 
-    // 首选 libc：它连夏令时一起算对。
-    let libc_secs = libc_offset_secs();
+    // 首选 libc：它连夏令时一起算对 —— 但**只在真的读到时区配置时**才采信，
+    // 理由见 [libc_offset_if_configured]。
+    let libc_secs = libc_offset_if_configured(tz.as_deref(), libc_offset_secs());
 
     // 内置解析器：给非 Unix 宿主兜底，也用于判断「有没有 DST 规则」。
     let parsed = tz.as_deref().and_then(parse_posix_tz);
@@ -177,6 +178,21 @@ fn resolve() -> Resolved {
     });
 
     Resolved { offset, secs, tz, source, dst_ignored }
+}
+
+/// 只有**确实读到了时区配置**时才采信 libc 给的偏移。
+///
+/// 没有任何 TZ 配置时，glibc 与 musl 的 `localtime_r` 都不报错，而是静默按 UTC
+/// 返回 `gmtoff = 0`。那恰好是本模块要用北京时间兜底的情形 —— 让 libc 的 0 参与
+/// 决策，等于「日志写着回落北京时间、时间戳却按 UTC 出」，实机（固件不打包
+/// tzdata）与 CI 宿主都会踩到。simulate-push 的第 3 组时间口径用例钉的就是这条。
+///
+/// 读到配置时一切照旧：`TZ` 已回写进环境，libc 的结果（含 DST）优先于内置解析器。
+fn libc_offset_if_configured(tz: Option<&str>, gmtoff: Option<i32>) -> Option<i32> {
+    match tz {
+        Some(_) => gmtoff,
+        None => None,
+    }
 }
 
 /// 偏移决策（纯函数，便于单测覆盖三级回退的每一种组合）。
@@ -517,6 +533,24 @@ mod tests {
     fn pick_offset_defaults_to_beijing() {
         // 系统完全没配时区 → 北京时间。这就是需求里的「默认北京时间」。
         assert_eq!(pick_offset(None, None), (BEIJING_OFFSET_SECS, false));
+    }
+
+    #[test]
+    fn libc_offset_is_ignored_when_nothing_is_configured() {
+        // 没配时区的宿主上 libc 会给出 gmtoff = 0（UTC），它必须被丢掉，
+        // 否则「默认北京时间」永远轮不到，日志与时间戳还会互相打脸。
+        assert_eq!(libc_offset_if_configured(None, Some(0)), None);
+        assert_eq!(libc_offset_if_configured(None, Some(-5 * 3600)), None);
+        // 读到配置时原样采信（含 libc 算出的 DST 结果）。
+        assert_eq!(libc_offset_if_configured(Some("CST-8"), Some(8 * 3600)), Some(8 * 3600));
+        assert_eq!(libc_offset_if_configured(Some("GMT0BST"), Some(3600)), Some(3600));
+        // 配置读到了但 libc 不可用（非 Unix 宿主）：仍交给内置解析器。
+        assert_eq!(libc_offset_if_configured(Some("CST-8"), None), None);
+        // 与 pick_offset 串起来的最终效果：无配置 → 北京，有配置 → 跟着 libc。
+        assert_eq!(
+            pick_offset(libc_offset_if_configured(None, Some(0)), None),
+            (BEIJING_OFFSET_SECS, false)
+        );
     }
 
 
