@@ -4,7 +4,7 @@
  *
  * 做法：不启动浏览器，也不依赖 LuCI 运行时 ——
  *   1. 用极简 DOM 桩提供 document / E() / localStorage，让 sms_center.js 的
- *      render() 能像在真机上一样跑完（含 refresh → parseCMGL → 聚合 → 渲染）；
+ *      render() 能像在真机上一样跑完（含 refresh → 后端条目 → 聚合 → 渲染）；
  *   2. 输入是 tests/mock-modem/sms-fixtures.js 生成的真实 PDU（DELIVER + SUBMIT），
  *      与 mock 模组返回的是同一份样本，避免「测试用的样本和实机不一样」；
  *   3. 断言落在最终的 DOM 结构上：分区数量、分区标题与条数、气泡顺序、时间文案。
@@ -151,6 +151,8 @@ function textsOf(nodes) {
 /* ==================== 3. 装载 sms_center.js 并渲染 ==================== */
 
 const pduList = fixtures.buildConversations();
+/* CMGL 原文只当**诱饵**：视图若还自己去下发 AT+CMGL=4 并解析原文，
+ * 下面的 tripwire 断言就会挂；正常路径根本不读它（列表来自后端事务）。 */
 const cmgl = fixtures.cmglText(pduList);
 
 function loadView(Parse, ls, opts) {
@@ -229,7 +231,7 @@ function loadView(Parse, ls, opts) {
 	 * 返回 undefined 时走下面的默认应答（CMGL / CPMS 真实样本，其余 OK）。
 	 */
 	const options = opts || {};
-	const STORAGE = { used: 6, total: 50, mem1: 'SM', mem2: 'SM', mem3: 'MT' };
+	const STORAGE = { used: 6, total: 50, mem1: 'SM', mem2: 'SM', mem3: 'ME' };
 	const AtWs = {
 		client: {
 			sendCommand: (cmd) => {
@@ -244,7 +246,7 @@ function loadView(Parse, ls, opts) {
 				 * `AT^CPMS?` 直接回 ERROR。这里刻意让私有写法失败 ——
 				 * 后端一旦退回 `^` 前缀，存储用量断言就会立刻挂掉。
 				 */
-				if (cmd === 'AT+CPMS?') return Promise.resolve({ success: true, data: '+CPMS: "SM",6,50,"SM",6,50,"MT",0,50' });
+				if (cmd === 'AT+CPMS?') return Promise.resolve({ success: true, data: '+CPMS: "SM",6,50,"SM",6,50,"ME",0,50' });
 				if (cmd === 'AT^CPMS?') return Promise.resolve({ success: false, error: 'ERROR' });
 				return Promise.resolve({ success: true, data: 'OK' });
 			},
@@ -329,7 +331,7 @@ async function main() {
 	check('相对 VP 的 SUBMIT 时间未知', parsedDirect[1].date, null);
 	check('绝对 VP 的 SUBMIT 标记为近似时间', parsedDirect[5].timeApprox, true);
 
-	console.log('\n=== 1. 渲染（refresh → parseCMGL → 聚合 → 分区）===');
+	console.log('\n=== 1. 渲染（refresh → 后端条目 → 聚合 → 分区）===');
 	const { page, calls } = loadView(Parse, ls);
 	/* refresh 走 Promise，等微任务队列清空后再读 DOM */
 	await new Promise((r) => setImmediate(r));

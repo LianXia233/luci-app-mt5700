@@ -12,7 +12,7 @@
  * 环境变量：
  *   MOCK_QUIET=1      关掉自发的周期 URC（信号 / 伪来电 / 伪短信）。
  *                     做推送模拟时必开：自发 URC 会混进结果，让收到的推送无法归因。
- *   MOCK_CMGL_TEXT=1  AT+CMGL=4 返回文本模式样本，而非 PDU 夹具。
+ *   MOCK_CMGL_TEXT=1  AT+CMGL=4 返回 9.9 的文本模式样本，而非 9.8 的 PDU 夹具。
  *
  * 短信内容来自 sms-fixtures.js（时间 = 当前北京时间 − 偏移），
  * 与前端渲染测试（sms-center-render.js）共用同一份样本。
@@ -59,8 +59,27 @@ const state = {
 	// USB 网口永远拿不到 DHCP —— e2e 用它做回归（见 e2e-test.js 第 10 项）。
 	autodial: 1,
 	autodialMode: 2,
+	/* 自动拨号的 APN 参数（手册 16.18.3）：协议/IP、APN、用户名、密码、鉴权 0=无 1=PAP 2=CHAP */
+	dialProtocol: 'IP',
+	dialApn: '',
+	dialUser: '',
+	dialPass: '',
+	dialAuth: 0,
 	// USB 数据面状态：1=就绪。置 0 会让后端进入重试与周期对账路径。
-	ndis: 1
+	ndis: 1,
+	/*
+	 * AT^TDCFG / AT^IPFILTERSWITCH 的持久化状态（手册 16.23.4、16.24：掉电保存）。
+	 * 缺省值全部按手册 16.23.3 的「缺省」标注取：mode=1、PostRoute=0（未配置）、
+	 * Dmz="not cfg"、share-pdp=0、IP 过滤=0（未使能）。
+	 */
+	infcfgMode: 1,
+	postRoute: 0,
+	dmz: 'not cfg',
+	lhcm: '192.168.10.1,255.255.255.0,192.168.10.100,192.168.10.200',
+	sharePdp: 0,
+	ipFilter: 0,
+	/* USB 端口形态（手册 11.8.3）：0=Linux ECM 正常模式，掉电保存，设置后模组重启。 */
+	setmode: 0
 };
 
 /* 依次轮换收件箱索引，保证每次 AT+TESTPUSH=2 都能读到一条真实存在的短信 */
@@ -87,6 +106,8 @@ const FORBIDDEN = [
 	/^AT\+EGMR/i,
 	/^AT\+WRIMEI/i,
 	/^AT\^IMEI/i,
+	// ^PHYNUM 在厂商四份文档里根本不存在，历史版本曾拿它写 IMEI：一并拦掉
+	/^AT\^PHYNUM/i,
 	/^AT\+SN=/i,
 	/^AT\^SN=/i,
 	// 恢复出厂设置 / 清 NV
@@ -151,11 +172,19 @@ function replyFor(cmd) {
 	if (c === 'AT^TXPOWER?') return '^TXPOWER: 0,15,23\r\nOK';
 	if (c === 'AT^NTXPOWER?') return '^NTXPOWER: 0,1,20,23\r\nOK';
 	if (c === 'AT+CGPADDR') return '+CGPADDR: 1,"10.10.1.2"\r\n+CGPADDR: 2,"2408:8400:8000:0:0:0:0:1"\r\nOK';
-	if (c === 'AT^CHIPTEMP?') return '^CHIPTEMP: 42\r\nOK';
+	/*
+	 * 手册 17.1.1/17.1.5：^CHIPTEMP 恒为 **12 个字段**（sub3G,sub6G,MIMO,TCXO,
+	 * peri1,peri2,ap1,ap2,modem1,modem2,bbp1,bbp2），单位 0.1℃，查询失败填 65535。
+	 * 夹具用手册例句，确保前端按下标取数时 12 项都能对齐（只回一个数字会让
+	 * 除 sub3GPA 之外的温度全部读不到，掩盖字段错位）。
+	 */
+	if (c === 'AT^CHIPTEMP?') return '^CHIPTEMP: 368,364,362,365,360,360,380,400,380,400,360,370\r\nOK';
 	if (c === 'AT+CPIN?') return '+CPIN: READY\r\nOK';
 	/*
 	 * 短信列表与单条读取喂**动态夹具**（sms-fixtures.js），与短信中心渲染测试同源。
-	 * MOCK_CMGL_TEXT=1 时退回文本模式样本，覆盖前端的非 PDU 分支。
+	 * 这两条应答的读者是后端的 PDU 解析（Rust pdu::parse_cmgl_response），形状必须严格按
+	 * 手册 9.8.1 / 9.10.1 —— 夹具一旦写成文本模式的样子，后端解析器就被 mock 哄着跑。
+	 * MOCK_CMGL_TEXT=1 时改回 9.9 的文本模式样本，覆盖「模组回了不该回的形状」这一路。
 	 */
 	if (c === 'AT+CMGL=4') {
 		if (process.env.MOCK_CMGL_TEXT === '1') {
@@ -173,8 +202,9 @@ function replyFor(cmd) {
 	if (c === 'AT+CSCA?') return '+CSCA: "' + state.csca + '",145\r\nOK';
 	if (c.startsWith('AT+CSCA=')) { const m = c.match(/AT\+CSCA="([^"]+)"/); if (m) state.csca = m[1]; return 'OK'; }
 	/* 存储用量与夹具条数保持一致，否则界面会显示「存储 0/50」却列出 6 条短信 */
-	if (c === 'AT^CPMS?') return '^CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"MT",0,50\r\nOK';
-	if (c === 'AT+CPMS?') return '+CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"MT",0,50\r\nOK';
+	/* 手册 8.1.3：<mem> 只有 "SM"（(U)SIM）与 "ME"（FLASH）两个值，模型不编 MT。 */
+	if (c === 'AT^CPMS?') return '^CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"ME",0,50\r\nOK';
+	if (c === 'AT+CPMS?') return '+CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"ME",0,50\r\nOK';
 	if (c.startsWith('AT+CPMS=')) {
 		/* AT+TESTCPMSFAIL=1：切到 SM 时被拒（手册里 +CME ERROR: 4 = 操作不允许），
 		 * 用于验证「清空全部短信」部分失败时 deleted 与 errors 同时可见。 */
@@ -212,39 +242,126 @@ function replyFor(cmd) {
 	if (c.startsWith('AT^LTEFREQLOCK=')) return 'OK';
 	if (c === 'AT^NRFREQLOCK?') return '^NRFREQLOCK: 0,0,0,""\r\nOK';
 	if (c.startsWith('AT^NRFREQLOCK=')) return 'OK';
+	/* 手册 13.17：私有前缀是 ^C5GOPTION，且插件只查询、从不写入 —— 早先这里留过
+	 * 一条 `AT+C5GOPTION=0,1,0` 的写入夹具（前缀写错成 +，也没有调用方），删掉。 */
 	if (c === 'AT^C5GOPTION?') return '^C5GOPTION: 0,1,0\r\nOK';
-	if (c === 'AT+C5GOPTION=0,1,0') return 'OK';
 	if (c === 'AT^SYSINFO?') return '^SYSINFO: 0,7,2,0\r\nOK';
 	if (c === 'AT+CGDCONT?') return '+CGDCONT: 1,"IP","ims","",0,0,0,0,1,1,1\r\nOK';
 	if (c.startsWith('AT+CGDCONT=')) return 'OK';
 	if (c.startsWith('AT+CGACT=')) return 'OK';
-	if (c.startsWith('AT^NDISSTATQRY')) return '^NDISSTATQRY: ' + state.ndis + ',1,0,0,0,0,0\r\nOK';
+	/* 手册 16.4.1/16.4.5：^NDISSTATQRY? 回 "<cid>,<stat>,<err>,<wx_state>,<PDP_type>[,<stat>,…]"，
+	 * 形如 ^NDISSTATQRY: 1,1,,,"IPV4",0,,,"IPV6" —— 首字段是 CID，第二字段才是状态。
+	 * 夹具此前把 state.ndis 放在首字段（等于永远告诉调用方「CID 就是 ndis 的值」），
+	 * 正好掩盖了解析端「按首字段判连接」的错误，现在按手册形状回。 */
+	if (c.startsWith('AT^NDISSTATQRY')) {
+		return '^NDISSTATQRY: 1,' + state.ndis + ',,,"IPV4",0,,,"IPV6"\r\nOK';
+	}
 	if (c === 'AT+CGACT?') return '+CGACT: 1,1\r\nOK';
 	// 注意前缀：MT5700M 的私有命令带 '^'，与此处其它私有命令
 	// （AT^NDISSTATQRY / AT^SETMODE / AT^TDCFG）一致。此前这里少写了一个 '^'，
 	// 基于 mock 的联调永远看不到自动拨号成功，把真实缺陷掩盖成夹具缺陷。
+	/*
+	 * 手册 16.18.1 的写入形式：
+	 *   AT^SETAUTODIAL=<enable>,<dial_mode>,[[<protocol>],[<apn>],[<usrname>,<password>,<authtype>]]
+	 * 查询按 16.18.5 的实例回全字段。早先夹具把查询结果写死成 `"IP","","","",0`，
+	 * 且无视 enable/dial_mode 的取值范围 —— 前端「写 APN 后回读」这条链路在本地
+	 * 永远看到的是同一个串，改没改进模组根本测不出来。现在真实存值并按 16.18.3 校验。
+	 */
 	if (c === 'AT^SETAUTODIAL?') {
-		return '^SETAUTODIAL: ' + state.autodial + ',' + state.autodialMode + ',"IP","","","",0\r\nOK';
+		return '^SETAUTODIAL: ' + state.autodial + ',' + state.autodialMode +
+			',"' + state.dialProtocol + '","' + state.dialApn + '","' + state.dialUser +
+			'","' + state.dialPass + '",' + state.dialAuth + '\r\nOK';
 	}
 	if (c.startsWith('AT^SETAUTODIAL=')) {
-		const m = c.match(/AT\^SETAUTODIAL=(\d+)(?:,(\d+))?/);
-		if (m) {
-			state.autodial = parseInt(m[1], 10);
-			if (m[2] !== undefined) state.autodialMode = parseInt(m[2], 10);
+		var ad = c.slice('AT^SETAUTODIAL='.length).match(/(?:[^,"]+|"[^"]*")+/g) || [];
+		var unq = function (v) { return String(v).trim().replace(/^"|"$/g, ''); };
+		if (!/^[01]$/.test(unq(ad[0] || ''))) return '+CME ERROR: 3';
+		/* 16.18.2：关闭自动拨号时不带 dial_mode */
+		if (ad[1] !== undefined && !/^[012]$/.test(unq(ad[1]))) return '+CME ERROR: 3';
+		state.autodial = parseInt(unq(ad[0]), 10);
+		if (ad[1] !== undefined) state.autodialMode = parseInt(unq(ad[1]), 10);
+		if (ad[2] !== undefined) state.dialProtocol = unq(ad[2]);
+		if (ad[3] !== undefined) state.dialApn = unq(ad[3]);
+		if (ad[4] !== undefined) state.dialUser = unq(ad[4]);
+		if (ad[5] !== undefined) state.dialPass = unq(ad[5]);
+		if (ad[6] !== undefined) {
+			if (!/^[012]$/.test(unq(ad[6]))) return '+CME ERROR: 3';
+			state.dialAuth = parseInt(unq(ad[6]), 10);
 		}
 		return 'OK';
 	}
-	if (c === 'AT^SETMODE?') return '^SETMODE: 2,0,3\r\nOK';
-	if (c.startsWith('AT^SETMODE=')) return 'OK';
-	if (c === 'AT^TDCFG?') return '^TDCFG: 1,1,1,1\r\nOK';
-	if (c.startsWith('AT^TDCFG=')) return 'OK';
-	if (c === 'AT^IPFILTERSWITCH=0' || c === 'AT^IPFILTERSWITCH?') return 'OK';
-	if (c === 'AT^DMZ=0') return 'OK';
-	if (c.startsWith('AT^DMZ=')) return 'OK';
+	/*
+	 * 手册 11.8：查询应答是 "^SETMODE: <mode>"（11.8.1），11.8.5 的举例又只回裸数字；
+	 * 两种都可能在真机上出现，这里按 11.8.1 的规范形态回，让前端的兼容解析真正被覆盖。
+	 * <mode> 取 0~6、8（11.8.3），7=Windows MBIM 标注「暂不支持」，真机会拒绝，夹具同样拒绝。
+	 */
+	if (c === 'AT^SETMODE?') return '^SETMODE: ' + state.setmode + '\r\nOK';
+	if (c.startsWith('AT^SETMODE=')) {
+		var sm = c.slice('AT^SETMODE='.length).trim();
+		if (!/^[0-68]$/.test(sm)) return '+CME ERROR: 3';
+		state.setmode = parseInt(sm, 10);
+		return 'OK';
+	}
+	/*
+	 * 手册 16.23.1 的查询结果不是逗号串，而是「^TDCFG:」空行头 + 5 行键值文本：
+	 *   Mode : <v> / Dmz : <v> / PostRoute：<v> / LHCM: <4 段> / Share-pdp：<v>
+	 * 16.23.5 的示例又写成半角冒号（PostRoute: 1），两种冒号都可能出现在真机上。
+	 * 早先夹具回的是 '^TDCFG: 1,1,1,1'，dial.js 的键值解析在本地联调里永远读不到值，
+	 * DMZ 也永远显示「未配置」——现在按手册形状回，并按 16.23.2/16.23.3 校验写入。
+	 */
+	if (c === 'AT^TDCFG?') {
+		return '^TDCFG:\r\n' +
+			'Mode : ' + state.infcfgMode + '\r\n' +
+			'Dmz : ' + state.dmz + '\r\n' +
+			'PostRoute：' + state.postRoute + '\r\n' +
+			'LHCM: ' + state.lhcm + '\r\n' +
+			'Share-pdp：' + state.sharePdp + '\r\n' +
+			'OK';
+	}
+	if (c.startsWith('AT^TDCFG=')) {
+		var tdcfg = c.slice('AT^TDCFG='.length())
+			.match(/^"infcfg"\s*,\s*"([^"]+)"\s*,\s*(.*)$/);
+		if (!tdcfg) return '+CME ERROR: 3';
+		var tdfunc = tdcfg[1].toLowerCase();
+		var tdval = tdcfg[2].trim();
+		if (tdfunc === 'mode') {
+			if (tdval !== '1' && tdval !== '2') return '+CME ERROR: 3';
+			state.infcfgMode = parseInt(tdval, 10);
+			return 'OK';
+		}
+		if (tdfunc === 'postroute') {
+			if (!/^[012]$/.test(tdval)) return '+CME ERROR: 3';
+			if (tdval === '1' && state.dmz !== 'not cfg') return '+CME ERROR: 3';
+			state.postRoute = parseInt(tdval, 10);
+			return 'OK';
+		}
+		if (tdfunc === 'dmz') {
+			var host = (tdval.match(/^"([^"]*)"$/) || [])[1];
+			if (host === undefined) return '+CME ERROR: 3';
+			/* 16.23.3：'0' 删除配置，否则必须是 IPv4 地址；16.23.2：与后路由互斥 */
+			if (host !== '0' && !/^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(host)) return '+CME ERROR: 3';
+			if (host !== '0' && state.postRoute === 1) return '+CME ERROR: 3';
+			state.dmz = host === '0' ? 'not cfg' : host;
+			return 'OK';
+		}
+		if (tdfunc === 'share-pdp') {
+			if (!/^[01]$/.test(tdval)) return '+CME ERROR: 3';
+			state.sharePdp = parseInt(tdval, 10);
+			return 'OK';
+		}
+		if (tdfunc === 'lhcm') {
+			state.lhcm = tdval;
+			return 'OK';
+		}
+		return '+CME ERROR: 3';
+	}
+	/* 手册 16.24.1：查询回 "^IPFILTERSWITCH: <switch>"，缺省 0=未使能 */
+	if (c === 'AT^IPFILTERSWITCH?') return '^IPFILTERSWITCH: ' + state.ipFilter + '\r\nOK';
+	if (c === 'AT^IPFILTERSWITCH=0') { state.ipFilter = 0; return 'OK'; }
+	if (c === 'AT^IPFILTERSWITCH=1') { state.ipFilter = 1; return 'OK'; }
 	if (c === 'AT^CONNECT?') return '+CONNECT: 0\r\nOK';
 	if (c === 'AT^SYSCFGEX?') return '^SYSCFGEX: 1,0,1,1,1,2FFFFFFFFFFFFFFFF,0,0,0,0,0,0,0\r\nOK';
 	if (c.startsWith('AT^SYSCFGEX=')) return 'OK';
-	if (c === 'AT^PHYNUM?') return '^PHYNUM: 0,0\r\nOK';
 	if (c === 'AT^SCICHG?') return '^SCICHG: 0\r\nOK';
 	if (c.startsWith('AT^SCICHG=')) return 'OK';
 	if (c === 'AT^HVSST?') return '^HVSST: 1,1,1,1\r\nOK';
@@ -254,8 +371,25 @@ function replyFor(cmd) {
 	if (c.startsWith('AT+CLCK=')) return 'OK';
 	if (c === 'AT+CPWD?') return '+CPWD: "SC",8\r\nOK';
 	if (c.startsWith('AT+CPWD=')) return 'OK';
-	if (c === 'AT^TDPCIELANCFG?') return '^TDPCIELANCFG: 0,0\r\nOK';
-	if (c === 'AT^TDPMCFG?') return '^TDPMCFG: 0,0,0\r\nOK';
+	/*
+	 * 手册 11.19 / 11.16 的严格参数形状（夹具要像真机一样拒绝参数不足的写入，
+	 * 否则早先那种 `AT^TDPMCFG=1`（缺 3 个保留位）的错误命令在本地永远是绿的）：
+	 *   AT^TDPMCFG=<mode>,<mode>,<mode>,<mode>   目前只有 byte[0]=PCIe 有效，每位 0/1
+	 *   AT^TDPCIELANCFG=<n>                      n 只能是 1(RTL8111 1G) / 2(RTL8125 2.5G)
+	 * 读命令：^TDPMCFG 回 4 个字段，^TDPCIELANCFG 回 1 个字段。
+	 */
+	if (c.startsWith('AT^TDPMCFG=')) {
+		var pm = c.slice('AT^TDPMCFG='.length).split(',').map(function (v) { return v.trim(); });
+		if (pm.length !== 4 || pm.some(function (v) { return !/^[01]$/.test(v); })) return '+CME ERROR: 3';
+		return 'OK';
+	}
+	if (c.startsWith('AT^TDPCIELANCFG=')) {
+		var pv = c.slice('AT^TDPCIELANCFG='.length).trim();
+		if (pv !== '1' && pv !== '2') return '+CME ERROR: 3';
+		return 'OK';
+	}
+	if (c === 'AT^TDPCIELANCFG?') return '^TDPCIELANCFG: 1\r\nOK';
+	if (c === 'AT^TDPMCFG?') return '^TDPMCFG: 1,0,0,0\r\nOK';
 	if (c === 'AT^NRRCCAPQRY?') return '^NRRCCAPQRY: 1,1,1,0,0\r\nOK';
 	if (c.startsWith('AT^NRRCCAPCFG=')) return 'OK';
 	if (c === 'AT^THERMAUTOFUN?') return '^THERMAUTOFUN: 1,85,0,0\r\nOK';
@@ -270,12 +404,14 @@ function replyFor(cmd) {
 	if (c.startsWith('AT^THERM')) return 'OK';
 	/* AT&F / AT+RESET / AT^RESET 已由上面的 FORBIDDEN 护栏拦截，此处刻意不实现 */
 	if (c === 'AT+CGMR') return 'MT5700M_CN_A0_V002\r\nOK';
-	if (c === 'AT^FOTASTATE?') return '^FOTASTATE: 0\r\nOK';
+	/* 手册 15.5.3：状态取值 10/11/12/13/14/20/30/31/40/50/70，空闲是 10（不是 0） */
+	if (c === 'AT^FOTASTATE?') return '^FOTASTATE: 10\r\nOK';
 	if (c.startsWith('AT^FOTA')) return 'OK';
 	if (c === 'AT^CELLSCAN=STATE') return '^CELLSCAN: 0,0\r\nOK';
 	if (c === 'AT^CELLSCAN=ABORT') return '^CELLSCAN: 0,0\r\nOK';
 	if (c.startsWith('AT^CELLSCAN=')) return '^CELLSCAN: 0,0\r\nOK';
-	if (c === 'AT+NWTIME?') return '+NWTIME: 25/09/10,10:30:00+32\r\nOK';
+	/* 手册 13.8：私有前缀是 ^NWTIME，格式 <yy/MM/dd>,<hh:mm:ss±tz>,<dt>（tz 单位 15 分钟，+32=东八区） */
+	if (c === 'AT^NWTIME?') return '^NWTIME: 25/09/10,10:30:00+32,00\r\nOK';
 	if (c === 'AT+CMGS=0') return 'ERROR'; // 零长度 TPDU 非法，真实模组直接拒绝
 	/*
 	 * AT+CMGS=<len> 与 PDU 提交不在 replyFor 里处理：前者要回**无换行结尾**的
