@@ -311,8 +311,14 @@ return L.view.extend({
 			if (byIds.length) {
 				var gById = E('optgroup', { label: '稳定路径（推荐，不受插口变化影响）' });
 				byIds.forEach(function (p) {
-					// if12 = PC UI Interface（AT 口），是本插件最常用的那个
-					var hint = /-if12(-|$)/.test(p) ? '（PCUI / AT 口）' : '';
+					/*
+					 * PCUI（AT 口）在 by-id 名字里的接口号：
+					 * 《MT5700M-CN USB 接口应用指南》Linux 侧端口表给出 NCM 0x00/0x01、
+					 * DIAG 0x02、PCUI 0x03、Serial_B 0x04、Serial_C 0x05、GPS 0x06，
+					 * 文档口径是 if03；本机实测固件枚举出的接口更多，AT 口落在 if12。
+					 * 两个都认，避免换固件/换 USB 形态后提示消失。
+					 */
+					var hint = /-if(03|12)(-|$)/.test(p) ? '（PCUI / AT 口）' : '';
 					gById.appendChild(E('option', { value: p }, p + hint));
 				});
 				serialSel.appendChild(gById);

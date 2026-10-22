@@ -96,7 +96,7 @@ return L.view.extend({
 			dhcpv4: { ipv4Address: '', subnetMask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
 			dhcpv6: { ipv6Address: '', netmask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
 			ipv6Cap: { capValue: 0, description: '' },
-			mcs: { dlMod: '', ulMod: '', dlRank: null, ulRank: null, dlMcs: null, ulMcs: null, dlEff: 0, ulEff: 0 },
+			mcs: { dlMod: '', ulMod: '', dlMcs: null, ulMcs: null, dlCw: null, ulCw: null, tm: '' },
 			modemInfo: { manufacturer: '', model: '', fw: '', imei: '', imsi: '', iccid: '' },
 			// 签约速率（Session-AMBR，来自 AT+C5GQOSRDP=1）
 			subRate: null,
@@ -467,7 +467,7 @@ return L.view.extend({
 		rowAdv1.appendChild(carrierCard);
 
 		var tempBadge = E('span');
-		var tempCard = Mt5700.card('模组芯片温度矩阵', '7 通道芯片结温物理分布', tempBadge);
+		var tempCard = Mt5700.card('模组芯片温度矩阵', '12 通道芯片结温（手册 17.1.1）', tempBadge);
 		var tempBody = E('div');
 		tempCard._body.appendChild(tempBody);
 		rowAdv1.appendChild(tempCard);
@@ -1629,8 +1629,7 @@ return L.view.extend({
 			// Tab 1: 网络信息
 			var dlModText = state.mcs.dlMod ? state.mcs.dlMod + ' (DL)' : '—';
 			var ulModText = state.mcs.ulMod ? state.mcs.ulMod + ' (UL)' : '—';
-			var dlRankText = state.mcs.dlRank != null ? state.mcs.dlRank + ' 层并发 (DL)' : '—';
-			var ulRankText = state.mcs.ulRank != null ? state.mcs.ulRank + ' 层 (UL)' : '—';
+			var mimoText = mimoSummary(state.mcs);
 
 			tabPanes['tab-net'].innerHTML =
 				'<table class="mt-info-table">' +
@@ -1639,7 +1638,7 @@ return L.view.extend({
 				'  <tr><td>运营商</td><td>' + (state.operator || '—') + '</td></tr>' +
 				'  <tr><td>连接时长</td><td>' + duration + '</td></tr>' +
 				'  <tr><td>调制方式</td><td><span class="mt-pill-tag mt-pill-cyan">QAM</span> ' + (state.mcs.dlMod ? (dlModText + ' / ' + ulModText) : '— (模组未上报)') + '</td></tr>' +
-				'  <tr><td>空间流 (MIMO)</td><td><span class="mt-pill-tag mt-pill-purple">MIMO</span> ' + (state.mcs.dlRank != null ? (dlRankText + ' / ' + ulRankText) : '— (模组未上报)') + '</td></tr>' +
+				'  <tr><td>空间流 / 传输模式</td><td><span class="mt-pill-tag mt-pill-purple">MIMO</span> ' + (mimoText || '— (模组未上报)') + '</td></tr>' +
 				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci != null && c.pci !== '' ? c.pci : '—') + '</td></tr>' +
 				'  <tr><td>基站标识 (eNB/gNB)</td><td>' + (c.cid || '—') + (c.lac ? ' (TAC ' + c.lac + ')' : '') + '</td></tr>' +
 				'</table>';
@@ -1823,14 +1822,22 @@ return L.view.extend({
 			var t = state.temps || {};
 			/* 查询失败/未就绪时显示占位符，不能用 47/46/43.3 这类合成默认值
 			 * 冒充实测结温 —— 用户会拿假温度去做散热判断。 */
+			/* 手册 17.1.1：^CHIPTEMP 恒定上报 12 路传感器（sub3G/sub6G/MIMO/TCXO/
+			 * peri1/peri2/ap1/ap2/modem1/modem2/bbp1/bbp2），全部展示，
+			 * 只挑 7 路会把 bbp/peri 的偏高悄悄藏起来。 */
 			var items = [
-				{ label: 'Modem1 基带', value: t.modem1 },
+				{ label: 'Sub3G PA', value: t.sub3GPA },
+				{ label: 'Sub6G PA', value: t.sub6GPA },
+				{ label: 'MIMO PA', value: t.mimoPa },
+				{ label: 'TCXO 晶振', value: t.tcxo },
+				{ label: 'Peri1 外设', value: t.peri1 },
+				{ label: 'Peri2 外设', value: t.peri2 },
 				{ label: 'AP1 主控', value: t.ap1 },
 				{ label: 'AP2 核心', value: t.ap2 },
-				{ label: 'Sub6G PA', value: t.sub6GPA },
-				{ label: 'Sub3G PA', value: t.sub3GPA },
-				{ label: 'MIMO PA', value: t.mimoPa },
-				{ label: 'TCXO 晶振', value: t.tcxo }
+				{ label: 'Modem1 基带', value: t.modem1 },
+				{ label: 'Modem2 基带', value: t.modem2 },
+				{ label: 'BBP1 基带处理', value: t.bbp1 },
+				{ label: 'BBP2 基带处理', value: t.bbp2 }
 			];
 			var hasAnyTemp = items.some(function (it) { return it.value != null && !isNaN(parseFloat(it.value)); });
 			if (!hasAnyTemp) {
@@ -1872,8 +1879,15 @@ return L.view.extend({
 			tempBody.appendChild(grid);
 
 			if (tempBadge) {
+				/* 分级与格子的着色同一口径（≥75 危险、≥60 偏高，其余正常）。
+				 * 早先这里恒写「温和」——那是已删除的 tempLevel 分级留下的死文案，
+				 * 会让 90℃ 的 PA 也显示成温和。散热看的是最热的结温，
+				 * 故按最高通道定级，同时给出均温参考。 */
 				tempBadge.innerHTML = '';
-				tempBadge.appendChild(Mt5700.badge(avgC != null ? ('均温 ' + avgC + ' ℃ · 温和') : '暂无温度读数', 'info'));
+				var hot = parseFloat(maxC);
+				var lv = hot >= 75 ? { text: '过热', kind: 'danger' }
+					: (hot >= 60 ? { text: '偏高', kind: 'warning' } : { text: '温和', kind: 'info' });
+				tempBadge.appendChild(Mt5700.badge('最高 ' + hot + ' ℃ · 均温 ' + avgC + ' ℃ · ' + lv.text, lv.kind));
 			}
 		}
 
@@ -1909,13 +1923,29 @@ return L.view.extend({
 		}
 
 		/* ---------- 调制方式与空间流动态 SVG 渲染 (折叠面板内部，真实读取 AT^MCS) ---------- */
+
+		/*
+		 * 空间流文案。手册里没有「当前 rank / N 层 MIMO」这一项：
+		 *   - AT^MCS（13.22）只给 direction、rat、MCS 表号与各码字 MCS；
+		 *   - AT^TRANSMODE?（13.31）只给 LTE 的传输模式 TM1~TM10。
+		 * 早先把 ^MCS 的 f1（制式标志 0=LTE/1=NR）当成层数显示，NR 下恒为
+		 * 「1 层」、LTE 下为「0 层」，是假数据。现在只报两个真实量：
+		 * LTE 传输模式 + 下行码字数（2 码字即两流空间复用）。
+		 */
+		function mimoSummary(m) {
+			var parts = [];
+			if (m.tm) parts.push(m.tm);
+			if (m.dlCw != null) parts.push('下行 ' + m.dlCw + ' 码字');
+			if (m.ulCw != null) parts.push('上行 ' + m.ulCw + ' 码字');
+			return parts.join(' · ');
+		}
+
 		function renderMcsAdv() {
 			mcsBody.innerHTML = '';
 			var m = state.mcs;
 			var dlMod = m.dlMod || '';
 			var ulMod = m.ulMod || '';
-			var dlRank = m.dlRank;
-			var ulRank = m.ulRank;
+			var mimoText = mimoSummary(m);
 
 			var visualWrap = E('div', { 'class': 'mt-mcs-visual-grid' });
 
@@ -1929,14 +1959,14 @@ return L.view.extend({
 			qamBox.appendChild(Mt5700.constellationSvg(dlMod || 'QPSK'));
 			visualWrap.appendChild(qamBox);
 
-			// 2. 空间流 (MIMO 空间天线与波束动态矢量 SVG)
+			// 2. 空间流 (按下行码字数绘制空间流，LTE 另标传输模式)
 			var mimoBox = E('div', { 'class': 'mt-mcs-box' });
 			var mimoTitle = E('div', { 'class': 'mt-mcs-header' }, [
-				E('span', { 'class': 'mt-mcs-tag mt-tag-purple' }, 'MIMO 空间流'),
-				E('span', { 'class': 'mt-mcs-desc' }, dlRank ? (dlRank + '×' + dlRank + ' MIMO (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '空间流读取中...')
+				E('span', { 'class': 'mt-mcs-tag mt-tag-purple' }, '空间流 / 传输模式'),
+				E('span', { 'class': 'mt-mcs-desc' }, mimoText || '模组上报读取中...')
 			]);
 			mimoBox.appendChild(mimoTitle);
-			mimoBox.appendChild(Mt5700.mimoSvg(dlRank || 1));
+			mimoBox.appendChild(Mt5700.mimoSvg(m.dlCw != null ? m.dlCw : 1));
 			visualWrap.appendChild(mimoBox);
 
 			mcsBody.appendChild(visualWrap);
@@ -1944,7 +1974,9 @@ return L.view.extend({
 			var rows = [
 				['下行调制方式 (DL)', dlMod ? (dlMod + ' (MCS ' + (m.dlMcs != null ? m.dlMcs : '—') + ')') : '— (模组未上报)'],
 				['上行调制方式 (UL)', ulMod ? (ulMod + ' (MCS ' + (m.ulMcs != null ? m.ulMcs : '—') + ')') : '— (模组未上报)'],
-				['空间多路复用流', dlRank ? (dlRank + ' 层空间复用流 (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '— (模组未上报)']
+				['下行空间流数 (码字)', m.dlCw != null ? (m.dlCw + ' 码字空间复用') : '— (模组未上报)'],
+				['上行空间流数 (码字)', m.ulCw != null ? (m.ulCw + ' 码字') : '— (模组未上报)'],
+				['LTE 传输模式', m.tm || '— (仅 LTE 上报)']
 			];
 			mcsBody.appendChild(Mt5700.table(['链路参数', '当前工作状态'], rows, { striped: true }));
 		}
@@ -2335,30 +2367,42 @@ return L.view.extend({
 			}).catch(function () {});
 		}
 
+		/*
+		 * ^MCS 按手册 13.22 只给「制式 + MCS 表号 + 各载波码字的 MCS」，EN-DC 下
+		 * 一次应答含 LTE、NR 两行，因此按当前驻留制式挑对应的那一行；
+		 * 空间流数量取主载波码字数（code1 合法即 2 码字 = 两流空间复用），
+		 * LTE 再补一条手册 13.31 的 AT^TRANSMODE?（TM1~TM10，非 LTE 制式回 ERROR）。
+		 */
+		function pickMcsEntry(parsed) {
+			var rat = String((state.cell && state.cell.sysMode) || '').toUpperCase();
+			var want = rat.indexOf('NR') === 0 ? 'NR' : (rat.indexOf('LTE') === 0 ? 'LTE' : '');
+			return Parse.mcsEntry(parsed, want);
+		}
+
 		function getMCS() {
 			return AtWs.client.sendCommand('AT^MCS=1').then(function (resDl) {
 				if (resDl && resDl.success && resDl.data) {
-					var parsedDl = Parse.parseMCS(resDl.data);
-					if (parsedDl) {
-						if (parsedDl.rank) state.mcs.dlRank = parsedDl.rank;
-						if (parsedDl.mcs != null) {
-							state.mcs.dlMcs = parsedDl.mcs;
-							state.mcs.dlMod = Parse.mcsModulation(parsedDl.mcs) || state.mcs.dlMod;
-						}
+					var e = pickMcsEntry(Parse.parseMCS(resDl.data));
+					if (e && e.carriers[0].mcs != null) {
+						state.mcs.dlMcs = e.carriers[0].mcs;
+						state.mcs.dlMod = Parse.mcsModulation(e.carriers[0].mcs) || state.mcs.dlMod;
+						state.mcs.dlCw = Parse.mcsCodewords(e);
 					}
 				}
 				return AtWs.client.sendCommand('AT^MCS=0');
 			}).then(function (resUl) {
 				if (resUl && resUl.success && resUl.data) {
-					var parsedUl = Parse.parseMCS(resUl.data);
-					if (parsedUl) {
-						if (parsedUl.rank) state.mcs.ulRank = parsedUl.rank;
-						if (parsedUl.mcs != null) {
-							state.mcs.ulMcs = parsedUl.mcs;
-							state.mcs.ulMod = Parse.mcsModulation(parsedUl.mcs) || state.mcs.ulMod;
-						}
+					var e = pickMcsEntry(Parse.parseMCS(resUl.data));
+					if (e && e.carriers[0].mcs != null) {
+						state.mcs.ulMcs = e.carriers[0].mcs;
+						state.mcs.ulMod = Parse.mcsModulation(e.carriers[0].mcs) || state.mcs.ulMod;
+						state.mcs.ulCw = Parse.mcsCodewords(e);
 					}
 				}
+				return AtWs.client.sendCommand('AT^TRANSMODE?');
+			}).then(function (resTm) {
+				var tm = resTm && resTm.success ? Parse.parseTransMode(resTm.data) : null;
+				state.mcs.tm = tm || '';
 				renderMcsAdv();
 				renderTabsUI();
 			}).catch(function () {

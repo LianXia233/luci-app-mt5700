@@ -111,19 +111,23 @@ try {
 		AtWs.convertEcio(0) + ' / ' + AtWs.convertEcio(65));
 	check('convertSinr 无浮点尾差', String(AtWs.convertSinr(226)) === '25.2', String(AtWs.convertSinr(226)));
 
-	/* ---- ^MONSC 的 LTE 布局（手册 13.9.3/13.9.5，实测样本）----
-	 * LTE,<mcc>,<mnc>,<tac>,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<rssi>，无 SINR。
-	 * 旧实现套 NR 布局会把 rsrp 取到 rsrq(-10)、rsrq 取到 rssi(-54)、cid 取到 PCI。
+	/* ---- ^MONSC 的 LTE 布局（手册 13.9.3/13.9.5）----
+	 * LTE,<mcc>,<mnc>,<arfcn 十进制>,<cid hex>,<pci hex>,<tac hex>,<rsrp>,<rsrq>,<rssi>，无 SINR。
+	 * 两个历史错位都在这里护栏：套 NR 布局会让 rsrp 取到 rsrq；把 p[3]/p[6]
+	 * 当成 TAC/ARFCN 会让频点变成十六进制串、频段反推全错。
 	 */
 	const mLte = AtWs.parseMONSC('^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54');
 	check('MONSC LTE 制式与 PCI(hex)', mLte && mLte.sysMode === 'LTE' && mLte.pci === 8,
 		mLte ? 'sysMode=' + mLte.sysMode + ' pci=' + mLte.pci : 'null');
 	check('MONSC LTE cid 不再取到 PCI', mLte.cid === 'D975244', 'cid=' + mLte.cid);
-	check('MONSC LTE channel 不再取到 RSRP', mLte.channel === '24C8', 'channel=' + mLte.channel);
+	check('MONSC LTE channel 是十进制 ARFCN、lac 是十六进制 TAC', mLte.channel === '38400' && mLte.lac === '24C8',
+		'channel=' + mLte.channel + ' lac=' + mLte.lac);
 	check('MONSC LTE RSRP/RSRQ 按位取数', mLte.rsrp === -85 && mLte.rsrq === -10,
 		'rsrp=' + mLte.rsrp + ' rsrq=' + mLte.rsrq);
 	check('MONSC LTE 末位是 RSSI 且无 SINR', mLte.rssi === -54 && mLte.sinr === null,
 		'rssi=' + mLte.rssi + ' sinr=' + mLte.sinr);
+	check('MONSC LTE ARFCN 为纯数字（可直接反推频段）', /^\d+$/.test(mLte.channel),
+		'channel=' + mLte.channel);
 	/* NR 布局回归护栏：PCI 走十六进制换算（0x80 -> 128），channel 为频点 501234，lac 为 TAC 12345 */
 	const mNr = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-65,-9,29');
 	check('MONSC NR 布局与 PCI(hex)', mNr.rsrp === -65 && mNr.rsrq === -9 && mNr.sinr === 29 && mNr.pci === 128 && mNr.channel === '501234' && mNr.lac === '12345',

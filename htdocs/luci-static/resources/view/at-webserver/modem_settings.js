@@ -223,83 +223,21 @@ return L.view.extend({
 		imeiBox.appendChild(copyBtn);
 		imeiBody.appendChild(imeiBox);
 
-		/* 操作条：修改 IMEI (四重验证) */
-		var imeiActions = E('div', { 'class': 'mt-sysctl-item is-danger', style: 'margin-bottom:12px;' });
-		var imeiInfo = E('div', { 'class': 'mt-sysctl-info' });
-		var imeiNameRow = E('div', { 'class': 'mt-sysctl-name' });
-		imeiNameRow.appendChild(E('span', { 'class': 'mt-sysctl-dot' }));
-		imeiNameRow.appendChild(E('span', {}, '修改设备 IMEI'));
-		imeiInfo.appendChild(imeiNameRow);
-		imeiInfo.appendChild(E('div', { 'class': 'mt-sysctl-desc' }, '四重验证安全确认后执行（AT^PHYNUM），需具备合法依据。'));
-		imeiActions.appendChild(imeiInfo);
-		imeiActions.appendChild(Mt5700.dangerButton('修改 IMEI', function () { startImeiChangeFlow(); }));
-		imeiBody.appendChild(imeiActions);
-
-		/* 说明与风险提示 */
+		/*
+		 * IMEI 只读。《AT 命令手册》全文只在「读取」语境下出现 IMEI
+		 * （ESN/IMEI 查询 AT+GSN、TAC+SNR 组装规则、错误码释义），没有任何写入
+		 * IMEI 的私有指令；早先版本自造的 AT^PHYNUM=IMEI,<imei> 在四份厂商文档
+		 * （AT 手册 / FOTA 指南 / USB 指南 / 授时指导）里都不存在，下发必然无效。
+		 * 加上「改写 IMEI 属无线电管制行为、插件对外声明不触碰 IMEI」，
+		 * 这条写入链路整体移除，页面保留读取与复制。
+		 */
 		imeiBody.appendChild(Mt5700.fieldNote(
-			'修改 IMEI 采用四重安全验证机制，输入新 IMEI（含 Luhn 校验）、二次校验、原机后 6 位归属校验及最终执行确认。',
+			'IMEI 为模组出厂写入的唯一设备标识，本页面只读展示（读取自 AT+CGSN）。',
 			[
-				'写入命令固定为 AT^PHYNUM，修改后请重启模组使系统网络彻底对齐。',
-				'擅自修改 IMEI 可能违反当地无线电通信法律法规，请确认具备合法测试依据。'
+				'厂商 AT 命令手册未提供 IMEI 写入指令，插件不提供改写能力。',
+				'擅自改写 IMEI 可能违反当地无线电通信法律法规。'
 			]
 		));
-
-		/* Luhn 校验 */
-		function luhnValid(s) {
-			var sum = 0, dbl = false, i, d;
-			for (i = s.length - 1; i >= 0; i--) {
-				d = s.charCodeAt(i) - 48;
-				if (dbl) { d *= 2; if (d > 9) d -= 9; }
-				sum += d;
-				dbl = !dbl;
-			}
-			return sum % 10 === 0;
-		}
-
-		function startImeiChangeFlow() {
-			Ui.promptModal('修改 IMEI（第 1/4 步）· 输入新 IMEI', [
-				{ key: 'imei', label: '新 IMEI（15 位数字）', value: '', placeholder: '仅数字，第 15 位须通过 Luhn 校验' }
-			], function (values) {
-				var newImei = (values.imei || '').trim();
-				if (!/^\d{15}$/.test(newImei)) { Mt5700.error('IMEI 必须是 15 位数字'); return; }
-				if (!luhnValid(newImei)) { Mt5700.error('校验位（第 15 位）未通过 Luhn 验证，请核对后重新输入'); return; }
-				if (dev.imei && newImei === dev.imei) { Mt5700.error('新 IMEI 与当前 IMEI 相同'); return; }
-
-				Ui.promptModal('修改 IMEI（第 2/4 步）· 再次输入确认', [
-					{ key: 'imei2', label: '再次输入新 IMEI', type: 'password', placeholder: '须与上一步完全一致' }
-				], function (v2) {
-					if ((v2.imei2 || '').trim() !== newImei) { Mt5700.error('两次输入不一致，流程已终止'); return; }
-					verifyImeiOwner(newImei);
-				});
-			});
-		}
-
-		function verifyImeiOwner(newImei) {
-			if (!dev.imei) {
-				finalImeiConfirm(newImei);
-				return;
-			}
-			Ui.promptModal('修改 IMEI（第 3/4 步）· 设备归属验证', [
-				{ key: 'tail', label: '输入当前 IMEI 的后 6 位', type: 'password', placeholder: '用于确认你知晓当前设备标识' }
-			], function (v3) {
-				if ((v3.tail || '').trim() !== dev.imei.slice(-6)) { Mt5700.error('与当前 IMEI 后 6 位不符，流程已终止'); return; }
-				finalImeiConfirm(newImei);
-			});
-		}
-
-		function finalImeiConfirm(newImei) {
-			Mt5700.confirm('最终确认：IMEI 将由 ' + (dev.imei || '（未知）') + ' 变更为 ' + newImei + '。此操作影响设备合法性，请谨慎。', function () {
-				send('AT^PHYNUM=IMEI,' + newImei).then(function (res) {
-					if (res.success) {
-						Mt5700.success('IMEI 修改成功');
-						dev.imei = newImei;
-						imeiEl.textContent = newImei;
-					} else {
-						Mt5700.error('IMEI 修改失败');
-					}
-				}).catch(function () { Mt5700.error('IMEI 修改失败'); });
-			}, '确认修改');
-		}
 
 		/* ================= 第二行：SIM 卡管理 + 射频与 5G 增强 ================= */
 		var rowSimRf = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
@@ -512,48 +450,64 @@ return L.view.extend({
 		}
 
 		/* ================= 第三行：硬件控制与低功耗节能 ================= */
-		var ctrlCard = Mt5700.card('硬件控制与能耗管理', '网卡 PCIe 物理协商速率与芯片低功耗节能策略');
+		var ctrlCard = Mt5700.card('硬件控制与能耗管理', 'PCIe 板载网口 PHY 类型与 PCIe 控制器功耗开关（手册 11.19 / 11.16）');
 		body.appendChild(ctrlCard);
 
 		var ctrlGrid = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
 		ctrlCard._body.appendChild(ctrlGrid);
 
+		/* 手册 11.19.3：^TDPCIELANCFG 设置的是 **PCIe 总线所连网口 PHY 芯片类型**，
+		 * 只有两个合法值 —— 1 = RTL8111（1G，默认）、2 = RTL8125（2.5G）；
+		 * 手册没有「自动协商」「100M」「10M」这些档位，早先的 0/1/2/3 四项里
+		 * 0 与 3 会被模组直接拒（+CME ERROR），2 也不是百兆而是 2.5G。
+		 * 属性：掉电保存 Y、无需 PIN（11.19.4）。 */
 		var nicSel = Mt5700.select([
-			{ label: '自动协商速率', value: '0' },
-			{ label: '1000Mbps 全双工 (千兆)', value: '1' },
-			{ label: '100Mbps 全双工 (百兆)', value: '2' },
-			{ label: '10Mbps 全双工 (十兆)', value: '3' }
-		], '0');
+			{ label: 'RTL8111 · 1G（默认）', value: '1' },
+			{ label: 'RTL8125 · 2.5G', value: '2' }
+		], '1');
 		nicSel.addEventListener('change', function () { handleSetNic(parseInt(nicSel.value, 10)); });
-		ctrlGrid.appendChild(Mt5700.formGroup('网卡协商速率', nicSel, '修改后需要重启模组生效'));
+		ctrlGrid.appendChild(Mt5700.formGroup('板载网口 PHY 类型', nicSel, '选择 PCIe 总线上连接的 PHY 芯片（1=RTL8111 1G / 2=RTL8125 2.5G），选错会导致网口不(link)，掉电保存'));
 
+		/* 手册 11.16：^TDPMCFG=<mode>,<mode>,<mode>,<mode> 四个参数缺一不可
+		 * （11.16.5 例句 AT^TDPMCFG=1,0,0,0），目前只有 byte[0] 有效，控制
+		 * **PCIe 控制器**：1=打开（功耗上升）、0=关闭（省电，但 PCIe 上的
+		 * 板载网口随之不可用）。其余三位手册明确是保留位，恒填 0。
+		 * 早先这里只发 AT^TDPMCFG=1，参数不足会报错；文案也把它说成
+		 * 「无业务时自动进入低功耗待机」，与手册语义正好相反。 */
 		var pwrSwitch = makeSwitch(function (checked) {
-			return send('AT^TDPMCFG=' + (checked ? '1' : '0')).then(function (res) {
+			return send('AT^TDPMCFG=' + (checked ? '1' : '0') + ',0,0,0').then(function (res) {
 				if (res.success) {
-					Mt5700.success((checked ? '开启' : '关闭') + '电源管理成功');
+					Mt5700.success((checked ? '打开' : '关闭') + ' PCIe 控制器成功');
 					return true;
 				}
-				Mt5700.error((checked ? '开启' : '关闭') + '电源管理失败');
+				Mt5700.error((checked ? '打开' : '关闭') + ' PCIe 控制器失败');
 				return false;
 			}).catch(function () {
-				Mt5700.error('电源管理设置失败');
+				Mt5700.error('PCIe 控制器设置失败');
 				return false;
 			});
 		});
 		var pwrChk = pwrSwitch.querySelector('input');
-		ctrlGrid.appendChild(Mt5700.formGroup('动态电源管理', pwrSwitch, '开启后模组在无业务数据时自动进入低功耗待机模式'));
+		ctrlGrid.appendChild(Mt5700.formGroup('PCIe 控制器功耗', pwrSwitch, '开启=PCIe 控制器工作（高性能、功耗上升）；关闭=省电，但经 PCIe 连接的板载网口会一并失效（手册 11.16.2，掉电保存）'));
 
 		function handleSetNic(value) {
+			/* 手册只认 1/2，其它值不发下去，避免白跑一条注定报错的命令 */
+			if (value !== 1 && value !== 2) {
+				Mt5700.error('PHY 类型只能是 1（RTL8111）或 2（RTL8125）');
+				return;
+			}
 			send('AT^TDPCIELANCFG=' + value).then(function (res) {
-				if (!res.success) { Mt5700.error('网卡速率设置失败'); return; }
-				Mt5700.success('网卡速率设置成功，重启后生效');
-				Mt5700.confirm('是否立即重启模组使配置生效？', function () {
+				if (!res.success) { Mt5700.error('网口 PHY 类型设置失败'); return; }
+				Mt5700.success('网口 PHY 类型已设置（掉电保存）');
+				/* 手册 11.19 没有规定生效时机；换 PHY 驱动通常需要重连链路，
+				 * 因此把重启作为**可选项**询问，而不是当成必须步骤写死。 */
+				Mt5700.confirm('是否立即重启模组以便重新协商链路？', function () {
 					send('AT^RESET').then(function (r) {
 						if (r.success) Mt5700.success('重启指令已发送');
 						else Mt5700.error('重启指令发送失败');
 					});
 				}, '立即重启');
-			}).catch(function () { Mt5700.error('网卡速率设置失败'); });
+			}).catch(function () { Mt5700.error('网口 PHY 类型设置失败'); });
 		}
 
 		/* ================= 第四行：网络系统配置 SYSCFGEX ================= */
@@ -844,7 +798,7 @@ return L.view.extend({
 		var thermBadgeRow = E('div', { 'class': 'mt-therm-badge-row' });
 		var thermLevelBadge = Mt5700.badge('温控状态: 检查中…', 'neutral');
 		var thermThresholdChip = E('span', { 'class': 'mt-therm-stat-chip' }, '温保阈值: —');
-		var thermLogChip = E('span', { 'class': 'mt-therm-stat-chip' }, '热抑制日志: —');
+		var thermLogChip = E('span', { 'class': 'mt-therm-stat-chip' }, '温保日志: —');
 		thermBadgeRow.appendChild(thermLevelBadge);
 		thermBadgeRow.appendChild(thermThresholdChip);
 		thermBadgeRow.appendChild(thermLogChip);
@@ -929,7 +883,11 @@ return L.view.extend({
 				if (res.success && res.data) {
 					var m = atText(res).match(/\^THERMLDLOGSW:\s*(\d+)\s+(\d+)/);
 					if (m) {
-						thermLogChip.textContent = '热抑制日志: ' + (m[1] === '1' ? '开 (等级 ' + m[2] + ')' : '关');
+						/* 手册 17.5.3：两个字段依次是 tempthreshold_log_switch（串口日志打印开关）
+						 * 与 tempthreshold_file_switch（日志文件存储开关），都是 0/1 开关。
+						 * 早先显示成「开 (等级 n)」把第二个开关当成了档位。 */
+						thermLogChip.textContent = '温保日志: 串口 ' + (m[1] === '1' ? '开' : '关') +
+							' · 文件 ' + (m[2] === '1' ? '开' : '关');
 					}
 				}
 				return send('AT^THERMLDAUTOPARA?');
@@ -1107,12 +1065,14 @@ return L.view.extend({
 		function fetchDeviceControl() {
 			return send('AT^TDPCIELANCFG?').then(function (res) {
 				if (res.success && res.data) {
+					/* 手册 11.19.1：读命令返回单个 <n> */
 					var m = atText(res).match(/\^TDPCIELANCFG:\s*(\d+)/);
-					if (m) nicSel.value = String(m[1]);
+					if (m && (m[1] === '1' || m[1] === '2')) nicSel.value = m[1];
 				}
 				return send('AT^TDPMCFG?');
 			}).then(function (res) {
 				if (res.success && res.data) {
+					/* 手册 11.16.1：^TDPMCFG 返回 4 个 <mode>，byte[0] 才是 PCIe 开关 */
 					var m = atText(res).match(/\^TDPMCFG:\s*(\d+)/);
 					if (m) pwrChk.checked = m[1] === '1';
 				}
