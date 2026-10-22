@@ -5,6 +5,54 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.35] - 2026-10-22
+
+### Rust 后端全面优化（clippy 全清 + 三处语义修正）
+
+以 `cargo clippy --all-targets` 为机械依据（此前本仓从未跑过 lint），17 条警告全部
+处理，并借机修掉三处**语义**问题。所有改动等价或更正确，无对外协议/接口变化。
+
+#### 语义修正
+
+- **SINR 换算不再把 NaN 伪装成 30.0**（跨语言漂移）：raw 来自 `parseInt(p[8])`，
+  `parseInt('nan')` = NaN，路径真实可达。JS 的 `Math.min/max` **传播** NaN，前端
+  本来就对；而 Rust 的 `f64::min/max` **不传播**（返回非 NaN 那一侧）→ 后端给
+  30.0「信号最好」、前端给 NaN，**同一读数两个值**。改用 `clamp` 与前端同口径，
+  NaN 原样透传（JSON 侧序列化为 null，前端显示「读不到」，红线 23）。新增
+  Rust 单测 + 前端契约断言各一条。
+- **打断扫频前校验命令身份**（B-3）：`interrupt()` 原先只验「有 pending」，扫频刚
+  结束而下一条命令已装入的窗口内，"abcd" 会打进**无关命令**的数据流致其失败。
+  现在按 pending.echo 前缀（`AT^CELLSCAN`，大小写不敏感）校验，不匹配则无害失败。
+- **pending 槽加 Drop 守卫**（B-05 通用化）：`send_command_inner` 的 future 被外层
+  timeout 整体 drop 时，守卫清空 pending，杜绝「旧命令迟到的结束码被算进下一条
+  命令」的 AT 应答错位。此前只靠「调用方预算对齐」这一约定防它，新增调用方
+  一旦漏算就会错位。守卫 drop 顺序在 cmd_mu 之后声明（逆序 drop 时仍持锁），
+  不会误清下一条命令的 pending。
+
+#### clippy 17 条（惯用法/可读性，逐条复核 diff 后采纳）
+
+`map_or(false, ..)` → `is_some_and`（3）、`(x + n - 1) / n` → `div_ceil`（3，PDU
+解码的整数除法逐个核对等价）、`write(true)` 冗余（2）、`replace(|c| c==''||…)`
+→ 字符数组（2）、连续 `replace` 合并（1）、`&cmd` 多余借用（1）、`if` 折叠进
+`match`（1）、手剥前缀 → `strip_prefix`（1）、冗余闭包（1）、`min/max` 链 →
+`clamp`（1）。
+
+#### 同类问题全局排查
+
+- Rust 侧其余 `min/max` 均为无符号整数运算，不存在 NaN 语义问题；
+- 数组/字符串索引面：`cut(...)?[0]` 由 `cut` 的长度检查保证、`msgs[0]` 前有
+  `is_empty` 早退 —— 无新增 panic 面；
+- 非测试代码的 `unwrap/expect`：**0 处**（复查确认）。
+
+#### 验证
+
+- `cargo clippy --all-targets`：**0 警告**（含测试代码）；
+- `cargo check --all-targets` 通过；
+- 新增 Rust 单测 2 条（`convert_sinr` 的 NaN 语义、`echo_matches_prefix` 的边界）；
+  **本机跑不了 `cargo test`**（该 crate 的测试目标是 Linux/musl，本机 Windows 缺
+  Windows 专用依赖的 rlib，链接失败）—— 由 CI 跑；
+- JS 契约测试全绿（新增 SINR NaN 断言）。
+
 ## [2.4.34] - 2026-10-22
 
 ### 修复：2.4.33 在本机 ucode 上不可用（重要，请从 2.4.33 直接升到本版）

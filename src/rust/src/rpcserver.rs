@@ -63,6 +63,8 @@ fn clamp_event_lines(lines: &mut Vec<String>) -> bool {
     truncated
 }
 const CELLSCAN_ABORT_TOKEN: &str = "abcd";
+/// 扫频命令前缀（打断时用它校验「挂着的确实是扫频命令」，B-3）。
+const CELLSCAN_COMMAND_PREFIX: &str = "AT^CELLSCAN";
 
 /// 单条短信等待模组确认的上限。超时即判定失败并补发 ESC 清场。
 ///
@@ -411,7 +413,7 @@ impl RpcServer {
                     // ★ 同样脱敏：被拒的命令也可能带 PIN/APDU（拒绝原因本身不受影响）
                     log_warn!(
                         "拒绝含控制字符的 AT 命令: {:?}",
-                        crate::logger::redact_at_for_log(&cmd)
+                        crate::logger::redact_at_for_log(cmd)
                     );
                     return serde_json::json!({ "id": id, "error": { "code": -32602, "message": "cmd 不允许包含换行或控制字符" } });
                 }
@@ -613,7 +615,7 @@ impl RpcServer {
             let (ok, message) = match result {
                 Ok(Ok(resp)) => {
                     let text = resp.text();
-                    let flat = text.replace(|c| c == '\r' || c == '\n', " ");
+                    let flat = text.replace(['\r', '\n'], " ");
                     if resp.has_error() {
                         (false, format!("模组返回错误：{}", flat.trim()))
                     } else if resp.contains("+CMGS:") || resp.ok() {
@@ -772,7 +774,8 @@ impl RpcServer {
         if !scan.running {
             return err_response("当前没有正在进行的扫频");
         }
-        match self.client.interrupt(CELLSCAN_ABORT_TOKEN).await {
+        // expect_prefix：只打断「当前真的挂着扫频命令」的那一次（B-3）
+        match self.client.interrupt(CELLSCAN_ABORT_TOKEN, CELLSCAN_COMMAND_PREFIX).await {
             Ok(()) => {
                 scan.aborted = true;
                 log_info!("已下发扫频打断字符串");
@@ -887,14 +890,14 @@ pub fn err_response(msg: &str) -> AtCommandResponse {
 /// 用 `get(..n)` 而不是 `&s[..n]`：后者在多字节字符上会 panic，而本 crate
 /// 的 release 是 `panic = "abort"`（同 is_apdu_command 的理由）。
 fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
-    s.get(..prefix.len()).map_or(false, |h| h.eq_ignore_ascii_case(prefix))
+    s.get(..prefix.len()).is_some_and(|h| h.eq_ignore_ascii_case(prefix))
 }
 
 /// 大小写不敏感的**后缀**比较，零分配（理由同上）。
 /// 同样用 `get(..)`：`&s[s.len() - n..]` 在 s 以多字节字符结尾时会 panic。
 fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
     s.len() >= suffix.len()
-        && s.get(s.len() - suffix.len()..).map_or(false, |t| t.eq_ignore_ascii_case(suffix))
+        && s.get(s.len() - suffix.len()..).is_some_and(|t| t.eq_ignore_ascii_case(suffix))
 }
 
 /// 判断是否为「短信数据命令」：`AT+CMGS` / `AT+CMGW`。
@@ -912,7 +915,7 @@ fn is_sms_data_command(command: &str) -> bool {
     }
     // 两步下发的第二步：整行都是十六进制字符（可能以 0x1A 结束后跟换行）。
     let payload = head
-        .trim_end_matches(|c| c == '\r' || c == '\n' || c == '\u{1a}')
+        .trim_end_matches(['\r', '\n', '\u{1a}'])
         .trim();
     !payload.is_empty()
         && payload.len() >= 20
@@ -929,7 +932,7 @@ fn normalize_syscfgex(command: &str) -> String {
     if !starts_with_ignore_ascii_case(command, "AT^SYSCFGEX") {
         return command.to_string();
     }
-    let mut cleaned = command.replace('\r', "").replace('\n', "");
+    let mut cleaned = command.replace(['\r', '\n'], "");
     // 只剥掉末尾的 OK —— 原先的 replace("OK", "") 是全局删除，会把参数里
     // 合法出现的 "OK" 一并抹掉，命令因此被改写。
     let trimmed = cleaned.trim_end();

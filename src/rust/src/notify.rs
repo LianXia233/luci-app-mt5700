@@ -238,7 +238,7 @@ fn prepare_log_file(path: &str) -> Result<String, String> {
     let f = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
-        .write(true)
+        
         .open(&abs)
         .map_err(|e| format!("日志文件不可写 {}: {e}", abs.display()))?;
     drop(f);
@@ -281,7 +281,7 @@ fn append_log(path: &str, msg: &Notification) -> std::io::Result<()> {
     b.push_str(&"-".repeat(50));
     b.push('\n');
 
-    let mut f = std::fs::OpenOptions::new().append(true).create(true).write(true).open(path)?;
+    let mut f = std::fs::OpenOptions::new().append(true).create(true).open(path)?;
     f.write_all(b.as_bytes())
 }
 

@@ -230,6 +230,32 @@ pub struct PendingCmd {
     pub stream: Option<Box<dyn Fn(String) + Send + Sync>>,
 }
 
+/// 大小写不敏感前缀比较（get(..n) 防 panic，理由同 rpcserver 的同名函数；
+/// 在本文件重复一份 3 行助手，避免 atclient → rpcserver 的反向模块依赖）。
+fn echo_matches_prefix(s: &str, prefix: &str) -> bool {
+    s.get(..prefix.len()).is_some_and(|h| h.eq_ignore_ascii_case(prefix))
+}
+
+/// pending 槽的 Drop 守卫（B05 通用化，2026-10-22 审计）。
+///
+/// `send_command_inner` 的 future 一旦被外层 timeout 整体 drop，cmd_mu 会随
+/// drop 提前释放，而 pending 槽还挂着旧命令 —— 下一条命令装入新 pending 时，
+/// 模组迟到的旧应答行/结束码会被算进新命令的应答（**AT 数据错位**）。
+///
+/// 守卫在 drop 时用 try_lock 清空 pending：迟到应答只会作为 URC 广播一条
+/// （无害），不再错位。try_lock 失败 = 读循环恰好持锁，它自己会完成 take，
+/// 跳过即可。正常路径 take 之后守卫再清一次 None，幂等无害。
+struct PendingGuard<'a> {
+    slot: &'a tokio::sync::Mutex<Option<PendingCmd>>,
+}
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut p) = self.slot.try_lock() {
+            *p = None;
+        }
+    }
+}
+
 /// 扫频计数的 RAII 守卫，见 `send_long_command` 内的说明。
 ///
 /// 持有引用的生命周期比任何一次调用都短，不存在跨 await 持有的风险。
@@ -561,7 +587,15 @@ impl AtClient {
     }
 
     /// 绕过命令锁直接向模组写入原始字符串（打断扫频用）。
-    pub async fn interrupt(&self, payload: &str) -> Result<(), String> {
+    /// 打断当前挂起的命令。`expect_prefix` 是**身份校验**（大小写不敏感）：
+    /// 只当挂着的命令以它开头才真正写入打断串。
+    ///
+    /// ★ B-3（2026-10-22 审计）：原先只验 `pending.is_some()` —— 扫频命令刚
+    ///   结束（pending 已清、scan.running 仍真）、而调度器/分发器抢先装好
+    ///   下一条命令的窗口内点「取消扫频」，"abcd\r" 会打进那条**无关命令**
+    ///   的数据流，模组回 ERROR 致其失败。校验 echo 身份后，窗口内误打断
+    ///   变成「当前没有可打断的扫频命令」，无害失败。
+    pub async fn interrupt(&self, payload: &str, expect_prefix: &str) -> Result<(), String> {
         let writer = {
             let guard = self.conn.lock().await;
             match &*guard {
@@ -570,9 +604,15 @@ impl AtClient {
             }
         };
 
-        let has_pending = self.pending.lock().await.is_some();
-        if !has_pending {
-            return Err("当前没有可打断的命令".into());
+        let is_expected = {
+            let guard = self.pending.lock().await;
+            match guard.as_ref() {
+                Some(p) => echo_matches_prefix(&p.echo, expect_prefix),
+                None => false,
+            }
+        };
+        if !is_expected {
+            return Err("当前没有可打断的目标命令".into());
         }
 
         let mut payload = payload.to_string();
@@ -688,12 +728,13 @@ impl AtClient {
         };
         *self.pending.lock().await = Some(pending);
 
-        // ★ drop 安全性警示（B05，2026-10-22 审计）：本函数的 future **不能被
-        //   调用方随意 drop** —— 从这里到应答收集完之间任意 await 点被 drop 的话，
-        //   cmd_mu 随 drop 释放、pending 槽残留旧命令，下一条命令可能读到旧结束码
-        //   （AT 应答错位）。当前调用方的外层预算都按「排队+写入+应答+gap+余量」
-        //   覆盖了内层最坏耗时（rpcserver 短信任务 = 20.1s）；新增调用方必须遵守
-        //   同一约定，或先给 pending 实现真正的 Drop 守卫。
+        // ★ B05（2026-10-22 审计）：挂 pending 的 Drop 守卫 —— 本函数的 future
+        //   被外层 timeout 整体 drop 时，守卫清空 pending 槽，杜绝「旧命令的
+        //   迟到结束码被算进下一条命令」的 AT 应答错位。
+        //   ★ 仍然**建议**调用方的外层预算覆盖内层最坏耗时（排队 8s + 写入 3s
+        //   + 应答 + gap）：守卫只保证「不错位」，不保证「这条命令拿到了完整
+        //   应答」—— 被 drop 的命令本来就拿不到应答，调用方要据此给出明确错误。
+        let _pending_guard = PendingGuard { slot: &self.pending };
 
         // 先创建 notified 再写入，避免应答先到而错过通知。
         let notified = done.notified();
@@ -1069,6 +1110,18 @@ mod tests {
 
     /// 正文里出现 "error" 不算失败；真错误结束码必须逐行识别。
     /// 样本与前端 tests/at-error-text-contract.test.js 同源。
+    #[test]
+    fn echo_matches_prefix_大小写不敏感且不越界() {
+        // B-3：打断前要确认「挂着的确实是目标命令」
+        assert!(echo_matches_prefix("AT^CELLSCAN=1", "AT^CELLSCAN"));
+        assert!(echo_matches_prefix("at^cellscan=1", "AT^CELLSCAN"));
+        assert!(!echo_matches_prefix("AT+CSQ", "AT^CELLSCAN"));
+        // 前缀比命令本身长 → false，且不 panic（get(..n) 的理由）
+        assert!(!echo_matches_prefix("AT", "AT^CELLSCAN"));
+        // 多字节字符：按字节切可能切在字符中间 → 不得 panic
+        assert!(!echo_matches_prefix("AT中", "AT^CELLSCAN"));
+    }
+
     #[test]
     fn has_error_只认整行的错误结束码() {
         // 误判面：这个词出现在正文 / 数据里，行首不是错误码

@@ -46,7 +46,11 @@ fn round1(v: f64) -> f64 {
 }
 fn convert_sinr(raw: f64) -> f64 {
     let v = if raw == 0.0 { -20.0 } else if raw >= 251.0 { 30.0 } else { -20.0 + raw * 0.2 };
-    round1(v.min(30.0).max(-20.0))
+    /* clamp 而非 min/max 链（2026-10-22 审计）：raw 若为 NaN（"nan" 能被
+     * parse::<f64> 成功解析），min/max 链会把它变成 30.0 —— 「读不到」被
+     * 伪装成「信号最好」。clamp 保留 NaN，JSON 侧序列化为 null，前端按
+     * 「读不到」如实展示（红线 23）。非 NaN 输入下与原式逐值等价。 */
+    round1(v.clamp(-20.0, 30.0))
 }
 fn convert_rssi(raw: f64) -> f64 {
     if raw == 0.0 { -120.0 } else if raw >= 96.0 { -25.0 } else { -121.0 + raw }
@@ -606,19 +610,18 @@ impl Dispatcher {
             }
             info.rat = parts[0].trim_matches('"').to_string();
             match info.rat.as_str() {
-                "NR" => {
-                    if parts.len() >= 11 {
-                        info.arfcn = parts[3].clone();
-                        info.cell_id = parts[5].clone();
-                        info.pci = hex_to_dec(&parts[6]);
-                        info.tac = parts[7].clone();
-                        info.rsrp = parts[8].clone();
-                        info.rsrq = parts[9].clone();
-                        info.sinr = parts[10].clone();
-                    }
+                /* NR/LTE 统一用 match guard（clippy 折叠后两分支风格一致；
+                 * guard 不满足落 _ => {} 空分支，与原先「分支内 if + 隐式空 else」等价） */
+                "NR" if parts.len() >= 11 => {
+                    info.arfcn = parts[3].clone();
+                    info.cell_id = parts[5].clone();
+                    info.pci = hex_to_dec(&parts[6]);
+                    info.tac = parts[7].clone();
+                    info.rsrp = parts[8].clone();
+                    info.rsrq = parts[9].clone();
+                    info.sinr = parts[10].clone();
                 }
-                "LTE" => {
-                    if parts.len() >= 10 {
+                "LTE" if parts.len() >= 10 => {
                         info.arfcn = parts[3].clone();
                         info.cell_id = parts[4].clone();
                         info.pci = hex_to_dec(&parts[5]);
@@ -627,7 +630,6 @@ impl Dispatcher {
                         info.rsrq = parts[8].clone();
                         info.rssi = parts[9].clone();
                     }
-                }
                 _ => {}
             }
             return info;
@@ -890,6 +892,16 @@ mod tests {
         //   推送与经 AT 轮询会给出两个不同的读数。
         assert_eq!(convert_sinr(146.0), 9.2);
         assert_eq!(convert_sinr(106.0), 1.2); // 同一事故里 106 那档的形态
+    }
+
+    #[test]
+    fn convert_sinr_保持nan不被伪装成上限() {
+        // ★ B-05 同款问题（2026-10-22 审计）：raw 若为 NaN（"nan" 能被
+        //   parse::<f64> 成功解析），min/max 链会把它变成 30.0 ——「读不到」
+        //   被伪装成「信号最好」。clamp 保留 NaN，JSON 侧序列化为 null。
+        //   这里锁住这条语义，防止有人「优化」回 min/max 链。
+        let v = convert_sinr(f64::NAN);
+        assert!(v.is_nan(), "NaN 必须原样透传，而不是变成 {}", v);
     }
 
     #[test]

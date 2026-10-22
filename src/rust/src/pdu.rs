@@ -220,7 +220,7 @@ pub fn decode_incoming_pdu(pdu_hex: &str) -> Result<Sms, String> {
 
     let sender_digits = cut(&raw, &mut pos, 1)?[0] as usize;
     let sender_toa = cut(&raw, &mut pos, 1)?[0];
-    let sender_bytes = cut(&raw, &mut pos, (sender_digits + 1) / 2)?;
+    let sender_bytes = cut(&raw, &mut pos, sender_digits.div_ceil(2))?;
     let sender = decode_address(sender_bytes, sender_digits, sender_toa);
 
     cut(&raw, &mut pos, 1)?; // 协议标识符 PID
@@ -251,7 +251,7 @@ pub fn decode_incoming_pdu(pdu_hex: &str) -> Result<Sms, String> {
     let ud = &raw[pos..];
     let ud_need = match encoding {
         0x02 | 0x01 => udl,
-        _ => (udl * 7 + 7) / 8,
+        _ => (udl * 7).div_ceil(8),
     };
     if ud.len() < ud_need {
         return Err(format!(
@@ -292,7 +292,7 @@ pub fn decode_incoming_pdu(pdu_hex: &str) -> Result<Sms, String> {
         }
         _ => {
             // 7 位编码里 UDH 也按码位计数，且正文需要对齐到 7 位边界。
-            let udh_septets = (udh_len * 8 + 6) / 7;
+            let udh_septets = (udh_len * 8).div_ceil(7);
             let mut total = udl;
             if total < udh_septets {
                 total = udh_septets;

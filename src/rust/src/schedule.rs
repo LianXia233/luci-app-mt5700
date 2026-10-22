@@ -212,7 +212,7 @@ impl Scheduler {
          */
         let cooling_down = {
             let s = self.state.read().await;
-            s.retry_after.map_or(false, |until| Instant::now() < until)
+            s.retry_after.is_some_and(|until| Instant::now() < until)
         };
 
         if !cooling_down && (target != mode || !applied || want != last) {

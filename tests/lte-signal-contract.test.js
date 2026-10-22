@@ -224,6 +224,17 @@ for (let raw = 0; raw <= 255; raw++) {
 ok('★ 原始值 0~255 全量程换算后都是一位小数（无浮点尾数）', dirty === null,
 	'第一处带尾数的是 ' + dirty);
 
+/*
+ * NaN 必须原样透传（2026-10-22 审计）：raw 来自 parseInt(p[8])，而
+ * parseInt('nan') = NaN —— 这条路径真实可达。JS 的 Math.min/max 传播 NaN，
+ * 所以前端侧本来就是对的；**Rust 后端**原先用 f64::min/max 链（不传播 NaN），
+ * 把 NaN 变成 30.0 —— 同一读数两边两个值（后端 30.0「信号最好」/前端 NaN）。
+ * 后端已改用 clamp 与前端同口径，这里锁住前端语义防止回退。
+ */
+ok('★ SINR 换算对 NaN 原样透传（不被伪装成 30.0 上限）',
+	convertSinr && Number.isNaN(convertSinr(NaN)),
+	'实际 ' + (convertSinr ? convertSinr(NaN) : 'helper 缺失'));
+
 /* 边界值仍要落在手册规定的 -20~30 dB 上（收尾数不能把量程收窄） */
 ok('SINR 下限仍是 -20 dB（原始值 0）', convertSinr(0) === -20, '实际 ' + convertSinr(0));
 ok('SINR 上限仍是 30 dB（原始值 251 及以上）', convertSinr(251) === 30 && convertSinr(255) === 30,

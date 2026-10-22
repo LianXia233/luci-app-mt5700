@@ -131,7 +131,7 @@ fn timestamp() -> String {
     let secs = now.as_secs();
     let millis = now.subsec_millis();
     // 用 chrono 格式化本地时间
-    let dt = chrono::Local.timestamp_opt(secs as i64, 0).single().unwrap_or_else(|| chrono::Local::now());
+    let dt = chrono::Local.timestamp_opt(secs as i64, 0).single().unwrap_or_else(chrono::Local::now);
     format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), millis)
 }
 
