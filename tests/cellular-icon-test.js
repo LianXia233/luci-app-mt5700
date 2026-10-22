@@ -79,8 +79,9 @@ const helpers = sliceCode(mt, 'function E(tag, attrs, text) {', '// SVG 创建')
 	sliceCode(mt, 'function svgEl(tag, attrs) {', 'api.constellationSvg');
 const cellular = sliceCode(mt, 'var CELLULAR_LEVELS = {', 'api.page = function');
 
+/* mt5700.js 里 CELLULAR_LEVELS / CELLULAR_LABELS 是局部变量，不挂在 api 上 */
 const cellularFactory = new Function('document', 'var api = {};\n' + helpers + cellular +
-	'\n;return { cellularSignal: api.cellularSignal, LEVELS: api.CELLULAR_LEVELS, LABELS: api.CELLULAR_LABELS };');
+	'\n;return { cellularSignal: api.cellularSignal, LEVELS: CELLULAR_LEVELS, LABELS: CELLULAR_LABELS };');
 const cel = cellularFactory(documentStub);
 
 const ns = fs.readFileSync(path.join(viewDir, 'network_status.js'), 'utf8');
