@@ -219,11 +219,19 @@ const SMS_RPC_TIMEOUT_SEC = 50;
  *   list / capacity / set_storage / get_smsc / set_smsc
  *                  40s —— 排队(10) + SMS_LIST_TIMEOUT(25) + 余量。
  *                        AT+CMGL=4 要吐出全部 PDU，几十条时远不止普通查询的 2s。
+ *   delete         40s —— 排队(10) + 每个槽位一句 AT+CMGD(2) + 收尾回读(2)。
+ *                        模组不收槽位列表，删除是一条一句（实机同理），耗时与
+ *                        槽位数成正比；界面按 8 个槽位一批下发（sms_center.js 的
+ *                        SMS_DELETE_CHUNK），最坏 10+16+2=28s，留 12s 余量。
+ *                        这条以前没上榜，走默认 12s —— 删两条分段短信就会撞断
+ *                        `nc`，而断掉的那次还会打开「后端不可用」的共享熔断，
+ *                        连别的页面一起 15s 内全部快速失败。
  *   session_*      12s —— 纯内存操作，走默认预算。
  */
 const SMS_ACTION_TIMEOUT = {
 	'send': 70,
 	'purge': 70,
+	'delete': 40,
 	'list': 40,
 	'capacity': 40,
 	'set_storage': 40,

@@ -560,6 +560,55 @@ async function main() {
 		check('删除后回读了列表', rD.calls.smsActions.filter((a) => a === 'list').length >= 2, true);
 	}
 
+	/*
+	 * 场景 E：槽位 0 是真槽位，序号读不出（null）的那条不许删。
+	 * 实机一张存着分段短信的卡，头两条就落在 0 和 1 号位上；把「读不出序号」
+	 * 记成 0 的话，最老的那条短信在界面上永远删不掉。
+	 */
+	{
+		const ZERO = { index: 0, stat: 1, direction: 'received', number: '10000',
+			content: '话费余额查询结果', time: '26/10/22,20:36:21', timeApprox: false, concat: null, error: null };
+		const BROKEN = { index: null, stat: 0, direction: 'received', number: '10086',
+			content: '', time: null, timeApprox: false, concat: null, error: 'PDU 行为空或含非十六进制字符' };
+		const lsE = makeLocalStorage();
+		const rE = loadView(loadParse(lsE), lsE, {
+			smsRespond: function (action) {
+				if (action === 'list') {
+					return { success: true, result: {
+						entries: [Object.assign({}, ZERO), Object.assign({}, BROKEN)],
+						fetchedAt: Date.now(), totalLines: 2 } };
+				}
+			}
+		});
+		await new Promise((r) => setImmediate(r));
+		await new Promise((r) => setImmediate(r));
+
+		const pick = async function (number) {
+			const items = findAll(rE.page._body, 'mt5700-sms-item');
+			const nums = items.map((n) => n.childNodes[0].textContent);
+			const hit = nums.indexOf(number);
+			if (hit < 0) return false;
+			items[hit].dispatch('click');
+			for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r));
+			const bubbles = findAll(rE.page._body, 'mt5700-sms-bubble');
+			const last = bubbles[bubbles.length - 1];
+			last.childNodes[last.childNodes.length - 1].dispatch('click');
+			for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r));
+			return true;
+		}
+
+		check('0 号槽位的短信在列表里', await pick('10000'), true);
+		const zeroDel = rE.calls.smsCalls.filter((c) => c.action === 'delete')[0];
+		check('删除 0 号槽位照实下发序号 0',
+			JSON.stringify((zeroDel && zeroDel.params.indices) || null), '[0]');
+
+		check('序号读不出的那条也在列表里（带 error 显示）', await pick('10086'), true);
+		check('序号读不出时不再对着 0 号位下发删除',
+			rE.calls.smsCalls.filter((c) => c.action === 'delete').length, 1);
+		check('序号读不出时提示「不在模组存储中」',
+			rE.toasts.some((t) => t.text.indexOf('不在模组存储中') >= 0), true);
+	}
+
 	console.log(`\n合计: ${pass} 通过, ${fail} 失败`);
 	process.exit(fail ? 1 : 0);
 }
