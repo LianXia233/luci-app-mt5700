@@ -8,6 +8,25 @@
 
 ---
 
+## v1.26.1 (未发布)
+
+### 短信开关不再把模组留在断网状态：先读 CEUS、失败回滚射频、提交改回两段式
+
+> 起因是 PR #20 的审查：开启短信功能这条路在最坏情况下会让整机没有网络，且失败时界面上看不到任何线索。
+
+- **fix(sms) 开关失败后回滚射频**：`power_set` 的开启分支一旦下发过 `AT+CFUN=0`，后续任一步（`CFUN=1`、`IMSSWITCH`、`CSCA`）失败都会 best-effort 补发 `AT+CFUN=1` 并回读确认，回滚结果写进 `failedDetail` 原样显示。此前失败即中断，模组被留在「射频关闭」状态 —— 用户点一下「开启短信」换来的是整机断网，而界面只有一句拒绝原因
+- **fix(sms) 先读 `AT+CEUS?` 再决定要不要重启射频**：CEUS 是「设置后需要开关机生效」的持久化项（手册 3.15.2），但 3.15.3 又写默认值就是 1（数据中心），3.15.5 的举例回读还是 0，加上旧版本应用会主动写 `CEUS=0` —— 出厂默认不能推定现网状态。读到 1 就直接跳过整套 `CFUN=0/1` 重启（实测模组侧只收到 `AT+CEUS?` + `AT^IMSSWITCH=1,0,0`，不再断网）；读不到、读到 0 或其它值一律走完整重启
+- **fix(sms) 顺序改为 `CEUS=1` → `CFUN=0` → `CFUN=1`**：CEUS 必须在关射频之前写好；`CFUN=0` 与 `CFUN=1` 之间的间隔从 500ms 提到 1100ms（手册 6.1.2 要求这一对大于 1s，实测原来只剩 3ms 余量）
+- **fix(sms) `AT+CFUN=1` 单独给 10 秒预算并轮询确认**：此前用的是统一 2 秒超时，5000ms 只是成功之后的 sleep。实测注入 3 秒延迟应答时，后端在 2000ms 判超时，`IMSSWITCH`/`CSCA` 一条都没发出去而射频已经关着。现在成功标准从「固定睡 5 秒」改为轮询 `AT+CFUN?`==1 且 `AT+CEREG?` 已注册（上限 15 秒；`CEREG` 读不到时按「未知」结束而不死等），整串最坏 ≈40 秒，仍在 ucode 给 power 动作的 70 秒以内
+- **fix(sms) 发送恢复两段式提交**：`AT+CMGS=<长度>` → 等 `> ` 提示符 → 再写 `<PDU>` + 0x1A。v1.25.2 改用一次性写法是为了躲 0x1A 在「浏览器 JSON → rpcd → ucode → nc」链路上被转义成字面量的问题，而现在提交发生在后端事务内、0x1A 由 Rust 直接 `write_all`，不再经过任何转义层。业务路径此前与本仓库自己的 e2e 断言矛盾（`tests/mock-modem/e2e-test.js` 第 5b 项：长度+`\r`+PDU 的拼法拿不到提交回执），实测 `sms send` 被模组拒为 ERROR —— 现在应用层发送能拿到 `+CMGS` 回执。裸 AT 终端页的一次性写法仍受支持（`is_single_shot_cmgs` 保留）
+- **fix(rpc) `enable` 参数类型不符直接报错**：`power` / `set_ims` 不再用 `as_bool().unwrap_or(false)`，传字符串 `"true"` 会被静默当成「关闭」并执行反向动作（实测模组侧只收到 `AT^IMSSWITCH=0,0,0`）。ucode 已把 `'1'`/`'true'` 归一为布尔，此项是为将来的其它调用方兜底
+- **fix(sms) 清空全部短信不再丢掉失败原因**：`AT+CPMS=` 切换失败时带上模组原始应答（此前只有固定文案「切换存储区失败」，`+CME ERROR: 4` 这类线索丢失）；前端把 `deleted` 与 `errors` 同时表达，部分成功不再被压成一句「部分存储区未能清空」
+- **fix(sms) 提交结果判定收紧**：回执必须是**以 `+CMGS` 开头的应答行**（全文 `contains` 会让回显/正文里的字样冒充回执），并合并两个同体分支
+- **docs(sms) 三处过期注释校正**：`sms.rs` 的开关流程说明（原写 CEUS→IMSSWITCH→CFUN→CGDCONT→CSCA）、`rpcserver.rs` 的 power 动作注释、前端 `sms_settings.js` 顶部对开关与清空流程的描述
+- **change(sms) 关闭短信不再清空短信、不再写 CEUS、不关射频**（PR #20 的语义变更，此处补记）：关闭分支只下发 `AT^IMSSWITCH=0,0,0`。开启分支也不再配置 `AT+CGDCONT=5`（IMS PDP），手册 7.1 未列该命令的掉电保存属性、且 7.1.3 说明 APN 为空时使用签约值，**实机需回读一次 `AT+CGDCONT?` 并发送一条短信确认**
+- **ui(sms) 解析失败的短信可见**：PDU 解不出来的条目在会话列表里显示为「未知号码」并预览错误原因，且不允许勾选参与删除（其 index 兜底为 0）
+- **test**：`cargo test`（TZ=Asia/Shanghai）245 passed / 0 failed / 2 ignored（新增 10 条：CEUS/CFUN/CEREG 解析、跳过重启、失败回滚、CEUS 被拒不动射频、关闭只动 IMS、purge 原因保留、回执行判定）；`tests/mock-modem/run-e2e.sh` 39/39（新增 `sms` 业务动作全链路 13 条，含 mock 故障钩子 `AT+TESTCEUS=0/1`、`TESTCEUSFAIL`、`TESTCFUN1FAIL`、`TESTCPMSFAIL`、`TESTIMSFALSE`）；前端行为测试 24/24，`tests/*.js` 全绿（`cellular-icon-test.js` 修复 harness 取导出写错的 `api.CELLULAR_LEVELS/LABELS`，13/14 → 38/38）；`cargo build --release`、`node --check`、`git diff --check` 通过。**遗留实机项**：`AT+CGDCONT?` 回读与重启后是否保留、真实 `CFUN=1` 应答时长与注册轮询上限是否够用、CEUS 改写后开关机是否真正生效
+
 ## v1.26.0 (2026-10-22)
 
 ### 短信模块深度重构：最高优先级调度、事务级互斥、无缓存实时语义
