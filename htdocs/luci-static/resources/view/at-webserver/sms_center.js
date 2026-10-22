@@ -208,7 +208,8 @@ return L.view.extend({
 				var item = E('div', {
 					'class': 'mt5700-sms-item' + (c.number === state.selectedContact ? ' active' : '')
 				});
-				item.appendChild(E('div', { 'class': 'mt5700-sms-item-number' }, c.number));
+				/* 号码为空的条目（解析失败）显示为「未知号码」 */
+				item.appendChild(E('div', { 'class': 'mt5700-sms-item-number' }, c.number || '未知号码'));
 				item.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' }, c.lastMessage || ''));
 				item.appendChild(E('div', { 'class': 'mt5700-sms-item-preview' }, c.lastTime || ''));
 				item.addEventListener('click', function (num) {
@@ -429,11 +430,12 @@ return L.view.extend({
 			for (var i = 0; i < list.length; i++) {
 				var msg = list[i];
 				var num = normalizeNumber(msg.number);
-				if (!num) continue;
-				if (!map[num]) {
-					map[num] = { number: num, lastMessage: msg.content, lastTime: msg.time, unreadCount: 0, messages: [] };
+				/* 解析失败的条目号码为空，归入特殊分组以便显示错误信息 */
+				var key = num || '__parse_error__';
+				if (!map[key]) {
+					map[key] = { number: num, lastMessage: msg.content, lastTime: msg.time, unreadCount: 0, messages: [] };
 				}
-				map[num].messages.push(msg);
+				map[key].messages.push(msg);
 			}
 			var list2 = [];
 			for (var key in map) {
@@ -448,7 +450,8 @@ return L.view.extend({
 					if (Parse.messageTimeMs(c.messages[n].time) !== null) { newest = c.messages[n]; break; }
 				}
 				if (!newest) newest = c.messages.length ? c.messages[c.messages.length - 1] : null;
-				c.lastMessage = newest ? (newest.content || '') : '';
+				/* 解析失败的条目显示错误信息而非内容 */
+				c.lastMessage = newest ? (newest.error ? '短信解析失败：' + newest.error : (newest.content || '')) : '';
 				c.lastTime = newest ? (newest.time || '') : '';
 				list2.push(c);
 			}
@@ -588,6 +591,9 @@ return L.view.extend({
 				var m = state.messages[i];
 				var row = E('label', { 'class': 'mt5700-inline' });
 				var chk = E('input', { type: 'checkbox' });
+				/* 解析失败的条目（index 为 0 或有 error）不可勾选删除 */
+				var isUndeletable = m.error || (m.index == null || m.index === 0);
+				if (isUndeletable) chk.disabled = true;
 				(function (msg, cb) {
 					cb.addEventListener('change', function () {
 						var idx = checked.indexOf(msg);
@@ -596,8 +602,9 @@ return L.view.extend({
 					});
 				})(m, chk);
 				row.appendChild(chk);
-				row.appendChild(E('span', { 'class': 'mt5700-hint' },
-					(m.type === 'sent' ? '[发] ' : '[收] ') + (m.number || '') + '：' + (m.content || '').slice(0, 30)));
+				var label = (m.type === 'sent' ? '[发] ' : '[收] ') + (m.number || '未知号码') + '：';
+				label += m.error ? '短信解析失败：' + m.error : (m.content || '').slice(0, 30);
+				row.appendChild(E('span', { 'class': 'mt5700-hint' }, label));
 				listEl.appendChild(row);
 			}
 			if (!state.messages.length) listEl.appendChild(Mt5700.empty('当前会话没有可删除的短信'));
