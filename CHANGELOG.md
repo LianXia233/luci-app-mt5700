@@ -25,7 +25,7 @@
 - **docs(sms) 三处过期注释校正**：`sms.rs` 的开关流程说明（原写 CEUS→IMSSWITCH→CFUN→CGDCONT→CSCA）、`rpcserver.rs` 的 power 动作注释、前端 `sms_settings.js` 顶部对开关与清空流程的描述
 - **change(sms) 关闭短信不再清空短信、不再写 CEUS、不关射频**（PR #20 的语义变更，此处补记）：关闭分支只下发 `AT^IMSSWITCH=0,0,0`。开启分支也不再配置 `AT+CGDCONT=5`（IMS PDP），手册 7.1 未列该命令的掉电保存属性、且 7.1.3 说明 APN 为空时使用签约值，**实机需回读一次 `AT+CGDCONT?` 并发送一条短信确认**
 - **ui(sms) 解析失败的短信可见**：PDU 解不出来的条目在会话列表里显示为「未知号码」并预览错误原因，且不允许勾选参与删除（其 index 兜底为 0）
-- **test**：`cargo test`（TZ=Asia/Shanghai）245 passed / 0 failed / 2 ignored（新增 10 条：CEUS/CFUN/CEREG 解析、跳过重启、失败回滚、CEUS 被拒不动射频、关闭只动 IMS、purge 原因保留、回执行判定）；`tests/mock-modem/run-e2e.sh` 39/39（新增 `sms` 业务动作全链路 13 条，含 mock 故障钩子 `AT+TESTCEUS=0/1`、`TESTCEUSFAIL`、`TESTCFUN1FAIL`、`TESTCPMSFAIL`、`TESTIMSFALSE`）；前端行为测试 24/24，`tests/*.js` 全绿（`cellular-icon-test.js` 修复 harness 取导出写错的 `api.CELLULAR_LEVELS/LABELS`，13/14 → 38/38）；`cargo build --release`、`node --check`、`git diff --check` 通过。**遗留实机项**：`AT+CGDCONT?` 回读与重启后是否保留、真实 `CFUN=1` 应答时长与注册轮询上限是否够用、CEUS 改写后开关机是否真正生效
+- **test**：`cargo test` 在 TZ=Asia/Shanghai、TZ=UTC、TZ=America/New_York 三种环境下均为 245 passed / 0 failed / 2 ignored（新增 10 条：CEUS/CFUN/CEREG 解析、跳过重启、失败回滚、CEUS 被拒不动射频、关闭只动 IMS、purge 原因保留、回执行判定）。顺带修掉一条时区相关的既有脆弱用例：`pdu::tests::test_decode_ucs2_pdu` 原先用**设备时区**构造期望时间，只有设备恰好也在东八区时才成立，UTC 环境下必报「差 8 小时」；现按短信中心自身的 +08:00 偏移构造期望值；`tests/mock-modem/run-e2e.sh` 39/39（新增 `sms` 业务动作全链路 13 条，含 mock 故障钩子 `AT+TESTCEUS=0/1`、`TESTCEUSFAIL`、`TESTCFUN1FAIL`、`TESTCPMSFAIL`、`TESTIMSFALSE`）；前端行为测试 24/24，`tests/*.js` 全绿（`cellular-icon-test.js` 修复 harness 取导出写错的 `api.CELLULAR_LEVELS/LABELS`，13/14 → 38/38）；`cargo build --release`、`node --check`、`git diff --check` 通过。**遗留实机项**：`AT+CGDCONT?` 回读与重启后是否保留、真实 `CFUN=1` 应答时长与注册轮询上限是否够用、CEUS 改写后开关机是否真正生效
 
 ## v1.26.0 (2026-10-22)
 
