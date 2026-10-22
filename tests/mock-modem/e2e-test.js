@@ -140,42 +140,52 @@ async function main() {
 		check('events 拉取结构 {seq,events}', ok, 'seq=' + sinceRef.val);
 	}
 
-	/* 5b. 短信发送两段式协议（issue #19 回归）
+	/* 5b. 短信提交形态（手册 9.14.1／9.14.5 + 实机对照；issue #19 回归）
 	 *
-	 * 正确协议（3GPP TS 27.005 §3.4.1）：
-	 *   1. `AT+CMGS=<长度>`        → 模组回 `> ` 输入提示符（无换行结尾），
-	 *                              后端 consume() 据此结束本次应答；
-	 *   2. `<PDU hex>` + Ctrl+Z    → 模组回 `+CMGS: <mr>` + `OK`。
-	 * 旧实现把两步拼成一条命令且从不发 0x1A，模组永远停在 PDU 输入等待态，
-	 * 前端却因「提示符被当成成功应答」显示发送成功 —— 即「显示成功但发不出去」。
-	 * 这里沿「JSON RPC → 后端 → mock 模组」全链路钉住每一跳。
+	 * 这台模组认的是**一次性形态**，分隔符是字面的 `\r`（反斜杠 + 字母 r 两个字符）：
+	 *   `AT+CMGS=<长度>` + 字面 `\r` + <PDU> → 立即 `+CMGS: <mr>` + `OK`，
+	 *   全程没有 `> ` 输入提示符，也不需要 Ctrl+Z。手册 9.14.5 的举例就是这个写法，
+	 *   并注明「使用 SSCOM 工具时对应的 "\r" 应改为 "\\r"」—— 串口上发的确实是
+	 *   反斜杠加字母 r。业务路径（sms::send）与厂商 WebUI 都走这一种。
+	 * 其余几种形态一并钉住，它们覆盖了「显示成功但发不出去」的每个来源：
+	 *   两段式（只报长度 → 提示符 → PDU+Ctrl+Z）仍是合法退路，但**提示符本身不是回执**；
+	 *   零长度、长度与 PDU 字节数不符 → 模组直接 ERROR；
+	 *   长度 + 真 CR + PDU + CR 一次写完 → 实机只回显命令然后静默（见文件末尾第 12 项）。
 	 */
 	{
-		/* 第一步：报 TPDU 长度。PDU 共 21 字节，SMSC 占 1 字节 → TPDU 20 字节 */
-		const r1 = atResult(await at('AT+CMGS=20'));
-		check('AT+CMGS=20 拿到输入提示符应答',
-			r1.success && String(r1.data).indexOf('>') >= 0,
-			(r1.data ? String(r1.data).replace(/\r/g, '\\r').slice(0, 20) : r1.error) || '无应答');
+		/* 手册 9.14.5 的原始举例：整条 PDU 19 字节，SMSC 字段 1 字节（00 = 用模组
+		 * 自己存的中心号）+ TPDU 18 字节，所以 <length> 是 18（9.14.3：长度不含
+		 * SMSC 字段）。长度一律由 PDU 算出来，不再手写 —— 旧夹具写的 21 字节
+		 * 其实只有 19.5 字节，两段式路径不校验长度，所以一直没暴露。 */
+		const pdu = '0015660B813109120090F60008FF044F60597D';
+		const tpduLen = pdu.length / 2 - 1 - parseInt(pdu.slice(0, 2), 16);
+		const oneShotCmd = 'AT+CMGS=' + tpduLen + '\\r' + pdu;
 
-		/* 第二步：PDU + Ctrl+Z(0x1A)。0x1A 经 JSON \u001a 转义穿过 RPC 链路，
+		const r1 = atResult(await at(oneShotCmd));
+		check('一次性形态（长度 + 字面 \\r + PDU）拿到 +CMGS 回执',
+			r1.success && String(r1.data).indexOf('+CMGS') >= 0 && String(r1.data).indexOf('OK') >= 0,
+			(r1.data ? String(r1.data).replace(/\r/g, '\\r').slice(0, 40) : r1.error) || '无应答');
+
+		/* 两段式第一步：只给 `> ` 提示符，不能被当成提交成功 */
+		const r2 = atResult(await at('AT+CMGS=' + tpduLen));
+		check('两段式第一步只有提示符、没有提交回执',
+			!(r2.success && String(r2.data).indexOf('+CMGS') >= 0),
+			(r2.data ? String(r2.data).replace(/\r/g, '\\r').slice(0, 20) : r2.error) || '无应答');
+
+		/* 两段式第二步：PDU + Ctrl+Z(0x1A)。0x1A 经 JSON \u001a 转义穿过 RPC 链路，
 		 * serde_json 解析还原后原样写入串口 —— 这条链路本身也是被测对象。 */
-		const pdu = '0001000B815221214365F70000AA0B4F60C6A21';
-		const r2 = atResult(await at(pdu + '\x1A'));
-		check('PDU+Ctrl+Z 提交拿到 +CMGS 回执',
-			r2.success && String(r2.data).indexOf('+CMGS') >= 0 && String(r2.data).indexOf('OK') >= 0,
-			(r2.data ? String(r2.data).replace(/\r/g, '\\r').slice(0, 40) : r2.error) || '无应答');
+		const r3 = atResult(await at(pdu + '\x1A'));
+		check('两段式第二步（PDU+Ctrl+Z）拿到 +CMGS 回执',
+			r3.success && String(r3.data).indexOf('+CMGS') >= 0 && String(r3.data).indexOf('OK') >= 0,
+			(r3.data ? String(r3.data).replace(/\r/g, '\\r').slice(0, 40) : r3.error) || '无应答');
 
-		/* 零长度 TPDU 必须被拒：畸形请求不能悄悄走完提交路径 */
-		const r3 = atResult(await at('AT+CMGS=0'));
-		check('AT+CMGS=0（零长度 TPDU）被拒', r3.success === false,
-			r3.error || String(r3.data).slice(0, 30));
+		const r4 = atResult(await at('AT+CMGS=0'));
+		check('AT+CMGS=0（零长度 TPDU）被拒', r4.success === false,
+			r4.error || String(r4.data).slice(0, 30));
 
-		/* 旧 bug 拼法（PDU 用 \r 接在长度后）不得被当成成功：
-		 * 真实模组对这种输入只回提示符，没有任何提交确认。 */
-		const r4 = atResult(await at('AT+CMGS=20\r' + pdu));
-		check('旧拼法（长度+\\r+PDU 一条命令）拿不到提交回执',
-			!(r4.success && String(r4.data).indexOf('+CMGS') >= 0),
-			(r4.data ? String(r4.data).replace(/\r/g, '\\r').slice(0, 30) : r4.error) || '无应答');
+		const r5 = atResult(await at('AT+CMGS=' + (tpduLen + 1) + '\\r' + pdu));
+		check('一次性形态长度与 PDU 字节数不符被拒', r5.success === false,
+			r5.error || String(r5.data).slice(0, 30));
 	}
 
 	/* 5c. 短信业务动作全链路（`sms` RPC → 后端事务 → mock 模组）
@@ -371,6 +381,25 @@ async function main() {
 		const d = String(r2.data || '').replace(/\r/g, '');
 		check('关闭自动拨号后回读为 0', r1.success && /\^SETAUTODIAL:\s*0/.test(d),
 			d.split('\n').filter(Boolean)[0] || '无应答');
+	}
+
+	/* 12. 真 CR 拼 PDU 的一次性写法：实机表现为静默（必须排在最后一条）
+	 *
+	 * 手册 9.14.1 把语法写成 `AT+CMGS=<length><CR>PDU is given`，照字面用**真实
+	 * CR** 把长度和 PDU 一次写完，这台模组只回显命令、随后不再有任何应答：它已经
+	 * 停在 PDU 输入态等 Ctrl+Z，而这条路上永远不会有 Ctrl+Z。mock 按同一套语义
+	 * 处理（见 mock-modem.js 的 awaitingPdu），所以这里必须**等不到**回执。
+	 *
+	 * 为什么放最后：后端把这条判为一次性提交，按 40s 预算等回执，客户端 3s 放弃后
+	 * 通道仍被占着。排在其它用例前面会把后面整串检查一起拖成排队超时。
+	 */
+	{
+		const pdu = '0015660B813109120090F60008FF044F60597D';
+		const r = atResult(await rpc('at',
+			{ cmd: 'AT+CMGS=' + (pdu.length / 2 - 1 - parseInt(pdu.slice(0, 2), 16)) + '\r' + pdu, auth_key: AUTH_KEY }, 3000));
+		check('长度 + 真 CR + PDU 一次写完拿不到提交回执（实机静默）',
+			!(r.success && String(r.data || '').indexOf('+CMGS') >= 0),
+			r.error || (r.data ? String(r.data).replace(/\r/g, '\\r').slice(0, 30) : '无应答'));
 	}
 
 	sock.end();

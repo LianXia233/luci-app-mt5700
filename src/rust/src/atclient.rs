@@ -19,7 +19,8 @@ use tokio::sync::{mpsc, Mutex, Notify};
 const COMMAND_GAP: Duration = Duration::from_millis(100);
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// 短信提交（`AT+CMGS=<长度>\r<PDU>`）的应答预算。
+/// 短信提交（`AT+CMGS=<长度>` 后面同一条命令里就带着 PDU，见
+/// [is_single_shot_cmgs]）的应答预算。
 ///
 /// 为什么必须单独给：普通查询是「模组本地算一下就回」，2 秒足够；而提交短信要
 /// 把 TPDU 交给网络侧，`+CMGS` 的回执取决于信号与基站排队，实测弱信号下要好几秒
@@ -213,9 +214,10 @@ pub struct PendingCmd {
     pub stream: Option<Box<dyn Fn(String) + Send + Sync>>,
     /// true 时忽略 `> ` 输入提示符，必须等到真正的结束码。
     ///
-    /// 仅用于「一次写完整条 `AT+CMGS=<长度>\r<PDU>`」的短信提交：模组收到长度后
-    /// 先吐 `> ` 提示符，再收 PDU，最后才回 `+CMGS: <mr>` / OK。若把 `> ` 当成
-    /// 应答结束，命令会提前返回 success，而此刻短信可能压根没提交完。
+    /// 仅用于「一次写完整条 `AT+CMGS=<长度>` + 分隔符 + `<PDU>`」的短信提交：
+    /// 这台模组的正常路径不给 `> ` 提示符（手册 9.14.1 的应答里也没有它），但裸 AT
+    /// 终端页的一次性写法仍可能先吃到一个 `> ` 再等回执。若把 `> ` 当成应答结束，
+    /// 命令会提前返回 success，而此刻短信可能压根没提交完。
     pub ignore_prompt: bool,
 }
 
@@ -938,7 +940,12 @@ impl AtClient {
             .acquire(prio, ctx, QUEUE_WAIT_TIMEOUT)
             .await?;
 
-        self.exec_locked(ctx, command, timeout, stream, false).await
+        // 一次性提交（长度与 PDU 同一条命令）与 PDU 载荷段不能被 `> ` 提示符提前
+        // 结束应答，判据与 [run_in_transaction] 完全一致 —— 否则裸 AT 终端页会
+        // 把「模组只给了个提示符」报成一次成功应答，而短信根本没提交完。
+        let single_shot_submit = is_single_shot_cmgs(command) || is_cmgs_payload(command);
+        self.exec_locked(ctx, command, timeout, stream, single_shot_submit)
+            .await
     }
 
     /// 通道已被本调用方持有时下发一条命令（不重复申请闸）。
@@ -1188,11 +1195,19 @@ pub fn is_terminator(line: &str) -> bool {
     line.starts_with("+CMS ERROR:") || line.starts_with("+CME ERROR:")
 }
 
-/// 判断是否为「一次性写完整条提交串」的 `AT+CMGS`：含 CR 即说明后面还跟着 PDU。
+/// 判断是否为「一次性写完整条提交串」的 `AT+CMGS`：长度与 PDU 在同一条命令里。
 ///
-/// 只报长度的那一半（`AT+CMGS=14`）不算 —— 它确实要停在 `> ` 提示符上。
+/// 两种分隔符都要认：
+///   - **字面的 `\r`**（反斜杠 + 字母 r 两个字符）—— 手册 9.14.5 举例与厂商 WebUI
+///     实际下发的形态，也是这台模组唯一认的形态（真 CR 那种只回显、不应答）；
+///     业务路径 `sms::send` 走的就是这一种。
+///   - 真实的 CR —— 裸 AT 终端页里用户手敲或脚本贴进来的形态。
+///
+/// 两种都不能被 `> ` 提示符提前结束应答：模组对这条形态是直接给 `+CMGS:` / OK，
+/// 把它当成「停在提示符上的一次普通命令」会把回执丢到下一条应答里。
+/// 只报长度的那一半（`AT+CMGS=14`，两种分隔符都没有）不算 —— 它确实要停在 `> ` 上。
 pub fn is_single_shot_cmgs(command: &str) -> bool {
-    command.starts_with("AT+CMGS=") && command.contains('\r')
+    command.starts_with("AT+CMGS=") && (command.contains('\r') || command.contains("\\r"))
 }
 
 /// 判断是否为「两段式提交里 PDU 那一半」：以 Ctrl+Z 结尾就是提交体，
@@ -1281,6 +1296,17 @@ mod tests {
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tokio::io::{AsyncRead, ReadBuf};
+
+    /// 一次性提交的识别：字面 `\r`（业务路径与厂商形态）与真实 CR（终端页手敲）
+    /// 都要认，只报长度的那半步都不能认——它确实要停在 `> ` 提示符上。
+    #[test]
+    fn single_shot_cmgs_recognizes_both_separators() {
+        assert!(is_single_shot_cmgs("AT+CMGS=18\\r0015660B813109120090F60008FF04"));
+        assert!(is_single_shot_cmgs("AT+CMGS=18\r0015660B813109120090F60008FF04"));
+        assert!(!is_single_shot_cmgs("AT+CMGS=18"), "只报长度：要等提示符");
+        assert!(!is_single_shot_cmgs("AT+CMGS=18\n001566"), "LF 不是分隔符");
+        assert!(!is_single_shot_cmgs("AT+CMGF=0\\r"), "不是提交命令");
+    }
 
     /// 模拟「暂无数据时 read 返回 0 字节」的串口：先给若干次 0，再给出数据。
     struct ZeroThenData {
