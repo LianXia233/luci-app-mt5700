@@ -1538,16 +1538,9 @@ return L.view.extend({
 				return;
 			}
 
-			/* 强度条：RSRP → 百分比（-120dBm=0%、-70dBm=100%），≥60 绿 / ≥40 黄 / 否则红 */
-			function sigBar(rsrp) {
-				if (rsrp == null) return document.createTextNode('—');
-				var pct = Math.max(0, Math.min(100, Math.round(2 * (Number(rsrp) + 120))));
-				var color = pct >= 60 ? 'var(--mt5700-success)'
-					: pct >= 40 ? 'var(--mt5700-warning)' : 'var(--mt5700-danger)';
-				return E('div', { 'class': 'mt5700-signal-bar' },
-					E('div', { 'class': 'mt5700-signal-bar-fill',
-						'style': 'width:' + pct + '%;background:' + color }));
-			}
+			/* 强度条：量程与等级的唯一真源在 Parse（mt5700.js「信号强度」段的明文纪律）。
+			 * 这里原先自算 2*(rsrp+120)，是那份纪律里点名的第二份实现（B12）——
+			 * 换成 Mt5700.rsrpBar（内部走 Parse.signalPercent + percentLevel）。 */
 
 			/* ^NRSSBID 邻区按「SSB 频点落在载波下行带宽内」配对；同频有多个邻区时取 RSRP 最强者 */
 			function nrssbidMatch(c) {
@@ -1638,7 +1631,7 @@ return L.view.extend({
 					sig.rsrp != null ? sig.rsrp + ' dBm' : '—',
 					sig.rsrq != null ? sig.rsrq + ' dB' : '—',
 					sig.sinr != null ? sig.sinr + ' dB' : '—',
-					sigBar(sig.rsrp)
+					Mt5700.rsrpBar(sig.rsrp)
 				];
 			});
 			carrierBox.appendChild(Mt5700.table(
@@ -2583,6 +2576,13 @@ return L.view.extend({
 				var now = Date.now();
 				if (rateSample && rateSample.device === r.device) {
 					var dt = (now - rateSample.t) / 1000;
+					/* 单侧计数器读不到（后端对瞬时不可读回 null 而非补 0）时，
+					 * 本拍差分不可信：跳过并重置基准，下一拍恢复（B07） */
+					if (rateSample.rx == null || rateSample.tx == null ||
+					    r.rx_bytes == null || r.tx_bytes == null) {
+						rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+						return;
+					}
 					/* 间隔过短（<0.2s）时差分噪声大，跳过本次并保留原基准 */
 					if (dt >= 0.2) {
 						var drx = r.rx_bytes - rateSample.rx;
@@ -2643,7 +2643,6 @@ return L.view.extend({
 		var FAST_MS = 5000;
 		var SLOW_MS = 30000;
 
-		var refreshing = false;
 		/*
 		 * 在跑的那一轮刷新。
 		 *
@@ -2656,7 +2655,6 @@ return L.view.extend({
 		var fastRunning = null;
 		function refreshFast() {
 			if (fastRunning) return fastRunning;
-			refreshing = true;
 			var chain = Promise.resolve();
 			/* 只保留「用户盯着看、需要秒级新鲜」的内容：信号与小区信息。
 			   注册状态（AT+CGREG?）与模组侧累计流量（AT^DSFLOWQRY）不随秒变化，
@@ -2664,7 +2662,7 @@ return L.view.extend({
 			[updateNetworkInfo]
 				.forEach(function (fn) { chain = chain.then(fn); });
 			fastRunning = chain.catch(function () { /* 刷新失败保留上一次数据 */ })
-				.then(function () { refreshing = false; fastRunning = null; });
+				.then(function () { fastRunning = null; });
 			return fastRunning;
 		}
 
@@ -2757,11 +2755,9 @@ return L.view.extend({
 		/* 慢档各任务的失败记录：逐步兜错后失败不再阻断后续，但要留痕，
 		   否则「某一项一直失败」又会退化成看不见的静默问题。 */
 		var slowFailures = {};
-		var slowRefreshing = false;
 		var slowRunning = null;   /* 同 refreshFast：撞车时复用在跑的那一轮 */
 		function refreshSlow() {
 			if (slowRunning) return slowRunning;
-			slowRefreshing = true;
 			/*
 			 * 串行，但**每个环节各自兜错**。
 			 * 过去是 `chain.then(a).then(b)…` 末尾挂一个 catch：任何一步 reject，
@@ -2800,7 +2796,6 @@ return L.view.extend({
 				}
 			});
 			slowRunning = chain.then(function () {
-				slowRefreshing = false;
 				slowRunning = null;
 			});
 			return slowRunning;

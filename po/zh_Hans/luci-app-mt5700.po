@@ -115,6 +115,6 @@ msgstr "通知将推送到该 WebHook 地址"
 msgid "AT WebServer"
 msgstr "AT WebServer"
 
-msgid "LuCI support for AT WebServer"
-msgstr "LuCI support for AT WebServer"
+msgid "LuCI support for AT WebServer (MT5700M 5G modem)"
+msgstr "AT WebServer 的 LuCI 支持（MT5700M 5G 模组）"
 

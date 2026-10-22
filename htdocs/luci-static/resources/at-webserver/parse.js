@@ -1085,8 +1085,13 @@ var Parse = (function () {
 			',' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 	};
 
-	api.parseMessageTime = function (timeStr) {
-		if (!timeStr) return new Date();
+	/* ★ B13（2026-10-22 审计）加 strict 参数：传 true 时解析失败返回 **null**
+	 * 而不是回落「当前时刻」。回落对显示侧合理（宁可显示现在也不显示错误过去），
+	 * 但对**判定侧**有毒 —— 每次调用都得到一个领先于任何水位线的新「现在」，
+	 * sms_center 的未读判定因此在时间异常的会话上永远消不掉（幻影未读）。
+	 * 判定方传 strict，显示方不传 —— 解析逻辑保持单源。 */
+	api.parseMessageTime = function (timeStr, strict) {
+		if (!timeStr) return strict ? null : new Date();
 		var match = String(timeStr).trim().match(/(\d{2})\/(\d{2})\/(\d{2}),(\d{2}):(\d{2}):(\d{2})/);
 		if (match) {
 			var y = 2000 + parseInt(match[1], 10);
@@ -1109,7 +1114,7 @@ var Parse = (function () {
 			 */
 			if (mo < 1 || mo > 12 || dy < 1 || dy > 31
 				|| hh > 23 || mi > 59 || ss > 60) {
-				return new Date();
+				return strict ? null : new Date();
 			}
 			var d = new Date(y, mo - 1, dy, hh, mi, ss);
 			/*
@@ -1129,12 +1134,13 @@ var Parse = (function () {
 			 *   with_ymd_and_hms，越界返回 None 并回落当前时间，三处现已同口径。
 			 */
 			if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== dy) {
-				return new Date();
+				return strict ? null : new Date();
 			}
 			return d;
 		}
 		var parsed = new Date(timeStr);
-		return isNaN(parsed.getTime()) ? new Date() : parsed;
+		if (isNaN(parsed.getTime())) return strict ? null : new Date();
+		return parsed;
 	};
 
 	/* ================= 短信 PDU 解码（等价 Rust pdu.rs / Go pdu.go） ================= */

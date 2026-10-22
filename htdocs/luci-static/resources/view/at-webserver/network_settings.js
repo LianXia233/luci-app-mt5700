@@ -75,7 +75,12 @@ return L.view.extend({
 		var neighRefreshBtn = Mt5700.primaryButton('扫描邻区', function () { loadNeighbors(); });
 		var neighAr = Ui.autoRefresh(function (enabled, interval) {
 			if (neighAutoTimer) { clearInterval(neighAutoTimer); neighAutoTimer = null; }
-			if (enabled) neighAutoTimer = Ui.interval(interval * 1000, loadNeighbors);
+			/* 回调首行查 hidden（同 logs.js:602 范式）：后台标签页仍每 15s 打 3 条 AT
+			 * （^MONNC/^NRSSBID?/^MONSC），纯浪费独占串口（2026-10-22 审计）。 */
+			if (enabled) neighAutoTimer = Ui.interval(interval * 1000, function () {
+				if (document.hidden) return;
+				loadNeighbors();
+			});
 		});
 		neighAr.setInterval(15);
 		var neighTools = E('div', { 'class': 'mt5700-toolbar' });
@@ -880,7 +885,9 @@ return L.view.extend({
 		Mt5700.connectThen(function () {
 			renderLockEditor();
 			fetchCurrent();
-			renderNeighbors();
+			/* loadNeighbors 自带渲染，原先前面那遍 renderNeighbors() 只画一张空表、
+			 * 随即被整体重绘覆盖 —— 每次进页面多一次纯浪费的 DOM 重建
+			 * （2026-10-22 审计）。 */
 			loadNeighbors();
 		});
 

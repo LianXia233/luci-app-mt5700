@@ -587,7 +587,10 @@ return L.view.extend({
 			return Promise.all([
 				rpcServiceList(SERVICE).catch(function () { svcRefreshFailed = true; return {}; }),
 				/* ★ 同上：返回值不用，副作用必需 —— 539 行的 L.uci.get 读的就是它加载进缓存的配置 */
-				L.uci.load(SERVICE)
+				L.uci.load(SERVICE),
+				/* ★ 2026-10-22 审计：二进制事实随刷新重查 —— 原先只有 load() 查一次，
+				 *   期间文件被替换/删除的话，「未安装 / 无执行位」的归因一直基于旧快照。 */
+				statBinary(BINARY).catch(function () { return null; })
 			]).then(function (res) {
 				var svc = (res[0] && res[0][SERVICE]) || {};
 				var found = false;
@@ -607,6 +610,11 @@ return L.view.extend({
 				state.registered = !!(res[0] && res[0][SERVICE]);
 				state.svcUnknown = svcRefreshFailed;
 				state.enabled = (en === null || en === undefined) ? '1' : String(en);
+				/* 二进制事实刷新（与 load() :204 同一套判据，唯一判据别长出第二套） */
+				var st2 = res[2];
+				state.binExists = !!(st2 && (st2.type || st2.mode !== undefined));
+				state.binExec = state.binExists && !!(st2.mode & parseInt('0111', 8));
+				state.binUnknown = (st2 == null);
 
 				var st = resolveStatus(state);
 				renderStatus(st);

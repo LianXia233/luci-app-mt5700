@@ -196,7 +196,12 @@ start_service() {
 	echo "AT WebServer started successfully"
 
 	# 串口探测与防火墙放到后台，避免 /etc/init.d/firewall reload 阻塞 start
+	# ★ stop 必须能追杀这个后台任务（2026-10-22 审计）：否则 start 后 ~90s 内
+	#   （modem 未就绪时 post_start 里的接口等待很长）执行 stop，后台任务会在
+	#   stop 清理完之后把防火墙规则重新加回 —— 「服务已停」而规则复活。PID 落
+	#   文件，stop_service 先 kill 再清规则；进程已退出时 kill 落空，无害。
 	( at_webserver_post_start ) >/dev/null 2>&1 &
+	echo $! > /var/run/at-webserver-post.pid
 }
 
 at_webserver_post_start() {
@@ -468,6 +473,12 @@ stop_service() {
 	# 额外 killall 会被记成一次「崩溃」，反复 stop/start 会攒满 respawn 重试次数，
 	# 最终让 procd 永久放弃重启（见 start_service 的「严重警告二」）。
 	rm -f /var/run/at-webserver-rust.pid
+
+	# 先追杀后台初始化任务（见 start_service 尾部）：它还活着的话会把规则重新加回
+	if [ -f /var/run/at-webserver-post.pid ]; then
+		kill "$(cat /var/run/at-webserver-post.pid 2>/dev/null)" 2>/dev/null
+		rm -f /var/run/at-webserver-post.pid
+	fi
 
 	# 清理防火墙规则（幂等）。清单与启动时共用 FW_RULE_NAMES，避免漏删。
 	for rule_name in $FW_RULE_NAMES; do

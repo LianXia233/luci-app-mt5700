@@ -1051,8 +1051,12 @@ return L.view.extend({
 				inputBox.appendChild(Mt5700.formGroup('SM-DP+ 服务器', smdpInput, '运营商给的下载服务器域名'));
 				inputBox.appendChild(Mt5700.formGroup('匹配码', midInput, 'Activation Code / Matching ID'));
 				inputBox.appendChild(Mt5700.formGroup('OID', oidInput, '多数运营商不需要'));
-				inputBox.appendChild(E('label', { 'class': 'mt5700-hint' },
-					ccChk, document.createTextNode(' 该运营商要求确认码')));
+				/* 两步建（2026-10-22 审计）：全局 E 的多参形态与本仓 Mt5700.E
+				 * 「只挂第 3 参」的约定相反 —— 将来若有人统一 E 实现，这九个字
+				 * 会被静默丢掉。 */
+				var ccLabel = E('label', { 'class': 'mt5700-hint' }, ccChk);
+				ccLabel.appendChild(document.createTextNode(' 该运营商要求确认码'));
+				inputBox.appendChild(ccLabel);
 			}
 
 			function start() {

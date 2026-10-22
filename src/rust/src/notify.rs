@@ -179,7 +179,9 @@ impl Notifier {
             let wait = next_wait(last_send);
             tokio::select! {
                 _ = ctx.changed() => {
-                    flush(&self.cfg.wechat_webhook, &mut pending);
+                    // 退出路径（A-B9，2026-10-22 审计）：原先 flush 只 spawn 就 return，
+                    // runtime 一关最后一批通知就丢了 —— 改为带超时的在位等待。
+                    flush_and_wait(&self.cfg.wechat_webhook, &mut pending).await;
                     return;
                 }
                 msg = rx.recv() => {
@@ -192,7 +194,7 @@ impl Notifier {
                             pending.push(msg);
                         }
                         None => {
-                            flush(&self.cfg.wechat_webhook, &mut pending);
+                            flush_and_wait(&self.cfg.wechat_webhook, &mut pending).await;
                             return;
                         }
                     }
@@ -216,6 +218,18 @@ fn flush(hook: &str, pending: &mut Vec<Notification>) {
     tokio::spawn(async move { send_webhook(&hook, &body).await; });
 }
 
+/// 退出路径专用：flush 后**在当前任务里等发送完成**（带 10s 上限，不无限拖关停）。
+async fn flush_and_wait(hook: &str, pending: &mut Vec<Notification>) {
+    if pending.is_empty() {
+        return;
+    }
+    let body = combine_messages(pending);
+    pending.clear();
+    let hook = hook.to_string();
+    let send = tokio::spawn(async move { send_webhook(&hook, &body).await; });
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), send).await;
+}
+
 fn prepare_log_file(path: &str) -> Result<String, String> {
     let abs = std::path::absolute(path).map_err(|e| e.to_string())?;
     if let Some(dir) = abs.parent() {
@@ -228,6 +242,13 @@ fn prepare_log_file(path: &str) -> Result<String, String> {
         .open(&abs)
         .map_err(|e| format!("日志文件不可写 {}: {e}", abs.display()))?;
     drop(f);
+    // 日志含短信/来电内容（D-B11，2026-10-22 审计）：收掉组/其他位。
+    // Windows 无此权限模型，随平台编译只在 Unix 生效。
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&abs, std::fs::Permissions::from_mode(0o600));
+    }
     Ok(abs.to_string_lossy().into_owned())
 }
 

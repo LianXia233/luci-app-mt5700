@@ -5,7 +5,58 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [2.4.32] - 2026-10-22
+## [2.4.33] - 2026-10-22
+
+### 全仓库深度审计修复（四批次，24 项）
+
+按「逻辑/性能/可读性/安全/可维护性」五维度做全仓审计（Rust 14 文件 / ucode 3592 行 / 前端 2 万行 / shell 与打包全量），问题清单见会话审计报告。无阻断级问题；本轮修复高危与中危全部 15 项中的 13 项 + 低危 9 项，其余进不改清单。
+
+#### ucode 层
+
+- **VoWiFi 评估链设总预算**（高危）：后端挂死/DNS 悬置时最坏 ~15 分钟冻结整个 LuCI（rpcd 单线程）。入口设绝对截止时刻（评估 30s / 开关后复评 20s），沿调用链传参，超窗降级为 unknown —— 那本来就是四态语义的合法结论。
+- **callLineInfo 不再把通道故障吞成 mute:null**（高危，红线 23）：`m == null` 是死分支（rpcCall 永不返 null），通道忙时 CMUT 错误被静默吞掉。改为 `!m.success` 整体报错。
+- **jsonParse 完整性校验**：被 timeout 掐断的半截应答此前会按「成功」解析出半截 data；现在未闭合/带尾随垃圾一律抛异常（8 个调用点全部已有 try/catch，原注释「解析失败是抛异常」由此真正成立）。
+- **netrate 单侧计数器读不到回 null**（原来补 0 → 假速率尖峰），前端跳拍重置基准。
+- **日志落盘临时文件改随机名**（smslog/calllog 固定 `.tmp` 并发互相覆盖 → 丢更新），失败时顺手清理。
+- **RPC 临时文件收权 0600**（内容含 auth_key），`AT+CIMI` 移出静态缓存档（IMSI 随卡变，与 P03 的 ICCID 同判据），`AT+CSQ` 与三条「写形式的查询」（`AT^MCS`/`AT^EONS`/`AT^DSAMBR`，手册 13.22/13.3/16.17）补进只读名单 —— 预热批次不再被拒、30s 慢档不再每轮清全片状态缓存。
+- readCounter 的 fd 在 read 抛异常时也会关闭。
+
+#### 前端
+
+- NON_QUESTION_READS 同步补三条带参查询，且 `isRetryableRead` 支持**前缀命中**（名单存命令头、实际调用带参数）。
+- 载波表强度列改用 `Mt5700.rsrpBar`（原先自算公式是「唯一真源在 Parse」纪律点名的第二份实现）。
+- 幻影未读修复：`parseMessageTime` 加 strict 参数（判定侧解析失败得 null 而不是回落「当前时刻」——回落值每次都领先水位线，会话永远消不掉红点）；显示侧行为不变。
+- VoNR 下发失败回读真值对齐界面（原先只弹错，界面停在未生效的值）。
+- 删 `refreshing`/`slowRefreshing` 两个只写不读的死变量；esim 手动模式 label 改两步建（全局 E 多参形态与本仓「只挂第 3 参」约定相反）；长短信发送切页后不再弹「页面已离开」的幽灵 toast；邻区自动刷新在后台标签页不再每 15s 打 3 条 AT；进网络设置页少一次空表重建；服务页刷新时重查二进制事实（原先停在 load() 快照）。
+
+#### shell / 打包
+
+- **init.d post_start 后台任务可被 stop 追杀**（高危）：start 后 ~90s 内执行 stop，后台任务会把防火墙规则重新加回 —— PID 落文件，stop 先 kill 再清。
+- uci-defaults 在线补装加 60s 限时（feed 不可达时不再拖住包管理器数分钟）；`/etc/config/at-webserver` 统一 `chmod 0600`（含 auth_key 与 webhook）；后台启动加 120s stamp 防重入。
+- hotplug 续约脚本：防抖改 mkdir 原子抢占（原「读-改-写」竞态会让两路续约重叠，锁超龄自愈）；设备名从 UCI 取（定制机型不再静默失效）。
+- audio-ko.sh 的错误文件按进程区分（init.d 与 usb hotplug 并发时不再张冠李戴）。
+- po/pot 的包标题 msgid 与 `LUCI_TITLE` 对齐（原先翻译永不命中），pot 的 msgstr 清空。
+
+#### Rust 后端（cargo check 通过；行为验证需 CI 出包 + 刷机）
+
+- **扫频 done/error 事件的 lines 按帧预算截断**（高危）：数百行 ≈ 数十 KB 单帧会吃穿 events 预算堵住游标；保留真实 count 并附 truncated 标志。
+- **短信任务外层预算对齐内层最坏耗时**（高危）：16s < 17.1s 的缺口会让 future 被整体 drop，cmd_mu 提前释放 + pending 残留 → AT 应答错位。现 20.1s，并在 send_command 处写明 drop-safety 约定（WRITE_TIMEOUT/COMMAND_GAP 转 pub）。
+- 长短信拼装改为「1..=total 每段都在」才组装（畸形分段不再拼出缺段正文）；分段缓存 key 加入 total（同号同 ref 不同分段数不互混）。
+- accept 持续失败加指数退避（100ms→1.6s，原来紧循环刷日志）；退出路径的通知 flush 改为带 10s 上限的在位等待（原来 spawn 后立刻 return，最后一批通知随 runtime 关闭丢失）；通知日志文件收权 0600；`LOG_BUFFER_CAP`/`DEFAULT_SCAN_TIMEOUT` 单源化（原来 1200/180 各存两份字面量）。
+
+#### 测试
+
+- 名单契约扩展：BARE_READS 11 条逐个点名、NON_QUESTION_READS 12 条、`AT+CIMI` 不得回静态档（B10 反向验证：故意加回 → 精确报红）。
+- 被钉住的旧形态锚点随行为迁移：渲染链复位断言改锚 `fastRunning`/`slowRunning`（死变量已删）、logs limit 上限改锚 `LOG_BUFFER_CAP`、vowifi 三处断言改锚预算后形态。
+- verify-guards 192 条全部检出、还原逐字节一致；run-all 全绿。
+
+### 未修复（决策记录）
+
+- AT 应答错位的**通用** drop-safety（pending 的 Drop 守卫）：触发路径已由预算对齐消解，通用守卫动核心命令通路且 try_lock 残留引入新风险，待真机验证后再评估。
+- `vowifi_set` 缺参 `enable` 是否被 rpcd 回填默认值 0：本机无法验证，需真机实测。
+- conffiles 声明：apk 对 /etc 的保护行为需真机验证后再定。
+- i18n 全量 `_()` 包裹：单语产品决策，非缺陷。
+
 
 ### 修复：随包内核模块让包在任何平台都编不过
 

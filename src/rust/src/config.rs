@@ -129,6 +129,10 @@ pub struct Config {
     pub schedule: ScheduleConfig,
 }
 
+/// 扫频超时的默认值：rpcserver 的回退值与这里的默认配置共用一份
+/// （A-B5，2026-10-22 审计：同值两处会静默漂移）。
+pub const DEFAULT_SCAN_TIMEOUT: Duration = Duration::from_secs(180);
+
 pub fn default_config() -> Config {
     Config {
         enabled: true,
@@ -173,7 +177,7 @@ pub fn default_config() -> Config {
             allow_wan: false,
             bind: "127.0.0.1".into(),
             bind_downgraded: false,
-            scan_timeout: Duration::from_secs(180),
+            scan_timeout: DEFAULT_SCAN_TIMEOUT,
         },
         schedule: ScheduleConfig {
             enabled: false,

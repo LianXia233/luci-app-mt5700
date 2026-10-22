@@ -551,11 +551,24 @@ return L.view.extend({
 			{ label: 'FR2-VoNR', value: '2' },
 			{ label: 'FR1+FR2-VoNR', value: '3' }
 		], '0');
+		/* 失败时回读真值对齐界面（2026-10-22 审计）：同卡 ca/dss 失败都回滚了
+		 * checked，唯独这里只弹错 —— 界面停在未生效的值。走 fetchNRCapability
+		 * 里同一条 NRRCCAPQRY=2 的回读，而不是把下拉拨回旧选择（真值优先）。 */
+		function revertVoNr() {
+			return send('AT^NRRCCAPQRY=2').then(function (r2) {
+				var v = r2.success ? Parse.parseNrrcCapQry(atText(r2), 2) : null;
+				if (v !== null) vonrSel.value = String(v);
+			}).catch(function () { /* 回读也失败就保留现值，错误已弹过 */ });
+		}
 		vonrSel.addEventListener('change', function () {
 			send('AT^NRRCCAPCFG=2,' + parseInt(vonrSel.value, 10)).then(function (res) {
-				if (res.success) Mt5700.success('VoNR 配置成功');
-				else Mt5700.error('VoNR 配置失败');
-			}).catch(function () { Mt5700.error('VoNR 配置失败'); });
+				if (res.success) { Mt5700.success('VoNR 配置成功'); return null; }
+				Mt5700.error('VoNR 配置失败');
+				return revertVoNr();
+			}).catch(function () {
+				Mt5700.error('VoNR 配置失败');
+				return revertVoNr();
+			});
 		});
 		nrBody.appendChild(Mt5700.formGroup('VoNR', vonrSel));
 

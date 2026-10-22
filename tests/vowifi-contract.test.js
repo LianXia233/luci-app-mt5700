@@ -235,8 +235,9 @@ const factsBody = grab('epdgFacts', ucSrc);
 ok('★★ 阳性对照查不到时，verdict 必须退回 unknown（不许把 DNS 故障说成运营商没发布）',
 	/posCtl\.state != 'available'[\s\S]{0,200}?verdict = 'unknown';/.test(factsBody),
 	'找不到「阳性对照失败 → verdict=unknown」的分支');
-ok('★ 阳性对照必须真的参与判定（不能只是查了不看的装饰）',
-	/let posCtl = epdgProbe\(safeEpdgFqdn\(EPDG_POS_FQDN\)\);/.test(factsBody));
+ok('★ 阳性对照必须真的参与判定（不能只是查了不看的装饰；B01 后包在预算 if 里）',
+	/posCtl = epdgProbe\(safeEpdgFqdn\(EPDG_POS_FQDN\)\);/.test(factsBody)
+	&& /let posCtl = \{ state: 'unknown' \};/.test(factsBody));
 ok('★ 阳性对照组也要查一次（不是写死结论）',
 	/posCtl: posCtl,/.test(factsBody));
 ok('★ 阴性对照组（mnc999）也要查并返回（用来识别通配污染）',
@@ -365,7 +366,7 @@ ok('★ AT 通道失败 / 解不出状态字 / 没有数据段都要留 err（�
 ok('★ efDirApps 返回 { apps, err }（调用方要能区分「读不到」与「确实没有」）',
 	/return \{ apps: apps, err: err \};/.test(dirBody));
 ok('★ 编排层把 dirError 带出去（前端据此显示「读不到」而不是「没有 ISIM」）',
-	/dirError: dir\.err,/.test(ucSrc) && /let dir = efDirApps\(\);[\s\S]{0,80}?let apps = dir\.apps;/.test(ucSrc));
+	/dirError: dir\.err,/.test(ucSrc) && /let dir = efDirApps\(dl\);[\s\S]{0,80}?let apps = dir\.apps;/.test(ucSrc));
 
 const crsmSw = ucFn(['decHex2', 'crsmSw'], 'crsmSw');
 /* 真机：+CRSM: 106,131,"" —— 6A83＝EF_DIR 记录不存在（读到头了） */
@@ -555,8 +556,8 @@ ok('★★ 回读不一致只报「未生效」，不反向重下发（手册三
 	wrBody.indexOf('AT^IMSSWITCH') < 0 && /effective: \(actual == \(enable \? '1' : '0'\)\)/.test(wrBody));
 ok('★ 回读不到要标 unknown（不许据此断言生效）',
 	/unknown: true/.test(wrBody) && /if \(actual == null\)/.test(wrBody));
-ok('★ 下发后重跑五门（开关状态与「VoWiFi 成不成立」是两件事，都要回）',
-	/let after = vowifiFacts\(\);/.test(setBody) && /facts: after/.test(setBody));
+ok('★ 下发后重跑五门（开关状态与「VoWiFi 成不成立」是两件事，都要回；B01 后带 20s 预算）',
+	/let after = vowifiFacts\(time\(\) \+ 20\);/.test(setBody) && /facts: after/.test(setBody));
 
 /* ---------- 7. ACL / rpc / 前端 ---------- */
 

@@ -337,8 +337,8 @@ ok('① LogRecord 可序列化（serde derive 已在 Cargo.toml 开启）',
 ok('② rpcserver.rs 有 logs 分支', /"logs"\s*=>\s*\{/.test(rpcRs));
 ok('② logs 分支走 crate::logger::snapshot',
 	/crate::logger::snapshot\(since, limit\)/.test(rpcRs));
-ok('② logs 分支限制 limit 上限（防止一次拉爆缓冲）',
-	/\.min\(1200\)/.test(rpcRs));
+ok('② logs 分支限制 limit 上限（防止一次拉爆缓冲；上限锚 LOG_BUFFER_CAP 单源，A-B5）',
+	/\.min\(crate::logger::LOG_BUFFER_CAP/.test(rpcRs));
 
 ok('③ ucode 有 logs 方法', /\blogs:\s*\{/.test(ucodeUc));
 ok('③ ucode logs 转发带 since 与 limit',

@@ -74,7 +74,8 @@ const mod = loadRpc();
 const isRead = mod.isRetryableRead;
 
 /* ---------- ① 手册确认的查询必须被当成只读 ---------- */
-const MANUAL_READS = ['AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CGMI'];
+const MANUAL_READS = ['AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CGMI',
+	'AT^MCS=0', 'AT^EONS=0', 'AT^DSAMBR=1'];
 MANUAL_READS.forEach(function (c) {
 	ok('① 手册确认的查询「' + c + '」被当成只读', isRead(c) === true,
 		'当前判为写命令 → 不缓存 / 不重试 / 不受熔断保护 / 还会清空状态缓存');
@@ -96,10 +97,12 @@ MUST_BE_WRITES.forEach(function (c) {
 
 /* ---------- ④ 前后端对「什么算只读」必须一致 ---------- */
 const bare = ucodeList('BARE_READS');
-{	/* ★ 2026-09-28：补点名 —— ucode BARE_READS 是这 7 条（后端「不带 ? 的纯读」名单）。 */
-	const MUST_BARE = ['AT^DSFLOWQRY', 'AT^MONNC', 'AT^MONSC', 'AT^MONSSC', 'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP'];
+{	/* ★ 2026-09-28 补 7 条；★ B11（2026-10-22）加 AT+CSQ —— 前端 warmCache 名单里有它，
+	 * ucode 不收的话每轮预热该条必被拒。 */
+	const MUST_BARE = ['AT^DSFLOWQRY', 'AT^MONNC', 'AT^MONSC', 'AT^MONSSC', 'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CSQ',
+		'AT^MCS', 'AT^EONS', 'AT^DSAMBR'];
 	const missBare = MUST_BARE.filter(function (k) { return bare.indexOf(k) < 0; });
-	ok('★ BARE_READS 正是这 7 条（逐个点名，少一条就判红）',
+	ok('★ BARE_READS 至少含这 11 条（逐个点名，少一条就判红）',
 		missBare.length === 0, '缺：' + missBare.join('、'));
 }
 ok('④ ucode BARE_READS 能解析出来（否则下面几条恒绿）', Array.isArray(bare) && bare.length >= 4,
@@ -110,8 +113,12 @@ ok('④ ucode BARE_READS 能解析出来（否则下面几条恒绿）', Array.i
 });
 const staticReads = ucodeList('STATIC_READS') || [];
 MANUAL_READS.forEach(function (c) {
+	/* 带参查询（MCS/EONS/DSAMBR）在 ucode 名单里存的是**前缀**（batchReadable 按
+	 * 前缀判），所以匹配用 startsWith；无参命令两种形态等价。 */
+	const inUcode = staticReads.indexOf(c) >= 0 ||
+		(!!bare && bare.some(function (k) { return c.indexOf(k) === 0; }));
 	ok('④ 前后端一致：「' + c + '」在 ucode 侧也被认为是只读',
-		staticReads.indexOf(c) >= 0 || (!!bare && bare.indexOf(c) >= 0),
+		inUcode,
 		'static=' + JSON.stringify(staticReads) + ' bare=' + JSON.stringify(bare));
 });
 
@@ -120,6 +127,8 @@ ok('⑤ AT+CGPADDR 不得进 ucode STATIC_READS（PDP 地址会随网络重配�
 	staticReads.indexOf('AT+CGPADDR') < 0, JSON.stringify(staticReads));
 ok('⑤ AT+CGEQOSRDP 同理不得进 STATIC_READS',
 	staticReads.indexOf('AT+CGEQOSRDP') < 0);
+ok('⑤ AT+CIMI 不得进 STATIC_READS（IMSI 随卡变，换卡后 300s 旧值 = B10）',
+	staticReads.indexOf('AT+CIMI') < 0, JSON.stringify(staticReads));
 
 /* ---------- ⑥ 反向：把补上的那几条删掉，检查必须报红 ---------- */
 function readsOf(src) {
@@ -128,12 +137,14 @@ function readsOf(src) {
 	return (m[1].match(/'([^']+)'/g) || []).map(function (x) { return x.slice(1, -1); });
 }
 const cur = readsOf(rpcSrc);
-/* ★ 2026-09-28：补点名 —— rpc.js NON_QUESTION_READS 是这 9 条。 */
+/* ★ 2026-09-28 补 9 条；★ B04（2026-10-22）加 MCS/EONS/DSAMBR 三条「写形式的查询」——
+ *   手册 13.22 / 13.3 / 16.17，不改状态；不加则每次成功清全片状态缓存。 */
 {
 	const MUST_CUR = ['AT+CSQ', 'AT^MONSC', 'AT^MONNC', 'AT^MONSSC', 'AT^DSFLOWQRY',
-		'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CGMI'];
+		'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CGMI',
+		'AT^MCS', 'AT^EONS', 'AT^DSAMBR'];
 	const missCur = MUST_CUR.filter(function (k) { return cur.indexOf(k) < 0; });
-	ok('★ NON_QUESTION_READS 正是这 9 条（逐个点名，少一条就判红）',
+	ok('★ NON_QUESTION_READS 至少含这 12 条（逐个点名，少一条就判红）',
 		missCur.length === 0, '缺：' + missCur.join('、'));
 }
 ok('⑥ 反向：NON_QUESTION_READS 能解析出来', cur.length >= 5, JSON.stringify(cur));

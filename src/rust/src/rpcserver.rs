@@ -39,8 +39,30 @@ const MAX_RPC_DRAIN: usize = 64 * 1024;
 /// 几十 KB，对端按行读只会拿到被截断的半个 JSON。留出 id/result 包装与中文转义
 /// 的余量，取 6 KB；多出来的下一轮再拉（seq 会停在实际回到的位置，不会跳过）。
 const EVENT_FRAME_BUDGET: usize = 6 * 1024;
+
+/// B03（2026-10-22 审计）：把事件的 lines 数组按字节预算截断，返回是否截断。
+///
+/// 扫频 done/error 把**全部** lines 打进单帧，而 EventBus::since 对「首条就超
+/// 预算」无条件放行 —— 数百行小区 ≈ 数十 KB，一帧就把 events 的预算吃穿，
+/// 游标后面的事件（new_sms 等）全部被堵。截断保留真实 count 并附 truncated
+/// 标志；当前前端没有 cellscan 消费方（安全网保留），无 UI 退化。
+fn clamp_event_lines(lines: &mut Vec<String>) -> bool {
+    let mut bytes = 0usize;
+    let mut keep = 0usize;
+    for v in lines.iter() {
+        // JSON 字符串转义后长度会涨（引号/反斜杠），这里按转义后估
+        let size = serde_json::to_string(v).map(|t| t.len()).unwrap_or(64);
+        if bytes + size > EVENT_FRAME_BUDGET && keep > 0 {
+            break;
+        }
+        bytes += size;
+        keep += 1;
+    }
+    let truncated = keep < lines.len();
+    lines.truncate(keep);
+    truncated
+}
 const CELLSCAN_ABORT_TOKEN: &str = "abcd";
-const DEFAULT_SCAN_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// 单条短信等待模组确认的上限。超时即判定失败并补发 ESC 清场。
 ///
@@ -233,7 +255,7 @@ impl RpcServer {
             sched,
             hub: Hub::new(),
             scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new() })),
-            scan_timeout: DEFAULT_SCAN_TIMEOUT,
+            scan_timeout: crate::config::DEFAULT_SCAN_TIMEOUT,
             ctx,
             sms: Arc::new(AsyncMutex::new(SmsState::default())),
         }
@@ -258,14 +280,26 @@ impl RpcServer {
         log_info!("LuCI RPC 监听 {bind}:{port}");
 
         let mut ctx_c = self.ctx.clone();
+        // accept 持续失败（如 fd 耗尽）时的退避：不加的话 Err 分支 continue 是
+        // 紧循环，错误日志刷盘 + 空转占满 CPU（A-B6，2026-10-22 审计）。
+        let mut accept_err_streak: u32 = 0;
         loop {
             tokio::select! {
                 _ = ctx_c.changed() => return Ok(()),
                 accepted = listener.accept() => {
                     let (stream, addr) = match accepted {
-                        Ok(v) => v,
+                        Ok(v) => {
+                            accept_err_streak = 0;
+                            v
+                        }
                         Err(e) => {
-                            log_warn!("接受连接失败: {}", e);
+                            accept_err_streak = accept_err_streak.saturating_add(1);
+                            // 指数退避 100ms→1.6s 封顶；只对连续失败生效
+                            let backoff = std::time::Duration::from_millis(
+                                100u64.saturating_mul(1u64 << accept_err_streak.saturating_sub(1).min(4)),
+                            );
+                            log_warn!("接受连接失败(连续 {} 次)，{}ms 后重试: {}", accept_err_streak, backoff.as_millis(), e);
+                            tokio::time::sleep(backoff).await;
                             continue;
                         }
                     };
@@ -403,7 +437,7 @@ impl RpcServer {
                     .get("limit")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(300)
-                    .min(1200) as usize;
+                    .min(crate::logger::LOG_BUFFER_CAP as u64) as usize;
                 let (seq, entries) = crate::logger::snapshot(since, limit);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "entries": entries } })
             }
@@ -560,8 +594,18 @@ impl RpcServer {
         let cmd = trimmed.to_string();
 
         tokio::spawn(async move {
+            // ★ 外层预算必须覆盖内层最坏耗时（B05，2026-10-22 审计）：
+            //   send_command 的 future 一旦被这里的 timeout **整个 drop**，
+            //   cmd_mu 会随 drop 提前释放，而 atclient 的 pending 槽还挂着旧命令
+            //   —— 下一条命令可能读到旧命令的结束码，造成 AT 应答错位。
+            //   原预算 8+6+2=16s < 内层最坏 8(排队)+0.1(gap)+3(写入)+6(应答)=17.1s，
+            //   排队稍久就必现 drop。现在 = 8 + 3 + 6 + 0.1(gap) + 3(余量) = 20.1s。
             let result = tokio::time::timeout(
-                crate::atclient::QUEUE_WAIT_TIMEOUT + SMS_SEND_TIMEOUT + Duration::from_secs(2),
+                crate::atclient::QUEUE_WAIT_TIMEOUT
+                    + crate::atclient::WRITE_TIMEOUT
+                    + SMS_SEND_TIMEOUT
+                    + crate::atclient::COMMAND_GAP
+                    + Duration::from_secs(3),
                 client.send_command(&ctx, &cmd, SMS_SEND_TIMEOUT, None),
             )
             .await;
@@ -706,7 +750,7 @@ impl RpcServer {
         let client = self.client.clone();
         let hub = self.hub.clone();
         let scan_state = self.scan.clone();
-        let timeout = if self.scan_timeout > Duration::ZERO { self.scan_timeout } else { DEFAULT_SCAN_TIMEOUT };
+        let timeout = if self.scan_timeout > Duration::ZERO { self.scan_timeout } else { crate::config::DEFAULT_SCAN_TIMEOUT };
         let ctx = self.ctx.clone();
         let command = command.trim().to_string();
         tokio::spawn(async move {
@@ -791,31 +835,34 @@ async fn run_cell_scan(
     drop(scan);
 
     let count = lines.len();
+    // B03：单帧预算截断（见 clamp_event_lines 的说明）
+    let mut lines = lines;
+    let truncated = clamp_event_lines(&mut lines);
     match result {
         Ok(Ok(resp)) if !resp.has_error() => {
             let state = if aborted { "aborted" } else { "done" };
             log_info!("扫频结束({}): 共 {} 个小区", state, count);
-            hub.broadcast_json("cellscan", serde_json::json!({ "state": state, "lines": lines, "count": count }));
+            hub.broadcast_json("cellscan", serde_json::json!({ "state": state, "lines": lines, "count": count, "truncated": truncated }));
         }
         Ok(Ok(resp)) => {
             log_warn!("扫频被模组拒绝: {}", resp.text());
             hub.broadcast_json(
                 "cellscan",
-                serde_json::json!({ "state": "error", "error": resp.text(), "lines": lines, "count": count }),
+                serde_json::json!({ "state": "error", "error": resp.text(), "lines": lines, "count": count, "truncated": truncated }),
             );
         }
         Ok(Err(e)) => {
             log_warn!("扫频失败: {}", e);
             hub.broadcast_json(
                 "cellscan",
-                serde_json::json!({ "state": "error", "error": e, "lines": lines, "count": count }),
+                serde_json::json!({ "state": "error", "error": e, "lines": lines, "count": count, "truncated": truncated }),
             );
         }
         Err(_) => {
             log_warn!("扫频超时");
             hub.broadcast_json(
                 "cellscan",
-                serde_json::json!({ "state": "error", "error": "扫频超时", "lines": lines, "count": count }),
+                serde_json::json!({ "state": "error", "error": "扫频超时", "lines": lines, "count": count, "truncated": truncated }),
             );
         }
     }

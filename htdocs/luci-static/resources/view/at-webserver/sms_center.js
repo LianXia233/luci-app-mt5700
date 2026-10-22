@@ -223,8 +223,12 @@ return L.view.extend({
 		/* 与来源无关的未读判定：只有「未读标志 + 晚于水位线」才算未读 */
 		function isMsgUnread(c, m) {
 			if (!m || !m.unread) return false;
-			var t = Parse.parseMessageTime(m.time);
-			if (!t) return true;                       // 时间解析不出来时保守显示未读
+			/* ★ B13（2026-10-22 审计）：strict 模式下解析失败返回 null —— 原先
+			 * parseMessageTime 恒回落「当前时刻」，`if (!t)` 是死分支，而回落值
+			 * 每次都领先于水位线，这条路的会话成了「点开也消不掉」的幻影未读。
+			 * 解析不出来就不参与未读判定：不冒未读，也不会堵死消红点。 */
+			var t = Parse.parseMessageTime(m.time, true);
+			if (!t) return false;
 			return !(readUptoOf(c && c.number) >= t.getTime());
 		}
 
@@ -1030,7 +1034,11 @@ return L.view.extend({
 					return refresh();
 				});
 			}).catch(function (err) {
-				Mt5700.error((err && err.message) || '发送失败');
+				/* 切页造成的「等待中止」不弹错（2026-10-22 审计）：用户已经在别的
+				 * 页面，挂在 body 上的 toast 会追过去 —— 幽灵提示。发送链本身已随
+				 * disposed 停止，不需要用户处置，静默即可。 */
+				var msg = (err && err.message) || '';
+				if (msg.indexOf('页面已离开') < 0) Mt5700.error(msg || '发送失败');
 			}).then(function () { sending = false; sendBtn.disabled = false; });
 		}
 

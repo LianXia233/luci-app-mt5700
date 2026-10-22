@@ -52,8 +52,21 @@ if ! command -v timeout >/dev/null 2>&1; then
 	logger -t mt5700-uci "缺少 timeout 命令（ucode 代理的 6 处调用都依赖它），正在补装 coreutils-timeout"
 	# opkg 优先；apk 系（OpenWrt 24.10+ / MWRT）两者都可能存在，都试一遍。
 	# 装不上也不阻塞安装流程 —— 下面的告警已经足够定位。
-	(opkg install coreutils-timeout ||
-		apk add --no-cache coreutils-timeout) >/dev/null 2>&1
+	# ★ 限时（2026-10-22 审计）：feed 不可达时 opkg 会重试很久，把包管理器整个
+	#   拖住数分钟。系统此刻没有 timeout 可用（正在补装的就是它），用
+	#   「后台起子进程 + sleep 上限 + kill」手搓限时；装不上也不阻塞安装。
+	(
+		opkg install coreutils-timeout ||
+			apk add --no-cache coreutils-timeout
+	) >/dev/null 2>&1 &
+	_install_pid=$!
+	(
+		sleep 60
+		kill "$_install_pid" 2>/dev/null
+	) >/dev/null 2>&1 &
+	_watchdog_pid=$!
+	wait "$_install_pid" 2>/dev/null
+	kill "$_watchdog_pid" 2>/dev/null
 	if command -v timeout >/dev/null 2>&1; then
 		logger -t mt5700-uci "coreutils-timeout 安装成功，AT 通道可用"
 	else
@@ -70,6 +83,10 @@ fi
 # 只能手动 `sh /etc/init.d/at-webserver start` 救场。
 # 根因修复：仓库里已把该文件标成 100755。这里是运行时兜底 —— 老固件/手工拷贝
 # 部署仍可能丢 +x，补一次再 enable，避免同一故障换个环境复发。
+# ★ 2026-10-22 审计（B15 部分）：/etc/config/at-webserver 里有 websocket_auth_key
+# 与企微 webhook，收掉组/其他位 —— 包安装出来的文件权限取决于打包宏，这里统一兜底。
+[ -f /etc/config/at-webserver ] && chmod 0600 /etc/config/at-webserver 2>/dev/null
+
 if [ -x /etc/init.d/at-webserver ]; then
 	/etc/init.d/at-webserver enable 2>/dev/null
 	logger -t mt5700-uci "at-webserver 已设为开机自启（S99at-webserver）"
@@ -90,6 +107,15 @@ fi
 #   放到后台跑，避免 ifup 等待把包管理器拖住（apk/opkg 会一直卡在 postinst）。
 (
 	sleep 5
+	# 防重入（2026-10-22 审计）：连续装/升两个版本会叠加两个后台实例并发
+	# ifup/写 UCI。stamp 新鲜（<120s）就退出，让上一棒干完。
+	stamp=/var/run/mt5700-uci-defaults-post
+	now=$(date +%s)
+	last=$(cat "$stamp" 2>/dev/null)
+	if [ -n "$last" ] && [ $((now - last)) -lt 120 ] 2>/dev/null; then
+		exit 0
+	fi
+	echo "$now" > "$stamp" 2>/dev/null
 	[ -x /etc/init.d/at-webserver ] || exit 0
 	/etc/init.d/at-webserver ensure_interfaces
 	/etc/init.d/at-webserver start

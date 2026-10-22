@@ -37,12 +37,16 @@ ok('P03 STATIC_READS 解析得到', statics !== null, '没找到 STATIC_READS �
 ok('P03 STATIC_READS 不含 AT^ICCID?（换卡 / 切 profile 会变）',
 	statics !== null && !/AT\^ICCID\?/.test(statics),
 	'AT^ICCID? 仍在 STATIC_READS 里，换 profile 后最长陈旧 5 分钟');
-ok('P03 其余不变类仍在（ATI / 型号 / 固件 / IMEI / IMSI / PHYNUM / VERSION）',
+ok('P03 其余不变类仍在（ATI / 型号 / 固件 / IMEI / PHYNUM / VERSION）',
 	statics !== null
 	&& /'ATI'/.test(statics) && /'AT\+CGMM'/.test(statics) && /'AT\+CGMR'/.test(statics)
-	&& /'AT\+CGSN'/.test(statics) && /'AT\+CIMI'/.test(statics)
+	&& /'AT\+CGSN'/.test(statics)
 	&& /'AT\^PHYNUM\?'/.test(statics) && /'AT\^VERSION\?'/.test(statics),
 	'移出 ICCID 时误删了其它不变类');
+/* B10（2026-10-22 审计）：IMSI 与 ICCID 同判据 —— 随卡变，不进静态档。 */
+ok('B10 AT+CIMI 已移出静态档（IMSI 随卡变，换卡后 300s 旧值）',
+	statics !== null && !/'AT\+CIMI'/.test(statics),
+	'AT+CIMI 不该再出现在 STATIC_READS');
 /* 反向：含 ICCID 的旧数组必须被同一检查判红 */
 const oldStatics = "const STATIC_READS = [\n\t'ATI', 'AT+CGMM', 'AT+CGMR', 'AT+CGSN', 'AT+CIMI', 'AT+CGMI',\n\t'AT^ICCID?', 'AT^PHYNUM?', 'AT^VERSION?'\n];";
 ok('P03 反向：旧数组（含 AT^ICCID?）被同一检查判为不通过',

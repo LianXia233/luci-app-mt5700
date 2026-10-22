@@ -100,8 +100,8 @@ has('ucode 用「临时文件 + rename」落盘',
 has('ucode 写盘失败时回 success:false',
 	/if \(!smsLogWrite\([\s\S]{0,200}?return \{ success: false, error: '写入已发记录失败/.test(UCODE),
 	'没落盘却报成功，下次刷新用户以为「又丢了」—— 正是这个 BUG 本身');
-has('smsLogWrite 自己也要如实回报失败',
-	/function smsLogWrite\(list\) \{[\s\S]{0,220}?\} catch \(e\) \{\s*\n\t\treturn false;/.test(UCODE),
+has('smsLogWrite 自己也要如实回报失败（catch 里清理 tmp 后 return false，B09）',
+	/function smsLogWrite\(list\) \{[\s\S]{0,300}?\} catch \(e\) \{[\s\S]{0,160}?return false;/.test(UCODE),
 	'helper 吞掉异常后返回 true，上面那三处 success:false 就永远走不到');
 has('ucode 的已发记录落在 /etc（跨重启）',
 	/SMS_LOG_DIR\s*=\s*'\/etc\/mt5700'/.test(UCODE),

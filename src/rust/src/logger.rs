@@ -145,7 +145,7 @@ fn now_ms() -> i64 {
 /* ----------------------------- 内存环形缓冲 ----------------------------- */
 
 /// 缓冲容量（条）。够覆盖一次完整启动 + 拨号 + 若干次重连与对账。
-const LOG_BUFFER_CAP: usize = 1200;
+pub const LOG_BUFFER_CAP: usize = 1200;
 
 #[derive(Clone, serde::Serialize)]
 pub struct LogRecord {

@@ -363,7 +363,9 @@ impl Dispatcher {
             Some(p) => p.clone(),
             None => return,
         };
-        let key = format!("{}_{}", sms.sender, info.reference);
+        // key 含 total（A-B11，2026-10-22 审计）：同号同 reference 但分段数不同的
+        // 两条长短信（网络重发场景）若共用一个 key，会互相污染分段表。
+        let key = format!("{}_{}_{}", sms.sender, info.reference, info.parts_count);
         let entry = self
             .partials
             .entry(key)
@@ -375,7 +377,11 @@ impl Dispatcher {
             });
         entry.parts.insert(info.part_number, sms.content.clone());
 
-        if entry.total <= 0 || (entry.parts.len() as u32) < entry.total {
+        // A-B4（2026-10-22 审计）：除数量够之外，还必须 1..=total **每段都在** ——
+        // 畸形分段（如 {1,5} 而 total=2）在旧逻辑下会拼出缺段正文并按完整推送。
+        let complete = entry.total > 0
+            && (1..=entry.total).all(|i| entry.parts.contains_key(&i));
+        if !complete {
             return;
         }
 
@@ -386,7 +392,8 @@ impl Dispatcher {
             }
         }
         let date = sms.date;
-        self.partials.remove(&format!("{}_{}", sms.sender, info.reference));
+        self.partials
+            .remove(&format!("{}_{}_{}", sms.sender, info.reference, info.parts_count));
 
         let notifier = self.notifier.clone();
         let sender = sms.sender.clone();

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex, Notify};
 
-const COMMAND_GAP: Duration = Duration::from_millis(100);
+pub const COMMAND_GAP: Duration = Duration::from_millis(100);
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// APDU 透传类命令（`AT+CSIM` / `AT+CGLA` / 逻辑通道管理）的应答超时。
@@ -100,7 +100,7 @@ const ZERO_READ_RETRY_LIMIT: u32 = 20;
 /// 的最坏耗时是 排队 QUEUE_WAIT(8s) + 写入(本值) + 等应答 / 短信(6s)。
 /// 本值取 5 秒时最坏 19s，几乎顶满 20s，正常的慢响应就有被掐断的风险；
 /// 取 3 秒则最坏 17s，留出了余量。
-const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
 /// 连接断开后，等待初始化任务收尾的最长时间（超过就放弃，直接进入重连）。
 const INIT_JOIN_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -687,6 +687,13 @@ impl AtClient {
             stream,
         };
         *self.pending.lock().await = Some(pending);
+
+        // ★ drop 安全性警示（B05，2026-10-22 审计）：本函数的 future **不能被
+        //   调用方随意 drop** —— 从这里到应答收集完之间任意 await 点被 drop 的话，
+        //   cmd_mu 随 drop 释放、pending 槽残留旧命令，下一条命令可能读到旧结束码
+        //   （AT 应答错位）。当前调用方的外层预算都按「排队+写入+应答+gap+余量」
+        //   覆盖了内层最坏耗时（rpcserver 短信任务 = 20.1s）；新增调用方必须遵守
+        //   同一约定，或先给 pending 实现真正的 Drop 守卫。
 
         // 先创建 notified 再写入，避免应答先到而错过通知。
         let notified = done.notified();

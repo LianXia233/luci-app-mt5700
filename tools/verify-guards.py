@@ -906,9 +906,9 @@ MUTATIONS = [
     (
         # ★ 开关状态与「VoWiFi 成不成立」是两件事，都要回。
         #   不重跑的话界面只会显示「已开启」，看不到还差 ePDG 这一门。
-        "下发后不再重跑五门（开了开关却不说还差什么）",
+        "下发后不再重跑五门（开了开关却不说还差什么；B01 后带 20s 预算）",
         "uc2",
-        "\tlet after = vowifiFacts();",
+        "\tlet after = vowifiFacts(time() + 20);",
         "\tlet after = f;",
         "下发后重跑五门",
     ),
@@ -1732,8 +1732,10 @@ MUTATIONS = [
     (
         "写盘失败却回报成功（三处 success:false 永远走不到）",
         "uc8",
-        "\t\tfs.rename(tmp, SMS_LOG_FILE);\n\t\treturn true;\n\t} catch (e) {\n\t\treturn false;\n\t}",
-        "\t\tfs.rename(tmp, SMS_LOG_FILE);\n\t\treturn true;\n\t} catch (e) {\n\t\treturn true;\n\t}",
+        # B09 后 catch 里先清 tmp 再 return false —— 锚点随行为迁移；
+        # callLogWrite 有同构 catch，锚点必须带 SMS_LOG_FILE 限定到 smsLogWrite
+        "\t\tfs.writefile(tmp, sprintf('%J', list));\n\t\tfs.rename(tmp, SMS_LOG_FILE);\n\t\treturn true;\n\t} catch (e) {\n\t\ttry { fs.unlink(tmp); } catch (e2) { }\n\t\treturn false;\n\t}",
+        "\t\tfs.writefile(tmp, sprintf('%J', list));\n\t\tfs.rename(tmp, SMS_LOG_FILE);\n\t\treturn true;\n\t} catch (e) {\n\t\ttry { fs.unlink(tmp); } catch (e2) { }\n\t\treturn true;\n\t}",
         "smsLogWrite 自己也要如实回报失败",
     ),
     (

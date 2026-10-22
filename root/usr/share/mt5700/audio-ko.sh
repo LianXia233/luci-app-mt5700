@@ -52,7 +52,9 @@ KO_ROOT=/usr/share/mt5700/audio
 #   snd-usb-audio→mc,usbcore,snd,snd-pcm,input-core,snd-usbmidi-lib,snd-hwdep
 KO_ORDER="soundcore snd snd-timer snd-pcm snd-hwdep snd-seq-device snd-rawmidi snd-usbmidi-lib mc input-core snd-usb-audio"
 
-ERRFILE=/tmp/.mt5700-audio-err
+# 按进程区分（2026-10-22 审计）：init.d post_start 与 usb hotplug 会并发跑 load，
+# 固定名会让两个实例互相覆盖错误信息、把对方的失败算到自己头上。
+ERRFILE="/tmp/.mt5700-audio-err.$$"
 
 log() {
 	logger -t mt5700-audio "$*" 2>/dev/null

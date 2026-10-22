@@ -92,7 +92,8 @@ function jsonParse(s) {
 				i++;
 			}
 		}
-		return out;
+		/* 闭合引号前就到末尾 = 被 timeout 掐断的半截应答，按失败处理（B08） */
+		throw '字符串未闭合';
 	}
 
 	function parseNum() {
@@ -120,10 +121,11 @@ function jsonParse(s) {
 			arr[length(arr)] = parseVal();
 			ws();
 			if (ch() == ',') { i++; ws(); continue; }
-			if (ch() == ']') { i++; break; }
+			if (ch() == ']') { i++; return arr; }
 			break;
 		}
-		return arr;
+		/* 没吃到闭合 ] 就退出 = 输入被截断或夹了非法字符（B08） */
+		throw '数组未闭合';
 	}
 
 	function parseObj() {
@@ -141,10 +143,11 @@ function jsonParse(s) {
 			obj[k] = v;
 			ws();
 			if (ch() == ',') { i++; continue; }
-			if (ch() == '}') { i++; break; }
+			if (ch() == '}') { i++; return obj; }
 			break;
 		}
-		return obj;
+		/* 没吃到闭合 } 就退出 = 输入被截断或夹了非法字符（B08） */
+		throw '对象未闭合';
 	}
 
 	parseVal = function () {
@@ -159,7 +162,16 @@ function jsonParse(s) {
 		return parseNum();
 	};
 
-	return parseVal();
+	let v = parseVal();
+	ws();
+	/* 完整性校验：值之后必须恰好到末尾。被 timeout 掐断的半截应答、
+	 * 带垃圾尾巴的输入都在这里按失败处理（B08，2026-10-22 审计）。
+	 * 调用点全部已在 try/catch 内（rpcCall/读缓存/es9p/smslog/calllog），
+	 * 原先「解析失败会抛异常」的注释由此真正成立。 */
+	if (i != n) {
+		throw 'JSON 尾部有多余内容';
+	}
+	return v;
 }
 
 /*
@@ -228,7 +240,14 @@ function readCounter(path) {
 	if (!f) {
 		return null;
 	}
-	let s = f.read('line');
+	/* read 理论上可抛（ rpcd 进程内 fd 会累积），兜住并保证关闭 */
+	let s;
+	try {
+		s = f.read('line');
+	} catch (e) {
+		f.close();
+		return null;
+	}
 	f.close();
 	if (s == null) {
 		return null;
@@ -269,8 +288,11 @@ function netrateCall(req) {
 	return {
 		success: true,
 		device: dev,
-		rx_bytes: rx == null ? 0 : rx,
-		tx_bytes: tx == null ? 0 : tx
+		/* 单侧读不到时回 null 而不是补 0：接口 up/down 翻转瞬间 statistics
+		 * 文件可能短暂不可读，补 0 会让前端差分出假尖峰或假归零。
+		 * 前端对 null 的处理是跳过本拍并重置基准（2026-10-22 审计 B07）。 */
+		rx_bytes: rx,
+		tx_bytes: tx
 	};
 }
 
@@ -327,6 +349,11 @@ function rpcCall(method, params) {
 	}
 	f.write(body + '\n');
 	f.close();
+	/* 文件内容含 auth_key（payload 里带）：收掉组/其他位，把「本地低权用户
+	 * 可读」的窗口压到 open→chmod 之间的一两毫秒（B10，2026-10-22 审计）。
+	 * nc 由 rpcd 以 root 拉起，收权不影响它读。chmod 包 try：个别固件
+	 * fs 无此函数时不影响主流程。 */
+	try { fs.chmod(tmp, 384); } catch (e) { }
 
 	let p;
 
@@ -435,7 +462,7 @@ const READ_CACHE_DIR = '/tmp/mt5700-read-cache';
 /*
  * 不变类：写一次终身不变（或极少变），可安全长 TTL。
  *
- * 入选标准只有一条：**没有任何界面能改它**。可选的项一律不进 ——
+ * 入选标准只有一条：**没有任何途径能让它变**。可选的项一律不进 ——
  * 早先把 `AT+CSCA?`（短信中心号）和 `AT^C5GOPTION?` 也列了进来，而这两项在
  * 短信页 / 网络设置页都能改。虽然写命令会清空全部缓存兜住了大部分情况，
  * 但缓存的语义是「这项不会变」，可写的项放进来等于给自己埋雷
@@ -446,9 +473,13 @@ const READ_CACHE_DIR = '/tmp/mt5700-read-cache';
  * 入选标准只有一条 ——「没有任何界面能改它」。ICCID 在换卡 / eSIM 切换 profile 之后
  * 会变，属于可被改的标识，放进来等于给自己埋雷（换完 profile 最长陈旧 5 分钟）。
  * 前端 esim.js 早已用 { fresh: true } 绕开前端缓存，但绕不过 ucode 侧这 300 秒。
+ *
+ * ★ B10（2026-10-22 全仓审计）：'AT+CIMI' 同判据移出。IMSI 与 ICCID 一样随卡变，
+ * 留在静态档等于换卡后 5 分钟内其它入口还在读旧卡的 IMSI —— 正是 P03 要防的事。
+ * 'AT+CGSN'（IMEI）是设备级标识、不随卡变，保留。
  */
 const STATIC_READS = [
-	'ATI', 'AT+CGMM', 'AT+CGMR', 'AT+CGSN', 'AT+CIMI', 'AT+CGMI',
+	'ATI', 'AT+CGMM', 'AT+CGMR', 'AT+CGSN', 'AT+CGMI',
 	'AT^PHYNUM?', 'AT^VERSION?'
 ];
 
@@ -460,10 +491,20 @@ const STATIC_READS = [
  *   后端按旧名单一律拒（表现为白跑一趟 + refused 计数虚高）。
  *   手册依据：CGPADDR 7.8 查询 PDP 地址｜CNUM 5.26 查询本机号码｜
  *   CGEQOSRDP 13.30 读取 EPS QoS 参数（三条语法都带可选参数，不带参即查询）。
- *   ★ 它们**不进 STATIC_READS**：PDP 地址/QoS 会随网络重配变化，不是「永不变」的标识。 */
+ *   ★ 它们**不进 STATIC_READS**：PDP 地址/QoS 会随网络重配变化，不是「永不变」的标识。
+ *
+ * ★ B11（2026-10-22 全仓审计）：补上 AT+CSQ。前端 warmCache 名单里有它，
+ *   这里不收的话每轮预热该条必被拒（refused 虚高、CSQ 永远预热不中）。
+ *   手册依据：CSQ 6.2 查询信号强度，无参形式即查询。
+ *
+ * ★ B04（2026-10-22 全仓审计）：补上 AT^MCS / AT^EONS / AT^DSAMBR 三条「写形式的
+ *   查询」（13.22 上下行 MCS｜13.3 运营商名称/EFSPN｜16.17 签约速率）——
+ *   它们带参数但**无副作用**，前端 NON_QUESTION_READS 已收录；这里不收的话
+ *   预热批次会被「不是只读查询」逐条拒掉（与 CSQ 同款症状）。 */
 const BARE_READS = [
 	'AT^DSFLOWQRY', 'AT^MONNC', 'AT^MONSC', 'AT^MONSSC',
-	'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP'
+	'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CSQ',
+	'AT^MCS', 'AT^EONS', 'AT^DSAMBR'
 ];
 
 /* 后端自己维护状态：**永不缓存** */
@@ -1640,11 +1681,27 @@ function epdgProbe(fqdn) {
 	r.via = 'doh';
 	return r;
 }
-function epdgFacts() {
+/*
+ * 评估预算（B01，2026-10-22 全仓审计）：vowifi 链在最坏情况下（后端挂死、
+ * DNS 悬置）能吃满 45s×N 条 rpcCall + 最多 4 次 DNS 探测 ≈ 15 分钟，而
+ * rpcd 单线程 —— 期间整个 LuCI 一起冻结（红线 17 实测 32ms→3606ms 的放大版）。
+ * 入口设一个**绝对截止时刻**，沿调用链传参（红线 24：不用模块级全局变量，
+ * 并发会话会互踩）；每个耗时步骤前检查，超窗立即降级为「unknown / 读不到」
+ * —— 那本来就是四态语义里的合法结论，不是错误数据。
+ */
+function dlExpired(dl) {
+	return (dl != null && time() >= dl);
+}
+
+function epdgFacts(dl) {
+	/* 预算已尽：连 IMSI 都不读，直接失败（调用方已有 success:false 分支） */
+	if (dlExpired(dl)) {
+		return { success: false, error: 'VoWiFi 评估预算已用尽' };
+	}
 	/*
-	 * ★ 必须 fresh：AT+CIMI 在 STATIC_READS 里（缓存 300 秒）。换完卡立刻点探测会
+	 * ★ 必须 fresh：AT+CIMI 曾在 STATIC_READS 里（缓存 300 秒）。换完卡立刻点探测会
 	 *   拿到上一张卡的 IMSI，进而拼出上一张卡的 ePDG 域名 —— 与红线 24（旧卡身份
-	 *   带给新卡）是同一类事故。
+	 *   带给新卡）是同一类事故。（B10：CIMI 现已移出静态档，这里 fresh 保留双保险。)
 	 */
 	let resp = rpcCall('at', { cmd: 'AT+CIMI', fresh: true });
 	if (resp == null || !resp.success) {
@@ -1703,13 +1760,13 @@ function epdgFacts() {
 		let m3 = substr(imsi, 3, 3);
 		let g2 = safeEpdgFqdn(epdgFqdn(mcc, '0' + m2));
 		let g3 = safeEpdgFqdn(epdgFqdn(mcc, m3));
-		if (g2 != null) {
+		if (g2 != null && !dlExpired(dl)) {
 			let r = epdgProbe(g2);
 			r.mnc = m2;
 			r.label = 'MNC 按 2 位（mnc' + ('0' + m2) + '）';
 			items[length(items)] = r;
 		}
-		if (g3 != null && g3 != g2) {
+		if (g3 != null && g3 != g2 && !dlExpired(dl)) {
 			let r = epdgProbe(g3);
 			r.mnc = m3;
 			r.label = 'MNC 按 3 位（mnc' + m3 + '）';
@@ -1721,14 +1778,14 @@ function epdgFacts() {
 			m3 = '0' + m3;
 		}
 		let fc = safeEpdgFqdn(epdgFqdn(mcc, m3));
-		if (fc != null) {
+		if (fc != null && !dlExpired(dl)) {
 			let r = epdgProbe(fc);
 			r.mnc = m3;
 			r.label = '标准写法（mnc' + m3 + '）';
 			r.canonical = true;
 			items[length(items)] = r;
 		}
-		if (substr(m3, 0, 1) == '0') {
+		if (substr(m3, 0, 1) == '0' && !dlExpired(dl)) {
 			let fa = safeEpdgFqdn(epdgFqdn(mcc, substr(m3, 1)));
 			if (fa != null && fa != fc) {
 				let r = epdgProbe(fa);
@@ -1745,7 +1802,11 @@ function epdgFacts() {
 	let smsc = readSmsc();
 	let imsStat = ciregStat();
 
-	let posCtl = epdgProbe(safeEpdgFqdn(EPDG_POS_FQDN));
+	/* 预算用尽时不发探测，置 unknown 哨兵 —— verdict 判定会解引用 posCtl.state */
+	let posCtl = { state: 'unknown' };
+	if (!dlExpired(dl)) {
+		posCtl = epdgProbe(safeEpdgFqdn(EPDG_POS_FQDN));
+	}
 	let negFqdn = safeEpdgFqdn(epdgFqdn(mcc, '999'));
 	let negCtl = null;
 	if (negFqdn != null) {
@@ -1970,10 +2031,15 @@ function appKind(aid) {
  *   **不许**落到「卡上没有 ISIM」——那会把一次读取失败说成一张卡的客观事实。
  *   只有读到 6A83（第一条就没有记录）才是真的「卡上没装任何应用」，err 保持空。
  */
-function efDirApps() {
+function efDirApps(dl) {
 	let apps = [];
 	let err = '';
 	for (let rec = 1; rec <= EF_DIR_MAX_REC; rec++) {
+		/* 预算用尽：不再占用串口，按「读不到」收场（dirError 非空的原有语义） */
+		if (dlExpired(dl)) {
+			err = 'ef_dir_budget_exhausted';
+			break;
+		}
 		let r = rpcCall('at', {
 			cmd: 'AT+CRSM=178,' + EF_DIR_ID + ',' + rec + ',4,0,,"' + EF_DIR_PATH + '"',
 			fresh: true
@@ -2083,13 +2149,13 @@ function vowifiTraceId(iccid) {
 	return 'vw-' + time() + '-' + tail;
 }
 
-function vowifiFacts() {
-	let ep = epdgFacts();
+function vowifiFacts(dl) {
+	let ep = epdgFacts(dl);
 	if (ep == null || !ep.success) {
 		return { success: false, error: (ep == null ? 'ePDG 探测返回空' : ep.error) };
 	}
 
-	let dir = efDirApps();
+	let dir = efDirApps(dl);
 	let apps = dir.apps;
 	let isim = isimOf(apps);
 	let mnc3 = mnc3Of(ep.mnc);
@@ -2326,7 +2392,7 @@ function imsswitchWrite(enable) {
 }
 
 function vowifiSet(enable) {
-	let f = vowifiFacts();
+	let f = vowifiFacts(time() + 30);
 	if (f == null || !f.success) {
 		return { success: false, error: (f == null ? 'VoWiFi 评估返回空' : f.error) };
 	}
@@ -2364,7 +2430,10 @@ function vowifiSet(enable) {
 	 *   前端要能同时显示「已开启」和「还差什么」（本机此时差的是 ePDG）。
 	 *   重跑失败就退回下发前的那份，不因此否认这次写入。
 	 */
-	let after = vowifiFacts();
+	/* 第二遍预算收得更紧（B01）：开关写入不改变 IMSI/AKA/ePDG 这些门，
+	 *   需要刷新的只有 IMS 注册态与开关值本身 —— 20s 内跑不完就退回第一遍
+	 *   的结论（下方 after = f 的兜底分支），绝不为它把 rpcd 冻住。 */
+	let after = vowifiFacts(time() + 20);
 	if (after == null || !after.success) {
 		after = f;
 	}
@@ -2591,14 +2660,29 @@ function smsLogRead() {
 	return (type(list) == 'array') ? list : [];
 }
 
+/* 日志落盘的临时文件名：随机后缀 + 同目录 rename（原子替换）。
+ * 固定 .tmp 名在「两个浏览器同时写日志」时会互相覆盖 —— 并发双方都写同一个
+ * tmp，先落盘的内容被后写者盖掉，rename 进主文件的内容就是串的
+ * （丢更新、id 重复）。B09，2026-10-22 全仓审计。 */
+function logTmpPath(file) {
+	let suffix = '';
+	try {
+		suffix = '.' + sprintf('%d', time()) + '.' + sprintf('%d', rand());
+	} catch (e) {
+		suffix = '';
+	}
+	return file + suffix + '.tmp';
+}
+
 function smsLogWrite(list) {
 	try { fs.mkdir(SMS_LOG_DIR); } catch (e) { }
-	let tmp = SMS_LOG_FILE + '.tmp';
+	let tmp = logTmpPath(SMS_LOG_FILE);
 	try {
 		fs.writefile(tmp, sprintf('%J', list));
 		fs.rename(tmp, SMS_LOG_FILE);
 		return true;
 	} catch (e) {
+		try { fs.unlink(tmp); } catch (e2) { }
 		return false;
 	}
 }
@@ -2909,16 +2993,25 @@ function callLineInfo() {
 	let out = { success: true, action: 'info', mute: null, volume: null, raw: '' };
 
 	let m = rpcCall('at', { cmd: 'AT+CMUT?' });
-	if (m == null) {
-		return { success: false, action: 'info', error: 'AT 通道无响应' };
+	/* CMUT 拿不到 = 通道不通，整体报错 —— 这是本函数注释与红线 23 的既有约定。
+	 * 原先判 m == null 是死分支：rpcCall 所有退出路径都返回对象，通道忙/错时
+	 * m.success == false，被下面的 if 静默吞掉后 mute 恒 null，页面把
+	 * 「通道故障」画成「未静音」（B02，2026-10-22 全仓审计）。 */
+	if (!m.success) {
+		return {
+			success: false, action: 'info',
+			mute: null, volume: null, raw: '',
+			error: (m.error || 'CMUT 查询失败')
+		};
 	}
-	if (m.success && type(m.data) == 'string') {
+	if (type(m.data) == 'string') {
 		out.raw = out.raw + m.data;
 		out.mute = callNumAfter(m.data, '+CMUT:');
 	}
 
+	/* CLVL 保持独立降级：拿不到只把 volume 留 null，不影响整体（红线 23） */
 	let v = rpcCall('at', { cmd: 'AT+CLVL?' });
-	if (v != null && v.success && type(v.data) == 'string') {
+	if (v.success && type(v.data) == 'string') {
 		out.raw = out.raw + v.data;
 		out.volume = callNumAfter(v.data, '+CLVL:');
 	}
@@ -2959,12 +3052,13 @@ function callLogRead() {
 
 function callLogWrite(list) {
 	try { fs.mkdir(CALL_LOG_DIR); } catch (e) { }
-	let tmp = CALL_LOG_FILE + '.tmp';
+	let tmp = logTmpPath(CALL_LOG_FILE);
 	try {
 		fs.writefile(tmp, sprintf('%J', list));
 		fs.rename(tmp, CALL_LOG_FILE);
 		return true;
 	} catch (e) {
+		try { fs.unlink(tmp); } catch (e2) { }
 		return false;
 	}
 }
@@ -3275,7 +3369,7 @@ return {
 		vowifi: {
 			args: {},
 			call: function (req) {
-				return vowifiFacts();
+				return vowifiFacts(time() + 30);
 			}
 		},
 		/*

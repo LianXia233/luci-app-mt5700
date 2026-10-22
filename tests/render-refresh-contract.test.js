@@ -96,11 +96,11 @@ ok('renderConn 函数存在', /function renderConn\(\)/.test(statusJs));
  * 这才是这条断言真正要守的东西。
  */
 ok('快档刷新链把复位语句串在 then 回调里',
-	/\.then\(function \(\) \{[^}]*refreshing = false/.test(statusJs),
-	'refreshing 复位必须挂在 .then 回调里，否则刷新标志永久为真');
+	/\.then\(function \(\) \{[^}]*fastRunning = null/.test(statusJs),
+	'fastRunning 复位必须挂在 .then 回调里，否则撞车互斥失效（refreshing 死变量已删，F-B5）');
 ok('慢档刷新链把复位语句串在 then 回调里',
-	/\.then\(function \(\) \{[^}]*slowRefreshing = false/.test(statusJs),
-	'slowRefreshing 复位必须挂在 .then 回调里，否则刷新标志永久为真');
+	/\.then\(function \(\) \{[^}]*slowRunning = null/.test(statusJs),
+	'slowRunning 复位必须挂在 .then 回调里，否则撞车互斥失效（slowRefreshing 死变量已删，F-B5）');
 
 const jsFiles = collectJs(RES_DIR);
 const bareThen = [];

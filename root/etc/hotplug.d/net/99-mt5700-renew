@@ -15,15 +15,37 @@
 # ============================================================================
 
 [ "$ACTION" = "add" ] || exit 0
-[ "$INTERFACE" = "eth2" ] || exit 0
+# 设备名从 UCI 取（与 init.d ensure_modem_interface 同源）：定制机型的设备名
+# 不叫 eth2 时，硬过滤会让本脚本永不触发 —— 续约静默失效（2026-10-22 审计）。
+dev=$(uci -q get network.MT5700M.device 2>/dev/null)
+[ -n "$dev" ] || dev=$(uci -q get network.MT5700M.ifname 2>/dev/null)
+[ -n "$dev" ] || dev='eth2'
+dev=${dev%% *}
+[ "$INTERFACE" = "$dev" ] || exit 0
 
 # 防抖：60 秒内只处理一次，避免模组枚举抖动导致反复续约
+# ★ 原子抢占（2026-10-22 审计）：原先「读 stamp → 判断 → 写 stamp」三步非原子，
+#   两个几乎同时到达的 add 都读到旧值、都通过检查 → 两路续约重叠。
+#   mkdir 天然原子：抢不到锁的直接退出 —— 对方就是刚被触发的那个实例，让它干。
+#   锁内时间戳超 120s 视为异常退出残留，清掉自愈，避免永久卡死。
 STAMP=/var/run/mt5700-renew.stamp
+LOCK="$STAMP.lock"
 now=$(date +%s)
-if [ -f "$STAMP" ]; then
-	last=$(cat "$STAMP" 2>/dev/null)
-	case "$last" in ''|*[!0-9]*) last=0;; esac
-	[ $((now - last)) -lt 60 ] && exit 0
+if ! mkdir "$LOCK" 2>/dev/null; then
+	lock_ts=$(cat "$LOCK/ts" 2>/dev/null)
+	case "$lock_ts" in ''|*[!0-9]*) lock_ts=0;; esac
+	if [ $((now - lock_ts)) -lt 120 ]; then
+		exit 0
+	fi
+	rm -rf "$LOCK"
+	mkdir "$LOCK" 2>/dev/null || exit 0
+fi
+echo "$now" > "$LOCK/ts" 2>/dev/null
+last=$(cat "$STAMP" 2>/dev/null)
+case "$last" in ''|*[!0-9]*) last=0;; esac
+if [ $((now - last)) -lt 60 ]; then
+	rmdir "$LOCK" 2>/dev/null
+	exit 0
 fi
 echo "$now" > "$STAMP"
 
@@ -40,3 +62,5 @@ echo "$now" > "$STAMP"
 		logger -t mt5700-hotplug "eth2 重新注册，renew 不可用，已重启 $iface"
 	fi
 ) &
+# 防抖完成，放锁（后台任务已提交，不再受本锁保护）
+rmdir "$LOCK" 2>/dev/null

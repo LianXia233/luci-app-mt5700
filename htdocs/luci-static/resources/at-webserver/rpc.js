@@ -419,10 +419,20 @@ ATClient.prototype.handlePush = function (ev) {
  *   真机复核（2026-09-26，只读）：CGPADDR/CGMI/CGEQOSRDP 均正常返回；
  *   CNUM 回 `+CME ERROR: not found`（卡上没写 MSISDN）—— 属**稳定失败**的查询，
  *   靠既有的「自适应降级」在连续两轮后收敛成单次下发，不需要为它开特例。
+ *
+ * ★ B04（2026-10-22 全仓审计）：补上三条「写形式的查询」—— 它们**不改任何
+ *   模组状态**，但形态上没有 `?`，此前每次成功都被 _dropStateCache() 把
+ *   CPIN?/SIMSQ?/CFUN? 等状态缓存整片作废；而网络状态页慢档 30s 每轮必发
+ *   MCS×2 + EONS×1，等于把状态缓存系统性架空。手册依据：
+ *     · AT\^MCS      13.22 上下行 MCS 查询（`AT\^MCS=<direction>`，0 上行 / 1 下行）
+ *     · AT\^EONS     13.3  查询运营商名称与 EFSPN（`AT\^EONS=<type>[,…]`）
+ *     · AT\^DSAMBR   16.17 签约速率查询（`AT\^DSAMBR=<cid>`）
+ *   三条都是「带参查询」：返回数据、无副作用 —— 与 `AT+CGPADDR=<cid>` 同类。
  */
 var NON_QUESTION_READS = [
 	'AT+CSQ', 'AT^MONSC', 'AT^MONNC', 'AT^MONSSC', 'AT^DSFLOWQRY',
-	'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CGMI'
+	'AT+CGPADDR', 'AT+CNUM', 'AT+CGEQOSRDP', 'AT+CGMI',
+	'AT^MCS', 'AT^EONS', 'AT^DSAMBR'
 ];
 
 /* 判断一条命令是否「可安全重试」，同时决定它是否可缓存（见 sendCommand）。 */
@@ -432,8 +442,14 @@ function isRetryableRead(command) {
 	if (cmd === 'AT' || cmd === 'ATI') return true;
 	if (cmd.charAt(cmd.length - 1) === '?') return true;
 	var k = normalizeCommand(cmd);
-	return NON_QUESTION_READS.indexOf(k) >= 0
-		|| IDENTIFIER_SET[k] === true
+	if (NON_QUESTION_READS.indexOf(k) >= 0) return true;
+	/* 带参查询（B04）：名单条目是命令头（AT^MCS），实际调用带参数（AT^MCS=0）。
+	 * 前缀命中即只读 —— 名单全是本仓核对过手册的查询命令，当前命令集里
+	 * 不存在以它们为前缀的写命令（手册 244 条无 AT^MCSS 之类）。 */
+	for (var i = 0; i < NON_QUESTION_READS.length; i++) {
+		if (k.indexOf(NON_QUESTION_READS[i]) === 0) return true;
+	}
+	return IDENTIFIER_SET[k] === true
 		|| STATE_SET[k] === true;
 }
 
