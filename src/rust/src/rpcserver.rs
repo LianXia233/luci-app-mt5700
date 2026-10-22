@@ -594,6 +594,7 @@ impl RpcServer {
                 Ok(r) => ok(id, serde_json::json!({
                     "requested": r.requested,
                     "deleted": r.deleted,
+                    "errors": r.errors,
                     "storage": r.storage.as_ref().map(storage_json),
                 })),
                 Err(e) => err(id, e),
@@ -630,6 +631,7 @@ impl RpcServer {
                         "enabled": r.enabled,
                         "stepsDone": r.steps_done,
                         "failedAt": r.failed_at,
+                        "failedDetail": r.failed_detail,
                         "smsc": r.smsc,
                         "storage": r.storage.as_ref().map(storage_json),
                     })),
