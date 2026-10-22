@@ -44,6 +44,15 @@ const state = {
 	imei: '862234051234567',
 	rsrp: -95,      // 动态变化用于信号 URC
 	ims: '1,1,1',
+	/* 数据中心模式（AT+CEUS）：手册 3.15.3 写默认值是 1，但它是「设置后需要开关机生效」
+	 * 的持久化项，旧版本应用会写成 0 —— 后端必须先读再决定要不要重启射频，所以这里
+	 * 要能真实回读，并用 AT+TESTCEUS=0/1 造出两种设备。 */
+	ceus: 1,
+	/* 故障注入钩子（AT+TESTCEUSFAIL / AT+TESTCFUN1FAIL / AT+TESTCPMSFAIL / AT+TESTIMSFALSE） */
+	faultCeus: false,
+	faultCfun1: false,
+	faultCpms: false,
+	faultIms: false,
 	smsSeq: 0,
 	// 自动拨号：刻意从「开关已开、但方式为 2（转网口模式）」起步。
 	// 只比开关不比方式的实现会判定已对齐而跳过下发，模组停在转网口模式，
@@ -111,7 +120,13 @@ function replyFor(cmd) {
 	if (c === 'AT+CLIP=1') return 'OK';
 	if (c === 'AT+CFUN?') return '+CFUN: ' + state.cfun + '\r\nOK';
 	if (c === 'AT+CFUN=0') { state.cfun = 0; return 'OK'; }
-	if (c === 'AT+CFUN=1') { state.cfun = 1; return 'OK'; }
+	if (c === 'AT+CFUN=1') {
+		/* AT+TESTCFUN1FAIL=1 让下一次 AT+CFUN=1 被拒：用于验证后端「关了射频又开不回来」
+		 * 时的回滚路径（真实模组在射频异常时确实会拒绝 AT+CFUN=1）。 */
+		if (state.faultCfun1) { state.faultCfun1 = false; return '+CME ERROR: 50'; }
+		state.cfun = 1; return 'OK';
+	}
+	if (c === 'AT+CEREG?') return '+CEREG: 0,' + (state.cfun === 1 ? '1' : '2') + '\r\nOK';
 	if (c === 'AT+CSQ?') return '+CSQ: 25,99\r\nOK';
 	if (c === 'AT^HCSQ?') return '^HCSQ: 0,0,0,0,17,45,25,10,14\r\nOK';
 	if (c === 'AT+CGREG?') return '+CGREG: 0,5\r\nOK';
@@ -160,12 +175,39 @@ function replyFor(cmd) {
 	/* 存储用量与夹具条数保持一致，否则界面会显示「存储 0/50」却列出 6 条短信 */
 	if (c === 'AT^CPMS?') return '^CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"MT",0,50\r\nOK';
 	if (c === 'AT+CPMS?') return '+CPMS: "SM",' + SMS_LIST.length + ',50,"SM",' + SMS_LIST.length + ',50,"MT",0,50\r\nOK';
-	if (c.startsWith('AT+CPMS=')) return 'OK';
+	if (c.startsWith('AT+CPMS=')) {
+		/* AT+TESTCPMSFAIL=1：切到 SM 时被拒（手册里 +CME ERROR: 4 = 操作不允许），
+		 * 用于验证「清空全部短信」部分失败时 deleted 与 errors 同时可见。 */
+		if (state.faultCpms && c.indexOf('"SM"') >= 0) return '+CME ERROR: 4';
+		return 'OK';
+	}
 	if (c === 'AT+CMGD=1,4') return 'OK';
 	if (c.startsWith('AT+CMGD=')) return 'OK';
 	if (c === 'AT^IMSSWITCH?') return '^IMSSWITCH: ' + state.ims + '\r\nOK';
-	if (c.startsWith('AT^IMSSWITCH=')) { const m = c.match(/AT\^IMSSWITCH=([^,]+)/); if (m) state.ims = m[1] + ',0,0'; return 'OK'; }
-	if (c === 'AT+CEUS=1' || c === 'AT+CEUS=0') return 'OK';
+	if (c.startsWith('AT^IMSSWITCH=')) {
+		/* AT+TESTIMSFALSE=1：IMSSWITCH 被拒（手册 4.10.1 的失败原因，308=当前状态不允许）。
+		 * 手册 4.10.2 还规定它「需要在上电初次开机后才能设置」，射频刚恢复时最容易撞上。 */
+		if (state.faultIms && c.startsWith('AT^IMSSWITCH=1')) return '+CME ERROR: 308';
+		const m = c.match(/AT\^IMSSWITCH=([^,]+)/); if (m) state.ims = m[1] + ',0,0'; return 'OK';
+	}
+	if (c === 'AT+CEUS?') return '+CEUS: ' + state.ceus + '\r\nOK';
+	if (c === 'AT+CEUS=1') {
+		/* AT+TESTCEUSFAIL=1：数据中心模式写不进去（手册 3.15 里的「设置失败」场景）。 */
+		if (state.faultCeus) return '+CME ERROR: 3';
+		state.ceus = 1; return 'OK';
+	}
+	if (c === 'AT+CEUS=0') { if (state.faultCeus) return '+CME ERROR: 3'; state.ceus = 0; return 'OK'; }
+	/* ---------- 测试钩子（仅 mock，真实模组没有这些命令） ---------- */
+	if (c === 'AT+TESTCEUS=0') { state.ceus = 0; return 'OK'; }
+	if (c === 'AT+TESTCEUS=1') { state.ceus = 1; return 'OK'; }
+	if (c === 'AT+TESTCEUSFAIL=1') { state.faultCeus = true; return 'OK'; }
+	if (c === 'AT+TESTCEUSFAIL=0') { state.faultCeus = false; return 'OK'; }
+	if (c === 'AT+TESTCFUN1FAIL=1') { state.faultCfun1 = true; return 'OK'; }
+	if (c === 'AT+TESTCFUN1FAIL=0') { state.faultCfun1 = false; return 'OK'; }
+	if (c === 'AT+TESTCPMSFAIL=1') { state.faultCpms = true; return 'OK'; }
+	if (c === 'AT+TESTCPMSFAIL=0') { state.faultCpms = false; return 'OK'; }
+	if (c === 'AT+TESTIMSFALSE=1') { state.faultIms = true; return 'OK'; }
+	if (c === 'AT+TESTIMSFALSE=0') { state.faultIms = false; return 'OK'; }
 	if (c === 'AT^LTEFREQLOCK?') return '^LTEFREQLOCK: 0,0,0,""\r\nOK';
 	if (c.startsWith('AT^LTEFREQLOCK=')) return 'OK';
 	if (c === 'AT^NRFREQLOCK?') return '^NRFREQLOCK: 0,0,0,""\r\nOK';
