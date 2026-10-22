@@ -534,7 +534,9 @@ fn parse_sms_response(resp: &AtResponse) -> Vec<Sms> {
         }
         match decode_incoming_pdu(pdu) {
             Ok(sms) => out.push(sms),
-            Err(e) => log_warn!("PDU 解析失败: {}", e),
+            // 本应用只收 SMS-DELIVER：状态报告（MTI=2）与其它类型走不到 out 里。
+            // 文案点明这一点，否则日志看起来像「短信坏了」，其实是「这条不该由我们解」。
+            Err(e) => log_warn!("短信上报未采纳（非 SMS-DELIVER 或解析失败，已忽略）：{}", e),
         }
     }
     out
