@@ -817,7 +817,7 @@ impl AtClient {
         if !tx.holds_channel().await {
             return Err(format!("短信事务 {} 已失效，拒绝下发 {}", tx.label(), command.trim()));
         }
-        let single_shot_submit = is_single_shot_cmgs(command);
+        let single_shot_submit = is_single_shot_cmgs(command) || is_cmgs_payload(command);
         self.exec_locked(ctx, command, timeout, None, single_shot_submit).await
     }
 
@@ -911,6 +911,9 @@ impl AtClient {
     ///
     /// 调用方必须自己持有 [GatePermit]（直接地、或通过 [SmsTransaction] 间接地）
     /// 并在整段 await 期间不释放它 —— 这就是「通道由谁独占」的唯一凭据。
+    ///
+    /// 短信提交相关的命令自动按「还没说完」处理：`> ` 输入提示符不算应答结束，
+    /// 必须等到 `+CMGS:` / OK / ERROR（例外情形见 [is_cmgs_payload] 的注释）。
     async fn exec_locked(
         &self,
         ctx: &tokio::sync::watch::Receiver<bool>,
@@ -1156,6 +1159,15 @@ pub fn is_terminator(line: &str) -> bool {
 /// 只报长度的那一半（`AT+CMGS=14`）不算 —— 它确实要停在 `> ` 提示符上。
 pub fn is_single_shot_cmgs(command: &str) -> bool {
     command.starts_with("AT+CMGS=") && command.contains('\r')
+}
+
+/// 判断是否为「两段式提交里 PDU 那一半」：以 Ctrl+Z 结尾就是提交体，
+/// 不是新的一条 AT 命令。
+///
+/// 它同样不能被 `> ` 提示符结束（模组偶尔会在收完 PDU 前再提示一次），
+/// 必须等到真正的 `+CMGS:` / OK / ERROR。
+pub fn is_cmgs_payload(command: &str) -> bool {
+    command.ends_with('\u{1a}')
 }
 
 /// 只匹配不可能出现在查询应答里的主动上报。

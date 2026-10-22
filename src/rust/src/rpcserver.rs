@@ -618,10 +618,15 @@ impl RpcServer {
                 Ok(n) => ok(id, serde_json::json!({ "smsc": n })),
                 Err(e) => err(id, e),
             },
-            // 短信功能开关（CEUS/IMSSWITCH/CFUN/CGDCONT/CSCA 整串）与 IMS 开关。
-            // 两者都是「会改变模组状态」的操作，同样必须独占通道跑完。
+            // 短信功能开关（读 CEUS → 必要时 CEUS/CFUN 重启 → IMSSWITCH → 可选 CSCA）
+            // 与 IMS 开关。两者都是「会改变模组状态」的操作，同样必须独占通道跑完。
             "power" => {
-                let enable = params.get("enable").and_then(|v| v.as_bool()).unwrap_or(false);
+                let enable = match params.get("enable").and_then(|v| v.as_bool()) {
+                    // 类型不对就报错：这里 default 成 false 等于「点开启、得到关闭」，
+                    // 而关闭与开启做的是完全不同的事（关 IMS vs 重启射频）。
+                    Some(v) => v,
+                    None => return err(id, "enable 必须为布尔值（true/false）"),
+                };
                 let smsc = params
                     .get("smsc")
                     .and_then(|v| v.as_str())
@@ -639,7 +644,10 @@ impl RpcServer {
                 }
             }
             "set_ims" => {
-                let enable = params.get("enable").and_then(|v| v.as_bool()).unwrap_or(false);
+                let enable = match params.get("enable").and_then(|v| v.as_bool()) {
+                    Some(v) => v,
+                    None => return err(id, "enable 必须为布尔值（true/false）"),
+                };
                 match self.sms.ims_set(enable).await {
                     Ok(()) => ok(id, serde_json::json!({ "enabled": enable })),
                     Err(e) => err(id, e),

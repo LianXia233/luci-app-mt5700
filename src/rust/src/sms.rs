@@ -11,14 +11,14 @@
 //!    超时或模组无响应算「结果不明」，并且**绝不自动重发** —— 那一次可能
 //!    已经发出去了，重发就是重复计费。
 
-use crate::at_queue::SmsMode;
-use crate::atclient::{AtClient, SMS_LIST_TIMEOUT, SMS_SUBMIT_TIMEOUT};
+use crate::at_queue::{SmsMode, SmsTransaction};
+use crate::atclient::{AtClient, AtResponse, SMS_LIST_TIMEOUT, SMS_SUBMIT_TIMEOUT};
 use crate::log_info;
 use crate::log_warn;
 use crate::pdu::{PartialInfo, SubmitOptions, build_submit_parts, parse_cmgl_response};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, watch};
 
@@ -36,6 +36,26 @@ pub const SMS_QUEUE_WAIT: Duration = Duration::from_secs(10);
 pub const SMS_SEND_TOTAL_BUDGET: Duration = Duration::from_secs(60);
 /// 前台短信模式租约时长。前端每轮续期，忘记释放也会在这里自动失效。
 pub const SMS_MODE_LEASE: Duration = Duration::from_secs(90);
+
+/// `AT+CFUN=1` 的应答预算。
+///
+/// 不能用默认的 2 秒：模组拉起射频、重新附着时这条命令的回话本身就会变慢，
+/// 实测（mock 注入 3 秒延迟）2 秒预算会让整串在 `AT+CFUN=1` 上判超时，
+/// 后面的 `IMSSWITCH`/`CSCA` 一条都发不出去，而射频已经被关闭着 —— 比不开更糟。
+pub const CFUN_SET_TIMEOUT: Duration = Duration::from_secs(10);
+/// `AT+CFUN=1` 之后确认「射频回来了、网也注册上了」的轮询上限。
+///
+/// 手册没给恢复时长，所以只能轮询而不能死等。上限压在 15 秒：加上前面各步，
+/// 整条 enable 序列最坏 ≈ 40 秒，仍在 `mt5700.uc` 给 power 动作的 70 秒以内，
+/// 不会出现「后端还在跑、前端已经报超时」的错配。
+pub const RF_RECOVER_BUDGET: Duration = Duration::from_secs(15);
+/// 射频恢复轮询的间隔（同时也是两次查询之间的天然喘息）。
+pub const RF_RECOVER_STEP: Duration = Duration::from_millis(1500);
+/// `AT+CFUN=0` 与 `AT+CFUN=1` 之间必须保持的间隔。
+///
+/// 手册 6.1.2：「cfun=0/1 生效至少大于 1s，建议 CFUN=0 与 CFUN=1 间隔至少大于 1s」。
+/// 取 1100ms 留一点余量 —— 原来只差 3ms，等于把约束写在悬崖边上。
+pub const CFUN_SWITCH_GAP: Duration = Duration::from_millis(1100);
 
 /// 发送结果的不确定状态：不要让上层把它当成成功或失败。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +171,28 @@ pub struct PowerResult {
     pub storage: Option<StorageInfo>,
 }
 
+/// 开关序列的中间结果：`power_set` 用它把「失败在哪、射频现在的真实状态」
+/// 一并带回外层，再由外层决定要不要回滚射频。
+#[derive(Debug, Default)]
+struct PowerSeq {
+    done: Vec<String>,
+    failed_at: Option<String>,
+    failed_detail: Option<String>,
+    /// 本次是否下发过 `AT+CFUN=0`（决定失败时要不要回滚）。
+    rf_off: bool,
+    /// 序列结束时射频是否已确认回到 `+CFUN: 1`。
+    rf_back: bool,
+}
+
+impl PowerSeq {
+    /// 标记失败在哪一步并原样返回自己，让调用处能写成 `return out.fail(..)`。
+    fn fail(mut self, label: &str, detail: String) -> Self {
+        self.failed_at = Some(label.to_string());
+        self.failed_detail = Some(detail);
+        self
+    }
+}
+
 /// 短信服务。
 pub struct SmsService {
     client: Arc<AtClient>,
@@ -165,6 +207,8 @@ pub struct SmsService {
     submit_timeout: Duration,
     /// 一次 send 的总预算（默认 [SMS_SEND_TOTAL_BUDGET]）。
     total_budget: Duration,
+    /// 射频恢复轮询上限（毫秒；默认 [RF_RECOVER_BUDGET]，单测里压到 0）。
+    rf_recover_ms: AtomicU64,
 }
 
 impl SmsService {
@@ -192,12 +236,20 @@ impl SmsService {
             mem_full: AtomicBool::new(false),
             submit_timeout,
             total_budget,
+            rf_recover_ms: AtomicU64::new(RF_RECOVER_BUDGET.as_millis() as u64),
         })
     }
 
     /// 存储满标志：被模组告知 MEMORY FULL 后置位，容量回落到未满时清除。
     pub fn memory_full(&self) -> bool {
         self.mem_full.load(Ordering::Relaxed)
+    }
+
+    /// 测试专用：把射频恢复轮询上限压小，否则「模组迟迟不注册」这条分支
+    /// 在单测里要真的等满 15 秒。
+    #[cfg(test)]
+    pub(crate) fn set_rf_recover_budget(&self, budget: Duration) {
+        self.rf_recover_ms.store(budget.as_millis() as u64, Ordering::Relaxed);
     }
 
     // ============= 前台短信模式（会话租约） =============
@@ -385,23 +437,50 @@ impl SmsService {
             plan.reference
         );
 
-        // 4) 逐片提交。一次写完整条 `AT+CMGS=<长度>\r<PDU>`（尾部 \r 由底层补），
-        //    不使用会经过多层转义的 0x1A。失败点在片内，立即停下，不继续也不重试。
+        // 4) 逐片提交，**两段式**（3GPP TS 27.005 §3.4.1）：先 `AT+CMGS=<长度>` 等模组
+        //    给 `> ` 输入提示符，再单独写 `<PDU>` + 0x1A 收尾（尾部 CR 由底层补，
+        //    与本仓库两个模组模型 —— `tests/mock-modem/mock-modem.js` 与
+        //    `atclient::testutil` —— 以及 e2e 第 5 项实测过的字节形状一致：
+        //    0x1A 结束 PDU 输入，随后那个空行被模组忽略）。
+        //    旧写法把长度、CR、PDU 一次写完，是为了躲 0x1A 在
+        //    浏览器 → rpcd → ucode → nc 链路上的转义问题（见 65eee21）；现在提交由后端
+        //    事务直接 write_all，0x1A 就是 Rust 里的一个字节，不再经过任何转义，而一次性
+        //    写法在本仓库自己的 mock/e2e 里被明确判为「拿不到提交回执」（e2e 第 5b 项）。
+        //    失败点在片内，立即停下，不继续也不重试。
         let mut parts = Vec::with_capacity(plan.parts.len());
         let mut outcome = SendOutcome::Accepted;
         let mut message_out = String::new();
         let deadline = Instant::now() + self.total_budget;
 
         for part in &plan.parts {
-            let command = format!("AT+CMGS={}\r{}", part.tpdu_length, part.pdu);
+            let head = format!("AT+CMGS={}", part.tpdu_length);
             // 单段预算 = min(单段上限, 事务剩余额度)。剩余额度为 0 时给最小预算，
             // 让模组还有一次机会回话（此时判 Unknown 而不是 Accepted）。
             let remain = deadline.saturating_duration_since(Instant::now());
             let part_timeout = self.submit_timeout.min(remain).max(Duration::from_millis(500));
-            let res = self
+            let started = Instant::now();
+            // 第一步没等到 `> ` 就不写 PDU：那样做会把 PDU 当成一条新命令，模组回 ERROR，
+            // 用户看到的是一次莫名其妙的失败。
+            let prompt = self
                 .client
-                .run_in_transaction(&self.ctx, &tx, &command, part_timeout)
+                .run_in_transaction(&self.ctx, &tx, &head, part_timeout)
                 .await;
+            let res = match prompt {
+                Ok(resp) if saw_input_prompt(&resp) => {
+                    let left = part_timeout
+                        .saturating_sub(started.elapsed())
+                        .max(Duration::from_millis(500));
+                    self.client
+                        .run_in_transaction(
+                            &self.ctx,
+                            &tx,
+                            &format!("{}\u{1a}", part.pdu),
+                            left,
+                        )
+                        .await
+                }
+                other => other,
+            };
             let (part_outcome, detail) = classify_cmgs_result(&res);
             if part_outcome == SendOutcome::Rejected {
                 self.mem_full.store(is_memory_full_detail(&detail), Ordering::Relaxed);
@@ -541,11 +620,24 @@ impl SmsService {
                 continue;
             }
             let set = format!(r#"AT+CPMS="{mem}","{mem}","{mem}""#);
-            let selected = self.client
+            // 切换失败也要把模组的原始应答带出来（+CME ERROR: 4 之类），
+            // 只留一句「切换存储区失败」等于把最能定位问题的那半句丢了。
+            let switched = match self
+                .client
                 .run_in_transaction(&self.ctx, &tx, &set, crate::atclient::COMMAND_TIMEOUT)
-                .await;
-            if !matches!(selected, Ok(ref r) if r.ok() && !r.has_error()) {
-                errors.push(format!("{mem}: 切换存储区失败"));
+                .await
+            {
+                Ok(resp) if resp.ok() && !resp.has_error() => true,
+                Ok(resp) => {
+                    errors.push(format!("{mem}: 切换存储区失败：{}", compact_detail(&resp.text())));
+                    false
+                }
+                Err(e) => {
+                    errors.push(format!("{mem}: 切换存储区失败：{e}"));
+                    false
+                }
+            };
+            if !switched {
                 continue;
             }
             match self.client
@@ -617,8 +709,10 @@ impl SmsService {
     /// 写短信中心号码，并回读校验（写成功不等于写对了）。
     pub async fn set_smsc(&self, number: &str) -> Result<String, String> {
         let cleaned = number.trim().to_string();
-        if !valid_phone_address(&cleaned) || cleaned.len() < 3 || cleaned.chars().filter(|c| c.is_ascii_digit()).count() > 20 {
-            return Err("短信中心号码格式不正确（仅允许可选前导 + 和数字）".into());
+        // 白名单只此一处：valid_phone_address 已经限定了「可选单个前导 +」
+        // 「全数字」「3–20 位」，再加一遍长度判断只会让人以为还有别的规则。
+        if !valid_phone_address(&cleaned) {
+            return Err("短信中心号码格式不正确（仅允许 3–20 位数字和可选前导 +）".into());
         }
         let tx = self
             .client
@@ -652,10 +746,16 @@ impl SmsService {
 
     /// 短信功能开关（开启/关闭）。
     ///
-    /// 这是**典型的多步骤操作**：CEUS → IMSSWITCH → CFUN → CGDCONT → CSCA，
-    /// 中间还有模组自己的处理间隔。过去它在前端连发五条各自排队的命令，
-    /// 后台巡检随时会从中间插进来，把「射频刚被拉起来」的状态打断，
-    /// 结果是短信开关看着勾上了、实际没生效。现在整串在一次事务里跑完。
+    /// 这是**典型的多步骤操作**：读 `CEUS` → （必要时）`CEUS=1` → `CFUN=0` →
+    /// `CFUN=1` 并确认恢复 → `IMSSWITCH=1` → 可选 `CSCA`，中间还有模组自己的处理间隔。
+    /// 过去它在前端连发五条各自排队的命令，后台巡检随时会从中间插进来，把「射频刚被
+    /// 拉起来」的状态打断，结果是短信开关看着勾上了、实际没生效。现在整串在一次事务里跑完。
+    ///
+    /// 两条不能省的规矩：
+    /// 1. **CEUS 要经一次开关机才生效**（手册 3.15.2），所以改过 CEUS 就必须重启射频；
+    ///    反之 CEUS 已经是 1 时整套重启都是白断网，所以先读再决定。
+    /// 2. **只要下发过 `AT+CFUN=0`，无论后面哪一步失败都必须把射频拉回来**，
+    ///    否则用户点一下「开启短信」得到的是整机断网，且界面已经报错了，没人知道要手动 `CFUN=1`。
     pub async fn power_set(&self, enable: bool, smsc: Option<String>) -> Result<PowerResult, String> {
         if let Some(sc) = smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             if !valid_phone_address(sc) {
@@ -667,55 +767,22 @@ impl SmsService {
             .open_sms_transaction(&self.ctx, "sms.power", SMS_QUEUE_WAIT)
             .await?;
 
-        // CEUS 设置需经过一次 RF 重启才生效（模组手册 3.15.2）。先关闭 RF，
-        // 设置为数据中心，再恢复 RF，最后设置 IMS；旧顺序在 RF 关闭前设置 IMS，
-        // 且关闭短信时直接 CFUN=0 会把整张数据网卡一起关掉，导致之后的开关失败。
-        let mut steps: Vec<(String, u64, &'static str)> = if enable {
-            vec![
-                ("AT+CFUN=0".into(), 500, "准备重启射频以应用短信模式"),
-                ("AT+CEUS=1".into(), 500, "设置数据中心模式"),
-                ("AT+CFUN=1".into(), 5000, "恢复射频并等待模组启动"),
-                ("AT^IMSSWITCH=1,0,0".into(), 1000, "开启 LTE IMS"),
-            ]
+        let seq = if enable {
+            self.run_power_enable(&tx, smsc).await
         } else {
-            // 关闭短信/IMS能力不应关闭 RF，也不应修改 CEUS 或数据承载配置。
-            vec![("AT^IMSSWITCH=0,0,0".into(), 0, "关闭 LTE IMS")]
+            // 关闭短信/IMS 能力只关 IMS：不动射频、不改 CEUS、不清空短信。
+            // 后三样都曾在这里发生过，代价分别是整机断网、需要开关机才自愈、用户数据消失。
+            self.run_one_step(&tx, "AT^IMSSWITCH=0,0,0", "关闭 LTE IMS").await
         };
-        if enable {
-            if let Some(sc) = smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                steps.push((format!(r#"AT+CSCA="{sc}""#), 0, "配置短信中心号码"));
-            }
-        }
 
-        let mut done: Vec<String> = Vec::new();
-        let mut failed_at: Option<String> = None;
-        let mut failed_detail: Option<String> = None;
-        for (cmd, gap_ms, label) in steps {
-            match self
-                .client
-                .run_in_transaction(&self.ctx, &tx, &cmd, crate::atclient::COMMAND_TIMEOUT)
-                .await
-            {
-                Ok(resp) if resp.ok() && !resp.has_error() => {
-                    done.push(label.to_string());
-                }
-                Ok(resp) => {
-                    let detail = compact_detail(&resp.text());
-                    log_warn!("短信开关步骤「{}」未返回 OK：{}", label, detail);
-                    failed_at = Some(label.to_string());
-                    failed_detail = Some(detail);
-                    break;
-                }
-                Err(e) => {
-                    log_warn!("短信开关步骤「{}」失败：{}", label, e);
-                    failed_at = Some(label.to_string());
-                    failed_detail = Some(e);
-                    break;
-                }
-            }
-            if gap_ms > 0 {
-                tokio::time::sleep(Duration::from_millis(gap_ms)).await;
-            }
+        // 失败回滚：本次关过射频而序列没把它带回来，就 best-effort 补一次并回读确认。
+        let mut failed_detail = seq.failed_detail;
+        if seq.failed_at.is_some() && seq.rf_off && !seq.rf_back {
+            let note = self.restore_rf(&tx).await;
+            failed_detail = Some(match failed_detail {
+                Some(d) => format!("{d}；{note}"),
+                None => note,
+            });
         }
 
         let smsc_now = match self
@@ -730,13 +797,223 @@ impl SmsService {
         drop(tx);
 
         Ok(PowerResult {
-            enabled: failed_at.is_none() && enable,
-            steps_done: done,
-            failed_at,
+            enabled: seq.failed_at.is_none() && enable,
+            steps_done: seq.done,
+            failed_at: seq.failed_at,
             failed_detail,
             smsc: smsc_now,
             storage,
         })
+    }
+
+    /// 开启分支：见 [SmsService::power_set] 的两条规矩。
+    async fn run_power_enable(&self, tx: &SmsTransaction, smsc: Option<String>) -> PowerSeq {
+        let mut out = PowerSeq::default();
+
+        // 1) 先读数据中心模式。手册 3.15.3 写「1 数据中心（默认值）」，但 3.15.5 的
+        //    回读举例是 `+CEUS: 0`，而且本应用的旧版本确实写过 `CEUS=0` —— 出厂默认
+        //    不能推定当前值，读不到就只能按「需要重启」处理，宁可多断一次网。
+        let ceus = match self
+            .client
+            .run_in_transaction(&self.ctx, tx, "AT+CEUS?", crate::atclient::COMMAND_TIMEOUT)
+            .await
+        {
+            Ok(resp) => parse_ceus_state(&resp.text()),
+            Err(e) => {
+                log_warn!("读取 CEUS 失败，按「需要重启射频」处理：{}", e);
+                None
+            }
+        };
+
+        if power_requires_rf_restart(ceus) {
+            // 2) 写 CEUS。这一步必须在 CFUN=0 之前：手册说它「设置后需要开关机生效」，
+            //    放在射频已经关闭的时候写，等于赌模组还认这条命令。
+            match self.step(tx, "AT+CEUS=1", "设置数据中心模式").await {
+                Ok(_) => out.done.push("设置数据中心模式".into()),
+                Err(detail) => return out.fail("设置数据中心模式", detail),
+            }
+            tokio::time::sleep(CFUN_SWITCH_GAP).await;
+
+            // 3) 关射频。rf_off 要在下发**之前**置位：万一命令已被模组执行、
+            //    只是回话丢了，仍然必须回滚。
+            out.rf_off = true;
+            out.rf_back = false;
+            match self.step(tx, "AT+CFUN=0", "关闭射频以应用短信模式").await {
+                Ok(_) => out.done.push("关闭射频以应用短信模式".into()),
+                Err(detail) => return out.fail("关闭射频以应用短信模式", detail),
+            }
+            // 手册 6.1.2：CFUN=0 与 CFUN=1 之间间隔至少大于 1s。
+            tokio::time::sleep(CFUN_SWITCH_GAP).await;
+
+            // 4) 恢复射频，用长超时（见 CFUN_SET_TIMEOUT 的注释）。
+            match self
+                .step_with_timeout(tx, "AT+CFUN=1", "恢复射频", CFUN_SET_TIMEOUT)
+                .await
+            {
+                Ok(_) => out.done.push("恢复射频".into()),
+                Err(detail) => return out.fail("恢复射频", detail),
+            }
+
+            // 5) 确认射频与注册状态。没确认到也继续往下走（IMSSWITCH 值得再试一次），
+            //    但 rf_back 如实记录，失败时外层会回滚；成功时把「未确认注册」写进步骤里，
+            //    界面显示的是模组的真实状态而不是「全部完成」。
+            let (back, registered) = self.wait_for_rf(tx).await;
+            out.rf_back = back;
+            out.done.push(if !back {
+                "恢复射频（未确认 +CFUN: 1）".into()
+            } else {
+                match registered {
+                    Some(true) => "射频已恢复并注册网络".into(),
+                    Some(false) => "射频已恢复（未在时限内注册，继续）".into(),
+                    None => "射频已恢复（注册状态未知）".into(),
+                }
+            });
+
+            // 手册 4.10.2：`AT^IMSSWITCH` 需要在上电初次开机后才能设置。刚恢复射频时
+            // 模组可能还没注册完，这条命令有一定概率被拒；上面已经等过注册，这里失败就
+            // 如实报，不再盲等。
+        } else {
+            out.done.push("数据中心模式已开启（CEUS=1），跳过射频重启".into());
+        }
+
+        match self
+            .step(tx, "AT^IMSSWITCH=1,0,0", "开启 LTE IMS")
+            .await
+        {
+            Ok(_) => out.done.push("开启 LTE IMS".into()),
+            Err(detail) => return out.fail("开启 LTE IMS", detail),
+        }
+
+        if let Some(sc) = smsc.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let cmd = format!(r#"AT+CSCA="{sc}""#);
+            match self.step(tx, &cmd, "配置短信中心号码").await {
+                Ok(_) => out.done.push("配置短信中心号码".into()),
+                Err(detail) => return out.fail("配置短信中心号码", detail),
+            }
+        }
+        out
+    }
+
+    /// 只跑一条命令的开关分支（关闭 IMS）。
+    async fn run_one_step(&self, tx: &SmsTransaction, cmd: &str, label: &str) -> PowerSeq {
+        let mut out = PowerSeq::default();
+        match self.step(tx, cmd, label).await {
+            Ok(_) => out.done.push(label.into()),
+            Err(detail) => return out.fail(label, detail),
+        }
+        out
+    }
+
+    /// 事务内下发一条命令；返回 Err 就是**模组原始拒绝信息**（供页面诊断）。
+    async fn step(&self, tx: &SmsTransaction, cmd: &str, label: &str) -> Result<AtResponse, String> {
+        self.step_with_timeout(tx, cmd, label, crate::atclient::COMMAND_TIMEOUT)
+            .await
+    }
+
+    async fn step_with_timeout(
+        &self,
+        tx: &SmsTransaction,
+        cmd: &str,
+        label: &str,
+        timeout: Duration,
+    ) -> Result<AtResponse, String> {
+        match self
+            .client
+            .run_in_transaction(&self.ctx, tx, cmd, timeout)
+            .await
+        {
+            Ok(resp) if resp.ok() && !resp.has_error() => Ok(resp),
+            Ok(resp) => {
+                let detail = compact_detail(&resp.text());
+                log_warn!("短信开关步骤「{}」未返回 OK：{}", label, detail);
+                Err(detail)
+            }
+            Err(e) => {
+                log_warn!("短信开关步骤「{}」失败：{}", label, e);
+                Err(e)
+            }
+        }
+    }
+
+    /// `AT+CFUN=1` 之后轮询射频与注册状态，返回（射频是否回到 1，是否已注册）。
+    ///
+    /// 判据：`AT+CFUN?` 回 1（射频已开）+ `AT+CEREG?` 回 1/5（已注册本地/漫游）。
+    /// `AT+CEREG?` 答不上来时不把它当成「没注册」死等 —— 模组不支持查询的话，
+    /// 再等 15 秒也不会多出答案，直接按「未知」结束轮询。
+    async fn wait_for_rf(&self, tx: &SmsTransaction) -> (bool, Option<bool>) {
+        let budget = Duration::from_millis(self.rf_recover_ms.load(Ordering::Relaxed));
+        let started = Instant::now();
+        let mut back = false;
+        let mut registered: Option<bool> = None;
+        loop {
+            match self
+                .client
+                .run_in_transaction(&self.ctx, tx, "AT+CFUN?", crate::atclient::COMMAND_TIMEOUT)
+                .await
+            {
+                Ok(resp) => back = parse_cfun_state(&resp.text()) == Some(1),
+                Err(e) => log_warn!("回读 AT+CFUN? 失败：{}", e),
+            }
+            if back {
+                match self
+                    .client
+                    .run_in_transaction(&self.ctx, tx, "AT+CEREG?", crate::atclient::COMMAND_TIMEOUT)
+                    .await
+                {
+                    Ok(resp) => {
+                        registered = parse_reg_state(&resp.text());
+                        if registered == Some(true) {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        log_warn!("查询 AT+CEREG? 失败，注册状态按未知处理：{}", e);
+                        registered = None;
+                    }
+                }
+            }
+            if started.elapsed() >= budget {
+                break;
+            }
+            tokio::time::sleep(RF_RECOVER_STEP).await;
+        }
+        (back, registered)
+    }
+
+    /// 失败后的射频回滚：补 `AT+CFUN=1` 并回读，把结果写成一句给用户/日志看的话。
+    async fn restore_rf(&self, tx: &SmsTransaction) -> String {
+        let detail = match self
+            .client
+            .run_in_transaction(&self.ctx, tx, "AT+CFUN=1", CFUN_SET_TIMEOUT)
+            .await
+        {
+            Ok(resp) if resp.ok() && !resp.has_error() => None,
+            Ok(resp) => Some(compact_detail(&resp.text())),
+            Err(e) => Some(e),
+        };
+        if let Some(d) = detail {
+            log_warn!("短信开关失败后恢复射频失败：{}（请手动执行 AT+CFUN=1）", d);
+            return format!("恢复射频失败：{d}（请手动执行 AT+CFUN=1）");
+        }
+        match self
+            .client
+            .run_in_transaction(&self.ctx, tx, "AT+CFUN?", crate::atclient::COMMAND_TIMEOUT)
+            .await
+        {
+            Ok(resp) if parse_cfun_state(&resp.text()) == Some(1) => {
+                log_warn!("短信开关失败，已回滚射频（回读 +CFUN: 1）");
+                "已回滚：恢复射频并确认 +CFUN: 1".into()
+            }
+            Ok(resp) => {
+                let d = compact_detail(&resp.text());
+                log_warn!("短信开关失败后已补发 AT+CFUN=1，但回读仍不是 1：{}", d);
+                format!("已尝试恢复射频，但回读为 {d}（请手动执行 AT+CFUN=1）")
+            }
+            Err(e) => {
+                log_warn!("短信开关失败后已补发 AT+CFUN=1，但无法回读确认：{}", e);
+                format!("已尝试恢复射频，但回读失败：{e}（请手动执行 AT+CFUN=1）")
+            }
+        }
     }
 
     /// IMS 开关（单条命令，但同样走短信事务：它直接决定短信能不能收发）。
@@ -884,19 +1161,112 @@ fn parse_ims_state(text: &str) -> Option<bool> {
     None
 }
 
+/// `AT+CEUS?` 应答 → 数据中心模式取值（无法判定为 None）。
+///
+/// 手册 3.15.3 说 `1 数据中心（默认值）`，但 3.15.5 的举例回读是 `+CEUS: 0`，
+/// 而且旧版本应用写过 `CEUS=0`。所以这里区分「读到 1」与「读不到」——
+/// 后者必须按「需要重启射频」处理，不能拿默认值当现网状态。
+fn parse_ceus_state(text: &str) -> Option<u8> {
+    for line in text.replace('\r', "").lines() {
+        let line = line.trim();
+        let Some(payload) = line.strip_prefix("+CEUS:") else {
+            continue;
+        };
+        let first = payload.split(',').next()?.trim().trim_matches('"');
+        return first.parse::<u8>().ok();
+    }
+    None
+}
+
+/// `AT+CFUN?` 应答 → 射频功能状态（无法判定为 None）。
+fn parse_cfun_state(text: &str) -> Option<u8> {
+    for line in text.replace('\r', "").lines() {
+        let line = line.trim();
+        let Some(payload) = line.strip_prefix("+CFUN:") else {
+            continue;
+        };
+        let first = payload.split(',').next()?.trim().trim_matches('"');
+        return first.parse::<u8>().ok();
+    }
+    None
+}
+
+/// `AT+CEREG?` 应答 → 是否已注册（1=本地、5=漫游）。
+///
+/// 返回 None 表示「答不上来 / 看不懂」，调用方据此**不再等注册**，
+/// 而不是当成未注册死等到超时上限。
+fn parse_reg_state(text: &str) -> Option<bool> {
+    for line in text.replace('\r', "").lines() {
+        let line = line.trim();
+        let Some(payload) = line.strip_prefix("+CEREG:") else {
+            continue;
+        };
+        // 两种形态（3GPP TS 27.007）：
+        //   查询回读  `+CEREG: <n>,<stat>`                  → <stat> 在第二位
+        //   主动上报  `+CEREG: <stat>[,<tac>,<ci>,<AcT>]`   → <stat> 在第一位，后面是带引号的 TAC/CI
+        // 用「第二位是不是引号串」区分两者，比数字段数可靠。
+        let second_quoted = payload
+            .split(',')
+            .nth(1)
+            .map(|f| f.trim().starts_with('"'))
+            .unwrap_or(false);
+        let fields: Vec<&str> = payload.split(',').map(|f| f.trim().trim_matches('"')).collect();
+        let stat = if second_quoted {
+            fields.first()
+        } else {
+            fields.get(1).or_else(|| fields.first())
+        }?;
+        return match *stat {
+            "1" | "5" => Some(true),
+            "0" | "2" | "3" | "4" | "8" => Some(false),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// 是否需要为了应用 CEUS 而重启射频。
+///
+/// 只有**明确读到 1** 才跳过；读不到、读到 0 或其它值一律走完整重启。
+/// 判断反了会静默留下一个「勾上了但短信收不到」的状态，代价比多断一次网大。
+fn power_requires_rf_restart(ceus: Option<u8>) -> bool {
+    ceus != Some(1)
+}
+
 fn last_line(text: &str) -> String {
     text.lines().last().unwrap_or("").trim().to_string()
+}
+
+/// 两段式提交的第一步是否等到了模组的 `> ` 输入提示符。
+///
+/// 底层把「只剩空白与 `>` 的残留字节」识别成一行 `">"`（见 `AtClient::consume`），
+/// 所以这里只认独立成行的提示符，不拿整段文本 `contains(">")` 凑数 —— 那样
+/// 一条 `+CMS ERROR: 500` 里出现尖括号也会被当成「模组在等 PDU」。
+fn saw_input_prompt(resp: &AtResponse) -> bool {
+    resp.lines.iter().any(|l| l.trim() == ">")
+}
+
+/// 模组是否给出了真正的提交回执：有以 `+CMGS` 开头的应答行。
+///
+/// 按行首判断而不是全文 `contains`：PDU 回显、正文里出现的字符串都可能带
+/// `+CMGS` 这几个字符，但它们不是模组的回执。
+fn has_cmgs_reference(text: &str) -> bool {
+    text.replace('\r', "")
+        .lines()
+        .any(|l| l.trim().starts_with("+CMGS"))
 }
 
 /// 把一次 `AT+CMGS` 的结果归类为「已确认 / 明确拒绝 / 结果不明」。
 ///
 /// 判定依据是**模组真正的回执**，不是 Ctrl+Z 也不是输入提示符：
-///   - 应答里出现 `+CMGS` （或单独的 OK）→ 模组确认识别并提交；
-///   - 出现 `+CMS ERROR` / `+CME ERROR` / `ERROR` → 明确拒绝；
+///   - 出现 `+CMS ERROR` / `+CME ERROR` / `ERROR` → 明确拒绝（先判，避免错误应答里
+///     夹了 `+CMGS` 文本就被当成已受理）；
+///   - 应答里有以 `+CMGS` 开头的回执行 → 模组确认提交；
+///   - 只有单独的 OK（个别固件不给回执行）→ 也按提交处理，但 detail 保留原始应答；
 ///   - 超时 / 模组无响应 → Unknown。
 ///
-/// 只看到 `> ` 提示符的情况不会走到这里：单次提交时 pending 会等到真正的结束码，
-/// 见 `PendingCmd::ignore_prompt`。
+/// 只看到 `> ` 提示符的情况不会走到 Accepted：那说明模组还在等 PDU，既没有 `+CMGS`
+/// 也没有 OK，落到最后的 Unknown 分支。
 fn classify_cmgs_result(res: &Result<crate::atclient::AtResponse, String>) -> (SendOutcome, String) {
     match res {
         Err(e) => (SendOutcome::Unknown, e.clone()),
@@ -904,9 +1274,7 @@ fn classify_cmgs_result(res: &Result<crate::atclient::AtResponse, String>) -> (S
             let text = resp.text();
             if text.contains("+CMS ERROR:") || text.contains("+CME ERROR:") || resp.has_error() {
                 (SendOutcome::Rejected, text)
-            } else if text.contains("+CMGS") {
-                (SendOutcome::Accepted, text)
-            } else if resp.ok() {
+            } else if has_cmgs_reference(&text) || resp.ok() {
                 (SendOutcome::Accepted, text)
             } else {
                 (SendOutcome::Unknown, format!("模组未给出提交确认（应答：{}）", first_line_capped(&text)))
@@ -1055,6 +1423,200 @@ mod tests {
         assert!(!is_safe_mem_name(r#"SM","SM","SM" AT+CFUN=0"#), "不能让外部串注入到 AT 命令里");
     }
 
+    #[test]
+    fn state_parsers_only_trust_real_replies() {
+        // CEUS：手册 3.15.3 的默认值是 1，3.15.5 的举例回读却是 0 —— 两者都得如实解析。
+        assert_eq!(parse_ceus_state("+CEUS: 1\r\nOK"), Some(1));
+        assert_eq!(parse_ceus_state("+CEUS: 0"), Some(0));
+        assert_eq!(parse_ceus_state("+CEUS: \"1\""), Some(1));
+        assert_eq!(parse_ceus_state("OK"), None, "没给 CEUS 行就是没读到，不能当成 1");
+        assert_eq!(parse_ceus_state("+CEUS: abc"), None);
+        // CFUN
+        assert_eq!(parse_cfun_state("+CFUN: 1\r\nOK"), Some(1));
+        assert_eq!(parse_cfun_state("+CFUN: 0"), Some(0));
+        assert_eq!(parse_cfun_state("ERROR"), None);
+        // CEREG：查询回读 <n>,<stat> 与事件上报 <stat>,<tac>,<ci> 两种形态
+        assert_eq!(parse_reg_state("+CEREG: 0,1\r\nOK"), Some(true));
+        assert_eq!(parse_reg_state("+CEREG: 2,5"), Some(true), "漫游注册也算注册");
+        assert_eq!(parse_reg_state("+CEREG: 0,2"), Some(false), "正在搜网 ≠ 已注册");
+        assert_eq!(parse_reg_state("+CEREG: 1,\"57274\",\"01234567\",7"), Some(true));
+        assert_eq!(parse_reg_state("+CEREG: 2"), Some(false), "只有一位时它就是 stat");
+        assert_eq!(parse_reg_state("ERROR"), None, "读不到就交 None，让调用方别死等");
+    }
+
+    #[test]
+    fn rf_restart_is_skipped_only_on_explicit_ceus_one() {
+        assert!(!power_requires_rf_restart(Some(1)), "已经是数据中心模式，重启射频只是白断网");
+        assert!(power_requires_rf_restart(Some(0)), "CEUS=0 必须写 1 并开关机生效");
+        assert!(power_requires_rf_restart(None), "读不到时按需要重启处理，宁可慢也不能留下假开启");
+    }
+
+    #[tokio::test]
+    async fn power_enable_skips_rf_restart_when_ceus_is_already_one() {
+        // 绝大多数设备出厂就是 CEUS=1，此时整套 CFUN 重启是不必要的断网。
+        let (svc, modem, _ctx) = harness(power_ok("+CEUS: 1")).await;
+        let r = svc.power_set(true, None).await.unwrap();
+        assert!(r.enabled, "开启应成功：{:?}", r.failed_detail);
+        let cmds = modem.cmds();
+        assert!(cmds.iter().any(|c| c == "AT+CEUS?"), "必须先读 CEUS");
+        assert!(!cmds.iter().any(|c| c == "AT+CFUN=0"), "CEUS 已是 1 时不得关射频：{cmds:?}");
+        assert!(cmds.iter().any(|c| c.starts_with("AT^IMSSWITCH=1")), "IMS 仍要设置：{cmds:?}");
+        assert!(
+            r.steps_done.iter().any(|s| s.contains("跳过射频重启")),
+            "步骤里要如实说明为什么没重启：{:?}",
+            r.steps_done
+        );
+    }
+
+    #[tokio::test]
+    async fn power_enable_rolls_back_rf_when_a_later_step_fails() {
+        // CEUS=0 → 走完整重启；IMSSWITCH 被拒（手册 4.10.1 的失败场景），
+        // 且射频回读仍是 0（模组没回来）——这时必须补发 AT+CFUN=1，
+        // 否则用户点一次「开启短信」换来的是整机断网。
+        let (svc, modem, _ctx) = harness(move |cmd: &str| match cmd {
+            "AT+CEUS?" => Reply::Lines(vec!["+CEUS: 0".into(), "OK".into()]),
+            "AT+CFUN?" => Reply::Lines(vec!["+CFUN: 0".into(), "OK".into()]),
+            "AT+CEREG?" => Reply::Lines(vec!["+CME ERROR: 3".into()]),
+            "AT^IMSSWITCH=1,0,0" => Reply::Lines(vec!["+CME ERROR: 308".into()]),
+            _ => Reply::ok(&[]),
+        })
+        .await;
+        svc.set_rf_recover_budget(Duration::from_millis(0));
+        let r = svc.power_set(true, None).await.unwrap();
+        assert!(!r.enabled);
+        assert_eq!(r.failed_at.as_deref(), Some("开启 LTE IMS"), "{:?}", r.failed_at);
+        let detail = r.failed_detail.clone().unwrap_or_default();
+        assert!(detail.contains("308"), "要带上模组的原始错误码：{detail}");
+        assert!(detail.contains("恢复射频"), "要说明射频回滚的结果：{detail}");
+        let cmds = modem.cmds();
+        let cfun1 = cmds.iter().filter(|c| c.as_str() == "AT+CFUN=1").count();
+        assert!(cfun1 >= 2, "序列里一次、回滚再补一次，实际 {cmds:?}");
+        // 顺序：CEUS=1 必须早于 CFUN=0（手册 3.15.2 要求设置后经开关机生效）
+        let pos_ceus = cmds.iter().position(|c| c == "AT+CEUS=1").unwrap();
+        let pos_off = cmds.iter().position(|c| c == "AT+CFUN=0").unwrap();
+        let pos_on = cmds.iter().position(|c| c == "AT+CFUN=1").unwrap();
+        assert!(pos_ceus < pos_off, "CEUS 必须在关射频之前写下：{cmds:?}");
+        assert!(pos_off < pos_on, "关射频之后必须再开回来：{cmds:?}");
+    }
+
+    #[tokio::test]
+    async fn power_enable_ceus_rejected_leaves_rf_untouched() {
+        // 手册 3.15.4 之外还有一层：CEUS 写失败时射频根本没动过，
+        // 所以这条路径不该出现任何 CFUN 下发，模组保持 +CFUN: 1。
+        let (svc, modem, _ctx) = harness(move |cmd: &str| {
+            if cmd == "AT+CEUS?" {
+                return Reply::Lines(vec!["+CEUS: 0".into(), "OK".into()]);
+            }
+            if cmd == "AT+CEUS=1" {
+                return Reply::Lines(vec!["+CME ERROR: 3".into()]);
+            }
+            if cmd.starts_with("AT+CFUN") || cmd.starts_with("AT^IMSSWITCH") {
+                return Reply::Lines(vec!["OK".into()]);
+            }
+            Reply::ok(&["+CSCA: \"+8613800755500\",145"])
+        })
+        .await;
+        let r = svc.power_set(true, None).await.unwrap();
+        assert!(!r.enabled);
+        assert_eq!(r.failed_at.as_deref(), Some("设置数据中心模式"));
+        assert!(r.failed_detail.clone().unwrap_or_default().contains('3'));
+        let cmds = modem.cmds();
+        assert!(!cmds.iter().any(|c| c == "AT+CFUN=0"), "CEUS 被拒后不得关射频：{cmds:?}");
+        assert!(!cmds.iter().any(|c| c == "AT+CFUN=1"), "更不得补发开射频：{cmds:?}");
+        assert!(!cmds.iter().any(|c| c.starts_with("AT^IMSSWITCH=1")), "后面几步都不该跑：{cmds:?}");
+    }
+
+    #[tokio::test]
+    async fn power_disable_touches_nothing_but_ims() {
+        let (svc, modem, _ctx) = harness(power_ok("+CEUS: 1")).await;
+        let r = svc.power_set(false, None).await.unwrap();
+        assert!(!r.enabled, "关闭后 enabled 必须是 false");
+        assert!(r.failed_at.is_none(), "{:?}", r.failed_detail);
+        let cmds = modem.cmds();
+        assert!(cmds.iter().any(|c| c == "AT^IMSSWITCH=0,0,0"));
+        assert!(!cmds.iter().any(|c| c == "AT+CFUN=0"), "关闭短信不该断网：{cmds:?}");
+        assert!(!cmds.iter().any(|c| c == "AT+CEUS=0"), "关闭短信不该改 CEUS：{cmds:?}");
+        assert!(!cmds.iter().any(|c| c.starts_with("AT+CMGD")), "关闭短信不该清空短信：{cmds:?}");
+    }
+
+    #[tokio::test]
+    async fn purge_keeps_modem_reason_when_switching_mem_fails() {
+        // 「切换存储区失败」后面必须带模组原话，否则 +CME ERROR: 4 这类线索就丢了。
+        let (svc, _modem, _ctx) = harness(move |cmd: &str| {
+            if cmd.starts_with(r#"AT+CPMS="SM""#) {
+                return Reply::Lines(vec!["+CME ERROR: 4".into()]);
+            }
+            if cmd == "AT+CPMS?" {
+                return Reply::Lines(vec![
+                    "+CPMS: \"SM\",1,50,\"ME\",1,50,\"MT\",0,50".into(),
+                    "OK".into(),
+                ]);
+            }
+            if cmd == "AT+CMGD=1,4" {
+                return Reply::Lines(vec!["OK".into()]);
+            }
+            Reply::ok(&[])
+        })
+        .await;
+        let r = svc.purge_all().await.unwrap();
+        assert_eq!(r.requested, 3, "SM/ME/MT 三个区都该试一次");
+        assert_eq!(r.deleted, 2, "SM 没切过去，ME/MT 成功：{:?}", r.errors);
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert!(r.errors[0].starts_with("SM: 切换存储区失败"), "{:?}", r.errors);
+        assert!(r.errors[0].contains('4'), "模组原话要留在错误里：{:?}", r.errors);
+    }
+
+    #[test]
+    fn cmgs_reference_requires_a_real_receipt_line() {
+        // 回显里带 +CMGS 字样的非回执行不能算成功；真正的回执行才算。
+        assert!(has_cmgs_reference("+CMGS: 12\r\nOK"));
+        assert!(has_cmgs_reference("+CMGS: 12"));
+        assert!(!has_cmgs_reference("OK"), "没有回执行时交给 resp.ok() 判断");
+        assert!(!has_cmgs_reference("> "));
+        assert!(!has_cmgs_reference("0011006800002143F1 里提到 +CMGS 只是正文"));
+    }
+
+    #[test]
+    fn classify_treats_bare_ok_as_accepted_but_prompt_as_unknown() {
+        let bare: Result<crate::atclient::AtResponse, String> =
+            Ok(crate::atclient::AtResponse { lines: vec!["OK".into()] });
+        assert_eq!(classify_cmgs_result(&bare).0, SendOutcome::Accepted);
+        let prompt: Result<crate::atclient::AtResponse, String> =
+            Ok(crate::atclient::AtResponse { lines: vec![">".into()] });
+        assert_eq!(classify_cmgs_result(&prompt).0, SendOutcome::Unknown);
+    }
+
+    /// 开关序列用的通用应答器：CEUS 回读值由 `ceus_line` 决定，其余命令一律接受，
+    /// 射频回读为 1 且已注册。
+    fn power_ok(ceus_line: &'static str) -> impl Fn(&str) -> Reply + Send + Sync + 'static {
+        move |cmd: &str| match cmd {
+            "AT+CEUS?" => Reply::Lines(vec![ceus_line.into(), "OK".into()]),
+            "AT+CFUN?" => Reply::Lines(vec!["+CFUN: 1".into(), "OK".into()]),
+            "AT+CEREG?" => Reply::Lines(vec!["+CEREG: 0,1".into(), "OK".into()]),
+            "AT+CSCA?" => Reply::ok(&["+CSCA: \"+8613800755500\",145"]),
+            _ => Reply::ok(&[]),
+        }
+    }
+
+    #[tokio::test]
+    async fn power_enable_full_restart_succeeds_without_rollback_noise() {
+        // CEUS=0 的设备：完整走 CEUS=1 → CFUN=0 → CFUN=1 → 确认 → IMSSWITCH，
+        // 成功时不该多补一次 AT+CFUN=1（回滚只属于失败路径）。
+        let (svc, modem, _ctx) = harness(power_ok("+CEUS: 0")).await;
+        svc.set_rf_recover_budget(Duration::from_millis(0));
+        let r = svc.power_set(true, Some("+8613800755500".into())).await.unwrap();
+        assert!(r.enabled, "{:?}", r.failed_detail);
+        assert_eq!(r.failed_at, None);
+        let cmds = modem.cmds();
+        assert_eq!(cmds.iter().filter(|c| c.as_str() == "AT+CFUN=1").count(), 1, "{cmds:?}");
+        assert!(cmds.iter().any(|c| c == r#"AT+CSCA="+8613800755500""#), "短信中心要在这串里写掉：{cmds:?}");
+        assert!(
+            r.steps_done.iter().any(|s| s.contains("注册网络")),
+            "射频确认结果要如实写进步骤：{:?}",
+            r.steps_done
+        );
+    }
+
     /* ==================== 模拟模组端到端测试 ==================== */
 
     use crate::atclient::testutil::{MockModem, Reply, attach_mock_modem};
@@ -1152,17 +1714,38 @@ mod tests {
         assert_eq!(r.encoding, "UCS2");
         assert!(r.storage.is_some(), "发送后应带回一次真实容量读数");
 
-        // 字节级：整条 `AT+CMGS=<长度>\r<PDU>` 必须一次写入，且没有 0x1A 被改写成字面量。
+        // 字节级：两段式 —— 先 `AT+CMGS=<len>\r`，再 `<PDU>` + 0x1A + `\r`，
+        // 且 0x1A 必须是真实字节，不能是被转义成字面量的 "\\u001a"。
         let stream = modem.stream();
         let text = String::from_utf8_lossy(&stream).to_string();
         assert!(text.contains("AT+CMGS="), "应下发 AT+CMGS：{text}");
-        assert!(!stream.contains(&0x1A), "单次提交不含 Ctrl-Z 字节");
+        assert!(stream.contains(&0x1A), "两段式提交必须以 Ctrl-Z 结束 PDU 输入");
         assert!(!text.contains("\\u001a"), "不应出现被转义成字面量的 0x1A");
         assert!(!text.contains("\\x1a"), "不应出现被转义成字面量的 0x1A");
-        // 命令串里必须含真实的 CR（0x0D），而不是反斜杠+r 两个字符
+        // 长度与 PDU 之间必须是真实的 CR / 0x1A，而不是反斜杠转义串
         let cmgs_pos = text.find("AT+CMGS=").unwrap();
-        assert!(stream[cmgs_pos..].contains(&0x0D), "长度与 PDU 之间必须是真实 CR");
+        assert!(stream[cmgs_pos..].contains(&0x0D), "命令结尾必须是真实 CR");
         assert!(!text[cmgs_pos..].contains("\\r"), "CR 不能被转义成字面量 \\r");
+        // 一次性写法（长度与 PDU 同一条命令）不应再出现：mock/e2e 第 5b 项证明它拿不到回执。
+        // 看**写入批次**而不是整条流：两段式是两次 write_all，第一段必须只有 `AT+CMGS=<数字>`。
+        let batches: Vec<Vec<u8>> = {
+            let guard = modem.written.lock().unwrap_or_else(|e| e.into_inner());
+            guard.clone()
+        };
+        let head = batches
+            .iter()
+            .find(|b| String::from_utf8_lossy(b).contains("AT+CMGS="))
+            .cloned()
+            .unwrap_or_default();
+        let head_text = String::from_utf8_lossy(&head).to_string();
+        let head_body = head_text.trim_end_matches('\r');
+        let len_field = head_body.trim_start_matches("AT+CMGS=");
+        assert!(
+            head_body.starts_with("AT+CMGS=")
+                && !len_field.is_empty()
+                && len_field.chars().all(|c| c.is_ascii_digit()),
+            "第一段只报长度、不带 PDU，实际写入 {head_text:?}"
+        );
     }
 
     #[tokio::test]

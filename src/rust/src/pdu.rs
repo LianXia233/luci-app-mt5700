@@ -684,16 +684,18 @@ fn encode_address(number: &str, is_smsc: bool, include_len: bool) -> Result<Vec<
     let trimmed = number.trim();
     let has_plus = trimmed.starts_with('+');
     let digits = if has_plus { &trimmed[1..] } else { trimmed };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || trimmed.matches('+').count() > 1 {
+    // 第二个 `+` 不可能通过下面的全数字检查，所以不必单独数 `+` 的个数。
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return Err("号码格式不正确（仅允许可选前导 + 和数字）".into());
     }
-    let digits = digits.to_string();
-    if digits.is_empty() {
-        return Err("地址不含可编码的号码".into());
-    }
+    // 故意不支持 1–2 位短号/特服号：SUBMIT 的地址字段要按 TON/NPI 选类型，
+    // 这里固定 0x81/0x91（国内/国际 ISDN），把 10086、12345 这类按普通号码编
+    // 出来网络侧也不认。真要支持短号得先补 TON/NPI 分支，而不是放开长度下限。
+    // 与后端 `valid_phone_address`（3–20 位）保持同一口径，避免两边结论不一致。
     if digits.len() < 3 || digits.len() > 20 {
         return Err("号码长度不正确（应为 3 至 20 位）".into());
     }
+    let digits = digits.to_string();
     // TOA：国际格式（带 +）用 0x91，国内/unknown 用 0x81。
     let toa: u8 = if has_plus { 0x91 } else { 0x81 };
 
