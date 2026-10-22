@@ -31,6 +31,29 @@ function getStr(obj, key) {
 }
 
 /*
+ * 取布尔参数。
+ *
+ * 必须**同时**认 JSON 真布尔与字符串两种写法：`rpc.js` 的 `sms()` 走的是
+ * `params.enable === true || …`，序列化出去就是 JSON 的 `true`；而 ubus 命令行、
+ * 旧版前端、以及手写的调用方习惯传 `'1'` / `'true'`。
+ *
+ * 实测故障：这里原来写成
+ *     params.enable = (getStr(a, 'enable') == '1' || getStr(a, 'enable') == 'true');
+ * 只认字符串。前端传过来的 `true` 是布尔，跟 `'1'`/`'true'` 都不等，
+ * 于是「打开短信功能」「打开 IMS」两种操作**全部被当成 false 下发** ——
+ * 界面上看着点了开，模组那边执行的是关。配合 `args` 里 `enable` 的声明
+ * （原本是 `''`，见 `sms` 方法的注释）又会让请求直接返回 `[2]`，
+ * 排查时两条线索互相掩盖，非常难定位。
+ */
+function getBool(obj, key) {
+	let v = getStr(obj, key);
+	if (v == null || v == '' || v == '0' || v == 'false' || v == 'no' || v == 'off') {
+		return false;
+	}
+	return true;
+}
+
+/*
  * 白名单校验客户端传入的 _rid。
  *
  * 安全背景（必须过滤，不能信任客户端）：
@@ -239,7 +262,11 @@ const SMS_ACTION_TIMEOUT = {
 	'set_smsc': 40,
 	'power': 70,
 	'set_ims': 40,
-	'get_ims': 40
+	'get_ims': 40,
+	/* 归档三个动作只做本地文件读写，不下发任何 AT，预算给短一点 */
+	'store_stats': 20,
+	'store_read': 20,
+	'store_drop': 20
 };
 
 /*
@@ -878,16 +905,31 @@ return {
 		 * action 走白名单，参数逐项取值后透传，不做命令拼接，杜绝 AT 注入。
 		 */
 		sms: {
-			args: { action: '', destination: '', message: '', smsc: '', mem: '', indices: '', session_id: 0, ttl_ms: 0, dedup_key: '', enable: '', _rid: '' },
+			/*
+			 * args 的**字面量类型**决定 rpcd 怎么校验入参，不是注释。
+			 *
+			 * 实测故障：`enable` 曾声明成 `''`（字符串），而 rpc.js 传的是布尔值
+			 * （`params.enable === true || …`）；`indices` 声明成 `''`，而批量删除传的是数组。
+			 * rpcd 对 ucode 插件会按声明的类型校验，类型不符直接返回
+			 * `{"result":[2]}`（UBUS_STATUS_INVALID_ARGUMENT）——**插件函数压根不会被执行**，
+			 * 于是 `list` / `capacity` / `send` / `session_open` 全部拿不到数据。
+			 * 前端把 `result: 2` 当成后端应答，`send` 走了兜底分支报
+			 * 「模组拒绝了这条短信」（那是 `r.message` 为 undefined 时的兜底文案），
+			 * 看上去就像「模组拒收」。
+			 * 因此这里必须按**实际传入的类型**声明：`enable` → 布尔，`indices` → 数组。
+			 * 未提供的参数由 LuCI 省略（undefined 不进 JSON），不会触发校验。
+			 */
+			args: { action: '', destination: '', message: '', smsc: '', mem: '', indices: [], session_id: 0, ttl_ms: 0, dedup_key: '', enable: false, number: '', items: [], all: false, _rid: '' },
 			call: function (req) {
 				let a = req.args;
 				let action = getStr(a, 'action');
 				if (action == null || action == '') {
 					return { success: false, error: '缺少参数 action' };
 				}
-				let known = ['list', 'send', 'delete', 'purge', 'capacity', 'set_storage',
-					'get_smsc', 'set_smsc', 'power', 'set_ims', 'get_ims',
-					'session_open', 'session_renew', 'session_release'];
+			let known = ['list', 'send', 'delete', 'purge', 'capacity', 'set_storage',
+				'get_smsc', 'set_smsc', 'power', 'set_ims', 'get_ims',
+	'session_open', 'session_renew', 'session_release',
+	'store_stats', 'store_read', 'store_drop'];
 				if (index(known, action) < 0) {
 					return { success: false, error: '不支持的短信动作: ' + action };
 				}
@@ -906,10 +948,18 @@ return {
 				} else if (action == 'set_smsc') {
 					params.smsc = getStr(a, 'smsc') || '';
 				} else if (action == 'power' || action == 'set_ims') {
-					params.enable = (getStr(a, 'enable') == '1' || getStr(a, 'enable') == 'true');
+					params.enable = getBool(a, 'enable');
 					if (action == 'power') {
 						let sc = getStr(a, 'smsc');
 						if (sc != null && sc != '') params.smsc = sc;
+					}
+				} else if (action == 'store_read' || action == 'store_drop') {
+					params.number = getStr(a, 'number') || '';
+					if (action == 'store_drop') {
+						/* 指纹由后端计算，这里只透传原始字段 */
+						params.items = a.items || [];
+						params.indices = a.indices || [];
+						params.all = getBool(a, 'all');
 					}
 				} else if (action == 'session_renew' || action == 'session_release') {
 					params.session_id = int(getStr(a, 'session_id')) || 0;

@@ -218,6 +218,9 @@ pub struct SmsService {
     total_budget: Duration,
     /// 射频恢复轮询上限（毫秒；默认 [RF_RECOVER_BUDGET]，单测里压到 0）。
     rf_recover_ms: AtomicU64,
+    /// 短信本地归档句柄。由 main 在装配阶段注入（[`SmsService::set_archive`]），
+    /// 未注入时 `send` 只走模组、不落盘 —— 单测因此不必准备文件系统。
+    archive: std::sync::OnceLock<std::sync::Arc<crate::sms_store::SmsArchive>>,
 }
 
 impl SmsService {
@@ -246,7 +249,27 @@ impl SmsService {
             submit_timeout,
             total_budget,
             rf_recover_ms: AtomicU64::new(RF_RECOVER_BUDGET.as_millis() as u64),
+            archive: std::sync::OnceLock::new(),
         })
+    }
+
+    /// 注入短信本地归档句柄（main 装配时调用一次）。
+    ///
+    /// 用 `OnceLock` 而不是构造参数，是为了不动 `new` / `with_timeouts` 的签名
+    /// —— 这两个入口被一堆既有用例直接调用，改签名等于把它们全改一遍。
+    pub fn set_archive(&self, a: std::sync::Arc<crate::sms_store::SmsArchive>) {
+        let _ = self.archive.set(a);
+    }
+
+    /// 把一条短信写入本地归档（发送与接收共用）。
+    ///
+    /// 归档失败**不影响**短信本身：落盘只是留档，失败时记一条日志就过，
+    /// 绝不能让「写文件失败」把已经发成功的短信报成失败。
+    pub fn archive_record(&self, rec: crate::sms_store::ArchiveRecord) {
+        let Some(a) = self.archive.get() else { return };
+        if let Err(e) = a.append(vec![rec]) {
+            log_warn!("写入短信本地归档失败（不影响本次收发）: {e}");
+        }
     }
 
     /// 存储满标志：被模组告知 MEMORY FULL 后置位，容量回落到未满时清除。
@@ -582,6 +605,14 @@ impl SmsService {
             } else {
                 "模组已确认提交".into()
             };
+            /*
+             * 落盘：把「发出过什么」留在路由器本地，与模组格位的生命周期解耦
+             * （格位会满、会被清空，本地归档不会）。
+             *
+             * 归档写失败**不影响**本次结论：模组已经回 `+CMGS` 确认收下，
+             * 留档只是附带动作，绝不能让「写文件失败」把发成功的短信报成失败。
+             */
+            self.archive_record(sent_record(&destination, &message));
         }
 
         Ok(SendResult {
@@ -1206,6 +1237,55 @@ fn parse_storage(lines: &[String]) -> Option<StorageInfo> {
 }
 
 /// 日志里只放正文的简短预览：短信正文可能很长，整条打进日志既刷屏又泄隐私。
+/*
+ * 构造一条「已发送」的归档记录。
+ *
+ * 发送时刻取**路由器本机时间**：3GPP 的 SMS-SUBMIT 里没有发送时刻字段
+ * （只有 TP-VP 有效期），模组存下来再读回去也拿不到。所以这是唯一能拿到的
+ * 时间点。设备没配 NTP 时这个值可能不准，故在记录里如实标 `time_approx`，
+ * 界面不会把它当成模组给的精确时刻来显示。
+ */
+fn sent_record(destination: &str, message: &str) -> crate::sms_store::ArchiveRecord {
+    let number = crate::notify::normalize_phone_number(destination);
+    let time = Some(crate::nettime::now().format("%y/%m/%d,%H:%M:%S").to_string());
+    crate::sms_store::ArchiveRecord {
+        fingerprint: crate::sms_store::fingerprint("sent", &number, time.as_deref(), message),
+        direction: "sent".into(),
+        number,
+        content: message.to_string(),
+        time,
+        time_approx: true,
+        index: None,
+        archived_at_ms: crate::nettime::now_ms(),
+    }
+}
+
+/*
+ * 构造一条「已收到」的归档记录。
+ *
+ * 时间来自 PDU 的 TP-SCTS（模组给的服务中心时间戳），是真实时刻，
+ * 故 `time_approx` 为 `false`。`index` 是模组格位，用于删除时按格位定位
+ * —— 长短信合并成一条气泡后，界面只带着各段的格位。
+ */
+pub(crate) fn received_record(
+    sender: &str,
+    content: &str,
+    time: Option<String>,
+    index: Option<u32>,
+) -> crate::sms_store::ArchiveRecord {
+    let number = crate::notify::normalize_phone_number(sender);
+    crate::sms_store::ArchiveRecord {
+        fingerprint: crate::sms_store::fingerprint("received", &number, time.as_deref(), content),
+        direction: "received".into(),
+        number,
+        content: content.to_string(),
+        time,
+        time_approx: false,
+        index,
+        archived_at_ms: crate::nettime::now_ms(),
+    }
+}
+
 fn text_preview(s: &str) -> String {
     let n = s.chars().count();
     let head: String = s.chars().take(20).collect();
