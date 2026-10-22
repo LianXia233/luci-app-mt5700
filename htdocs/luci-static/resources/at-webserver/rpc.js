@@ -534,12 +534,16 @@ ATClient.prototype.sendCommand = function (command, timeoutMs) {
  *
  * 必须与后端的预算同量级且略大（让后端先出结论）：
  *   send / purge  —— 后端排队(10s) + 总预算(60s)，给 72s
+ *   delete        —— 后端排队(10s) + 每槽位一句 AT+CMGD(2s) + 回读(2s)。
+ *                     槽位数由前端按 8 个一批限住（见 sms_center.js 的
+ *                     SMS_DELETE_CHUNK），否则一次勾满几十条必然超预算。
  *   list / 存储类 —— 后端排队(10s) + 列表(20s)，给 42s
  *   其余          —— 走普通命令预算
  */
 var SMS_ACTION_TIMEOUT_MS = {
 	send: 72000,
 	purge: 72000,
+	delete: 42000,
 	list: 42000,
 	capacity: 42000,
 	set_storage: 42000,

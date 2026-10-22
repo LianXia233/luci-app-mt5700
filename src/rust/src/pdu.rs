@@ -530,7 +530,10 @@ pub fn decode_stored_pdu(pdu_hex: &str) -> StoredSms {
 /// `AT+CMGL` 应答里的一条记录（手册 9.8.1）。
 #[derive(Debug, Clone)]
 pub struct CmglEntry {
-    pub index: u32,
+    /// 模组报的存储槽位。**None = 头行里那个字段没读出来**，不是「0 号位」：
+    /// 实机证明槽位确实从 0 开始（一张有两条分段短信的卡回过 `indices [0,1]`），
+    /// 拿 0 当「读不出」的哨兵会把一条真短信永久变成删不掉的条目。
+    pub index: Option<u32>,
     /// 手册 9.8.3 `<stat>`：0=收到的未读 1=收到的已读 2=存储的未发送 3=存储的已发送
     pub stat: u32,
     pub direction_incoming: bool,
@@ -555,7 +558,8 @@ pub struct CmglEntry {
 /// `urc::parse_sms_response`，它只取 PDU 那一行，序号由调用方自己带着。
 ///
 /// 解析失败的单条会带着 error 保留下来，界面上如实提示，而不是静默丢掉；
-/// 这种条目的 `index` 落为 0，删除路径据此拒绝下发（见 `sms::delete`）。
+/// 这种条目如果连头行的序号都没读出来，`index` 是 **None**（删除侧据此拒发，
+/// 见 `sms::delete`）—— 0 是一个合法槽位，不能拿来当哨兵。
 pub fn parse_cmgl_response(lines: &[String]) -> Vec<CmglEntry> {
     let mut out: Vec<CmglEntry> = Vec::new();
     let mut i = 0usize;
@@ -566,7 +570,7 @@ pub fn parse_cmgl_response(lines: &[String]) -> Vec<CmglEntry> {
             continue;
         };
         let fields: Vec<&str> = rest.split(',').map(|p| p.trim()).collect();
-        let index = fields.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+        let index = fields.first().and_then(|s| s.parse::<u32>().ok());
         let stat = fields.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
         let pdu = lines[i + 1].trim();
         i += 2;
@@ -678,6 +682,60 @@ pub fn pick_encoding(message: &str) -> SmEncoding {
     } else {
         SmEncoding::Ucs2
     }
+}
+
+/// 按实机 `normalize()` 的口径归一收件人号码，返回可以直接交给 [`encode_address`] 的串。
+///
+/// 实机在编码之前多走这一步，因为它决定 TOA 取 0x81 还是 0x91、以及要不要补国家码：
+///   - 先去掉空白、`-`、`()`、`.`，`+` 只认最前面那一个；
+///   - `+` 开头，或 `00` 开头的国际前缀 → 国际格式；
+///   - 裸的 11 位、`1` 开头的手机号 → 补上 `86` 走国际格式；
+///   - 12 位以上且已经带 `86` → 国际格式；
+///   - 其余（特服短号、固话）→ 国内格式，不补任何前缀。
+///
+/// 本插件原先「照用户输入的写法编码」，于是界面上填 `13800138000` 会以国内格式
+/// （0x81）发出。实机那条路是这台模组 + 这张卡真发出去过的写法，短号（如 `10000`）
+/// 也确实是按 0x81 发的 —— 两种情形各归各位，不能一刀切。
+///
+/// 长度上下限沿用 [`encode_address`] 的 3～20 位（实机放到 2 位，但没有 2 位可达
+/// 号码，放开只会让手滑多一个出口）；两处结论必须一致，所以这里先判一次。
+///
+/// 「裸 11 位且 `1` 开头就补 `86`」是本机（MT5700M-CN，大陆运营商）的口径，与实机
+/// 完全一致；代价是一个不带 `+` 的外国 11 位号码会被当成大陆手机号。真要给国际
+/// 号码用就照实机的写法带上前导 `+` —— `+` 是这里唯一的、不会猜错的信号。
+pub fn normalize_destination(raw: &str) -> Result<String, String> {
+    if raw.trim().is_empty() {
+        return Err("缺少收件人号码".into());
+    }
+    let mut digits = String::new();
+    let mut international = false;
+    for ch in raw.trim().chars() {
+        match ch {
+            // `+` 只允许出现在号码之前；号码中间再出 `+` 是打错了。
+            '+' if digits.is_empty() && !international => international = true,
+            '0'..='9' => digits.push(ch),
+            ' ' | '\t' | '\r' | '\n' | '-' | '(' | ')' | '.' => {}
+            c => return Err(format!("号码格式不正确（仅允许可选前导 +、数字与分隔符 -()，遇到 {c}）")),
+        }
+    }
+    if digits.len() < 3 || digits.len() > 20 {
+        return Err("号码长度不正确（应为 3 至 20 位）".into());
+    }
+    // `00` 是手动拨国际长途的写法，去掉它，剩下的按国际格式编。
+    if !international && digits.starts_with("00") && digits.len() > 8 {
+        international = true;
+        digits.drain(..2);
+    }
+    if international {
+        return Ok(format!("+{digits}"));
+    }
+    if digits.len() == 11 && digits.starts_with('1') {
+        return Ok(format!("+86{digits}")); // 裸的大陆手机号
+    }
+    if digits.len() >= 12 && digits.starts_with("86") {
+        return Ok(format!("+{digits}")); // 国家码写了但没写 +
+    }
+    Ok(digits)
 }
 
 /// 把地址打包成 PDU 地址字段。
@@ -903,14 +961,15 @@ pub struct SubmitOptions {
     pub message: String,
     /// 短信中心号码，留空表示用 SIM 卡里存的那一个（SMSC 长度字节写 0）。
     pub smsc: Option<String>,
-    /// 相对有效期（TP-VP 字节），默认 0xA8 = 24 小时。
+    /// 相对有效期（TP-VP 字节），默认 0xA7 = 24 小时。
     ///
     /// TP-VP 用的是 3GPP TS 23.040 §9.2.3.12 的相对有效期编码（本 AT 手册不含该表，
     /// 别按字面当小时数读）：`0～143` 为 `(n+1)×5` 分钟，`144～167` 为
-    /// `12 小时 + (n−144)×30` 分钟，`168～196` 为 `1 天 + (n−168)×1` 小时，
-    /// `197～255` 为 `1 周 + (n−197)×24` 小时。所以 **0xA8（168）正好是 24 小时**，
-    /// 而 0xAA（170）是 26 小时。厂商 WebUI 的短信发送用的是 0xA7（23.5 小时），
-    /// 取 0xA8 与它只差半小时，不影响送达。
+    /// `12 小时 + (n−143)×30` 分钟（**167 = 24 小时**），`168～196` 为 `(n−166)×1 天`
+    /// （168 已经是 **2 天**，不是 24 小时），`197～255` 为 `(n−192)×1 周`。
+    /// 相邻档在边界上是连续跳跃的：143→12 小时、144→12.5 小时、167→24 小时、
+    /// 168→48 小时、196→30 天、197→35 天，可以拿这条自查读表有没有读歪。
+    /// 厂商 WebUI 的短信发送用的正是 0xA7（= 24 小时）。
     pub validity: Option<u8>,
     /// 8 位连接头参考号；不给则随机取 1..=255。
     pub reference: Option<u8>,
@@ -918,22 +977,22 @@ pub struct SubmitOptions {
 
 /// 构造真正要发出去的分片列表（按片序排列）。
 ///
-/// 每片按手册 9.14.1／9.14.5 的**两段式**下发：先 `AT+CMGS=<tpdu_length>` 等 `> `
-/// 提示符，再写 `<PDU>` + 0x1A（见 `sms.rs::send`）。`tpdu_length` 是 TPDU 字节数、
-/// **不含前面的 SMSC 字段**，厂商 WebUI 的编码器算的也是这一个数（它把 SMSC 字段
-/// 单独拼在 TPDU 之前、长度只取 TPDU 部分），与本插件一致。
+/// `tpdu_length` 是 TPDU 字节数、**不含前面的 SMSC 字段**，厂商 WebUI 的编码器算的也是
+/// 这一个数（它把 SMSC 字段单独拼在 TPDU 之前、长度只取 TPDU 部分），与本插件一致。
+/// 提交形态取手册 9.14.5 的一次性写法 `AT+CMGS=<长度>` + 字面 `\r` + `<PDU>`，
+/// 由 `sms.rs::send` 下发。
 pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
-    let destination = opts.destination.trim();
-    if destination.is_empty() {
+    if opts.destination.trim().is_empty() {
         return Err("缺少收件人号码".into());
     }
-    let message = &opts.message;
-    if message.is_empty() {
+    if opts.message.is_empty() {
         return Err("短信内容为空".into());
     }
+    let destination = normalize_destination(&opts.destination)?;
+    let message = &opts.message;
 
     let encoding = pick_encoding(message);
-    let da = encode_address(destination, false, true)?;
+    let da = encode_address(&destination, false, true)?;
 
     // 先试单条；超限时才引入 UDH。
     let mut chunks = split_message(message, encoding, false);
@@ -955,7 +1014,7 @@ pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
         Some(sc) => encode_address(sc, true, true)?,
         None => vec![0x00], // 0 长度 = 用卡里配的短信中心
     };
-    let vp = opts.validity.unwrap_or(0xA8);
+    let vp = opts.validity.unwrap_or(0xA7);
     let dcs: u8 = match encoding {
         SmEncoding::Gsm7 => 0x00,
         SmEncoding::Ucs2 => 0x08,
@@ -964,7 +1023,8 @@ pub fn build_submit_parts(opts: &SubmitOptions) -> Result<SubmitPlan, String> {
 
     let mut parts = Vec::with_capacity(parts_count as usize);
     for (i, chunk) in chunks.iter().enumerate() {
-        // TP-MTI = SMS-SUBMIT(0x01) | TP-RD(0x20，拒绝重复) | TP-VPF=相对(0x10)
+        // TP-MTI = SMS-SUBMIT(0x01) | TP-VPF = 相对(bit4:bit3 = 10，即 0x10) | TP-SRR(0x20，索要状态报告)
+        // 注意 0x20 是 bit5 的 TP-SRR，不是 bit2 的 TP-RD(0x04)——见 23.038 的 SMS-SUBMIT 首字节表。
         let mut first_octet: u8 = 0x01 | 0x20 | 0x10;
         let udh_value = if concat {
             first_octet |= 0x40; // TP-UDHI
@@ -1211,6 +1271,38 @@ mod tests {
     }
 
     #[test]
+    fn normalize_destination_matches_modem_side_rules() {
+        // 实机 normalize() 的四档判定，逐条对齐。
+        assert_eq!(normalize_destination("13800138000").unwrap(), "+8613800138000", "裸的大陆手机号要补国家码");
+        assert_eq!(normalize_destination("10000").unwrap(), "10000", "特服短号按国内格式，不补任何前缀");
+        assert_eq!(normalize_destination("+8613800138000").unwrap(), "+8613800138000");
+        assert_eq!(normalize_destination("8613800138000").unwrap(), "+8613800138000", "写了 86 没写 + 也算国际");
+        assert_eq!(normalize_destination("008613800138000").unwrap(), "+8613800138000", "00 前缀剥掉后按国际");
+        assert_eq!(normalize_destination("8613800").unwrap(), "8613800", "不足 12 位的 86 开头不猜国际");
+        assert_eq!(normalize_destination("0755-1234 5678").unwrap(), "075512345678", "分隔符只是噪声");
+        assert_eq!(normalize_destination(" +86 (138) 0013-8000 ").unwrap(), "+8613800138000");
+    }
+
+    #[test]
+    fn normalize_destination_rejects_unencodable_input() {
+        // 归一之后仍只剩数字与一个前导 +，控制字符与逗号永远进不了串口。
+        for bad in ["", "   ", "12", "123\rAT+CMGS=1", "123,45", "abc", "+", "13800138000+", "138001380001234567890"] {
+            assert!(normalize_destination(bad).is_err(), "should reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn destination_is_encoded_international_after_normalize() {
+        // 归一的落点在 PDU 上：TP-DA 长度是位数，TOA 随之从 0x81 变 0x91。
+        let da = encode_address(&normalize_destination("13800138000").unwrap(), false, true).unwrap();
+        assert_eq!(da[0], 13);
+        assert_eq!(da[1], 0x91);
+        assert_eq!(hex_upper(&da[2..]), "683108108300F0");
+        let short = encode_address(&normalize_destination("10000").unwrap(), false, true).unwrap();
+        assert_eq!(short[1], 0x81, "短号仍走国内格式");
+    }
+
+    #[test]
     fn encode_address_counts_octets_for_smsc() {
         // SMSC 的长度字节记 TOA + 号码字节数。
         let sca = encode_address("+8613800755500", true, true).unwrap();
@@ -1241,7 +1333,9 @@ mod tests {
     #[test]
     fn default_validity_is_relative_24h() {
         // 相对有效期编码（TS 23.040 §9.2.3.12）：n=168～196 表示「1 天 + (n−168) 小时」，
-        // 24 小时对应 0xA8；0xAA 是 26 小时，注释以前把它当 24 小时用。
+        // 相对有效期编码（TS 23.040 §9.2.3.12）：n=144～167 表示「12 小时 + (n−143)×30 分钟」，
+        // 24 小时对应 0xA7（167）。n=168（0xA8）已经跳到「(n−166)×1 天」= 2 天，
+        // 早期注释把 0xA8 当 24 小时用，是读表读歪了。
         let plan = build_submit_parts(&SubmitOptions {
             destination: "+8613800138000".into(),
             message: "vp".into(),
@@ -1258,7 +1352,7 @@ mod tests {
         pos += 1 + (da_len + 1) / 2 + 1; // DA 长度 + 号码 BCD 字节 + TOA
         pos += 2; // TP-PID + TP-DCS → TP-VP
         assert_eq!(first & 0x18, 0x10, "TP-VPF 应为相对格式（bit4:bit3 = 10）");
-        assert_eq!(raw[pos], 0xA8, "默认 TP-VP 应为 0xA8 = 24 小时");
+        assert_eq!(raw[pos], 0xA7, "默认 TP-VP 应为 0xA7 = 24 小时");
     }
 
     #[test]
@@ -1370,7 +1464,7 @@ mod tests {
         ];
         let got = parse_cmgl_response(&lines);
         assert_eq!(got.len(), 1, "回显行与空行都不该被当成记录");
-        assert_eq!(got[0].index, 1);
+        assert_eq!(got[0].index, Some(1));
         assert_eq!(got[0].stat, 1, "9.8.3：<stat>=1 是「收到的已读短信」");
         assert_eq!(got[0].content, "测试");
         assert!(got[0].error.is_none());
@@ -1387,8 +1481,8 @@ mod tests {
 
     #[test]
     fn cmgl_keeps_unparsable_entry_with_error() {
-        // 解析失败的一条要带着原因留下，而不是静默丢掉；序号读不出时落为 0，
-        // 删除侧（sms::delete）正是用「0 不是来路明确的序号」拒绝下发的。
+        // 解析失败的一条要带着原因留下，而不是静默丢掉。头行的序号照样读得出来
+        // 就照实报（槽位 0 也是真槽位），只有读不出来时才是 None。
         let lines = vec![
             "+CMGL: 2,0,,30".to_string(),
             "not-hex-at-all".to_string(),
@@ -1396,8 +1490,23 @@ mod tests {
         ];
         let got = parse_cmgl_response(&lines);
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].index, 2);
+        assert_eq!(got[0].index, Some(2));
         assert!(got[0].error.is_some(), "{:?}", got[0].error);
+
+        // 槽位 0：实机的短信就从 0 号位开始排。
+        let zero = vec![
+            "+CMGL: 0,0,,25".to_string(),
+            "00040B913108108300F0000852805221000023046D4B8BD5".to_string(),
+            "OK".to_string(),
+        ];
+        assert_eq!(parse_cmgl_response(&zero)[0].index, Some(0), "0 号槽位不是「读不出序号」");
+
+        let noindex = vec![
+            "+CMGL: ,0,,25".to_string(),
+            "00040B913108108300F0000852805221000023046D4B8BD5".to_string(),
+            "OK".to_string(),
+        ];
+        assert_eq!(parse_cmgl_response(&noindex)[0].index, None, "序号读不出时留 None");
     }
 
     /// 把我们自己编出来的 SMS-SUBMIT 反向解出正文，验证「编得对不对」。

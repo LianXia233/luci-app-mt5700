@@ -25,6 +25,17 @@
 var SMS_SESSION_TTL_MS = 90000;
 var SMS_SESSION_HEARTBEAT_MS = 30000;
 
+/*
+ * 批量删除每批的槽位数。
+ *
+ * 后端是一句 `AT+CMGD=<槽位>` 删一条（模组不收槽位列表，实机同理），一次 RPC 的
+ * 耗时与槽位数成正比；而 ucode 侧的 `nc` 超时是写死的，勾满 40 条就是 80s 以上，
+ * 必然被掐断 —— 掐断不止是这次删除失败，还会把「后端不可用」的共享熔断打开 15s，
+ * 别的页面一起跟着报错。按 8 个槽位一批（每批 ≤ 排队 10 + 8×2 + 回读 2 = 28s）
+ * 顺序发，既对得上超时预算，也让中途失败时已经删掉的不必重来。
+ */
+var SMS_DELETE_CHUNK = 8;
+
 return L.view.extend({
 	render: function () {
 		var self = this;
@@ -574,14 +585,13 @@ return L.view.extend({
 		/*
 		 * 一条界面消息对应模组里的哪些序号。
 		 *
-		 * `> 0` 而不是 `>= 0`：解析失败的那几条后端把序号记成 0（手册 8.6.3 没给
-		 * <index> 的取值范围，0 分不清「真有 0 号位」和「这条没解出来」），
-		 * 后端 delete 也会把 0 挡掉。与其发一条注定被拒的 AT+CMGD，
-		 * 不如走「该条不在模组存储中」这条提示。
+		 * 判据是 `typeof === 'number'`：后端把「头行里读不出序号」的那几条报成
+		 * null（不是 0 —— 实机的短信就从 0 号位开始排，拿 0 当哨兵会让最老的一条
+		 * 永远删不掉），那种条目压根不给勾选。
 		 */
 		function indicesOf(msg) {
 			if (msg.partIndices && msg.partIndices.length) return msg.partIndices.slice();
-			return (msg.index != null && msg.index > 0) ? [msg.index] : [];
+			return typeof msg.index === 'number' ? [msg.index] : [];
 		}
 
 		function deleteMessage(msg) {
@@ -612,8 +622,8 @@ return L.view.extend({
 				var m = state.messages[i];
 				var row = E('label', { 'class': 'mt5700-inline' });
 				var chk = E('input', { type: 'checkbox' });
-				/* 解析失败的条目（index 为 0 或有 error）不可勾选删除 */
-				var isUndeletable = m.error || (m.index == null || m.index === 0);
+				/* 解析失败的条目（index 为 null 或有 error）不可勾选删除；0 号槽位是合法的 */
+				var isUndeletable = m.error || typeof m.index !== 'number';
 				if (isUndeletable) chk.disabled = true;
 				(function (msg, cb) {
 					cb.addEventListener('change', function () {
@@ -642,12 +652,30 @@ return L.view.extend({
 					indicesOf(m).forEach(function (ix) { if (idxs.indexOf(ix) < 0) idxs.push(ix); });
 				});
 				if (!idxs.length) { Mt5700.warning('所选条目都不在模组存储中'); return; }
-				AtWs.client.sms('delete', { indices: idxs }).then(function (res) {
-					if (!res.success) { Mt5700.error(String(res.error || '批量删除失败')); return; }
-					var r = res.result || {};
-					Mt5700.success('已删除 ' + r.deleted + ' 条' + (r.failed && r.failed.length ? '，' + r.failed.length + ' 条失败' : ''));
+				/* 分批下发（理由见 SMS_DELETE_CHUNK）；每批仍是后端的一次事务，
+				 * 批内不会被别的命令插进来，批与批之间让出通道给巡检。 */
+				var total = { deleted: 0, failed: 0 };
+				var chain = Promise.resolve();
+				for (var c = 0; c < idxs.length; c += SMS_DELETE_CHUNK) {
+					(function (chunk) {
+						chain = chain.then(function () {
+							return AtWs.client.sms('delete', { indices: chunk }).then(function (res) {
+								if (!res.success) throw new Error(String(res.error || '批量删除失败'));
+								var r = res.result || {};
+								total.deleted += (r.deleted || 0);
+								total.failed += ((r.failed || []).length);
+							});
+						});
+					})(idxs.slice(c, c + SMS_DELETE_CHUNK));
+				}
+				chain.then(function () {
+					Mt5700.success('已删除 ' + total.deleted + ' 条' + (total.failed ? '，' + total.failed + ' 条失败' : ''));
 					return refreshAll();
-				}).catch(function () { Mt5700.error('批量删除失败'); });
+				}).catch(function (e) {
+					/* 半途失败也要回读一次：已经删掉的那些不该还留在界面上 */
+					Mt5700.error(String((e && e.message) || '批量删除失败'));
+					return refreshAll();
+				});
 			}));
 			box.appendChild(listEl);
 			box.appendChild(actions);
