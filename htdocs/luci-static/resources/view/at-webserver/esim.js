@@ -1528,8 +1528,8 @@ return L.view.extend({
 			 *   是不是要定时轮换由用户自己按实测结论决定。
 			 * ★ 固定尺寸：只显示最近 5 条，不按数据量撑开（UI 红线）。
 			 */
-			var ipObsCard = Mt5700.card('换卡换出口 IP（实测）',
-				'每次切换收敛后记录承载地址与出口 IP，并判定「切 Profile ⇒ 出口 IP 变化」在本机是否成立');
+			var ipObsCard = Mt5700.card('换卡换出口 IP',
+				'每次切换后记录承载地址与出口 IP，看切 Profile 是否真的换 IP');
 			ipObsBody = ipObsCard._body;
 			body.appendChild(ipObsCard);
 			renderIpObs();

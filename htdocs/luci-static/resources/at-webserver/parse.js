@@ -1627,37 +1627,12 @@ var Parse = (function () {
 
 	api.modeText = function (mode) { return mode === '' ? '当前时段不锁频' : mode; };
 
-	/* ================= 辅载波/辅站小区（carrier.ts 等价迁移） ================= */
-	// 手册 13.27 AT^MONSSC — NSA 下 5G 辅连接服务小区（最多 8CC）
-	// 手册 13.18 AT^CASCELLINFO? — LTE CA 的辅小区（最多 4 个 SCELL）
-	// ^HFREQINFO 只给频点与带宽，这两条补每个辅载波各自的信号质量。
-	//
-	/*
-	 * ★ 2026-09-28 状态说明（两轮更新，结论已由真机实测确定）：
-	 *
-	 * 本段只有注释与下面三个常量，**没有对应的解析函数** —— 全仓搜 `CASCELLINFO`
-	 * 与 `MONSSC` 只有这里的注释提及。原先记为「尚未完成的迁移」，但**真机实测表明
-	 * 这两个命令在当前固件上拿不到可用数据**，所以它不是待办，而是**做不了**：
-	 *
-	 *   $ ubus call mt5700 at '{"cmd":"AT^CASCELLINFO?"}'   → ERROR
-	 *   $ ubus call mt5700 at '{"cmd":"AT^CASCELLINFO=?"}'  → ERROR   ← 连测试命令都不支持
-	 *   $ ubus call mt5700 at '{"cmd":"AT^MONSSC"}'         → ^MONSSC: NONE
-	 *   $ ubus call mt5700 at '{"cmd":"AT^MONSSC=?"}'       → ERROR
-	 *
-	 * 按 3GPP 惯例，`AT+XXX=?` 返回 ERROR 基本等同于「该命令不存在」：`^CASCELLINFO`
-	 * 在本固件**没有实现**，为它写解析器永远不会拿到数据。
-	 * `^MONSSC` 存在，但手册 13.27 说它只用于 **NSA** 下的 5G 辅连接服务小区；
-	 * 本机 `AT^LENDC?` 为 `^LENDC: 1,0,0,0,0`（DC 状态全 0，没有 NSA 双连接），
-	 * 此时返回 `NONE` 正是正确行为 —— 也就是说它只有在 NSA 建立后才有内容。
-	 *
-	 * 另外 `rpc.js` 的 `parseHFREQINFO` 走的是 `^HFREQINFO`（手册 13.16.3 的
-	 * <dl_bw>/<ul_bw> 本身就是数值，直接 `int(c[3])` 取用），**不需要码表**，
-	 * 所以 `LTE_BANDWIDTHS` 也用不上。
-	 *
-	 * 结论：**这三个常量当前全仓无引用，且对应的通路在本固件上不可用**。
-	 * 没有删除，是因为它们逐项都有手册出处（见上方 13.18.3 / 13.27 注释），
-	 * 换个固件/插上 NSA 场景后可能又有意义；但**不要以为它们正在生效**。
-	 */
+	/* ================= 辅载波/辅站小区码表（手册 13.18 / 13.27） =================
+	 * ★ 这三个常量当前全仓无引用，且对应通路在本固件上不可用：^CASCELLINFO 未实现
+	 *   （连 `=?` 都回 ERROR），^MONSSC 只在 NSA 双连接建立后才有内容（本机 ^LENDC 全 0），
+	 *   ^HFREQINFO 的带宽本身就是数值、不需要码表。
+	 *   保留是因为逐项都有手册出处，换固件或插上 NSA 场景可能有用；**不要以为它正在生效**。
+	 *   实测过程见 REFERENCE §辅载波常量。 */
 
 	var MEAS_TYPES = { 0: 'SSB', 1: 'CSI-RS' };
 	var NR_INVALID = { rsrp: -1256, rsrq: -348, sinr: -188 };

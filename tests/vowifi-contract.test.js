@@ -715,8 +715,8 @@ ok('★ 回读不到不许说「已生效」（unknown 单独成一句）',
 ok('★ 开关与评估两条路互斥（都碰串口，并发会让回读拿到别人的包）',
 	/!known \|\| !!\(t\.busy \|\| t\.setBusy\)/.test(viewSrc)
 	&& /if \(t\.busy \|\| t\.setBusy\) \{ renderVowifiSwitch\(\); return; \}/.test(viewSrc));
-ok('★ 开关文案说清「ePDG 由运营商发布，本机没有可下发的参数」（不假装开了就通）',
-	/ePDG 隧道由运营商发布，本机没有可下发的参数/.test(viewSrc));
+ok('★ 开关文案说清「开关只管本机 IMS，通不通要看五道门」（不假装开了就通）',
+	viewSrc.includes('开关只管本机 IMS') && viewSrc.includes('还要看下面五道门'));
 
 /* ★ 真机事实（2026-09-24 实测）：`args: { enable: 0 }` 声明的是**整型**，
  *   传字符串 '1' 会被 rpcd 以 code=2（Invalid argument）整包拒掉，ucode 根本进不去。

@@ -668,7 +668,7 @@ return L.view.extend({
 						if (mt.max == null) {
 							return {
 								level: 'idle',
-								text: '没读到温度 —— 与「SIM 与设备」卡的「5G模块温度」同源（12 路取最高，慢档 30 秒才取一次）；那边显示「—」时这里同样是待检查'
+								text: '还没取到（慢档 30 秒一次，与「SIM 与设备」卡同源）'
 							};
 						}
 						var mx = mt.max;

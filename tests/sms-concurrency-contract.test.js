@@ -39,7 +39,9 @@ const UPG = read(path.join(V, 'upgrade.js'));
 const MODEM = read(path.join(V, 'modem_settings.js'));
 const SMSSET = read(path.join(V, 'sms_settings.js'));
 const SVC = read(path.join(V, 'service.js'));
-const SCHED = read(path.join(V, 'schedule.js'));
+/* v2.4.31：定时锁频从独立页面归并进「网络设置」，实现搬到 at-webserver/schedule_panel.js。
+   下面两条「下限」断言判的是那段编排代码本身，跟着实现走，而不是跟着菜单走。 */
+const SCHED = read(path.join(A, 'schedule_panel.js'));
 const MT = read(path.join(A, 'mt5700.js'));
 const RUST = read(path.join(ROOT, 'src/rust/src/smsclean.rs'));
 
@@ -175,10 +177,15 @@ has('卸载判据是「曾进入文档、现已脱离」', /wasInDoc/.test(MT),
 	'只判「现在不在文档里」会把尚未插入文档的页面误清');
 has('confirm 支持取消回调', /if \(onCancel\) onCancel\(\);/.test(MT),
 	'否则「加确认」后取消会让开关状态与实际不符');
-['network_status.js', 'upgrade.js', 'logs.js', 'network_settings.js', 'sms_center.js', 'schedule.js'].forEach((n) => {
+['network_status.js', 'upgrade.js', 'logs.js', 'network_settings.js', 'sms_center.js'].forEach((n) => {
 	has(n + ' 注册了卸载钩子', /page\._onDispose\(self\._dispose\);/.test(read(path.join(V, n))),
 		'切页后定时器/订阅会持续累积并抢独占串口');
 });
+/* v2.4.31：定时锁频不再是独立页面，但它的 15s 轮询仍在 —— 必须由宿主页面卸载时收掉。
+   这条替换了原来「schedule.js 注册了卸载钩子」，判据换成实际入口，不靠文件名。 */
+has('定时锁频面板的轮询由宿主页面卸载时清理',
+	/SchedulePanel\.dispose\(\);/.test(read(path.join(V, 'network_settings.js'))),
+	'归并后若漏调 dispose，切页后 15s 轮询会继续攒在单线程 rpcd 上');
 
 /* ------------------------------------------------------------------ */
 console.log('== F. 其他确凿缺陷 ==');

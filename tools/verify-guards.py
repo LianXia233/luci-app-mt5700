@@ -176,6 +176,11 @@ TARGETS = {
     #     at-batch / cellscan / busy-fastfail / at-read-classification / sms-sent-log），
     #     变异生效却没人判红 —— 红线 16b。
     "voicejs": ATWB.parent / "view" / "at-webserver" / "voice_call.js",
+    # ★ 2026-10-22 UI 文案守卫：**同一文件另挂一个键**（红线 16b：复用 voicejs
+    #   会让变异生效却没人判红 —— 那个键跑的是 voice-call-contract）。
+    #   守的是「界面不许再贴取证报告」：那条能力提示一旦被写回 208 字的实测
+    #   报告，用户就得在打电话的页面上读实验记录。
+    "voicecopy": ATWB.parent / "view" / "at-webserver" / "voice_call.js",
     # ★ 2026-10-22 通话事件驱动改造：Rust 侧的 URC 分类是**另一层**
     #   ——is_exclusive_urc 管「要不要 emit」，is_passthrough_urc 管
     #   「emit 时带不带 broadcast」，两者只改一处就会出现「URC 被并进
@@ -265,6 +270,7 @@ TARGET_TEST = {
     "nsjs3": ROOT / "tests" / "sysmode-label.test.js",
     # ★ 厂商 beta 固件电话功能移植（2026-10-16）：两个键都跑语音契约。
     "voicejs": ROOT / "tests" / "voice-call-contract.test.js",
+    "voicecopy": ROOT / "tests" / "ui-copy-contract.test.js",
     "rustat": ROOT / "tests" / "voice-call-contract.test.js",
     "audioko": ROOT / "tests" / "audio-ko-contract.test.js",
     "audiosum": ROOT / "tests" / "audio-ko-contract.test.js",
@@ -2097,6 +2103,16 @@ MUTATIONS = [
         "  soundcore.ko\n",
         "  soundcore.ko 14552\n",
         "sha256sum -c 认的",
+    ),
+    (
+        # 把取证语言写回用户文案：2026-10-22 之前语音页那条提示就是这么开的头，
+        # 全句 208 字，讲 USB 六个接口、手册 244 条命令、要不要重编固件。
+        # 用户点进「语音通话」是要打电话，不是读实验记录。
+        "文案：能力提示里写回「实测（日期）」（界面变实验记录）",
+        "voicecopy",
+        "\t\t}, '这一页只管信令：能拨能接",
+        "\t\t}, '实测（2026-10-22）这一页只管信令：能拨能接",
+        "没有内部取证语言",
     ),
 ]
 

@@ -3,7 +3,8 @@
 'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, AtWs, Parse, Ui, Mt5700 */
+'require at-webserver/schedule_panel';
+/* global L, AtWs, Parse, Ui, Mt5700, SchedulePanel */
 
 /**
  * 网络设置 - 新 UI 视觉 + 基准 v1.3.4 功能
@@ -11,12 +12,16 @@
  * 等价迁移原 WebUI network/Settings.tsx：LTE/NR 锁频、5G 选项、网络拒绝。
  * 5G 选项（C5GOPTION）、网络拒绝原因（^REJINFO 主动上报）。
  * 锁频应用流程与基准一致：飞行模式 → 下发锁频命令 → 关闭飞行模式 → 重新查询。
+ *
+ * v2.4.31：「定时锁频」原为独立菜单页（view/at-webserver/schedule.js），
+ * 现归并到本页「锁频设置」之后 —— 手动锁频与按时段自动锁频是同一条主题，
+ * 拆成两个菜单项只会让人来回跳页。面板实现在 at-webserver/schedule_panel.js。
  */
 
 return L.view.extend({
 	render: function () {
 		var self = this;
-		var page = Mt5700.page('网络设置', 'LTE / NR 锁频、5G 选项与网络拒绝');
+		var page = Mt5700.page('网络设置', 'LTE / NR 锁频、定时编排、5G 选项与网络拒绝');
 		var body = page._body;
 
 		var connBar = E('div');
@@ -31,7 +36,7 @@ return L.view.extend({
 		};
 
 		/*
-		 * 结构：接入模式 → 锁频设置 → 邻区扫描 → SSB 信息 → 网络拒绝。
+		 * 结构：接入模式 → 锁频设置 → 定时锁频 → 邻区扫描 → SSB 信息 → 网络拒绝。
 		 * 锁频的 4G/5G 由「制式」分段切换共用一套编辑器（不再并排两块重复表单）。
 		 */
 
@@ -55,6 +60,15 @@ return L.view.extend({
 		var lockCardSub = lockCard.querySelector('.mt5700-card-subtitle');
 		var lockEditorBox = E('div');
 		lockBody.appendChild(lockEditorBox);
+
+		/* ---------- 定时锁频（v2.4.31 从独立页面并入，实现见 schedule_panel.js） ----------
+		 *
+		 * 放在「锁频设置」之后是刻意的：手动锁的是「现在锁什么」，
+		 * 定时锁的是「几点到几点锁什么」，同一件事的两个时间尺度，隔页反而割裂。
+		 * 面板自带「运行状态（含总开关）+ 编排配置」两张卡，本页只负责给它容器。
+		 * ★ 它自己的 15s 轮询由 SchedulePanel.dispose() 收，见下方 _dispose。
+		 */
+		SchedulePanel.render(body);
 
 		/* ---------- 邻区扫描（^MONNC + ^NRSSBID 的 SSB 邻区，合并去重） ---------- */
 		var neighAutoTimer = null;
@@ -873,6 +887,8 @@ return L.view.extend({
 		self._dispose = function () {
 			if (neighAutoTimer) clearInterval(neighAutoTimer);
 			AtWs.client.unsubscribe(rejectHandler);
+			/* 定时锁频面板自己的 15s 轮询：不清就会在切页后继续抢独占串口 */
+			SchedulePanel.dispose();
 		};
 		page._onDispose(self._dispose);
 

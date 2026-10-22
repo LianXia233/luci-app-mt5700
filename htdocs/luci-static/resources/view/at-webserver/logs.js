@@ -459,9 +459,9 @@ return L.view.extend({
 			levelSel.disabled = (state.tab === 'notify');
 			clearRow.style.display = (state.tab === 'notify') ? '' : 'none';
 			var hint = state.tab === 'dial'
-				? '后端内存日志里的拨号过程：自动拨号对齐、PDP 与 USB 网卡状态、串口探测、主动上报分发。进程重启后从零开始。'
+				? '拨号过程（后端内存日志）：拨号对齐、PDP 与网卡、串口探测、URC 分发；重启后清空。'
 				: (state.tab === 'iface'
-					? 'syslog 中 at-webserver 相关行（init.d 的 logger 输出）：接口拉起、热插拔、DHCP / IPv6 取址结果。'
+					? 'syslog 里 at-webserver 相关行：接口拉起、热插拔、DHCP / IPv6 取址。'
 					: '通知文件内容（短信、来电、信号变化、存储告警）。');
 			if (state.tab === 'notify') hint += '（级别筛选只对前两个视图生效）';
 			hintEl.textContent = hint;

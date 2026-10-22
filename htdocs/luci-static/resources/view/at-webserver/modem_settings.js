@@ -443,7 +443,7 @@ return L.view.extend({
 			});
 		});
 		ctrlBody.appendChild(Mt5700.formGroup('LED 指示灯', ledSwitch,
-			'模组自身指示灯的亮灭开关（0 关闭 / 1 打开，出厂默认关闭）；厂商手册标注需重启模组生效'));
+			'指示灯亮灭开关（0 关 / 1 开，出厂默认关闭；需重启模组生效）'));
 		var ledChk = ledSwitch.querySelector('input');
 
 		/* ---------- 2. PCIe 控制器（AT^TDPMCFG，手册 11.16） ---------- */
@@ -623,7 +623,7 @@ return L.view.extend({
 		vowifiSwitch.addEventListener('change', function () { requestVowifiSet(vowifiSwitch.checked); });
 		vowifiCard._body.appendChild(Mt5700.formGroup('VoWiFi（本机 IMS 能力）', vowifiSwitchWrap,
 			'开＝AT^IMSSWITCH=1,0,0，关＝AT^IMSSWITCH=0,0,0（掉电保存）。'
-			+ 'ePDG 隧道由运营商发布，本机没有可下发的参数 —— 开了开关仍要看下面五道门才知道通不通。'));
+			+ '开关只管本机 IMS，通不通还要看下面五道门。'));
 		var vowifiSetMsg = E('p', { 'class': 'mt5700-hint mt5700-mt-sm' }, '');
 		vowifiCard._body.appendChild(vowifiSetMsg);
 
@@ -664,8 +664,8 @@ return L.view.extend({
 		/* 单域名四态，与 ucode 的 epdgState() 返回值一一对应（加一种要两边一起加）。 */
 		var EPDG_STATE = {
 			available: '解析到地址',
-			polluted: '只有环回地址（通配污染，不是真 ePDG）',
-			not_published: '查不到（NXDOMAIN）',
+			polluted: '只有环回地址（DNS 通配，不是真 ePDG）',
+			not_published: '查不到（域名不存在）',
 			unknown: '无法判定'
 		};
 
@@ -740,13 +740,12 @@ return L.view.extend({
 		 * ePDG 那一门自己的结论体现在门表里，不再单独造一张同名的总判定表。
 		 */
 		var EPDG_VERDICT_HINT = {
-			available: '这道门过了，下一步才是 IKEv2/EAP-AKA 隧道与 IMS 客户端 —— 本页只判这一道门。',
-			not_published: '标准写法（由卡上 EF_AD 定的 MNC 长度推出）明确查不到。'
-				+ '这不取决于设备怎么配：ePDG 是运营商侧的网元，只能换一张其运营商发布了 ePDG 的卡。'
-				+ '两位变体即便返回地址，若与「必然不存在的 mnc999」同值，那是通配污染不是证据。',
-			polluted: '本网 DNS 把 *.3gppnetwork.org 做了通配解析，任何不存在的子域都会返回一个假地址。',
-			unknown: '阳性对照（境外已商用的 ePDG）也没解析出来 —— 是本机的 DNS 链路有问题，'
-				+ '不是运营商没发布。先恢复上网与 DNS，再探测一次。'
+			available: '这道门过了；后续的 IKEv2 隧道与 IMS 客户端不在本页范围。',
+			not_published: '查不到：卡所属运营商没有发布 ePDG。ePDG 是运营商侧网元，'
+				+ '只能换一张有 VoWiFi 的卡。',
+			polluted: '本网 DNS 对 *.3gppnetwork.org 做了通配解析，回来的是假地址。',
+			unknown: '阳性对照也没解析出来 —— 是本机 DNS 链路有问题，不是运营商没发布。'
+				+ '先恢复上网再试。'
 		};
 
 		/* 开关状态 = 后端实测值（^IMSSWITCH），不是本地勾选记忆 */
@@ -893,9 +892,8 @@ return L.view.extend({
 			}
 			if (!t.ran || !t.data) {
 				vowifiBody.appendChild(E('p', { 'class': 'mt5700-hint mt5700-mt-sm' },
-					'点「评估」：后端从卡上读 IMSI / ICCID / EF_AD（MNC 长度由卡定，不猜）/ EF_DIR（卡上装了哪些应用），'
-					+ '派生 IMPI，拼出 3GPP 标准 ePDG 域名走系统 DNS 与 DoH+ECS 两条链路各查一次，'
-					+ '再用一正一负两组对照判断这张卡能不能走 VoWiFi。全程只读，一条会改模组状态的命令都不发。'));
+					'点「评估」：读卡上的 IMSI / EF_AD / EF_DIR，派生 IMPI 并解析 3GPP 标准 ePDG 域名，'
+					+ '判断这张卡能不能走 VoWiFi。全程只读，不改模组状态。'));
 				return;
 			}
 
@@ -982,8 +980,7 @@ return L.view.extend({
 
 			var hint = EPDG_VERDICT_HINT[e.verdict] || '';
 			if (d.verdict === 'capable') {
-				hint = '五道门都过了。下一步才是 IKEv2/EAP-AKA 隧道与 IMS 客户端 —— '
-					+ '本页只判这五道门，且本设备没有可用的 UDP 发包工具，隧道那一步无法在这里验证。';
+				hint = '五道门都过了。IKEv2 隧道与 IMS 客户端不在本页范围，也无法在本机验证。';
 			}
 			if (hint) {
 				vowifiBody.appendChild(E('p', { 'class': 'mt5700-hint mt5700-mt-sm' }, hint));

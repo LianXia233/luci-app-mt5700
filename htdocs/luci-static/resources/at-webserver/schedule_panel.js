@@ -5,31 +5,43 @@
 /* global L, AtWs, Parse, Mt5700 */
 
 /**
- * 定时锁频编排 - 新 UI 视觉 + 基准 v1.3.4 功能
+ * 定时锁频面板 —— 原独立页面 view/at-webserver/schedule.js
  *
- * 等价迁移原 WebUI network/SchedulePanel.tsx：
+ * v2.4.31 归并进「网络设置」：定时锁频与手动锁频是同一条主题（一静一动），
+ * 分成两个菜单项只让人来回跳页。菜单项撤掉，但**代码与后端契约一字未动** ——
+ * AT+SCHED? / AT+SCHED=<json>、UCI 键名、Rust 调度逻辑全部照旧。
+ *
+ * 功能（等价迁移原 WebUI network/SchedulePanel.tsx）：
  * - 运行状态：当前时段 / 下次切换 / 已切换次数（AT+SCHED? 返回 status）
  * - 编排表单：检测间隔、无服务超时、解锁时是否下发 LTE/NR 解锁、切换飞行模式
  * - 夜间/日间两时段：各自 4G/5G 锁频（类型、移动性、频段/频点/PCI/SCS）
  * - 保存走伪命令 AT+SCHED=<json>，后端写 UCI 并热生效
+ *
+ * 对外只有两个入口：render(body) 往容器里挂两张卡；dispose() 清定时器。
+ * 不创建 Mt5700.page、不画连接条 —— 那些由宿主页面（网络设置）统一负责。
  */
 
-return L.view.extend({
-	render: function () {
-		var self = this;
-		var page = Mt5700.page('定时锁频编排', '按夜间/日间时段自动切换锁频，配置存 UCI 并由后端调度生效');
-		var body = page._body;
+var SchedulePanel = (function () {
+	var api = {};
 
-		var connBar = E('div');
-		body.appendChild(connBar);
-		Mt5700.renderConnectionBar(connBar);
+	/*
+	 * 模块级定时器：一个宿主页面只该有一份。
+	 * 重复 render（切页回来）前必须先清旧的，否则每来一次就多一个 15s 轮询，
+	 * 而 rpcd 是单线程的（红线 63），多出来的轮询会直接拖慢整个 LuCI。
+	 */
+	var statusTimer = null;
+
+	api.render = function (body) {
+		if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
 
 		var cfg = null;
 		var draft = null;
 		var busy = false;
 		var expanded = false;
 
-		var statusCard = Mt5700.card('运行状态', '当前编排是否已启用、下一次切换时间');
+		/* ---------- 运行状态卡（含总开关） ---------- */
+		var statusCard = Mt5700.card('定时锁频 · 运行状态',
+			'按夜间/日间时段自动切换锁频；关闭后后端不再按时段切换');
 		var statusCardBody = E('div');
 		statusCard._body.appendChild(statusCardBody);
 		body.appendChild(statusCard);
@@ -38,8 +50,8 @@ return L.view.extend({
 		statusCardBody.appendChild(statusLine);
 
 		/*
-		 * 总开关（原在「服务配置」页，现归位到本页）：
-		 * 开关与配置在同一页，不必再来回跳页；写 UCI 后由后端调度生效。
+		 * 总开关（原在「服务配置」页，现已归位到本面板）：
+		 * 开关与配置在同一处，不必再来回跳页；写 UCI 后由后端调度生效。
 		 */
 		var schedChk = E('input', { type: 'checkbox' });
 		var schedSwitch = E('div', { 'class': 'mt5700-switch' });
@@ -64,7 +76,8 @@ return L.view.extend({
 			});
 		});
 
-		var formCard = Mt5700.card('编排配置', '先在「运行状态」卡打开总开关；夜间/日间时段各自独立启用');
+		var formCard = Mt5700.card('定时锁频 · 编排配置',
+			'先在「运行状态」卡打开总开关；夜间/日间时段各自独立启用');
 		var formBody = E('div');
 		formCard._body.appendChild(formBody);
 		body.appendChild(formCard);
@@ -237,7 +250,7 @@ return L.view.extend({
 				Mt5700.primaryButton('保存编排', save),
 				Mt5700.button('收起', function () {
 					expanded = false;
-					render();
+					schedRender();
 				}, 'ghost')
 			));
 		}
@@ -250,8 +263,8 @@ return L.view.extend({
 					var parsed = Parse.parseScheduleResponse(res.data);
 					if (parsed) cfg = parsed;
 				}
-				render();
-			}).catch(function () { render(); });
+				schedRender();
+			}).catch(function () { schedRender(); });
 		}
 
 		function load() {
@@ -280,7 +293,7 @@ return L.view.extend({
 					draft.day.lte = { type: cfg.day.lte.type, items: draft.day.lte };
 					draft.day.nr = { type: cfg.day.nr.type, items: draft.day.nr };
 				}
-				render();
+				schedRender();
 			});
 		}
 
@@ -339,7 +352,9 @@ return L.view.extend({
 
 		/* ---------- 渲染 ---------- */
 
-		function render() {
+		/* 名字带 sched 前缀：宿主页面 network_settings.js 里另有一套 render，
+		   同名函数在合并后极易混淆（本文件就在它眼皮底下被调用）。 */
+		function schedRender() {
 			// 状态行
 			statusLine.innerHTML = '';
 			if (cfg && cfg.status) {
@@ -370,7 +385,7 @@ return L.view.extend({
 			} else {
 				buildForm();
 			}
-	}
+		}
 
 		/* ---------- 初始化 ---------- */
 
@@ -385,20 +400,30 @@ return L.view.extend({
 		});
 
 		// 定时刷新运行状态（不覆盖表单草稿）
-		var statusTimer = setInterval(function () {
+		statusTimer = setInterval(function () {
 			if (expanded) return;
 			AtWs.client.sendCommand('AT+SCHED?').then(function (res) {
 				if (res.success && res.data) {
 					var parsed = Parse.parseScheduleResponse(res.data);
-					if (parsed) { cfg = parsed; render(); }
+					if (parsed) { cfg = parsed; schedRender(); }
 				}
 				/* 只读探测失败：界面保持「—」或原值，下一轮刷新会再试；不弹错是因为一次查询失败不值得打断用户操作 */
 			}).catch(function () {});
 		}, 15000);
 
-		self._dispose = function () { clearInterval(statusTimer); };
-		page._onDispose(self._dispose);
+		return statusCard;
+	};
 
-		return page;
-	}
-});
+	api.dispose = function () {
+		if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+	};
+
+	return api;
+})();
+
+// 导出（与 parse.js / ui.js / mt5700.js 同一种 LuCI 模块形状）
+var SchedulePanelClass = L.Class.extend(SchedulePanel);
+if (typeof window !== 'undefined') {
+	window.SchedulePanel = new SchedulePanelClass();
+}
+return SchedulePanelClass;

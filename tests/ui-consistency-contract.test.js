@@ -116,8 +116,9 @@ console.log('== B. 「改了却存不下来」：不留空回调控件 ==');
    「改了没反应 / 刷新后自己跳回去」。 */
 const EMPTY_SWITCH = /makeSwitch\(\s*function\s*\(\s*\)\s*\{\s*\}\s*\)/;
 const EMPTY_CHANGE = /addEventListener\(\s*['"](?:change|input)['"]\s*,\s*function\s*\(\s*\)\s*\{\s*\}\s*\)/;
+/* v2.4.31：schedule.js 已并入「网络设置」（实现搬到 at-webserver/schedule_panel.js） */
 const VIEWS = ['dial.js', 'esim.js', 'logs.js', 'modem_settings.js', 'network_settings.js',
-	'network_status.js', 'schedule.js', 'service.js', 'sms_center.js', 'sms_settings.js',
+	'network_status.js', 'service.js', 'sms_center.js', 'sms_settings.js',
 	'terminal.js', 'upgrade.js'];
 const offenders = VIEWS.filter(function (f) {
 	const src = stripComments(read(path.join(V, f)));

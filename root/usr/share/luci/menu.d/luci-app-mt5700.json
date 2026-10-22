@@ -44,14 +44,6 @@
 			"path": "at-webserver/dial"
 		}
 	},
-	"admin/modem/5g/schedule": {
-		"title": "定时锁频",
-		"order": 40,
-		"action": {
-			"type": "view",
-			"path": "at-webserver/schedule"
-		}
-	},
 	"admin/modem/5g/modem-settings": {
 		"title": "模组设置",
 		"order": 50,

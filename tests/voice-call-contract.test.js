@@ -245,7 +245,7 @@ ok('铃声在离开页面时停掉', /_onDispose\(function[\s\S]*?ringStop\(\)/.
  * 断言盯的是「页面必须说清断点在哪」，不是某一句原文，所以跟着事实改锚点。
  */
 ok('页面明示「通话内容听不到」及断点（不让用户把没声音当成故障）',
-	viewSrc.includes('通话内容听不到') && viewSrc.includes('没有任何 Audio Class'));
+	viewSrc.includes('通话内容听不到') && viewSrc.includes('USB Audio Class'));
 ok('静音未读到时显示「—」而不是当作 0（红线 23）',
 	/if \(st\.mute == null\)/.test(viewSrc));
 ok('通话结束落记录（回到 idle 触发 saveRecord）',
