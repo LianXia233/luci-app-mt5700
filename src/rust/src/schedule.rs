@@ -113,7 +113,7 @@ impl Scheduler {
                 continue;
             }
 
-            self.safe_tick().await;
+            self.tick().await;
         }
     }
 
@@ -139,10 +139,6 @@ impl Scheduler {
             s.cfg.night_end,
             enabled_text(s.cfg.day_enabled)
         );
-    }
-
-    async fn safe_tick(&self) {
-        self.tick().await;
     }
 
     async fn tick(&self) {
@@ -319,9 +315,14 @@ impl Scheduler {
 
         let actions = if done.is_empty() { "未执行任何操作".to_string() } else { done.join("、") };
         let notifier = self.notifier.clone();
+        /*
+         * 正文里的时刻和 Notification.time 取同一次 now：原来各取一次，相差可达数秒，
+         * 用户拿推送列表和正文对时间会以为对不上。格式与 now_string 完全相同。
+         */
+        let now_text = crate::nettime::now_string();
         let content = format!(
             "定时锁频切换\n时间：{}\n模式：{}\nLTE：{}\nNR：{}\n执行操作：{}\n切换次数：第 {} 次\n结果：{}",
-            crate::nettime::now().format("%Y-%m-%d %H:%M:%S"),
+            now_text,
             mode,
             lock_summary("LTE", &cfg.lte),
             lock_summary("NR", &cfg.nr),
@@ -331,7 +332,7 @@ impl Scheduler {
         );
         tokio::spawn(async move {
             notifier
-                .notify(Notification { sender: SENDER_SIGNAL.into(), content, kind: NotifyKind::Signal, memory_full: false, time: crate::notify::now_string(), qq_card: None })
+                .notify(Notification { sender: SENDER_SIGNAL.into(), content, kind: NotifyKind::Signal, memory_full: false, time: now_text, qq_card: None })
                 .await;
         });
         log_info!("定时锁频切换完成: {}（{}）", actions, if lock_ok { "成功" } else { "失败" });
@@ -493,6 +494,12 @@ fn unlock_config() -> LockPair {
     LockPair { lte: BandLock { type_: 0, ..Default::default() }, nr: BandLock { type_: 0, ..Default::default() } }
 }
 
+/*
+ * 夜间时段判定。区间是**半开** `[start, end)`：`end` 那一分钟已算日间。
+ * 别和 `config::in_poll_window` 互相照抄 —— 那边是闭区间且「起止相等」按全天处理，
+ * 这里起止相等时 `cur >= start && cur < end` 恒为假，等于夜间档不生效。
+ * 两者各自成立：调度端点是模式切换时刻（不该重复命中），巡检窗口要含末分钟。
+ */
 fn is_night(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> bool {
     let (Some(start), Some(end)) = (parse_hhmm(&cfg.night_start), parse_hhmm(&cfg.night_end)) else {
         log_warn!("夜间时段配置无法解析: {:?}-{:?}", cfg.night_start, cfg.night_end);
