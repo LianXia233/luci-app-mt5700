@@ -88,7 +88,6 @@ pub struct Notifier {
     qq_bind_pending: bool,
 }
 
-#[allow(dead_code)] // 通知事件类型与来源标识
 impl Notifier {
     pub fn new(cfg: NotificationConfig) -> (Notifier, mpsc::Receiver<Notification>) {
         let (tx, rx) = mpsc::channel(NOTIFY_QUEUE_SIZE);
@@ -139,10 +138,6 @@ impl Notifier {
             },
             rx,
         )
-    }
-
-    pub fn sender(&self) -> mpsc::Sender<Notification> {
-        self.tx.clone()
     }
 
     fn enabled(&self, kind: NotifyKind) -> bool {
@@ -358,11 +353,6 @@ impl Notifier {
         for msg in &taken {
             self.send_realtime(msg);
         }
-    }
-
-    /// 是否有可用的推送通道（供状态展示与测试）。
-    pub fn ready(&self) -> bool {
-        self.dispatch_enabled()
     }
 
     /// 自动推送总开关是否开启。
