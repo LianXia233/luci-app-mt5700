@@ -7205,3 +7205,587 @@ select option {
   }
 }
 
+/* ==========================================================================
+   v2.40.0 · 全局：英雄区看板娘防遮挡
+   --------------------------------------------------------------------------
+   本文件里同时躺着四代 hero 样式，看板娘被裁切 / 被压住来自三处：
+
+   1. `.mt5700-hero-card` 早期那代写的是 overflow:hidden，只靠后段一条
+      `overflow: visible !important` 救回来。构建链的压缩会把多个
+      `@media (max-width: 768px)` 合并重排，「源码在后段」不等于
+      「产物里最后生效」；一旦被反超，头像 hover 的上浮 + 缩放就被卡片上缘
+      裁掉半截。
+   2. `.mt5700-hero-art` 在 960 / 768 / 640 三个断点被写成
+      `width: 100% !important`：看板娘被拉到整行最右、紧贴屏幕边缘，正好
+      落进主题固定浮层（#floating-toolbar、右侧快捷按钮）的覆盖区。
+   3. 装饰光斑 `::before` 是 `z-index: 0` 的定位元素，而早期给 art 的
+      `z-index: 2` 一旦被反超，光斑就画在脸上。
+
+   写法与文件既有约定一致：选择器用 `.x.x` / `:not()` 把特异性抬到 (0,3,0)
+   以上，与压缩器如何重排无关。
+   `:not(.mt5700-sms-hero-compact)` 与 `.mt5700-page:not(.mt5700-sms-shell)`
+   把短信中心整页排除在外 —— 短信中心保持现状，不参与这次全局改动。
+   ========================================================================== */
+
+/* 卡片自身永不裁切。isolation 只建立「卡内」层叠上下文：
+   卡片本身仍是 z-index:auto，::before 光斑溢出到相邻卡片上方时
+   依旧按文档顺序画在下面，不会产生「装饰盖住下一张卡」的新事故 */
+.mt5700-hero-card.mt5700-hero-card:not(.mt5700-sms-hero-compact) {
+  position: relative !important;
+  z-index: auto !important;
+  overflow: visible !important;
+  isolation: isolate;
+  /* 看板娘与屏幕右缘之间的缓冲区，主题浮层再宽也压不到脸 */
+  padding-right: 26px !important;
+}
+
+/* 光斑永远在最底层，且不吃点击 */
+.mt5700-hero-card.mt5700-hero-card:not(.mt5700-sms-hero-compact)::before {
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 文案列：光斑之上、看板娘之下；长标题自己换行，不把看板娘挤出卡片 */
+.mt5700-page:not(.mt5700-sms-shell) .mt5700-hero-content.mt5700-hero-content {
+  position: relative !important;
+  z-index: 1 !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  overflow-wrap: anywhere;
+}
+
+/* 看板娘列：定宽、靠右、永不越界 —— 压掉三个断点遗留的 width:100% */
+.mt5700-page:not(.mt5700-sms-shell) .mt5700-hero-art.mt5700-hero-art {
+  position: relative !important;
+  z-index: 3 !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  align-self: center !important;
+  justify-content: flex-end !important;
+  margin-left: auto !important;
+  overflow: visible !important;
+}
+
+.mt5700-page:not(.mt5700-sms-shell) .mt-mascot-speech-wrap.mt-mascot-speech-wrap {
+  position: relative !important;
+  z-index: 3 !important;
+  display: flex !important;
+  align-items: center !important;
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+}
+
+/* 头像本体：等宽等高的正圆，浮在光斑与文案之上，hover 不被裁 */
+.mt5700-page:not(.mt5700-sms-shell) .mt-mascot-avatar.mt-mascot-avatar {
+  position: relative !important;
+  z-index: 4 !important;
+  flex: 0 0 auto !important;
+  width: 76px !important;
+  height: 76px !important;
+  aspect-ratio: 1 / 1 !important;
+  border-radius: 50% !important;
+}
+
+/* 图片铺满圆形容器；底色改成与容器同色系：
+   mascot.png 因缓存/版本参数没加载出来时，露出的是紫色圆
+   而不是那块突兀的黄色补丁（旧版 background:#fbbf24） */
+.mt5700-page:not(.mt5700-sms-shell) .mt-mascot-img.mt-mascot-img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 50% !important;
+  object-fit: cover !important;
+  background: linear-gradient(135deg, #a78bfa 0%, #f472b6 100%) !important;
+}
+
+@media (max-width: 820px) {
+  /* 窄屏维持「左文右娘」单行；右侧只留 16px，让头像稳稳落在卡片内 */
+  .mt5700-page:not(.mt5700-sms-shell) .mt5700-hero-card.mt5700-hero-card {
+    flex-wrap: nowrap !important;
+    padding-right: 16px !important;
+  }
+
+  .mt5700-page:not(.mt5700-sms-shell) .mt5700-hero-art.mt5700-hero-art {
+    width: auto !important;
+    max-width: 44% !important;
+    margin-right: env(safe-area-inset-right, 0px) !important;
+  }
+
+  .mt5700-page:not(.mt5700-sms-shell) .mt-mascot-avatar.mt-mascot-avatar {
+    width: 64px !important;
+    height: 64px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 悬浮动效每帧位移，低帧率/截图下看起来像「被切在边缘」 */
+  .mt5700-page:not(.mt5700-sms-shell) .mt-mascot-avatar.mt-mascot-avatar {
+    animation: none !important;
+  }
+}
+
+[data-theme="dark"] .mt5700-page:not(.mt5700-sms-shell) .mt-mascot-img.mt-mascot-img {
+  background: linear-gradient(135deg, #6d5bd0 0%, #b0538a 100%) !important;
+}
+
+/* ==========================================================================
+   v2.40.0 · 全局弹窗（短信中心的三套弹窗保持原样，全部排除在外）
+   --------------------------------------------------------------------------
+   v2.16.0 那代弹窗规则有两个硬伤：
+   a) 遮罩 z-index 是 1000 !important —— 比主题自己的下拉/抽屉（普遍 1040+）
+      还低，弹窗一开，主题浮层从上面压过来；
+   b) 面板加了 `overflow: hidden !important`，却没有给内容区滚动能力。
+      长内容（升级条款、终端回显、长错误信息）直接被裁掉，且拉不动。
+   这里把面板改成「标题 / 正文 / 按钮」三段 flex：
+   需要滚动的是正文，按钮永远钉在面板底部，长文本自动换行。
+   ========================================================================== */
+
+/* 遮罩：抬到主题浮层之上，仍低于自家 toast(10000) */
+.mt5700-modal-mask:not(.mt5700-sms-modal-mask),
+.at-modal-mask:not(.mt5700-sms-prompt) {
+  z-index: 9400 !important;
+  padding: max(20px, env(safe-area-inset-top, 20px)) 20px
+           calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mt5700-modal:not(.mt5700-sms-modal) {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  max-width: min(560px, 100%) !important;
+  max-height: min(86vh, 760px) !important;
+  max-height: min(86dvh, 760px) !important;
+  min-height: 0 !important;
+  padding: 22px 24px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+/* 标题与按钮不参与伸缩，正文吃掉剩余高度并自己滚动 */
+.mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-title {
+  flex: 0 0 auto !important;
+  margin: 0 0 10px !important;
+  overflow-wrap: anywhere;
+}
+
+.mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  margin-bottom: 0 !important;
+  padding: 0 6px 0 0 !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+}
+
+/* 长串（AT 回显、PDU、URL）必须能断行，否则横向溢出又被裁 */
+.mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-body pre,
+.mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-body code {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-footer {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  margin-top: 16px !important;
+  padding: 14px 0 0 !important;
+  border-top: 1px solid rgba(139, 92, 246, 0.1) !important;
+}
+
+.mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-footer .mt5700-btn,
+.at-modal-mask:not(.mt5700-sms-prompt) .at-modal-actions .at-btn {
+  min-height: 38px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+}
+
+/* AT 工具条那套弹窗：同样是「正文滚动、按钮常驻」 */
+.at-modal-mask:not(.mt5700-sms-prompt) .at-modal.at-modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border-radius: 20px;
+  padding: 22px 24px;
+  overflow: hidden;
+  /* at.css 的 .at-modal 没设 box-sizing：默认 content-box 下 max-height 只管
+     内容盒，加上内边距后整块会比 max-height 高出 30~40px，手机上底部按钮
+     会被顶出屏幕外。这里改成 border-box，max-height 才是「整块」的上限。 */
+  box-sizing: border-box;
+}
+
+.at-modal-mask:not(.mt5700-sms-prompt) .at-modal.at-modal .at-modal-title {
+  flex: 0 0 auto;
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.at-modal-mask:not(.mt5700-sms-prompt) .at-modal.at-modal .at-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+
+.at-modal-mask:not(.mt5700-sms-prompt) .at-modal.at-modal .at-modal-actions {
+  flex: 0 0 auto;
+  margin-top: 16px;
+}
+
+[data-theme="dark"] .mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-footer {
+  border-top-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+@keyframes mt-modal-sheet-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 768px) {
+  /* 手机上改成底部抬起的面板：拇指够得着按钮，长内容也不会顶出屏幕 */
+  .mt5700-modal-mask:not(.mt5700-sms-modal-mask),
+  .at-modal-mask:not(.mt5700-sms-prompt) {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .mt5700-modal:not(.mt5700-sms-modal) {
+    max-width: 100% !important;
+    max-height: 90vh !important;
+    max-height: 90dvh !important;
+    padding: 18px 18px calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+    border-radius: 18px 18px 0 0 !important;
+    animation: mt-modal-sheet-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+
+  .mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-footer {
+    margin-top: 14px !important;
+  }
+
+  .mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-footer .mt5700-btn {
+    flex: 1 1 auto !important;
+  }
+
+  .at-modal-mask:not(.mt5700-sms-prompt) .at-modal.at-modal {
+    max-width: 100%;
+    max-height: 90dvh;
+    padding: 18px 18px calc(16px + env(safe-area-inset-bottom, 0px));
+    border-radius: 18px 18px 0 0;
+    animation: mt-modal-sheet-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+/* ==========================================================================
+   v2.40.0 · 运行日志：类别条 / 日期分组 / 类别徽章 / 长消息折叠
+   --------------------------------------------------------------------------
+   日志页从「拨号 / 接口」两桶改成「数据源 tab + 类别条」两级结构
+   （视图侧见 view/at-webserver/logs.js）。这里只补新增 DOM 的外观，
+   原有 .mt5700-log* 规则一律复用，不改名。
+   ========================================================================== */
+
+/* ---------- 类别条（横向胶囊，带实时计数） ---------- */
+.mt5700-logcatbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.mt5700-logcatbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 92, 246, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+  color: #475569;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background .18s ease, border-color .18s ease,
+              box-shadow .18s ease, transform .18s ease;
+}
+
+.mt5700-logcatbtn:hover {
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.1);
+  transform: translateY(-1px);
+}
+
+.mt5700-logcatbtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
+}
+
+.mt5700-logcatbtn.active {
+  color: #ffffff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+  box-shadow: 0 6px 16px rgba(139, 92, 246, 0.32);
+}
+
+.mt5700-logcatbtn-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.mt5700-logcatbtn-count {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+.mt5700-logcatbtn.active .mt5700-logcatbtn-count {
+  background: rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+}
+
+/* ---------- 日期分隔行（吸顶，长列表滚动时始终知道在看哪天） ---------- */
+.mt5700-logday {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 6px 0;
+  padding: 4px 0;
+  background: rgba(139, 92, 246, 0.07);
+  border-top: 1px solid rgba(139, 92, 246, 0.12);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.mt5700-logday-text {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #7c3aed;
+}
+
+/* ---------- 行内类别徽章 ---------- */
+.mt5700-logcat {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.mt5700-logcat-dial  { color: #0284c7; border-color: rgba(2, 132, 199, 0.3);  background: rgba(2, 132, 199, 0.1); }
+.mt5700-logcat-at    { color: #7c3aed; border-color: rgba(124, 58, 237, 0.3);  background: rgba(124, 58, 237, 0.1); }
+.mt5700-logcat-sms   { color: #059669; border-color: rgba(5, 150, 105, 0.3);   background: rgba(5, 150, 105, 0.1); }
+.mt5700-logcat-net   { color: #0891b2; border-color: rgba(8, 145, 178, 0.3);   background: rgba(8, 145, 178, 0.1); }
+.mt5700-logcat-sys   { color: #475569; border-color: rgba(71, 85, 105, 0.28);  background: rgba(71, 85, 105, 0.09); }
+.mt5700-logcat-other { color: #64748b; border-color: rgba(100, 116, 139, 0.28); background: rgba(100, 116, 139, 0.08); }
+
+/* ---------- 超长消息折叠 ----------
+   折叠按钮由视图塞在 .mt5700-logmsg 内部末尾：折叠时把它绝对定位到
+   右下角（带底色遮住底下的字），展开后回到行文里，两种状态都不挡内容 */
+.mt5700-logmsg {
+  position: relative;
+  min-width: 0;
+}
+
+.mt5700-logmsg-clamped {
+  max-height: calc(3 * 1.65em);
+  overflow: hidden;
+}
+
+.mt5700-logexpand {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7c3aed;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.mt5700-logexpand:hover {
+  text-decoration: underline;
+}
+
+.mt5700-logmsg-clamped .mt5700-logexpand {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: -8px 0 8px rgba(255, 255, 255, 0.94);
+}
+
+/* ---------- 「仅错误+警告」快捷开关 ---------- */
+.mt5700-logerrwrn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.06);
+  color: #b91c1c;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.mt5700-logerrwrn input[type="checkbox"] {
+  accent-color: #ef4444;
+  cursor: pointer;
+  margin: 0;
+}
+
+.mt5700-logerrwrn:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- 暗色模式 ---------- */
+[data-theme="dark"] .mt5700-logcatbtn {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .mt5700-logcatbtn.active {
+  color: #ffffff;
+  border-color: transparent;
+}
+
+[data-theme="dark"] .mt5700-logcatbtn-count {
+  background: rgba(139, 92, 246, 0.2);
+  color: #c4b5fd;
+}
+
+[data-theme="dark"] .mt5700-logday {
+  background: rgba(139, 92, 246, 0.14);
+  border-top-color: rgba(139, 92, 246, 0.24);
+  border-bottom-color: rgba(139, 92, 246, 0.24);
+}
+
+[data-theme="dark"] .mt5700-logday-text {
+  color: #c4b5fd;
+}
+
+[data-theme="dark"] .mt5700-logmsg-clamped .mt5700-logexpand {
+  background: rgba(22, 27, 46, 0.94);
+  box-shadow: -8px 0 8px rgba(22, 27, 46, 0.94);
+  color: #c4b5fd;
+}
+
+[data-theme="dark"] .mt5700-logerrwrn {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+/* ---------- 手机排版 ----------
+   一行里塞了「时间 级别 类别 方向 正文」五段，窄屏必须允许换行：
+   第一行留给徽章，正文独占第二行并从左边对齐，不再被挤成一条细缝 */
+@media (max-width: 768px) {
+  .mt5700-logcatbar {
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .mt5700-logcatbtn {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  .mt5700-logcatbtn-icon {
+    font-size: 12px;
+  }
+
+  .mt5700-logtoolbar {
+    gap: 8px;
+  }
+
+  .mt5700-logsearch {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .mt5700-logerrwrn {
+    height: 34px;
+    padding: 0 10px;
+  }
+
+  .mt5700-loglist {
+    max-height: 58vh;
+  }
+
+  .mt5700-logrow {
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    padding: 6px 10px 8px 9px;
+  }
+
+  .mt5700-logrow .mt5700-logmsg {
+    flex: 1 1 100%;
+    margin-top: 1px;
+  }
+
+  .mt5700-logtime {
+    font-size: 11px;
+  }
+
+  /* 折叠后的高度跟着窄屏行高走 */
+  .mt5700-logmsg-clamped {
+    max-height: calc(3 * 1.62em);
+  }
+
+  .mt5700-logfooter {
+    flex-wrap: wrap;
+    gap: 6px;
+    line-height: 1.6;
+  }
+}
+
+/* 主题自带的固定浮层（#floating-toolbar / .floating-toolbar，右缘竖条）
+   会正好压在英雄区右侧的看板娘上。只在「确实存在这个浮层」的主题下让出
+   一条右沟（56px > 常见浮层宽度 40~48px），没有它的主题保持原来的
+   16~26px 内距，不白白浪费横向空间。 */
+@supports selector(body:has(*)) {
+  body:has(#floating-toolbar) .mt5700-page:not(.mt5700-sms-shell) .mt5700-hero-card.mt5700-hero-card,
+  body:has(.floating-toolbar) .mt5700-page:not(.mt5700-sms-shell) .mt5700-hero-card.mt5700-hero-card {
+    padding-right: 56px !important;
+  }
+}
