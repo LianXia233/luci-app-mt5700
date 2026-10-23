@@ -52,6 +52,11 @@
 - **docs(rust) 两处 rustdoc 列表缺空行**（clippy `doc_lazy_continuation`）：`atclient.rs` 的 `prepare_scan_data_plane` 收尾要求「必须成对恢复」会被吞进第 4) 条、`nettime.rs` 模块头「任何一次成功都会清零计数」会被吞进第三个退避档位条目，各补一行空文档注释独立成段
 - **test(state_cfg)**：校验禁用缓存指令时不再对每条规则 `cmd.to_string()`（23 条规则 × 禁用清单的无谓临时分配）
 - **note(clippy) 刻意不动的风格项**：`sort_by_key`（async_runtime.rs:244、sms_store.rs:892）、`chunks_exact` 常量分块（sms_store.rs:141）、`timerpush.rs:223` 的 `used * 100 / total`（值域是几十条格位，不会溢出，改成 checked 反而掩盖真实意图）——属可读性偏好而非冗余，留给各自模块改动时顺手处理
+- **refactor(rust) `notify.rs` 撤掉 impl 级 `#[allow(dead_code)]`**：该属性挂在整个 `impl Notifier`（约 425 行）上，等于把这一整块的死代码检测关掉——这正是 cargo 此前只报得出 `combine_messages` 的原因。撤掉后 cargo 立即点名两个零调用方法 `sender()`、`ready()`（后者只是 `dispatch_enabled()` 的转调壳，文档称「供状态展示与测试」但界面与单测都没用），一并删除；未再暴露其它死方法
+- **refactor(rust) `rpcserver.rs` 三处死码**：`ScanPush` 结构体全仓无构造点（cellscan 事件在 5 处各自手搓同一形状），其 `allow` 注释称「保留（后续断点续扫扩展）」却既无读取方也无续扫代码；`ScanState.task_id` 只写不读（状态查询只看 running/lines，取消走 TaskManager 的 token，前端 tid 来自应答文本）；`scan_timeout` 的 else 兜底恒不可达（new 置默认、setter 忽略零值、config 按下限 10s 夹取）
+- **refactor(rust) `urc.rs` 去掉孤儿事件键**：长短信合并推送里的 `isComplete` 全仓仅此一处出现，前端处理 `new_sms` 只看 `resp.data` 是否存在便重新 `list`，不读任何载荷字段
+- **docs(rust) 注释失实订正（urc / rpcserver）**：`signal_level` 的「与轮询推送共用、口径一致」为假——轮询与定时推送的等级文案来自 `signalgrade::Level::caption()`，与本函数的（优秀/良好/一般/较差）是两套词表且无跨模块调用（原句尚有「口径…口径」重复字）；`query_monsc` 声称的「由调用方回退 ^HCSQ?」只存在于巡检侧，URC 路径从不回退；`handle_signal` 补注该链在实机休眠（本模组不自发上报 ^HCSQ/^CERSSI，实测 1200 条 AT 记录 0 条），换固件即生效、**勿当死代码删**；`TaskManager` 注释称扫频/锁频/固件升级都登记后台，实际只有扫频一处；`capacity` 应答的 `memFull` 注释称「界面据此提示清理」，实际前端零命中
+- **note(待决) urc 与 rpcserver 新增四项**：`task_status` / `task_cancel` / `task_list` 三个 RPC 方法 ucode 白名单不导出、前端零调用（但 127.0.0.1 直连可调用，故未删）；`memFull` / `store_stats.dir` / `updatedAtMs` / `fingerprint` / `archivedAtMs` / `totalLines` / `scope` / `freedBytes` / `touched` / `channel` 等一批响应键前端不消费；`memory_full_notified` 是单向闩锁（全仓无复位点，一个进程生命周期内「存储满」最多推一次）且该路径不向前端广播结构化事件；`notify.rs` 与 `qqpush.rs` 各有一份同构的三次重试 + 线性退避实现（改超时/退避必须两处同步）
 - **test**：`cargo check --all-targets` 无 error（剩上述 2 条 warning）；`cargo test` **285 passed / 0 failed / 2 ignored**（Windows 本机，Unix-only 用例不参与）；`rpc.js` / `logs.js` 通过语法校验
 - **chore(release) `PKG_RELEASE` 7 → 8**
 
