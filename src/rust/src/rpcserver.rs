@@ -131,7 +131,9 @@ pub struct RpcServer {
     scan_timeout: Duration,
     /// 异步状态缓存：只读状态查询优先命中内存，避免重复 AT 与排队阻塞。
     cache: Arc<StateCache>,
-    /// 统一后台任务管理器：长耗时操作（扫频/锁频/固件升级）以 task_id 提交后台执行，
+    /// 统一后台任务管理器。**目前只有扫频接入**（`spawn_with_timeout("cellscan", …)`，
+    /// 因为只有它需要整体超时保护）；锁频与固件升级并不经由这里——锁频由
+    /// `schedule` 自己的循环执行，固件升级走 ucode 的独立链路。
     /// 支持状态查询与取消，RPC handler 立即返回，不阻塞。
     tasks: Arc<TaskManager>,
     /// 通知器：notify_test 直发测试消息，验证推送通道链路。
@@ -756,7 +758,9 @@ impl RpcServer {
             "capacity" => match self.sms.capacity().await {
                 Ok(s) => ok(id, serde_json::json!({
                     "storage": storage_json(&s),
-                    /* 模组告知过「存储已满」且尚未回落：界面据此提示用户清理 */
+                    /* 模组告知过「存储已满」且尚未回落。注意：**当前界面并不读这个键**
+                     * （sms_center / sms_settings 的容量提示只看 storage 里的 used/total），
+                     * 保留给直连 RPC 的调用方；要界面提示得前端一并接。 */
                     "memFull": self.sms.memory_full(),
                 })),
                 Err(e) => err(id, e),
