@@ -1,5 +1,6 @@
-//! 通知：短信/来电/信号/内存满四类事件，经企业微信 webhook、QQ 机器人（官方 API v2）
-//! 与本地日志文件输出（可配置定时推送间隔、重试 3 次）。
+//! 通知：短信/来电/信号/内存满四类事件，经企业微信 webhook、QQ 机器人
+//! （[`crate::qqpush`]，官方 API v2）与本地日志文件输出
+//! （可配置定时推送间隔、重试 3 次）。
 //!
 //! 数据流（本模块是推送链路的中枢）：
 //!   urc.rs / schedule.rs 产生事件
@@ -14,21 +15,15 @@
 //! 通道，此时事件入队，`Notifier::run()` 每 10 秒扫一次，通道就绪即逐条补发
 //! （不合并）。若照直发路径丢弃，用户绑定成功后会永久失去绑定期间的事件。
 
+use crate::qqpush::QqSender;
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::{NotificationConfig, NotifyTemplates};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 const NOTIFY_QUEUE_SIZE: usize = 256;
 const NOTIFY_MAX_PENDING: usize = 1000;
 const NOTIFY_MAX_RETRIES: u32 = 3;
-
-/// QQ 机器人开放接口（API v2）基础地址与令牌提前刷新余量。
-/// 文档：https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/api-use.html
-const QQ_API_BASE: &str = "https://api.bot.qq.com";
-/// access_token 官方有效期 7200 秒，过期前 60 秒内刷新可拿到新 token 且旧 token 仍有 60 秒余命。
-/// 这里提前 120 秒判定过期，避开交界期边界。
-const QQ_TOKEN_REFRESH_MARGIN: u64 = 120;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifyKind {
@@ -112,7 +107,11 @@ impl Notifier {
 
         let qq = QqSender::from_config(&cfg.qq);
         if let Some(ref s) = qq {
-            log_info!("QQ 机器人推送已启用（目标类型: {}）", s.target_type);
+            log_info!(
+                "QQ 机器人推送已启用（目标类型: {}，消息格式: {}）",
+                s.target_type(),
+                s.format().as_str()
+            );
         }
         let qq = qq.map(std::sync::Arc::new);
 
@@ -226,28 +225,35 @@ impl Notifier {
 
     /// 实时直发：单条事件立即渲染并投递到所有通道，不经过任何攒批。
     fn send_realtime(&self, msg: &Notification) {
-        let body = combine_messages(std::slice::from_ref(msg), &self.cfg.templates);
-        log_debug!("推送内容（实时直发）: {}", body);
-        self.dispatch_body(body);
+        let body = render_body(msg, &self.cfg.templates);
+        let prefix = render_prefix_str(&self.cfg.templates, 1);
+        let combined = combine_body(&body, &prefix);
+        log_debug!("推送内容（实时直发）: {}", combined);
+        self.dispatch_body(&combined, &body, &prefix);
     }
 
     /// 把渲染好的正文投递到所有已启用通道。
     ///
     /// 通道可用性在此刻同步判定、发送异步进行：投递失败由各自的重试与日志负责，
     /// 不阻塞调用方（URC 分发循环与定时推送都跑在关键路径上）。
-    fn dispatch_body(&self, body: String) {
+    ///
+    /// 三个入参的分工：`combined` 是「前缀 + 正文」的纯文本（企业微信用）；
+    /// `body` / `prefix` 分开传是给 QQ 通道的 —— [`crate::qqpush`] 需要它们
+    /// 分别组装 Markdown（正文进标题与列表，前缀进引用行）。
+    fn dispatch_body(&self, combined: &str, body: &str, prefix: &str) {
         let wechat = self.wechat_enabled();
         let qq = self.current_qq();
         if wechat {
             let hook = self.cfg.wechat_webhook.clone();
-            let text = body.clone();
+            let text = combined.to_string();
             tokio::spawn(async move {
                 let _ = send_webhook(&hook, &text).await;
             });
         }
         if let Some(qq) = qq {
+            let msg = qq.build_message(body, prefix);
             tokio::spawn(async move {
-                let _ = qq.send(&body).await;
+                let _ = qq.send(msg).await;
             });
         }
     }
@@ -337,29 +343,23 @@ impl Notifier {
     /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过事件链路直接发送。
     /// 测试消息不携带任何插件名字样，同样套用全局前缀，便于一次性验证前缀配置是否生效。
     pub async fn notify_test(&self, channel: &str) -> Result<(), String> {
-        let base = "喵～测试通知来啦！推送通道一切正常，链路畅通无阻喵！";
-        let now = now_string();
-        let prefix = render_prefix(&self.cfg.templates.prefix, 1, &now);
-        let content = if prefix.trim().is_empty() {
-            base.to_string()
-        } else {
-            format!("{prefix}\n{base}")
-        };
-        // 与合并推送一致地记录「实际发出的文本」：测试通道是排障入口，
+        let base = "测试通知：推送通道一切正常，链路畅通";
+        let prefix = render_prefix_str(&self.cfg.templates, 1);
+        // 与业务推送一致地记录「实际发出的文本」：测试通道是排障入口，
         // 只有看到真实出站内容才能判断前缀/文案是否按预期生效。
-        log_debug!("推送内容（测试通道 {}）: {}", channel, content);
+        log_debug!("推送内容（测试通道 {}）: {}", channel, combine_body(base, &prefix));
         match channel {
             "qq" => {
                 let qq = self
                     .current_qq()
                     .ok_or_else(|| "QQ 通道未启用（检查 AppID/AppSecret/目标 ID；绑定模式需先完成绑定）".to_string())?;
-                qq.send(&content).await
+                qq.send(qq.build_message(base, &prefix)).await
             }
             "wechat" => {
                 if self.cfg.wechat_webhook.is_empty() {
                     return Err("企业微信 WebHook 未配置".into());
                 }
-                send_webhook(&self.cfg.wechat_webhook.clone(), &content).await
+                send_webhook(&self.cfg.wechat_webhook.clone(), &combine_body(base, &prefix)).await
             }
             other => Err(format!("未知通道: {other}")),
         }
@@ -440,8 +440,39 @@ impl Notifier {
             *g = sender.map(std::sync::Arc::new);
         }
         match self.current_qq() {
-            Some(s) => log_info!("QQ 机器人推送已启用（目标类型: {}，热生效）", s.target_type),
+            Some(s) => log_info!("QQ 机器人推送已启用（目标类型: {}，热生效）", s.target_type()),
             None => log_info!("QQ 机器人推送通道已停用"),
+        }
+    }
+
+    /// QQ 自定义菜单管理（LuCI `qq_menu` RPC）：set=覆盖配置默认菜单，get=查询当前菜单。
+    ///
+    /// 自定义菜单仅 C2C（单聊）场景生效（官方限制），对所有用户生效；
+    /// 默认菜单项见 [`crate::qqpush::QqSender::default_menu_body`]。
+    pub async fn qq_menu(&self, action: &str) -> Result<serde_json::Value, String> {
+        let qq = self
+            .current_qq()
+            .ok_or_else(|| "QQ 通道未启用（检查 AppID/AppSecret/目标 ID）".to_string())?;
+        match action.trim() {
+            "set" => {
+                let version = qq.set_menu(&QqSender::default_menu_body()).await?;
+                Ok(serde_json::json!({ "action": "set", "version": version }))
+            }
+            "get" => {
+                let menu = qq.get_menu().await?;
+                Ok(serde_json::json!({ "action": "get", "menu": menu }))
+            }
+            other => Err(format!("未知菜单操作: {other}（可用 set / get）")),
+        }
+    }
+
+    /// 启动时按 `qq_menu_enabled` 配置一次 QQ 自定义菜单（由 main 在启动
+    /// 段落调用）。通道未就绪（绑定模式等待绑定）时静默跳过 —— 绑定成功
+    /// 路径会补一次，见 `main::run_qq_bind`。
+    pub async fn apply_qq_menu_auto(&self) {
+        match self.current_qq() {
+            Some(qq) => qq.apply_default_menu().await,
+            None => log_debug!("QQ 通道未就绪，跳过自定义菜单自动配置"),
         }
     }
 }
@@ -612,6 +643,25 @@ pub fn render_prefix(prefix: &str, count: usize, now: &str) -> String {
     prefix.replace("{count}", &count.to_string()).replace("{time}", now)
 }
 
+/// 前缀拼接：前缀在上、正文在下；前缀为空（或全空白）时只返回正文。
+pub fn combine_body(body: &str, prefix: &str) -> String {
+    if prefix.trim().is_empty() {
+        body.to_string()
+    } else {
+        format!("{prefix}\n{body}")
+    }
+}
+
+/// 渲染单条事件的正文（**不含**全局前缀，供 QQ 富媒体单独组装用）。
+pub fn render_body(msg: &Notification, tpl: &NotifyTemplates) -> String {
+    render_template(template_for(tpl, msg.kind), msg, 1, &now_string())
+}
+
+/// 渲染全局前缀（空串表示不添加）。
+pub fn render_prefix_str(tpl: &NotifyTemplates, count: usize) -> String {
+    render_prefix(&tpl.prefix, count, &now_string())
+}
+
 /// 把一批事件渲染为最终推送文本（单条即只渲染该条）。
 ///
 /// 单条：直接套用该事件类型的模板。
@@ -623,7 +673,7 @@ pub fn combine_messages(msgs: &[Notification], tpl: &NotifyTemplates) -> String 
     }
     let now = now_string();
 
-    let mut body = if msgs.len() == 1 {
+    let body = if msgs.len() == 1 {
         let m = &msgs[0];
         render_template(template_for(tpl, m.kind), m, 1, &now)
     } else {
@@ -642,221 +692,13 @@ pub fn combine_messages(msgs: &[Notification], tpl: &NotifyTemplates) -> String 
         b
     };
 
-    if !tpl.prefix.trim().is_empty() {
-        body = format!("{}\n{}", render_prefix(&tpl.prefix, msgs.len(), &now), body);
-    }
-    body
-}
-
-// ==================== QQ 机器人通道（官方 API v2） ====================
-//
-// 鉴权与发消息接口均来自官方文档（bot.q.qq.com/wiki/develop/api-v2）：
-//   取凭证：POST /app/getAppAccessToken，body {appId, clientSecret}
-//           → {access_token, expires_in}；expires_in 官方示例是字符串 "7200"。
-//   携带：  请求头 `Authorization: QQBot <access_token>`。
-//   发消息：群   POST /v2/groups/{group_openid}/messages
-//           单聊 POST /v2/users/{openid}/messages
-//           频道 POST /channels/{channel_id}/messages
-//           文本用 msg_type=0 + content。
-//
-// 已知限制（本模块为单向推送、不连 WebSocket，拿不到 msg_id/event_id）：
-//   - 所有消息都是「主动消息」，受频控（群 30~60 条/分钟、单关系 20 条/分钟、
-//     1000 条/群/天）与用户端「允许主动发送」开关约束；
-//   - 频道主动推送官方要求机器人保持 WebSocket 在线，channel 模式可能失败。
-
-/// QQ 机器人推送通道。凭证缓存 + 单飞刷新；发送失败重试 NOTIFY_MAX_RETRIES 次。
-pub struct QqSender {
-    app_id: String,
-    app_secret: String,
-    /// "group" | "c2c" | "channel"
-    target_type: String,
-    target_id: String,
-    token: tokio::sync::Mutex<Option<QqToken>>,
-}
-
-struct QqToken {
-    value: String,
-    valid_until: Instant,
-}
-
-impl QqSender {
-    /// 由配置构造；AppID/Secret/目标 ID 任一为空，或目标类型是 "bind"
-    /// （绑定模式由 qqbind 模块处理，完成后经 set_qq 热替换）时返回 None。
-    pub fn from_config(cfg: &crate::config::QqNotifyConfig) -> Option<Self> {
-        let app_id = cfg.app_id.trim().to_string();
-        let app_secret = cfg.app_secret.trim().to_string();
-        let target_id = cfg.target_id.trim().to_string();
-        let target_type = normalize_qq_target_type(&cfg.target_type);
-        if app_id.is_empty() || app_secret.is_empty() || target_id.is_empty() || target_type == "bind" {
-            return None;
-        }
-        Some(QqSender {
-            app_id,
-            app_secret,
-            target_type,
-            target_id,
-            token: tokio::sync::Mutex::new(None),
-        })
-    }
-
-    /// 按目标类型路由到对应的消息发送接口。
-    fn message_url(&self) -> String {
-        match self.target_type.as_str() {
-            "channel" => format!("{QQ_API_BASE}/channels/{}/messages", self.target_id),
-            "c2c" => format!("{QQ_API_BASE}/v2/users/{}/messages", self.target_id),
-            _ => format!("{QQ_API_BASE}/v2/groups/{}/messages", self.target_id),
-        }
-    }
-
-    /// 取 access_token：缓存有效期内直接复用；过期则锁内单飞刷新，
-    /// 避免并发请求各自取一次凭证。
-    async fn token(&self) -> Result<String, String> {
-        let mut cache = self.token.lock().await;
-        if let Some(t) = cache.as_ref() {
-            if Instant::now() < t.valid_until {
-                return Ok(t.value.clone());
-            }
-        }
-        let (value, expires_in) = fetch_qq_token(&self.app_id, &self.app_secret).await?;
-        let valid_secs = expires_in.saturating_sub(QQ_TOKEN_REFRESH_MARGIN);
-        *cache = Some(QqToken {
-            value: value.clone(),
-            valid_until: Instant::now() + Duration::from_secs(valid_secs),
-        });
-        Ok(value)
-    }
-
-    /// 发送一条文本消息（msg_type=0）。不带 msg_id，属主动消息。
-    /// 重试 NOTIFY_MAX_RETRIES 次后仍失败则返回 Err（日志照记）。
-    pub async fn send(&self, content: &str) -> Result<(), String> {
-        let url = self.message_url();
-        for attempt in 1..=NOTIFY_MAX_RETRIES {
-            let result = match self.token().await {
-                Ok(token) => {
-                    let payload = serde_json::json!({
-                        "msg_type": 0,
-                        "content": content,
-                        "msg_seq": 1
-                    });
-                    tokio::task::spawn_blocking({
-                        let url = url.clone();
-                        let body = payload.to_string();
-                        move || post_qq(&url, &token, &body)
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(format!("发送任务失败: {e}")))
-                }
-                Err(e) => Err(format!("获取凭证失败: {e}")),
-            };
-            match result {
-                Ok(()) => {
-                    log_info!("QQ 机器人通知发送成功");
-                    return Ok(());
-                }
-                Err(e) => {
-                    log_warn!("QQ 机器人发送失败 ({}/{NOTIFY_MAX_RETRIES}): {}", attempt, e);
-                }
-            }
-            if attempt < NOTIFY_MAX_RETRIES {
-                tokio::time::sleep(Duration::from_secs(attempt as u64)).await;
-            }
-        }
-        log_error!("QQ 机器人通知已达最大重试次数，放弃发送");
-        Err(format!("重试 {NOTIFY_MAX_RETRIES} 次均失败（详见日志）"))
-    }
-}
-
-/// 目标类型归一化：识别常见别名与 bind 模式，其余未知值回落群聊。
-pub fn normalize_qq_target_type(t: &str) -> String {
-    match t.trim().to_ascii_lowercase().as_str() {
-        "c2c" | "user" | "users" | "single" => "c2c".into(),
-        "channel" | "channels" | "guild" => "channel".into(),
-        "bind" | "auto" => "bind".into(),
-        _ => "group".into(),
-    }
-}
-
-/// 获取 app access_token。兼容 expires_in 的字符串/数字两种返回。
-async fn fetch_qq_token(app_id: &str, app_secret: &str) -> Result<(String, u64), String> {
-    let body = serde_json::json!({ "appId": app_id, "clientSecret": app_secret }).to_string();
-    let raw = tokio::task::spawn_blocking(move || {
-        let resp = ureq::post(&format!("{QQ_API_BASE}/app/getAppAccessToken"))
-            .timeout(Duration::from_secs(10))
-            .set("Content-Type", "application/json")
-            .send_string(&body)
-            .map_err(|e| e.to_string())?;
-        if resp.status() != 200 {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        resp.into_string().map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("获取凭证任务失败: {e}"))??;
-
-    parse_token_response(&raw)
-}
-
-/// 解析 getAppAccessToken 响应。实测错误场景（如密钥错误）返回
-/// HTTP 200 + `{"code":100016,"message":"invalid appid or secret"}`，
-/// 必须显式检查业务码，不能只看 HTTP 状态。
-fn parse_token_response(raw: &str) -> Result<(String, u64), String> {
-    let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("凭证响应解析失败: {e}"))?;
-    if let Some(code) = v.get("code").and_then(|x| x.as_i64()) {
-        if code != 0 {
-            let msg = v.get("message").and_then(|x| x.as_str()).unwrap_or("");
-            return Err(format!("鉴权接口返回 code={code} message={msg}"));
-        }
-    }
-    let token = v.get("access_token").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    if token.is_empty() {
-        return Err(format!("凭证响应缺少 access_token: {raw}"));
-    }
-    Ok((token, parse_expires_in(v.get("expires_in"))))
-}
-
-/// 兼容 expires_in 的字符串（官方示例 "7200"）与数字两种类型，异常时回落 7200。
-fn parse_expires_in(v: Option<&serde_json::Value>) -> u64 {
-    match v {
-        Some(serde_json::Value::String(s)) => s.trim().parse().unwrap_or(7200),
-        Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(7200),
-        _ => 7200,
-    }
-}
-
-/// 调用 QQ openapi 发消息。2xx 视为成功；非 2xx 附响应片段便于排障
-/// （QQ 错误码如 304xxx 会出现在响应体里）。
-fn post_qq(url: &str, token: &str, body: &str) -> Result<(), String> {
-    match ureq::post(url)
-        .timeout(Duration::from_secs(10))
-        .set("Content-Type", "application/json")
-        .set("Authorization", &format!("QQBot {token}"))
-        .send_string(body)
-    {
-        Ok(resp) if (200..300).contains(&resp.status()) => Ok(()),
-        Ok(resp) => Err(format!("HTTP {}", resp.status())),
-        Err(ureq::Error::Status(code, resp)) => {
-            let text = resp.into_string().unwrap_or_default();
-            let snippet: String = text.chars().take(300).collect();
-            Err(format!("HTTP {code}: {snippet}"))
-        }
-        Err(e) => Err(e.to_string()),
-    }
+    combine_body(&body, &render_prefix(&tpl.prefix, msgs.len(), &now))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::QqNotifyConfig;
-
-    fn qq_cfg(target_type: &str) -> QqNotifyConfig {
-        QqNotifyConfig {
-            app_id: "111999".into(),
-            app_secret: "secret".into(),
-            target_type: target_type.into(),
-            target_id: "ABC123".into(),
-            bind_qq: String::new(),
-        }
-    }
 
     fn sms(sender: &str, content: &str) -> Notification {
         Notification {
@@ -897,73 +739,21 @@ mod tests {
         assert_eq!(normalize_phone_number("+8610"), "10");
     }
 
-    #[test]
-    fn qq_message_url_routes_by_target_type() {
-        let base = "https://api.bot.qq.com";
-        assert_eq!(sender_of("group").message_url(), format!("{base}/v2/groups/ABC123/messages"));
-        assert_eq!(sender_of("c2c").message_url(), format!("{base}/v2/users/ABC123/messages"));
-        assert_eq!(sender_of("channel").message_url(), format!("{base}/channels/ABC123/messages"));
-    }
-
-    #[test]
-    fn qq_message_url_unknown_type_falls_back_to_group() {
-        assert_eq!(
-            sender_of(" nonsense ").message_url(),
-            sender_of("group").message_url()
-        );
-    }
-
-    #[test]
-    fn qq_sender_requires_credentials_and_target() {
-        let missing_id = QqNotifyConfig { app_id: String::new(), ..qq_cfg("group") };
-        let missing_secret = QqNotifyConfig { app_secret: String::new(), ..qq_cfg("group") };
-        let missing_target = QqNotifyConfig { target_id: "  ".into(), ..qq_cfg("group") };
-        assert!(QqSender::from_config(&missing_id).is_none());
-        assert!(QqSender::from_config(&missing_secret).is_none());
-        assert!(QqSender::from_config(&missing_target).is_none());
-        assert!(QqSender::from_config(&qq_cfg("group")).is_some());
-    }
-
-    #[test]
-    fn qq_target_type_normalization() {
-        assert_eq!(normalize_qq_target_type("Group"), "group");
-        assert_eq!(normalize_qq_target_type(" users "), "c2c");
-        assert_eq!(normalize_qq_target_type("GUILD"), "channel");
-        assert_eq!(normalize_qq_target_type(""), "group");
-    }
-
-    #[test]
-    fn parse_expires_in_accepts_string_and_number() {
-        assert_eq!(parse_expires_in(Some(&serde_json::json!("7200"))), 7200);
-        assert_eq!(parse_expires_in(Some(&serde_json::json!(3600))), 3600);
-        assert_eq!(parse_expires_in(Some(&serde_json::json!("not-a-num"))), 7200);
-        assert_eq!(parse_expires_in(None), 7200);
-    }
-
-    #[test]
-    fn parse_token_response_accepts_success_body() {
-        // 实测成功响应：expires_in 为字符串，无 code 字段
-        let (token, exp) = parse_token_response(r#"{"access_token":"abc","expires_in":"7200"}"#).expect("应成功");
-        assert_eq!(token, "abc");
-        assert_eq!(exp, 7200);
-    }
-
-    #[test]
-    fn parse_token_response_surfaces_business_error() {
-        // 实测错误场景：HTTP 200 + 业务码（错误的 AppSecret）
-        let err = parse_token_response(r#"{"code":100016,"message":"invalid appid or secret"}"#)
-            .expect_err("业务错误应转为 Err");
-        assert!(err.contains("100016"), "错误信息应包含业务码: {err}");
-        assert!(err.contains("invalid appid or secret"), "错误信息应包含 message: {err}");
-    }
-
     // ---------- 文案模板渲染 ----------
 
     #[test]
-    fn default_single_sms_keeps_legacy_layout() {
+    fn default_single_sms_has_no_decorative_prefix() {
+        // v1.28.0 起默认模板不再自带「喵呜～」类装饰前缀：全部推送只带
+        // 统一的全局前缀 {time} {count}，正文首行即标题。
         let tpl = NotifyTemplates::default();
         let out = combine_messages(&[sms("10086", "验证码 1234")], &tpl);
-        assert_eq!(out, "喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: 10086\n内容: 验证码 1234");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 4, "实际: {out}");
+        assert!(lines[0].ends_with(" 1"), "首行应为「事件时刻 条数」: {}", lines[0]);
+        assert_eq!(lines[1], "新短信");
+        assert_eq!(lines[2], "发送者：10086");
+        assert_eq!(lines[3], "内容：验证码 1234");
+        assert!(!out.contains("喵呜"), "默认模板不应再带装饰性前缀: {out}");
     }
 
     #[test]
@@ -978,6 +768,7 @@ mod tests {
     #[test]
     fn unknown_placeholder_is_preserved() {
         let mut tpl = NotifyTemplates::default();
+        tpl.prefix = String::new();
         tpl.sms = "{sender}/{unknown}".into();
         assert_eq!(combine_messages(&[sms("A", "B")], &tpl), "A/{unknown}");
     }
@@ -985,6 +776,7 @@ mod tests {
     #[test]
     fn memory_full_content_falls_back_to_readable_text() {
         let mut tpl = NotifyTemplates::default();
+        tpl.prefix = String::new();
         tpl.memory_full = "{content}".into();
         let m = Notification {
             sender: String::new(),
@@ -999,6 +791,7 @@ mod tests {
     #[test]
     fn batch_uses_header_index_and_template() {
         let mut tpl = NotifyTemplates::default();
+        tpl.prefix = String::new();
         tpl.batch = "汇总".into();
         tpl.sms = "S:{content}".into();
         let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
@@ -1019,59 +812,6 @@ mod tests {
     fn empty_input_yields_empty_output() {
         let tpl = NotifyTemplates::default();
         assert_eq!(combine_messages(&[], &tpl), "");
-    }
-
-    /// 真实接口冒烟测试（默认跳过）：
-    ///   QQ_BOT_APP_ID=xxx QQ_BOT_APP_SECRET=xxx cargo test -- --ignored qq_real_api
-    /// 凭据只经环境变量传入，严禁写死在代码里。
-    #[test]
-    #[ignore]
-    fn qq_real_api_token_smoke() {
-        let app_id = std::env::var("QQ_BOT_APP_ID").expect("需要环境变量 QQ_BOT_APP_ID");
-        let secret = std::env::var("QQ_BOT_APP_SECRET").expect("需要环境变量 QQ_BOT_APP_SECRET");
-        let (token, expires) = tokio::runtime::Runtime::new()
-            .expect("runtime")
-            .block_on(fetch_qq_token(&app_id, &secret))
-            .expect("鉴权应成功");
-        assert!(!token.is_empty());
-        // 实测 expires_in 不是恒定 7200：QQ 返回「到服务端固定过期点的剩余秒数」
-        // （首次实测 7039），即共享过期窗口倒计时。缓存按 expires_in - 120 兜底，天然兼容。
-        assert!((1..=7200).contains(&expires), "expires_in 应在 (0, 7200] 内: {expires}");
-    }
-
-    /// 真实发送链路冒烟（默认跳过，走生产代码 QqSender::send 全路径）：
-    ///   QQ_BOT_APP_ID=xxx QQ_BOT_APP_SECRET=xxx QQ_BOT_TARGET=c2c:OPENID \
-    ///     cargo test -- --ignored qq_real_send
-    /// 目标格式 c2c:openid / group:group_openid / channel:channel_id。
-    #[test]
-    #[ignore]
-    fn qq_real_send_smoke() {
-        let app_id = std::env::var("QQ_BOT_APP_ID").expect("需要环境变量 QQ_BOT_APP_ID");
-        let secret = std::env::var("QQ_BOT_APP_SECRET").expect("需要环境变量 QQ_BOT_APP_SECRET");
-        let target = std::env::var("QQ_BOT_TARGET").expect("需要环境变量 QQ_BOT_TARGET（type:id）");
-        let (t, id) = target.split_once(':').expect("目标格式应为 type:id");
-        let sender = QqSender::from_config(&QqNotifyConfig {
-            app_id,
-            app_secret: secret,
-            target_type: t.into(),
-            target_id: id.into(),
-            bind_qq: String::new(),
-        })
-        .expect("配置应完整");
-        let _ = tokio::runtime::Runtime::new()
-            .expect("runtime")
-            .block_on(sender.send("QQ 机器人通知通道冒烟测试（QqSender 生产链路）"));
-    }
-
-    #[test]
-    fn qq_token_validity_uses_refresh_margin() {
-        // 正常 7200 秒 → 提前 120 秒视为过期；expires_in 小于余量时立即待刷新
-        assert_eq!(7200u64.saturating_sub(QQ_TOKEN_REFRESH_MARGIN), 7080);
-        assert_eq!(30u64.saturating_sub(QQ_TOKEN_REFRESH_MARGIN), 0);
-    }
-
-    fn sender_of(target_type: &str) -> QqSender {
-        QqSender::from_config(&qq_cfg(target_type)).expect("应构造成功")
     }
 
     /// 「事件 → 入队（通道未就绪时）→ 补发 → 文案模板渲染 → HTTP 投递」整条链路的回归用例。
@@ -1137,6 +877,10 @@ mod tests {
             target_type: "c2c".into(),
             target_id: String::new(),
             bind_qq: String::new(),
+            msg_format: "auto".into(),
+            keyboard_enabled: false,
+            keyboard_url: String::new(),
+            menu_enabled: false,
         };
         // 模板换成可精确断言的固定格式；事件走实时直发，测试不必等任何攒批窗口
         cfg.templates.prefix = "[测试]".into();
@@ -1232,6 +976,10 @@ mod tests {
             target_type: "c2c".into(),
             target_id: String::new(),
             bind_qq: String::new(),
+            msg_format: "auto".into(),
+            keyboard_enabled: false,
+            keyboard_url: String::new(),
+            menu_enabled: false,
         };
         cfg
     }

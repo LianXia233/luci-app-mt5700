@@ -313,9 +313,9 @@ pub fn render_report_with(assessment: &Assessment, sample: &Sample, now: &str) -
         .unwrap_or_default();
 
     let mut out = if gen.is_empty() {
-        String::from("📶 信号巡检\n")
+        String::from("信号巡检\n")
     } else {
-        format!("📶 {gen} 信号巡检\n")
+        format!("{gen} 信号巡检\n")
     };
     out.push_str(&format!("时间：{now}\n"));
 
@@ -608,7 +608,7 @@ mod tests {
         // 指标名 + 基准 + 实测值 + 档位 + 状态短语 + 网络能力总评
         let text = render_report(&full_sample(), "2026-10-11 23:43:12");
         // 制式（4G/5G）进标题，频段号与带宽合并在「频段」行 —— 这是本版新增的信息
-        assert!(text.starts_with("📶 5G 信号巡检"), "标题缺少 5G 代际: {text}");
+        assert!(text.starts_with("5G 信号巡检"), "标题缺少 5G 代际: {text}");
         assert!(text.contains("时间：2026-10-11 23:43:12"));
         assert!(text.contains("频段：n41 · 2565 MHz / 100 MHz"), "缺少具体频段号: {text}");
         assert!(text.contains("网络能力：优秀 —— 信号与频段带宽俱佳"), "总评缺少档位或建议: {text}");
@@ -633,7 +633,7 @@ mod tests {
             band: None,
         };
         let text = render_report(&s, "t");
-        assert!(text.starts_with("📶 4G 信号巡检"), "LTE 应显示为 4G: {text}");
+        assert!(text.starts_with("4G 信号巡检"), "LTE 应显示为 4G: {text}");
         assert!(text.contains("RSRP -75 dBm"));
         assert!(text.contains("RSRQ -9 dB"));
         assert!(!text.contains("SINR"), "无读数时不该输出该行: {text}");
@@ -646,7 +646,7 @@ mod tests {
         let mut s = full_sample();
         s.rat = "  ".into();
         let text = render_report(&s, "t");
-        assert!(text.starts_with("📶 信号巡检"), "制式未知时标题不该带代际: {text}");
+        assert!(text.starts_with("信号巡检"), "制式未知时标题不该带代际: {text}");
         // 频段号仍要显示，但不能猜前缀 —— 未知制式用中性的 Band 41
         assert!(text.contains("频段：Band 41"), "实际: {text}");
         // 能力档仍由频段与带宽支撑，总评不受影响

@@ -16,7 +16,6 @@ use std::pin::Pin;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
-const QQ_API_BASE: &str = "https://api.bot.qq.com";
 /// C2C_MESSAGE_CREATE / GROUP_AT_MESSAGE_CREATE 共用 intent 位 1<<25
 const INTENT_GROUP_AND_C2C: u64 = 1 << 25;
 /// 绑定监听窗口秒数（对外暴露给 RPC 状态查询，用于前端倒计时）
@@ -95,7 +94,8 @@ pub async fn run_bind(
     app_secret: &str,
     mut ctx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<BindTarget, String> {
-    let token = fetch_token(app_id, app_secret).await?;
+    // 凭证获取与 qqpush 共用一份实现（同一 AppID/Secret，行为必须一致）
+    let token = crate::qqpush::fetch_qq_token(app_id, app_secret).await?.0;
     let ws_url = fetch_gateway(&token).await?;
 
     let (ws, _resp) = tokio_tungstenite::connect_async(&ws_url)
@@ -255,40 +255,11 @@ async fn run_cmd(prog: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
-async fn fetch_token(app_id: &str, app_secret: &str) -> Result<String, String> {
-    let body = serde_json::json!({ "appId": app_id, "clientSecret": app_secret }).to_string();
-    let raw = tokio::task::spawn_blocking(move || {
-        let resp = ureq::post(&format!("{QQ_API_BASE}/app/getAppAccessToken"))
-            .timeout(Duration::from_secs(10))
-            .set("Content-Type", "application/json")
-            .send_string(&body)
-            .map_err(|e| e.to_string())?;
-        if resp.status() != 200 {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        resp.into_string().map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("获取凭证任务失败: {e}"))??;
-    // 业务错误（如密钥错误）为 HTTP 200 + {"code":100016,...}，必须显式检查
-    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| format!("凭证响应解析失败: {e}"))?;
-    if let Some(code) = v.get("code").and_then(|x| x.as_i64()) {
-        if code != 0 {
-            return Err(format!("鉴权失败 code={code} message={}", v.get("message").and_then(|x| x.as_str()).unwrap_or("")));
-        }
-    }
-    let token = v.get("access_token").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    if token.is_empty() {
-        return Err(format!("凭证响应缺少 access_token: {raw}"));
-    }
-    Ok(token)
-}
-
 async fn fetch_gateway(token: &str) -> Result<String, String> {
     let raw = tokio::task::spawn_blocking({
         let token = token.to_string();
         move || {
-            let resp = ureq::get(&format!("{QQ_API_BASE}/gateway"))
+            let resp = ureq::get(&format!("{}/gateway", crate::qqpush::QQ_API_BASE))
                 .timeout(Duration::from_secs(10))
                 .set("Authorization", &format!("QQBot {token}"))
                 .call()

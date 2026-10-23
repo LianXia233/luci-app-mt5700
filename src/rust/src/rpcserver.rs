@@ -398,6 +398,18 @@ impl RpcServer {
                     "error": s.error,
                 } })
             }
+            // QQ 自定义菜单（LuCI「配置 QQ 菜单」按钮）：set=覆盖配置默认菜单，
+            // get=查询当前菜单。菜单仅 C2C 场景生效，见 qqpush 模块文档。
+            "qq_menu" => {
+                let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("set").to_string();
+                match self.notify.qq_menu(&action).await {
+                    Ok(mut result) => {
+                        result["success"] = serde_json::json!(true);
+                        serde_json::json!({ "id": id, "result": result })
+                    }
+                    Err(e) => serde_json::json!({ "id": id, "result": { "success": false, "action": action, "error": e } }),
+                }
+            }
             // 后端运行日志（含被级别过滤掉的 info）：拨号对齐、串口探测、接口拉起协作、
             // URC 分发等过程都在这里，是 syslog 看不到的部分（稳态级别是 Warn）。
             "logs" => {
