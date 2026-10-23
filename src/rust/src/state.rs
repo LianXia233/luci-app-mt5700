@@ -29,6 +29,21 @@ struct Entry {
     last_read: Instant,
 }
 
+/// 短信模式生效时的跳过文案。与普通失败严格区分：**这不是故障**，
+/// 是「不占通道、沿用旧数据」的设计行为（issue #23 的修复核心）。
+/// 循环侧靠这个常量识别该走哪条日志路径，勿改文案开头。
+pub const SMS_SKIP_ERR: &str = "模组正忙（短信操作进行中），本轮跳过缓存刷新";
+
+/// 跳过日志的报送间隔：短信模式生效期间每 30s 最多一条。
+///
+/// 动机（issue #23 反馈）：十五个缓存键各按自己的周期跑，跳过时每秒
+/// 能刷出十几条「缓存刷新 XX 失败」，日志页一片红，用户以为出了大事。
+/// 跳过是设计行为，不该按失败的密度刷；真正该关注的失败仍然逐条报。
+const SKIP_LOG_INTERVAL: Duration = Duration::from_secs(30);
+
+/// 「恢复」日志的归属窗口：跳过发生后这么久以内成功刷新，才补一条恢复日志。
+const SKIP_RECOVER_WINDOW: Duration = Duration::from_secs(120);
+
 pub struct StateCache {
     client: Arc<AtClient>,
     /// 每条可缓存指令的刷新规则（白名单），直接引用静态表，零拷贝。
@@ -37,6 +52,8 @@ pub struct StateCache {
     entries: RwLock<HashMap<String, Entry>>,
     /// command -> per-command 锁，用于同一指令并发读取去重。
     locks: RwLock<HashMap<String, Arc<Mutex<()>>>>,
+    /// 最近一条「短信模式跳过」日志的时刻（限流 + 恢复提示用）。
+    last_skip_log: Mutex<Option<Instant>>,
     ctx: watch::Receiver<bool>,
 }
 
@@ -58,6 +75,7 @@ impl StateCache {
             rules,
             entries: RwLock::new(HashMap::new()),
             locks: RwLock::new(HashMap::new()),
+            last_skip_log: Mutex::new(None),
             ctx,
         })
     }
@@ -127,7 +145,7 @@ impl StateCache {
         // （旧实现每个缓存键各占一个 worker 干等 30s，日志里 6 条
         //  「通道已被占用 30s」正是这么来的）。
         if self.client.sms_mode_active().await {
-            return Err("模组正忙（短信操作进行中），本轮跳过缓存刷新".into());
+            return Err(SMS_SKIP_ERR.into());
         }
 
         let resp = self
@@ -239,8 +257,36 @@ impl StateCache {
                 if !overdue {
                     continue;
                 }
-                if let Err(e) = self.do_fetch(&key, self.rule(&key).expect("active 来自 rules")).await {
-                    log_debug!("缓存刷新 {} 失败: {}", key, e);
+                match self.do_fetch(&key, self.rule(&key).expect("active 来自 rules")).await {
+                    Ok(()) => {
+                        // 跳过窗口之后首次刷新成功：补一条恢复日志，
+                        // 让日志里「暂停 → 恢复」有头有尾，不用自己猜数据什么时候补上。
+                        let mut last = self.last_skip_log.lock().await;
+                        if let Some(t) = last.take() {
+                            if t.elapsed() < SKIP_RECOVER_WINDOW {
+                                drop(last);
+                                log_debug!("短信中心已退出，缓存刷新恢复（{}）", key);
+                            }
+                        }
+                    }
+                    Err(e) if e == SMS_SKIP_ERR => {
+                        // 跳过是设计行为，不是故障：换掉「失败」措辞，并按 30s 限流，
+                        // 不再每键每秒刷满日志页（issue #23 反馈）。
+                        let mut last = self.last_skip_log.lock().await;
+                        let now = Instant::now();
+                        let quiet = matches!(last.as_ref(), Some(t) if now.duration_since(*t) < SKIP_LOG_INTERVAL);
+                        if !quiet {
+                            *last = Some(now);
+                            drop(last);
+                            log_debug!(
+                                "短信中心使用中，本轮缓存刷新跳过（{}，沿用旧数据，恢复后自动补齐）",
+                                key
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        log_debug!("缓存刷新 {} 失败: {}", key, e);
+                    }
                 }
             }
         }
