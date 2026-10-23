@@ -48,6 +48,10 @@
 - **refactor(rust) 去掉两处恒等转换**：`qqbind.rs` 的 Identify 帧与心跳帧 `to_string().into()`，`into()` 的目标类型就是 `String` 本身（clippy `useless_conversion`）
 - **note(clippy) 刻意保留的告警**：`config.rs` / `ringlog.rs` 共 8 处「assertion has a constant value」是**故意**的常量不变式守卫（`MIN <= DEFAULT <= MAX`），只有将来有人把顺序改乱才会失败，不作删除；`pdu.rs` 手写 `div_ceil` 已有注释说明是为兼容低版本 Rust 工具链
 - **note(核查) 排除的两个假阳性**：`root/etc/config/at-webserver` 里 18 个 `schedule_{night,day}_{lte,nr}_*` 键初判「零消费方」，实际由 `schedconfig::uci_entries()` 用 `format!("{prefix}_{kind}_bands")` 拼名写入、`config.rs` 的 `band_lock()` 拼名读回，读写对称；`compat.js` 的 `api.resourceVersionInstalled` 初判「导出无人读」，实际是给 `L.env.resource_version` 打版本标签的副作用 IIFE，删不得
+- **refactor(rust) `config.rs` 两处**：`secs_to_timer_minutes` 的手写 `(secs+59)/60` 补上局部 `#[allow(clippy::manual_div_ceil)]` 与理由（与 `pdu.rs` 文件头同一条工具链兼容取舍，此前只在 pdu.rs 说明过）；解析 `uci show` 输出的 `starts_with` + `key[prefix.len()..]` 改 `strip_prefix`，去掉同一件事写两遍
+- **docs(rust) 两处 rustdoc 列表缺空行**（clippy `doc_lazy_continuation`）：`atclient.rs` 的 `prepare_scan_data_plane` 收尾要求「必须成对恢复」会被吞进第 4) 条、`nettime.rs` 模块头「任何一次成功都会清零计数」会被吞进第三个退避档位条目，各补一行空文档注释独立成段
+- **test(state_cfg)**：校验禁用缓存指令时不再对每条规则 `cmd.to_string()`（23 条规则 × 禁用清单的无谓临时分配）
+- **note(clippy) 刻意不动的风格项**：`sort_by_key`（async_runtime.rs:244、sms_store.rs:892）、`chunks_exact` 常量分块（sms_store.rs:141）、`timerpush.rs:223` 的 `used * 100 / total`（值域是几十条格位，不会溢出，改成 checked 反而掩盖真实意图）——属可读性偏好而非冗余，留给各自模块改动时顺手处理
 - **test**：`cargo check --all-targets` 无 error（剩上述 2 条 warning）；`cargo test` **285 passed / 0 failed / 2 ignored**（Windows 本机，Unix-only 用例不参与）；`rpc.js` / `logs.js` 通过语法校验
 - **chore(release) `PKG_RELEASE` 7 → 8**
 
