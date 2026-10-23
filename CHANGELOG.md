@@ -35,6 +35,7 @@
 > 全仓静态审查：死代码逐个 grep 到「零引用」才删，注释逐条和当前代码核对。**行为一律不变**——发现的口径分歧只写进注释、列为待决，不擅自改前端或推送的显示值。
 
 - **refactor(web) 前端死函数清理**：`rpc.js` 的 `parseHexValue` / `formatSpeed` / `splitSpeed` / `signalColor` / `qciLabel` / `isUnsolicitedText` 六个函数（全仓只剩「定义 + 导出口」两处命中，含 tests 亦无引用）连同 `AtWs` 导出口一并删除；`logs.js` 的 `computeCategoryCounts` 同删（真正在用的是姊妹函数 `computeCategoryTotals`）。副带收益：速率格式化此后只有 `network_status.js` 的 `formatSpeedNumber` 一份实现
+- **refactor(web) `AtUci` 瘦身**：删 `uciCommit()`（自带注释就写着「与 uciSave 实现一致」，且全仓只有 `service.js` 调 `uciSave`）、`isDirty()`（零调用的取值器）与只声明从不使用的 `_dirtyFlush` 字段；删掉之后模块头「对外只暴露 uciSave 与 uciHasChanges」才与实际一致
 - **refactor(rust) 后端死代码删除**：`SmsTransaction::elapsed()`（`cargo` 直接报 dead_code）、`WaitToken::make()`（与 `derive(Clone)` 逐字段等价，二者只留 derive）、`Scheduler::safe_tick()` 空壳（名为 safe 实为 `tick()` 透传，调用点直接进 `tick()`）
 - **refactor(rust) 复用既有实现而非再写一份**：`atclient` 两处手写 `select!{ sleep / ctx.changed() }` 收敛到现成的 `sleep_ctx()`（命令最小间隔等待、0 字节退避），不新增抽象
 - **fix(schedule) 推送时刻只取一次**：锁频切换通知的正文时间与 `Notification.time` 原为两次取值，可相差数秒，用户拿推送列表对正文会以为对不上
@@ -43,6 +44,10 @@
 - **docs(rust) 重构遗留的错挂 doc 归位**：`sms.rs` 挂在 `sent_record` 头上的正文预览说明归给 `text_preview`；`signalwatch.rs` 挂在 `sample_signal` 头上的两段（分属 `render_report_with` / `assess`）归位，并删去 `sample()` 的重复 doc 行
 - **note(待决) 信号百分比两边口径不一致**：`signal_percent` 按 30 dB 跨度（-80 dBm 满格），前端 `calculateSignalPercent` 按 40 dB 跨度（-70 满格）——同一时刻 -85 dBm 网页显示 63%、推送显示 83%。本轮**只把注释改准，未改任何一边**；误导性测试名 `percent_matches_frontend_formula` 改为 `percent_uses_30db_span`
 - **note(待决) 「批量汇总」模板是条死链路**：前端 `service.js` 有输入框 → UCI `notify_tpl_batch` → `config.batch` → 仅 `combine_messages` 使用，而生产路径每条通知单独渲染，`combine_messages` 只剩测试调用。`cargo check --all-targets` 现存 2 条 dead_code warning 即此二者，保留待决
+- **docs(rust) 两处与函数脱节的 doc 归位**（`cargo clippy` 的 `empty_line_after_doc_comments`）：`config.rs` 里「从 UCI 读取配置；读取失败时返回默认配置」被空行隔断、孤悬在 `uci_values()` 与下一个函数之间，实际描述的是原本没有文档的 `load_config()`，归位；`localtime.rs` 测试模块里「一天 24 小时的分钟数」描述的是已被删除的常量，去掉
+- **refactor(rust) 去掉两处恒等转换**：`qqbind.rs` 的 Identify 帧与心跳帧 `to_string().into()`，`into()` 的目标类型就是 `String` 本身（clippy `useless_conversion`）
+- **note(clippy) 刻意保留的告警**：`config.rs` / `ringlog.rs` 共 8 处「assertion has a constant value」是**故意**的常量不变式守卫（`MIN <= DEFAULT <= MAX`），只有将来有人把顺序改乱才会失败，不作删除；`pdu.rs` 手写 `div_ceil` 已有注释说明是为兼容低版本 Rust 工具链
+- **note(核查) 排除的两个假阳性**：`root/etc/config/at-webserver` 里 18 个 `schedule_{night,day}_{lte,nr}_*` 键初判「零消费方」，实际由 `schedconfig::uci_entries()` 用 `format!("{prefix}_{kind}_bands")` 拼名写入、`config.rs` 的 `band_lock()` 拼名读回，读写对称；`compat.js` 的 `api.resourceVersionInstalled` 初判「导出无人读」，实际是给 `L.env.resource_version` 打版本标签的副作用 IIFE，删不得
 - **test**：`cargo check --all-targets` 无 error（剩上述 2 条 warning）；`cargo test` **285 passed / 0 failed / 2 ignored**（Windows 本机，Unix-only 用例不参与）；`rpc.js` / `logs.js` 通过语法校验
 - **chore(release) `PKG_RELEASE` 7 → 8**
 
