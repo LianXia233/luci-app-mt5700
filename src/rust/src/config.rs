@@ -565,8 +565,8 @@ pub async fn uci_values() -> Result<UciReader, String> {
         if let Some(eq) = line.find('=') {
             let key = &line[..eq];
             let raw = &line[eq + 1..];
-            if key.starts_with(prefix) {
-                values.insert(key[prefix.len()..].to_string(), unquote_uci(raw));
+            if let Some(name) = key.strip_prefix(prefix) {
+                values.insert(name.to_string(), unquote_uci(raw));
             }
         }
     }
