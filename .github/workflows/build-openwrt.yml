@@ -19,9 +19,20 @@ name: OpenWrt 软件包云编译（apk + ipk）
 #   反之亦然。这不是 CPU 不兼容（两者都是 ARMv8-A 指令集），而是元数据不匹配。
 #
 # 触发：push 到 main、打 v* 标签、或手动 workflow_dispatch
-# 产物：每次编译成功后自动发布 GitHub Release
-#   - 标签推送 → 使用该标签名（如 v1.12.5）
-#   - main 推送 → 使用 Makefile 的 PKG_VERSION（如 v1.12.5），同名则覆盖更新
+# 产物：每次编译成功后自动发布 GitHub Release，分**两条互不干扰**的通道
+#   - 正式版（stable）：push 标签 v*，或手动派发时选 stable → tag 用标签名
+#     （如 v1.29.0），同名则覆盖更新；会成为 GitHub 的 latest。
+#   - 预览版（preview）：push main（开发中的默认路径），或手动派发时选 preview →
+#     tag 为 preview-v<PKG_VERSION>-r<PKG_RELEASE>（如 preview-v1.29.0-r8），
+#     带 Pre-release 标记。**不会**触碰正式版 Release，也不会抢占 latest。
+#
+# 为什么要分通道：main 上每次提交都会触发编译，若沿用「main 推送 → 覆盖 v<VERSION>」，
+# 开发中的中间产物会直接盖掉用户正在用的正式版 —— 而正式版的资产版本往往落后于
+# Makefile 的 PKG_RELEASE（正式版资产停在 r3 时，main 上已经是 r8 就很常见）。
+# 预览版用 preview- 前缀带来两个额外好处：
+#   ① 与正式版在 Releases 页面自然分开，各自标注；
+#   ② 不匹配下方「清理历史 Release」的 ^v[0-9] 规则，因此发布预览版
+#      **不会**把正式版挤出保留名额（这条是硬保护，不是靠配置约定）。
 #
 # 构建日志：不向仓库写入（不再产出 ci-logs-* 分支），仅保留在 Actions 运行日志中
 #           （保留期由 GitHub 侧控制）
@@ -32,10 +43,23 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
+      channel:
+        description: '发布通道：preview=预览版（不影响正式版，默认）；stable=正式版（覆盖同名 v<版本>）'
+        required: false
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - stable
       keep_releases:
-        description: '发布后保留最近几个 v* Release，更早的自动删除（仅清理 Release 与资产，不动 git tag）'
+        description: '正式版：发布后保留最近几个 v* Release，更早的自动删除（仅清理 Release 与资产，不动 git tag）'
         required: false
         default: '1'
+        type: string
+      keep_previews:
+        description: '预览版：发布后保留最近几个 preview-* Release，更早的自动删除（正式版不参与计数）'
+        required: false
+        default: '3'
         type: string
 
 permissions:
@@ -100,7 +124,8 @@ jobs:
 
     steps:
       - name: 检出仓库代码
-        uses: actions/checkout@v5
+        # v7.0.1：runs.using = node24（v5 为 node20，同样会触发 Node 20 弃用告警）
+        uses: actions/checkout@v7.0.1
 
       - name: 环境准备（输出目录与构建参数）
         run: |
@@ -211,9 +236,12 @@ jobs:
 
       - name: 产物归档（上传 Actions 构件）
         if: steps.stale.outputs.stale != 'true'
-        # v5：与 v4 的差异之一是同名构件默认覆盖（overwrite=true），此处每个矩阵组合
-        # 的名称唯一，用不到该行为；升级的主因是 v4 仍跑在 Node 20，runner 已弃用。
-        uses: actions/upload-artifact@v5
+        # v7：runs.using = node24。此前 v5 声明的是 node20，runner 已弃用 Node 20，
+        # 每个 job 都会打印「Node.js 20 is deprecated … being forced to run on Node.js 24」
+        # 告警。v6 起正式支持 node24（v7 为当前最新，仅追加了单文件直传能力，
+        # name / path / if-no-files-found / retention-days 的输入语义不变）。
+        # 与 download-artifact@v8 配套使用——两者的大版本号不同步，以各自 release 为准。
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.fmt }}-${{ matrix.arch }}
           path: out/
@@ -236,23 +264,53 @@ jobs:
       contents: write
     steps:
       - name: 检出仓库代码（读取版本号）
-        uses: actions/checkout@v5
+        # v7.0.1：runs.using = node24，与 build job 保持一致
+        uses: actions/checkout@v7.0.1
 
-      - name: 解析发布版本号
+      - name: 解析发布版本号与通道
         id: ver
+        env:
+          CHANNEL_INPUT: ${{ github.event.inputs.channel || '' }}
         run: |
+          set -e
+          VER=$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -1 | tr -d '[:space:]')
+          REL=$(sed -n 's/^PKG_RELEASE:=//p' Makefile | head -1 | tr -d '[:space:]')
+          [ -n "$VER" ] || VER="0.0.0-dev"
+          [ -n "$REL" ] || REL="0"
+
+          # 通道判定：tag 推送恒为正式版；main 推送恒为预览版；手动派发按输入选择。
+          # 之所以让 main 走预览版：main 上的提交是开发中间态，让它直接覆盖
+          # v<VERSION> 会把用户正在用的正式版换掉（见文件头「为什么要分通道」）。
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            TAG="${GITHUB_REF_NAME}"
+            CHANNEL=stable
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            CHANNEL="${CHANNEL_INPUT:-preview}"
           else
-            VER=$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -1 | tr -d '[:space:]')
-            [ -n "$VER" ] || VER="0.0.0-dev"
-            TAG="v${VER}"
+            CHANNEL=preview
           fi
+
+          if [ "$CHANNEL" = "stable" ]; then
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v${VER}"; fi
+            PRERELEASE=false
+          else
+            # 预览版 tag 带发行号：同一 PKG_VERSION 下每次 rN 递进都是一份独立产物，
+            # 不会「同名覆盖」把上一次的预览版悄悄换掉；也保证 ^v[0-9] 规则不匹配它，
+            # 从而不参与正式版的保留名额竞争。
+            TAG="preview-v${VER}-r${REL}"
+            PRERELEASE=true
+          fi
+
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "==> 发布版本: ${TAG} (ref=${GITHUB_REF})"
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "release=${REL}" >> "$GITHUB_OUTPUT"
+          echo "==> 发布通道: ${CHANNEL} / tag: ${TAG} / pre-release: ${PRERELEASE} (ref=${GITHUB_REF})"
 
       - name: 下载全部构建产物
-        uses: actions/download-artifact@v5
+        # v8：runs.using = node24，与 upload-artifact@v7 同为 Node 24 运行时。
+        # pattern / merge-multiple / path 三个输入在 v8 中语义不变。
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: '*'
           path: out/
@@ -389,15 +447,23 @@ jobs:
         id: notes
         env:
           TAG: ${{ steps.ver.outputs.tag }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
+          PKG_REL: ${{ steps.ver.outputs.release }}
         run: |
           set -e
           VER=$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -1 | tr -d '[:space:]')
+          # 三段式拼装：HEADER（预览版专属说明） + BODY（变更摘要 + 安装命令） → NOTES。
+          # 拆开是为了让预览版说明恒定排在最前，而不必改动下面已有的摘要生成逻辑。
           NOTES=/tmp/release-notes.md
+          BODY=/tmp/release-body.md
+          HEADER=/tmp/release-header.md
+          : > "$BODY"
+          : > "$HEADER"
           HANDWRITTEN="docs/release-notes/${TAG}.md"
 
           if [ -f "$HANDWRITTEN" ]; then
             echo "==> 使用手写发布摘要：$HANDWRITTEN"
-            cp "$HANDWRITTEN" "$NOTES"
+            cp "$HANDWRITTEN" "$BODY"
           else
             SECTION=/tmp/changelog-section.md
             awk -v ver="$VER" '
@@ -410,16 +476,16 @@ jobs:
               echo "::warning::未找到 $HANDWRITTEN，改用 CHANGELOG 裁剪摘要"
               grep -E '^(### |- )' "$SECTION" \
                 | sed -E 's/^(- \*\*[^*]+\*\*: [^。]*。).*$/\1/' \
-                | head -12 > "$NOTES"
-              echo "" >> "$NOTES"
-              echo "完整变更记录见 [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)。" >> "$NOTES"
+                | head -12 > "$BODY"
+              echo "" >> "$BODY"
+              echo "完整变更记录见 [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)。" >> "$BODY"
             else
               echo "::warning::既无 $HANDWRITTEN 也无 CHANGELOG 段落，回退为自动生成的提交列表"
-              rm -f "$NOTES"
+              rm -f "$BODY"
             fi
           fi
 
-          if [ -s "$NOTES" ]; then
+          if [ -s "$BODY" ]; then
             # 自动生成「当前版本 + 当前架构」的完整安装命令，URL 已经拼好可直接执行。
             # 默认给国内加速地址（前缀 https://gh.acg2.mom/），并说明如何还原为直连。
             RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}"
@@ -495,8 +561,43 @@ jobs:
               echo "另有 \`ARCH-GUIDE.txt\`（架构选择与报错对照）。"
               echo "> opkg 系统（OpenWrt 24.10 及更早）：把 \`.apk\` 换成 \`.ipk\`，命令改为 \`opkg install\`。"
               echo "> 只想先验证不安装：在 \`apk add\` 后加 \`--simulate\`。报错对照见资产 \`ARCH-GUIDE.txt\`。"
-            } >> "$NOTES"
+            } >> "$BODY"
+          fi
+
+          # ---- 头部：预览版专属说明（正式版为空，摘要格式与原先完全一致）----
+          if [ "$CHANNEL" = "preview" ]; then
+            SHORT_SHA="${GITHUB_SHA:0:7}"
+            {
+              echo "> ### 预览版（Pre-release）"
+              echo ">"
+              echo "> 由 \`main\` 分支自动构建，用于验证最新改动。**不是**正式发布版本："
+              echo "> 它不会替换正式版 [\`v${VER}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${VER})，"
+              echo "> 也不会成为仓库的 latest。"
+              echo ">"
+              echo "> | 项 | 值 |"
+              echo "> |:--|:--|"
+              echo "> | 来源分支 | \`${GITHUB_REF_NAME}\` |"
+              echo "> | 来源提交 | [\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) |"
+              echo "> | 版本 | \`PKG_VERSION=${VER}\` / \`PKG_RELEASE=${PKG_REL}\` |"
+              echo "> | 构建时间 | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+              echo "> | 构建矩阵 | 3 架构 ×（apk · OpenWrt 25.12.5 / ipk · OpenWrt 24.10.8） |"
+              echo ">"
+              echo "> 安装方式与正式版完全相同（见下方「安装」）。生产环境请优先用正式版，"
+              echo "> 只在需要验证本次改动时才用这份预览包。"
+              echo ""
+            } >> "$HEADER"
+          fi
+
+          # ---- 拼装：有摘要时 HEADER+BODY；只有头部时也要保留头部（预览版标识不能丢）----
+          if [ -s "$BODY" ]; then
+            cat "$HEADER" "$BODY" > "$NOTES"
             echo "body_file=$NOTES" >> "$GITHUB_OUTPUT"
+          elif [ -s "$HEADER" ]; then
+            cp "$HEADER" "$NOTES"
+            echo "本次构建的提交列表见 [Actions 运行日志](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})。" >> "$NOTES"
+            echo "body_file=$NOTES" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f "$NOTES" ]; then
             echo "==> Release 简介（$(wc -l < "$NOTES") 行）："
             cat "$NOTES"
           fi
@@ -504,55 +605,77 @@ jobs:
       - name: 发布 GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
           mapfile -t FILES < <(find dist -type f | sort)
           BODY="${{ steps.notes.outputs.body_file }}"
+          # 预览版加 --prerelease：Releases 页面单独打 Pre-release 标记，而且
+          # **不会抢占 latest** —— latest 只认最新的「非草稿且非预发布」Release，
+          # 所以正式版 v<VERSION> 的 latest 身份在这里是天然受保护的。
+          FLAGS=(--repo "${GITHUB_REPOSITORY}")
+          TITLE="AT WebServer ${TAG}"
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS+=(--prerelease)
+            TITLE="${TITLE}（预览版）"
+          fi
           if [ -n "$BODY" ] && [ -s "$BODY" ]; then
             gh release create "$TAG" "${FILES[@]}" \
-              --repo "${GITHUB_REPOSITORY}" \
+              "${FLAGS[@]}" \
               --notes-file "$BODY" \
-              --title "AT WebServer ${TAG}"
+              --title "${TITLE}"
           else
             gh release create "$TAG" "${FILES[@]}" \
-              --repo "${GITHUB_REPOSITORY}" \
+              "${FLAGS[@]}" \
               --generate-notes \
-              --title "AT WebServer ${TAG}"
+              --title "${TITLE}"
           fi
-          echo "==> Release ${TAG} 已发布，资产 ${#FILES[@]} 个"
+          echo "==> Release ${TAG} 已发布（通道 ${CHANNEL}），资产 ${#FILES[@]} 个"
 
       # 每个版本 13 个资产、约 9 MB，历史 Release 会一路堆积。
       # 只删 **Release 与其资产**，不动 git tag —— tag 指向提交，删了会让
       # 「某版本对应哪次提交」无从追溯，而 Release 只是可重发的下载入口。
-      # 两条保护：① 只认 v<数字> 前缀（debian-v2.0.1 这类另一条发布线的产物不参与）；
-      #           ② latest 那个即使超出保留数也保留（它可能不是时间上最新的）。
-      - name: 清理历史 Release（保留最近若干个）
+      # 分**两组独立**清理，互不计入对方名额：
+      #   正式版：tag 形如 v1.29.0，只保留最近 KEEP_RELEASES 个；
+      #   预览版：tag 形如 preview-v1.29.0-r8，只保留最近 KEEP_PREVIEWS 个。
+      # 两组正则各自只匹配本组（^v[0-9] 匹配不到 preview- 前缀），因此
+      # **发布预览版永远不会把正式版挤出保留名额** —— 这是硬保护，不是靠配置约定。
+      # 两组共用两条保护：① 只认本组前缀（debian-v2.0.1 这类另一条发布线的产物不参与）；
+      #                   ② latest 那个即使超出保留数也保留（它可能不是时间上最新的）。
+      - name: 清理历史 Release（正式版 / 预览版各保留最近若干个）
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP_RELEASES: ${{ github.event.inputs.keep_releases || '1' }}
+          KEEP_PREVIEWS: ${{ github.event.inputs.keep_previews || '3' }}
         run: |
           set -e
-          mapfile -t ROWS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
-            --json tagName,isLatest,createdAt \
-            --jq 'map(select(.tagName | test("^v[0-9]")))
-                  | sort_by(.createdAt) | reverse
-                  | .[] | "\(.tagName)\t\(.isLatest)"')
-          echo "==> 现有 v* Release ${#ROWS[@]} 个，本轮保留最近 ${KEEP_RELEASES} 个"
-          idx=0
-          for row in "${ROWS[@]}"; do
-            idx=$((idx + 1))
-            tag="${row%%$'\t'*}"
-            is_latest="${row##*$'\t'}"
-            if [ "$idx" -le "$KEEP_RELEASES" ]; then
-              echo "  [保留] ${tag}（第 ${idx} 新的，在保留数内）"
-              continue
-            fi
-            if [ "$is_latest" = "true" ]; then
-              echo "  [保留] ${tag}（当前 latest，即使超出保留数）"
-              continue
-            fi
-            echo "  [删除] ${tag}"
-            gh release delete "$tag" --yes --repo "${GITHUB_REPOSITORY}" \
-              || echo "::warning::删除 ${tag} 失败，已跳过不影响发布"
-          done
+          cleanup_group() {
+            local regex="$1" keep="$2" label="$3"
+            mapfile -t ROWS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
+              --json tagName,isLatest,createdAt \
+              --jq "map(select(.tagName | test(\"${regex}\")))
+                    | sort_by(.createdAt) | reverse
+                    | .[] | \"\(.tagName)\t\(.isLatest)\"")
+            echo "==> ${label} 现有 ${#ROWS[@]} 个，本轮保留最近 ${keep} 个"
+            local idx=0
+            for row in "${ROWS[@]}"; do
+              idx=$((idx + 1))
+              tag="${row%%$'\t'*}"
+              is_latest="${row##*$'\t'}"
+              if [ "$idx" -le "$keep" ]; then
+                echo "  [保留] ${tag}（第 ${idx} 新的，在保留数内）"
+                continue
+              fi
+              if [ "$is_latest" = "true" ]; then
+                echo "  [保留] ${tag}（当前 latest，即使超出保留数）"
+                continue
+              fi
+              echo "  [删除] ${tag}"
+              gh release delete "$tag" --yes --repo "${GITHUB_REPOSITORY}" \
+                || echo "::warning::删除 ${tag} 失败，已跳过不影响发布"
+            done
+          }
+          cleanup_group '^v[0-9]' "$KEEP_RELEASES" '正式版 v* Release'
+          cleanup_group '^preview-v' "$KEEP_PREVIEWS" '预览版 preview-* Release'
