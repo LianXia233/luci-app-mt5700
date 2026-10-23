@@ -58,7 +58,6 @@ pub struct StateCache {
 }
 
 /// 最近一次『连接 -> 断开』翻转已清除过缓存；避免每个周期重复清空。
-#[derive(Default)]
 struct LoopState {
     prev_connected: bool,
 }
@@ -80,8 +79,8 @@ impl StateCache {
         })
     }
 
-    /// 该指令是否在白名单（可缓存）。仅测试直接使用；业务读取统一走 `resolve`。
-    #[allow(dead_code)]
+    /// 该指令是否在白名单（可缓存）。业务读取统一走 `resolve`，因此只有单测用得上。
+    #[cfg(test)]
     pub fn is_cacheable(&self, command: &str) -> bool {
         self.rules.contains_key(&command.trim().to_uppercase())
     }
