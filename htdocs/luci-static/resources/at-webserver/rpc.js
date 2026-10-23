@@ -813,7 +813,6 @@ var AtUci = {
 	// 当前页面是否有未保存更改（true=有）
 	_dirty: false,
 	_beforeUnload: null,
-	_dirtyFlush: [],
 
 	// 标记当前页面存在未保存更改，并在离开时提示（等价 LuCI 自带行为）
 	markDirty: function () {
@@ -836,8 +835,6 @@ var AtUci = {
 			this._beforeUnload = null;
 		}
 	},
-
-	isDirty: function () { return this._dirty; },
 
 	// 查询该配置是否存在待应用变更（rpcd uci.changes）
 	uciHasChanges: function (section) {
@@ -874,39 +871,6 @@ var AtUci = {
 			}, function (err) {
 				// ubus 状态码 5 = NO_DATA：rpcd 未收到待应用数据，通常表示
 				// 变更已在上一轮 commit，配置实际已生效，不视为失败。
-				var code = err && err.code;
-				var msg = (err && err.message) || '';
-				if (code === 5 || /未收到数据|No data|NO_DATA/i.test(msg)) {
-					result.applied = true;
-					result.appliedSkipped = true;
-					return result;
-				}
-				throw err;
-			});
-		});
-	},
-
-	/**
-	 * commit 型保存：save 后同样调用 apply，走完整 commit+apply 流程
-	 * （与 uciSave 实现一致，会记录 config hash 并触发 procd reload）。
-	 */
-	uciCommit: function (section) {
-		var result = { saved: false, applied: false, appliedSkipped: false };
-		return this.uciHasChanges(section).then(function (has) {
-			if (!has) {
-				result.saved = true;
-				result.appliedSkipped = true;
-				return result;
-			}
-			return L.uci.save(section).then(function () {
-				result.saved = true;
-				// append=true 表示「保存并应用」，会走 rpcd 的 commit+apply 全流程，
-				// 从而正确记录 config hash 并触发 procd reload。
-				return L.uci.apply(false, true);
-			}).then(function () {
-				result.applied = true;
-				return result;
-			}, function (err) {
 				var code = err && err.code;
 				var msg = (err && err.message) || '';
 				if (code === 5 || /未收到数据|No data|NO_DATA/i.test(msg)) {
