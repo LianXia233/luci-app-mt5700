@@ -1004,6 +1004,17 @@ return {
 				return rpcCall('qq_bind_status', { _rid: getStr(req.args, '_rid') });
 			}
 		},
+		qq_menu: {
+			args: { action: 'set', _rid: '' },
+			call: function (req) {
+				let a = req.args;
+				let action = getStr(a, 'action');
+				if (action == null || action == '') {
+					action = 'set';
+				}
+				return rpcCall('qq_menu', { action: action, _rid: getStr(a, '_rid') });
+			}
+		},
 		netrate: {
 			args: { device: '' },
 			call: function (req) {
