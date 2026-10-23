@@ -54,26 +54,11 @@ fn storage_json(s: &crate::sms::StorageInfo) -> serde_json::Value {
     })
 }
 
-/// 扫频推给前端的事件 data。state 取值 running/done/aborted/error。
-#[derive(Serialize)]
-#[allow(dead_code)] // 扫频推送结构保留（后续断点续扫扩展）
-pub struct ScanPush {
-    pub state: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cell: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lines: Option<Vec<String>>,
-    pub count: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
+/// 扫频进行中的状态快照（供 cellscan 进度查询与并发保护）。
 pub struct ScanState {
     pub running: bool,
     pub aborted: bool,
     pub lines: Vec<String>,
-    /// 当前扫频对应的后台任务 id（异步化新增），用于状态查询/取消。
-    pub task_id: Option<String>,
 }
 
 /// 事件总线：向所有订阅客户端广播。
@@ -181,7 +166,7 @@ impl RpcServer {
             auth_key,
             sched,
             hub: Hub::new(),
-            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new(), task_id: None })),
+            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new() })),
             scan_timeout: DEFAULT_SCAN_TIMEOUT,
             cache,
             tasks,
@@ -1023,7 +1008,9 @@ impl RpcServer {
         let hub = self.hub.clone();
         let tasks = self.tasks.clone();
         let scan_state = self.scan.clone();
-        let timeout = if self.scan_timeout > Duration::ZERO { self.scan_timeout } else { DEFAULT_SCAN_TIMEOUT };
+        // scan_timeout 恒为正：new() 取 DEFAULT，set_scan_timeout() 显式忽略零值，
+        // 唯一外部来源 main.rs 传 config.scan_timeout，而 config 已按下限 10s 夹取。
+        let timeout = self.scan_timeout;
         let ctx = self.ctx.clone();
         let command = command.trim().to_string();
         let tid = tasks
@@ -1031,10 +1018,6 @@ impl RpcServer {
                 run_cell_scan(client, hub, scan_state, ctx, cancel, command, timeout).await
             })
             .await;
-        {
-            let mut scan = self.scan.lock().await;
-            scan.task_id = Some(tid.clone());
-        }
 
         // 立刻应答，让前端的命令队列不被这条几分钟的命令堵住。
         ok_response(&format!("^CELLSCAN: STARTED {tid}\r\nOK"))
@@ -1135,7 +1118,6 @@ async fn run_cell_scan(
     scan.running = false;
     scan.aborted = false;
     scan.lines.clear();
-    scan.task_id = None;
     drop(scan);
 
     // 扫频结束（成功/失败/超时/取消均必经此处）：先复位扫频标志，再无条件恢复数据面。
