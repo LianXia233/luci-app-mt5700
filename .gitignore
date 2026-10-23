@@ -21,3 +21,4 @@ tests/mock-modem/node_modules/
 # Python 字节码缓存
 __pycache__/
 _ci_watch*.py
+_post_reply.py
