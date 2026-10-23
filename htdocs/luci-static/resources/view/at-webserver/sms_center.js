@@ -186,7 +186,7 @@ return L.view.extend({
 		var sideFoot = smsEl('div', { 'class': 'mt5700-sms-side-foot' });
 
 		var newBtn = Mt5700.primaryButton('+ 新短信', function () {
-			Ui.promptModal('新短信', [
+			var promptMask = Ui.promptModal('新短信', [
 				{ key: 'number', label: '收件人号码', placeholder: '请输入 5-19 位手机号码' }
 			], function (values) {
 				var num = (values.number || '').trim();
@@ -200,6 +200,10 @@ return L.view.extend({
 				}
 				selectContact(num);
 			});
+			/* 仅用于移动端把「新短信」弹窗排成与其余短信弹窗一致的底部面板 */
+			if (promptMask && promptMask.classList) {
+				promptMask.classList.add('mt5700-sms-prompt');
+			}
 		});
 		sideFoot.appendChild(newBtn);
 
@@ -208,9 +212,7 @@ return L.view.extend({
 		 * 这里只呈现统计数字，真正的加密读写在后端完成。
 		 */
 		var archiveInfo = smsEl('span', {}, '本地归档：—');
-		var archiveRow = smsEl('div', {
-			'style': 'margin-top:10px;font-size:11px;color:var(--sms-muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap;'
-		}, [
+		var archiveRow = smsEl('div', { 'class': 'mt5700-sms-foot-row' }, [
 			archiveInfo,
 			Mt5700.button('管理归档', function () { openArchiveModal(); }, 'ghost')
 		]);
@@ -253,10 +255,12 @@ return L.view.extend({
 
 		var msgInput = smsEl('textarea', {
 			rows: '1',
-			placeholder: '输入消息…（回车发送，Shift+Enter 换行）',
+			placeholder: '输入短信内容…',
 			'aria-label': '短信内容'
 		});
 		var sendBtn = Mt5700.primaryButton('发送', function () { composer.requestSubmit(); });
+		/* 供短信页专用样式命中（蓝底、手机端固定宽度） */
+		sendBtn.classList.add('mt5700-sms-send');
 		var composer = smsEl('form', { 'class': 'mt5700-sms-composer' }, [msgInput, sendBtn]);
 		composer.addEventListener('submit', function (e) {
 			e.preventDefault();
@@ -459,7 +463,8 @@ return L.view.extend({
 			});
 			var bubble = smsEl('div', { 'class': 'mt5700-sms-bubble' });
 
-			bubble.appendChild(smsEl('div', {}, m.content || '(空消息)'));
+			bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-text' },
+				m.content || '(空消息)'));
 
 			/*
 			 * 时间未知时如实显示「时间未知」：
@@ -475,21 +480,25 @@ return L.view.extend({
 			if (m.time && m.timeApprox) {
 				timeText += '（近似）';
 			}
-			bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-time' }, timeText));
+
+			/* 时刻与删除按钮收进同一行：否则「删除」会独占一行，
+			 * 每个气泡底部都多出一块空白，手机上尤其明显。 */
+			var meta = smsEl('div', { 'class': 'mt5700-sms-meta' });
+			meta.appendChild(smsEl('span', { 'class': 'mt5700-sms-time' }, timeText));
+			var del = Mt5700.button('删除', function () { deleteMessage(m); }, 'danger');
+			del.className = 'mt5700-sms-del';
+			meta.appendChild(del);
+			bubble.appendChild(meta);
 
 			if (m.partsExpected != null && m.partsCount != null
 				&& m.partsCount < m.partsExpected) {
-				bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-time' },
+				bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-note' },
 					'长短信已合并 ' + m.partsCount + '/' + m.partsExpected + ' 段（部分缺失）'));
 			}
 			if (m.error) {
-				bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-time' },
+				bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-note' },
 					'该条解析失败：' + m.error));
 			}
-
-			var del = Mt5700.button('删除', function () { deleteMessage(m); }, 'danger');
-			del.className = 'mt5700-sms-del';
-			bubble.appendChild(del);
 
 			if (isSent) {
 				row.appendChild(bubble);
@@ -564,23 +573,60 @@ return L.view.extend({
 		 * 合并模组消息与归档消息。
 		 *
 		 * 收到的短信两边都有（模组槽位 + 归档），必须去重，否则每条都出现两次。
-		 * 去重键用「方向 | 正文 | 时刻」：收到的时刻来自 TP-SCTS，两边完全一致；
-		 * 发出的在模组列表里根本不存在，因此不会误判。
+		 * 去重键用「方向 | 正文 | 时刻」：收到的时刻来自 TP-SCTS，两边完全一致。
+		 *
+		 * 发出的短信还要多做一件事：**时刻一律以归档为准**。归档那条是插件在
+		 * 发送成功当场用 nettime（NTP 优先、取不到才退设备时钟）盖的章；
+		 * 模组里若存了已发条目，它能给的只有 PDU 的 TP-VP 有效期 —— 那是
+		 * 「这条短信几时作废」，不是「几时发出去」，最长能差一周，拿来当发送
+		 * 时刻排障会把时间线整个带偏。所以这里把模组条目的时刻换成归档时刻，
+		 * 同时**保留模组条目的 index**：换的是显示用的时间，不是删除要用的槽位。
+		 *
+		 * 同一正文发过两次时两条归档无法区分，宁可不换（继续显示「近似」），
+		 * 也不随便挑一个时刻冒充精确时间。
 		 */
 		function archiveKeyOf(m) {
 			return (m.type || '') + '|' + (m.content || '') + '|' + (m.time || '');
+		}
+
+		/* 正文 → 唯一的发出归档记录；正文重复出现的直接剔除，不参与换时刻 */
+		function sentTimeAnchor(extra) {
+			var seenContent = {};
+			var anchor = {};
+			(extra || []).forEach(function (m) {
+				if (m.type !== 'sent' || !m.time) {
+					return;
+				}
+				var key = m.content || '';
+				if (seenContent[key]) {
+					anchor[key] = null;      /* 发过不止一次，无法判定是哪一次 */
+					return;
+				}
+				seenContent[key] = true;
+				anchor[key] = m;
+			});
+			return anchor;
 		}
 
 		function mergeArchived(base, extra) {
 			if (!extra || !extra.length) {
 				return base;
 			}
+			var anchor = sentTimeAnchor(extra);
 			var seen = {};
 			var out = [];
 			var i;
 			for (i = 0; i < base.length; i++) {
-				seen[archiveKeyOf(base[i])] = true;
-				out.push(base[i]);
+				var m = base[i];
+				if (m.type === 'sent' && (m.timeApprox || !m.time)) {
+					var a = anchor[m.content || ''];
+					if (a) {
+						m.time = a.time;
+						m.timeApprox = a.timeApprox;
+					}
+				}
+				seen[archiveKeyOf(m)] = true;
+				out.push(m);
 			}
 			for (i = 0; i < extra.length; i++) {
 				var k = archiveKeyOf(extra[i]);
@@ -1081,9 +1127,9 @@ return L.view.extend({
 		/* 查看某个会话的归档记录（弹窗内展示，不干扰当前会话） */
 		function viewArchive(number) {
 			AtWs.client.sms('store_read', { number: number }).then(function (res) {
-				var mask = smsEl('div', { 'class': 'mt5700-modal-mask' });
-				var box = smsEl('div', { 'class': 'mt5700-modal' });
-				var body2 = smsEl('div', { 'style': 'max-height:50vh;overflow-y:auto;' });
+				var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
+				var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+				var body2 = smsEl('div', { 'class': 'mt5700-sms-modal-scroll' });
 
 				box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' },
 					'归档：' + number));
@@ -1105,7 +1151,8 @@ return L.view.extend({
 							var t = e.time
 								? (String(e.time).split(',')[1] || e.time)
 								: '时间未知';
-							bubble.appendChild(smsEl('div', {}, e.content || '(空消息)'));
+							bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-text' },
+								e.content || '(空消息)'));
 							bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-time' },
 								t + (e.timeApprox ? '（近似）' : '')));
 							if (isSent) {
@@ -1157,9 +1204,9 @@ return L.view.extend({
 				}
 				return refreshArchiveStats();
 			}).then(function () {
-				var mask = smsEl('div', { 'class': 'mt5700-modal-mask' });
-				var box = smsEl('div', { 'class': 'mt5700-modal' });
-				var listEl = smsEl('div', { 'class': 'mt5700-agree-list' });
+				var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
+				var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+				var listEl = smsEl('div', { 'class': 'mt5700-agree-list mt5700-sms-modal-list' });
 
 				box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' },
 					'本地短信归档'));
@@ -1180,8 +1227,7 @@ return L.view.extend({
 				} else {
 					list.forEach(function (c) {
 						var row = smsEl('div', {
-							'class': 'mt5700-inline',
-							'style': 'justify-content:space-between;gap:10px;'
+							'class': 'mt5700-inline mt5700-sms-archive-row'
 						});
 
 						var left = smsEl('div', {
@@ -1253,14 +1299,13 @@ return L.view.extend({
 		 */
 		function confirmDeleteModal(message, onOk, opts) {
 			var localOnly = !!(opts && opts.localOnly);
-			var mask = smsEl('div', { 'class': 'mt5700-modal-mask' });
-			var box = smsEl('div', { 'class': 'mt5700-modal' });
+			var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
+			var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
 			var chk = smsEl('input', { type: 'checkbox' });
 
 			box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' }, message));
 			var optRow = smsEl('label', {
-				'class': 'mt5700-inline',
-				'style': 'margin:12px 0;cursor:pointer;'
+				'class': 'mt5700-inline mt5700-sms-opt-row'
 			}, [chk, smsEl('span', {}, '同时删除本地记录文件')]);
 			if (!localOnly) {
 				box.appendChild(optRow);
@@ -1354,15 +1399,71 @@ return L.view.extend({
 
 		/* 批量删除：勾选条目后按批下发，并可选同步删除本地归档 */
 		function batchDelete() {
-			var mask = smsEl('div', { 'class': 'mt5700-modal-mask' });
-			var box = smsEl('div', { 'class': 'mt5700-modal' });
-			var listEl = smsEl('div', { 'class': 'mt5700-agree-list' });
+			var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
+			var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+			var listEl = smsEl('div', { 'class': 'mt5700-agree-list mt5700-sms-modal-list' });
 			var checked = [];
 
 			box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' }, '批量删除短信'));
 
-			currentMessages().forEach(function (m) {
-				var row = smsEl('label', { 'class': 'mt5700-inline' });
+			var messages = currentMessages();
+			var pickBoxes = [];
+
+			/*
+			 * 全选条：吸在列表顶部，滚动时始终可点。
+			 * 只对「真的能删」的条目生效 —— 没有模组槽位、又不是本地归档的
+			 * 条目复选框是禁用的，全选不能把它们算进去。
+			 */
+			var selectAllChk = smsEl('input', { type: 'checkbox' });
+			selectAllChk.setAttribute('aria-label', '全选可删除的短信');
+			var selectAllCount = smsEl('span', {
+				'class': 'mt5700-sms-selectall-count'
+			}, '');
+			var selectAllRow = smsEl('label', { 'class': 'mt5700-sms-selectall' }, [
+				selectAllChk,
+				smsEl('span', { 'class': 'mt5700-sms-selectall-label' }, '全选'),
+				selectAllCount
+			]);
+
+			function selectablePicks() {
+				return pickBoxes.filter(function (p) { return !p.chk.disabled; });
+			}
+
+			function updatePickCount() {
+				var can = selectablePicks();
+				var selected = 0;
+				can.forEach(function (p) {
+					if (p.chk.checked) selected++;
+				});
+				selectAllCount.textContent = can.length
+					? '已选 ' + selected + ' / ' + can.length + ' 条'
+					: '没有可删除的短信';
+				selectAllChk.disabled = !can.length;
+				selectAllChk.checked = can.length > 0 && selected === can.length;
+				selectAllChk.indeterminate = selected > 0 && selected < can.length;
+			}
+
+			selectAllChk.addEventListener('change', function () {
+				var on = selectAllChk.checked;
+				selectablePicks().forEach(function (p) {
+					p.chk.checked = on;
+					var at = checked.indexOf(p.m);
+					if (on && at < 0) {
+						checked.push(p.m);
+					}
+					if (!on && at >= 0) {
+						checked.splice(at, 1);
+					}
+				});
+				updatePickCount();
+			});
+
+			if (messages.length) {
+				listEl.appendChild(selectAllRow);
+			}
+
+			messages.forEach(function (m) {
+				var row = smsEl('label', { 'class': 'mt5700-inline mt5700-sms-pick-row' });
 				var chk = smsEl('input', { type: 'checkbox' });
 				/*
 				 * 能不能删**只看有没有真实槽位**，不再因为「解析失败」就禁掉。
@@ -1376,6 +1477,7 @@ return L.view.extend({
 				if (typeof m.index !== 'number' && !m.archived) {
 					chk.disabled = true;
 				}
+				pickBoxes.push({ m: m, chk: chk });
 				chk.addEventListener('change', function () {
 					var idx = checked.indexOf(m);
 					if (chk.checked && idx < 0) {
@@ -1384,26 +1486,29 @@ return L.view.extend({
 					if (!chk.checked && idx >= 0) {
 						checked.splice(idx, 1);
 					}
+					updatePickCount();
 				});
 				row.appendChild(chk);
 
 				var label = (m.type === 'sent' ? '[发] ' : '[收] ')
 					+ (m.number || '未知号码') + '：';
 				label += m.error ? '短信解析失败：' + m.error : (m.content || '').slice(0, 30);
-				row.appendChild(smsEl('span', { 'class': 'mt5700-hint' }, label));
+				row.appendChild(smsEl('span', {
+					'class': 'mt5700-hint mt5700-sms-pick-text'
+				}, label));
 				listEl.appendChild(row);
 			});
 
-			if (!currentMessages().length) {
+			if (!messages.length) {
 				listEl.appendChild(Mt5700.empty('当前会话没有可删除的短信'));
 			}
+			updatePickCount();
 			box.appendChild(listEl);
 
 			/* 与单条删除口径一致的「同时删除本地记录文件」 */
 			var alsoLocalChk = smsEl('input', { type: 'checkbox' });
 			var optRow = smsEl('label', {
-				'class': 'mt5700-inline',
-				'style': 'margin:12px 0;cursor:pointer;'
+				'class': 'mt5700-inline mt5700-sms-opt-row'
 			}, [alsoLocalChk, smsEl('span', {}, '同时删除本地记录文件')]);
 			box.appendChild(optRow);
 
@@ -1621,37 +1726,24 @@ return L.view.extend({
 		/*
 		 * 把会话区高度定成「视口里剩下的那点地方」。
 		 *
-		 * 纯 CSS 算不出来：上方的导航栏、页签、hero 卡高度随主题和屏宽变，
-		 * 用 calc 写死常量必然在某些尺寸下超出去，页面就又能整体滚动了 ——
+		 * 纯 CSS 算不出来：上方的导航栏、页签高度随主题和屏宽变，用 calc
+		 * 写死常量必然在某些尺寸下超出去，页面就又能整体滚动了 ——
 		 * 那样「滚消息」变成了「滚网页」，输入框被推到很远。
 		 * 这里直接量一次 offsetTop，剩下的全给会话区，超出的部分由消息区自己滚。
+		 *
+		 * 注意：不要再用「文档溢出多少就扣多少」来自适应。OpenWrt 的
+		 * 「保存与应用」操作条、主题页脚都在会话区下方，扣溢出的结果就是
+		 * 它们越高、聊天窗越矮，手机上直接被压成一条缝。会话区始终占满
+		 * 视口剩余高度，操作条留在首屏之外，需要时整页滚一下就能看到。
 		 */
 		function fitHeight() {
 			var top = layout.getBoundingClientRect().top + window.pageYOffset;
-			/* 16px 底部留白，避免卡片贴着屏幕边缘 */
-			var avail = window.innerHeight - top - 16;
+			/* 8px 底部留白，避免卡片贴着屏幕边缘 */
+			var avail = window.innerHeight - top - 8;
 			if (avail < 320) {
 				avail = 320;      /* 极端矮屏：宁可整页滚，也不要把会话区压成一条缝 */
 			}
 			layout.style.height = avail + 'px';
-
-			/*
-			 * 再校几次。
-			 * 会话区上方是 hero（图片、字体撑开后还会变高），容器底部还有主题/
-			 * LuCI 页脚留下的空白 —— 这些都是量不准的，所以干脆量「实际溢出多少」，
-			 * 从会话区里扣掉，扣到整页不再滚动为止。
-			 */
-			for (var pass = 0; pass < 3; pass++) {
-				var over = document.documentElement.scrollHeight - window.innerHeight;
-				if (over <= 0) {
-					break;
-				}
-				var next = layout.getBoundingClientRect().height - over;
-				if (next < 320) {
-					break;      /* 再扣就压没了，宁可让整页滚一点 */
-				}
-				layout.style.height = next + 'px';
-			}
 		}
 
 		var refit = function () { fitHeight(); };
