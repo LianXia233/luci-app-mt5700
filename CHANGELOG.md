@@ -32,8 +32,9 @@
 
 ### r8 冗余代码清理 + 注释按实现订正
 
-> 全仓静态审查：死代码逐个 grep 到「零引用」才删，注释逐条和当前代码核对。除下方两处
-> P1 缺陷修复外**行为不变**——发现的口径分歧只写进注释、列为待决，不擅自改前端或推送的显示值。
+> 全仓静态审查：死代码逐个 grep 到「零引用」才删，注释逐条和当前代码核对。除下方**三处
+> 行为修复**（两处 P1 缺陷 + 一处 `fix(schedule)` 推送时刻一致性）外**行为不变**——
+> 发现的口径分歧只写进注释、列为待决，不擅自改前端或推送的显示值。
 
 - **refactor(web) 前端死函数清理**：`rpc.js` 的 `parseHexValue` / `formatSpeed` / `splitSpeed` / `signalColor` / `qciLabel` / `isUnsolicitedText` 六个函数（全仓只剩「定义 + 导出口」两处命中，含 tests 亦无引用）连同 `AtWs` 导出口一并删除；`logs.js` 的 `computeCategoryCounts` 同删（真正在用的是姊妹函数 `computeCategoryTotals`）。副带收益：速率格式化此后只有 `network_status.js` 的 `formatSpeedNumber` 一份实现
 - **refactor(web) `AtUci` 瘦身**：删 `uciCommit()`（自带注释就写着「与 uciSave 实现一致」，且全仓只有 `service.js` 调 `uciSave`）、`isDirty()`（零调用的取值器）与只声明从不使用的 `_dirtyFlush` 字段；删掉之后模块头「对外只暴露 uciSave 与 uciHasChanges」才与实际一致
@@ -60,6 +61,25 @@
 - **note(待决) urc 与 rpcserver 新增四项**：`task_status` / `task_cancel` / `task_list` 三个 RPC 方法 ucode 白名单不导出、前端零调用（但 127.0.0.1 直连可调用，故未删）；`memFull` / `store_stats.dir` / `updatedAtMs` / `fingerprint` / `archivedAtMs` / `totalLines` / `scope` / `freedBytes` / `touched` / `channel` 等一批响应键前端不消费；`memory_full_notified` 是单向闩锁（全仓无复位点，一个进程生命周期内「存储满」最多推一次）且该路径不向前端广播结构化事件；`notify.rs` 与 `qqpush.rs` 各有一份同构的三次重试 + 线性退避实现（改超时/退避必须两处同步）
 - **test**：`cargo check --all-targets` 无 error（剩上述 2 条 warning）；`cargo test` **285 passed / 0 failed / 2 ignored**（Windows 本机，Unix-only 用例不参与）；`rpc.js` / `logs.js` 通过语法校验
 - **chore(release) `PKG_RELEASE` 7 → 8**
+
+### r8 续：串口/基建/状态/ucode 层审查（第二批）
+
+> 同批方法：每条结论先由我自己 grep 或读码复核，再落地。本批原本全部行为不变；
+> 但审查中坐实一处**用户可见缺陷**（`usbCall` 硬超时），经确认后已按独立提交修复
+> （见下方 note(P1) 的「已修复」说明），因此本 PR 不再是纯行为不变——除这一处外
+> 其余仍是一律不变。加上第一段的 `usage_ctl` 与 `fix(schedule)`，全 PR 共三处行为变更。
+
+- **refactor(rust) 死代码**：`serialdetect.rs` 删除恒不可达的 `chosen.is_empty()` 回退分支（前一行刚 `extend(by_id)`，必非空）；`state.rs` 用 `#[cfg(test)]` 取代 `is_cacheable()` 上的 `#[allow(dead_code)]`（既然只有单测用，cfg(test) 才是事实），并去掉 `LoopState` 从未使用的 `derive(Default)`；`async_runtime.rs` 合并 `spawn()` 上方两句重复文档
+- **docs(rust) 注释按实现订正**：`async_runtime.rs` 模块头声称「小区扫频、锁频恢复、固件升级统一以 Task 提交后台」——实际只有扫频接入（锁频走 schedule 自循环、FOTA 由前端下发 `AT^FOTAOEMDL` 走 AT 队列），与同仓 `rpcserver.rs` 的说法互相矛盾；`main.rs`/`localtime.rs` 三处「必须在 spawn 任何线程之前调用」在 `#[tokio::main]` 下前提不成立（运行时线程已存在），改为「先于任何会读时间的任务与首条日志，靠启动顺序而非语言保证」；`state.rs` 的「十五个缓存键」实际是 23 条（改成不带数量，免得下次加键又过期）；`schedconfig.rs` 声称「uci 键名与 LuCI 界面完全一致」恰好相反（界面认 `AT+SCHED` 的 DTO 字段名，`schedule_` 前缀只对应 `config.rs` 读取侧）；串口探测的「候选集 + 800ms + 上限 10」**只属于本仓库 `serialdetect.rs`**，已补写进 `docs/sms-at-protocol.md` 的 §1.2（§1.1 讲的是实机 `/usr/bin/sendat`，两套独立实现、数值不可互抄）
+- **docs(transport,serial_linux) 一处「写了但没实现」的保护**：两处注释称写超时「由上层 send_command / RPC 写路径负责」，实际 `exec_locked` 的 `write_all` 发生在命令超时 `select!` **之前**，写本身无任何 timeout；fd 以 O_NONBLOCK + AsyncFd 打开，串口 wedged 时写会一直 poll。改为如实说明「目前任何一层都未实现」。顺带把 `SerialWriter` 的 `#[allow(dead_code)]` 从 struct 收窄到 `write_timeout` 单字段
+- **fix(P1，已修复) 自动清零日存不住**：ucode 的 `usage_ctl` 声明 `args: {action, day, _rid}` 并读 `getStr(a,'day')`，而 `rpc.js` 的 `L.rpc.declare` 写的是 `params: ['action','days']`——LuCI 按**声明名**映射位置参数，后端 `rpcserver.rs:428` 取 `params["day"]` 落空 → `monthly::normalize_day(0)` 夹成 **1**。用户设「每月 15 号清零」实际保存为 1 号，ucode 里「day 只在 set_reset_day 时带上」的注释也一直落空。修法在前端把 `'days'` 改 `'day'`（ucode 的 args 表才是这条 RPC 的权威签名，位置参数顺序不变）
+- **fix(P1，已修复) usbCall 的 6s 硬超时从未生效**：`fs.popen` 等价于 `sh -c "<整串>"`，而 `usbCall` 拼的是 `timeout 6 /bin/sh -c ` + script（**缺单引号**）。script 是 `echo USB_SCAN; for x in …; done` 多语句，于是内层 sh 只执行了 `echo`（多吐一空行），真正的 sysfs 扫描在**没有 timeout 包裹**的外层 shell 里跑——注释声称的「子进程卡住会拖死 rpcd 上下文」保护并不存在。按同文件 `detectUsbNetdev` 的既有正确写法补单引号；已核对 script 正文无单引号，下游只按 `USB=` 前缀取行，消失的标记行与空行不影响解析
+- **note(待实机确认) 上述两条 P1 的验收动作**：清零日设为 15 后 `uci get at-webserver.config.usage_reset_day` 应为 15（改前会是 1）；模组设置页的 USB 速率仍正常显示。本机无 ucode 解释器，`.uc` 改动无法静态校验语法，也解释了为何这两条不能只靠 `cargo test` 背书
+- **note(clippy 已核查为不动) 串口探测的 is_final_line 与 atclient::is_terminator**：判据几乎相同但**有意不同**（前者多认 `NO CARRIER`、前缀不带冒号），合并会改变探测行为，列为待决而非收敛
+- **note(待决) ucode 其余四项**：`nc` 预算 12s/50s 均比后端外层 13s/51s **小 1 秒**，注释里的算式（8+2+3=13 却取 12）与结论自相矛盾；`detectUsbNetdev` 只跳 `lo|br-*` 而 init.d 还跳 `eth0|eth1`，板载 USB 网卡机型上两边数的不是同一张卡；`strIndexOf` 与内建 `index()` 重复且同文件对 `index()` 可用性给出一正一反两处结论，933 行更把数组传给 `index()`，需实机 `ucode -e 'print(index(["a","b"],"b"))'` 定性；`netrate` 的 `device`、各方法的 `_rid` 参数前端从不传入（恒走 fallback），属对外契约保留但应注释点明
+- **test(限制说明) 本机校验盲区**：`serial_linux.rs` 与 `serialdetect.rs` 是 `cfg(target_os = "linux")` 模块，Windows 上的 `cargo check/test` **不编译它们**（musl target 因 `ring` 的 build script 需要 C 工具链而无法使用）。本批对这两个文件只做了「注释 + 属性位置 + 删除恒假分支」三类不可能引入编译错误的改动，但仍需在 Linux/CI 复验
+- **test(Linux 复核，补上本机盲区)**：`cargo check --all-targets` / `cargo test` **300 passed / 0 failed / 2 ignored**，与 main 基线**逐项一致**（Windows 本机 285 系 Unix-only 用例未参与所致）；`cargo clippy --all-targets` 相对 main **净减 9 条、新增 0 条**；`node --check` 与 `tests/` 8 个 JS 用例（179 项断言）全通过；`usbCall` 超时用等价 shell 场景实测复现（旧写法 8s 不被掐断 → 新写法 2s 被掐断、exit 124）
+- **docs(review) 审查后修正三处**：① `docs/sms-at-protocol.md` §1.1「找端口」描述的是**实机 `/usr/bin/sendat`**（厂商二进制，取证无法从仓库复原），此前误按本仓库 `serialdetect.rs` 的参数改写，已回滚原文；本仓库的候选集 / 800ms / 上限 10 改记入 §1.2 并链接常量；② `README.md` 安装示例随 `PKG_RELEASE` 同步到 `-r8`；③ `signalgrade.rs` 模块头补记前端 `SIGNAL_TIERS`（4 档、阈值 -110/-95/-80、名 较差/一般/良好/极佳）与后端 `Level::caption()` 前四档**同名不同阈值**，是最易再次漂移的一处
 
 ## v1.28.0 (2026-10-23)
 
@@ -1376,19 +1396,3 @@ v1.18.1 的看板娘移动端排版在**源码预览下正常**，但装到实�
 ### 变更
 
 - PKG_VERSION 1.12.2 → 1.12.3。
-
-### r8 续：串口/基建/状态/ucode 层审查（第二批）
-
-> 同批方法：每条结论先由我自己 grep 或读码复核，再落地。本批原本全部行为不变；
-> 但审查中坐实两处**用户可见缺陷**，经确认后已按独立提交修复（见下方两条 note(P1)
-> 的「已修复」说明），因此本 PR 不再是纯行为不变——除这两处外其余仍是一律不变。
-
-- **refactor(rust) 死代码**：`serialdetect.rs` 删除恒不可达的 `chosen.is_empty()` 回退分支（前一行刚 `extend(by_id)`，必非空）；`state.rs` 用 `#[cfg(test)]` 取代 `is_cacheable()` 上的 `#[allow(dead_code)]`（既然只有单测用，cfg(test) 才是事实），并去掉 `LoopState` 从未使用的 `derive(Default)`；`async_runtime.rs` 合并 `spawn()` 上方两句重复文档
-- **docs(rust) 注释按实现订正**：`async_runtime.rs` 模块头声称「小区扫频、锁频恢复、固件升级统一以 Task 提交后台」——实际只有扫频接入（锁频走 schedule 自循环、FOTA 由前端下发 `AT^FOTAOEMDL` 走 AT 队列），与同仓 `rpcserver.rs` 的说法互相矛盾；`main.rs`/`localtime.rs` 三处「必须在 spawn 任何线程之前调用」在 `#[tokio::main]` 下前提不成立（运行时线程已存在），改为「先于任何会读时间的任务与首条日志，靠启动顺序而非语言保证」；`state.rs` 的「十五个缓存键」实际是 23 条（改成不带数量，免得下次加键又过期）；`schedconfig.rs` 声称「uci 键名与 LuCI 界面完全一致」恰好相反（界面认 `AT+SCHED` 的 DTO 字段名，`schedule_` 前缀只对应 `config.rs` 读取侧）；`docs/sms-at-protocol.md` 的串口探测「1.2s 超时、只遍历 ttyUSB/ttyACM」订正为 800ms、五个前缀、上限 10 个
-- **docs(transport,serial_linux) 一处「写了但没实现」的保护**：两处注释称写超时「由上层 send_command / RPC 写路径负责」，实际 `exec_locked` 的 `write_all` 发生在命令超时 `select!` **之前**，写本身无任何 timeout；fd 以 O_NONBLOCK + AsyncFd 打开，串口 wedged 时写会一直 poll。改为如实说明「目前任何一层都未实现」。顺带把 `SerialWriter` 的 `#[allow(dead_code)]` 从 struct 收窄到 `write_timeout` 单字段
-- **fix(P1，已修复) 自动清零日存不住**：ucode 的 `usage_ctl` 声明 `args: {action, day, _rid}` 并读 `getStr(a,'day')`，而 `rpc.js` 的 `L.rpc.declare` 写的是 `params: ['action','days']`——LuCI 按**声明名**映射位置参数，后端 `rpcserver.rs:428` 取 `params["day"]` 落空 → `monthly::normalize_day(0)` 夹成 **1**。用户设「每月 15 号清零」实际保存为 1 号，ucode 里「day 只在 set_reset_day 时带上」的注释也一直落空。修法在前端把 `'days'` 改 `'day'`（ucode 的 args 表才是这条 RPC 的权威签名，位置参数顺序不变）
-- **fix(P1，已修复) usbCall 的 6s 硬超时从未生效**：`fs.popen` 等价于 `sh -c "<整串>"`，而 `usbCall` 拼的是 `timeout 6 /bin/sh -c ` + script（**缺单引号**）。script 是 `echo USB_SCAN; for x in …; done` 多语句，于是内层 sh 只执行了 `echo`（多吐一空行），真正的 sysfs 扫描在**没有 timeout 包裹**的外层 shell 里跑——注释声称的「子进程卡住会拖死 rpcd 上下文」保护并不存在。按同文件 `detectUsbNetdev` 的既有正确写法补单引号；已核对 script 正文无单引号，下游只按 `USB=` 前缀取行，消失的标记行与空行不影响解析
-- **note(待实机确认) 上述两条 P1 的验收动作**：清零日设为 15 后 `uci get at-webserver.config.usage_reset_day` 应为 15（改前会是 1）；模组设置页的 USB 速率仍正常显示。本机无 ucode 解释器，`.uc` 改动无法静态校验语法，也解释了为何这两条不能只靠 `cargo test` 背书
-- **note(clippy 已核查为不动) 串口探测的 is_final_line 与 atclient::is_terminator**：判据几乎相同但**有意不同**（前者多认 `NO CARRIER`、前缀不带冒号），合并会改变探测行为，列为待决而非收敛
-- **note(待决) ucode 其余四项**：`nc` 预算 12s/50s 均比后端外层 13s/51s **小 1 秒**，注释里的算式（8+2+3=13 却取 12）与结论自相矛盾；`detectUsbNetdev` 只跳 `lo|br-*` 而 init.d 还跳 `eth0|eth1`，板载 USB 网卡机型上两边数的不是同一张卡；`strIndexOf` 与内建 `index()` 重复且同文件对 `index()` 可用性给出一正一反两处结论，933 行更把数组传给 `index()`，需实机 `ucode -e 'print(index(["a","b"],"b"))'` 定性；`netrate` 的 `device`、各方法的 `_rid` 参数前端从不传入（恒走 fallback），属对外契约保留但应注释点明
-- **test(限制说明) 本机校验盲区**：`serial_linux.rs` 与 `serialdetect.rs` 是 `cfg(target_os = "linux")` 模块，Windows 上的 `cargo check/test` **不编译它们**（musl target 因 `ring` 的 build script 需要 C 工具链而无法使用）。本批对这两个文件只做了「注释 + 属性位置 + 删除恒假分支」三类不可能引入编译错误的改动，但仍需在 Linux/CI 复验
