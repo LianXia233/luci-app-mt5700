@@ -376,7 +376,18 @@ pub struct Config {
     /// 设置跟着一起丢会让用户每次重启后都要重填。
     /// 日历语义（大小月 / 闰年 / 跨年）见 [`crate::monthly`]。
     pub usage_reset_day: u32,
+    /// 短信默认存储区（SM / ME），启动时兜底应用；界面「保存存储位置」也会写回。
+    pub sms_storage: String,
 }
+
+/// 短信默认存储区：SM=SIM 卡（40 槽位级）、ME=模组 FLASH（300 槽位级）。
+///
+/// 默认 ME 的理由：SM 槽位少（实测 40），长短信（5 片）几条就满，
+/// 满了之后模组会把后续分片溢出到另一个存储区、把一条短信拆成两截；
+/// ME 300 槽位按日常量级够用一个多月。模组 CPMS 选择虽掉电保存，
+/// 但换卡 / 刷固件 / 模组复位后会回 SM，所以启动时按本配置兜底重放
+/// （见 `SmsService::apply_default_storage`）。
+pub const DEFAULT_SMS_STORAGE: &str = "ME";
 
 pub fn default_config() -> Config {
     Config {
@@ -450,6 +461,16 @@ pub fn default_config() -> Config {
             day_nr: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
         },
         usage_reset_day: crate::monthly::DEFAULT_RESET_DAY,
+        sms_storage: DEFAULT_SMS_STORAGE.to_string(),
+    }
+}
+
+/// 归一化存储区配置值：只认 SM / ME（不区分大小写），其余一律回落默认 ME。
+/// 填错说明是误填，按默认走比把错误值下发给模组（必然被拒）更可预期。
+pub fn normalize_sms_storage(raw: &str) -> String {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "SM" | "ME" => raw.trim().to_ascii_uppercase(),
+        _ => DEFAULT_SMS_STORAGE.to_string(),
     }
 }
 
@@ -757,6 +778,9 @@ pub async fn load_config() -> Config {
     // 使用量自动清零日：每月几号，默认 1 号。
     // 只有 1~31 之间的值才被采纳，其余（0 / 负数 / 大于 31 / 非数字）
     // 一律回落默认 —— 填了「不存在的日期」说明是误填，按默认走比夹到月末更可预期。
+    // 短信默认存储区：SM / ME，默认 ME（槽位大、长短信不会被拆到两个存储区）。
+    cfg.sms_storage = normalize_sms_storage(&values.str("sms_storage", DEFAULT_SMS_STORAGE));
+
     let raw_day = values.int("usage_reset_day", crate::monthly::DEFAULT_RESET_DAY as i64);
     cfg.usage_reset_day = if (crate::monthly::MIN_RESET_DAY as i64..=crate::monthly::MAX_RESET_DAY as i64)
         .contains(&raw_day)
@@ -771,6 +795,17 @@ pub async fn load_config() -> Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sms_storage_normalizes_to_sm_or_me() {
+        // 只认 SM / ME（不区分大小写），误填一律回落默认 ME
+        assert_eq!(normalize_sms_storage("ME"), "ME");
+        assert_eq!(normalize_sms_storage("me"), "ME");
+        assert_eq!(normalize_sms_storage("SM"), "SM");
+        assert_eq!(normalize_sms_storage(" sm "), "SM");
+        assert_eq!(normalize_sms_storage("MT"), "ME", "手册未定义的值回落默认");
+        assert_eq!(normalize_sms_storage(""), "ME");
+    }
+
     use super::*;
 
     #[test]

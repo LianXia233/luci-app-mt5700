@@ -235,6 +235,38 @@ async fn run(verbose: bool) -> Result<(), String> {
         let ctx = ctx_rx.clone();
         async move { usage.run(ctx).await }
     });
+    // 默认存储区兜底：UCI sms_storage（默认 ME）。等 AT 通道就绪后读一次实际
+    // 容量，与配置不符才下发（换卡 / 模组复位回 SM 时拉回配置值）。
+    let sms_storage_task = {
+        let sms = sms.clone();
+        let client = client.clone();
+        let want = cfg.sms_storage.clone();
+        let mut ctx = ctx_rx.clone();
+        tokio::spawn(async move {
+            let mut waited = Duration::ZERO;
+            while !client.connected() {
+                if waited >= SMS_STORAGE_WAIT_MAX {
+                    log_warn!(
+                        "AT 通道 {}s 未就绪，跳过默认存储区应用（{}）",
+                        SMS_STORAGE_WAIT_MAX.as_secs(),
+                        want
+                    );
+                    return;
+                }
+                tokio::select! {
+                    _ = ctx.changed() => return,
+                    _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+                }
+                waited += Duration::from_secs(3);
+            }
+            match sms.apply_default_storage(&want).await {
+                Ok(true) => log_info!("默认存储区已应用：{}", want),
+                Ok(false) => log_debug!("存储区已是 {}，无需切换", want),
+                Err(e) => log_warn!("默认存储区应用失败（{}）：{}", want, e),
+            }
+        })
+    };
+
     // 后台任务生命周期兜底：定期淘汰已结束的旧任务，避免无界增长。
     let task_cleanup_task = {
         let tasks = tasks.clone();
@@ -282,6 +314,7 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = usage_task.await;
         let _ = nettime_task.await;
         let _ = task_cleanup_task.await;
+        let _ = sms_storage_task.await;
         let _ = serve_handle.await;
     })
     .await;
@@ -290,6 +323,9 @@ async fn run(verbose: bool) -> Result<(), String> {
     log_info!("服务已停止");
     Ok(())
 }
+
+/// 默认存储区兜底任务等 AT 通道就绪的上限（弱信号 / 模组慢启动时别干等）。
+const SMS_STORAGE_WAIT_MAX: Duration = Duration::from_secs(180);
 
 /// QQ 绑定模式任务：监听 → 写 UCI → 热替换通道。
 async fn run_qq_bind(

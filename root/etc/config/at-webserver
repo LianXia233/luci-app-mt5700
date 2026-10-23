@@ -86,6 +86,12 @@ option dns_exclusive '1'
 	option notify_sms '1'
 	option notify_call '1'
 	option notify_memory_full '1'
+
+	# 短信默认存储区：SM=SIM 卡（槽位少，实测 40）、ME=模组 FLASH（实测 300）。
+	# 默认 ME：SM 满后模组会把长短信后续分片溢出到另一个存储区，把一条短信拆成两截。
+	# 启动时若模组实际存储区与本值不符（换卡/模组复位回 SM）会自动切回；
+	# 界面「短信设置 → 存储位置」保存时也会写回本值。
+	option sms_storage 'ME'
 	option notify_signal '1'
 
 	# 定时推送间隔（分钟）：到点就推送一次「当前实际情况」（信号读数 + 短信存储占用），

@@ -249,6 +249,8 @@ return L.view.extend({
 		/*
 		 * 通道状态徽章（issue #23 改动点 6）：优先模式生效期间告诉用户
 		 * 「后台暂停、剩余 Ns」，其它页面的数据转圈时有明确原因可看。
+		 * 由 statusTicker 每秒驱动；续租成功会跳回 TTL——租约确实被延长，
+		 * 这样显示是诚实的，不是做假的平滑倒数。
 		 */
 		var channelStatus = smsEl('span', { 'class': 'mt5700-sms-channel-status' }, '');
 		chatChannel.appendChild(channelStatus);
@@ -1669,6 +1671,8 @@ return L.view.extend({
 
 		var sessionId = 0;
 		var heartbeat = null;
+		/* 徽章秒表：1s 粒度刷新剩余租约（原来只在事件点刷新，看起来钉死不动） */
+		var statusTicker = null;
 
 		function openSession() {
 			/*
@@ -1687,6 +1691,11 @@ return L.view.extend({
 				sessionId = res.result.session_id || 0;
 				lastRenewAt = Date.now();
 				refreshChannelStatus();
+				/* 秒表：每秒刷新一次剩余租约，让倒计时真的在走 */
+				if (statusTicker) {
+					clearInterval(statusTicker);
+				}
+				statusTicker = setInterval(refreshChannelStatus, 1000);
 				/*
 				 * 心跳续期：页面还在就一直占着；后端另有租约上限兜底，
 				 * 即便这里的心跳因为浏览器休眠停了，也会自动释放。
@@ -1720,6 +1729,10 @@ return L.view.extend({
 			if (heartbeat) {
 				clearInterval(heartbeat);
 				heartbeat = null;
+			}
+			if (statusTicker) {
+				clearInterval(statusTicker);
+				statusTicker = null;
 			}
 			if (!sessionId) {
 				return;
