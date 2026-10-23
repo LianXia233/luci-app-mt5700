@@ -1269,7 +1269,6 @@ fn parse_storage(lines: &[String]) -> Option<StorageInfo> {
     None
 }
 
-/// 日志里只放正文的简短预览：短信正文可能很长，整条打进日志既刷屏又泄隐私。
 /*
  * 构造一条「已发送」的归档记录。
  *
@@ -1324,6 +1323,7 @@ pub(crate) fn received_record(
     }
 }
 
+/// 日志里只放正文的简短预览：短信正文可能很长，整条打进日志既刷屏又泄隐私。
 fn text_preview(s: &str) -> String {
     let n = s.chars().count();
     let head: String = s.chars().take(20).collect();
