@@ -572,8 +572,6 @@ pub async fn uci_values() -> Result<UciReader, String> {
     Ok(UciReader(values))
 }
 
-/// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
-
 /// 解析定时推送间隔：UCI 以**分钟**为单位，内部换算成 [`Duration`]。
 ///
 /// 单独成函数的理由：`load_config()` 自己会去调 `uci show`，单测无法注入值；
@@ -613,6 +611,7 @@ fn timer_interval_from(values: &UciReader) -> Duration {
     Duration::from_secs(minutes.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN) * 60)
 }
 
+/// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
 pub async fn load_config() -> Config {
     let mut cfg = default_config();
     let values = match uci_values().await {

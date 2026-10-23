@@ -401,8 +401,6 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    /// 一天 24 小时的分钟数，仅测试断言用。
-
     /// 生效偏移的秒数（东为正）。生产代码不需要它，故只活在测试里。
     fn offset_secs() -> i32 {
         offset().local_minus_utc()
