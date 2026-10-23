@@ -111,9 +111,15 @@ struct QqToken {
 }
 
 impl QqSender {
-    /// 由配置构造；AppID/Secret/目标 ID 任一为空，或目标类型是 "bind"
-    /// （绑定模式由 qqbind 模块处理，完成后经 set_qq 热替换）时返回 None。
+    /// 由配置构造；开关关闭、AppID/Secret/目标 ID 任一为空，或目标类型是
+    /// "bind"（绑定模式由 qqbind 模块处理，完成后经 set_qq 热替换）时返回 None。
+    ///
+    /// `enabled` 是独立于企业微信的 QQ 推送总开关（**默认关闭**）：关掉后
+    /// QQ 通道整体停用，企业微信不受影响，反之亦然。
     pub fn from_config(cfg: &QqNotifyConfig) -> Option<Self> {
+        if !cfg.enabled {
+            return None;
+        }
         let app_id = cfg.app_id.trim().to_string();
         let app_secret = cfg.app_secret.trim().to_string();
         let target_id = cfg.target_id.trim().to_string();
@@ -656,6 +662,7 @@ mod tests {
 
     fn qq_cfg(target_type: &str) -> QqNotifyConfig {
         QqNotifyConfig {
+            enabled: true,
             app_id: "111999".into(),
             app_secret: "secret".into(),
             target_type: target_type.into(),
@@ -686,6 +693,16 @@ mod tests {
             sender_of(" nonsense ").message_url(),
             sender_of("group").message_url()
         );
+    }
+
+    #[test]
+    fn qq_sender_respects_enabled_switch() {
+        // 开关关闭 → 不构造发送器（与企业微信开关互不影响）
+        let off = QqNotifyConfig { enabled: false, ..qq_cfg("c2c") };
+        assert!(QqSender::from_config(&off).is_none(), "qq_enabled=0 时不应构造发送器");
+        // 显式开启 + 凭据齐全才构造（默认关闭，需用户主动打开）
+        let on = QqNotifyConfig { enabled: true, ..qq_cfg("c2c") };
+        assert!(QqSender::from_config(&on).is_some(), "显式开启应能构造");
     }
 
     #[test]
@@ -897,6 +914,7 @@ mod tests {
         let target = std::env::var("QQ_BOT_TARGET").expect("需要环境变量 QQ_BOT_TARGET（type:id）");
         let (t, id) = target.split_once(':').expect("目标格式应为 type:id");
         let sender = QqSender::from_config(&QqNotifyConfig {
+            enabled: true,
             app_id,
             app_secret: secret,
             target_type: t.into(),

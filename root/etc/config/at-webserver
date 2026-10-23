@@ -51,6 +51,10 @@ option dns_exclusive '1'
 	option cellscan_timeout '180'           # 一次 ^CELLSCAN 全网扫频允许运行的秒数（下限 10）
 
 	# 通知配置
+	# 推送通道独立开关（v1.28.0）：两者互不影响，均默认关闭。
+	# 企业微信：开关 + WebHook 地址都满足才发；QQ：开关 + 凭据齐全才发。
+	option wechat_enabled '0'          # 企业微信推送开关（0=关，1=开）
+	option qq_enabled '0'              # QQ 机器人推送开关（0=关，1=开）
 	option wechat_webhook ''
 	# QQ 机器人推送（官方 API v2）。AppID + AppSecret + 目标 ID 全部填写后启用；
 	# AppSecret 建议留空并改用环境变量 QQ_BOT_APP_SECRET（AppID 可用 QQ_BOT_APP_ID）注入，

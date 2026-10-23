@@ -547,6 +547,10 @@ return L.view.extend({
 		notifBody.appendChild(Mt5700.formGroup('短信存储满通知', notifyMem.wrap));
 
 		var webhookInput = Mt5700.input('text', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx', '');
+		var wechatChk = mkCheck();
+		notifBody.appendChild(Mt5700.formGroup('企业微信推送', wechatChk.wrap,
+			'独立开关，默认关闭。开启后事件通知才会推送到企业微信机器人；'
+			+ '与 QQ 推送互不影响，两者各自单独控制。'));
 		notifBody.appendChild(Mt5700.formGroup('企业微信 WebHook', webhookInput, '通知将推送到该 WebHook 地址'));
 
 		/* 定时推送间隔。
@@ -685,6 +689,10 @@ return L.view.extend({
 		], 'group');
 		var qqBindInput = Mt5700.input('text', '你的 QQ 号（仅作绑定标签）', '');
 		var qqTargetIdInput = Mt5700.input('text', 'group_openid / 用户 openid / channel_id', '');
+		var qqChk = mkCheck();
+		notifBody.appendChild(Mt5700.formGroup('QQ 推送', qqChk.wrap,
+			'独立开关，默认关闭。开启后事件通知才会推送到 QQ 机器人；'
+			+ '与企业微信推送互不影响，两者各自单独控制。'));
 		notifBody.appendChild(Mt5700.formGroup('QQ 机器人 AppID', qqAppIdInput, '也可用环境变量 QQ_BOT_APP_ID 覆盖'));
 		notifBody.appendChild(Mt5700.formGroup('QQ 机器人 AppSecret', qqSecretInput, '建议留空并经环境变量 QQ_BOT_APP_SECRET 注入，避免凭据落盘 UCI'));
 		notifBody.appendChild(Mt5700.formGroup('QQ 推送目标类型', qqTargetSel, '选「绑定」：保存并应用后，用你的 QQ 给机器人发一条消息即自动完成绑定'));
@@ -761,8 +769,9 @@ return L.view.extend({
 			testBtn.disabled = true;
 			testStatus.textContent = '正在发送测试通知…';
 			var channels = [];
-			if (String(get('wechat_webhook', '')) !== '') channels.push('wechat');
-			if (String(get('qq_target_type', '')) === 'bind' || String(get('qq_app_id', '')) !== '') channels.push('qq');
+			/* 通道可见性跟随两个独立开关：开关关掉时对应通道不参与测试 */
+			if (wechatChk.input.checked && String(get('wechat_webhook', '')) !== '') channels.push('wechat');
+			if (qqChk.input.checked && (String(get('qq_target_type', '')) === 'bind' || String(get('qq_app_id', '')) !== '')) channels.push('qq');
 			if (channels.length === 0) {
 				testStatus.textContent = '没有已启用的推送通道（先填写企业微信 WebHook 或 QQ 配置并保存）';
 				testBtn.disabled = false;
@@ -1037,7 +1046,9 @@ return L.view.extend({
 		notifySms.input.checked = get('notify_sms', '1') === '1';
 		notifySignal.input.checked = get('notify_signal', '1') === '1';
 		notifyMem.input.checked = get('notify_memory_full', '1') === '1';
+		wechatChk.input.checked = get('wechat_enabled', '0') === '1';
 		webhookInput.value = String(get('wechat_webhook', ''));
+		qqChk.input.checked = get('qq_enabled', '0') === '1';
 		qqAppIdInput.value = String(get('qq_app_id', ''));
 		qqSecretInput.value = String(get('qq_app_secret', ''));
 		qqTargetSel.value = String(get('qq_target_type', 'group'));
@@ -1133,7 +1144,9 @@ return L.view.extend({
 			set('notify_sms', notifySms.input.checked ? '1' : '0');
 			set('notify_signal', notifySignal.input.checked ? '1' : '0');
 			set('notify_memory_full', notifyMem.input.checked ? '1' : '0');
+			set('wechat_enabled', wechatChk.input.checked ? '1' : '0');
 			set('wechat_webhook', webhookInput.value.trim());
+			set('qq_enabled', qqChk.input.checked ? '1' : '0');
 			set('qq_app_id', qqAppIdInput.value.trim());
 			set('qq_app_secret', qqSecretInput.value.trim());
 			set('qq_target_type', qqTargetSel.value);
