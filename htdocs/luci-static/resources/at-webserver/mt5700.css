@@ -3928,8 +3928,14 @@ select.cbi-input-select:focus {
   gap: 12px !important;
 }
 
+/*
+ * 空态立绘（小吱-喜欢，1000x1000 方图，140px 注入见 mt5700.js api.empty）。
+ * 保留原有紫色投影，补一个轻浮动画——与 mt5700-loading 的呼吸节奏
+ * 区分开，空态是「等人」而不是「在转」。
+ */
 .mt-anime-empty-svg {
   filter: drop-shadow(0 4px 10px rgba(139, 92, 246, 0.15)) !important;
+  animation: mt-anim-float 4s ease-in-out infinite alternate;
 }
 
 .mt5700-empty-text {
@@ -5544,6 +5550,18 @@ select option {
   gap: 6px;
   color: #8a98a9;
   font-size: 12px;
+}
+
+/* 短信优先模式状态徽章（issue #23）：生效期间提示后台暂停与剩余租约时间 */
+.mt5700-sms-channel-status {
+  margin-left: 2px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c5cd6;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .mt5700-sms-dot {

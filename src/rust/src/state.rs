@@ -122,6 +122,14 @@ impl StateCache {
             return Err("模组正忙（长命令进行中），暂不刷新缓存".into());
         }
 
+        // 短信优先模式生效：与长命令避让同一范式，直接跳过本轮（issue #23）。
+        // 缓存继续显示上一轮数据，下一轮刷新补上；刷新 worker 不再被白占
+        // （旧实现每个缓存键各占一个 worker 干等 30s，日志里 6 条
+        //  「通道已被占用 30s」正是这么来的）。
+        if self.client.sms_mode_active().await {
+            return Err("模组正忙（短信操作进行中），本轮跳过缓存刷新".into());
+        }
+
         let resp = self
             .client
             // 后台缓存刷新：Low 优先级，绝不抢占用户终端的 High 与状态查询的 Normal。

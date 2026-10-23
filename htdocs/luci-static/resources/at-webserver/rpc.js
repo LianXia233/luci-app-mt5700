@@ -464,7 +464,7 @@ ATClient.prototype.handlePush = function (ev) {
  * 默认值与 ucode 的 nc 硬超时（12s）配套，不能全局调大 —— 那样后端真挂掉时
  * 每条命令都要白等更久，整页的失败反馈会变得很迟钝。
  */
-ATClient.prototype.sendCommand = function (command, timeoutMs) {
+ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
 	var self = this;
 	this.commandQueue = this.commandQueue.then(function () {
 		/*
@@ -518,6 +518,19 @@ ATClient.prototype.sendCommand = function (command, timeoutMs) {
 				if (resp.cause === 'circuit-open') {
 					self.markBackendDown('circuit-open', resp.error);
 				}
+				/*
+				 * 短信优先模式占用（后端 sms_busy: 前缀，issue #23）：
+				 * 2s 退避后自动重试一次，不把「请稍后重试」抛给用户，
+				 * 也不计入熔断 —— 这不是通道故障，是短信中心正在活动。
+				 * 重试排在同一条命令队列里，顺序不乱。
+				 */
+				if (!retried && typeof resp.error === 'string' && resp.error.indexOf('sms_busy:') === 0) {
+					return new Promise(function (resolve) {
+						setTimeout(function () {
+							resolve(self.sendCommand(command, timeoutMs, true));
+						}, 2000);
+					});
+				}
 				self.noteCommandFailure(resp.cause);
 				return { success: false, error: resp.error || '命令执行失败', cause: resp.cause };
 			}
@@ -568,7 +581,7 @@ var SMS_ACTION_TIMEOUT_MS = {
  * 后端的事务锁负责，前端再排一次只会让「后端已经在跑」的请求被额外拖延。
  * 但会尊重 AT 通道的整体不可用/熔断状态，后端挂掉时不会白白等满预算。
  */
-ATClient.prototype.sms = function (action, params) {
+ATClient.prototype.sms = function (action, params, retried) {
 	var self = this;
 	params = params || {};
 	if (self.state === 'degraded' || self.state === 'error' || self.state === 'disconnected') {
@@ -614,6 +627,14 @@ ATClient.prototype.sms = function (action, params) {
 			if (resp.success === false) {
 				if (resp.cause === 'circuit-open') {
 					self.markBackendDown('circuit-open', resp.error);
+				}
+				/* 短信优先模式占用：2s 退避自动重试一次（issue #23），不计熔断 */
+				if (!retried && typeof resp.error === 'string' && resp.error.indexOf('sms_busy:') === 0) {
+					return new Promise(function (resolve) {
+						setTimeout(function () {
+							resolve(self.sms(action, params, true));
+						}, 2000);
+					});
 				}
 				self.noteCommandFailure(resp.cause);
 				return { success: false, error: resp.error || '短信操作失败', cause: resp.cause };
@@ -1394,7 +1415,7 @@ function parseHFREQINFO(data) {
  *   <NB_PCI>,<NB_ARFCN>,<NB_RSRP>,<NB_SINR>,
  *   <NB_SSBID0>,<NB_ID0_RSRP>, ... 共 4 组（按 Beam 能量排序的前 4 个）
  *
- * 实测样例（192.168.88.1，SA 驻网）：
+ * 实测样例（内网测试机，SA 驻网）：
  *   ^NRSSBID: 504990,0000000c2840c002,128,-64,24,-1,
  *             1,-62,0,-63,2,-80,3,-81,4,-79,5,-78,6,-81,255,32767,
  *             1,643,504990,-66,24,7,-62,6,-75,5,-77,4,-78

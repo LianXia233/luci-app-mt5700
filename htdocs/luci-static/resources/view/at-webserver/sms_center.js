@@ -29,8 +29,16 @@
  */
 
 /* 前台短信模式的心跳间隔：必须明显小于后端租约（90s），否则会被判为已离开 */
-var SMS_SESSION_TTL_MS = 90000;
-var SMS_SESSION_HEARTBEAT_MS = 30000;
+/*
+ * 会话租约 TTL 与心跳（issue #23）。
+ *
+ * 原值 TTL 90s / 心跳 30s：页面崩溃或忘记释放时，其它页面要等租约自然
+ * 过期（最长 90s）才能恢复，叠加旧版「一刀切等 30s」就是整页卡死。
+ * 现与后端 SMS_MODE_LEASE 对齐为 TTL 30s / 心跳 10s —— 续租粒度更细，
+ * 正常使用无感，异常场景最长阻塞 90s → 30s。
+ */
+var SMS_SESSION_TTL_MS = 30000;
+var SMS_SESSION_HEARTBEAT_MS = 10000;
 
 /*
  * 批量删除每批的槽位数。
@@ -238,6 +246,21 @@ return L.view.extend({
 			smsEl('span', { 'class': 'mt5700-sms-dot online' }),
 			smsEl('span', {}, '短信')
 		]);
+		/*
+		 * 通道状态徽章（issue #23 改动点 6）：优先模式生效期间告诉用户
+		 * 「后台暂停、剩余 Ns」，其它页面的数据转圈时有明确原因可看。
+		 */
+		var channelStatus = smsEl('span', { 'class': 'mt5700-sms-channel-status' }, '');
+		chatChannel.appendChild(channelStatus);
+		var lastRenewAt = 0;
+		function refreshChannelStatus() {
+			if (!sessionId) {
+				channelStatus.textContent = '';
+				return;
+			}
+			var left = Math.max(0, Math.ceil((SMS_SESSION_TTL_MS - (Date.now() - lastRenewAt)) / 1000));
+			channelStatus.textContent = '优先模式生效中 · 后台暂停（剩余 ' + left + 's）';
+		}
 
 		var chatHead = smsEl('div', { 'class': 'mt5700-sms-chat-head' }, [
 			backBtn,
@@ -1648,11 +1671,22 @@ return L.view.extend({
 		var heartbeat = null;
 
 		function openSession() {
+			/*
+			 * 已有会话且心跳在跑：不重复开。
+			 * visibilitychange 的 visible 分支与初始化的竞态曾导致
+			 * 「会话 8 已释放 → 0.4s 后会话 9 上线」的 churn ——
+			 * 模式被反复开关，后台轮询刚恢复又被暂停。
+			 */
+			if (sessionId && heartbeat) {
+				return;
+			}
 			AtWs.client.sms('session_open', { ttl_ms: SMS_SESSION_TTL_MS }).then(function (res) {
 				if (!res.success || !res.result) {
 					return;
 				}
 				sessionId = res.result.session_id || 0;
+				lastRenewAt = Date.now();
+				refreshChannelStatus();
 				/*
 				 * 心跳续期：页面还在就一直占着；后端另有租约上限兜底，
 				 * 即便这里的心跳因为浏览器休眠停了，也会自动释放。
@@ -1671,7 +1705,11 @@ return L.view.extend({
 						/* 续不上（租约已被自动回收）→ 重新申请，不要静默失效 */
 						if (!r.success || (r.result && r.result.renewed === false)) {
 							sessionId = 0;
+							refreshChannelStatus();
 							openSession();
+						} else {
+							lastRenewAt = Date.now();
+							refreshChannelStatus();
 						}
 					});
 				}, SMS_SESSION_HEARTBEAT_MS);
@@ -1688,6 +1726,8 @@ return L.view.extend({
 			}
 			var id = sessionId;
 			sessionId = 0;
+			lastRenewAt = 0;
+			refreshChannelStatus();
 			AtWs.client.sms('session_release', { session_id: id }).catch(function () {});
 		}
 

@@ -8,7 +8,7 @@
 
 取证来源分两栏并排写清：
 
-- **实机**：`192.168.88.1` 上厂商自己的实现 —— `/usr/bin/sendat`、`/usr/bin/smssend`、
+- **实机**：内网测试机上厂商自己的实现 —— `/usr/bin/sendat`、`/usr/bin/smssend`、
   `/usr/bin/pdul.lua`、`/usr/bin/pdu_decoder`、`/usr/share/modem/smsc.sh`、
   `/usr/share/luci/menu.d`+`modem.lua`（均 md5 校验后取回，存档在会话目录 `device-ref/`）。
 - **本仓库**：`src/rust/src/{pdu,sms,urc,atclient,serial_linux}.rs` 与前端 `sms_center.js`。
