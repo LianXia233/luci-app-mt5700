@@ -50,6 +50,7 @@ sendat 1 at+cmgl=4 | pdu_decoder --list > /tmp/smsc.at
 
 | 环节 | 实际做法 | 位置 |
 |---|---|---|
+| 找端口 | 分层取候选：`/dev/serial/by-id/*` 优先 → USB 类 `ttyUSB`/`ttyACM`/`ttyAP` 回退 → 完全没有 USB 串口时才用 SoC 串口 `ttyS`/`ttyAMA`；按 `port_rank` 排序后由 `MAX_PROBE_CANDIDATES` 截断到 **10 个**，逐个发裸 `AT`（`AT_PROBE_TIMEOUT` = **800ms**），**第一个回 `OK` 的**即 AT 口。**与 §1.1 的 `sendat` 是两套独立实现，数值不要互抄** | [serialdetect.rs:373](../src/rust/src/serialdetect.rs#L373)、[serialdetect.rs:33](../src/rust/src/serialdetect.rs#L33)、[serialdetect.rs:38](../src/rust/src/serialdetect.rs#L38) |
 | 打开端口 | `open(O_RDWR\|O_NOCTTY\|O_NONBLOCK)`；`CS8\|CREAD\|CLOCAL`，无校验、单停止位 | [serial_linux.rs:153](../src/rust/src/serial_linux.rs#L153)、[serial_linux.rs:52](../src/rust/src/serial_linux.rs#L52) |
 | 读阻塞语义 | `VMIN=1`（**不能用 0**：Linux tty 在 `VMIN=0/VTIME=0` 下"暂无数据"的 `read` 返回 0，会被当成 EOF 而误关端口） | [serial_linux.rs:56](../src/rust/src/serial_linux.rs#L56) |
 | 排队 | 单一队列 + 优先级；短信动作走 `AtPriority::Sms`，**排在后台信号轮询之前** | [at_queue.rs](../src/rust/src/at_queue.rs) |

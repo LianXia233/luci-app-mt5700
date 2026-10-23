@@ -86,6 +86,7 @@ pub const LEGACY_DEFAULT_NOTIFY_INTERVAL_SECS: u64 = 60;
 /// 这些边界在单测里能被直接钉住，而不是散落在读取逻辑里靠人脑推演。
 ///
 /// 注意：这个函数只在「旧值不是出厂默认值」时才被调用（见 `timer_interval_from`）。
+#[allow(clippy::manual_div_ceil)] // 见 pdu.rs 同款说明：div_ceil 稳定于 Rust 1.73，老 OpenWrt 工具链会编译失败
 pub fn secs_to_timer_minutes(secs: u64) -> u64 {
     let m = (secs + 59) / 60;
     m.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN)
@@ -564,15 +565,13 @@ pub async fn uci_values() -> Result<UciReader, String> {
         if let Some(eq) = line.find('=') {
             let key = &line[..eq];
             let raw = &line[eq + 1..];
-            if key.starts_with(prefix) {
-                values.insert(key[prefix.len()..].to_string(), unquote_uci(raw));
+            if let Some(name) = key.strip_prefix(prefix) {
+                values.insert(name.to_string(), unquote_uci(raw));
             }
         }
     }
     Ok(UciReader(values))
 }
-
-/// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
 
 /// 解析定时推送间隔：UCI 以**分钟**为单位，内部换算成 [`Duration`]。
 ///
@@ -613,6 +612,7 @@ fn timer_interval_from(values: &UciReader) -> Duration {
     Duration::from_secs(minutes.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN) * 60)
 }
 
+/// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
 pub async fn load_config() -> Config {
     let mut cfg = default_config();
     let values = match uci_values().await {

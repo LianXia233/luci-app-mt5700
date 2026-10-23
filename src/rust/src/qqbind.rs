@@ -138,7 +138,7 @@ pub async fn run_bind(
             "shard": [0, 1],
         }
     });
-    tx.send(Message::Text(identify.to_string().into()))
+    tx.send(Message::Text(identify.to_string()))
         .await
         .map_err(|e| format!("发送 Identify 失败: {e}"))?;
     log_info!("QQ 绑定: 已上线监听（心跳 {}s），请给机器人发一条消息", hb_ms / 1000);
@@ -154,7 +154,7 @@ pub async fn run_bind(
             _ = tokio::time::sleep_until(last_hb + hb) => {
                 // 周期心跳（阻塞式读取会饿死心跳被网关踢线，这里按时间驱动）
                 let hb_frame = serde_json::json!({"op": 1, "d": last_seq});
-                if tx.send(Message::Text(hb_frame.to_string().into())).await.is_err() {
+                if tx.send(Message::Text(hb_frame.to_string())).await.is_err() {
                     return Err("发送心跳失败".into());
                 }
                 last_hb = tokio::time::Instant::now();

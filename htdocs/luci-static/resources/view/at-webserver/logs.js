@@ -524,17 +524,6 @@ return L.view.extend({
 			return out;
 		}
 
-		/* 计算各类别计数（受级别/关键词/来源过滤联动） */
-		function computeCategoryCounts(filteredAll) {
-			/* filteredAll 是已经过级别/关键词/来源过滤的全量条目 */
-			var counts = { all: filteredAll.length, dial: 0, at: 0, sms: 0, net: 0, sys: 0, other: 0 };
-			for (var i = 0; i < filteredAll.length; i++) {
-				var c = filteredAll[i].cat;
-				if (counts[c] !== undefined) counts[c]++;
-			}
-			return counts;
-		}
-
 		/* 计算未过滤时的各类别总数 */
 		function computeCategoryTotals(allEntries) {
 			var totals = { all: allEntries.length, dial: 0, at: 0, sms: 0, net: 0, sys: 0, other: 0 };

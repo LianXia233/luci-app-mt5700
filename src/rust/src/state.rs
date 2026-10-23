@@ -36,7 +36,7 @@ pub const SMS_SKIP_ERR: &str = "模组正忙（短信操作进行中），本轮
 
 /// 跳过日志的报送间隔：短信模式生效期间每 30s 最多一条。
 ///
-/// 动机（issue #23 反馈）：十五个缓存键各按自己的周期跑，跳过时每秒
+/// 动机（issue #23 反馈）：各缓存键按自己的周期分别跑，跳过时一秒内
 /// 能刷出十几条「缓存刷新 XX 失败」，日志页一片红，用户以为出了大事。
 /// 跳过是设计行为，不该按失败的密度刷；真正该关注的失败仍然逐条报。
 const SKIP_LOG_INTERVAL: Duration = Duration::from_secs(30);
@@ -58,7 +58,6 @@ pub struct StateCache {
 }
 
 /// 最近一次『连接 -> 断开』翻转已清除过缓存；避免每个周期重复清空。
-#[derive(Default)]
 struct LoopState {
     prev_connected: bool,
 }
@@ -80,8 +79,8 @@ impl StateCache {
         })
     }
 
-    /// 该指令是否在白名单（可缓存）。仅测试直接使用；业务读取统一走 `resolve`。
-    #[allow(dead_code)]
+    /// 该指令是否在白名单（可缓存）。业务读取统一走 `resolve`，因此只有单测用得上。
+    #[cfg(test)]
     pub fn is_cacheable(&self, command: &str) -> bool {
         self.rules.contains_key(&command.trim().to_uppercase())
     }

@@ -237,11 +237,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-   ./<ARCH>-luci-app-mt5700-1.29.0-r7.apk \
+   ./<ARCH>-luci-app-mt5700-1.29.0-r8.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.29.0-r7_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.29.0-r8_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 

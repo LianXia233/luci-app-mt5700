@@ -4,7 +4,7 @@
 //! - 命令串行执行（100ms 最小间隔），2 秒超时，最多保留 2048 行；
 //! - 空闲期收到的数据视为主动上报（raw_data 推给前端）；
 //! - 有命令等待时，只截取绝不可能出现在查询应答里的上报（来电 RING/+CLIP、
-//!   短信 +CMTI、通话 ^CEND 等）；^REJINFO/+CUSD 经 passthrough 一并纳入；
+//!   短信 +CMTI、通话 ^CEND 等）；^REJINFO/+CUSD/+CDSI 经 passthrough 一并纳入；
 //! - `abcd` 打断绕过命令锁直接写入（供扫频使用）。
 
 use crate::{log_debug, log_info, log_warn};
@@ -221,9 +221,9 @@ pub struct PendingCmd {
     pub ignore_prompt: bool,
 }
 
-#[allow(dead_code)] // describe 当前仅构造未读取，保留字段以免改动构造函数签名
 pub struct Connection {
     writer: Arc<Mutex<Box<dyn tokio::io::AsyncWrite + Unpin + Send>>>,
+    #[allow(dead_code)] // 仅构造时写入、从不读取；保留是为了不改动各处构造字面量的签名
     describe: String,
 }
 
@@ -641,8 +641,9 @@ impl AtClient {
         true
     }
 
-    /// 数据面是否就绪。先看 USB 网口状态，再回退看 PDP 激活位；
-    /// 两条命令都给不出可判定信息时返回 true（宁可放过，也不要因判定工具缺失而反复下发）。
+    /// 数据面是否就绪。先看 USB 网口状态，再回退看 PDP 激活位。
+    /// 只要拿不到可判定的读数就**倾向放过**（含 NDISSTATQRY 报了未就绪、
+    /// 但 CGACT? 给不出行的组合）—— 宁可放过，也不要因判定工具缺失而反复下发。
     async fn pdp_ready(self: &Arc<Self>, ctx: &tokio::sync::watch::Receiver<bool>) -> bool {
         if let Ok(resp) = self.send_command(ctx, "AT^NDISSTATQRY?", COMMAND_TIMEOUT, None).await {
             if let Some(state) = parse_ndis_state(&resp.text()) {
@@ -666,6 +667,7 @@ impl AtClient {
     ///   2) 数据面未激活且自动拨号本就关闭时直接跳过（无卡扫描等场景不断不恢复）；
     ///   3) 先关自动拨号（防止模组在断开后自动重拨、与恢复逻辑争用 CID），再撤数据面；
     ///   4) 给模组 1.5s 收尾，避免紧随其后的 CELLSCAN 撞上 PDP 拆除。
+    ///
     /// 返回快照，扫频结束后必须用 [Self::restore_scan_data_plane] 成对恢复。
     pub async fn prepare_scan_data_plane(&self, ctx: &tokio::sync::watch::Receiver<bool>) -> ScanDataPrior {
         let mut prior = ScanDataPrior::default();
@@ -1018,12 +1020,8 @@ impl AtClient {
         {
             let last = self.last_cmd_at.lock().await;
             let gap = COMMAND_GAP.saturating_sub(last.elapsed());
-            if !gap.is_zero() {
-                let mut ctx_c = ctx.clone();
-                tokio::select! {
-                    _ = tokio::time::sleep(gap) => {}
-                    _ = ctx_c.changed() => return Err("上下文取消".into()),
-                }
+            if !gap.is_zero() && !sleep_ctx(ctx, gap).await {
+                return Err("上下文取消".into());
             }
         }
 
@@ -1063,8 +1061,9 @@ impl AtClient {
             }
         }
         *self.last_cmd_at.lock().await = Instant::now();
-        // 方向标记：这里是**唯一**真正写串口的地方，内部命令（初始化、自动拨号对齐）
-        // 也走这条路径，所以在这一层记录才能完整反映"我们发给模组什么"。
+        // 方向标记：常规命令（含内部初始化、自动拨号对齐）都从这一行写出去，
+        // 在这层记录才最接近"我们发给模组什么"。唯一例外是 interrupt() 的 `abcd`
+        // 打断串——它刻意绕过命令锁直接 write_all，不走这条路径、也就不会出现在这里。
         log_debug!("发送 → 模组: {}", cmd.trim());
 
         let mut ctx_c = ctx.clone();
@@ -1135,10 +1134,8 @@ impl AtClient {
                 if zero_reads >= ZERO_READ_RETRY_LIMIT {
                     return Ok(()); // 持续为 0：判定链路已断开，交给上层重连
                 }
-                let mut ctx_c = ctx.clone();
-                tokio::select! {
-                    _ = tokio::time::sleep(ZERO_READ_BACKOFF) => {}
-                    _ = ctx_c.changed() => return Ok(()),
+                if !sleep_ctx(ctx, ZERO_READ_BACKOFF).await {
+                    return Ok(());
                 }
                 continue;
             }

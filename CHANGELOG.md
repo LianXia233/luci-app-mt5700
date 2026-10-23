@@ -30,6 +30,57 @@
 - **chore(release) `PKG_VERSION` 1.28.0 → 1.29.0**
 - **test**：`cargo test` **299 passed / 0 failed / 2 ignored**（WSL Debian 本机）；`rpc.js` / `sms_center.js` / `mt5700.js` `node --check` 通过
 
+### r8 冗余代码清理 + 注释按实现订正
+
+> 全仓静态审查：死代码逐个 grep 到「零引用」才删，注释逐条和当前代码核对。除下方**三处
+> 行为修复**（两处 P1 缺陷 + 一处 `fix(schedule)` 推送时刻一致性）外**行为不变**——
+> 发现的口径分歧只写进注释、列为待决，不擅自改前端或推送的显示值。
+
+- **refactor(web) 前端死函数清理**：`rpc.js` 的 `parseHexValue` / `formatSpeed` / `splitSpeed` / `signalColor` / `qciLabel` / `isUnsolicitedText` 六个函数（全仓只剩「定义 + 导出口」两处命中，含 tests 亦无引用）连同 `AtWs` 导出口一并删除；`logs.js` 的 `computeCategoryCounts` 同删（真正在用的是姊妹函数 `computeCategoryTotals`）。副带收益：速率格式化此后只有 `network_status.js` 的 `formatSpeedNumber` 一份实现
+- **refactor(web) `AtUci` 瘦身**：删 `uciCommit()`（自带注释就写着「与 uciSave 实现一致」，且全仓只有 `service.js` 调 `uciSave`）、`isDirty()`（零调用的取值器）与只声明从不使用的 `_dirtyFlush` 字段；删掉之后模块头「对外只暴露 uciSave 与 uciHasChanges」才与实际一致
+- **refactor(rust) 后端死代码删除**：`SmsTransaction::elapsed()`（`cargo` 直接报 dead_code）、`WaitToken::make()`（与 `derive(Clone)` 逐字段等价，二者只留 derive）、`Scheduler::safe_tick()` 空壳（名为 safe 实为 `tick()` 透传，调用点直接进 `tick()`）
+- **refactor(rust) 复用既有实现而非再写一份**：`atclient` 两处手写 `select!{ sleep / ctx.changed() }` 收敛到现成的 `sleep_ctx()`（命令最小间隔等待、0 字节退避），不新增抽象
+- **fix(schedule) 推送时刻只取一次**：锁频切换通知的正文时间与 `Notification.time` 原为两次取值，可相差数秒，用户拿推送列表对正文会以为对不上
+- **refactor(rust) `#[allow(dead_code)]` 作用域收窄**：从 `Connection` 结构体收到 `describe` 单个字段，避免将来新增的死字段被静默豁免
+- **docs(rust) 注释与实现矛盾的订正**（本轮主体）：`signalgrade` 模块头引用的前端 `GAUGE_METRICS` / `GAUGE_CAPTIONS` / `capabilityAssess` / `VERDICT_TEXT` **四个标识符在 `htdocs/` 中都不存在**，改为真名 `SSB_TIERS` 并把「严格同一套阈值与文案」改成如实的「只对上一部分」；`sha256`「本模块只用于派生密钥」被 `fingerprint` / `path_for` 证伪；`ArchiveRecord.time`「发出的短信为 None」与 `sent_record` 实际写 `Some(自盖时刻)` 互相矛盾；`nettime::run`「失败等 60 秒」与三级退避（3s×10 → 60s×10 → 20min）不符；`monthly` 跨月表「每月 30 号」行的平/闰二月落点写错列（与自带单测冲突）；`localtime::from_ymdhms` 的钉住理由称「PDU 回退路径使用」实为仅单测使用；`atclient`「唯一真正写串口的地方」漏了 `interrupt()` 的绕过式写入、`pdp_ready` 兜底条件描述与控制流不符、passthrough 清单漏 `+CDSI`；`pdu` 乱码「收蝭得对」与遗留叫法「go-submit 分片」订正
+- **docs(rust) 重构遗留的错挂 doc 归位**：`sms.rs` 挂在 `sent_record` 头上的正文预览说明归给 `text_preview`；`signalwatch.rs` 挂在 `sample_signal` 头上的两段（分属 `render_report_with` / `assess`）归位，并删去 `sample()` 的重复 doc 行
+- **note(待决) 信号百分比两边口径不一致**：`signal_percent` 按 30 dB 跨度（-80 dBm 满格），前端 `calculateSignalPercent` 按 40 dB 跨度（-70 满格）——同一时刻 -85 dBm 网页显示 63%、推送显示 83%。本轮**只把注释改准，未改任何一边**；误导性测试名 `percent_matches_frontend_formula` 改为 `percent_uses_30db_span`
+- **note(待决) 「批量汇总」模板是条死链路**：前端 `service.js` 有输入框 → UCI `notify_tpl_batch` → `config.batch` → 仅 `combine_messages` 使用，而生产路径每条通知单独渲染，`combine_messages` 只剩测试调用。`cargo check --all-targets` 现存 2 条 dead_code warning 即此二者，保留待决
+- **docs(rust) 两处与函数脱节的 doc 归位**（`cargo clippy` 的 `empty_line_after_doc_comments`）：`config.rs` 里「从 UCI 读取配置；读取失败时返回默认配置」被空行隔断、孤悬在 `uci_values()` 与下一个函数之间，实际描述的是原本没有文档的 `load_config()`，归位；`localtime.rs` 测试模块里「一天 24 小时的分钟数」描述的是已被删除的常量，去掉
+- **refactor(rust) 去掉两处恒等转换**：`qqbind.rs` 的 Identify 帧与心跳帧 `to_string().into()`，`into()` 的目标类型就是 `String` 本身（clippy `useless_conversion`）
+- **note(clippy) 刻意保留的告警**：`config.rs` / `ringlog.rs` 共 8 处「assertion has a constant value」是**故意**的常量不变式守卫（`MIN <= DEFAULT <= MAX`），只有将来有人把顺序改乱才会失败，不作删除；`pdu.rs` 手写 `div_ceil` 已有注释说明是为兼容低版本 Rust 工具链
+- **note(核查) 排除的两个假阳性**：`root/etc/config/at-webserver` 里 18 个 `schedule_{night,day}_{lte,nr}_*` 键初判「零消费方」，实际由 `schedconfig::uci_entries()` 用 `format!("{prefix}_{kind}_bands")` 拼名写入、`config.rs` 的 `band_lock()` 拼名读回，读写对称；`compat.js` 的 `api.resourceVersionInstalled` 初判「导出无人读」，实际是给 `L.env.resource_version` 打版本标签的副作用 IIFE，删不得
+- **refactor(rust) `config.rs` 两处**：`secs_to_timer_minutes` 的手写 `(secs+59)/60` 补上局部 `#[allow(clippy::manual_div_ceil)]` 与理由（与 `pdu.rs` 文件头同一条工具链兼容取舍，此前只在 pdu.rs 说明过）；解析 `uci show` 输出的 `starts_with` + `key[prefix.len()..]` 改 `strip_prefix`，去掉同一件事写两遍
+- **docs(rust) 两处 rustdoc 列表缺空行**（clippy `doc_lazy_continuation`）：`atclient.rs` 的 `prepare_scan_data_plane` 收尾要求「必须成对恢复」会被吞进第 4) 条、`nettime.rs` 模块头「任何一次成功都会清零计数」会被吞进第三个退避档位条目，各补一行空文档注释独立成段
+- **test(state_cfg)**：校验禁用缓存指令时不再对每条规则 `cmd.to_string()`（23 条规则 × 禁用清单的无谓临时分配）
+- **note(clippy) 刻意不动的风格项**：`sort_by_key`（async_runtime.rs:244、sms_store.rs:892）、`chunks_exact` 常量分块（sms_store.rs:141）、`timerpush.rs:223` 的 `used * 100 / total`（值域是几十条格位，不会溢出，改成 checked 反而掩盖真实意图）——属可读性偏好而非冗余，留给各自模块改动时顺手处理
+- **refactor(rust) `notify.rs` 撤掉 impl 级 `#[allow(dead_code)]`**：该属性挂在整个 `impl Notifier`（约 425 行）上，等于把这一整块的死代码检测关掉——这正是 cargo 此前只报得出 `combine_messages` 的原因。撤掉后 cargo 立即点名两个零调用方法 `sender()`、`ready()`（后者只是 `dispatch_enabled()` 的转调壳，文档称「供状态展示与测试」但界面与单测都没用），一并删除；未再暴露其它死方法
+- **refactor(rust) `rpcserver.rs` 三处死码**：`ScanPush` 结构体全仓无构造点（cellscan 事件在 5 处各自手搓同一形状），其 `allow` 注释称「保留（后续断点续扫扩展）」却既无读取方也无续扫代码；`ScanState.task_id` 只写不读（状态查询只看 running/lines，取消走 TaskManager 的 token，前端 tid 来自应答文本）；`scan_timeout` 的 else 兜底恒不可达（new 置默认、setter 忽略零值、config 按下限 10s 夹取）
+- **refactor(rust) `urc.rs` 去掉孤儿事件键**：长短信合并推送里的 `isComplete` 全仓仅此一处出现，前端处理 `new_sms` 只看 `resp.data` 是否存在便重新 `list`，不读任何载荷字段
+- **docs(rust) 注释失实订正（urc / rpcserver）**：`signal_level` 的「与轮询推送共用、口径一致」为假——轮询与定时推送的等级文案来自 `signalgrade::Level::caption()`，与本函数的（优秀/良好/一般/较差）是两套词表且无跨模块调用（原句尚有「口径…口径」重复字）；`query_monsc` 声称的「由调用方回退 ^HCSQ?」只存在于巡检侧，URC 路径从不回退；`handle_signal` 补注该链在实机休眠（本模组不自发上报 ^HCSQ/^CERSSI，实测 1200 条 AT 记录 0 条），换固件即生效、**勿当死代码删**；`TaskManager` 注释称扫频/锁频/固件升级都登记后台，实际只有扫频一处；`capacity` 应答的 `memFull` 注释称「界面据此提示清理」，实际前端零命中
+- **note(待决) urc 与 rpcserver 新增四项**：`task_status` / `task_cancel` / `task_list` 三个 RPC 方法 ucode 白名单不导出、前端零调用（但 127.0.0.1 直连可调用，故未删）；`memFull` / `store_stats.dir` / `updatedAtMs` / `fingerprint` / `archivedAtMs` / `totalLines` / `scope` / `freedBytes` / `touched` / `channel` 等一批响应键前端不消费；`memory_full_notified` 是单向闩锁（全仓无复位点，一个进程生命周期内「存储满」最多推一次）且该路径不向前端广播结构化事件；`notify.rs` 与 `qqpush.rs` 各有一份同构的三次重试 + 线性退避实现（改超时/退避必须两处同步）
+- **test**：`cargo check --all-targets` 无 error（剩上述 2 条 warning）；`cargo test` **285 passed / 0 failed / 2 ignored**（Windows 本机，Unix-only 用例不参与）；`rpc.js` / `logs.js` 通过语法校验
+- **chore(release) `PKG_RELEASE` 7 → 8**
+
+### r8 续：串口/基建/状态/ucode 层审查（第二批）
+
+> 同批方法：每条结论先由我自己 grep 或读码复核，再落地。本批原本全部行为不变；
+> 但审查中坐实一处**用户可见缺陷**（`usbCall` 硬超时），经确认后已按独立提交修复
+> （见下方 note(P1) 的「已修复」说明），因此本 PR 不再是纯行为不变——除这一处外
+> 其余仍是一律不变。加上第一段的 `usage_ctl` 与 `fix(schedule)`，全 PR 共三处行为变更。
+
+- **refactor(rust) 死代码**：`serialdetect.rs` 删除恒不可达的 `chosen.is_empty()` 回退分支（前一行刚 `extend(by_id)`，必非空）；`state.rs` 用 `#[cfg(test)]` 取代 `is_cacheable()` 上的 `#[allow(dead_code)]`（既然只有单测用，cfg(test) 才是事实），并去掉 `LoopState` 从未使用的 `derive(Default)`；`async_runtime.rs` 合并 `spawn()` 上方两句重复文档
+- **docs(rust) 注释按实现订正**：`async_runtime.rs` 模块头声称「小区扫频、锁频恢复、固件升级统一以 Task 提交后台」——实际只有扫频接入（锁频走 schedule 自循环、FOTA 由前端下发 `AT^FOTAOEMDL` 走 AT 队列），与同仓 `rpcserver.rs` 的说法互相矛盾；`main.rs`/`localtime.rs` 三处「必须在 spawn 任何线程之前调用」在 `#[tokio::main]` 下前提不成立（运行时线程已存在），改为「先于任何会读时间的任务与首条日志，靠启动顺序而非语言保证」；`state.rs` 的「十五个缓存键」实际是 23 条（改成不带数量，免得下次加键又过期）；`schedconfig.rs` 声称「uci 键名与 LuCI 界面完全一致」恰好相反（界面认 `AT+SCHED` 的 DTO 字段名，`schedule_` 前缀只对应 `config.rs` 读取侧）；串口探测的「候选集 + 800ms + 上限 10」**只属于本仓库 `serialdetect.rs`**，已补写进 `docs/sms-at-protocol.md` 的 §1.2（§1.1 讲的是实机 `/usr/bin/sendat`，两套独立实现、数值不可互抄）
+- **docs(transport,serial_linux) 一处「写了但没实现」的保护**：两处注释称写超时「由上层 send_command / RPC 写路径负责」，实际 `exec_locked` 的 `write_all` 发生在命令超时 `select!` **之前**，写本身无任何 timeout；fd 以 O_NONBLOCK + AsyncFd 打开，串口 wedged 时写会一直 poll。改为如实说明「目前任何一层都未实现」。顺带把 `SerialWriter` 的 `#[allow(dead_code)]` 从 struct 收窄到 `write_timeout` 单字段
+- **fix(P1，已修复) 自动清零日存不住**：ucode 的 `usage_ctl` 声明 `args: {action, day, _rid}` 并读 `getStr(a,'day')`，而 `rpc.js` 的 `L.rpc.declare` 写的是 `params: ['action','days']`——LuCI 按**声明名**映射位置参数，后端 `rpcserver.rs:428` 取 `params["day"]` 落空 → `monthly::normalize_day(0)` 夹成 **1**。用户设「每月 15 号清零」实际保存为 1 号，ucode 里「day 只在 set_reset_day 时带上」的注释也一直落空。修法在前端把 `'days'` 改 `'day'`（ucode 的 args 表才是这条 RPC 的权威签名，位置参数顺序不变）
+- **fix(P1，已修复) usbCall 的 6s 硬超时从未生效**：`fs.popen` 等价于 `sh -c "<整串>"`，而 `usbCall` 拼的是 `timeout 6 /bin/sh -c ` + script（**缺单引号**）。script 是 `echo USB_SCAN; for x in …; done` 多语句，于是内层 sh 只执行了 `echo`（多吐一空行），真正的 sysfs 扫描在**没有 timeout 包裹**的外层 shell 里跑——注释声称的「子进程卡住会拖死 rpcd 上下文」保护并不存在。按同文件 `detectUsbNetdev` 的既有正确写法补单引号；已核对 script 正文无单引号，下游只按 `USB=` 前缀取行，消失的标记行与空行不影响解析
+- **note(待实机确认) 上述两条 P1 的验收动作**：清零日设为 15 后 `uci get at-webserver.config.usage_reset_day` 应为 15（改前会是 1）；模组设置页的 USB 速率仍正常显示。本机无 ucode 解释器，`.uc` 改动无法静态校验语法，也解释了为何这两条不能只靠 `cargo test` 背书
+- **note(clippy 已核查为不动) 串口探测的 is_final_line 与 atclient::is_terminator**：判据几乎相同但**有意不同**（前者多认 `NO CARRIER`、前缀不带冒号），合并会改变探测行为，列为待决而非收敛
+- **note(待决) ucode 其余四项**：`nc` 预算 12s/50s 均比后端外层 13s/51s **小 1 秒**，注释里的算式（8+2+3=13 却取 12）与结论自相矛盾；`detectUsbNetdev` 只跳 `lo|br-*` 而 init.d 还跳 `eth0|eth1`，板载 USB 网卡机型上两边数的不是同一张卡；`strIndexOf` 与内建 `index()` 重复且同文件对 `index()` 可用性给出一正一反两处结论，933 行更把数组传给 `index()`，需实机 `ucode -e 'print(index(["a","b"],"b"))'` 定性；`netrate` 的 `device`、各方法的 `_rid` 参数前端从不传入（恒走 fallback），属对外契约保留但应注释点明
+- **test(限制说明) 本机校验盲区**：`serial_linux.rs` 与 `serialdetect.rs` 是 `cfg(target_os = "linux")` 模块，Windows 上的 `cargo check/test` **不编译它们**（musl target 因 `ring` 的 build script 需要 C 工具链而无法使用）。本批对这两个文件只做了「注释 + 属性位置 + 删除恒假分支」三类不可能引入编译错误的改动，但仍需在 Linux/CI 复验
+- **test(Linux 复核，补上本机盲区)**：`cargo check --all-targets` / `cargo test` **300 passed / 0 failed / 2 ignored**，与 main 基线**逐项一致**（Windows 本机 285 系 Unix-only 用例未参与所致）；`cargo clippy --all-targets` 相对 main **净减 9 条、新增 0 条**；`node --check` 与 `tests/` 8 个 JS 用例（179 项断言）全通过；`usbCall` 超时用等价 shell 场景实测复现（旧写法 8s 不被掐断 → 新写法 2s 被掐断、exit 124）
+- **docs(review) 审查后修正三处**：① `docs/sms-at-protocol.md` §1.1「找端口」描述的是**实机 `/usr/bin/sendat`**（厂商二进制，取证无法从仓库复原），此前误按本仓库 `serialdetect.rs` 的参数改写，已回滚原文；本仓库的候选集 / 800ms / 上限 10 改记入 §1.2 并链接常量；② `README.md` 安装示例随 `PKG_RELEASE` 同步到 `-r8`；③ `signalgrade.rs` 模块头补记前端 `SIGNAL_TIERS`（4 档、阈值 -110/-95/-80、名 较差/一般/良好/极佳）与后端 `Level::caption()` 前四档**同名不同阈值**，是最易再次漂移的一处
+
 ## v1.28.0 (2026-10-23)
 
 ### 推送前缀统一为 {time} {count}、三类正文排版重做、QQ 推送富文本化（独立 qqpush 模块）
