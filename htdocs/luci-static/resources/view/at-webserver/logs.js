@@ -7,22 +7,29 @@
 /**
  * 运行日志页
  *
- * 三个视图（互不重复，来源不同）：
- *   1) 模组拨号：后端内存日志里的拨号过程 —— 自动拨号对齐、PDP/NDIS 状态、AT 初始化、
- *      串口探测、URC 分发。**这些是 syslog 看不到的**：稳态下后端日志级别是 Warn，
- *      info 级过程日志不会写 syslog，但它们对排障最关键。
- *   2) 接口与网络：init.d 的 logger 输出（取自 syslog，含 hotplug、接口拉起、取址结果）
- *      + 后端日志里与接口/网络相关的行。
- *   3) 通知记录：通知文件（短信/来电/信号/存储）。
+ * 两个顶层视图：
+ *   1) 运行日志：后端内存 + syslog 合并，按类别细分（拨号/AT/短信/接口/系统/其他）
+ *   2) 通知记录：通知文件（短信/来电/信号/存储），逻辑不变
  *
  * 展示要点：等宽字体、级别配色与左色条、毫秒级时间列、关键词高亮、斑马纹、
- * 底部统计、可导出为文本。
+ * 日期分组、类别徽章、长消息折叠、底部统计、可导出为文本。
  */
 
-/* 分类规则：先拨号，再接口，其余归入接口与网络（系统类）。
- * 规则写成常量，改动只需动这一处。 */
-var DIAL_RE = /自动拨号|拨号|SETAUTODIAL|APN|PDP|CGACT|CGDCONT|NDIS|驻网|注册|CREG|CGREG|C5GREG|COPS|SETMODE|串口|ttyUSB|ttyACM|AT通道|CMEE|CNMI|CMGF|CLIP|模组/i;
-var IFACE_RE = /接口|网口|ifup|ifdown|DHCP|地址|device|hotplug|MT5700M|eth\d|IPv4|IPv6|网关|路由|metric|防火墙|服务|procd|防火墙|network/i;
+/* 类别规则：有序正则表，先命中先归位。
+ * 顺序即优先级——sms 必须在 at 之前，因为 AT+CMGS 等短信命令同时匹配 at 规则；
+ * dial 在 net 之前，因为拨号过程里也含接口关键词。 */
+var CATEGORY_RULES = [
+	{ key: 'sms', label: '短信',
+		re: /短信|SMS|PDU|长短信|收件|发件|短信中心|CPMS|CMGD|归档|存储已满|SM/ },
+	{ key: 'dial', label: '拨号与网络',
+		re: /自动拨号|拨号|SETAUTODIAL|APN|PDP|CGACT|CGDCONT|NDIS|驻网|注册|CREG|CGREG|C5GREG|COPS|SETMODE|信号/ },
+	{ key: 'net', label: '接口与网络',
+		re: /接口|网口|ifup|ifdown|DHCP|地址|device|hotplug|MT5700M|eth\d|IPv4|IPv6|网关|路由|metric|防火墙|network/ },
+	{ key: 'at', label: 'AT 通道',
+		re: /AT\+|AT\^|前端请求|发送\s*(?:→|->)\s*模组|接收\s*(?:←|<-)\s*模组|URC|主动上报|串口|ttyUSB|ttyACM|AT通道|事务|超时|重试|CMEE|CNMI|CMGF|CLIP|回显/ },
+	{ key: 'sys', label: '系统与服务',
+		re: /服务|procd|守护|固件|FOTA|升级|重启|内存|CPU|温度|UCI|uci|配置|权限|证书|NTP|对时|时钟|时区|日志级别|Web|luci/ }
+];
 
 /* 级别中文化：徽章显示中文，原始标识放 title 便于对照 */
 var LEVEL_LABEL = { DBG: '调试', INF: '信息', WRN: '警告', ERR: '错误' };
@@ -117,18 +124,23 @@ function displayText(text) {
 	for (var i = 0; i < TEXT_MAP.length; i++) s = s.replace(TEXT_MAP[i][0], TEXT_MAP[i][1]);
 	for (var j = 0; j < AT_PURPOSE.length; j++) {
 		if (AT_PURPOSE[j][0].test(s)) {
-			s += '　（' + AT_PURPOSE[j][1] + '）';
+			s += ' （' + AT_PURPOSE[j][1] + '）';
 			break;
 		}
 	}
 	return s;
 }
 
-function classify(msg) {
-	if (DIAL_RE.test(msg)) return 'dial';
-	if (IFACE_RE.test(msg)) return 'iface';
-	return 'iface';
+/* 类别判定：按 CATEGORY_RULES 有序匹配，都不命中归 other */
+function categorize(msg) {
+	for (var i = 0; i < CATEGORY_RULES.length; i++) {
+		if (CATEGORY_RULES[i].re.test(msg)) return CATEGORY_RULES[i].key;
+	}
+	return 'other';
 }
+
+/* 类别中文名查找 */
+var CATEGORY_LABEL = { all: '全部', dial: '拨号与网络', at: 'AT 通道', sms: '短信', net: '接口与网络', sys: '系统与服务', other: '其他' };
 
 function pad(n, w) {
 	var s = String(n);
@@ -144,6 +156,12 @@ function fmtClock(ms) {
 function fmtFull(ms) {
 	var d = new Date(ms);
 	return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2) + ' ' + fmtClock(ms);
+}
+
+/* 取日期字符串用于分组 */
+function dateKey(ms) {
+	var d = new Date(ms);
+	return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2);
 }
 
 /* 后端日志：msg 里已经带了业务信息；级别来自宏 */
@@ -197,12 +215,14 @@ return L.view.extend({
 		var notifyPath = (data && data.path) || '/tmp/at-notifications.log';
 
 		var state = {
-			tab: 'dial',
-			level: 'all',        /* all | INF | WRN | ERR */
+			tab: 'runtime',      /* runtime | notify */
+			category: 'all',     /* all | dial | at | sms | net | sys | other */
+			level: 'all',        /* all | DBG | INF | WRN | ERR | errwrn */
+			source: 'all',       /* all | backend | syslog */
+			limit: 400,          /* 200 | 400 | 800 | 0(全部) */
 			query: '',
 			auto: true,
-			dial: [],
-			iface: [],
+			entries: [],         /* 后端+syslog 合并后的全量条目（已分类） */
 			notify: '',
 			syslogOk: true,
 			loading: false
@@ -240,11 +260,10 @@ return L.view.extend({
 			return fileWrite(p, content);
 		}
 
-		/* ---------------- 顶部：视图切换 + 工具栏 ---------------- */
+		/* ---------------- 顶部：视图切换 ---------------- */
 		var tabs = E('div', { 'class': 'mt5700-logtabs' });
 		var TAB_DEFS = [
-			{ id: 'dial', label: '模组拨号', icon: '📡' },
-			{ id: 'iface', label: '接口与网络', icon: '🌐' },
+			{ id: 'runtime', label: '运行日志', icon: '📋' },
 			{ id: 'notify', label: '通知记录', icon: '🔔' }
 		];
 		TAB_DEFS.forEach(function (t) {
@@ -257,8 +276,39 @@ return L.view.extend({
 		});
 		body.appendChild(tabs);
 
+		/* ---------------- 类别条（仅运行日志 tab 下显示） ---------------- */
+		var catBar = E('div', { 'class': 'mt5700-logcatbar' });
+		var CAT_DEFS = [
+			{ key: 'all', icon: '📑' },
+			{ key: 'dial', icon: '📡' },
+			{ key: 'at', icon: '🔌' },
+			{ key: 'sms', icon: '💬' },
+			{ key: 'net', icon: '🌐' },
+			{ key: 'sys', icon: '⚙️' },
+			{ key: 'other', icon: '📦' }
+		];
+		var catBtns = {};
+		CAT_DEFS.forEach(function (c) {
+			var btn = E('div', {
+				'class': 'mt5700-logcatbtn',
+				'data-cat': c.key,
+				role: 'button',
+				tabindex: '0'
+			}, [
+				E('span', { 'class': 'mt5700-logcatbtn-icon' }, c.icon),
+				E('span', { 'class': 'mt5700-logcatbtn-label' }, CATEGORY_LABEL[c.key]),
+				E('span', { 'class': 'mt5700-logcatbtn-count' }, '0')
+			]);
+			btn.addEventListener('click', function () { state.category = c.key; renderAll(); });
+			catBar.appendChild(btn);
+			catBtns[c.key] = btn;
+		});
+		body.appendChild(catBar);
+
+		/* ---------------- 工具栏 ---------------- */
 		var levelSel = Mt5700.select([
 			{ label: '全部级别', value: 'all' },
+			{ label: '仅调试', value: 'DBG' },
 			{ label: '仅信息', value: 'INF' },
 			{ label: '仅警告', value: 'WRN' },
 			{ label: '仅错误', value: 'ERR' }
@@ -302,6 +352,90 @@ return L.view.extend({
 		})(levelSel);
 		levelSel.addEventListener('change', function () { state.level = levelSel.value; renderList(); });
 
+		/* 仅看错误+警告 快捷开关 */
+		var errWrnChk = E('input', { type: 'checkbox' });
+		errWrnChk.addEventListener('change', function () {
+			if (errWrnChk.checked) {
+				state.level = 'errwrn';
+				levelSel.value = 'all'; /* 下拉回到「全部级别」，由 checkbox 接管 */
+			} else {
+				state.level = 'all';
+			}
+			renderList();
+		});
+		var errWrnWrap = E('label', { 'class': 'mt5700-logerrwrn' }, [errWrnChk, E('span', {}, '仅错误+警告')]);
+
+		/* 来源下拉 */
+		var srcSel = Mt5700.select([
+			{ label: '全部来源', value: 'all' },
+			{ label: '后端内存', value: 'backend' },
+			{ label: 'syslog', value: 'syslog' }
+		], 'all');
+		(function styleSelect2(el) {
+			if (!el) return;
+			var ARROW = "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' "
+				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%238b5cf6' "
+				+ "stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
+			var BG_CLOSED = 'rgba(139,92,246,0.08)';
+			var BG_HOVER = 'rgba(139,92,246,0.15)';
+			var base = {
+				'-webkit-appearance': 'none', '-moz-appearance': 'none', 'appearance': 'none',
+				'background': BG_CLOSED + ' ' + ARROW + ' no-repeat right 10px center',
+				'background-size': '12px 12px',
+				'padding': '0 32px 0 14px',
+				'border': '1px solid rgba(139,92,246,0.28)',
+				'border-radius': '10px',
+				'color': '#8b5cf6',
+				'font-weight': '500',
+				'font-size': '13px',
+				'height': '36px',
+				'line-height': '36px',
+				'box-shadow': 'none',
+				'text-shadow': 'none',
+				'cursor': 'pointer'
+			};
+			Object.keys(base).forEach(function (k) { el.style.setProperty(k, base[k], 'important'); });
+			el.addEventListener('mouseenter', function () { el.style.setProperty('background-color', BG_HOVER, 'important'); });
+			el.addEventListener('mouseleave', function () { el.style.setProperty('background-color', BG_CLOSED, 'important'); });
+		})(srcSel);
+		srcSel.addEventListener('change', function () { state.source = srcSel.value; renderList(); });
+
+		/* 条数上限下拉 */
+		var limitSel = Mt5700.select([
+			{ label: '最新 200 条', value: '200' },
+			{ label: '最新 400 条', value: '400' },
+			{ label: '最新 800 条', value: '800' },
+			{ label: '全部', value: '0' }
+		], '400');
+		(function styleSelect3(el) {
+			if (!el) return;
+			var ARROW = "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' "
+				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%238b5cf6' "
+				+ "stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
+			var BG_CLOSED = 'rgba(139,92,246,0.08)';
+			var BG_HOVER = 'rgba(139,92,246,0.15)';
+			var base = {
+				'-webkit-appearance': 'none', '-moz-appearance': 'none', 'appearance': 'none',
+				'background': BG_CLOSED + ' ' + ARROW + ' no-repeat right 10px center',
+				'background-size': '12px 12px',
+				'padding': '0 32px 0 14px',
+				'border': '1px solid rgba(139,92,246,0.28)',
+				'border-radius': '10px',
+				'color': '#8b5cf6',
+				'font-weight': '500',
+				'font-size': '13px',
+				'height': '36px',
+				'line-height': '36px',
+				'box-shadow': 'none',
+				'text-shadow': 'none',
+				'cursor': 'pointer'
+			};
+			Object.keys(base).forEach(function (k) { el.style.setProperty(k, base[k], 'important'); });
+			el.addEventListener('mouseenter', function () { el.style.setProperty('background-color', BG_HOVER, 'important'); });
+			el.addEventListener('mouseleave', function () { el.style.setProperty('background-color', BG_CLOSED, 'important'); });
+		})(limitSel);
+		limitSel.addEventListener('change', function () { state.limit = Number(limitSel.value); renderList(); });
+
 		var searchInput = Mt5700.input('text', '按关键词过滤，如 拨号 / eth2 / 警告', '');
 		searchInput.addEventListener('input', function () { state.query = searchInput.value.trim(); renderList(); });
 
@@ -329,6 +463,9 @@ return L.view.extend({
 		var toolbar = E('div', { 'class': 'mt5700-logtoolbar' });
 		toolbar.appendChild(E('div', { 'class': 'mt5700-logsearch' }, [searchInput]));
 		toolbar.appendChild(E('div', { 'class': 'mt5700-logselect' }, [levelSel]));
+		toolbar.appendChild(errWrnWrap);
+		toolbar.appendChild(E('div', { 'class': 'mt5700-logselect' }, [srcSel]));
+		toolbar.appendChild(E('div', { 'class': 'mt5700-logselect' }, [limitSel]));
 		var autoWrap = E('label', { 'class': 'mt5700-logauto' }, [autoChk, E('span', {}, '自动刷新')]);
 		toolbar.appendChild(autoWrap);
 		toolbar.appendChild(logButton('刷新', function () { refresh(true); }, 'primary', '↻'));
@@ -355,26 +492,48 @@ return L.view.extend({
 		clearRow.appendChild(clearBtn);
 		panel.appendChild(clearRow);
 
-		/* ---------------- 渲染 ---------------- */
-		function currentEntries() {
-			if (state.tab === 'dial') return state.dial;
-			if (state.tab === 'iface') return state.iface;
-			return [];
-		}
-
+		/* ---------------- 过滤与统计 ---------------- */
 		function applyFilters(list) {
 			var q = state.query.toLowerCase();
 			var out = [];
 			for (var i = 0; i < list.length; i++) {
 				var e = list[i];
-				if (state.level !== 'all') {
-					if (state.level === 'ERR') { if (e.level !== 'ERR') continue; }
-					else if (e.level !== state.level) continue;
+				/* 类别过滤 */
+				if (state.category !== 'all' && e.cat !== state.category) continue;
+				/* 来源过滤 */
+				if (state.source !== 'all' && e.src !== state.source) continue;
+				/* 级别过滤 */
+				if (state.level === 'errwrn') {
+					if (e.level !== 'ERR' && e.level !== 'WRN') continue;
+				} else if (state.level !== 'all') {
+					if (e.level !== state.level) continue;
 				}
+				/* 关键词过滤（按原文匹配） */
 				if (q && e.msg.toLowerCase().indexOf(q) < 0) continue;
 				out.push(e);
 			}
 			return out;
+		}
+
+		/* 计算各类别计数（受级别/关键词/来源过滤联动） */
+		function computeCategoryCounts(filteredAll) {
+			/* filteredAll 是已经过级别/关键词/来源过滤的全量条目 */
+			var counts = { all: filteredAll.length, dial: 0, at: 0, sms: 0, net: 0, sys: 0, other: 0 };
+			for (var i = 0; i < filteredAll.length; i++) {
+				var c = filteredAll[i].cat;
+				if (counts[c] !== undefined) counts[c]++;
+			}
+			return counts;
+		}
+
+		/* 计算未过滤时的各类别总数 */
+		function computeCategoryTotals(allEntries) {
+			var totals = { all: allEntries.length, dial: 0, at: 0, sms: 0, net: 0, sys: 0, other: 0 };
+			for (var i = 0; i < allEntries.length; i++) {
+				var c = allEntries[i].cat;
+				if (totals[c] !== undefined) totals[c]++;
+			}
+			return totals;
 		}
 
 		/* 必须始终返回 Node：早期实现里"没有搜索词就 return text（字符串）"，
@@ -401,35 +560,202 @@ return L.view.extend({
 			return frag;
 		}
 
+		/* ---------------- 渲染 ---------------- */
 		function renderList() {
 			listEl.innerHTML = '';
 			footer.innerHTML = '';
 
 			if (state.tab === 'notify') { renderNotify(); return; }
 
-			var all = currentEntries();
+			var all = state.entries;
+			/* 先按级别/关键词/来源过滤（不过滤类别，类别用于计数） */
+			var filteredForCounts = applyFiltersNoCategory(all);
+			var totals = computeCategoryTotals(filteredForCounts);
+
+			/* 更新类别条计数 */
+			updateCatBar(totals, computeCategoryTotals(all));
+
+			/* 再按类别过滤 */
 			var list = applyFilters(all);
 
 			if (!all.length) {
 				listEl.appendChild(emptyBox(
-					state.tab === 'dial' ? '暂无拨号日志' : '暂无接口日志',
-					state.tab === 'dial'
-						? '服务连上模组后会记录自动拨号对齐、数据承载与 USB 网卡状态、串口探测与选口过程。'
-						: '接口拉起与重试、热插拔钩子、动态地址与 IPv6 取址结果都会出现在这里。'));
+					'暂无运行日志',
+					'服务连上模组后会自动记录拨号对齐、AT 通道交互、短信收发、接口拉起与系统事件。'));
 			} else if (!list.length) {
-				listEl.appendChild(emptyBox('没有匹配的日志', '试试清空关键词，或把级别切回「全部级别」。'));
+				var catLabel = state.category === 'all' ? '' : '（' + CATEGORY_LABEL[state.category] + '）';
+				listEl.appendChild(emptyBox('没有匹配的日志' + catLabel, '试试清空关键词、切换类别，或把级别切回「全部级别」。'));
 			} else {
 				var frag = document.createDocumentFragment();
-				/* 只渲染最后 400 行，避免一次插入过多节点导致滚动卡顿 */
-				var shown = list.length > 400 ? list.slice(list.length - 400) : list;
-				for (var i = 0; i < shown.length; i++) frag.appendChild(renderRow(shown[i]));
+				/* 条数上限 */
+				var shown = (state.limit > 0 && list.length > state.limit) ? list.slice(list.length - state.limit) : list;
+				var lastDate = '';
+				for (var i = 0; i < shown.length; i++) {
+					/* 日期分组分隔行 */
+					var dk = dateKey(shown[i].ts);
+					if (dk !== lastDate) {
+						frag.appendChild(renderDateSeparator(dk));
+						lastDate = dk;
+					}
+					frag.appendChild(renderRow(shown[i]));
+				}
 				listEl.appendChild(frag);
+				/* 这里不能直接量：首次 render() 时页面还没被 LuCI 插进 #view，
+				 * 脱离文档的节点高度全是 0，会把每条折叠都误判成「没溢出」。
+				 * 推迟一个宏任务，等 DOM 落进文档再量。 */
+				setTimeout(relaxFalseClamps, 0);
 			}
 
-			var text = '共 ' + all.length + ' 条';
-			if (list.length !== all.length) text += '（过滤后 ' + list.length + ' 条）';
-			if (list.length > 400) text += '，仅显示最新 400 条';
-			if (state.tab === 'iface' && !state.syslogOk) text += ' · syslog 不可读（仅显示后端日志）';
+			/* 折叠按钮只该在「正文真的被裁掉了」时出现。
+			 * renderRow 按字符数（>160）先打上折叠类，但宽屏上一条两百字的正文
+			 * 可能三行就排完了 —— 这时按钮点开看不到任何变化，属于假折叠。
+			 * DOM 进了文档之后再量一次：没溢出就把折叠态和按钮一起摘掉。 */
+			function relaxFalseClamps() {
+				var clamped = listEl.querySelectorAll('.mt5700-logmsg-clamped');
+				for (var j = 0; j < clamped.length; j++) {
+					var msgEl = clamped[j];
+					if (msgEl.scrollHeight <= msgEl.clientHeight + 1) {
+						msgEl.classList.remove('mt5700-logmsg-clamped');
+						var btnEl = msgEl.querySelector('.mt5700-logexpand');
+						if (btnEl && btnEl.parentNode) btnEl.parentNode.removeChild(btnEl);
+					}
+				}
+			}
+
+			/* footer 统计 */
+			renderFooter(all, list);
+		}
+
+		/* 不过滤类别的过滤（用于类别计数联动） */
+		function applyFiltersNoCategory(list) {
+			var q = state.query.toLowerCase();
+			var out = [];
+			for (var i = 0; i < list.length; i++) {
+				var e = list[i];
+				if (state.source !== 'all' && e.src !== state.source) continue;
+				if (state.level === 'errwrn') {
+					if (e.level !== 'ERR' && e.level !== 'WRN') continue;
+				} else if (state.level !== 'all') {
+					if (e.level !== state.level) continue;
+				}
+				if (q && e.msg.toLowerCase().indexOf(q) < 0) continue;
+				out.push(e);
+			}
+			return out;
+		}
+
+		/* 更新类别条按钮的计数与激活状态 */
+		function updateCatBar(filteredCounts, totalCounts) {
+			var hasFilter = state.level !== 'all' || state.source !== 'all' || state.query !== '';
+			CAT_DEFS.forEach(function (c) {
+				var btn = catBtns[c.key];
+				if (!btn) return;
+				var countEl = btn.querySelector('.mt5700-logcatbtn-count');
+				if (countEl) {
+					if (hasFilter) {
+						countEl.textContent = filteredCounts[c.key] + ' / ' + totalCounts[c.key];
+					} else {
+						countEl.textContent = String(totalCounts[c.key]);
+					}
+				}
+				/* 激活状态 */
+				if (state.category === c.key) {
+					btn.classList.add('active');
+				} else {
+					btn.classList.remove('active');
+				}
+			});
+		}
+
+		/* 日期分隔行 */
+		function renderDateSeparator(dateStr) {
+			return E('div', { 'class': 'mt5700-logday' }, [
+				E('span', { 'class': 'mt5700-logday-text' }, dateStr)
+			]);
+		}
+
+		function emptyBox(title, desc) {
+			var box = E('div', { 'class': 'mt5700-logempty' });
+			box.appendChild(E('div', { 'class': 'mt5700-logempty-title' }, title));
+			box.appendChild(E('div', { 'class': 'mt5700-logempty-desc' }, desc));
+			return box;
+		}
+
+		function renderRow(e) {
+			var lv = e.level || 'INF';
+			var cls = lv === 'ERR' ? 'err' : (lv === 'WRN' ? 'warn' : (lv === 'DBG' ? 'dbg' : 'info'));
+			var row = E('div', {
+				'class': 'mt5700-logrow mt5700-logrow-' + cls,
+				'data-cat': e.cat || 'other',
+				'data-level': lv,
+				'data-src': e.src || 'backend'
+			});
+			var d = new Date(e.ts);
+			var timeEl = E('span', { 'class': 'mt5700-logtime', title: fmtFull(e.ts) }, [
+				pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2),
+				E('span', { 'class': 'mt5700-logms' }, '.' + pad(d.getMilliseconds(), 3))
+			]);
+			row.appendChild(timeEl);
+			row.appendChild(E('span', { 'class': 'mt5700-loglv', title: lv }, LEVEL_LABEL[lv] || lv));
+
+			/* 类别小徽章 */
+			var catKey = e.cat || 'other';
+			row.appendChild(E('span', {
+				'class': 'mt5700-logcat mt5700-logcat-' + catKey,
+				title: CATEGORY_LABEL[catKey] || catKey
+			}, CATEGORY_LABEL[catKey] || catKey));
+
+			var dir = detectDirection(e.msg);
+			if (dir) {
+				var dirIcon = dir.kind === 'tx' ? '↑ ' : (dir.kind === 'rx' ? '↓ ' : '→ ');
+				row.appendChild(E('span', { 'class': 'mt5700-logdir mt5700-logdir-' + dir.kind, title: dir.kind === 'tx' ? '本机发给模组' : (dir.kind === 'rx' ? '模组回给本机' : '页面发给后端') }, dirIcon + dir.label));
+			}
+
+			var msg = E('span', { 'class': 'mt5700-logmsg' });
+			var textToRender = displayText(dir ? dir.rest : e.msg);
+			var pIdx = textToRender.indexOf(' （');
+			if (pIdx > 0 && textToRender.slice(-1) === '）') {
+				var mainText = textToRender.slice(0, pIdx);
+				var purposeText = textToRender.slice(pIdx);
+				msg.appendChild(highlight(mainText));
+				msg.appendChild(E('span', { 'class': 'mt5700-logpurpose' }, purposeText));
+			} else {
+				msg.appendChild(highlight(textToRender));
+			}
+
+			/* 超长消息折叠：正文超过约 160 字符时默认折叠 */
+			var rawLen = (dir ? dir.rest : e.msg).length;
+			if (rawLen > 160) {
+				msg.classList.add('mt5700-logmsg-clamped');
+				var expandBtn = E('span', { 'class': 'mt5700-logexpand', role: 'button', tabindex: '0' }, '展开');
+				expandBtn.addEventListener('click', function () {
+					var clamped = msg.classList.toggle('mt5700-logmsg-clamped');
+					expandBtn.textContent = clamped ? '展开' : '收起';
+				});
+				expandBtn.addEventListener('keydown', function (ev) {
+					if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); expandBtn.click(); }
+				});
+				msg.appendChild(expandBtn);
+			}
+
+			row.appendChild(msg);
+			if (e.src === 'syslog') row.appendChild(E('span', { 'class': 'mt5700-logsrc', title: '来自 syslog（init.d / 内核）' }, '系统'));
+			return row;
+		}
+
+		function renderFooter(all, filtered) {
+			/* 统计各级别数量 */
+			var errCount = 0, wrnCount = 0, infCount = 0, dbgCount = 0;
+			for (var i = 0; i < all.length; i++) {
+				if (all[i].level === 'ERR') errCount++;
+				else if (all[i].level === 'WRN') wrnCount++;
+				else if (all[i].level === 'DBG') dbgCount++;
+				else infCount++;
+			}
+			var text = '共 ' + all.length + ' 条 · 错误 ' + errCount + ' · 警告 ' + wrnCount + ' · 信息 ' + infCount + ' · 调试 ' + dbgCount;
+			if (filtered.length !== all.length) text += ' · 过滤后 ' + filtered.length + ' 条';
+			if (state.limit > 0 && filtered.length > state.limit) text += ' · 仅显示最新 ' + state.limit + ' 条';
+			if (!state.syslogOk) text += ' · syslog 不可读';
 
 			var footerStats = E('span', { 'class': 'mt5700-logfooter-text' }, text);
 			var scrollActions = E('span', { 'class': 'mt5700-logfooter-actions' }, [
@@ -448,47 +774,6 @@ return L.view.extend({
 			]);
 			footer.appendChild(footerStats);
 			footer.appendChild(scrollActions);
-		}
-
-		function emptyBox(title, desc) {
-			var box = E('div', { 'class': 'mt5700-logempty' });
-			box.appendChild(E('div', { 'class': 'mt5700-logempty-title' }, title));
-			box.appendChild(E('div', { 'class': 'mt5700-logempty-desc' }, desc));
-			return box;
-		}
-
-		function renderRow(e) {
-			var lv = e.level || 'INF';
-			var cls = lv === 'ERR' ? 'err' : (lv === 'WRN' ? 'warn' : (lv === 'DBG' ? 'dbg' : 'info'));
-			var row = E('div', { 'class': 'mt5700-logrow mt5700-logrow-' + cls });
-			var d = new Date(e.ts);
-			var timeEl = E('span', { 'class': 'mt5700-logtime', title: fmtFull(e.ts) }, [
-				pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2),
-				E('span', { 'class': 'mt5700-logms' }, '.' + pad(d.getMilliseconds(), 3))
-			]);
-			row.appendChild(timeEl);
-			row.appendChild(E('span', { 'class': 'mt5700-loglv', title: lv }, LEVEL_LABEL[lv] || lv));
-
-			var dir = detectDirection(e.msg);
-			if (dir) {
-				var dirIcon = dir.kind === 'tx' ? '↑ ' : (dir.kind === 'rx' ? '↓ ' : '→ ');
-				row.appendChild(E('span', { 'class': 'mt5700-logdir mt5700-logdir-' + dir.kind, title: dir.kind === 'tx' ? '本机发给模组' : (dir.kind === 'rx' ? '模组回给本机' : '页面发给后端') }, dirIcon + dir.label));
-			}
-
-			var msg = E('span', { 'class': 'mt5700-logmsg' });
-			var textToRender = displayText(dir ? dir.rest : e.msg);
-			var pIdx = textToRender.indexOf('　（');
-			if (pIdx > 0 && textToRender.slice(-1) === '）') {
-				var mainText = textToRender.slice(0, pIdx);
-				var purposeText = textToRender.slice(pIdx);
-				msg.appendChild(highlight(mainText));
-				msg.appendChild(E('span', { 'class': 'mt5700-logpurpose' }, purposeText));
-			} else {
-				msg.appendChild(highlight(textToRender));
-			}
-			row.appendChild(msg);
-			if (e.src === 'syslog') row.appendChild(E('span', { 'class': 'mt5700-logsrc', title: '来自 syslog（init.d / 内核）' }, '系统'));
-			return row;
 		}
 
 		function renderNotify() {
@@ -539,15 +824,25 @@ return L.view.extend({
 				var on = btns[i].getAttribute('data-tab') === state.tab;
 				btns[i].className = 'mt5700-logtab' + (on ? ' active' : '');
 			}
-			levelSel.value = state.level;
-			levelSel.disabled = (state.tab === 'notify');
-			searchInput.disabled = (state.tab === 'notify');
-			clearRow.style.display = (state.tab === 'notify') ? '' : 'none';
-			hint.textContent = state.tab === 'dial'
-				? '后端内存日志（不受日志级别限制）：自动拨号对齐、数据承载与 USB 网卡状态、串口探测、主动上报分发。AT 命令按「请求 / 发送 / 接收」标出方向并保留原文；进程重启后从零开始，搜索按原文匹配。'
-				: (state.tab === 'iface'
-					? 'init.d 的 logger 输出（取自 syslog）与后端日志中与接口/网络相关的部分：接口拉起、hotplug、DHCP / IPv6 取址结果。'
-					: '通知文件内容（短信、来电、信号变化、存储告警）。');
+
+			/* 通知记录 tab 下：隐藏类别条、禁用过滤控件 */
+			var isNotify = (state.tab === 'notify');
+			catBar.style.display = isNotify ? 'none' : '';
+			levelSel.disabled = isNotify;
+			errWrnChk.disabled = isNotify;
+			errWrnWrap.style.display = isNotify ? 'none' : '';
+			srcSel.disabled = isNotify;
+			limitSel.disabled = isNotify;
+			searchInput.disabled = isNotify;
+			clearRow.style.display = isNotify ? '' : 'none';
+
+			/* hint 文案 */
+			if (isNotify) {
+				hint.textContent = '通知文件内容（短信、来电、信号变化、存储告警）。';
+			} else {
+				hint.textContent = '后端内存日志与 syslog 合并：自动拨号对齐、AT 通道交互、短信收发、接口拉起、系统事件。按类别筛选，关键词按原文匹配。';
+			}
+
 			renderList();
 		}
 
@@ -557,29 +852,29 @@ return L.view.extend({
 			state.loading = true;
 
 			var tasks = [];
-			/* 后端内存日志：一次取全量（上限 1200），前端按视图分类 */
+			/* 后端内存日志：一次取全量（上限 1200），前端按类别分类 */
 			/* 三路取数**串行**执行：ucode 转发用的是临时文件，并发会互相覆盖。
 			 * 新版 ucode 已用唯一文件名解决，这里串行是为了兼容存量设备，双保险。 */
 			tasks.push(rpcLogs(0, 1200, newRid()).then(function (r) {
 				var entries = entriesFromBackend((r && r.entries) || []);
-				state.dial = [];
-				state.iface = [];
 				for (var i = 0; i < entries.length; i++) {
-					if (classify(entries[i].msg) === 'dial') state.dial.push(entries[i]);
-					else state.iface.push(entries[i]);
+					entries[i].cat = categorize(entries[i].msg);
 				}
+				state._backendEntries = entries;
 			}).catch(function (err) {
-				state.dial = [{ ts: Date.now(), level: 'ERR', msg: '读取后端日志失败：' + ((err && err.message) || '未知错误') }];
-				state.iface = [];
+				state._backendEntries = [{ ts: Date.now(), level: 'ERR', msg: '读取后端日志失败：' + ((err && err.message) || '未知错误'), cat: 'other', src: 'backend' }];
 			}));
 
 			/* init.d 日志：走 syslog；无权限或不可用时降级，不影响其它视图 */
 			tasks.push(rpcSyslog(1500, false, true).then(function (r) {
 				var extra = entriesFromSyslog((r && r.log) || []);
-				state.iface = state.iface.concat(extra);
-				state.iface.sort(function (a, b) { return a.ts - b.ts; });
+				for (var i = 0; i < extra.length; i++) {
+					extra[i].cat = categorize(extra[i].msg);
+				}
+				state._syslogEntries = extra;
 				state.syslogOk = true;
 			}).catch(function () {
+				state._syslogEntries = [];
 				state.syslogOk = false;
 			}));
 
@@ -592,6 +887,10 @@ return L.view.extend({
 
 			/* 串行执行（见上） */
 			return tasks.reduce(function (p, t) { return p.then(function () { return t; }); }, Promise.resolve()).then(function () {
+				/* 合并后端+syslog，按时间排序 */
+				var merged = (state._backendEntries || []).concat(state._syslogEntries || []);
+				merged.sort(function (a, b) { return a.ts - b.ts; });
+				state.entries = merged;
 				state.loading = false;
 				renderAll();
 				if (manual) Mt5700.success('日志已刷新');
@@ -601,12 +900,22 @@ return L.view.extend({
 		}
 
 		function exportLog() {
-			var list = (state.tab === 'notify')
-				? [{ ts: Date.now(), level: 'INF', msg: state.notify || '' }]
-				: applyFilters(currentEntries());
+			var list;
+			if (state.tab === 'notify') {
+				list = [{ ts: Date.now(), level: 'INF', msg: state.notify || '' }];
+			} else {
+				list = applyFilters(state.entries);
+				if (state.limit > 0 && list.length > state.limit) {
+					list = list.slice(list.length - state.limit);
+				}
+			}
 			var lines = [];
 			lines.push('# luci-app-mt5700 运行日志导出');
 			lines.push('# 视图: ' + state.tab + '  导出时间: ' + fmtFull(Date.now()));
+			if (state.tab === 'runtime') {
+				lines.push('# 类别: ' + (CATEGORY_LABEL[state.category] || state.category));
+				lines.push('# 来源: ' + (state.source === 'all' ? '全部来源' : (state.source === 'backend' ? '后端内存' : 'syslog')));
+			}
 			lines.push('');
 			for (var i = 0; i < list.length; i++) {
 				lines.push(fmtFull(list[i].ts) + ' [' + list[i].level + '] ' + list[i].msg);
