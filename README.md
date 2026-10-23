@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.26.2-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.29.0-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -109,10 +109,10 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 | **数据与链路** | **拨号设置** | USB NDIS 拨号 / 转网口模式切换，承载网络链路状态守护与自动对账 |
 | | **模组设置** | 模组核心元数据查询（含自动识别的 USB 链路速率，sysfs 读取、不发 AT 命令）、SIM/USIM 卡管理（卡槽切换 / 热插拔 / PIN）、射频模式与 5G 增强（NR 载波聚合 / DSS / VoNR）、系统接入顺序与频段掩码、软硬件复位重启、出厂配置重置 |
 | | **模组升级** | 模组新固件远程推送检测与本地固件包上传刷写 |
-| **消息与运维** | **短信中心** | 支持 PDU / Text 短信收发、长短信自动分段重组、SIM 卡短信池查看；会话呈**聊天式 IM 界面**（收发双方头像、对方在左自己在右、跨天插日期分隔条、气泡宽度随内容收缩、手机端单栏 + 返回切换），提供搜索、全部/未读/已发筛选、单条与批量删除、新短信入口；**发出记录本地归档**：短信提交后模组不写槽位（`AT+CMGL` 永远读不到自己发的那条），改由后端把收发双向记录写入路由 `/etc/at-webserver/SMS`（按号码分文件、ChaCha20 加密 + 整帧混淆、2 MiB 配额按最早淘汰），界面把归档与模组存储合并成单条时间轴，删除可选「同时删除本地记录文件」，批量删除带**全选**（按当前筛选结果全选 / 再点取消，状态报告等无槽位条目不计入）。**发出时刻取插件 NTP 模块的时间**（`crate::nettime`，NTP 已同步时按精确时刻显示，未同步才标「（近似）」），不再依赖模组回读。收发语义与命令细节见 **[短信链路协议与命令参考](docs/sms-at-protocol.md)** |
-| | **短信设置** | 自定义短信中心号（SMSC）、存储介质与清空、USSD 查询；开关背后的真实 AT 序列见 [短信链路协议与命令参考](docs/sms-at-protocol.md) 第 2 节 |
+| **消息与运维** | **短信中心** | 支持 PDU / Text 短信收发、长短信自动分段重组、SIM 卡短信池查看；会话呈**聊天式 IM 界面**（收发双方头像、对方在左自己在右、跨天插日期分隔条、气泡宽度随内容收缩、手机端单栏 + 返回切换），提供搜索、全部/未读/已发筛选、单条与批量删除、新短信入口；**打开本页不再阻塞其它页面**（分级等待 + 事务协作让出 + 租约 30s 瘦身，详见 v1.29.0 发布说明），头部通道状态徽章实时显示「优先模式生效中 · 后台暂停（剩余 Ns）」；**发出记录本地归档**：短信提交后模组不写槽位（`AT+CMGL` 永远读不到自己发的那条），改由后端把收发双向记录写入路由 `/etc/at-webserver/SMS`（按号码分文件、ChaCha20 加密 + 整帧混淆、2 MiB 配额按最早淘汰），界面把归档与模组存储合并成单条时间轴，删除可选「同时删除本地记录文件」，批量删除带**全选**（按当前筛选结果全选 / 再点取消，状态报告等无槽位条目不计入）。**发出时刻取插件 NTP 模块的时间**（`crate::nettime`，NTP 已同步时按精确时刻显示，未同步才标「（近似）」），不再依赖模组回读。**QQ 富文本卡片**：新短信/巡检/切换/定时状态四类事件按表格卡片排版推送（短信卡为 LuCI 可改模板 `notify_tpl_qq_sms_md`），与纯文本推送同源同口径。收发语义与命令细节见 **[短信链路协议与命令参考](docs/sms-at-protocol.md)** |
+| | **短信设置** | 自定义短信中心号（SMSC）、存储介质与清空（默认 **ME** 模组 FLASH，保存即开机默认，模组复位回 SM 时启动自动拉回）、USSD 查询；开关背后的真实 AT 序列见 [短信链路协议与命令参考](docs/sms-at-protocol.md) 第 2 节 |
 | | **AT 调试终端** | Web 原生交互式控制台，支持常用指令自动补全、历史回溯与原语调试 |
-| | **运行日志** | 后端环形日志与系统 syslog 的统一入口，分「**运行日志** / **通知记录**」两个页签。运行时日志按**类别细分**：短信 / 拨号 / 网络 / AT / 系统 / 其他（每条挂类别徽章，类别胶囊实时显示条数、点一下就筛），另有关键词搜索、DBG/INF/WRN/ERR 级别、**「仅错误+警告」一键过滤**、来源（后端 / syslog）与条数上限（200 / 400 / 800 / 全部）；跨天插日期分隔条，长正文默认折 3 行、**真的被裁掉才出「展开」**，底部给出「共 N 条 · 错误 / 警告 / 信息 / 调试」统计，导出文件头部附类别与来源。通知记录页保留掉线告警、频段漂移记录，推送通道支持企业微信机器人、QQ 机器人（API v2）与 Webhook 实时推送 |
+| | **运行日志** | 后端环形日志与系统 syslog 的统一入口，分「**运行日志** / **通知记录**」两个页签。运行时日志按**类别细分**：短信 / 拨号 / 网络 / AT / 系统 / 其他（每条挂类别徽章，类别胶囊实时显示条数、点一下就筛），另有关键词搜索、DBG/INF/WRN/ERR 级别、**「仅错误+警告」一键过滤**、来源（后端 / syslog）与条数上限（200 / 400 / 800 / 全部）；跨天插日期分隔条，长正文默认折 3 行、**真的被裁掉才出「展开」**，底部给出「共 N 条 · 错误 / 警告 / 信息 / 调试」统计，导出文件头部附类别与来源。通知记录页保留掉线告警、频段漂移记录，推送通道支持企业微信机器人、QQ 机器人（API v2，富文本卡片 + 内嵌键盘 + 自定义菜单）与 Webhook 实时推送；短信中心占用期间的后台跳过提示已限流（30s 一条）并区分于真失败 |
 | | **服务配置** | 守护进程参数、通信串口绑定、退避重试阈值与自愈巡检开关 |
 
 ---
@@ -237,11 +237,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-   ./<ARCH>-luci-app-mt5700-1.26.2-r1.apk \
+   ./<ARCH>-luci-app-mt5700-1.29.0-r7.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.26.2_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_1.29.0-r7_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -524,6 +524,8 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 | 版本 | 主题 |
 |:--|:--|
+| [v1.29.0](docs/release-notes/v1.29.0.md) | **修复短信中心打开后其它页面卡死（issue #23）**：非短信命令按优先级分级等待（手动 3s / 页面查询 5s / 后台巡检零预算直接跳过本轮）；缓存刷新避让短信模式，不再每键白占 30s；短信事务持有超 5s 且门外有排队者时命令边界协作让出；租约 TTL 90s→30s、心跳 10s；前端「模块忙」2s 退避自动重试；事务耗时日志 + 短信中心通道状态徽章（1s 秒表）。**默认存储区改 ME**（模组 FLASH 300 槽位，SM 满后长短信会被拆进两个存储区）；空态立绘换新「小吱」并背景透明化；短信占用期间日志文案改为「跳过」并限流 30s，退出后补恢复日志 |
+| [v1.28.0](docs/release-notes/v1.28.0.md) | **QQ 推送富文本化**：鉴权/发消息/富媒体组装/内嵌键盘/自定义菜单收敛独立模块 `qqpush.rs`；Markdown 富文本（msg_type=2）+ 三级降级；四类富文本卡片（信笺 / 巡检报告 / 网络切换提醒 / 定时状态报告）；推送前缀统一 `{time} {count}`；企业微信与 QQ **独立开关均默认关闭**；LuCI 目标 ID 提示重写 + 绑定进度条 |
 | [v1.27.0](docs/release-notes/v1.27.0.md) | 全局视觉与日志页收口：英雄区看板娘不再被样式/主题切掉遮挡（`overflow: visible` + `isolation: isolate` + 头像定尺寸，检测到主题浮动工具条自动避让）；全局弹窗重做为三段 flex（只让正文滚动、footer 常驻，窄屏转底部抽屉，修 `.at-modal` 缺 `box-sizing` 导致的溢出视口）；**运行日志按类别细分**（短信/拨号/网络/AT/系统/其他 + 仅错误警告 + 来源/上限 + 日期分隔 + 长文折叠展开 + 统计与导出头）；**发出时刻改取插件 NTP 模块时间**；批量删除补全选；短信中心版式在改动中逐元素对拍为「零差异」 |
 | [v1.26.2](docs/release-notes/v1.26.2.md) | 短信中心界面重构为 IM 形态（收发双方头像、蓝紫色系、手机单栏 + 返回、会话内按时间一人一句排序、消息区内部滚动不顶页）；新增**发出记录本地归档**（`/etc/at-webserver/SMS`，按号码独立加密文件 + 2 MiB 配额淘汰 + 删除时可选连带清本地）；修 `conversationOrder` 拿对象当字典键导致排序退化成按槽位号、批量删除按钮漏挂载导致整功能不可用、状态报告占着真实槽位却禁止勾选 |
 | [v1.26.1](docs/release-notes/v1.26.1.md) | 短信收发链路逐条对照实机厂商实现修 7 处：0 号槽位永久删不掉、删除改按槽位降序、收件人号码先归一再编码、提交失败后写 ESC 清半开输入态、新短信按 `+CMTI` 上报的存储区对齐后再读、清空后还原 `AT+CPMS`、`delete` 缺超时条目导致批量删除被掐断并连带打开熔断；TP-VP 默认值纠正为 0xA7（24 小时）；新增《短信链路协议与命令参考》 |
@@ -555,7 +557,7 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.26.2)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.29.0)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本（见上方功能矩阵）
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / parse.js / mt5700.js / ui.js / mt5700.css / tabmenu.js)
