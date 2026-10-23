@@ -1240,10 +1240,15 @@ fn parse_storage(lines: &[String]) -> Option<StorageInfo> {
 /*
  * 构造一条「已发送」的归档记录。
  *
- * 发送时刻取**路由器本机时间**：3GPP 的 SMS-SUBMIT 里没有发送时刻字段
- * （只有 TP-VP 有效期），模组存下来再读回去也拿不到。所以这是唯一能拿到的
- * 时间点。设备没配 NTP 时这个值可能不准，故在记录里如实标 `time_approx`，
- * 界面不会把它当成模组给的精确时刻来显示。
+ * 3GPP 的 SMS-SUBMIT 里没有发送时刻字段（只有 TP-VP 有效期），模组存下来再读
+ * 回去也拿不到，所以发送时刻只能由**插件自己**盖章：取 [`crate::nettime`] 这个
+ * 全仓库唯一墙上时间入口 —— 它优先 NTP 校时结果，取不到才回退设备时钟。
+ *
+ * `time_approx` 因此不再是「一律近似」，而是如实反映**这一次**的时刻来源：
+ *   - NTP 已同步 → 时刻与服务器同源，`false`，界面按精确时刻显示；
+ *   - NTP 没同步（刚开机还没拨上号、服务器不可达）→ 只能信设备时钟，
+ *     断电重启后它可能停在 1970 或出厂时间，这时必须继续标 `true`，
+ *     让界面写明「（近似）」，别把没对过的钟当成精确时刻误导排障。
  */
 fn sent_record(destination: &str, message: &str) -> crate::sms_store::ArchiveRecord {
     let number = crate::notify::normalize_phone_number(destination);
@@ -1254,7 +1259,7 @@ fn sent_record(destination: &str, message: &str) -> crate::sms_store::ArchiveRec
         number,
         content: message.to_string(),
         time,
-        time_approx: true,
+        time_approx: !crate::nettime::from_ntp(),
         index: None,
         archived_at_ms: crate::nettime::now_ms(),
     }
