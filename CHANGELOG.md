@@ -8,6 +8,28 @@
 
 ---
 
+## v1.27.0 (2026-10-23)
+
+### 全局视觉收口（看板娘防遮挡 + 弹窗重做）、运行日志按类别细分、发出时刻改取 NTP 模块时间
+
+> 三件事。一是**英雄区的看板娘在别的页面上被切、被盖**：`mt5700.css` 一路长到 7200 行，里面叠了四套设计体系，同一个 `.mt5700-hero-card` 同时存在 `overflow: hidden` 与 `overflow: visible` 两条 `!important`，断点又把 `.mt5700-hero-art` 强拉成 `width: 100%` —— 头像被卡片自己裁掉、被相邻卡片压住、被主题的 `#floating-toolbar` 盖住。二是**弹窗内容一长就截断**：老规则 `max-height: 85vh` 配 `overflow: hidden`，正文超高时 footer 直接被切掉，两套世代的 `z-index`（9999 与 1000）互相打架。三是**运行日志只有一条时间轴**，拨号 / AT / 短信 / 系统混在一起，排障时想找一条 WRN 得肉眼扫全屏。
+>
+> 按要求**短信中心保持原样**：新增的每一条规则都用 `:not()` 把 `.mt5700-sms-shell`、`.mt5700-sms-hero-compact`、`.mt5700-sms-modal`、`.mt5700-sms-modal-mask`、`.mt5700-sms-prompt` 排除在外（追加的 584 行里 SMS 相关选择器 100% 是排除式，唯一例外 `.mt5700-logcat-sms` 是日志页的类别徽章，短信页不用这个类）。并做了一次逐元素对拍：同一份短信中心 DOM（页面骨架 + 读详情 / 批量删除 / 删除确认 / 输入号码四类弹窗，54 个元素 × 49 项计算属性）在「本次追加之前」与「之后」两版 CSS 下比较，1280×900 / 1280×700 / 768×900 / 390×844 四档视口 **diffCount 全部为 0**，横向溢出宽度也一致。
+>
+> 另外两处是经授权的功能性改动：发出时刻的来源、日志的筛选维度。
+
+- **style(ui) 看板娘防遮挡**：`.mt5700-hero-card` 恢复 `overflow: visible`，并加 `isolation: isolate` —— 卡片自身成层叠上下文，`::before` 那团 220px 径向光斑锁在 `z-index: 0` 且 `pointer-events: none`，既盖不住头像也不会溢到下一张卡片上；`.mt5700-hero-art` 改 `width: auto` + `flex: 0 0 auto`，头像锁 76×76 正方形（≤820px 收到 64×64），层级 art:3 / avatar:4；图片缺失时的兜底从原来那块黄色补丁换成紫粉渐变；`prefers-reduced-motion` 下停掉浮动动画。历史样式里 `!important` 成片且构建会把同宽度的 `@media` 块合并重排，因此沿用项目既有写法：双类名 `.x.x` + `:not()` 链做**顺序无关**的权重
+- **fix(ui) 主题工具条避让**：用 `@supports selector(body:has(*))` 包裹 `body:has(#floating-toolbar)` 检测，命中时给英雄卡加 56px 右侧避让；短信中心不参与。实测 1280px 下最坏情形原先重叠 6px，避让后头像右缘到视口右缘 57px、与工具条无交集
+- **fix(ui) 全局弹窗重做**：遮罩统一 `z-index: 9400`（高于主题 chrome、低于 toast 的 10000）+ safe-area padding + `overscroll-behavior: contain`；弹窗本体改 `display: flex; flex-direction: column`、`max-height: min(86dvh, 760px)`，只让 `.mt5700-modal-body` 滚动（`flex: 1 1 auto; min-height: 0`），footer 常驻可见，长串正文 `overflow-wrap: anywhere`；≤768px 转底部抽屉（贴底、顶部圆角、进幕动画、按钮平分）
+- **fix(css) `.at-modal` 缺 `box-sizing` 导致弹窗溢出视口**：`at.css` 从来没给 `.at-modal` 设过盒模型，`max-height` 落在 content box 上，768×900 实测弹窗 846px > 视口可用 810px —— 内容再多也会被顶出屏幕。补 `box-sizing: border-box`
+- **feat(logs) 运行日志按类别细分**：运行时日志 / 通知记录分两个页签；条目按 `短信 → 拨号 → 网络 → AT → 系统 → 其他` 顺序归类，每条挂类别徽章，类别胶囊实时显示条数、点一下即筛；新增「仅错误+警告」过滤、DBG 级别、来源（后端环形日志 / syslog，syslog 只取 `at-webserver:` 前缀并跳过 `at-webserver-rust`）、条数上限（200 / 400 / 800 / 全部）；跨天插 sticky 日期分隔条；长正文默认折 3 行且**只有真被裁掉才出「展开」**；底部统计「共 N 条 · 错误 / 警告 / 信息 / 调试」，导出头部附类别与来源
+- **feat(sms) 发出时刻取插件 NTP 模块时间**：`sent_record()` 改用 `crate::nettime::now()`（全仓库唯一墙上时间入口，NTP 优先、设备时钟回退），格式 `%y/%m/%d,%H:%M:%S` 与前端 `archiveKey` 对齐；`time_approx` 从「一律 true」改为 `!crate::nettime::from_ntp()`，如实反映这一次是否 NTP 同源。前端 `sentTimeAnchor()` + `mergeArchived()` 优先采用归档时刻，模组回读那份只用来保留槽位 `index`（删除要靠它）
+- **feat(sms) 批量删除补全选**：sticky 全选栏按当前筛选结果全选 / 再点取消，「已选 N 条」实时跟随；状态报告等无槽位条目不计入（原先它们禁用勾选却仍被算进全选）
+- **style(sms) 短信中心版式收口**：桌面按 QQ 式会话排布（左列表 + 右气泡时间轴），手机端铺满屏幕且不再被 OpenWrt「保存 & 应用」与主题 `#floating-toolbar` 挤压 —— 定高逻辑去掉「按溢出迭代回扣」的收缩环，改由 CSS 的 `dvh` + safe-area 承担，避免工具条出现时把会话区越算越矮；`.at-field-control` 补 `width: 100%`（标签上下排列后输入框原先只剩两百来像素）
+- **chore(ui) `MT5700_CSS_VERSION` 2.37.0 → 2.40.0、`AT_CSS_VERSION` 1.11.1 → 1.11.2**：LuCI 静态资源没有 `Cache-Control`，改样式必须同步 bump；view 模块无版本参数，**升级后需硬刷新一次（Ctrl+F5）**
+- **note**：本次**未**改 `Makefile` 的 `PKG_VERSION`（仍为 1.26.2）；发布打包前需同步 bump，否则包版本与 CHANGELOG 对不上
+- **test**：5 个前端 JS `node --check` 通过；`mt5700.css` 括号平衡（1190/1190）；短信中心 A/B 对拍四档视口 diffCount=0（见上文）；无头浏览器实测（Chromium + 假 RPC）看板娘在桌面/平板/手机三档均完整可见、`art` 占卡宽 6.4%–17.9%、头像 76×76 与 64×64、与最坏情形工具条零交集；弹窗遮罩 9400、正文可滚、footer 可见、盒体在视口内、移动端 `align-items: flex-end`；日志页 27 条（24 后端 + 3 syslog）日期分隔与类别计数正确，「仅错误+警告」只剩 WRN/ERR，syslog 来源筛选生效，通知页签下类别条 `display: none`，导出含类别与来源，移动端折叠 58px→展开 99px，桌面「假折叠」归 0，console 零报错。**未做**：`cargo check` / `cargo test`（沙箱无依赖缓存、拉 crates.io 索引未完成），Rust 侧改动为 3 行且只调用 `nettime` 已有公开函数，合并前请由 CI 或本机补跑
+
 ## v1.26.2 (2026-10-23)
 
 ### 短信中心重做成 IM 界面，并补上「发出去的短信」这条一直缺失的记录链
@@ -21,7 +43,7 @@
 - **feat(sms) 短信中心界面重构为 IM 形态**：左侧会话列表（搜索框 + 全部/未读/已发三档筛选 + 底部「+ 新短信」与归档概览），右侧聊天区（会话头部、日期分隔条、左右气泡、底部输入区）。**收发双方默认展示头像**：对方用粉色系、本机用薰衣草系，两张 192×192 的 PNG 随包安装到 `htdocs/luci-static/resources/at-webserver/`。配色沿用参考稿的蓝紫色系（页面底 `#edf3fc`、发送气泡 `#2997f3`、选中态 `#e0edfc`），未改主题色
 - **feat(sms) 发出记录本地归档（新增 `src/rust/src/sms_store.rs`）**：按会话独立文件、互不覆盖，单会话上限 500 条 / 512 KB，目录总配额 **2 MiB**、淘汰水位 4/5（超限先清最早记录）。去重键 `方向|正文|时刻` 是纯函数（`fingerprint()`），所以重复归档天然幂等。加密与混淆见上文容器格式；读写时自动加解密，不引入任何新依赖 —— SHA-256 与 ChaCha20 都是本文件内的纯 Rust 实现，随机数用时间戳混原子计数走 xorshift64\*（仅用于 salt/nonce/padding）
 - **feat(rpc) 归档三动作接入 RPC**：`store_stats` / `store_read` / `store_drop` 走 rpcd ucode 插件，**在事务段之前分支** —— 归档只做文件读写、不占 AT 通道，不该排在短信事务后面等锁。`store_drop` 三种形态：`all=true` 清全部；`fingerprints` 与 `indices` 均空则整会话删除；否则按记录逐条删。指纹一律由后端算，前端只回传 `{direction, content, time}`
-- **feat(sms) 收到与发出均归档**：`SmsService::send()` 在 `outcome == Accepted` 后记一条 `sent`（`time_approx=true` —— SUBMIT 里没有发送时刻，只有 TP-VP）；`urc.rs` 的 `handle_new_sms()` 读到正文、推送通知前记 `received`，长短信在 `assemble_partial()` 拼装完成后按**合并后的完整正文**记一条。归档失败只记日志，绝不影响收发结论 —— 留档是旁路，不是主链路
+- **feat(sms) 收到与发出均归档**：`SmsService::send()` 在 `outcome == Accepted` 后记一条 `sent`（本条当时取本机时钟并一律标 `time_approx=true` —— SUBMIT 里没有发送时刻，只有 TP-VP；**v1.27.0 起改为取 NTP 模块时间、按来源标 `time_approx`，见上文**）；`urc.rs` 的 `handle_new_sms()` 读到正文、推送通知前记 `received`，长短信在 `assemble_partial()` 拼装完成后按**合并后的完整正文**记一条。归档失败只记日志，绝不影响收发结论 —— 留档是旁路，不是主链路
 - **feat(ui) 归档与模组存储合并成单条时间轴**：`selectContact()` 异步拉 `store_read` 再渲染，缓存按会话号持有、发送/删除后主动失效（`invalidateArchive`）。发出气泡带「时间未知」标注而不是伪造时刻
 - **fix(rpc) 短信 RPC 一直返回 `{"result":[2]}`、插件函数根本不执行**：`mt5700.uc` 的 `sms.args` 里 `indices: ''`、`enable: ''` 这些**字面量默认值就是 rpcd 的类型声明**（不是注释）—— 声明成字符串，前端传数组/布尔就被判 `UBUS_STATUS_INVALID_ARGUMENT`。改为 `indices: []`、`enable: false`，并新增 `number: ''` / `items: []` / `all: false`。这是「能发送但读不到状态和记录」「提示模组拒绝但有时候能发出」两条现象的共同根因
 - **fix(ucode) 布尔参数把 `true` 判成 `false`**：`getBool()` 原先拿 JSON 布尔直接比字符串，短信设置页的开关只能下发 `false`。ucode 不是完整 JS、**不支持 `typeof`**，改用 `lc(trim('' + v))` 比对 `'1'/'true'/'yes'/'on'`
