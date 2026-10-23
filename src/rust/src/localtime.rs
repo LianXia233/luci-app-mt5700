@@ -81,7 +81,9 @@ static RESOLVED: OnceLock<Resolved> = OnceLock::new();
 
 /// 启动时调用一次：解析系统时区并把结果打进日志。
 ///
-/// 必须在 spawn 任何线程**之前**调用（[`resolve`] 会写 `TZ` 环境变量）。
+/// 必须在任何会读时间/时区的任务与第一条日志**之前**调用（[`resolve`] 会写 `TZ`
+/// 环境变量）。注意 `#[tokio::main]` 进来时运行时线程已经存在，这里靠启动顺序保证，
+/// 不是语言级同步。
 pub fn init() {
     let r = resolved();
     log_info!("时区: {}", describe());
@@ -157,7 +159,8 @@ fn resolve() -> Resolved {
     let (tz, source) = system_tz_string();
 
     // 回写环境变量：libc / chrono::Local / 子进程（uci）都只看 TZ。
-    // 仅在此处写一次，且 main 在 spawn 线程前调用 init()，不构成数据竞争。
+    // 仅在此处写一次。此刻 tokio 运行时线程已存在，靠「init() 先于任何业务任务」的
+    // 启动顺序避免竞争，并非语言级保证（edition 2021 下 set_var 还不是 unsafe）。
     #[cfg(unix)]
     if let Some(t) = tz.as_deref() {
         std::env::set_var("TZ", t);
