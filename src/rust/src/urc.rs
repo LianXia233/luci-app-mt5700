@@ -423,7 +423,6 @@ impl Dispatcher {
                 "sender": sender_ws,
                 "content": full,
                 "time": date.format("%Y-%m-%d %H:%M:%S").to_string(),
-                "isComplete": true,
             }
         }));
     }
