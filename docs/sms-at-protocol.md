@@ -28,7 +28,7 @@
 
 | 环节 | 实际做法 |
 |---|---|
-| 找端口 | 遍历 `/dev/ttyUSB*` + `/dev/ttyACM*`，对每个发裸 `AT`（1.2s 超时），**第一个回 `OK` 的**就是 AT 口；命令行里的 `<index>`（一般传 `1`）只当优先猜测用的提示 |
+| 找端口 | 遍历串口候选（USB 类 `ttyUSB` / `ttyACM` / `ttyAP`，另加 SoC 串口 `ttyS` / `ttyAMA`，最多 10 个），对每个发裸 `AT`（800ms 超时），**第一个回 `OK` 的**就是 AT 口；命令行里的 `<index>`（一般传 `1`）只当优先猜测用的提示 |
 | 记住端口 | 结果写 `/tmp/sendat.atport`；后续调用直接读缓存，读到空应答时重新探测并**换端口重试一次** |
 | 互斥 | `flock /tmp/sendat.at.lock` 独占，最多等 8s，等不到就**不持锁继续发**（best-effort，注释里明说了这是在赌运气） |
 | 线路参数 | raw 19200 8N1：`iflag/oflag/lflag = 0`，`cflag = CS8|CLOCAL|CREAD`，清 `PARENB`/`CSTOPB`，`VMIN=0 VTIME=0`，打开后先 `tcflush(TCIOFLUSH)` |
