@@ -667,6 +667,7 @@ impl AtClient {
     ///   2) 数据面未激活且自动拨号本就关闭时直接跳过（无卡扫描等场景不断不恢复）；
     ///   3) 先关自动拨号（防止模组在断开后自动重拨、与恢复逻辑争用 CID），再撤数据面；
     ///   4) 给模组 1.5s 收尾，避免紧随其后的 CELLSCAN 撞上 PDP 拆除。
+    ///
     /// 返回快照，扫频结束后必须用 [Self::restore_scan_data_plane] 成对恢复。
     pub async fn prepare_scan_data_plane(&self, ctx: &tokio::sync::watch::Receiver<bool>) -> ScanDataPrior {
         let mut prior = ScanDataPrior::default();
