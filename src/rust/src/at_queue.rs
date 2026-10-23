@@ -180,6 +180,14 @@ impl SmsMode {
         if !self.active().await {
             return Ok(());
         }
+        // 零预算（Low/Background 后台任务）：不等，直接带稳定前缀失败。
+        // 前缀是与前端的约定（rpc.js 据此区分「重试」与「跳过」），勿改文案开头。
+        if max_wait.is_zero() {
+            return Err(format!(
+                "sms_skip:短信操作进行中，后台任务本轮跳过：{}",
+                command.trim()
+            ));
+        }
         crate::log_debug!("命令 {} 等待短信优先模式让出通道", command.trim());
 
         let deadline = Instant::now() + max_wait;
@@ -205,7 +213,7 @@ impl SmsMode {
         }
 
         Err(format!(
-            "短信操作进行中，通道已被占用 {}s：{}",
+            "sms_busy:短信操作进行中，通道已被占用 {}s，请稍后重试：{}",
             max_wait.as_secs(),
             command.trim()
         ))
@@ -406,6 +414,15 @@ impl PriLock {
             w.notify.notify_one();
         }
     }
+
+    /// 等待队列是否非空（有命令正在排队等通道）。
+    ///
+    /// 供短信事务的协作让出判断使用：近似判断（含已取消尚未清扫的令牌），
+    /// 代价是一次短临界区加锁，绝不在命令路径上做堆扫描。
+    pub async fn has_waiters(&self) -> bool {
+        let state = self.inner.lock().await;
+        !state.waiters.is_empty()
+    }
 }
 
 /// 拿到的通道使用权，释放时把通道交给下一个排队的请求。
@@ -450,22 +467,81 @@ impl GatePermit {
 ///   - 事务内部的命令直接下发，不再重复 acquire（否则会与自己死锁）；
 ///   - Drop 即释放，异常/取消/超时都不会把通道永久占住。
 pub struct SmsTransaction {
-    permit: GatePermit,
+    /// 通道独占权。协作让出期间为 `None`（已交出、尚未抢回）。
+    ///
+    /// 用 `Option + Mutex` 而不是把方法改成 `&mut self`：让出只发生在命令边界，
+    /// 但调用方（sms.rs 的多个辅助函数）持有的是 `&SmsTransaction`，
+    /// 改签名会波及十余处调用点，收益不成比例。
+    permit: Mutex<Option<GatePermit>>,
     label: String,
+    /// 事务开始时刻（Drop 日志报总耗时）。
+    started: Instant,
+    /// 当前持有段的起点（让出后抢回时重置，供让出判断）。
+    held_since: AtomicU64,
 }
 
 impl SmsTransaction {
     pub(crate) fn new(permit: GatePermit, label: String) -> SmsTransaction {
-        SmsTransaction { permit, label }
+        SmsTransaction {
+            permit: Mutex::new(Some(permit)),
+            label,
+            started: Instant::now(),
+            held_since: AtomicU64::new(crate::atclient::mono_ms()),
+        }
     }
 
     pub fn label(&self) -> &str {
         &self.label
     }
 
+    /// 事务总耗时。
+    pub fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    /// 当前持有段已持续的时间（让出判断用）。
+    pub fn held_since(&self) -> Duration {
+        let since = self.held_since.load(Ordering::Relaxed);
+        Duration::from_millis(crate::atclient::mono_ms().saturating_sub(since))
+    }
+
     /// 供 AtClient 在事务内下发命令前做归属校验。
     pub async fn holds_channel(&self) -> bool {
-        self.permit.still_holds().await
+        let guard = self.permit.lock().await;
+        match guard.as_ref() {
+            // still_holds 只做一次短临界区加锁，不与其它路径成环
+            Some(p) => p.still_holds().await,
+            None => false,
+        }
+    }
+
+    /// 协作让出：交出通道，让排队的高优先级命令插进来（issue #23）。
+    pub async fn relinquish(&self) {
+        let taken = {
+            let mut guard = self.permit.lock().await;
+            guard.take()
+        };
+        // GatePermit::drop 内部 spawn 释放 + 派发，不阻塞当前任务
+        drop(taken);
+    }
+
+    /// 让出后重新持回通道（重置持有段计时）。
+    pub async fn restore(&self, permit: GatePermit) {
+        let mut guard = self.permit.lock().await;
+        *guard = Some(permit);
+        self.held_since.store(crate::atclient::mono_ms(), Ordering::Relaxed);
+    }
+}
+
+impl Drop for SmsTransaction {
+    fn drop(&mut self) {
+        // permit 的 Drop 负责释放通道；这里只补耗时日志。
+        // logger::emit 是非阻塞的（缓冲 + eprintln），Drop 内调用安全。
+        crate::log_debug!(
+            "短信事务结束: {} 耗时 {}ms",
+            self.label,
+            self.started.elapsed().as_millis()
+        );
     }
 }
 
@@ -640,6 +716,62 @@ mod tests {
             let _p = lock.acquire(AtPriority::Normal, &ctx, Duration::from_secs(3)).await.unwrap();
             name
         })
+    }
+
+    #[tokio::test]
+    async fn wait_clear_zero_budget_fails_fast_with_skip_prefix() {
+        let mode = SmsMode::new();
+        let (_tx, ctx) = watch::channel(false);
+        mode.acquire(Duration::from_secs(30)).await;
+        let t0 = Instant::now();
+        let err = mode
+            .wait_clear(&ctx, Duration::ZERO, "AT+CGREG?")
+            .await
+            .unwrap_err();
+        assert!(
+            t0.elapsed() < Duration::from_millis(100),
+            "零预算应立即失败，实测 {:?}",
+            t0.elapsed()
+        );
+        assert!(err.starts_with("sms_skip:"), "应带跳过前缀: {err}");
+    }
+
+    #[tokio::test]
+    async fn wait_clear_timeout_carries_busy_prefix() {
+        let mode = SmsMode::new();
+        let (_tx, ctx) = watch::channel(false);
+        mode.acquire(Duration::from_secs(30)).await;
+        let err = mode
+            .wait_clear(&ctx, Duration::from_millis(120), "AT^MONSC")
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("sms_busy:"), "应带忙前缀: {err}");
+    }
+
+    #[tokio::test]
+    async fn gate_reports_waiters_for_transaction_yield() {
+        let lock = PriLock::new();
+        let (_ctx_tx, ctx) = watch::channel(false);
+        assert!(!lock.has_waiters().await, "空队列不应有等待者");
+        let p = lock
+            .acquire(AtPriority::Sms, &ctx, Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(!lock.has_waiters().await, "仅持有者不应算等待者");
+        let waiter = {
+            let lock = lock.clone();
+            let ctx = ctx.clone();
+            tokio::spawn(async move {
+                let _p = lock
+                    .acquire(AtPriority::High, &ctx, Duration::from_secs(3))
+                    .await
+                    .unwrap();
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(lock.has_waiters().await, "排队者应被观察到");
+        drop(p);
+        waiter.await.unwrap();
     }
 
     #[tokio::test]

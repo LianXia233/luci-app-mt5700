@@ -838,13 +838,13 @@ mod tests {
     fn keyboard_json_only_when_url_present() {
         let mut cfg = qq_cfg("c2c");
         cfg.keyboard_enabled = true;
-        cfg.keyboard_url = "http://192.168.88.1/".into();
+        cfg.keyboard_url = "http://192.168.1.1/".into();
         let s = QqSender::from_config(&cfg).unwrap();
         let kb = s.keyboard_json().expect("启用且带地址时应产出键盘");
         assert_eq!(kb.pointer("/content/rows/0/buttons/0/action/type"), Some(&serde_json::json!(0)));
         assert_eq!(
             kb.pointer("/content/rows/0/buttons/0/action/data"),
-            Some(&serde_json::json!("http://192.168.88.1/"))
+            Some(&serde_json::json!("http://192.168.1.1/"))
         );
         // 未启用 → 无键盘
         let s2 = sender_of("c2c");

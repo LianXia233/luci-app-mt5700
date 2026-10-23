@@ -611,29 +611,669 @@ var Mt5700 = (function () {
 		return el;
 	};
 
+	/*
+	 * 空态立绘源码（小吱-喜欢，1000x1000 方图）。
+	 *
+	 * 整段 innerHTML 注入而不是逐个 appendChild：这幅画有 20 多个渐变 /
+	 * 滤镜定义，用 DOM API 拼既不可读也没法维护。defs 里的 id 在注入时
+	 * 按实例加后缀（见下方 replace），避免同页多个空态互相串色 ——
+	 * 重复 id 会让 url(#...) 全部解析到文档里第一份，渲染虽然一致，
+	 * 但调试时根本分不清是哪一份。
+	 */
+	var MT_ANIME_EMPTY_SEQ = 0;
+	var MT_ANIME_EMPTY_SVG = `<defs>
+    <!-- 腮红柔化滤镜 -->
+    <filter id="soft-blur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" />
+    </filter>
+    <filter id="glow-blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" />
+    </filter>
+
+    <!-- 头发主渐变 -->
+    <linearGradient id="hair-base" x1="15%" y1="0%" x2="35%" y2="100%">
+      <stop offset="0%" stop-color="#ffdbe8" />
+      <stop offset="40%" stop-color="#ffb3cd" />
+      <stop offset="85%" stop-color="#f48bb0" />
+      <stop offset="100%" stop-color="#e07298" />
+    </linearGradient>
+
+    <!-- 头发深色暗部渐变 -->
+    <linearGradient id="hair-dark" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d97596" />
+      <stop offset="60%" stop-color="#b55677" />
+      <stop offset="100%" stop-color="#8f3d59" />
+    </linearGradient>
+
+    <!-- 右侧发髻光照渐变 -->
+    <linearGradient id="hair-loop-right" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd6e5" />
+      <stop offset="55%" stop-color="#ffa8c5" />
+      <stop offset="100%" stop-color="#e3789c" />
+    </linearGradient>
+
+    <!-- 皮肤渐变 -->
+    <linearGradient id="skin-base" x1="20%" y1="0%" x2="40%" y2="100%">
+      <stop offset="0%" stop-color="#fffaf7" />
+      <stop offset="65%" stop-color="#fff0eb" />
+      <stop offset="100%" stop-color="#ffe0d8" />
+    </linearGradient>
+
+    <!-- 皮肤阴影渐变 -->
+    <linearGradient id="skin-shadow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f7cbc4" />
+      <stop offset="100%" stop-color="#ebbab2" stop-opacity="0.6" />
+    </linearGradient>
+
+    <!-- 光环金属渐变 -->
+    <linearGradient id="halo-metal" x1="0%" y1="30%" x2="100%" y2="60%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="35%" stop-color="#e3e8ed" />
+      <stop offset="65%" stop-color="#61666e" />
+      <stop offset="88%" stop-color="#383b40" />
+      <stop offset="100%" stop-color="#26282b" />
+    </linearGradient>
+
+    <!-- 光环内部半透明辉光 -->
+    <radialGradient id="halo-inner-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="40%" stop-color="#d8e4f0" stop-opacity="0" />
+      <stop offset="85%" stop-color="#b0c2d4" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#8da2b8" stop-opacity="0.55" />
+    </radialGradient>
+
+    <!-- 白色帽饰渐变 -->
+    <linearGradient id="cap-grad" x1="0%" y1="0%" x2="20%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="70%" stop-color="#f5eef0" />
+      <stop offset="100%" stop-color="#dfd3d8" />
+    </linearGradient>
+
+    <!-- 金元宝船体渐变 -->
+    <linearGradient id="ingot-body" x1="10%" y1="0%" x2="30%" y2="100%">
+      <stop offset="0%" stop-color="#fff2ad" />
+      <stop offset="35%" stop-color="#f7d374" />
+      <stop offset="75%" stop-color="#dead46" />
+      <stop offset="100%" stop-color="#bd8422" />
+    </linearGradient>
+
+    <!-- 金元宝凹槽内壁渐变 -->
+    <linearGradient id="ingot-basin" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c98e28" />
+      <stop offset="50%" stop-color="#f0c765" />
+      <stop offset="100%" stop-color="#d49a33" />
+    </linearGradient>
+
+    <!-- 金元宝中心圆顶径向渐变 -->
+    <radialGradient id="ingot-dome" cx="42%" cy="32%" r="62%">
+      <stop offset="0%" stop-color="#ffffed" />
+      <stop offset="30%" stop-color="#ffea96" />
+      <stop offset="70%" stop-color="#ecc05b" />
+      <stop offset="100%" stop-color="#c9902c" />
+    </radialGradient>
+
+    <!-- 金币正面渐变 -->
+    <linearGradient id="coin-face" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff8bf" />
+      <stop offset="45%" stop-color="#fae078" />
+      <stop offset="85%" stop-color="#e8bd4d" />
+      <stop offset="100%" stop-color="#d49e2a" />
+    </linearGradient>
+
+    <!-- 金币厚度侧边渐变 -->
+    <linearGradient id="coin-rim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e3ab42" />
+      <stop offset="50%" stop-color="#bd8222" />
+      <stop offset="100%" stop-color="#8c5a0e" />
+    </linearGradient>
+
+    <!-- 珍珠径向渐变 -->
+    <radialGradient id="pearl-sphere" cx="32%" cy="28%" r="68%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="50%" stop-color="#faf2f5" />
+      <stop offset="82%" stop-color="#decad2" />
+      <stop offset="100%" stop-color="#bfa6b0" />
+    </radialGradient>
+
+    <!-- 星星渐变 -->
+    <radialGradient id="star-glow" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#ffb700" />
+      <stop offset="45%" stop-color="#ffdf2b" />
+      <stop offset="100%" stop-color="#fff176" />
+    </radialGradient>
+  </defs>
+
+  <!-- 纯白背景 -->
+  <rect width="1000" height="1000" fill="#ffffff" />
+
+  <g stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- ================================================================= -->
+    <!-- 1. 后景层：白色软帽、光环、左右双环发髻 -->
+    <!-- ================================================================= -->
+
+    <!-- 后方白色软帽/女仆头饰底座 -->
+    <g>
+      <path d="M 232 455 C 212 268, 392 162, 636 248 C 662 278, 652 338, 622 372 Z" fill="url(#cap-grad)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 帽沿内侧柔和暗部 -->
+      <path d="M 244 432 C 242 292, 398 198, 622 268 L 615 310 C 425 230, 275 315, 255 438 Z" fill="#e3d5dc" opacity="0.7" />
+    </g>
+
+    <!-- 头顶金属光环与粉色环扣 -->
+    <g transform="translate(302, 206) rotate(-32)">
+      <!-- 光环内部半透明阴影圈 -->
+      <ellipse cx="0" cy="2" rx="122" ry="48" fill="url(#halo-inner-glow)" />
+      <!-- 光环主体（带内外圈描边） -->
+      <path d="M -136 0 A 136 58 0 1 0 136 0 A 136 58 0 1 0 -136 0 Z
+               M -111 4 A 111 42 0 1 1 111 4 A 111 42 0 1 1 -111 4 Z" fill="url(#halo-metal)" fill-rule="evenodd" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 光环高光条 -->
+      <path d="M -124 -8 A 124 48 0 0 1 15 -51" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.9" />
+      <!-- 光环上的粉色小圆环扣 -->
+      <path d="M 28 -65 C 42 -68, 53 -51, 48 -33 C 43 -18, 26 -13, 14 -23 C 4 -32, 7 -54, 21 -63" fill="none" stroke="#2b1d21" stroke-width="13.5" />
+      <path d="M 28 -65 C 42 -68, 53 -51, 48 -33 C 43 -18, 26 -13, 14 -23 C 4 -32, 7 -54, 21 -63" fill="none" stroke="#ff73a2" stroke-width="6.5" />
+      <path d="M 32 -62 C 40 -62, 45 -50, 42 -38" fill="none" stroke="#ffb8d0" stroke-width="2.5" />
+      <!-- 光环顶部淡粉色小蝴蝶结 -->
+      <path d="M 14 -72 C 3 -85, -10 -73, 1 -59 C -8 -50, 7 -40, 18 -53 C 24 -60, 20 -68, 14 -72 Z" fill="#ffe0eb" stroke="#2b1d21" stroke-width="4.5" />
+      <circle cx="8" cy="-60" r="3.5" fill="#ff85ad" />
+    </g>
+
+    <!-- 右上角大环形发髻 -->
+    <g>
+      <!-- 发髻内壁深色折面 -->
+      <path d="M 552 218 C 552 152, 635 122, 678 182 C 705 222, 668 278, 618 272
+               C 642 238, 652 185, 620 164 C 594 148, 568 178, 574 218 Z" fill="url(#hair-dark)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 发髻内壁发丝纹理线 -->
+      <path d="M 588 162 C 618 165, 635 198, 625 245" fill="none" stroke="#782e47" stroke-width="3" opacity="0.6" />
+      <!-- 发髻外层主亮面 -->
+      <path d="M 510 245 C 492 158, 584 92, 650 104 C 706 114, 732 190, 696 256 C 676 288, 635 298, 608 285
+               C 655 268, 675 210, 640 166 C 614 140, 568 160, 575 225 C 578 248, 558 262, 510 245 Z" fill="url(#hair-loop-right)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 发髻顶部弧形高光 -->
+      <path d="M 532 185 C 552 135, 612 115, 658 130" fill="none" stroke="#fff0f5" stroke-width="6" opacity="0.65" />
+      <!-- 发髻右下角外翘发尾 -->
+      <path d="M 615 284 C 665 316, 712 295, 732 250 C 706 272, 675 275, 648 264 Z" fill="url(#hair-base)" stroke="#2b1d21" stroke-width="5.5" />
+    </g>
+
+    <!-- 左侧环形发髻与白色波浪垂带 -->
+    <g>
+      <!-- 左发髻内部暗面 -->
+      <path d="M 255 415 C 182 392, 128 435, 144 486 C 155 522, 215 538, 256 512 Z" fill="url(#hair-dark)" stroke="#2b1d21" stroke-width="5.5" />
+      <path d="M 155 465 C 165 495, 205 510, 245 495" fill="none" stroke="#782e47" stroke-width="3" opacity="0.6" />
+      <!-- 左发髻外层亮面 -->
+      <path d="M 262 394 C 194 348, 114 394, 117 468 C 119 516, 165 540, 206 533
+               C 162 508, 150 454, 190 430 C 216 416, 245 430, 258 455 Z" fill="url(#hair-base)" stroke="#2b1d21" stroke-width="5.5" />
+      <path d="M 134 435 C 145 398, 185 382, 225 395" fill="none" stroke="#fff0f5" stroke-width="5" opacity="0.6" />
+      <!-- 穿插在左发髻下的粉色小发束 -->
+      <path d="M 212 502 C 215 532, 232 548, 258 542 C 262 522, 258 498, 245 488 Z" fill="url(#hair-base)" stroke="#2b1d21" stroke-width="5" />
+      <!-- 白色波浪形垂带 -->
+      <path d="M 256 460 C 218 460, 214 478, 210 498 C 206 516, 166 498, 166 526 C 166 546, 174 564, 175 572
+               L 198 558 C 194 536, 222 532, 228 510 C 232 490, 246 488, 262 482 Z" fill="#ffffff" stroke="#2b1d21" stroke-width="5" />
+      <path d="M 248 472 C 224 475, 222 492, 218 508 C 214 522, 182 515, 182 536" fill="none" stroke="#dfd3d8" stroke-width="3.5" />
+    </g>
+
+    <!-- ================================================================= -->
+    <!-- 2. 中后景层：左右两侧后方金元宝 -->
+    <!-- ================================================================= -->
+
+    <!-- 左侧后方金元宝 -->
+    <g>
+      <!-- 船形底座 -->
+      <path d="M 192 702 C 184 650, 242 612, 312 614 L 322 776 C 250 786, 202 752, 192 702 Z" fill="url(#ingot-body)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 凹槽阴影 -->
+      <path d="M 196 692 C 222 712, 268 718, 305 708 L 302 652 C 255 645, 210 662, 196 692 Z" fill="url(#ingot-basin)" />
+      <!-- 元宝圆顶 -->
+      <path d="M 222 672 C 238 625, 288 628, 306 672 C 282 690, 245 690, 222 672 Z" fill="url(#ingot-dome)" stroke="#2b1d21" stroke-width="5" />
+      <!-- 船沿高光与暗部线 -->
+      <path d="M 195 696 C 222 716, 265 722, 295 715" fill="none" stroke="#9e6914" stroke-width="4" />
+      <path d="M 200 688 C 215 655, 248 632, 285 628" fill="none" stroke="#fff9c4" stroke-width="3.5" opacity="0.8" />
+    </g>
+
+    <!-- 右侧大金元宝 -->
+    <g>
+      <!-- 元宝船形主体 -->
+      <path d="M 654 620 C 664 584, 796 584, 864 638 C 866 696, 836 746, 764 760 C 694 766, 648 700, 654 620 Z" fill="url(#ingot-body)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 元宝顶部凹槽面 -->
+      <path d="M 660 626 C 712 666, 804 670, 858 640 C 835 602, 715 595, 660 626 Z" fill="url(#ingot-basin)" />
+      <!-- 元宝中心圆顶 -->
+      <path d="M 686 626 C 694 560, 788 550, 810 632 C 776 654, 714 650, 686 626 Z" fill="url(#ingot-dome)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 元宝圆顶高光 -->
+      <ellipse cx="762" cy="592" rx="14" ry="8" transform="rotate(-12 762 592)" fill="#ffffff" opacity="0.85" />
+      <!-- 元宝内沿线与光泽 -->
+      <path d="M 662 628 C 714 666, 805 670, 858 642" fill="none" stroke="#8f5d10" stroke-width="4.5" />
+      <path d="M 672 638 C 722 672, 802 676, 852 648" fill="none" stroke="#fff8bd" stroke-width="3.5" opacity="0.85" />
+    </g>
+
+    <!-- ================================================================= -->
+    <!-- 3. 角色身体与服饰细节 -->
+    <!-- ================================================================= -->
+    <g>
+      <!-- 脖子与锁骨区阴影 -->
+      <path d="M 510 610 L 568 595 L 575 645 L 515 655 Z" fill="#f2beb6" stroke="#2b1d21" stroke-width="4.5" />
+      <!-- 粉色连衣裙主体 -->
+      <path d="M 552 615 L 642 605 L 655 785 L 542 785 Z" fill="#ff6699" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 连衣裙暗部褶皱 -->
+      <path d="M 565 620 L 622 615 L 628 775 L 595 775 C 602 720, 595 665, 565 620 Z" fill="#e0487b" opacity="0.65" />
+      <!-- 侧面黑色百褶荷叶边 -->
+      <path d="M 632 632 C 652 638, 654 656, 638 666
+               C 656 674, 656 692, 640 702
+               C 656 710, 656 728, 638 738
+               C 652 746, 650 762, 634 768
+               L 614 760 L 618 630 Z" fill="#3d3339" stroke="#2b1d21" stroke-width="5" />
+      <!-- 荷叶边内部灰色褶皱线 -->
+      <path d="M 622 652 L 638 666 M 620 688 L 640 702 M 618 724 L 638 738" fill="none" stroke="#6e6068" stroke-width="3.5" />
+      <!-- 领口蝴蝶结与飘带 -->
+      <path d="M 518 628 L 566 602 L 574 646 L 532 662 Z" fill="#3d3339" stroke="#2b1d21" stroke-width="5" />
+      <path d="M 544 618 L 562 666" stroke="#ff7aa6" stroke-width="5.5" />
+      <path d="M 526 635 L 548 625" stroke="#6e6068" stroke-width="3" />
+    </g>
+
+    <!-- ================================================================= -->
+    <!-- 4. 角色头部、五官、表情与精细发丝 -->
+    <!-- ================================================================= -->
+
+    <!-- 脸部皮肤底座 -->
+    <path d="M 314 445 C 294 536, 344 642, 435 645 C 526 648, 628 595, 625 485 C 622 375, 535 320, 440 335 C 355 348, 326 390, 314 445 Z" fill="url(#skin-base)" stroke="#2b1d21" stroke-width="5.5" />
+
+    <!-- 刘海在额头与脸侧投下的柔和皮肤阴影 -->
+    <path d="M 318 455 C 335 495, 365 525, 392 538 C 385 512, 378 485, 372 465
+             C 395 495, 425 518, 448 525 C 445 505, 442 490, 440 480
+             C 462 502, 482 512, 502 515 C 502 498, 498 482, 495 472
+             C 528 452, 538 418, 530 380 C 568 412, 594 458, 605 502
+             C 622 465, 622 415, 605 370 L 420 340 L 325 395 Z" fill="url(#skin-shadow)" />
+
+    <!-- 双颊红晕与斜线腮红纹理 -->
+    <g>
+      <ellipse cx="384" cy="586" rx="40" ry="23" transform="rotate(-18 384 586)" fill="#ff8da8" opacity="0.6" filter="url(#soft-blur)" />
+      <ellipse cx="572" cy="506" rx="44" ry="24" transform="rotate(-18 572 506)" fill="#ff8da8" opacity="0.65" filter="url(#soft-blur)" />
+      <!-- 右脸颊斜线腮红细节 -->
+      <g stroke="#f06e8c" stroke-width="3" opacity="0.65">
+        <line x1="548" y1="512" x2="554" y2="524" />
+        <line x1="562" y1="506" x2="568" y2="518" />
+        <line x1="576" y1="500" x2="582" y2="512" />
+        <line x1="590" y1="494" x2="596" y2="506" />
+      </g>
+      <!-- 左脸颊斜线腮红细节 -->
+      <g stroke="#f06e8c" stroke-width="3" opacity="0.6">
+        <line x1="368" y1="588" x2="374" y2="598" />
+        <line x1="382" y1="582" x2="388" y2="592" />
+        <line x1="396" y1="576" x2="402" y2="586" />
+      </g>
+    </g>
+
+    <!-- 开心眯起的左眼（含多层睫毛与内部光泽） -->
+    <g>
+      <!-- 眼睑上方的双眼皮折线 -->
+      <path d="M 374 548 C 384 524, 408 514, 430 518" fill="none" stroke="#7a4953" stroke-width="3" opacity="0.7" />
+      <!-- 眯眼主体外框 -->
+      <path d="M 385 590 C 376 555, 404 524, 439 532 C 443 542, 436 552, 422 556 C 408 560, 402 572, 396 590 Z" fill="#3d1923" stroke="#2b1d21" stroke-width="5" />
+      <!-- 眼睑内侧粉紫色高光带 -->
+      <path d="M 392 568 C 397 548, 414 538, 431 542" fill="none" stroke="#c47e90" stroke-width="5.5" />
+      <path d="M 396 556 C 404 544, 416 539, 426 541" fill="none" stroke="#ffdae3" stroke-width="2.5" />
+      <!-- 眼角睫毛分叉 -->
+      <path d="M 382 562 L 366 565 M 384 574 L 372 580" stroke="#2b1d21" stroke-width="4.5" />
+      <!-- 左眉毛 -->
+      <path d="M 354 512 C 364 490, 386 486, 406 494" fill="none" stroke="#2b1d21" stroke-width="5" />
+    </g>
+
+    <!-- 开心眯起的右眼（含多层睫毛与内部光泽） -->
+    <g>
+      <!-- 双眼皮折线 -->
+      <path d="M 520 468 C 542 448, 574 446, 596 458" fill="none" stroke="#7a4953" stroke-width="3" opacity="0.7" />
+      <!-- 眯眼主体外框 -->
+      <path d="M 514 509 C 510 472, 565 446, 603 472 C 603 485, 588 490, 568 492 C 548 495, 532 504, 514 509 Z" fill="#3d1923" stroke="#2b1d21" stroke-width="5" />
+      <!-- 眼睑内侧粉紫色高光带 -->
+      <path d="M 525 493 C 542 472, 572 464, 591 476" fill="none" stroke="#c47e90" stroke-width="5.5" />
+      <path d="M 538 482 C 552 470, 572 467, 585 474" fill="none" stroke="#ffdae3" stroke-width="2.5" />
+      <!-- 右眼外眼角睫毛 -->
+      <path d="M 600 470 L 614 466 M 598 480 L 610 482" stroke="#2b1d21" stroke-width="4.5" />
+      <!-- 右眉毛 -->
+      <path d="M 472 432 C 495 414, 528 414, 552 425" fill="none" stroke="#2b1d21" stroke-width="5.5" />
+    </g>
+
+    <!-- 微笑张开的猫咪嘴 -->
+    <g>
+      <!-- 口腔内部底色 -->
+      <path d="M 477 559 C 488 594, 529 596, 533 559 C 535 547, 530 536, 526 534 C 512 548, 492 556, 477 559 Z" fill="#c95b6e" stroke="#612836" stroke-width="4.5" />
+      <!-- 粉嫩舌头亮面 -->
+      <path d="M 484 568 C 495 592, 528 592, 532 562 C 520 554, 498 558, 484 568 Z" fill="#ff9eb0" />
+      <!-- 上唇猫咪弧线 -->
+      <path d="M 464 564 C 480 563, 496 556, 504 548 C 514 546, 526 538, 534 526" fill="none" stroke="#612836" stroke-width="5" />
+    </g>
+
+    <!-- 头发主层（右后垂发、两侧鬓角、多层次刘海、呆毛） -->
+    <g>
+      <!-- 右侧垂在肩膀与元宝前的深色发束 -->
+      <path d="M 614 542 C 628 605, 648 656, 676 682 C 686 646, 678 590, 658 545 Z" fill="url(#hair-dark)" stroke="#2b1d21" stroke-width="5.5" />
+      <path d="M 632 565 C 644 610, 656 645, 670 668" fill="none" stroke="#8f3d59" stroke-width="3.5" />
+
+      <!-- 左侧贴脸长鬓角（带内侧暗面层） -->
+      <path d="M 295 450 C 288 515, 302 582, 345 612 L 315 625 C 275 585, 265 515, 280 450 Z" fill="url(#hair-dark)" />
+      <path d="M 278 335 C 242 415, 245 555, 282 628 C 308 632, 332 622, 345 612
+               C 320 572, 312 512, 324 462 Z" fill="url(#hair-base)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 左鬓角发丝细线 -->
+      <path d="M 272 465 C 268 525, 278 585, 302 624" fill="none" stroke="#d4688c" stroke-width="3.5" />
+
+      <!-- 右侧蓬松外翘侧发（带层次暗部与发丝线） -->
+      <path d="M 555 262 C 655 292, 725 385, 722 475 C 742 495, 765 535, 798 532
+               C 788 565, 762 578, 742 576 C 755 595, 768 602, 778 605
+               C 748 618, 722 612, 705 595 C 712 612, 718 625, 722 632
+               C 685 625, 658 598, 645 568 C 618 575, 598 575, 588 570
+               C 618 540, 635 505, 635 468 C 615 495, 598 508, 585 512
+               C 612 465, 615 412, 595 368 Z" fill="url(#hair-base)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 右侧侧发阴影色块 -->
+      <path d="M 722 475 C 712 515, 685 548, 645 568 C 658 595, 682 618, 715 628
+               C 708 612, 702 595, 705 595 C 722 610, 745 615, 770 604
+               C 752 595, 740 576, 740 576 C 725 565, 715 535, 722 475 Z" fill="#e3789c" opacity="0.45" />
+
+      <!-- 额前主刘海 -->
+      <path d="M 372 325 C 345 268, 455 222, 578 268
+               C 615 282, 655 325, 668 385
+               C 645 375, 622 365, 602 355
+               C 625 405, 625 465, 602 505
+               C 592 462, 565 415, 525 385
+               C 535 425, 522 462, 495 485
+               C 498 498, 498 508, 495 518
+               C 472 512, 452 502, 438 488
+               C 442 505, 445 518, 442 528
+               C 412 518, 385 495, 368 468
+               C 372 495, 378 525, 388 542
+               C 352 525, 325 492, 315 452
+               C 305 472, 298 492, 295 508
+               C 272 468, 275 395, 312 342
+               C 332 315, 358 312, 372 325 Z" fill="url(#hair-base)" stroke="#2b1d21" stroke-width="5.5" />
+
+      <!-- 额前发根深色凹陷阴影（发际分缝处） -->
+      <path d="M 382 322 C 385 282, 445 268, 498 298 C 462 302, 415 318, 382 322 Z" fill="url(#hair-dark)" stroke="#2b1d21" stroke-width="4.5" />
+
+      <!-- 刘海内部结构线与发丝纹理 -->
+      <path d="M 385 385 C 402 435, 445 475, 495 485" fill="none" stroke="#2b1d21" stroke-width="5" />
+      <path d="M 442 355 C 468 395, 502 422, 528 425" fill="none" stroke="#2b1d21" stroke-width="4.5" />
+      <path d="M 628 465 C 665 455, 695 425, 712 385" fill="none" stroke="#2b1d21" stroke-width="5" />
+      <path d="M 645 568 C 685 548, 712 518, 722 475" fill="none" stroke="#2b1d21" stroke-width="5" />
+      <!-- 粉色细发丝内部刻画 -->
+      <path d="M 345 405 C 348 455, 365 495, 385 525" fill="none" stroke="#d4688c" stroke-width="3" />
+      <path d="M 408 372 C 425 425, 455 462, 488 475" fill="none" stroke="#d4688c" stroke-width="3" />
+      <path d="M 488 338 C 525 362, 565 405, 592 458" fill="none" stroke="#d4688c" stroke-width="3.5" />
+
+      <!-- 刘海椭圆高光群 -->
+      <ellipse cx="445" cy="395" rx="20" ry="11" transform="rotate(-25 445 395)" fill="#fff5f8" opacity="0.88" />
+      <ellipse cx="528" cy="365" rx="24" ry="12" transform="rotate(-15 528 365)" fill="#fff5f8" opacity="0.88" />
+      <ellipse cx="346" cy="435" rx="15" ry="9" transform="rotate(-35 346 435)" fill="#fff5f8" opacity="0.8" />
+      <circle cx="482" cy="382" r="6" fill="#ffffff" opacity="0.9" />
+      <circle cx="382" cy="418" r="5" fill="#ffffff" opacity="0.85" />
+
+      <!-- 左侧高高翘起的长呆毛 -->
+      <path d="M 372 325 C 335 202, 252 192, 210 295 C 184 356, 184 426, 198 476
+               C 202 415, 218 345, 252 292 C 285 242, 332 258, 365 332 Z" fill="url(#hair-base)" stroke="#2b1d21" stroke-width="5.5" />
+      <path d="M 232 268 C 262 222, 312 222, 348 275" fill="none" stroke="#fff5f8" stroke-width="4.5" opacity="0.75" />
+    </g>
+
+    <!-- 额前白色云朵荷叶边发带（带内部立体褶皱） -->
+    <g>
+      <path d="M 310 438 C 298 418, 310 390, 335 390 C 338 370, 355 360, 372 366
+               C 375 344, 402 330, 425 340 C 435 316, 465 314, 482 324
+               C 496 316, 514 328, 508 346 C 495 364, 468 366, 452 355
+               C 442 376, 418 386, 398 378 C 388 396, 368 402, 355 398
+               C 355 418, 338 442, 310 438 Z" fill="#ffffff" stroke="#2b1d21" stroke-width="5" />
+      <!-- 发带分段褶皱阴影线 -->
+      <path d="M 335 390 C 344 394, 350 396, 355 398" fill="none" stroke="#d4c5cb" stroke-width="4" />
+      <path d="M 372 366 C 382 372, 390 376, 398 378" fill="none" stroke="#d4c5cb" stroke-width="4" />
+      <path d="M 425 340 C 435 348, 444 352, 452 355" fill="none" stroke="#d4c5cb" stroke-width="4" />
+    </g>
+
+    <!-- 右上刘海十字发夹 -->
+    <g>
+      <!-- 发夹下方投影 -->
+      <path d="M 560 362 L 636 322 L 642 336 L 566 376 Z" fill="#b55677" opacity="0.5" />
+      <!-- 横向底条 -->
+      <path d="M 556 355 L 632 315 L 640 332 L 564 372 Z" fill="#382228" stroke="#211216" stroke-width="4.5" />
+      <path d="M 565 360 L 631 324" stroke="#c95b78" stroke-width="4.5" />
+      <!-- 纵向顶条 -->
+      <path d="M 598 302 L 616 305 L 596 382 L 578 378 Z" fill="#382228" stroke="#211216" stroke-width="4.5" />
+      <path d="M 606 310 L 588 374" stroke="#c95b78" stroke-width="4.5" />
+    </g>
+
+    <!-- ================================================================= -->
+    <!-- 5. 前景主金元宝与角色双手 -->
+    <!-- ================================================================= -->
+
+    <!-- 正前方主金元宝 -->
+    <g>
+      <!-- 元宝船形底座 -->
+      <path d="M 270 672 C 268 648, 310 638, 345 642 C 405 648, 472 648, 528 638
+               C 545 636, 548 665, 542 705 C 532 768, 475 815, 405 815
+               C 332 815, 274 758, 270 672 Z" fill="url(#ingot-body)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 元宝底部暖金反光层 -->
+      <path d="M 285 725 C 315 785, 475 795, 532 720 C 522 772, 468 812, 405 812 C 338 812, 295 772, 285 725 Z" fill="#b87b18" opacity="0.45" />
+      <!-- 元宝顶面凹槽暗部 -->
+      <path d="M 274 668 C 325 718, 485 718, 542 665 C 542 645, 525 638, 495 642
+               C 435 650, 355 650, 305 642 C 282 640, 272 652, 274 668 Z" fill="url(#ingot-basin)" stroke="#2b1d21" stroke-width="5" />
+      <!-- 元宝船沿亮边高光 -->
+      <path d="M 278 674 C 328 720, 482 720, 538 670" fill="none" stroke="#fff9c4" stroke-width="4.5" opacity="0.9" />
+      <!-- 元宝中央圆润凸起 -->
+      <path d="M 328 675 C 328 594, 472 584, 482 678 C 442 702, 368 702, 328 675 Z" fill="url(#ingot-dome)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 元宝高光点 -->
+      <ellipse cx="428" cy="634" rx="16" ry="10" transform="rotate(-15 428 634)" fill="#ffffff" opacity="0.9" />
+      <circle cx="398" cy="648" r="5.5" fill="#ffffff" opacity="0.85" />
+    </g>
+
+    <!-- 角色右手（搭在主元宝顶部的白手套） -->
+    <g>
+      <path d="M 325 638 C 318 612, 352 588, 385 592 C 405 595, 412 608, 402 618
+               C 392 628, 368 625, 352 642 C 342 652, 328 650, 325 638 Z" fill="#ffffff" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 手套底部柔和阴影 -->
+      <path d="M 330 642 C 345 648, 362 630, 398 616 C 388 625, 365 628, 350 644 Z" fill="#d9cdd2" />
+      <!-- 手套指缝线 -->
+      <path d="M 342 642 C 348 625, 362 612, 375 608" fill="none" stroke="#2b1d21" stroke-width="4.5" />
+      <path d="M 362 632 C 368 618, 380 608, 392 605" fill="none" stroke="#2b1d21" stroke-width="4.5" />
+    </g>
+
+    <!-- 角色左臂与左手（抱住金元宝右侧） -->
+    <g>
+      <!-- 肩膀与手臂皮肤 -->
+      <path d="M 572 608 C 585 572, 628 575, 632 618 L 605 725 L 518 765 L 502 732 L 568 682 Z" fill="url(#skin-base)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 手臂内侧阴影 -->
+      <path d="M 565 688 L 515 732 L 525 752 L 592 715 Z" fill="#f2cbc4" opacity="0.6" />
+      <!-- 白色泡泡袖口与绊带纽扣 -->
+      <path d="M 560 642 C 585 634, 622 640, 638 655 C 642 688, 625 715, 592 715
+               C 565 715, 550 688, 560 642 Z" fill="#ffffff" stroke="#2b1d21" stroke-width="5.5" />
+      <path d="M 564 655 C 588 650, 618 655, 634 666" fill="none" stroke="#d9cdd2" stroke-width="4" />
+      <!-- 袖口袢带与小圆点扣 -->
+      <path d="M 578 668 L 598 670 L 594 698 L 574 695 Z" fill="#f5eef0" stroke="#2b1d21" stroke-width="4" />
+      <circle cx="586" cy="684" r="2.5" fill="#2b1d21" />
+      <!-- 左手白色手套（带腕部荷叶褶边） -->
+      <path d="M 496 716 C 515 720, 538 744, 546 768 C 532 785, 518 792, 505 792
+               C 492 808, 462 820, 442 815 C 438 802, 448 792, 458 785
+               C 448 778, 452 762, 468 755 C 462 745, 472 735, 485 735 Z" fill="#ffffff" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 手套手腕褶皱与指缝 -->
+      <path d="M 492 732 C 508 738, 522 752, 528 772" fill="none" stroke="#cfc2c8" stroke-width="4.5" />
+      <path d="M 458 785 C 474 778, 488 772, 502 768" fill="none" stroke="#2b1d21" stroke-width="4" />
+      <path d="M 468 755 C 480 752, 492 750, 500 750" fill="none" stroke="#2b1d21" stroke-width="4" />
+    </g>
+
+    <!-- ================================================================= -->
+    <!-- 6. 精细金币堆（带立体侧边与船锚十字浮雕）、切面蓝宝石、珍珠 -->
+    <!-- ================================================================= -->
+
+    <!-- 金币1：最左侧竖立金币 -->
+    <g>
+      <path d="M 155 662 C 185 645, 232 685, 252 745 C 272 805, 245 842, 212 842
+               C 178 842, 142 785, 138 725 C 135 685, 142 668, 155 662 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <!-- 侧边刻度纹理 -->
+      <path d="M 142 705 L 160 700 M 142 735 L 162 728 M 148 765 L 168 756 M 160 795 L 180 785" stroke="#8c5a0e" stroke-width="3.5" />
+      <ellipse cx="206" cy="748" rx="44" ry="88" transform="rotate(-22 206 748)" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5" />
+      <ellipse cx="206" cy="748" rx="33" ry="72" transform="rotate(-22 206 748)" fill="none" stroke="#dead46" stroke-width="3.5" />
+      <!-- 币面浮雕纹样 -->
+      <path d="M 186 715 C 202 708, 222 735, 222 768 M 185 745 L 222 735" fill="none" stroke="#dead46" stroke-width="5.5" />
+    </g>
+
+    <!-- 金币2：左下倾斜金币 -->
+    <g>
+      <path d="M 255 768 C 285 735, 365 768, 398 825 C 415 855, 395 882, 355 880
+               C 305 878, 242 825, 255 768 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <ellipse cx="332" cy="814" rx="76" ry="44" transform="rotate(28 332 814)" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5" />
+      <ellipse cx="332" cy="814" rx="60" ry="32" transform="rotate(28 332 814)" fill="none" stroke="#e0a638" stroke-width="3.5" />
+      <!-- 船锚十字浮雕 -->
+      <path d="M 294 794 L 366 834 M 316 792 L 304 816 M 342 802 C 362 816, 352 838, 326 832" fill="none" stroke="#e0a638" stroke-width="5.5" />
+      <circle cx="290" cy="791" r="5" fill="none" stroke="#e0a638" stroke-width="4" />
+    </g>
+
+    <!-- 金币3：底部中后枚平铺金币 -->
+    <g>
+      <path d="M 465 812 C 465 785, 612 775, 615 805 L 615 832 C 612 858, 465 865, 465 838 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <ellipse cx="540" cy="805" rx="74" ry="24" transform="rotate(-5 540 805)" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5" />
+      <ellipse cx="540" cy="805" rx="55" ry="15" transform="rotate(-5 540 805)" fill="none" stroke="#e0a638" stroke-width="3.5" />
+    </g>
+
+    <!-- 金币4：底部中左枚平铺金币 -->
+    <g>
+      <path d="M 358 842 C 358 820, 488 820, 488 842 L 488 865 C 488 885, 358 885, 358 865 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <path d="M 385 858 L 385 878 M 415 860 L 415 880 M 445 860 L 445 880" stroke="#8c5a0e" stroke-width="3.5" />
+      <ellipse cx="423" cy="842" rx="64" ry="20" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5" />
+      <ellipse cx="423" cy="842" rx="46" ry="12" fill="none" stroke="#e0a638" stroke-width="3.5" />
+    </g>
+
+    <!-- 金币5：底部中右枚平铺金币 -->
+    <g>
+      <path d="M 542 838 C 542 812, 688 812, 688 838 L 688 865 C 688 888, 542 888, 542 865 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <path d="M 575 858 L 575 880 M 615 860 L 615 882 M 655 858 L 655 878" stroke="#8c5a0e" stroke-width="3.5" />
+      <ellipse cx="615" cy="838" rx="72" ry="22" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5" />
+      <ellipse cx="615" cy="836" rx="52" ry="14" fill="none" stroke="#e0a638" stroke-width="3.5" />
+      <path d="M 585 836 L 645 836 M 615 828 L 615 844" stroke="#e0a638" stroke-width="4.5" />
+    </g>
+
+    <!-- 金币6：右侧偏上大金币 -->
+    <g>
+      <path d="M 658 725 C 668 662, 725 618, 765 638 C 795 652, 792 718, 762 768
+               C 732 812, 650 785, 658 725 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <ellipse cx="715" cy="705" rx="74" ry="50" transform="rotate(-55 715 705)" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5" />
+      <ellipse cx="715" cy="705" rx="58" ry="38" transform="rotate(-55 715 705)" fill="none" stroke="#e0a638" stroke-width="3.5" />
+      <!-- 船锚十字浮雕 -->
+      <path d="M 695 738 L 732 672 M 700 715 L 726 728 M 695 695 C 712 678, 738 695, 725 718" fill="none" stroke="#e0a638" stroke-width="5.5" />
+    </g>
+
+    <!-- 金币7：最右侧斜伸金币 -->
+    <g>
+      <path d="M 785 772 C 815 738, 882 718, 895 745 C 908 772, 858 825, 805 832 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <ellipse cx="838" cy="775" rx="62" ry="30" transform="rotate(-30 838 775)" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5" />
+      <ellipse cx="838" cy="775" rx="46" ry="20" transform="rotate(-30 838 775)" fill="none" stroke="#e0a638" stroke-width="3.5" />
+      <path d="M 812 788 L 862 760 M 828 762 C 845 758, 855 772, 842 785" fill="none" stroke="#e0a638" stroke-width="4.5" />
+    </g>
+
+    <!-- 金币8：右下前景大金币 -->
+    <g>
+      <path d="M 678 815 C 675 765, 745 715, 795 735 C 835 752, 822 825, 775 862
+               C 732 895, 680 865, 678 815 Z" fill="url(#coin-rim)" stroke="#2b1d21" stroke-width="5.5" />
+      <ellipse cx="742" cy="798" rx="76" ry="52" transform="rotate(-38 742 798)" fill="url(#coin-face)" stroke="#2b1d21" stroke-width="5.5" />
+      <ellipse cx="742" cy="798" rx="60" ry="39" transform="rotate(-38 742 798)" fill="none" stroke="#e0a638" stroke-width="3.5" />
+      <!-- 清晰的船锚十字浮雕 -->
+      <path d="M 708 825 L 775 772 M 736 782 L 758 808 M 706 798 C 702 822, 725 836, 748 824" fill="none" stroke="#e0a638" stroke-width="6" />
+      <circle cx="778" cy="769" r="5" fill="none" stroke="#e0a638" stroke-width="4" />
+    </g>
+
+    <!-- 4颗多切面蓝宝石（含高光切面、中调切面与深蓝背光面） -->
+    <!-- 1. 左侧蓝宝石 -->
+    <g>
+      <polygon points="196,795 218,770 250,776 260,804 235,850 196,828" fill="#78ccf5" stroke="#2b1d21" stroke-width="5" />
+      <polygon points="218,770 250,776 240,800 208,796" fill="#d4f2ff" />
+      <polygon points="196,795 218,770 208,796" fill="#9be0ff" />
+      <polygon points="208,796 240,800 235,850 196,828" fill="#62bce8" />
+      <polygon points="240,800 260,804 235,850" fill="#398ec2" />
+      <path d="M 196 795 L 240 800 L 260 804 M 218 770 L 208 796 L 235 850 L 240 800 L 250 776" fill="none" stroke="#2b1d21" stroke-width="3.5" />
+    </g>
+
+    <!-- 2. 中左蓝宝石 -->
+    <g>
+      <polygon points="375,812 396,784 428,790 438,818 418,864 376,845" fill="#78ccf5" stroke="#2b1d21" stroke-width="5" />
+      <polygon points="396,784 428,790 416,816 386,810" fill="#d4f2ff" />
+      <polygon points="386,810 416,816 418,864 376,845" fill="#62bce8" />
+      <polygon points="416,816 438,818 418,864" fill="#398ec2" />
+      <path d="M 375 812 L 416 816 L 438 818 M 396 784 L 386 810 L 418 864 L 416 816 L 428 790" fill="none" stroke="#2b1d21" stroke-width="3.5" />
+    </g>
+
+    <!-- 3. 中右蓝宝石 -->
+    <g>
+      <polygon points="626,765 655,744 688,754 694,785 662,830 630,798" fill="#78ccf5" stroke="#2b1d21" stroke-width="5" />
+      <polygon points="655,744 688,754 672,780 642,772" fill="#d4f2ff" />
+      <polygon points="642,772 672,780 662,830 630,798" fill="#62bce8" />
+      <polygon points="672,780 694,785 662,830" fill="#398ec2" />
+      <path d="M 626 765 L 672 780 L 694 785 M 655 744 L 642 772 L 662 830 L 672 780 L 688 754" fill="none" stroke="#2b1d21" stroke-width="3.5" />
+    </g>
+
+    <!-- 4. 右上蓝宝石 -->
+    <g>
+      <polygon points="720,728 748,706 784,716 788,745 752,762 724,748" fill="#78ccf5" stroke="#2b1d21" stroke-width="5" />
+      <polygon points="748,706 784,716 765,738 735,730" fill="#d4f2ff" />
+      <polygon points="765,738 784,716 788,745 752,762" fill="#398ec2" />
+      <path d="M 720 728 L 765 738 L 788 745 M 748 706 L 735 730 L 752 762 L 765 738 L 784 716" fill="none" stroke="#2b1d21" stroke-width="3.5" />
+    </g>
+
+    <!-- 7颗圆润白珍珠（带高光点与底侧反光） -->
+    <g>
+      <!-- 1. 左后珍珠 -->
+      <circle cx="246" cy="765" r="14" fill="url(#pearl-sphere)" stroke="#2b1d21" stroke-width="4.5" />
+      <circle cx="241" cy="759" r="3.5" fill="#ffffff" />
+      <!-- 2. 左前珍珠 -->
+      <circle cx="216" cy="852" r="17" fill="url(#pearl-sphere)" stroke="#2b1d21" stroke-width="5" />
+      <circle cx="210" cy="845" r="4.5" fill="#ffffff" />
+      <!-- 3. 左下大珍珠 -->
+      <circle cx="360" cy="865" r="18" fill="url(#pearl-sphere)" stroke="#2b1d21" stroke-width="5" />
+      <circle cx="354" cy="858" r="4.5" fill="#ffffff" />
+      <!-- 4. 左下小珍珠 -->
+      <circle cx="386" cy="877" r="12.5" fill="url(#pearl-sphere)" stroke="#2b1d21" stroke-width="4.5" />
+      <circle cx="382" cy="872" r="3" fill="#ffffff" />
+      <!-- 5. 右中珍珠 -->
+      <circle cx="802" cy="745" r="15" fill="url(#pearl-sphere)" stroke="#2b1d21" stroke-width="4.5" />
+      <circle cx="797" cy="739" r="3.5" fill="#ffffff" />
+      <!-- 6. 右下外侧珍珠 -->
+      <circle cx="826" cy="825" r="17" fill="url(#pearl-sphere)" stroke="#2b1d21" stroke-width="5" />
+      <circle cx="820" cy="818" r="4.5" fill="#ffffff" />
+      <!-- 7. 右下内侧珍珠 -->
+      <circle cx="805" cy="846" r="15" fill="url(#pearl-sphere)" stroke="#2b1d21" stroke-width="5" />
+      <circle cx="800" cy="840" r="4" fill="#ffffff" />
+    </g>
+
+    <!-- ================================================================= -->
+    <!-- 7. 四角星闪光特效（3处） -->
+    <!-- ================================================================= -->
+
+    <!-- 左侧四角星（带柔和白晕衬底以区分发梢与金元宝） -->
+    <g transform="translate(225, 595)">
+      <path d="M 0 -52 C 6 -18, 14 -10, 42 -6 C 14 2, 8 12, 4 52 C -4 14, -12 4, -40 2 C -12 -6, -6 -16, 0 -52 Z" fill="none" stroke="#ffffff" stroke-width="11" />
+      <path d="M 0 -52 C 6 -18, 14 -10, 42 -6 C 14 2, 8 12, 4 52 C -4 14, -12 4, -40 2 C -12 -6, -6 -16, 0 -52 Z" fill="url(#star-glow)" />
+      <ellipse cx="1" cy="-1" rx="8" ry="12" fill="#f59e00" opacity="0.55" filter="url(#glow-blur)" />
+    </g>
+
+    <!-- 右上刘海四角星（保留发丝上的白色分离轮廓） -->
+    <g transform="translate(675, 360)">
+      <path d="M 0 -46 C 5 -15, 12 -8, 38 -4 C 12 2, 6 10, 2 46 C -4 12, -10 4, -36 2 C -10 -4, -5 -14, 0 -46 Z" fill="none" stroke="#ffffff" stroke-width="12" />
+      <path d="M 0 -46 C 5 -15, 12 -8, 38 -4 C 12 2, 6 10, 2 46 C -4 12, -10 4, -36 2 C -10 -4, -5 -14, 0 -46 Z" fill="url(#star-glow)" />
+      <ellipse cx="1" cy="0" rx="7" ry="10" fill="#f59e00" opacity="0.55" filter="url(#glow-blur)" />
+    </g>
+
+    <!-- 最右侧独立四角星 -->
+    <g transform="translate(840, 495)">
+      <path d="M 4 -54 C 8 -18, 16 -10, 44 -4 C 16 4, 8 14, -2 54 C -6 14, -14 4, -42 -2 C -14 -8, -4 -18, 4 -54 Z" fill="url(#star-glow)" />
+      <ellipse cx="1" cy="0" rx="8" ry="12" fill="#f59e00" opacity="0.55" filter="url(#glow-blur)" />
+    </g>
+
+  </g>`;
+
 	api.empty = function (text) {
 		var el = E('div', { 'class': 'mt5700-empty' });
+		/*
+		 * 140px 见方：原图是 1000x1000 的方图；空态容器（.mt5700-empty）
+		 * 上下留白 36px，140px 在 320px 窄屏上也放得下，再大就开始挤正文。
+		 */
 		var svg = svgEl('svg', {
 			'class': 'mt-anime-empty-svg',
-			viewBox: '0 0 100 80',
-			width: '80',
-			height: '64',
-			fill: 'none',
+			viewBox: '0 0 1000 1000',
+			width: '140',
+			height: '140',
 			xmlns: 'http://www.w3.org/2000/svg'
 		});
-		// 萌系软云与浮动星光
-		svg.appendChild(svgEl('path', {
-			d: 'M25 55 C18 55 12 49 14 42 C15 36 21 32 27 33 C30 24 41 20 49 25 C54 21 64 22 68 28 C74 27 80 32 80 38 C86 41 87 48 83 53 C81 55 76 55 75 55 Z',
-			fill: 'rgba(237, 233, 254, 0.85)',
-			stroke: '#c7d2fe',
-			'stroke-width': '1.5',
-			'class': 'mt-anim-float'
-		}));
-		svg.appendChild(svgEl('circle', { cx: '40', cy: '42', r: '2', fill: '#8b5cf6' }));
-		svg.appendChild(svgEl('circle', { cx: '60', cy: '42', r: '2', fill: '#8b5cf6' }));
-		svg.appendChild(svgEl('path', { d: 'M 47 47 Q 50 50 53 47', stroke: '#ec4899', 'stroke-width': '1.5', fill: 'none' }));
-		svg.appendChild(svgEl('path', { d: 'M18 24 L20 18 L22 24 L28 26 L22 28 L20 34 L18 28 L12 26 Z', fill: '#fbbf24', 'class': 'mt-anim-pulse' }));
-		svg.appendChild(svgEl('path', { d: 'M76 18 L77.5 13 L79 18 L84 19.5 L79 21 L77.5 26 L76 21 L71 19.5 Z', fill: '#f472b6', 'class': 'mt-anim-pulse' }));
+		var uid = ++MT_ANIME_EMPTY_SEQ;
+		svg.innerHTML = MT_ANIME_EMPTY_SVG
+			.replace(/id="([^"]+)"/g, 'id="$1-' + uid + '"')
+			.replace(/url\(#([^)]+)\)/g, 'url(#$1-' + uid + ')');
 		el.appendChild(svg);
 		el.appendChild(E('div', { 'class': 'mt5700-empty-text' }, text || '暂无数据喵~'));
 		return el;

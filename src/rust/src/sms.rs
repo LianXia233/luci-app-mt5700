@@ -35,7 +35,12 @@ pub const SMS_QUEUE_WAIT: Duration = Duration::from_secs(10);
 /// 才能让「前端 / RPC / 后端」三层的时间预期对齐。
 pub const SMS_SEND_TOTAL_BUDGET: Duration = Duration::from_secs(60);
 /// 前台短信模式租约时长。前端每轮续期，忘记释放也会在这里自动失效。
-pub const SMS_MODE_LEASE: Duration = Duration::from_secs(90);
+/// 短信中心会话租约的默认 TTL。
+///
+/// 90s → 30s（issue #23）：页面崩溃 / 忘记释放 / WebSocket 断了的时候，
+/// 最长阻塞从 90s 降到 30s；心跳同步加密到 10s（见 sms_center.js），
+/// 续租粒度更细，正常使用无感。
+pub const SMS_MODE_LEASE: Duration = Duration::from_secs(30);
 
 /// `AT+CFUN=1` 的应答预算。
 ///

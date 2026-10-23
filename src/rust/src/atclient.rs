@@ -232,7 +232,7 @@ pub struct Connection {
 /// 长命令「什么时候结束的」是两个瞬时之间的**间隔**，不是墙上时间：
 /// 必须用 `Instant` 这类单调时钟，否则 NTP 校正 / 手动改时间会让差值失真。
 /// `Instant` 没法塞进原子量，这里折算成「距进程起点的毫秒」再存。
-fn mono_ms() -> u64 {
+pub(crate) fn mono_ms() -> u64 {
     static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
     ORIGIN.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
@@ -260,13 +260,39 @@ pub struct AtClient {
     pending: Arc<Mutex<Option<PendingCmd>>>,
 }
 
-/// 非短信命令在短信优先模式下的最长等待时间。
+/// 非短信命令在短信优先模式下的等待预算：按优先级分级（issue #23）。
 ///
-/// 取 30s 的依据：一次短信事务最坏情况（长短信多片 + 弱信号重提交）远小于此，
-/// 后台巡检（信号、缓存、流量）错过一轮不影响功能，下一轮补上即可；
-/// 而用户层面的等待若超过这个值，宁可让他看到「短信操作进行中」的明确提示，
-/// 也不要无限期排在队里等待。
-const SMS_MODE_MAX_WAIT: Duration = Duration::from_secs(30);
+/// 旧实现对所有非短信命令一刀切等 30s：页面状态查询（Normal）与后台巡检
+/// （Low）一个待遇，短信中心开着的时候其它页面全部干等满 30s 才失败，
+/// 再叠加前端 14s 的 RPC 超时，表现为「整个界面卡死」。
+///
+/// 分级依据：
+///   - High（用户主动操作：AT 终端、强制刷新）：短等，坏了立刻给明确结论；
+///   - Normal（页面状态查询）：中短等，保证页面 5s 内必有确定结果；
+///   - Low / Background（后台巡检、缓存刷新）：零预算直接跳过本轮 ——
+///     错过一轮下一轮补上，不该占着 worker 干等。
+///
+/// 等待超时的错误文案带 `sms_busy:` 前缀（前端 rpc.js 据此 2s 退避自动重试），
+/// 零预算的跳过带 `sms_skip:` 前缀（后台任务，无需重试）。
+pub fn sms_mode_budget(prio: AtPriority) -> Duration {
+    match prio {
+        AtPriority::High => Duration::from_secs(3),
+        AtPriority::Normal => Duration::from_secs(5),
+        AtPriority::Low | AtPriority::Background | AtPriority::Sms => Duration::ZERO,
+    }
+}
+
+/// 短信事务协作让出阈值：持有超过这么久且门外有排队者时，让出一次通道，
+/// 让被挡住的交互命令插进来，再以 Sms 优先级抢回（issue #23）。
+///
+/// 让出只发生在**命令边界**：PDU 会话上下文不跨让出点，事务完整性不受影响。
+/// `sms.list` 的单条 `AT+CMGL=4` 无法中途让出（一条命令一个 RPC），那种场景
+/// 由分级预算兜底（High 3s 内得到明确结论 + 前端自动重试）。
+const SMS_TX_YIELD_AFTER: Duration = Duration::from_secs(5);
+
+/// 让出后的抢回等待：给 [GatePermit] Drop 的「释放 + 派发」留出执行窗口
+/// （Drop 内部是 spawn，不占当前任务，但需要一次调度才会真正让出）。
+const SMS_TX_YIELD_GRACE: Duration = Duration::from_millis(100);
 
 impl AtClient {
     pub fn new(cfg: AtConfig, urc_tx: mpsc::Sender<Unsolicited>) -> Arc<Self> {
@@ -288,6 +314,11 @@ impl AtClient {
     /// 短信优先模式的句柄（供 RPC 层登记/释放会话租约）。
     pub fn sms_mode(&self) -> Arc<SmsMode> {
         self.sms_mode.clone()
+    }
+
+    /// 短信优先模式是否生效（供缓存刷新等后台任务避让，issue #23）。
+    pub async fn sms_mode_active(&self) -> bool {
+        self.sms_mode.active().await
     }
 
     pub fn connection_type(&self) -> &str {
@@ -850,6 +881,24 @@ impl AtClient {
         command: &str,
         timeout: Duration,
     ) -> Result<AtResponse, String> {
+        // 协作让出检查点（issue #23）：事务持有超过阈值且门外有排队者时，
+        // 主动交出通道一次，让页面查询 / AT 终端插进来，再以 Sms 优先级抢回。
+        // 分片发送、批量删除这类多步骤流程因此在步骤间形成天然让出点，
+        // 长事务不再无限期饿死交互命令。
+        if tx.held_since() >= SMS_TX_YIELD_AFTER && self.gate.has_waiters().await {
+            crate::log_debug!(
+                "短信事务 {} 已持有 {}s，门外有等待者，协作让出一次",
+                tx.label(),
+                tx.held_since().as_secs()
+            );
+            tx.relinquish().await;
+            tokio::time::sleep(SMS_TX_YIELD_GRACE).await;
+            let permit = self
+                .gate
+                .acquire(AtPriority::Sms, ctx, QUEUE_WAIT_TIMEOUT)
+                .await?;
+            tx.restore(permit).await;
+        }
         if !tx.holds_channel().await {
             return Err(format!("短信事务 {} 已失效，拒绝下发 {}", tx.label(), command.trim()));
         }
@@ -927,7 +976,9 @@ impl AtClient {
         // 缓存刷新此时不能产生新的 AT，否则会和正在进行的短信事务抢同一条 TTY。
         // 等待本身有上限：超时给出明确文案，不会把命令硬塞进通道造成响应串线。
         if !prio.is_sms() {
-            self.sms_mode.wait_clear(ctx, SMS_MODE_MAX_WAIT, command).await?;
+            self.sms_mode
+                .wait_clear(ctx, sms_mode_budget(prio), command)
+                .await?;
         }
 
         // 第一段预算：排队（按优先级申请放行闸 + 最小命令间隔）。
@@ -1292,6 +1343,15 @@ pub fn humandur(d: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn sms_mode_budget_tiers_by_priority() {
+        // issue #23：分级预算，High 短等 / Normal 中短等 / 后台零预算直接跳过
+        assert_eq!(sms_mode_budget(AtPriority::High), Duration::from_secs(3));
+        assert_eq!(sms_mode_budget(AtPriority::Normal), Duration::from_secs(5));
+        assert_eq!(sms_mode_budget(AtPriority::Low), Duration::ZERO);
+        assert_eq!(sms_mode_budget(AtPriority::Background), Duration::ZERO);
+    }
     use super::*;
     use std::pin::Pin;
     use std::task::{Context, Poll};
