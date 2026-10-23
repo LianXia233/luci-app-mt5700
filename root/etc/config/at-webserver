@@ -120,6 +120,9 @@ option dns_exclusive '1'
 	option notify_tpl_signal ''             # 留空用默认 '{content}'（正文由后端组装）
 	option notify_tpl_memory ''             # 留空用默认「短信存储空间已满\n后果：清理前可能收不到新短信」
 	option notify_tpl_batch ''              # 批量汇总时的首行标题（合并窗口已移除，当前不会触发）
+	# QQ 富文本短信卡片（仅 QQ Markdown 生效；企业微信/纯文本仍用 notify_tpl_sms）。
+	# 占位符同通用模板；留空=内置默认卡片；写成 {body} 可改回通用转换。
+	option notify_tpl_qq_sms_md ''
 
 	# 定时锁频配置
 	option schedule_enabled '0'              # 启用定时锁频

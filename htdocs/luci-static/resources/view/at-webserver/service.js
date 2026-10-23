@@ -904,6 +904,8 @@ return L.view.extend({
 		 * 原来这里是普通单行 input，等宽字体、高度、边框都和相邻的模板框不同，
 		 * 在卡片里显得像另一个控件。它和「前缀」一样是短文本，两行足够。 */
 		var tplBatchInput = mkTplArea(2);
+		/* QQ 富文本短信卡片：Markdown 多行模板，行高给足 */
+		var tplQqSmsInput = mkTplArea(9);
 
 		var PLACEHOLDER_HINT =
 			'可用占位符：{sender} 发送者 · {content} 事件正文 · {time} 事件时刻 · ' +
@@ -920,6 +922,11 @@ return L.view.extend({
 		tplBody.appendChild(Mt5700.formGroup('批量汇总标题', tplBatchInput,
 			'合并窗口已于 v1.14.20 移除，不再有「多条事件合并成一条」的场景；' +
 			'此项保留仅为兼容已有配置，当前不会被触发。'));
+		tplBody.appendChild(Mt5700.formGroup('QQ 富文本短信卡片', tplQqSmsInput,
+			'仅 QQ 富文本（Markdown）消息生效；企业微信与 QQ 纯文本仍用上方「新短信」模板。'
+			+ '占位符：{sender} 发送者 · {content} 短信正文 · {time} 接收时间 · {count} 消息序号。'
+			+ '留空 = 内置默认卡片；写成 {body} 则改用通用转换（不加卡片版式）。'
+			+ '分隔线请用空行包裹的 ---，页脚用 *斜体*（QQ 不支持 <sub> 等 HTML 标签）。'));
 
 		/* 内置默认文案：必须与 Rust 侧 config.rs 的 DEFAULT_TPL_* 保持一致。
 		 * 仅用于「恢复默认文案」按钮与初始回填，后端始终以自己的默认为准。 */
@@ -929,7 +936,22 @@ return L.view.extend({
 			call: '来电\n{content}',
 			signal: '{content}',
 			memory: '短信存储空间已满\n后果：清理前可能收不到新短信',
-			batch: '批量通知汇总'
+			batch: '批量汇总',
+			qq_sms_md: '## 喵呜～收到新短信啦\n'
+				+ '有新的消息送到喵，快来看看是谁给你寄来了信笺。\n'
+				+ '**发送者：** `{sender}`\n'
+				+ '**接收时间：** `{time}`\n'
+				+ '**消息序号：** `{count}`\n'
+				+ '\n'
+				+ '---\n'
+				+ '\n'
+				+ '### 信笺内容\n'
+				+ '\n'
+				+ '{content}\n'
+				+ '\n'
+				+ '---\n'
+				+ '\n'
+				+ '*本喵已经把信笺整理好啦，记得及时查收喵。*'
 		};
 
 		var tplStatus = E('span', { 'class': 'mt5700-hint' }, '');
@@ -940,6 +962,7 @@ return L.view.extend({
 			tplSignalInput.value = TPL_DEFAULTS.signal;
 			tplMemInput.value = TPL_DEFAULTS.memory;
 			tplBatchInput.value = TPL_DEFAULTS.batch;
+			tplQqSmsInput.value = TPL_DEFAULTS.qq_sms_md;
 			AtWs.uci.markDirty();
 			tplStatus.textContent = '已填入默认文案，点击「保存并应用」后生效';
 		});
@@ -1059,6 +1082,7 @@ return L.view.extend({
 		tplSignalInput.value = tplLoad('notify_tpl_signal', TPL_DEFAULTS.signal);
 		tplMemInput.value = tplLoad('notify_tpl_memory', TPL_DEFAULTS.memory);
 		tplBatchInput.value = tplLoad('notify_tpl_batch', TPL_DEFAULTS.batch);
+		tplQqSmsInput.value = tplLoad('notify_tpl_qq_sms_md', TPL_DEFAULTS.qq_sms_md);
 
 		/* ---------- 保存（OpenWrt 标准「保存并应用」流程） ----------
 		 *
@@ -1140,6 +1164,7 @@ return L.view.extend({
 			set('notify_tpl_signal', tplToUci(tplSignalInput.value));
 			set('notify_tpl_memory', tplToUci(tplMemInput.value));
 			set('notify_tpl_batch', tplToUci(tplBatchInput.value));
+			set('notify_tpl_qq_sms_md', tplToUci(tplQqSmsInput.value));
 
 			// 写内存后立刻标脏，未点保存就离开会被浏览器拦截
 			AtWs.uci.markDirty();

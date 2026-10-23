@@ -74,6 +74,7 @@ impl TimerPusher {
 
         let memory_full = storage.map(|(used, total)| total > 0 && used >= total).unwrap_or(false);
         let content = render_status(sample.as_ref(), storage, &now);
+        let card = render_status_card_md(sample.as_ref(), storage, &now);
         log_info!("定时推送触发：{}", first_line(&content));
         self.notifier
             .notify(Notification {
@@ -84,6 +85,7 @@ impl TimerPusher {
                 kind: NotifyKind::Signal,
                 memory_full,
                 time: now,
+                qq_card: Some(card),
             })
             .await;
     }
@@ -126,6 +128,9 @@ pub fn render_status(sample: Option<&Sample>, storage: Option<(u64, u64)>, now: 
             }
             out.push_str(&line);
             out.push('\n');
+            // 指标行与「信号」汇总行之间空一行：纯文本下分组更清晰，
+            // QQ Markdown 下空行结束列表上下文，指标行才不会缩进成列表续行
+            out.push('\n');
 
             out.push_str(&format!("RSRP {} dBm  {}\n", fmt_num(s.rsrp), grade_phrase(a.rsrp)));
             if let Some(pct) = a.signal_percent {
@@ -148,6 +153,82 @@ pub fn render_status(sample: Option<&Sample>, storage: Option<(u64, u64)>, now: 
             out.push_str(&format!("短信存储：{used} / {total}\n"));
         }
     }
+    out
+}
+
+/// 渲染 QQ 富文本「定时状态报告」卡片（Markdown 表格排版）。
+///
+/// 与 [`render_status`]（纯文本）同源：信号读数与存储用量来自同一轮采样，
+/// 口径与网页卡片一致。无信号读数时表格降级为一行说明；存储段仅在读到
+/// 用量时出现。分隔线用空行包裹的 `---`；页脚用斜体（QQ 不支持 `<sub>`）。
+pub fn render_status_card_md(sample: Option<&Sample>, storage: Option<(u64, u64)>, now: &str) -> String {
+    let mut out = format!(
+        "## 定时状态报告\n喵呜，来看看当前的网络状态和短信存储情况吧。\n**推送时间：** `{now}`\n**消息序号：** `1`\n\n---\n\n"
+    );
+
+    match sample {
+        Some(s) => {
+            let a = assess(s);
+            let gen = a
+                .capability
+                .iter()
+                .find(|c| c.label == "网络制式")
+                .map(|c| c.value.clone())
+                .unwrap_or_default();
+            let heading = if gen.is_empty() {
+                "### 网络状态\n".to_string()
+            } else {
+                format!("### {gen} 网络状态\n")
+            };
+            out.push_str(&heading);
+            out.push_str("| 项目 | 当前数据 |\n|:--|:--|\n");
+            let band = band_label(&s.rat, s.band);
+            let rat_cell = match (gen.is_empty(), band.is_empty()) {
+                (false, false) => format!("**{gen} {} · {band}**", s.rat),
+                (false, true) => format!("**{gen} {}**", s.rat),
+                (true, false) => format!("**{} · {band}**", s.rat),
+                (true, true) => format!("**{}**", s.rat),
+            };
+            out.push_str(&format!("| 网络制式 | {rat_cell} |\n"));
+            if let Some(freq) = s.dl_freq_khz {
+                out.push_str(&format!("| 中心频率 | {} MHz |\n", fmt_num(freq / 1000.0)));
+            }
+            if let Some(bw) = s.dl_bw_khz {
+                out.push_str(&format!("| 信道带宽 | {} MHz |\n", fmt_num(bw / 1000.0)));
+            }
+            out.push_str(&format!(
+                "| RSRP | **{} dBm** · {} |\n",
+                fmt_num(s.rsrp),
+                grade_phrase(a.rsrp)
+            ));
+            if let Some(pct) = a.signal_percent {
+                out.push_str(&format!("| SIGNAL | **{pct}%** · {} |\n", grade_phrase(a.pct)));
+            }
+            if let Some(v) = &a.verdict {
+                let short = v.title.strip_prefix("网络能力").unwrap_or(v.title);
+                out.push_str(&format!("\n**网络评估：{short}**\n{}\n", v.advice));
+            }
+        }
+        // 宁可明说「没读到」，也不要拿上一轮的旧值冒充当前状态
+        None => out.push_str("### 网络状态\n信号：暂无读数（未注册 / 无服务 / 模组忙）\n"),
+    }
+
+    if let Some((used, total)) = storage {
+        out.push_str("\n### 短信存储状态\n");
+        if total > 0 && used >= total {
+            out.push_str(&format!("**已用：** `{used} / {total}` 条（已满）\n"));
+            out.push_str("*存储已满，清理前可能收不到新短信。*\n");
+        } else {
+            out.push_str(&format!("**已用：** `{used} / {total}` 条\n"));
+            if total > 0 {
+                let pct = used * 100 / total;
+                let remain = total - used;
+                out.push_str(&format!("*存储占用率：{pct}%，剩余 {remain} 条空间。*\n"));
+            }
+        }
+    }
+
+    out.push_str("\n---\n\n*定时监测报告 · 喵呜，本次状态已经检查完毕啦。*");
     out
 }
 
@@ -178,6 +259,32 @@ mod tests {
             dl_bw_khz: Some(100_000.0),
             band: Some(41),
         }
+    }
+
+    #[test]
+    fn status_card_has_tables_storage_and_no_html_tags() {
+        let s = full_sample();
+        let card = render_status_card_md(Some(&s), Some((22, 40)), "2026-10-23 14:10:25");
+        assert!(card.starts_with("## 定时状态报告"), "实际: {card}");
+        assert!(card.contains("**推送时间：** `2026-10-23 14:10:25`"), "缺推送时间: {card}");
+        assert!(card.contains("### 5G 网络状态"), "缺网络状态分节: {card}");
+        assert!(card.contains("| 网络制式 | **5G NR · n41** |"), "缺制式行: {card}");
+        assert!(card.contains("| RSRP | **-62 dBm** ·"), "缺 RSRP 行: {card}");
+        assert!(card.contains("### 短信存储状态"), "缺存储分节: {card}");
+        assert!(card.contains("**已用：** `22 / 40` 条"), "缺已用量: {card}");
+        assert!(card.contains("*存储占用率：55%，剩余 18 条空间。*"), "缺占用率: {card}");
+        // QQ Markdown 不支持 HTML 标签，卡片里不允许出现
+        assert!(!card.contains("<sub>"), "不应使用 <sub>: {card}");
+        // 分隔线必须空行包裹（否则 CommonMark 会把上文段落变成二级标题）
+        assert!(card.contains("\n\n---\n\n"), "分隔线未用空行包裹: {card}");
+    }
+
+    #[test]
+    fn status_card_admits_no_reading_and_full_storage() {
+        let card = render_status_card_md(None, Some((40, 40)), "2026-10-23 14:10:25");
+        assert!(card.contains("信号：暂无读数"), "未说明没有读数: {card}");
+        assert!(card.contains("（已满）"), "未标记存储已满: {card}");
+        assert!(card.contains("收不到新短信"), "未说明已然后果: {card}");
     }
 
     #[test]
@@ -216,6 +323,7 @@ mod tests {
         let s = full_sample();
         let text = render_status(Some(&s), Some((3, 50)), "2026-10-12 02:30:00");
         let lines = text.trim().split('\n').count();
-        assert!(lines <= 9, "定时推送正文 {lines} 行，太长: {text}");
+        // 10 行含两处空行分段（标题/信号块/指标块/存储块），仍是一屏可读
+        assert!(lines <= 10, "定时推送正文 {lines} 行，太长: {text}");
     }
 }

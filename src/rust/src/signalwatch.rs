@@ -22,7 +22,7 @@ use crate::atclient::{AtClient, COMMAND_TIMEOUT};
 use crate::config::{in_poll_window, PollConfig};
 use crate::notify::{Notification, NotifyKind, Notifier, SENDER_SIGNAL};
 use crate::schedule::sleep_ctx;
-use crate::signalgrade::{Assessment, Grade, SignalInput};
+use crate::signalgrade::{Assessment, Grade, Level, SignalInput};
 use crate::urc::{parse_signal_reading, query_hfreqinfo, query_monsc};
 use crate::{log_debug, log_info};
 use chrono::Timelike;
@@ -170,7 +170,9 @@ async fn notify_signal(&self, sample: &Sample) {
                 content,
                 kind: NotifyKind::Signal,
                 memory_full: false,
-                time: now,
+                time: now.clone(),
+                // QQ 富文本卡片：与纯文本报告同源同口径，但按表格排版
+                qq_card: Some(render_patrol_card_md(&assessment, sample, &now)),
             })
             .await;
     }
@@ -371,6 +373,127 @@ pub fn render_report_with(assessment: &Assessment, sample: &Sample, now: &str) -
     }
 
     out.trim_end().to_string()
+}
+
+/// 渲染 QQ 富文本「巡检报告」卡片（Markdown 表格排版）。
+///
+/// 与 [`render_report_with`]（纯文本，企业微信/日志用）**同源同口径** ——
+/// 等级、状态短语、总评全部来自同一份 `Assessment`，只是排版不同：
+/// 驻网信息 + 射频指标两张表 + 结论。缺测项整行省略（不写占位符）。
+///
+/// 排版约定（对照参考样式做了两处适配）：
+/// - 分隔线用**空行包裹**的 `---`：CommonMark 中紧随段落的 `---` 会被
+///   解释成 setext 二级标题下线（把上文段落变成标题），空行才能保证它是
+///   水平分割线；
+/// - 页脚用斜体：QQ Markdown 不支持 HTML 标签，参考样式里的 `<sub>`
+///   会原样显示成标签文本。
+/// - 指标评价列用本模块统一的档位口径（极佳/良好/…），与网页卡片一致，
+///   不照抄参考示例里的文字。
+pub fn render_patrol_card_md(assessment: &Assessment, sample: &Sample, now: &str) -> String {
+    let gen = assessment
+        .capability
+        .iter()
+        .find(|c| c.label == "网络制式")
+        .map(|c| c.value.clone())
+        .unwrap_or_default();
+    let title = if gen.is_empty() {
+        "信号巡检报告".to_string()
+    } else {
+        format!("{gen} 信号巡检报告")
+    };
+
+    let mut out = format!(
+        "## {title}\n**巡检时间：** `{now}`\n**巡检序号：** `1`\n\n---\n\n### 驻网信息\n| 项目 | 当前状态 |\n|:--|:--|\n"
+    );
+    let band = band_label(&sample.rat, sample.band);
+    if !band.is_empty() {
+        out.push_str(&format!("| 网络频段 | **{band}** |\n"));
+    }
+    if let Some(freq) = sample.dl_freq_khz {
+        out.push_str(&format!("| 中心频率 | {} MHz |\n", fmt_num(freq / 1000.0)));
+    }
+    if let Some(bw) = sample.dl_bw_khz {
+        out.push_str(&format!("| 信道带宽 | {} MHz |\n", fmt_num(bw / 1000.0)));
+    }
+    if let Some(v) = &assessment.verdict {
+        let short = v.title.strip_prefix("网络能力").unwrap_or(v.title);
+        out.push_str(&format!("| 网络评估 | **{short}** |\n"));
+        out.push_str(&format!("| 驻网建议 | {} |\n", v.advice));
+    }
+
+    out.push_str("\n### 射频指标\n| 指标 | 当前值 | 参考标准 | 评价 |\n|:--|--:|--:|:--|\n");
+    out.push_str(&format!(
+        "| RSRP | **{} dBm** | ≥ -80 dBm | {} · {} |\n",
+        fmt_num(sample.rsrp),
+        grade_text(assessment.rsrp),
+        grade_status(assessment.rsrp)
+    ));
+    if let (Some(v), Some(g)) = (sample.rsrq, assessment.rsrq) {
+        out.push_str(&format!(
+            "| RSRQ | **{} dB** | ≥ -10 dB | {} · {} |\n",
+            fmt_num(v),
+            g.text,
+            g.status
+        ));
+    }
+    if let (Some(v), Some(g)) = (sample.sinr, assessment.sinr) {
+        out.push_str(&format!(
+            "| SINR | **{} dB** | ≥ 20 dB | {} · {} |\n",
+            fmt_num(v),
+            g.text,
+            g.status
+        ));
+    }
+    if let (Some(pct), Some(g)) = (assessment.signal_percent, assessment.pct) {
+        out.push_str(&format!(
+            "| SIGNAL | **{pct}%** | 满分 | {} · {} |\n",
+            g.text,
+            g.status
+        ));
+    }
+
+    // 结论：总评一句 + 优秀指标列举 + 建议
+    out.push_str("\n---\n\n### 巡检结论\n");
+    let verdict_short = assessment
+        .verdict
+        .as_ref()
+        .map(|v| v.title.strip_prefix("网络能力").unwrap_or(v.title).to_string());
+    let mut concl = match (&gen, &verdict_short) {
+        (g, Some(short)) if !g.is_empty() => format!("当前 {g} 信号整体表现{short}"),
+        (_, Some(short)) => format!("当前信号整体表现{short}"),
+        (g, None) if !g.is_empty() => format!("当前 {g} 信号读数如下"),
+        _ => "当前信号读数如下".to_string(),
+    };
+    let exc: Vec<&str> = [
+        assessment.rsrp.filter(|g| g.level == Level::Exc).map(|_| "RSRP"),
+        assessment.rsrq.filter(|g| g.level == Level::Exc).map(|_| "RSRQ"),
+        assessment.sinr.filter(|g| g.level == Level::Exc).map(|_| "SINR"),
+        assessment.pct.filter(|g| g.level == Level::Exc).map(|_| "SIGNAL"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !exc.is_empty() {
+        concl.push_str(&format!("，{} 达到优秀水平", exc.join("、")));
+    }
+    concl.push('。');
+    out.push_str(&concl);
+    out.push('\n');
+    if let Some(v) = &assessment.verdict {
+        out.push_str(&format!("**建议：** {}\n", v.advice));
+    }
+
+    out.push_str(&format!("\n---\n\n*{title} · 自动监测报告*\n"));
+    let is_exc = assessment
+        .verdict
+        .as_ref()
+        .is_some_and(|v| v.level == Level::Exc);
+    if is_exc {
+        out.push_str("*喵～本次巡检结果已经整理好啦，当前信号状态很不错，请继续保持喵。*");
+    } else {
+        out.push_str("*喵～本次巡检结果已经整理好啦，请持续关注信号变化喵。*");
+    }
+    out
 }
 
 /// 频段号显示：NR 用 `n` 前缀、LTE 用 `B` 前缀（3GPP 书写惯例）；
