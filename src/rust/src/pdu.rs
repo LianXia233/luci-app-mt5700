@@ -6,7 +6,7 @@
 //! 编码侧负责 SMS-SUBMIT（我们发出去的）：自动选编码、自动分片、自动加 UDH，
 //! 输出可直接喂给 `AT+CMGS=<TPDU 长度>\r<PDU>` 的分片列表。
 //!
-//! 两侧共用同一张 GSM 03.38 字母表，避免「收蝭得对、发蝭得错」这种只在一个
+//! 两侧共用同一张 GSM 03.38 字母表，避免「收得对、发得错」这种只在一个
 //! 方向暴露的偏差。
 
 // 手动写 `(x + n - 1) / n` / `% n != 0` 而不是用 `div_ceil` / `is_multiple_of`：
@@ -639,7 +639,7 @@ const CONCAT_UDH_LEN: usize = 6;
 /// 6 字节 UDH 在 7 位编码里占用的 septet 数 = ceil(6*8/7)。
 const CONCAT_UDH_SEPTETS: usize = 7;
 
-/// 一个 go-submit 分片。
+/// 一个 SMS-SUBMIT 分片。
 #[derive(Debug, Clone)]
 pub struct SubmitPart {
     /// 完整 PDU（含 SMSC 字段）的十六进制串，大写。
