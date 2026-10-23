@@ -423,13 +423,22 @@ impl Dispatcher {
                 "sender": sender_ws,
                 "content": full,
                 "time": date.format("%Y-%m-%d %H:%M:%S").to_string(),
-                "isComplete": true,
             }
         }));
     }
 
     // ============= 信号 =============
 
+    /*
+     * 这条链（handle_signal → notify_signal → render_switch_card_md / signal_level）
+     * 在实机上**不会被触发**：本模组（TDTECH / Fibocom 系）不主动上报 ^HCSQ / ^CERSSI，
+     * 实测 1200 条 AT 记录里自发信号上报 0 条（同款记录见 crate::signalwatch 模块头
+     * 与 config.rs 的轮询开关注释）。「信号变化通知」实际由 signalwatch 定时轮询驱动，
+     * 等级与文案走 signalgrade。
+     *
+     * 所以这里的措辞是**当前休眠的第二份实现**：改巡检推送文案不必同步改这里，反之也是；
+     * 但换成会自发上报的固件时它会重新生效，**勿当死代码删除**。
+     */
     async fn handle_signal(&mut self, line: &str) {
         let line = line.split('\n').next().unwrap_or(line);
         // 解析逻辑抽成纯函数，供「定时轮询推送」复用同一套换算规则
@@ -724,8 +733,10 @@ pub(crate) async fn query_storage(
 /// 查询驻留小区信息（`AT^MONSC`，《AT 命令手册》13.9.1/13.9.3）。
 ///
 /// 应答恒为 `^MONSC: <RAT>[,<cell_paras>]`，<RAT> ∈ WCDMA / LTE / NR / NONE；
-/// NONE 或无服务时不带小区参数，字段长度不足会直接返回默认值（制式「未知」），
-/// 由调用方回退 `AT^HCSQ?`。LTE 与 NR 的 <cell_paras> 顺序不同，必须分支取值：
+/// NONE 或无服务时不带小区参数，字段长度不足会直接返回默认值（制式「未知」）。
+/// **回退 `AT^HCSQ?` 只发生在巡检侧**（`signalwatch::sample_signal` 拿不到可用
+/// RSRP 时才读 HCSQ）；本文件的 URC 路径拿到「未知」不会回退，直接按未知出文案。
+/// LTE 与 NR 的 <cell_paras> 顺序不同，必须分支取值：
 ///   LTE: MCC,MNC,ARFCN(十进制 0~133121),Cell_ID(hex),PCI(hex 0~0x1F7),TAC(hex),RSRP,RSRQ,RSSI
 ///   NR:  MCC,MNC,ARFCN-NR,SCS(0~4),Cell_ID(hex),PCI(hex 0~0x3EF),TAC(hex),RSRP,RSRQ,SINR
 /// 下标须与前端 `rpc.js::parseMONSC` 完全一致，否则页面与推送会给出不同的小区参数。
@@ -1015,7 +1026,11 @@ pub(crate) fn render_switch_card_md(
     out
 }
 
-/// RSRP → 中文信号等级。轮询推送与 URC 通知共用，保证文案口径之间口径一致。
+/// RSRP → 中文信号等级。
+///
+/// 注意：**只服务于本文件的 URC 通知文案**。定时轮询与定时推送的等级文案来自
+/// `crate::signalgrade`（`Level::caption()`：极佳/良好/一般/较差/极差），两者是
+/// 两套词表、并不共用——改这里不会同步改变巡检推送里的措辞，反之亦然。
 pub(crate) fn signal_level(rsrp: f64) -> &'static str {
     match rsrp {
         _ if rsrp >= -85.0 => "优秀",

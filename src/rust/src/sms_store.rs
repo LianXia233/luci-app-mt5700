@@ -121,7 +121,8 @@ const K256: [u32; 64] = [
 	0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-/// SHA-256。本模块只用它在 salt 上派生**每个文件各不相同**的密钥。
+/// SHA-256。本模块有三处用途：在 salt 上派生**每个文件各不相同**的密钥（`derive_key`）、
+/// 算记录指纹（`fingerprint`）、哈希会话文件名（`path_for`）。
 fn sha256(data: &[u8]) -> [u8; 32] {
 	let mut h: [u32; 8] = [
 		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
@@ -331,10 +332,12 @@ pub struct ArchiveRecord {
 	/// 归一化后的对端号码。
 	pub number: String,
 	pub content: String,
-	/// 模组给出的时间串（`YY/MM/DD,HH:MM:SS`）；发出的短信为 `None`
-	/// —— 3GPP 的 SUBMIT 不携带发送时刻。
+	/// 时间串（`YY/MM/DD,HH:MM:SS`）。收到的取自 PDU 的 TP-SCTS（模组给的真实时刻）；
+	/// 发出的由插件自己盖章（3GPP 的 SUBMIT 不携带发送时刻，模组存回去也读不出来），
+	/// 所以已发送记录通常是 `Some`，来源见 `sms::sent_record`。
 	pub time: Option<String>,
-	/// 时间为「按有效期估算」而非真实发送时刻。
+	/// `time` 不是可信的精确时刻，界面要标「（近似）」。两种成因：
+	/// 读存量短信时只能拿 TP-VP 有效期估算；或发送时设备时钟还没被 NTP 校对过。
 	#[serde(default)]
 	pub time_approx: bool,
 	/// 模组存储槽位；发出的短信为 `None`。

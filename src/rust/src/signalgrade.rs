@@ -1,10 +1,19 @@
-//! 信号评估：与 LuCI 前端（`network_status.js` 的 GAUGE_METRICS、`rpc.js` 的
-//! `calculateSignalPercent`、`mt5700.js` 的 capabilityAssess / VERDICT_TEXT）
-//! **严格同一套阈值与文案**，保证推送里看到的等级与网页上看到的一致。
+//! 信号评估：把网页上的信号结论搬进推送，让用户不打开网页也能在 QQ 里看到同一套判断。
 //!
 //! 存在意义：网页上那套仪表只有打开页面才看得到，而用户需要的是「不合时宜地
 //! 掏出手机看信号」——巡检推送必须把同样的结论送到 QQ/微信里，否则同一时刻
 //! 两处结论不同会直接损害可信度。
+//!
+//! 但**当前只对齐了一部分**，改这里之前先看清（这几处口径历史上反复漂移）：
+//!   - RSRP 分档边界与 `network_status.js` 的 `SSB_TIERS` 一致（-80/-90/-100/-110），
+//!     档位名却是两套：前端「优/良/中/弱/差」，这里「极佳/良好/一般/较差/极差」；
+//!   - 前端**还有第二张表** `SIGNAL_TIERS`（趋势图背景分区，4 档、阈值 -110/-95/-80，
+//!     名字 较差/一般/良好/极佳）——前四个名字与 [`Level::caption()`] **完全重合而阈值不同**，
+//!     是最容易被误当成「已对齐」的一处：只 grep 到「极佳」就以为同源，会改错表；
+//!   - 状态短语、能力总评标题与建议文案**只有本文件一份**，前端并没有对应的表；
+//!   - 信号百分比**是分歧的**：这里按 30 dB 跨度（-80→100%），前端
+//!     `rpc.js` 的 `calculateSignalPercent` 按 40 dB 跨度（-70→100%），见
+//!     [`signal_percent`]。
 //!
 //! 两处口径若发生分歧，以本文件为准，前端需同步（反之亦然）。
 
@@ -19,7 +28,9 @@ pub enum Level {
 }
 
 impl Level {
-    /// 档位中文名（对应前端 GAUGE_CAPTIONS）。
+    /// 档位中文名。前端 `SSB_TIERS`（SSB 波束矩阵）用的是另一套「优/良/中/弱/差」；
+    /// `SIGNAL_TIERS`（趋势图背景分区）前四个名字与本表**重合但阈值不同**（见模块头），
+    /// 改任一侧之前先确认动的是哪张表。文案以本文件为准。
     pub fn caption(self) -> &'static str {
         match self {
             Level::Exc => "极佳",
@@ -45,7 +56,7 @@ fn g(level: Level, status: &'static str) -> Grade {
     Grade { level, text: level.caption(), status }
 }
 
-/// RSRP 信号强度（dBm）。阈值与前端 GAUGE_METRICS.rsrp 一致。
+/// RSRP 信号强度（dBm）。分档边界与前端 `network_status.js` 的 `SSB_TIERS` 一致（文案不同）。
 pub fn grade_rsrp(v: f64) -> Grade {
     if v >= -80.0 {
         g(Level::Exc, "覆盖极佳")
@@ -60,7 +71,7 @@ pub fn grade_rsrp(v: f64) -> Grade {
     }
 }
 
-/// RSRQ 信号质量（dB）。注意档位阈值比 RSRP 密得多（3 dB 一档）。
+/// RSRQ 信号质量（dB）。注意档位阈值比 RSRP 密得多（-10/-13/-16/-18，约 2~3 dB 一档）。
 pub fn grade_rsrq(v: f64) -> Grade {
     if v >= -10.0 {
         g(Level::Exc, "纯净通畅")
@@ -105,10 +116,11 @@ pub fn grade_pct(v: i64) -> Grade {
     }
 }
 
-/// 综合信号百分比：由 RSRP 线性映射（与前端 `calculateSignalPercent` 完全一致）。
+/// 综合信号百分比：由 RSRP 线性映射，量程 -110 dBm(0%) ~ -80 dBm(100%)，30 dB 跨度。
 ///
-/// 前端实现为 `clamp((rsrp + 110) / 30, 0, 1) * 100` 取整，量程 -110 dBm(0%) ~
-/// -80 dBm(100%)。`rsrp >= 0` 视为无效（前端同样返回空串）。
+/// **与前端并不一致**：`rpc.js` 的 `calculateSignalPercent` 用 `(rsrp + 110) / 40`，
+/// 到 -70 dBm 就算满格。同一时刻两处数字不同（-85 dBm：网页 63%、推送 83%），
+/// 要统一口径得两边一起改，别只动一边。`rsrp >= 0` 视为无效（前端同样返回空串）。
 pub fn signal_percent(rsrp: f64) -> Option<i64> {
     if rsrp >= 0.0 {
         return None;
@@ -195,7 +207,7 @@ fn bw_cap(bw_khz: f64, rat: Option<&str>) -> (Level, &'static str) {
     }
 }
 
-/// 最终结论文案（前端 VERDICT_TEXT）。
+/// 网络能力总评的结论项（标题 + 建议）。这套文案只存在于本文件，前端没有对应表。
 #[derive(Debug, Clone, Copy)]
 pub struct Verdict {
     pub level: Level,
@@ -332,8 +344,9 @@ mod tests {
     }
 
     #[test]
-    fn percent_matches_frontend_formula() {
-        // (rsrp + 110) / 30，量程 -110 → 0%，-80 → 100%
+    fn percent_uses_30db_span() {
+        // (rsrp + 110) / 30，量程 -110 → 0%，-80 → 100%。
+        // 这条断言锁的是**后端自己的**口径；前端 rpc.js 用的是 /40（-70 满格），两边并不相同。
         assert_eq!(signal_percent(-110.0), Some(0));
         assert_eq!(signal_percent(-95.0), Some(50));
         assert_eq!(signal_percent(-80.0), Some(100));

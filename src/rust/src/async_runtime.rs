@@ -1,7 +1,8 @@
 //! 统一任务管理器（Async Task Manager）与取消令牌（CancellationToken）。
 //!
 //! 对应异步化架构的「后台任务异步化 / 任务生命周期管理 / 取消机制 / 超时」：
-//!   - 长耗时操作（小区扫频、锁频恢复、固件升级等）统一以 Task 提交后台执行；
+//!   - **当前只有小区扫频接入**（`rpcserver` 的 `spawn_with_timeout("cellscan", …)`）；
+//!     锁频由 `schedule` 自己的循环执行，固件升级走 ucode 的独立链路，两者都不经本管理器；
 //!   - 每个 Task 拥有 task_id、创建/开始/结束时刻、进度、状态、错误与结果；
 //!   - 支持 Pending/Running/Completed/Failed/Cancelled/Timeout 状态机；
 //!   - 外部可通过 task_id cancel / status，任务体内通过 CancellationToken 收取消信号；
@@ -110,11 +111,10 @@ impl TaskManager {
     ///
     /// 立即返回 task_id；执行在 manager 持有的 tokio 任务中，不阻塞调用方。
     ///
-    /// `spawn` 是通用入口（任务自行管理超时）；需要整体超时保护请用
-    /// [Self::spawn_with_timeout]。
-    /// 通用入口（任务自行管理超时）。当前仅单元测试覆盖：生产路径一律走
-    /// [Self::spawn_with_timeout]（扫频需要整体超时保护）。将来接入无超时的
-    /// 长任务（SMS 批量 / 固件升级）时移除下方的 `#[cfg(test)]`。
+    /// 通用入口（任务自行管理超时）；需要整体超时保护请用
+    /// [Self::spawn_with_timeout]。**当前仅单元测试覆盖**：生产路径一律走
+    /// `spawn_with_timeout`，因为只有扫频需要整体超时。若将来真接入无超时的
+    /// 长任务，再移除下方的 `#[cfg(test)]`。
     #[cfg(test)]
     pub async fn spawn<F, Fut>(&self, kind: &str, f: F) -> String
     where

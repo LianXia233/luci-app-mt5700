@@ -274,7 +274,9 @@ impl SchedConfigDto {
         Ok(())
     }
 
-    /// 摊平成 uci key/value，键名与 LuCI 界面使用的完全一致。
+    /// 摊平成 uci key/value。键名与 `config.rs` 的 schedule 读取侧一一对应；
+    /// LuCI 定时页认的是 `AT+SCHED` JSON 里的 DTO 字段名（check_interval / night.lte.bands
+    /// 等），从不出现 `schedule_` 前缀——两套命名互转正是本模块的职责。
     pub fn uci_entries(&self) -> Vec<(String, String)> {
         let flag = |b: bool| if b { "1".to_string() } else { "0".to_string() };
         let mut out = vec![

@@ -80,7 +80,8 @@ async fn run(verbose: bool) -> Result<(), String> {
     log_info!("at-webserver {} 启动中 (pid {})", VERSION, std::process::id());
     // 时间源必须最早初始化：它会按系统时区设置（/etc/TZ → uci）确定本地偏移，
     // 并写回 TZ 环境变量，供后续 libc / 子进程一致使用。
-    // 必须在 spawn 任何线程之前调用，故放在这里、而非各任务内部懒加载。
+    // 必须在任何会读时间/落日志的业务任务之前调用，故放在这里、而非各任务内部懒加载
+    // （`#[tokio::main]` 已经建好运行时线程，靠的是启动顺序而非语言级保证）。
     crate::localtime::init();
 
     let cfg = config::load_config().await;

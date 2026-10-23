@@ -54,26 +54,11 @@ fn storage_json(s: &crate::sms::StorageInfo) -> serde_json::Value {
     })
 }
 
-/// 扫频推给前端的事件 data。state 取值 running/done/aborted/error。
-#[derive(Serialize)]
-#[allow(dead_code)] // 扫频推送结构保留（后续断点续扫扩展）
-pub struct ScanPush {
-    pub state: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cell: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lines: Option<Vec<String>>,
-    pub count: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
+/// 扫频进行中的状态快照（供 cellscan 进度查询与并发保护）。
 pub struct ScanState {
     pub running: bool,
     pub aborted: bool,
     pub lines: Vec<String>,
-    /// 当前扫频对应的后台任务 id（异步化新增），用于状态查询/取消。
-    pub task_id: Option<String>,
 }
 
 /// 事件总线：向所有订阅客户端广播。
@@ -146,7 +131,9 @@ pub struct RpcServer {
     scan_timeout: Duration,
     /// 异步状态缓存：只读状态查询优先命中内存，避免重复 AT 与排队阻塞。
     cache: Arc<StateCache>,
-    /// 统一后台任务管理器：长耗时操作（扫频/锁频/固件升级）以 task_id 提交后台执行，
+    /// 统一后台任务管理器。**目前只有扫频接入**（`spawn_with_timeout("cellscan", …)`，
+    /// 因为只有它需要整体超时保护）；锁频与固件升级并不经由这里——锁频由
+    /// `schedule` 自己的循环执行，固件升级走 ucode 的独立链路。
     /// 支持状态查询与取消，RPC handler 立即返回，不阻塞。
     tasks: Arc<TaskManager>,
     /// 通知器：notify_test 直发测试消息，验证推送通道链路。
@@ -181,7 +168,7 @@ impl RpcServer {
             auth_key,
             sched,
             hub: Hub::new(),
-            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new(), task_id: None })),
+            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new() })),
             scan_timeout: DEFAULT_SCAN_TIMEOUT,
             cache,
             tasks,
@@ -771,7 +758,9 @@ impl RpcServer {
             "capacity" => match self.sms.capacity().await {
                 Ok(s) => ok(id, serde_json::json!({
                     "storage": storage_json(&s),
-                    /* 模组告知过「存储已满」且尚未回落：界面据此提示用户清理 */
+                    /* 模组告知过「存储已满」且尚未回落。注意：**当前界面并不读这个键**
+                     * （sms_center / sms_settings 的容量提示只看 storage 里的 used/total），
+                     * 保留给直连 RPC 的调用方；要界面提示得前端一并接。 */
                     "memFull": self.sms.memory_full(),
                 })),
                 Err(e) => err(id, e),
@@ -1023,7 +1012,9 @@ impl RpcServer {
         let hub = self.hub.clone();
         let tasks = self.tasks.clone();
         let scan_state = self.scan.clone();
-        let timeout = if self.scan_timeout > Duration::ZERO { self.scan_timeout } else { DEFAULT_SCAN_TIMEOUT };
+        // scan_timeout 恒为正：new() 取 DEFAULT，set_scan_timeout() 显式忽略零值，
+        // 唯一外部来源 main.rs 传 config.scan_timeout，而 config 已按下限 10s 夹取。
+        let timeout = self.scan_timeout;
         let ctx = self.ctx.clone();
         let command = command.trim().to_string();
         let tid = tasks
@@ -1031,10 +1022,6 @@ impl RpcServer {
                 run_cell_scan(client, hub, scan_state, ctx, cancel, command, timeout).await
             })
             .await;
-        {
-            let mut scan = self.scan.lock().await;
-            scan.task_id = Some(tid.clone());
-        }
 
         // 立刻应答，让前端的命令队列不被这条几分钟的命令堵住。
         ok_response(&format!("^CELLSCAN: STARTED {tid}\r\nOK"))
@@ -1135,7 +1122,6 @@ async fn run_cell_scan(
     scan.running = false;
     scan.aborted = false;
     scan.lines.clear();
-    scan.task_id = None;
     drop(scan);
 
     // 扫频结束（成功/失败/超时/取消均必经此处）：先复位扫频标志，再无条件恢复数据面。
