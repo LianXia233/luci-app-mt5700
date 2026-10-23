@@ -953,8 +953,6 @@ function calculateSignalPercent(rsrp) {
 	return Math.round(Math.max(0, Math.min(1, ratio)) * 100) + '%';
 }
 
-function parseHexValue(hexStr) { return parseInt(hexStr, 16) || 0; }
-
 function hexToIP(hex) {
 	if (!hex || typeof hex !== 'string') return '0.0.0.0';
 	var clean = hex.trim().replace(/[\r\n]/g, '');
@@ -982,22 +980,6 @@ function formatFlow(bytes) {
 	if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
 	if (bytes < 1099511627776) return (bytes / 1073741824).toFixed(2) + ' GB';
 	return (bytes / 1099511627776).toFixed(2) + ' TB';
-}
-
-function formatSpeed(bytesPerSecond) {
-	var bits = bytesPerSecond * 8;
-	if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gbps';
-	if (bits >= 1e6) return (bits / 1e6).toFixed(2) + ' Mbps';
-	if (bits >= 1e3) return (bits / 1e3).toFixed(2) + ' Kbps';
-	return Math.round(bits) + ' bps';
-}
-
-function splitSpeed(bytesPerSecond) {
-	var bits = bytesPerSecond * 8;
-	if (bits >= 1e9) return { value: (bits / 1e9).toFixed(2), unit: 'Gbps' };
-	if (bits >= 1e6) return { value: (bits / 1e6).toFixed(2), unit: 'Mbps' };
-	if (bits >= 1e3) return { value: (bits / 1e3).toFixed(1), unit: 'Kbps' };
-	return { value: Math.round(bits).toString(), unit: 'bps' };
 }
 
 function formatDuration(seconds, showDays) {
@@ -1094,13 +1076,6 @@ function parseHCSQ(data) {
 	return result;
 }
 
-function signalColor(rsrp) {
-	if (rsrp == null || rsrp >= 0) return '#8f8f8f';
-	if (rsrp >= -90) return '#2e7d32';
-	if (rsrp >= -105) return '#f9a825';
-	return '#c62828';
-}
-
 /* ---- PS 注册状态 ---- */
 
 function psRegText(stat) {
@@ -1113,16 +1088,6 @@ function psRegText(stat) {
 		case 5: return '已注册（漫游）';
 		default: return '等待状态中';
 	}
-}
-
-/* ---- 主动上报识别 ---- */
-
-function isUnsolicitedText(text) {
-	if (!text) return false;
-	if (text === 'RING' || text === 'IRING' || text === '^IRING' || text === 'NO CARRIER') return true;
-	return text.indexOf('+CMTI:') === 0 || text.indexOf('^CEND:') === 0 ||
-		text.indexOf('^SMMEMFULL') === 0 || text.indexOf('MEMORY FULL') >= 0 ||
-		text.indexOf('^REJINFO') === 0 || (text.indexOf('+CUSD:') === 0 && text.indexOf(',') >= 0);
 }
 
 /* ---- raw_data 拆分（^PDCPDATAINFO / URC） ---- */
@@ -1520,11 +1485,6 @@ function operatorFromCode(code) {
 	return table[code] || code;
 }
 
-function qciLabel(qci) {
-	var table = { '1': 'QCI1 (VoLTE)', '2': 'QCI2', '3': 'QCI3', '4': 'QCI4', '5': 'QCI5 (IMS信令)', '6': 'QCI6', '7': 'QCI7', '8': 'QCI8', '9': 'QCI9 (默认承载)' };
-	return table[String(qci).trim()] || ('QCI' + qci);
-}
-
 /* ================= 导出 ================= */
 
 // eslint-disable-next-line no-undef
@@ -1678,12 +1638,9 @@ var AtWs = {
 	convertRssi: convertRssi,
 	convertEcio: convertEcio,
 	calculateSignalPercent: calculateSignalPercent,
-	parseHexValue: parseHexValue,
 	hexToIP: hexToIP,
 	parseTemperature: parseTemperature,
 	formatFlow: formatFlow,
-	formatSpeed: formatSpeed,
-	splitSpeed: splitSpeed,
 	formatDuration: formatDuration,
 	parseHCSQ: parseHCSQ,
 	parseMONSC: parseMONSC,
@@ -1692,12 +1649,9 @@ var AtWs = {
 	sysModeName: sysModeName,
 	parsePDCP: parsePDCP,
 	parseRawData: parseRawData,
-	signalColor: signalColor,
 	psRegText: psRegText,
 	operatorFromCode: operatorFromCode,
-	qciLabel: qciLabel,
 	bandName: bandName,
-	isUnsolicitedText: isUnsolicitedText,
 	uci: AtUci
 };
 
