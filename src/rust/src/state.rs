@@ -165,6 +165,20 @@ impl StateCache {
             key.to_string(),
             Entry { lines, fetched_at: Instant::now(), last_read: Instant::now() },
         );
+        // 跳过窗口之后首次真实抓取成功：补一条恢复日志。
+        // 放在 do_fetch 而不是后台循环的 Ok 分支——释放租约后用户的读取走
+        // resolve → do_fetch 直接刷新条目，循环看到新鲜就 continue，
+        // 恢复标志在循环里永远没人消费（实测复现：恢复日志一次都不出）。
+        // do_fetch 是读取路径与后台循环的共同汇聚点，两条路径都覆盖。
+        {
+            let mut last = self.last_skip_log.lock().await;
+            if let Some(t) = last.take() {
+                if t.elapsed() < SKIP_RECOVER_WINDOW {
+                    drop(last);
+                    log_debug!("短信中心已退出，缓存刷新恢复（{}）", key);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -258,17 +272,8 @@ impl StateCache {
                     continue;
                 }
                 match self.do_fetch(&key, self.rule(&key).expect("active 来自 rules")).await {
-                    Ok(()) => {
-                        // 跳过窗口之后首次刷新成功：补一条恢复日志，
-                        // 让日志里「暂停 → 恢复」有头有尾，不用自己猜数据什么时候补上。
-                        let mut last = self.last_skip_log.lock().await;
-                        if let Some(t) = last.take() {
-                            if t.elapsed() < SKIP_RECOVER_WINDOW {
-                                drop(last);
-                                log_debug!("短信中心已退出，缓存刷新恢复（{}）", key);
-                            }
-                        }
-                    }
+                    // 恢复日志在 do_fetch 内统一处理（读取路径与后台路径都覆盖）
+                    Ok(()) => {}
                     Err(e) if e == SMS_SKIP_ERR => {
                         // 跳过是设计行为，不是故障：换掉「失败」措辞，并按 30s 限流，
                         // 不再每键每秒刷满日志页（issue #23 反馈）。
