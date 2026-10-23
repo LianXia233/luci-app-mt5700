@@ -320,7 +320,7 @@ impl Scheduler {
         let actions = if done.is_empty() { "未执行任何操作".to_string() } else { done.join("、") };
         let notifier = self.notifier.clone();
         let content = format!(
-            "🔄 定时锁频切换\n时间: {}\n模式: {}\nLTE: {}\nNR: {}\n执行操作: {}\n切换次数: 第 {} 次\n结果: {}",
+            "定时锁频切换\n时间：{}\n模式：{}\nLTE：{}\nNR：{}\n执行操作：{}\n切换次数：第 {} 次\n结果：{}",
             crate::nettime::now().format("%Y-%m-%d %H:%M:%S"),
             mode,
             lock_summary("LTE", &cfg.lte),

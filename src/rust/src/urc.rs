@@ -451,21 +451,23 @@ impl Dispatcher {
         let info = self.query_monsc().await;
         let now = crate::notify::now_string();
 
+        // 标题行：发生制式切换时以「网络切换提醒」为题（这是用户最关心的
+        // 网络事件），否则以「信号变动通知」为题。正文统一「键：值」行 +
+        // 分段小标题，QQ 富文本下键值行会渲染为列表（见 qqpush::build_markdown）。
         let mut b = String::new();
         if mode_switched {
-            b.push_str("⚡ 网络切换提醒\n");
+            b.push_str("网络切换提醒\n");
+        } else {
+            b.push_str("信号变动通知\n");
         }
-        b.push_str(&format!(
-            "📶 信号变动通知\n时间: {}\n制式: {}\n信号: {}\n",
-            now,
-            info.rat,
-            signal_level(rsrp)
-        ));
+        b.push_str(&format!("时间：{}\n", now));
+        b.push_str(&format!("制式：{}\n", info.rat));
+        b.push_str(&format!("信号：{}\n", signal_level(rsrp)));
 
         let content = match info.rat.as_str() {
             "NR" => {
                 format!(
-                    "{}RSRP: {} dBm\nRSRQ: {} dB\nSINR: {} dB\n\n📡 小区信息:\n频点: {}\nPCI: {}\nTAC: {}\n小区ID: {}",
+                    "{}RSRP：{} dBm\nRSRQ：{} dB\nSINR：{} dB\n\n小区信息\n频点：{}\nPCI：{}\nTAC：{}\n小区ID：{}",
                     b,
                     or_unknown(&info.rsrp),
                     or_unknown(&info.rsrq),
@@ -478,7 +480,7 @@ impl Dispatcher {
             }
             "LTE" => {
                 format!(
-                    "{}RSRP: {} dBm\nRSRQ: {} dB\nRSSI: {} dBm\n\n📡 小区信息:\n频点: {}\nPCI: {}\nTAC: {}\n小区ID: {}",
+                    "{}RSRP：{} dBm\nRSRQ：{} dB\nRSSI：{} dBm\n\n小区信息\n频点：{}\nPCI：{}\nTAC：{}\n小区ID：{}",
                     b,
                     or_unknown(&info.rsrp),
                     or_unknown(&info.rsrq),

@@ -95,7 +95,7 @@ impl TimerPusher {
 /// 「现在是什么状态」的快照，且多了存储一项 —— 两条线内容可区分，用户收到
 /// 两条时才不会以为是重复推送。
 pub fn render_status(sample: Option<&Sample>, storage: Option<(u64, u64)>, now: &str) -> String {
-    let mut out = String::from("🕒 当前状态（定时推送）\n");
+    let mut out = String::from("当前状态（定时推送）\n");
     out.push_str(&format!("时间：{now}\n"));
 
     match sample {
@@ -110,9 +110,9 @@ pub fn render_status(sample: Option<&Sample>, storage: Option<(u64, u64)>, now: 
             out.push('\n');
 
             let mut line = if gen.is_empty() {
-                String::from("📶 信号")
+                String::from("信号：")
             } else {
-                format!("📶 {gen}")
+                format!("信号：{gen}")
             };
             let band = band_label(&s.rat, s.band);
             if !band.is_empty() {
@@ -137,15 +137,15 @@ pub fn render_status(sample: Option<&Sample>, storage: Option<(u64, u64)>, now: 
             }
         }
         // 宁可明说「没读到」，也不要拿上一轮的旧值冒充当前状态
-        None => out.push_str("\n📶 信号：暂无读数（未注册 / 无服务 / 模组忙）\n"),
+        None => out.push_str("\n信号：暂无读数（未注册 / 无服务 / 模组忙）\n"),
     }
 
     if let Some((used, total)) = storage {
         out.push('\n');
         if total > 0 && used >= total {
-            out.push_str(&format!("💾 短信存储已满（{used} / {total}）—— 清理前可能收不到新短信\n"));
+            out.push_str(&format!("短信存储：已满（{used} / {total}）—— 清理前可能收不到新短信\n"));
         } else {
-            out.push_str(&format!("💾 短信存储 {used} / {total}\n"));
+            out.push_str(&format!("短信存储：{used} / {total}\n"));
         }
     }
     out
@@ -184,14 +184,14 @@ mod tests {
     fn status_shows_generation_band_and_storage() {
         let s = full_sample();
         let text = render_status(Some(&s), Some((3, 50)), "2026-10-12 02:30:00");
-        assert!(text.starts_with("🕒 当前状态（定时推送）"), "标题不对: {text}");
+        assert!(text.starts_with("当前状态（定时推送）"), "标题不对: {text}");
         assert!(text.contains("时间：2026-10-12 02:30:00"));
-        assert!(text.contains("📶 5G"), "缺网络代际: {text}");
+        assert!(text.contains("信号：5G"), "缺网络代际: {text}");
         assert!(text.contains("n41"), "缺频段号: {text}");
         assert!(text.contains("2565 MHz / 100 MHz"), "缺频点与带宽: {text}");
         assert!(text.contains("RSRP -62 dBm"), "缺 RSRP: {text}");
         assert!(text.contains("SIGNAL 100%"), "缺综合信号: {text}");
-        assert!(text.contains("💾 短信存储 3 / 50"), "缺存储用量: {text}");
+        assert!(text.contains("短信存储：3 / 50"), "缺存储用量: {text}");
     }
 
     #[test]
@@ -199,7 +199,7 @@ mod tests {
         let s = full_sample();
         let text = render_status(Some(&s), Some((50, 50)), "2026-10-12 02:30:00");
         // 光说「已满」不够：要说清后果，用户才知道该去清理
-        assert!(text.contains("短信存储已满"), "未标记已满: {text}");
+        assert!(text.contains("短信存储：已满"), "未标记已满: {text}");
         assert!(text.contains("收不到新短信"), "未说明后果: {text}");
     }
 

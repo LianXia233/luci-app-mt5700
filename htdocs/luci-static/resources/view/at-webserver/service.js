@@ -689,7 +689,62 @@ return L.view.extend({
 		notifBody.appendChild(Mt5700.formGroup('QQ 机器人 AppSecret', qqSecretInput, '建议留空并经环境变量 QQ_BOT_APP_SECRET 注入，避免凭据落盘 UCI'));
 		notifBody.appendChild(Mt5700.formGroup('QQ 推送目标类型', qqTargetSel, '选「绑定」：保存并应用后，用你的 QQ 给机器人发一条消息即自动完成绑定'));
 		notifBody.appendChild(Mt5700.formGroup('绑定 QQ 号', qqBindInput, '仅用于日志标识（平台事件里拿不到 QQ 号），openid 由后端自动抓取'));
-		notifBody.appendChild(Mt5700.formGroup('QQ 推送目标 ID', qqTargetIdInput, '绑定模式留空即可；手动模式填 openid（非 QQ 号）'));
+		notifBody.appendChild(Mt5700.formGroup('QQ 推送目标 ID', qqTargetIdInput,
+		'openid 是平台分配的联系人标识，不是 QQ 号，也无法由 QQ 号换算。'
+		+ '绑定模式留空即可（保存并应用后，用你的 QQ 给机器人发一条消息即自动写回）；'
+		+ '手动模式请粘贴完整 openid（绑定成功后的日志里也能看到）。'));
+
+	/* QQ 富文本与交互（v1.28.0）：消息格式 / 内嵌键盘 / 自定义菜单。
+	 * 后端实现见 src/rust/src/qqpush.rs；格式降级（富文本失败回落纯文本）
+	 * 在后端自动完成，这里只暴露选择。 */
+	var qqFormatSel = Mt5700.select([
+		{ label: '自动（富文本优先，失败自动回落纯文本，推荐）', value: 'auto' },
+		{ label: '富文本 Markdown（只发结构化消息，失败不回落）', value: 'markdown' },
+		{ label: '纯文本（只发普通文本）', value: 'text' }
+	], 'auto');
+	var qqKbChk = mkCheck();
+	var qqKbUrlInput = Mt5700.input('text', '留空则按局域网 IP 自动推导，如 http://192.168.1.1/', '');
+	var qqMenuChk = mkCheck();
+	notifBody.appendChild(Mt5700.formGroup('QQ 消息格式', qqFormatSel,
+		'富文本 = Markdown 结构化消息（标题、列表、引用排版）；纯文本为兜底形态。'
+		+ '「自动」在富文本发送失败时自动改发纯文本，保证消息不丢失。'));
+	notifBody.appendChild(Mt5700.formGroup('富文本附带「打开管理页」按钮', qqKbChk.wrap,
+		'在 QQ 富文本消息底部附带一个跳转按钮，点击直达本机管理页。'
+		+ '按钮跳转地址填在下一项；留空则按局域网 IP 自动推导。'));
+	notifBody.appendChild(Mt5700.formGroup('按钮跳转地址', qqKbUrlInput,
+		'按钮点击后打开的地址（http/https）。一般填路由器管理地址；'
+		+ '仅在使用非标准端口或域名访问时才需要改。'));
+	notifBody.appendChild(Mt5700.formGroup('启动时自动配置 QQ 菜单', qqMenuChk.wrap,
+		'在 QQ 单聊窗口底部配置「查询状态 / 查询流量」两个菜单项（仅单聊场景生效）。'
+		+ '点击菜单项会把指令填入输入框；机器人应答指令需要长连接支持（当前版本未实现）。'
+		+ '也可随时用下方「配置 QQ 菜单」按钮手动配置。'));
+
+	/* 手动配置 QQ 自定义菜单（不等重启，立即生效） */
+	var qqMenuRpc = L.rpc.declare({
+		object: 'mt5700', method: 'qq_menu',
+		params: ['action', '_rid'], expect: {}
+	});
+	var qqMenuStatus = E('span', { 'class': 'mt5700-hint' }, '');
+	var qqMenuBtn = Mt5700.button('配置 QQ 菜单', function () {
+		qqMenuBtn.disabled = true;
+		qqMenuStatus.textContent = '正在配置 QQ 自定义菜单…';
+		qqMenuRpc('set', 'menu-' + Date.now()).then(function (res) {
+			if (res && res.success) {
+				qqMenuStatus.textContent = '菜单已配置（version=' + (res.version || '?')
+					+ '）：QQ 单聊窗口底部可见「查询状态 / 查询流量」';
+				Mt5700.success('QQ 自定义菜单已配置');
+			} else {
+				qqMenuStatus.textContent = '配置失败：' + ((res && res.error) || '未知原因');
+				Mt5700.error('QQ 菜单配置失败');
+			}
+		}).catch(function (err) {
+			qqMenuStatus.textContent = '配置失败：' + ((err && err.message) || 'RPC 调用失败');
+			Mt5700.error('QQ 菜单配置失败');
+		}).finally(function () {
+			qqMenuBtn.disabled = false;
+		});
+	});
+	notifBody.appendChild(E('div', { 'class': 'mt5700-form-group' }, qqMenuBtn, qqMenuStatus));
 
 		/* 测试推送：两种粒度，回答两个不同的问题
 		 *   通道连通性（企业微信 / QQ）—— 这条通道到底通不通，不看事件类型；
@@ -766,8 +821,22 @@ return L.view.extend({
 			params: ['_rid'], expect: {}
 		});
 		var bindStatusLine = E('span', { 'class': 'mt5700-hint' }, '');
-		notifBody.appendChild(E('div', { 'class': 'mt5700-form-group' }, E('strong', {}, '绑定进度：'), bindStatusLine));
+		/* 进度条：600 秒监听窗口的剩余比例。仅 waiting 状态显示，
+		 * 其余状态整条隐藏，避免「没在绑定也挂着一条空进度」的误解。 */
+		var bindBarWrap = E('div', { 'style': 'display:none;width:240px;max-width:100%;height:6px;'
+			+ 'background:rgba(127,127,127,.25);border-radius:3px;overflow:hidden;margin-top:6px;' });
+		var bindBar = E('div', { 'style': 'height:100%;width:100%;border-radius:3px;'
+			+ 'background:var(--mt5700-accent,#3f8edc);transition:width .5s linear;' });
+		bindBarWrap.appendChild(bindBar);
+		notifBody.appendChild(E('div', { 'class': 'mt5700-form-group' },
+			E('strong', {}, '绑定进度：'), bindStatusLine, bindBarWrap));
 		var bindState = '';
+		/* 秒 → m:ss（进度条旁的剩余时间显示） */
+		function fmtMmSs(sec) {
+			var m = Math.floor(sec / 60);
+			var s = sec % 60;
+			return m + ':' + (s < 10 ? '0' : '') + s;
+		}
 		var bindTimer = setInterval(function () {
 			/* 页面已卸载时停止轮询 */
 			if (!bindStatusLine.isConnected) { clearInterval(bindTimer); return; }
@@ -777,16 +846,24 @@ return L.view.extend({
 				var left = parseInt(res.left, 10) || 0;
 				var isBind = String(get('qq_target_type', '')) === 'bind' || qqTargetSel.value === 'bind';
 				if (bindState === 'waiting') {
-					bindStatusLine.textContent = '等待绑定：用你的 QQ 给机器人发一条消息即可完成（剩余 ' + left + ' 秒，超时后重启服务自动重试）';
+					bindBarWrap.style.display = '';
+					bindBar.style.width = Math.max(0, Math.min(100, left / 600 * 100)) + '%';
+					bindStatusLine.textContent = '等待绑定：用你的 QQ 给机器人发一条消息即可完成'
+						+ '（剩余 ' + fmtMmSs(left) + ' / 10:00，超时后重启服务自动重试）';
 				} else if (bindState === 'success') {
+					bindBarWrap.style.display = 'none';
 					var tid = String(res.target_id || '');
-					bindStatusLine.textContent = '绑定成功：目标 ' + (res.target_type || '') + ' ' + (tid.length > 12 ? tid.slice(0, 12) + '…' : tid) + '（已写回 UCI 并生效）';
+					bindStatusLine.textContent = '绑定成功：目标 ' + (res.target_type || '') + ' '
+						+ (tid.length > 12 ? tid.slice(0, 12) + '…' : tid) + '（已写回 UCI 并生效）';
 				} else if (bindState === 'failed') {
+					bindBarWrap.style.display = 'none';
 					bindStatusLine.textContent = '绑定失败：' + (res.error || '未知原因') + '（下次服务重启自动重试）';
 				} else if (isBind) {
+					bindBarWrap.style.display = 'none';
 					bindStatusLine.textContent = '已配置绑定模式：保存并应用后开始等待消息';
 				} else {
 					bindState = '';
+					bindBarWrap.style.display = 'none';
 					bindStatusLine.textContent = '';
 				}
 			}).catch(function () { /* RPC 暂不可用时静默，下个周期重试 */ });
@@ -834,7 +911,8 @@ return L.view.extend({
 			'未识别的占位符会原样保留。';
 
 		tplBody.appendChild(Mt5700.formGroup('前缀（所有推送消息最前面）', tplPrefixInput,
-			'支持 {time} 与 {count}；留空则不添加前缀。测试通知也会带上它，便于一次性验证。'));
+			'默认 {time} {count}（事件时刻 + 本条消息条数）。所有推送只带这一种前缀，'
+			+ '各事件模板不再自带其他前缀；留空则不添加。测试通知也会带上它，便于一次性验证。'));
 		tplBody.appendChild(Mt5700.formGroup('新短信', tplSmsInput, PLACEHOLDER_HINT));
 		tplBody.appendChild(Mt5700.formGroup('来电', tplCallInput, PLACEHOLDER_HINT));
 		tplBody.appendChild(Mt5700.formGroup('信号变化', tplSignalInput, PLACEHOLDER_HINT));
@@ -846,12 +924,12 @@ return L.view.extend({
 		/* 内置默认文案：必须与 Rust 侧 config.rs 的 DEFAULT_TPL_* 保持一致。
 		 * 仅用于「恢复默认文案」按钮与初始回填，后端始终以自己的默认为准。 */
 		var TPL_DEFAULTS = {
-			prefix: '',
-			sms: '喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: {sender}\n内容: {content}',
-			call: '喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}',
+			prefix: '{time} {count}',
+			sms: '新短信\n发送者：{sender}\n内容：{content}',
+			call: '来电\n{content}',
 			signal: '{content}',
-			memory: '喵呜～短信存储空间已经满啦，请尽快清理一下喵，不然可能收不到新的短信了哦！',
-			batch: '喵～有一批新通知需要查看哦，快来看看都有哪些消息吧！'
+			memory: '短信存储空间已满\n后果：清理前可能收不到新短信',
+			batch: '批量通知汇总'
 		};
 
 		var tplStatus = E('span', { 'class': 'mt5700-hint' }, '');
@@ -942,6 +1020,10 @@ return L.view.extend({
 		qqTargetSel.value = String(get('qq_target_type', 'group'));
 		qqBindInput.value = String(get('qq_bind_qq', ''));
 		qqTargetIdInput.value = String(get('qq_target_id', ''));
+		qqFormatSel.value = String(get('qq_msg_format', 'auto')) || 'auto';
+		qqKbChk.input.checked = get('qq_keyboard_enabled', '0') === '1';
+		qqKbUrlInput.value = String(get('qq_keyboard_url', ''));
+		qqMenuChk.input.checked = get('qq_menu_enabled', '0') === '1';
 		/* 定时推送间隔（分钟）。旧的 notify_interval（秒）由后端换算迁移，
 		 * 这里把换算结果显示出来并说明一句，避免用户以为自己填过的频率丢了。 */
 		var timerRaw = String(get('notify_timer_interval', ''));
@@ -1033,6 +1115,10 @@ return L.view.extend({
 			set('qq_target_type', qqTargetSel.value);
 			set('qq_bind_qq', qqBindInput.value.trim());
 			set('qq_target_id', qqTargetIdInput.value.trim());
+			set('qq_msg_format', qqFormatSel.value);
+			set('qq_keyboard_enabled', qqKbChk.input.checked ? '1' : '0');
+			set('qq_keyboard_url', qqKbUrlInput.value.trim());
+			set('qq_menu_enabled', qqMenuChk.input.checked ? '1' : '0');
 			var timerMin = parseInt(notifyTimerInput.value, 10) || 10;
 			timerMin = Math.min(1440, Math.max(1, timerMin));
 			set('notify_timer_interval', String(timerMin));

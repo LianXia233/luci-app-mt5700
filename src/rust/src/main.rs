@@ -16,6 +16,7 @@ mod nettime;
 mod notify;
 mod pdu;
 mod qqbind;
+mod qqpush;
 mod ringlog;
 mod rpcserver;
 mod schedconfig;
@@ -176,6 +177,13 @@ async fn run(verbose: bool) -> Result<(), String> {
         }
     }
 
+    // QQ 自定义菜单：启用时启动后自动配置一次（失败仅记日志，不影响推送）。
+    // 绑定模式的通道要等绑定成功才就绪，那条路径在 run_qq_bind 里另行处理。
+    if cfg.notification.qq.menu_enabled && cfg.notification.qq.target_type != "bind" {
+        let notifier_menu = notifier.clone();
+        tokio::spawn(async move { notifier_menu.apply_qq_menu_auto().await });
+    }
+
     let dispatch_task = tokio::spawn({
         let mut dispatcher = Dispatcher::new(client.clone(), notifier.clone(), broadcaster, ctx_rx.clone());
         dispatcher.set_archive(sms_archive.clone());
@@ -299,12 +307,16 @@ async fn run_qq_bind(
                 log_info!("QQ 绑定结果已写回 UCI（qq_target_type/qq_target_id）");
             }
             let bind_tag = q.bind_qq.clone();
-            let sender = crate::notify::QqSender::from_config(&crate::config::QqNotifyConfig {
+            let sender = crate::qqpush::QqSender::from_config(&crate::config::QqNotifyConfig {
                 app_id: q.app_id,
                 app_secret: q.app_secret,
                 target_type: target.target_type,
                 target_id: target.target_id,
                 bind_qq: q.bind_qq,
+                msg_format: q.msg_format,
+                keyboard_enabled: q.keyboard_enabled,
+                keyboard_url: q.keyboard_url,
+                menu_enabled: q.menu_enabled,
             });
             if let Some(sender) = sender {
                 // 绑定成功后立即回一条确认消息，让用户知道后续通知会发到这里。
@@ -316,10 +328,12 @@ async fn run_qq_bind(
                 };
                 // 绑定确认消息同样不携带插件名字样，保持与业务通知一致的观感
                 let content = format!("绑定成功{}：后续通知将推送到本会话", tag);
-                match sender.send(&content).await {
+                match sender.send(sender.build_message(&content, "")).await {
                     Ok(()) => log_info!("QQ 绑定确认消息已发送"),
                     Err(e) => log_error!("QQ 绑定确认消息发送失败（不影响绑定生效）: {}", e),
                 }
+                // 菜单启用时，绑定成功后立即配置一次（启动时通道尚未就绪，配置不了）
+                sender.apply_default_menu().await;
                 notifier.set_qq(Some(sender));
             } else {
                 // from_config 正常不会返回 None（凭据已校验），兜底防御

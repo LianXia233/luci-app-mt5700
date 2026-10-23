@@ -198,16 +198,21 @@ pub fn valid_hhmm(v: &str) -> bool {
 //   {count}   本条消息合并的事件条数（单条为 1）
 // ---------------------------------------------------------------------------
 
-/// 单条短信通知的默认文案。
-pub const DEFAULT_TPL_SMS: &str = "喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: {sender}\n内容: {content}";
-/// 来电通知的默认文案。
-pub const DEFAULT_TPL_CALL: &str = "喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}";
-/// 短信存储满通知的默认文案。
-pub const DEFAULT_TPL_MEMORY: &str = "喵呜～短信存储空间已经满啦，请尽快清理一下喵，不然可能收不到新的短信了哦！";
+/// 全局前缀的默认值：所有推送消息统一只带这一种前缀。
+///
+/// v1.28.0 起各事件模板**不再自带**任何装饰性前缀（旧默认值里的
+/// 「喵呜～……」句全部移除），前缀统一在这里配置：时间 + 条数。
+pub const DEFAULT_TPL_PREFIX: &str = "{time} {count}";
+/// 单条短信通知的默认文案（首行是标题，供 QQ Markdown 渲染为二级标题）。
+pub const DEFAULT_TPL_SMS: &str = "新短信\n发送者：{sender}\n内容：{content}";
+/// 来电通知的默认文案（content 本身是「时间/号码/状态」多行结构）。
+pub const DEFAULT_TPL_CALL: &str = "来电\n{content}";
+/// 短信存储满通知的默认文案（标题 + 后果说明）。
+pub const DEFAULT_TPL_MEMORY: &str = "短信存储空间已满\n后果：清理前可能收不到新短信";
 /// 信号变化通知的默认文案（正文由后端组装，模板默认直接透出）。
 pub const DEFAULT_TPL_SIGNAL: &str = "{content}";
 /// 批量汇总的默认标题。
-pub const DEFAULT_TPL_BATCH: &str = "喵～有一批新通知需要查看哦，快来看看都有哪些消息吧！";
+pub const DEFAULT_TPL_BATCH: &str = "批量通知汇总";
 
 #[derive(Debug, Clone)]
 pub struct NotifyTemplates {
@@ -229,7 +234,7 @@ pub struct NotifyTemplates {
 impl Default for NotifyTemplates {
     fn default() -> Self {
         NotifyTemplates {
-            prefix: String::new(),
+            prefix: DEFAULT_TPL_PREFIX.into(),
             sms: DEFAULT_TPL_SMS.into(),
             call: DEFAULT_TPL_CALL.into(),
             memory_full: DEFAULT_TPL_MEMORY.into(),
@@ -300,6 +305,15 @@ pub struct QqNotifyConfig {
     pub target_id: String,
     /// 绑定模式下的用户 QQ 号（仅作展示标签，事件里拿不到 QQ 号）
     pub bind_qq: String,
+    /// 消息格式："auto"（默认，Markdown 优先失败回落纯文本）/
+    /// "markdown"（只发富文本）/ "text"（只发纯文本）。
+    pub msg_format: String,
+    /// 是否在富文本消息上附内嵌键盘（「打开管理页」跳转按钮）。
+    pub keyboard_enabled: bool,
+    /// 键盘跳转地址；留空时后端从 `network.lan.ipaddr` 推导。
+    pub keyboard_url: String,
+    /// 是否在启动时自动配置 QQ 自定义菜单（C2C 场景）。
+    pub menu_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -385,6 +399,10 @@ pub fn default_config() -> Config {
                 target_type: "group".into(),
                 target_id: String::new(),
                 bind_qq: String::new(),
+                msg_format: "auto".into(),
+                keyboard_enabled: false,
+                keyboard_url: String::new(),
+                menu_enabled: false,
             },
             timer_interval: Duration::from_secs(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN * 60),
             poll: PollConfig::default(),
@@ -628,9 +646,15 @@ pub async fn load_config() -> Config {
     cfg.notification.qq = QqNotifyConfig {
         app_id: if qq_app_id.is_empty() { values.str("qq_app_id", "") } else { qq_app_id },
         app_secret: if qq_app_secret.is_empty() { values.str("qq_app_secret", "") } else { qq_app_secret },
-        target_type: crate::notify::normalize_qq_target_type(&values.str("qq_target_type", "group")),
+        target_type: crate::qqpush::normalize_qq_target_type(&values.str("qq_target_type", "group")),
         target_id: values.str("qq_target_id", ""),
         bind_qq: values.str("qq_bind_qq", ""),
+        // 消息格式：auto=富文本优先、失败回落纯文本（默认）
+        msg_format: values.str("qq_msg_format", "auto"),
+        keyboard_enabled: values.bool("qq_keyboard_enabled", false),
+        // 键盘跳转地址：留空时由 qqpush 从 network.lan.ipaddr 推导
+        keyboard_url: values.str("qq_keyboard_url", ""),
+        menu_enabled: values.bool("qq_menu_enabled", false),
     };
 
     // 定时推送间隔（分钟）：到点主动推一次当前实际情况。
@@ -646,7 +670,8 @@ pub async fn load_config() -> Config {
         }
     };
     cfg.notification.templates = NotifyTemplates {
-        prefix: unescape_template(&values.str("notify_tpl_prefix", "")),
+        // 前缀留空（或未配置）时回落到统一的 {time} {count}，不再是无前缀。
+        prefix: unescape_template(&values.str("notify_tpl_prefix", DEFAULT_TPL_PREFIX)),
         sms: tpl("notify_tpl_sms", DEFAULT_TPL_SMS),
         call: tpl("notify_tpl_call", DEFAULT_TPL_CALL),
         memory_full: tpl("notify_tpl_memory", DEFAULT_TPL_MEMORY),
@@ -743,7 +768,7 @@ mod tests {
 
     #[test]
     fn unescape_template_leaves_plain_text_untouched() {
-        assert_eq!(unescape_template("喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~"), "喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~");
+        assert_eq!(unescape_template(DEFAULT_TPL_SMS), DEFAULT_TPL_SMS);
         assert_eq!(unescape_template(""), "");
     }
 
@@ -755,7 +780,11 @@ mod tests {
         assert!(t.signal.contains("{content}"));
         assert!(!t.memory_full.is_empty());
         assert!(!t.batch.is_empty());
-        assert!(t.prefix.is_empty(), "默认不添加前缀");
+        // v1.28.0：前缀统一为 {time} {count}，各模板不再自带装饰前缀
+        assert_eq!(t.prefix, "{time} {count}");
+        assert!(!t.sms.contains("喵呜"), "默认短信模板不应带装饰前缀: {}", t.sms);
+        assert!(!t.call.contains("喵呜"), "默认来电模板不应带装饰前缀: {}", t.call);
+        assert!(!t.memory_full.contains("喵呜"), "默认存储满模板不应带装饰前缀: {}", t.memory_full);
     }
 
     #[test]

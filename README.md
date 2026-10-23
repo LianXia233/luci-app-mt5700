@@ -347,9 +347,10 @@ config at-webserver 'config'
 | 总开关 | `notify_enabled` | 自动推送总开关，默认 `1`；关闭后仅写本地日志、外发全部停止 |
 | 企业微信 | `wechat_webhook` | 群机器人 WebHook 地址 |
 | QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道）/ `bind`（自动绑定） |
+| QQ 富文本与交互 | `qq_msg_format` / `qq_keyboard_enabled` / `qq_keyboard_url` / `qq_menu_enabled` | 消息格式（`auto` 富文本优先失败回落纯文本 / `markdown` / `text`）、富文本「打开管理页」按钮、启动时自动配置自定义菜单，详见下文 |
 | 定时推送间隔 | `notify_timer_interval` | 定时推送周期（**分钟**），取值 1~1440（1 分钟 ~ 24 小时），默认 10；每到一个间隔推送一次**当前实际情况**。旧键 `notify_interval`（秒，5~3600）自动迁移：**出厂默认值 60 秒落到新默认值 10 分钟**，被改过的值才按「向上取整到分钟」换算 |
 | 信号巡检 | `notify_poll_enabled` / `notify_poll_start` / `notify_poll_end` / `notify_poll_interval` / `notify_poll_all` / `notify_poll_delta` | 时段内主动轮询信号（本模组不主动上报信号读数） |
-| 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀 + 五类事件文案模板，支持占位符 |
+| 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀（默认 `{time} {count}`，所有推送只带这一种前缀）+ 五类事件文案模板，支持占位符 |
 | 日志文件 | `log_file` | 本地逐条落盘（总开关关闭时仍写） |
 
 ### 事件类型与推送路径
@@ -411,6 +412,28 @@ option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅
 | `{time}` | 事件发生时刻 |
 | `{kind}` | 事件类型（`新短信` / `来电` / `信号变化` / `存储空间已满`） |
 | `{count}` | 合并消息条数（仅全局前缀与批量标题有意义） |
+
+### QQ 富文本推送、内嵌键盘与自定义菜单
+
+v1.28.0 起 QQ 推送不再只有纯文本。所有 QQ 机器人能力（鉴权、发消息、富媒体组装、键盘、菜单）收敛在独立模块 `src/rust/src/qqpush.rs`，`notify.rs` 只面向事件与文案模板。
+
+**消息格式**（`qq_msg_format`，默认 `auto`）：
+
+| 值 | 行为 |
+|:--|:--|
+| `auto` | 优先发 Markdown 富文本；失败自动回落纯文本（并进入 10 分钟冷却，期间直接发纯文本） |
+| `markdown` | 只发富文本，失败不回落（让错误暴露） |
+| `text` | 只发纯文本 |
+
+**富文本组装规则**（`msg_type=2`，单聊/群聊自定义 Markdown 已对所有机器人开放、无需模板申请）：正文首行渲染为二级标题，全局前缀渲染为引用行，`键：值` 行渲染为列表项（全角冒号优先，兼容旧配置的半角写法；URL 行不拆），空行保留分段。
+
+**降级阶梯**：Markdown+键盘失败 → 去掉键盘重发（富文本本身仍要送达）→ 仍失败且为 `auto` → 回落纯文本。
+
+**内嵌键盘**（`qq_keyboard_enabled=1`）：富文本消息底部附带「打开管理页」跳转按钮，地址取 `qq_keyboard_url`，留空按 `network.lan.ipaddr` 自动推导。
+
+**自定义菜单**（`qq_menu_enabled=1`）：启动时经 `PUT /v2/menu` 配置 C2C 单聊窗口底部菜单（默认「查询状态 / 查询流量」两项，点击后指令填入输入框）；也可在 LuCI 页面点「配置 QQ 菜单」立即生效（`qq_menu` RPC，支持 set/get）。
+
+**已知限制**：本模块只做主动消息推送，不连 WebSocket 网关，收不到用户消息与按钮回调 —— 菜单指令项的机器人应答需要长连接指令处理（规划中），「打开管理页」跳转按钮不受影响。自定义菜单的 `link` 项官方要求 `https://` 开头，局域网 LuCI 为 `http`，故默认菜单不含 link 项。QQ 主动消息频控不变（单关系 20 条/分钟、每个好友每天最多 1000 条）。
 
   未知占位符会原样保留，便于发现拼写错误。默认文案为：
 

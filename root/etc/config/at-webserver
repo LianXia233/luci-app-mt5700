@@ -60,6 +60,11 @@ option dns_exclusive '1'
 	option qq_target_type 'group'          # group=群聊 / c2c=单聊 / channel=频道 / bind=自动绑定
 	option qq_target_id ''                 # group_openid / 用户 openid / channel_id（bind 模式由后端自动写回，勿手填）
 	option qq_bind_qq ''                   # 绑定模式下你的 QQ 号（仅日志标签；绑定后给机器人发条消息即自动完成）
+	# QQ 富文本与交互（v1.28.0）。实现与官方文档依据见 src/rust/src/qqpush.rs。
+	option qq_msg_format 'auto'           # auto=富文本(Markdown)优先、失败自动回落纯文本（默认）；markdown=只发富文本；text=只发纯文本
+	option qq_keyboard_enabled '0'        # 1=富文本消息附带「打开管理页」跳转按钮（点击直达本机管理页）
+	option qq_keyboard_url ''             # 按钮跳转地址（http/https）；留空按局域网 IP 自动推导
+	option qq_menu_enabled '0'            # 1=启动时自动配置 QQ 自定义菜单（仅单聊场景生效，也可用 qq_menu RPC 手动配置）
 	option log_file '/tmp/at-notifications.log'
 	# 通知日志文件的大小上限（字节，默认 256 KiB）。/tmp 是 tmpfs（占内存），
 	# 不加限制时长期运行会把内存吃满；达到上限后按行边界裁掉最旧的一半再继续写。
@@ -108,12 +113,13 @@ option dns_exclusive '1'
 	#   {kind}    事件类型中文名（新短信 / 来电 / 信号变化 / 存储空间已满）
 	#   {count}   本条消息合并的事件条数（单条为 1）
 	# 未识别的占位符原样保留。
-	option notify_tpl_prefix ''             # 全局前缀，附加在所有推送消息最前面（测试通知也会带上）；支持 {time} {count}
-	option notify_tpl_sms ''                # 例：'喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n{sender}\n{content}\n({time})'
-	option notify_tpl_call ''               # 例：'喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}'
-	option notify_tpl_signal ''             # 例：'{content}'
-	option notify_tpl_memory ''             # 例：'喵呜～短信存储空间已经满啦，请尽快清理一下喵，不然可能收不到新的短信了哦！'
-	option notify_tpl_batch ''              # 批量汇总时的首行标题（例：'喵～有一批新通知需要查看哦，快来看看都有哪些消息吧！'）
+	# v1.28.0 起：所有推送只带统一前缀 {time} {count}，各事件模板不再自带装饰性前缀。
+	option notify_tpl_prefix '{time} {count}'  # 全局前缀，附加在所有推送消息最前面（测试通知也会带上）；支持 {time} {count}
+	option notify_tpl_sms ''                # 留空用默认「新短信\n发送者：{sender}\n内容：{content}」（首行是标题）
+	option notify_tpl_call ''               # 留空用默认「来电\n{content}」
+	option notify_tpl_signal ''             # 留空用默认 '{content}'（正文由后端组装）
+	option notify_tpl_memory ''             # 留空用默认「短信存储空间已满\n后果：清理前可能收不到新短信」
+	option notify_tpl_batch ''              # 批量汇总时的首行标题（合并窗口已移除，当前不会触发）
 
 	# 定时锁频配置
 	option schedule_enabled '0'              # 启用定时锁频
