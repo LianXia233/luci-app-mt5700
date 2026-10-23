@@ -86,6 +86,7 @@ pub const LEGACY_DEFAULT_NOTIFY_INTERVAL_SECS: u64 = 60;
 /// 这些边界在单测里能被直接钉住，而不是散落在读取逻辑里靠人脑推演。
 ///
 /// 注意：这个函数只在「旧值不是出厂默认值」时才被调用（见 `timer_interval_from`）。
+#[allow(clippy::manual_div_ceil)] // 见 pdu.rs 同款说明：div_ceil 稳定于 Rust 1.73，老 OpenWrt 工具链会编译失败
 pub fn secs_to_timer_minutes(secs: u64) -> u64 {
     let m = (secs + 59) / 60;
     m.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN)
