@@ -191,6 +191,8 @@
 @media (max-width: 768px) {
 	.at-field { flex-direction: column; gap: 4px; }
 	.at-field-label { flex: none; padding-top: 0; width: 100%; }
+	/* 标签改为上下排列后，控件仍按内容宽度收缩，输入框只剩两百来像素 */
+	.at-field-control { width: 100%; }
 	.at-field-control .cbi-input-text,
 	.at-field-control .cbi-input-select,
 	.at-field-control input[type="text"],
