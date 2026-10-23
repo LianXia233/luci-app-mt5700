@@ -12,7 +12,7 @@
 //!
 //! 设计要点：
 //!   - 完全异步，排队的等待者不再自旋占 CPU；
-//!   - `acquire` 自带超时与上下文取消，取带可让出通道；
+//!   - `acquire` 自带超时与上下文取消，超时或被取消即从队列撤出、让出通道；
 //!   - 用 Notify + 显式 pump 派发，取消者直接从堆里移除，不会占着不放。
 //!
 //! 短信优先由两层构成（缺一不可）：
@@ -261,18 +261,6 @@ struct WaitToken {
     cancelled: Arc<AtomicBool>,
 }
 
-impl WaitToken {
-    fn make(&self) -> WaitToken {
-        WaitToken {
-            prio: self.prio,
-            seq: self.seq,
-            token: self.token,
-            notify: self.notify.clone(),
-            cancelled: self.cancelled.clone(),
-        }
-    }
-}
-
 impl PartialEq for WaitToken {
     fn eq(&self, o: &Self) -> bool {
         self.token == o.token
@@ -337,7 +325,7 @@ impl PriLock {
             drop(state);
             return Ok(GatePermit { owner: self.clone(), token: mine.token });
         }
-        state.waiters.push(mine.make());
+        state.waiters.push(mine.clone());
         drop(state);
 
         // 等待被放行（notify）或超时 / 取消。
@@ -492,11 +480,6 @@ impl SmsTransaction {
 
     pub fn label(&self) -> &str {
         &self.label
-    }
-
-    /// 事务总耗时。
-    pub fn elapsed(&self) -> Duration {
-        self.started.elapsed()
     }
 
     /// 当前持有段已持续的时间（让出判断用）。
