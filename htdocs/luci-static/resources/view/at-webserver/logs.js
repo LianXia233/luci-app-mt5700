@@ -16,11 +16,14 @@
  */
 
 /* 类别规则：有序正则表，先命中先归位。
- * 顺序即优先级——sms 必须在 at 之前，因为 AT+CMGS 等短信命令同时匹配 at 规则；
+ * 顺序即优先级——sms 必须在 at 之前：AT 通道日志形如「发送 → 模组: AT+CMGS=...」，
+ * 通道层措辞（发送/接收/模组）与 AT+ 前缀都会命中 at 规则，若 sms 排在后面
+ * 所有短信收发痕迹都会被归进「AT 通道」；同时正则必须列全 CMGS/CMGL/CMGR/
+ * CMGW/CMSS 这些短信命令名——「SM」子串匹配不到 CMGS（C-M-G-S）。
  * dial 在 net 之前，因为拨号过程里也含接口关键词。 */
 var CATEGORY_RULES = [
 	{ key: 'sms', label: '短信',
-		re: /短信|SMS|PDU|长短信|收件|发件|短信中心|CPMS|CMGD|归档|存储已满|SM/ },
+		re: /短信|SMS|PDU|长短信|收件|发件|短信中心|CPMS|CMGS|CMGL|CMGR|CMGW|CMSS|CMGD|归档|存储已满|SM/ },
 	{ key: 'dial', label: '拨号与网络',
 		re: /自动拨号|拨号|SETAUTODIAL|APN|PDP|CGACT|CGDCONT|NDIS|驻网|注册|CREG|CGREG|C5GREG|COPS|SETMODE|信号/ },
 	{ key: 'net', label: '接口与网络',
@@ -350,7 +353,13 @@ return L.view.extend({
 				el.style.setProperty('box-shadow', 'none', 'important');
 			});
 		})(levelSel);
-		levelSel.addEventListener('change', function () { state.level = levelSel.value; renderList(); });
+		levelSel.addEventListener('change', function () {
+			state.level = levelSel.value;
+			if (errWrnChk.checked) {
+				errWrnChk.checked = false; /* 级别接管过滤，同步清除快捷开关，避免 UI 谎报过滤状态 */
+			}
+			renderList();
+		});
 
 		/* 仅看错误+警告 快捷开关 */
 		var errWrnChk = E('input', { type: 'checkbox' });
