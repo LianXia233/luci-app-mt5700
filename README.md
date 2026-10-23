@@ -345,7 +345,8 @@ config at-webserver 'config'
 | 通道 | 配置项 | 说明 |
 |:--|:--|:--|
 | 总开关 | `notify_enabled` | 自动推送总开关，默认 `1`；关闭后仅写本地日志、外发全部停止 |
-| 企业微信 | `wechat_webhook` | 群机器人 WebHook 地址 |
+| 企业微信 | `wechat_enabled` / `wechat_webhook` | **独立开关，默认关闭**；开关与 WebHook 地址都满足才发送 |
+| QQ 机器人 | `qq_enabled` / `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | **独立开关，默认关闭**；开关与凭据齐全才发送（`bind` 模式还需完成绑定） |
 | QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道）/ `bind`（自动绑定） |
 | QQ 富文本与交互 | `qq_msg_format` / `qq_keyboard_enabled` / `qq_keyboard_url` / `qq_menu_enabled` | 消息格式（`auto` 富文本优先失败回落纯文本 / `markdown` / `text`）、富文本「打开管理页」按钮、启动时自动配置自定义菜单，详见下文 |
 | 定时推送间隔 | `notify_timer_interval` | 定时推送周期（**分钟**），取值 1~1440（1 分钟 ~ 24 小时），默认 10；每到一个间隔推送一次**当前实际情况**。旧键 `notify_interval`（秒，5~3600）自动迁移：**出厂默认值 60 秒落到新默认值 10 分钟**，被改过的值才按「向上取整到分钟」换算 |

@@ -164,7 +164,9 @@ async fn run(verbose: bool) -> Result<(), String> {
     // 拿到 openid 写回 UCI 并热替换推送通道（无需重启）。
     if cfg.notification.qq.target_type == "bind" {
         let q = cfg.notification.qq.clone();
-        if q.app_id.is_empty() || q.app_secret.is_empty() {
+        if !q.enabled {
+            log_warn!("QQ 推送开关未开启（qq_enabled=0），跳过绑定");
+        } else if q.app_id.is_empty() || q.app_secret.is_empty() {
             log_error!("QQ 绑定模式缺少 AppID/AppSecret，跳过绑定");
         } else {
             if q.bind_qq.trim().is_empty() {
@@ -308,6 +310,7 @@ async fn run_qq_bind(
             }
             let bind_tag = q.bind_qq.clone();
             let sender = crate::qqpush::QqSender::from_config(&crate::config::QqNotifyConfig {
+                enabled: q.enabled,
                 app_id: q.app_id,
                 app_secret: q.app_secret,
                 target_type: target.target_type,

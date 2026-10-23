@@ -288,6 +288,9 @@ pub struct NotificationConfig {
     /// 自动推送总开关。关闭时事件不再推送（仅保留本地通知日志），
     /// 便于用户在不改动分类开关的前提下整体静音。
     pub enabled: bool,
+    /// 企业微信推送开关（独立于 QQ，默认关闭）。
+    /// 与 `wechat_webhook` 是「AND」关系：开关关闭或地址为空都不发。
+    pub wechat_enabled: bool,
     pub wechat_webhook: String,
     pub log_file: String,
     /// 通知日志文件的大小上限（字节）。
@@ -309,6 +312,8 @@ pub struct NotificationConfig {
 
 #[derive(Debug, Clone)]
 pub struct QqNotifyConfig {
+    /// QQ 推送总开关（独立于企业微信，**默认关闭**；凭据不全时同样不发）。
+    pub enabled: bool,
     pub app_id: String,
     pub app_secret: String,
     /// "group" | "c2c" | "channel" | "bind"（bind=启动后自动抓取 openid 并写回 UCI）
@@ -395,6 +400,7 @@ pub fn default_config() -> Config {
         },
         notification: NotificationConfig {
             enabled: true,
+            wechat_enabled: false,
             wechat_webhook: String::new(),
             log_file: String::new(),
             log_file_max_bytes: crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES,
@@ -405,6 +411,7 @@ pub fn default_config() -> Config {
                 signal: true,
             },
             qq: QqNotifyConfig {
+                enabled: false,
                 app_id: String::new(),
                 app_secret: String::new(),
                 target_type: "group".into(),
@@ -633,6 +640,10 @@ pub async fn load_config() -> Config {
     // 下限 10 秒而不是默认 3 分钟：用户配置的小于 3 分钟的值不能被悄悄抬回。
     cfg.websocket.scan_timeout = values.seconds("cellscan_timeout", cfg.websocket.scan_timeout, Duration::from_secs(10));
 
+    // 企业微信推送开关：默认关闭。历史上「webhook 非空即启用」曾把脏数据
+    // （值里带引号字符的伪 URL）当成已配置地址，每次通知都白跑三轮重试。
+    // 现在改为显式开关，默认关，与 QQ 各自独立。
+    cfg.notification.wechat_enabled = values.bool("wechat_enabled", false);
     cfg.notification.wechat_webhook = values.str("wechat_webhook", "");
     cfg.notification.log_file = values.str("log_file", "");
     // 通知日志文件上限：默认 256 KiB；填 0/负数/过小值都回落到默认，
@@ -655,6 +666,7 @@ pub async fn load_config() -> Config {
     let qq_app_id = env_nonempty("QQ_BOT_APP_ID");
     let qq_app_secret = env_nonempty("QQ_BOT_APP_SECRET");
     cfg.notification.qq = QqNotifyConfig {
+        enabled: values.bool("qq_enabled", false),
         app_id: if qq_app_id.is_empty() { values.str("qq_app_id", "") } else { qq_app_id },
         app_secret: if qq_app_secret.is_empty() { values.str("qq_app_secret", "") } else { qq_app_secret },
         target_type: crate::qqpush::normalize_qq_target_type(&values.str("qq_target_type", "group")),

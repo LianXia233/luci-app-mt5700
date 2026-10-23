@@ -27,6 +27,7 @@
 - **feat(ui) QQ 目标 ID 提示重写**：说清 openid 是平台标识、不是 QQ 号、无法换算，绑定模式留空即可
 - **feat(ui) 绑定进度条**：600 秒监听窗口剩余比例可视化（仅 waiting 显示），剩余时间改 `m:ss / 10:00` 秒表
 - **feat(ui) QQ 富文本控件组**：消息格式（自动 / 富文本 / 纯文本）、键盘开关与跳转地址、菜单自动配置开关
+- **feat(notify) 企业微信 / QQ 独立推送开关**：新增 `wechat_enabled` 与 `qq_enabled` 两个 UCI 开关，**均默认关闭**，互不影响；企业微信需「开关 + WebHook 非空」才发，QQ 需「开关 + 凭据齐全」才发（`bind` 模式开关关闭时跳过绑定）。LuCI 通知卡与 QQ 卡各有一个开关控件，「发送测试通知」的通道可见性同步跟随。修复「webhook 非空即启用」在脏数据（值含引号字符的伪 URL）下每轮通知白跑三次重试的问题
 - **chore(release) `PKG_VERSION` 1.27.0 → 1.28.0**
 - **test**：`cargo test` **288 passed / 0 failed / 2 ignored**（WSL Debian 本机）；`service.js` `node --check` 通过；新增 Markdown 组装、键值识别、降级冷却、菜单/键盘形状、凭证解析等用例
 

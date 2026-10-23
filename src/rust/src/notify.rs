@@ -386,8 +386,11 @@ impl Notifier {
                 qq.send(qq.build_message(base, &prefix)).await
             }
             "wechat" => {
-                if self.cfg.wechat_webhook.is_empty() {
-                    return Err("企业微信 WebHook 未配置".into());
+                if !self.cfg.wechat_enabled {
+                    return Err("企业微信推送开关未开启（通知设置里打开「企业微信推送」并填写 WebHook）".into());
+                }
+                if self.cfg.wechat_webhook.trim().is_empty() {
+                    return Err("企业微信推送开关已开启，但 WebHook 地址为空".into());
                 }
                 send_webhook(&self.cfg.wechat_webhook.clone(), &combine_body(base, &prefix)).await
             }
@@ -452,8 +455,12 @@ impl Notifier {
         Ok(())
     }
 
+    /// 企业微信通道是否可用：独立开关 **且** WebHook 地址非空。
+    ///
+    /// 两个条件都要：只填地址不开开关不发（默认关），开了开关没地址也不发
+    /// （否则会拿空串去请求，每轮通知白跑三次重试）。
     fn wechat_enabled(&self) -> bool {
-        !self.cfg.wechat_webhook.is_empty()
+        self.cfg.wechat_enabled && !self.cfg.wechat_webhook.trim().is_empty()
     }
 
     /// 当前 QQ 通道快照（读锁短暂持有，热替换不影响进行中的发送）。
@@ -941,8 +948,10 @@ mod tests {
 
         let mut cfg = crate::config::default_config().notification;
         cfg.log_file = String::new();
+        cfg.wechat_enabled = true;
         cfg.wechat_webhook = format!("http://127.0.0.1:{port}/hook");
         cfg.qq = QqNotifyConfig {
+            enabled: true,
             app_id: String::new(),
             app_secret: String::new(),
             target_type: "c2c".into(),
@@ -1041,8 +1050,10 @@ mod tests {
     fn webhook_only_cfg(port: u16) -> NotificationConfig {
         let mut cfg = crate::config::default_config().notification;
         cfg.log_file = String::new();
+        cfg.wechat_enabled = true;
         cfg.wechat_webhook = format!("http://127.0.0.1:{port}/hook");
         cfg.qq = QqNotifyConfig {
+            enabled: true,
             app_id: String::new(),
             app_secret: String::new(),
             target_type: "c2c".into(),
