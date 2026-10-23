@@ -97,9 +97,12 @@ impl AsyncRead for SerialReader {
     }
 }
 
-#[allow(dead_code)] // 预留字段：本层不实现写超时（由上层 send_command 负责），暂透传未使用
 pub struct SerialWriter {
     afd: tokio::io::unix::AsyncFd<OwnedFd>,
+    // 本层不实现写超时，且**上层目前也没有实现**：`atclient::exec_locked` 的
+    // write_all 在命令超时 select! 之前完成等待，写本身没被任何 timeout 包过。
+    // 因此这个字段只透传、无人读取；保留是为了不改动构造点签名。
+    #[allow(dead_code)]
     write_timeout: Duration,
 }
 
