@@ -742,9 +742,6 @@ var Mt5700 = (function () {
     </radialGradient>
   </defs>
 
-  <!-- 纯白背景 -->
-  <rect width="1000" height="1000" fill="#ffffff" />
-
   <g stroke-linecap="round" stroke-linejoin="round">
 
     <!-- ================================================================= -->

@@ -22,6 +22,7 @@
 - **feat(web) 模块忙自动重试**：后端错误带 `sms_busy:` 前缀，前端 2s 退避自动重试一次，不计熔断、不抛给用户；`sms_skip:` 为后台跳过（无需重试）
 - **feat(web) 通道状态徽章**：短信中心头部显示「优先模式生效中 · 后台暂停（剩余 Ns）」，数据转圈时有明确原因
 - **feat(web) 短信事务耗时日志**：Drop 时输出 `短信事务结束: {label} 耗时 {ms}ms`，CMGL 读取等耗时可观测
+- **style(ui) 空态立绘背景透明化**：移除 1000x1000 纯白底 rect，角色直接浮在卡片背景上（深浅色界面均不违和，角色本体零改动）
 - **feat(ui) 空态立绘换新**：`mt-anime-empty-svg` 由软云星光换成「小吱-喜欢」方图（140px 注入 + 轻浮动画 + id 实例隔离）
 - **chore(release) `PKG_VERSION` 1.28.0 → 1.29.0**
 - **test**：`cargo test` **299 passed / 0 failed / 2 ignored**（WSL Debian 本机）；`rpc.js` / `sms_center.js` / `mt5700.js` `node --check` 通过

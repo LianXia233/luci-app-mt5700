@@ -3930,8 +3930,8 @@ select.cbi-input-select:focus {
 
 /*
  * 空态立绘（小吱-喜欢，1000x1000 方图，140px 注入见 mt5700.js api.empty）。
- * 保留原有紫色投影，补一个轻浮动画——与 mt5700-loading 的呼吸节奏
- * 区分开，空态是「等人」而不是「在转」。
+ * 背景已透明化（无白色底rect），角色直接浮在卡片上；紫色投影 + 轻浮动画
+ * 与 mt5700-loading 的呼吸节奏区分开——空态是「等人」而不是「在转」。
  */
 .mt-anime-empty-svg {
   filter: drop-shadow(0 4px 10px rgba(139, 92, 246, 0.15)) !important;
