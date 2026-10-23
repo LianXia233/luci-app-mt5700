@@ -138,9 +138,12 @@ return L.view.extend({
 		var locSel = Mt5700.select([
 			{ label: 'SIM 卡（SM）', value: 'SM' },
 			{ label: '模组存储（ME）', value: 'ME' }
-		], 'SM');
+		], 'ME');
 		storeBody.appendChild(Mt5700.formGroup('存储位置', locSel,
-			'手册只定义 SM（SIM 卡）与 ME（模组 FLASH）两种存储介质。'));
+			'手册只定义 SM（SIM 卡）与 ME（模组 FLASH）两种存储介质。默认 ME：SM 槽位少'
+			+ '（实测 40），长短信几条就满，满了模组会把后续分片溢出到另一个存储区、把一条'
+			+ '短信拆成两截。保存后同时写回开机默认（UCI sms_storage 由后端维护），模组复位'
+			+ '回 SM 时启动会自动拉回这里选的值。'));
 
 		storeBody.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('保存存储位置', function () {
@@ -383,6 +386,11 @@ return L.view.extend({
 				mem2: st.mem2 || '', used2: 0, total2: 0,
 				mem3: st.mem3 || '', used3: 0, total3: 0
 			};
+			/* 选择器跟随模组实际存储区回显：默认值只是「还没读到真值」时的占位，
+			 * 读到后以模组为准，避免显示与实际不符。 */
+			if (st.mem1 === 'SM' || st.mem1 === 'ME') {
+				locSel.value = st.mem1;
+			}
 			renderStorage();
 		}
 

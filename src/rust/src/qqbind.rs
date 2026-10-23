@@ -238,7 +238,7 @@ pub async fn persist_uci(target: &BindTarget) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_cmd(prog: &str, args: &[&str]) -> Result<(), String> {
+pub(crate) async fn run_cmd(prog: &str, args: &[&str]) -> Result<(), String> {
     let out = tokio::process::Command::new(prog)
         .args(args)
         .output()

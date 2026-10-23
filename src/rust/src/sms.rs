@@ -42,6 +42,14 @@ pub const SMS_SEND_TOTAL_BUDGET: Duration = Duration::from_secs(60);
 /// 续租粒度更细，正常使用无感。
 pub const SMS_MODE_LEASE: Duration = Duration::from_secs(30);
 
+/// 把存储区选择写回 UCI 并 commit（开机默认值的来源，界面保存时同路）。
+async fn persist_storage_uci(mem: &str) -> Result<(), String> {
+    let arg = format!("at-webserver.config.sms_storage={mem}");
+    crate::qqbind::run_cmd("uci", &["set", arg.as_str()]).await?;
+    crate::qqbind::run_cmd("uci", &["commit", "at-webserver"]).await?;
+    Ok(())
+}
+
 /// `AT+CFUN=1` 的应答预算。
 ///
 /// 不能用默认的 2 秒：模组拉起射频、重新附着时这条命令的回话本身就会变慢，
@@ -827,7 +835,27 @@ impl SmsService {
             .await?;
         let info = self.read_storage_in_tx(&tx).await;
         drop(tx);
+        // 写回 UCI：这个选择同时是「开机默认存储区」，不落盘的话模组复位 /
+        // 换卡回 SM 后，用户每次重启都要重设一次。写失败不影响本次生效，留痕即可。
+        if let Err(e) = persist_storage_uci(mem).await {
+            log_warn!("存储区已生效但写回 UCI 失败（{mem}）：{e}");
+        }
         info
+    }
+
+    /// 开机按 UCI 配置兜底存储区（默认 ME）。
+    ///
+    /// 模组 CPMS 选择虽掉电保存，但换卡 / 刷固件 / 模组复位后会回 SM。
+    /// 先读一次实际容量，与配置不符才下发——避免每次重启都白跑一个事务，
+    /// 也让「界面保存 → 重启 → 还是那个值」形成闭环。返回是否发生了切换。
+    pub async fn apply_default_storage(&self, want: &str) -> Result<bool, String> {
+        let want = crate::config::normalize_sms_storage(want);
+        let cur = self.capacity().await?;
+        if cur.mem1.eq_ignore_ascii_case(&want) {
+            return Ok(false);
+        }
+        self.set_storage(&want).await?;
+        Ok(true)
     }
 
     /// 读短信中心号码。

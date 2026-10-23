@@ -350,6 +350,7 @@ config at-webserver 'config'
 | QQ 机器人 | `qq_app_id` / `qq_app_secret` / `qq_target_type` / `qq_target_id` | 官方 API v2，目标类型 `group`（群聊）/ `c2c`（单聊）/ `channel`（频道）/ `bind`（自动绑定） |
 | QQ 富文本与交互 | `qq_msg_format` / `qq_keyboard_enabled` / `qq_keyboard_url` / `qq_menu_enabled` | 消息格式（`auto` 富文本优先失败回落纯文本 / `markdown` / `text`）、富文本「打开管理页」按钮、启动时自动配置自定义菜单，详见下文 |
 | 定时推送间隔 | `notify_timer_interval` | 定时推送周期（**分钟**），取值 1~1440（1 分钟 ~ 24 小时），默认 10；每到一个间隔推送一次**当前实际情况**。旧键 `notify_interval`（秒，5~3600）自动迁移：**出厂默认值 60 秒落到新默认值 10 分钟**，被改过的值才按「向上取整到分钟」换算 |
+| 短信默认存储区 | `sms_storage` | 开机默认存储区：`ME`（模组 FLASH，300 槽位）/ `SM`（SIM 卡，40 槽位）。模组复位回 SM 时启动自动拉回；界面「短信设置 → 存储位置」保存时写回本值 |
 | 信号巡检 | `notify_poll_enabled` / `notify_poll_start` / `notify_poll_end` / `notify_poll_interval` / `notify_poll_all` / `notify_poll_delta` | 时段内主动轮询信号（本模组不主动上报信号读数） |
 | 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀（默认 `{time} {count}`，所有推送只带这一种前缀）+ 五类事件文案模板，支持占位符 |
 | 日志文件 | `log_file` | 本地逐条落盘（总开关关闭时仍写） |
