@@ -30,6 +30,22 @@
 - **chore(release) `PKG_VERSION` 1.28.0 → 1.29.0**
 - **test**：`cargo test` **299 passed / 0 failed / 2 ignored**（WSL Debian 本机）；`rpc.js` / `sms_center.js` / `mt5700.js` `node --check` 通过
 
+### r8 冗余代码清理 + 注释按实现订正
+
+> 全仓静态审查：死代码逐个 grep 到「零引用」才删，注释逐条和当前代码核对。**行为一律不变**——发现的口径分歧只写进注释、列为待决，不擅自改前端或推送的显示值。
+
+- **refactor(web) 前端死函数清理**：`rpc.js` 的 `parseHexValue` / `formatSpeed` / `splitSpeed` / `signalColor` / `qciLabel` / `isUnsolicitedText` 六个函数（全仓只剩「定义 + 导出口」两处命中，含 tests 亦无引用）连同 `AtWs` 导出口一并删除；`logs.js` 的 `computeCategoryCounts` 同删（真正在用的是姊妹函数 `computeCategoryTotals`）。副带收益：速率格式化此后只有 `network_status.js` 的 `formatSpeedNumber` 一份实现
+- **refactor(rust) 后端死代码删除**：`SmsTransaction::elapsed()`（`cargo` 直接报 dead_code）、`WaitToken::make()`（与 `derive(Clone)` 逐字段等价，二者只留 derive）、`Scheduler::safe_tick()` 空壳（名为 safe 实为 `tick()` 透传，调用点直接进 `tick()`）
+- **refactor(rust) 复用既有实现而非再写一份**：`atclient` 两处手写 `select!{ sleep / ctx.changed() }` 收敛到现成的 `sleep_ctx()`（命令最小间隔等待、0 字节退避），不新增抽象
+- **fix(schedule) 推送时刻只取一次**：锁频切换通知的正文时间与 `Notification.time` 原为两次取值，可相差数秒，用户拿推送列表对正文会以为对不上
+- **refactor(rust) `#[allow(dead_code)]` 作用域收窄**：从 `Connection` 结构体收到 `describe` 单个字段，避免将来新增的死字段被静默豁免
+- **docs(rust) 注释与实现矛盾的订正**（本轮主体）：`signalgrade` 模块头引用的前端 `GAUGE_METRICS` / `GAUGE_CAPTIONS` / `capabilityAssess` / `VERDICT_TEXT` **四个标识符在 `htdocs/` 中都不存在**，改为真名 `SSB_TIERS` 并把「严格同一套阈值与文案」改成如实的「只对上一部分」；`sha256`「本模块只用于派生密钥」被 `fingerprint` / `path_for` 证伪；`ArchiveRecord.time`「发出的短信为 None」与 `sent_record` 实际写 `Some(自盖时刻)` 互相矛盾；`nettime::run`「失败等 60 秒」与三级退避（3s×10 → 60s×10 → 20min）不符；`monthly` 跨月表「每月 30 号」行的平/闰二月落点写错列（与自带单测冲突）；`localtime::from_ymdhms` 的钉住理由称「PDU 回退路径使用」实为仅单测使用；`atclient`「唯一真正写串口的地方」漏了 `interrupt()` 的绕过式写入、`pdp_ready` 兜底条件描述与控制流不符、passthrough 清单漏 `+CDSI`；`pdu` 乱码「收蝭得对」与遗留叫法「go-submit 分片」订正
+- **docs(rust) 重构遗留的错挂 doc 归位**：`sms.rs` 挂在 `sent_record` 头上的正文预览说明归给 `text_preview`；`signalwatch.rs` 挂在 `sample_signal` 头上的两段（分属 `render_report_with` / `assess`）归位，并删去 `sample()` 的重复 doc 行
+- **note(待决) 信号百分比两边口径不一致**：`signal_percent` 按 30 dB 跨度（-80 dBm 满格），前端 `calculateSignalPercent` 按 40 dB 跨度（-70 满格）——同一时刻 -85 dBm 网页显示 63%、推送显示 83%。本轮**只把注释改准，未改任何一边**；误导性测试名 `percent_matches_frontend_formula` 改为 `percent_uses_30db_span`
+- **note(待决) 「批量汇总」模板是条死链路**：前端 `service.js` 有输入框 → UCI `notify_tpl_batch` → `config.batch` → 仅 `combine_messages` 使用，而生产路径每条通知单独渲染，`combine_messages` 只剩测试调用。`cargo check --all-targets` 现存 2 条 dead_code warning 即此二者，保留待决
+- **test**：`cargo check --all-targets` 无 error（剩上述 2 条 warning）；`cargo test` **285 passed / 0 failed / 2 ignored**（Windows 本机，Unix-only 用例不参与）；`rpc.js` / `logs.js` 通过语法校验
+- **chore(release) `PKG_RELEASE` 7 → 8**
+
 ## v1.28.0 (2026-10-23)
 
 ### 推送前缀统一为 {time} {count}、三类正文排版重做、QQ 推送富文本化（独立 qqpush 模块）
