@@ -331,7 +331,7 @@ impl Scheduler {
         );
         tokio::spawn(async move {
             notifier
-                .notify(Notification { sender: SENDER_SIGNAL.into(), content, kind: NotifyKind::Signal, memory_full: false, time: crate::notify::now_string() })
+                .notify(Notification { sender: SENDER_SIGNAL.into(), content, kind: NotifyKind::Signal, memory_full: false, time: crate::notify::now_string(), qq_card: None })
                 .await;
         });
         log_info!("定时锁频切换完成: {}（{}）", actions, if lock_ok { "成功" } else { "失败" });

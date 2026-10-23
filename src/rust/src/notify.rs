@@ -15,7 +15,7 @@
 //! 通道，此时事件入队，`Notifier::run()` 每 10 秒扫一次，通道就绪即逐条补发
 //! （不合并）。若照直发路径丢弃，用户绑定成功后会永久失去绑定期间的事件。
 
-use crate::qqpush::QqSender;
+use crate::qqpush::{QqMessage, QqMsgFormat, QqSender};
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::{NotificationConfig, NotifyTemplates};
 use std::time::Duration;
@@ -55,6 +55,13 @@ pub struct Notification {
     /// 事件发生时刻（本地时间 `%Y-%m-%d %H:%M:%S`），供文案模板的 `{time}` 占位符使用。
     /// 空串时渲染阶段回落到推送时刻。
     pub time: String,
+    /// 预渲染的 QQ 富文本正文（Markdown 卡片）。
+    ///
+    /// 由掌握结构化数据的生产者自行渲染并携带（信号巡检、网络切换提醒
+    /// 的表格卡片含条件行，模板表达不了）；短信卡片由 Notifier 按
+    /// `notify_tpl_qq_sms_md` 自动填充；其余事件为 None，走通用的
+    /// 「纯文本 → Markdown」转换。仅 QQ 富文本形态使用它。
+    pub qq_card: Option<String>,
 }
 
 /// 事件类型的中文标签，供文案模板的 `{kind}` 占位符使用。
@@ -228,8 +235,25 @@ impl Notifier {
         let body = render_body(msg, &self.cfg.templates);
         let prefix = render_prefix_str(&self.cfg.templates, 1);
         let combined = combine_body(&body, &prefix);
-        log_debug!("推送内容（实时直发）: {}", combined);
-        self.dispatch_body(&combined, &body, &prefix);
+        // QQ 富文本卡片：生产者预渲染优先，否则按事件类型自动套模板（短信）。
+        // 卡片自带时间与序号信息，不再叠加全局前缀。
+        let qq_card = msg.qq_card.clone().or_else(|| self.auto_card(msg));
+        match &qq_card {
+            Some(card) => log_debug!("推送内容（QQ 富文本卡片）: {}", card),
+            None => log_debug!("推送内容（实时直发）: {}", combined),
+        }
+        self.dispatch_body(&combined, &body, &prefix, qq_card.as_deref());
+    }
+
+    /// 生产者未预渲染卡片时，按事件类型自动套用对应的 QQ 富文本模板。
+    /// 当前仅短信有模板卡片（`notify_tpl_qq_sms_md`）。
+    fn auto_card(&self, msg: &Notification) -> Option<String> {
+        match msg.kind {
+            NotifyKind::Sms => {
+                render_card_template(&self.cfg.templates.qq_sms_md, msg, 1, &now_string())
+            }
+            _ => None,
+        }
     }
 
     /// 把渲染好的正文投递到所有已启用通道。
@@ -240,7 +264,7 @@ impl Notifier {
     /// 三个入参的分工：`combined` 是「前缀 + 正文」的纯文本（企业微信用）；
     /// `body` / `prefix` 分开传是给 QQ 通道的 —— [`crate::qqpush`] 需要它们
     /// 分别组装 Markdown（正文进标题与列表，前缀进引用行）。
-    fn dispatch_body(&self, combined: &str, body: &str, prefix: &str) {
+    fn dispatch_body(&self, combined: &str, body: &str, prefix: &str, qq_card: Option<&str>) {
         let wechat = self.wechat_enabled();
         let qq = self.current_qq();
         if wechat {
@@ -251,7 +275,13 @@ impl Notifier {
             });
         }
         if let Some(qq) = qq {
-            let msg = qq.build_message(body, prefix);
+            let msg = match qq_card {
+                // 富文本卡片已是最终 Markdown，直接投递；纯文本格式不投卡片
+                Some(card) if qq.format() != QqMsgFormat::Text => {
+                    QqMessage::Markdown { content: card.to_string() }
+                }
+                _ => qq.build_message(body, prefix),
+            };
             tokio::spawn(async move {
                 let _ = qq.send(msg).await;
             });
@@ -415,6 +445,7 @@ impl Notifier {
             content,
             kind,
             memory_full: false,
+            qq_card: None,
             time: now_string(),
         })
         .await;
@@ -643,6 +674,19 @@ pub fn render_prefix(prefix: &str, count: usize, now: &str) -> String {
     prefix.replace("{count}", &count.to_string()).replace("{time}", now)
 }
 
+/// 渲染 QQ 富文本卡片模板（当前用于短信卡片）。
+///
+/// 占位符与通用模板一致（`{sender}` `{content}` `{time}` `{kind}` `{count}`），
+/// 渲染结果本身就是最终 Markdown，不再经通用转换。模板为空、或显式写成
+/// `{body}`（逃生开关：表示「改用通用转换」）时返回 None。
+pub fn render_card_template(tpl: &str, msg: &Notification, count: usize, now: &str) -> Option<String> {
+    let t = tpl.trim();
+    if t.is_empty() || t == "{body}" {
+        return None;
+    }
+    Some(render_template(tpl, msg, count, now))
+}
+
 /// 前缀拼接：前缀在上、正文在下；前缀为空（或全空白）时只返回正文。
 pub fn combine_body(body: &str, prefix: &str) -> String {
     if prefix.trim().is_empty() {
@@ -706,6 +750,7 @@ mod tests {
             content: content.into(),
             kind: NotifyKind::Sms,
             memory_full: false,
+            qq_card: None,
             time: "2026-10-11 12:00:00".into(),
         }
     }
@@ -740,6 +785,31 @@ mod tests {
     }
 
     // ---------- 文案模板渲染 ----------
+
+    #[test]
+    fn qq_sms_card_template_renders_placeholders() {
+        let tpl = NotifyTemplates::default();
+        let m = sms("10086", "验证码 1234");
+        let card = render_card_template(&tpl.qq_sms_md, &m, 1, "2026-10-23 17:00:00")
+            .expect("默认配置应产出短信卡片");
+        assert!(card.starts_with("## 喵呜～收到新短信啦"), "实际: {card}");
+        assert!(card.contains("**发送者：** `10086`"), "发送者应进代码 span: {card}");
+        assert!(card.contains("**接收时间：** `2026-10-11 12:00:00`"), "缺接收时间: {card}");
+        assert!(card.contains("**消息序号：** `1`"), "缺消息序号: {card}");
+        assert!(card.contains("### 信笺内容"), "缺内容分节: {card}");
+        assert!(card.contains("验证码 1234"), "正文缺失: {card}");
+    }
+
+    #[test]
+    fn qq_card_template_empty_or_body_means_generic() {
+        let m = sms("10086", "hi");
+        assert!(render_card_template("", &m, 1, "t").is_none(), "空模板不产卡片");
+        assert!(render_card_template("   ", &m, 1, "t").is_none(), "空白模板不产卡片");
+        assert!(
+            render_card_template("{body}", &m, 1, "t").is_none(),
+            "{{body}} 是显式改用通用转换的逃生开关"
+        );
+    }
 
     #[test]
     fn default_single_sms_has_no_decorative_prefix() {
@@ -783,6 +853,7 @@ mod tests {
             content: String::new(),
             kind: NotifyKind::MemoryFull,
             memory_full: true,
+            qq_card: None,
             time: String::new(),
         };
         assert_eq!(combine_messages(&[m], &tpl), "短信存储空间已满");
@@ -900,6 +971,7 @@ mod tests {
                 content: "余额不足".into(),
                 kind: NotifyKind::Sms,
                 memory_full: false,
+                qq_card: None,
                 time: "2026-10-11 23:00:00".into(),
             })
             .await;
@@ -1013,6 +1085,7 @@ mod tests {
                 content: "总开关关闭时不应外发".into(),
                 kind: NotifyKind::Sms,
                 memory_full: false,
+                qq_card: None,
                 time: "2026-10-11 23:10:00".into(),
             })
             .await;
@@ -1052,6 +1125,7 @@ mod tests {
                 content: "验证码 4321".into(),
                 kind: NotifyKind::Sms,
                 memory_full: false,
+                qq_card: None,
                 time: "2026-10-11 23:20:00".into(),
             })
             .await;
@@ -1088,6 +1162,7 @@ mod tests {
                 content: "13800138000 来电".into(),
                 kind: NotifyKind::Call,
                 memory_full: false,
+                qq_card: None,
                 time: "2026-10-11 23:21:00".into(),
             })
             .await;
@@ -1127,6 +1202,7 @@ mod tests {
                 content: "RSRP -95 dBm".into(),
                 kind: NotifyKind::Signal,
                 memory_full: false,
+                qq_card: None,
                 time: "2026-10-11 23:22:00".into(),
             })
             .await;

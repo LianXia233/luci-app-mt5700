@@ -213,6 +213,14 @@ pub const DEFAULT_TPL_MEMORY: &str = "短信存储空间已满\n后果：清理�
 pub const DEFAULT_TPL_SIGNAL: &str = "{content}";
 /// 批量汇总的默认标题。
 pub const DEFAULT_TPL_BATCH: &str = "批量通知汇总";
+/// QQ 富文本短信卡片的默认模板（仅 QQ Markdown 形态生效）。
+///
+/// 企业微信与 QQ 纯文本仍使用 [DEFAULT_TPL_SMS]；本模板只决定 QQ
+/// 富文本下短信长什么样。占位符与通用模板一致。分隔线用空行包裹的
+/// `---`：CommonMark 里紧随段落的 `---` 会被当作 setext 二级标题下划线，
+/// 空行才能保证它是水平分割线。页脚用斜体（QQ Markdown 不支持 HTML 标签，
+/// 参考样式里的 `<sub>` 会原样显示成标签文本）。
+pub const DEFAULT_QQ_SMS_MD: &str = "## 喵呜～收到新短信啦\n有新的消息送到喵，快来看看是谁给你寄来了信笺。\n**发送者：** `{sender}`\n**接收时间：** `{time}`\n**消息序号：** `{count}`\n\n---\n\n### 信笺内容\n\n{content}\n\n---\n\n*本喵已经把信笺整理好啦，记得及时查收喵。*";
 
 #[derive(Debug, Clone)]
 pub struct NotifyTemplates {
@@ -229,6 +237,8 @@ pub struct NotifyTemplates {
     /// 批量汇总标题（多条合并时使用）。v1.14.20 起生产路径逐条直发，
     /// 该标题当前不会被触发，保留仅为兼容已有配置。
     pub batch: String,
+    /// QQ 富文本短信卡片模板（仅 QQ Markdown 形态生效；空或 `{body}` = 用通用转换）。
+    pub qq_sms_md: String,
 }
 
 impl Default for NotifyTemplates {
@@ -240,6 +250,7 @@ impl Default for NotifyTemplates {
             memory_full: DEFAULT_TPL_MEMORY.into(),
             signal: DEFAULT_TPL_SIGNAL.into(),
             batch: DEFAULT_TPL_BATCH.into(),
+            qq_sms_md: DEFAULT_QQ_SMS_MD.into(),
         }
     }
 }
@@ -677,6 +688,7 @@ pub async fn load_config() -> Config {
         memory_full: tpl("notify_tpl_memory", DEFAULT_TPL_MEMORY),
         signal: tpl("notify_tpl_signal", DEFAULT_TPL_SIGNAL),
         batch: tpl("notify_tpl_batch", DEFAULT_TPL_BATCH),
+        qq_sms_md: tpl("notify_tpl_qq_sms_md", DEFAULT_QQ_SMS_MD),
     };
 
     // 自动推送总开关：默认开启，保证升级后行为不变。
@@ -785,6 +797,10 @@ mod tests {
         assert!(!t.sms.contains("喵呜"), "默认短信模板不应带装饰前缀: {}", t.sms);
         assert!(!t.call.contains("喵呜"), "默认来电模板不应带装饰前缀: {}", t.call);
         assert!(!t.memory_full.contains("喵呜"), "默认存储满模板不应带装饰前缀: {}", t.memory_full);
+        // QQ 富文本短信卡片：默认应有，且带齐占位符
+        assert!(t.qq_sms_md.contains("{sender}") && t.qq_sms_md.contains("{content}"));
+        assert!(t.qq_sms_md.contains("{time}") && t.qq_sms_md.contains("{count}"));
+        assert!(t.qq_sms_md.starts_with("## "), "卡片应以标题开头: {}", t.qq_sms_md);
     }
 
     #[test]

@@ -449,7 +449,12 @@ fn markdown_payload(content: &str, keyboard: Option<&serde_json::Value>) -> serd
 ///   （模板没有标题行，如来电模板只写 `{content}`），则不硬造标题；
 /// - 全局前缀渲染为引用行 `> …`（保留 `{time} {count}` 信息又不抢标题）；
 /// - `键：值` 行渲染为无序列表 `- **键**：值`；
-/// - 空行保留（分段），其余行原样输出。
+/// - **列表项续行**：`键：值` 行之后紧跟的非空普通行（中间没有空行）视为
+///   该列表项的延续，缩进 4 空格保持列表结构 —— 多行短信正文
+///   （`内容：第一行\n第二行`）若不做这层处理，第二行会跳出列表变成
+///   独立段落，版式上与内容脱节；
+/// - 空行保留（分段），并结束当前列表上下文（空行后的普通行是新段落，
+///   不再缩进 —— 巡检报告的指标行正是这种结构）。
 pub fn build_markdown(body: &str, prefix: &str) -> String {
     let mut lines: Vec<&str> = body.lines().collect();
     while lines.first().is_some_and(|l| l.trim().is_empty()) {
@@ -476,14 +481,21 @@ pub fn build_markdown(body: &str, prefix: &str) -> String {
     if !rest.is_empty() {
         out.push('\n');
     }
+    let mut in_list = false;
     for line in rest {
         let t = line.trim();
         if t.is_empty() {
             out.push('\n');
+            in_list = false;
             continue;
         }
         if let Some((k, v)) = split_kv(t) {
             out.push_str(&format!("- **{k}**：{v}\n"));
+            in_list = true;
+        } else if in_list {
+            // 列表项续行（多行短信正文）：缩进 4 空格，QQ Markdown 渲染时
+            // 仍归属上方列表项，不会掉出列表变成独立段落
+            out.push_str(&format!("    {t}\n"));
         } else {
             out.push_str(t);
             out.push('\n');
@@ -746,6 +758,27 @@ mod tests {
         assert!(md.contains("\n\nRSRP -62 dBm"), "空行应保留: {md}");
         assert!(md.contains("RSRP -62 dBm（≥ -80）  优秀 · 信号强劲"), "普通行原样: {md}");
         assert!(!md.contains("- **RSRP"), "无冒号行不应变成列表: {md}");
+    }
+
+    #[test]
+    fn markdown_indents_multiline_content_under_list_item() {
+        // 多行短信正文：第二行必须缩进成列表续行，否则会跳出列表变成独立段落
+        let md = build_markdown("新短信\n发送者：10086\n内容：第一行\n第二行继续", "");
+        assert!(
+            md.contains("- **内容**：第一行\n    第二行继续"),
+            "多行正文应缩进为列表续行: {md}"
+        );
+        // 空行之后的普通行是新段落，不缩进（巡检报告的指标行结构）
+        let md2 = build_markdown("5G 信号巡检\n时间：now\n\nRSRP -62 dBm  优秀", "");
+        assert!(md2.contains("\n\nRSRP -62 dBm  优秀"), "空行后不应缩进: {md2}");
+    }
+
+    #[test]
+    fn md_to_plain_strips_list_indent() {
+        let md = "## 新短信\n\n- **发送者**：10086\n- **内容**：第一行\n    第二行继续";
+        let plain = md_to_plain(md);
+        assert!(plain.contains("内容：第一行"), "实际: {plain}");
+        assert!(plain.contains("\n第二行继续"), "续行缩进应被剥掉: {plain}");
     }
 
     #[test]

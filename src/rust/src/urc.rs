@@ -178,6 +178,7 @@ impl Dispatcher {
                     content: format!("时间：{ts}\n号码：{number}\n状态：来电振铃"),
                     kind: NotifyKind::Call,
                     memory_full: false,
+                    qq_card: None,
                     time: ts.clone(),
                 })
                 .await;
@@ -195,6 +196,7 @@ impl Dispatcher {
                         content: format!("时间：{ts}\n号码：{number}\n状态：通话结束"),
                         kind: NotifyKind::Call,
                         memory_full: false,
+                        qq_card: None,
                         time: ts.clone(),
                     })
                     .await;
@@ -224,6 +226,7 @@ impl Dispatcher {
                     content: String::new(),
                     kind: NotifyKind::MemoryFull,
                     memory_full: true,
+                    qq_card: None,
                     time: crate::notify::now_string(),
                 })
                 .await;
@@ -317,6 +320,7 @@ impl Dispatcher {
                     content: sms.content.clone(),
                     kind: NotifyKind::Sms,
                     memory_full: false,
+                    qq_card: None,
                     time: sms.date.format("%Y-%m-%d %H:%M:%S").to_string(),
                 })
                 .await;
@@ -408,6 +412,7 @@ impl Dispatcher {
                     content,
                     kind: NotifyKind::Sms,
                     memory_full: false,
+                    qq_card: None,
                     time: date.format("%Y-%m-%d %H:%M:%S").to_string(),
                 })
                 .await;
@@ -498,6 +503,7 @@ impl Dispatcher {
                         content: b,
                         kind: NotifyKind::Signal,
                         memory_full: false,
+                        qq_card: Some(render_switch_card_md(rsrp, mode_switched, &info, &now)),
                         time: now.clone(),
                     })
                     .await;
@@ -511,6 +517,7 @@ impl Dispatcher {
                 content,
                 kind: NotifyKind::Signal,
                 memory_full: false,
+                qq_card: Some(render_switch_card_md(rsrp, mode_switched, &info, &now)),
                 time: now,
             })
             .await;
@@ -887,7 +894,128 @@ pub fn parse_signal_reading(line: &str) -> Option<(f64, String)> {
     None
 }
 
-/// RSRP → 中文信号等级。轮询推送与 URC 通知共用，保证文案口径一致。
+/// 渲染 QQ 富文本「网络切换提醒 / 信号变动通知」卡片（Markdown 表格排版）。
+///
+/// 制式切换（LTE ↔ NR）时以「网络切换提醒」为题，否则「信号变动通知」——
+/// 与纯文本正文同一判定。缺测项整行省略。分隔线用空行包裹的 `---`
+/// （CommonMark 中紧随段落的 `---` 是 setext 二级标题下线）；页脚用斜体
+/// （QQ Markdown 不支持 `<sub>` 等 HTML 标签）。
+pub(crate) fn render_switch_card_md(
+    rsrp: f64,
+    mode_switched: bool,
+    info: &MonscInfo,
+    now: &str,
+) -> String {
+    let rat = info.rat.trim();
+    let is_nr = rat.eq_ignore_ascii_case("NR");
+    let is_lte = rat.eq_ignore_ascii_case("LTE");
+    let gen = if is_nr {
+        "5G"
+    } else if is_lte {
+        "4G"
+    } else {
+        ""
+    };
+    let title = if mode_switched { "网络切换提醒" } else { "信号变动通知" };
+    let intro = if mode_switched {
+        "检测到网络状态发生变化，请留意当前信号表现喵。"
+    } else {
+        "信号状态更新，请留意当前信号表现喵。"
+    };
+    let level = signal_level(rsrp);
+    // RSRP 展示值：MONSC 给出就用实测串，否则用事件读数兜底
+    let rsrp_s = if info.rsrp.trim().is_empty() {
+        format!("{rsrp:.0}")
+    } else {
+        info.rsrp.trim().to_string()
+    };
+    let gen_or_rat = if gen.is_empty() { rat } else { gen };
+
+    let mut out = format!(
+        "## {title}
+{intro}
+**事件时间：** `{now}`
+**消息序号：** `1`
+
+---
+
+### 网络状态
+| 项目 | 当前状态 |
+|:--|:--|
+"
+    );
+    if !rat.is_empty() {
+        let cell = if gen.is_empty() {
+            format!("**{rat}**")
+        } else {
+            format!("**{rat} · {gen}**")
+        };
+        out.push_str(&format!("| 网络制式 | {cell} |
+"));
+    }
+    out.push_str(&format!("| 信号质量 | **{level}** |
+"));
+    out.push_str(&format!("| RSRP | `{rsrp_s} dBm` |
+"));
+    if !info.rsrq.trim().is_empty() {
+        out.push_str(&format!("| RSRQ | `{} dB` |
+", or_unknown(&info.rsrq)));
+    }
+    if is_nr {
+        if !info.sinr.trim().is_empty() {
+            out.push_str(&format!("| SINR | `{} dB` |
+", or_unknown(&info.sinr)));
+        }
+    } else if !info.rssi.trim().is_empty() {
+        out.push_str(&format!("| RSSI | `{} dBm` |
+", or_unknown(&info.rssi)));
+    }
+
+    out.push_str("
+### 小区信息
+| 项目 | 参数 |
+|:--|:--|
+");
+    let arfcn_label = if is_nr { "频点（NR-ARFCN）" } else { "频点（LTE-ARFCN）" };
+    if !info.arfcn.trim().is_empty() {
+        out.push_str(&format!("| {arfcn_label} | `{}` |
+", or_unknown(&info.arfcn)));
+    }
+    if !info.pci.trim().is_empty() {
+        out.push_str(&format!("| PCI | `{}` |
+", or_unknown(&info.pci)));
+    }
+    if !info.tac.trim().is_empty() {
+        out.push_str(&format!("| TAC | `{}` |
+", or_unknown(&info.tac)));
+    }
+    if !info.cell_id.trim().is_empty() {
+        out.push_str(&format!("| 小区 ID | `{}` |
+", or_unknown(&info.cell_id)));
+    }
+
+    // 巡检提示：按信号等级给一句结论 + 通用建议
+    let hint = match level {
+        "优秀" => format!("当前 {gen_or_rat} 信号整体优秀。"),
+        "良好" => format!("当前 {gen_or_rat} 信号整体良好，但信号强度与信噪比仍有优化空间。"),
+        other => format!("当前 {gen_or_rat} 信号{other}，建议关注驻网质量。"),
+    };
+    out.push_str(&format!(
+        "
+---
+
+### 巡检提示
+{hint}建议继续观察网络稳定性，暂不必仅凭单次测量切换频段或小区。
+
+---
+
+*网络状态监测 · 自动通知*
+*本喵会继续关注网络变化，有新的状态更新时再来提醒你喵。*"
+    ));
+    out
+}
+
+/// RSRP → 中文信号等级。轮询推送与 URC 通知共用，保证文案口径之间口径一致。
 pub(crate) fn signal_level(rsrp: f64) -> &'static str {
     match rsrp {
         _ if rsrp >= -85.0 => "优秀",
