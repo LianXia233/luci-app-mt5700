@@ -394,9 +394,6 @@ fn list_serial_candidates() -> Vec<String> {
         // by-id 可用：以它为主，USB 裸路径作为回退附在其后
         chosen.extend(by_id);
         chosen.extend(usb);
-        if chosen.is_empty() {
-            chosen.append(&mut all);
-        }
     } else if usb.is_empty() {
         // 既无 by-id 也无 USB 串口：退回任意串口（覆盖 AT 口挂 SoC 串口的机型）
         chosen.append(&mut all);
