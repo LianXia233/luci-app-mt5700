@@ -28,7 +28,7 @@
 - **feat(sms) 批量删除补全选**：sticky 全选栏按当前筛选结果全选 / 再点取消，「已选 N 条」实时跟随；状态报告等无槽位条目不计入（原先它们禁用勾选却仍被算进全选）
 - **style(sms) 短信中心版式收口**：桌面按 QQ 式会话排布（左列表 + 右气泡时间轴），手机端铺满屏幕且不再被 OpenWrt「保存 & 应用」与主题 `#floating-toolbar` 挤压 —— 定高逻辑去掉「按溢出迭代回扣」的收缩环，改由 CSS 的 `dvh` + safe-area 承担，避免工具条出现时把会话区越算越矮；`.at-field-control` 补 `width: 100%`（标签上下排列后输入框原先只剩两百来像素）
 - **chore(ui) `MT5700_CSS_VERSION` 2.37.0 → 2.40.0、`AT_CSS_VERSION` 1.11.1 → 1.11.2**：LuCI 静态资源没有 `Cache-Control`，改样式必须同步 bump；view 模块无版本参数，**升级后需硬刷新一次（Ctrl+F5）**
-- **note**：本次**未**改 `Makefile` 的 `PKG_VERSION`（仍为 1.26.2）；发布打包前需同步 bump，否则包版本与 CHANGELOG 对不上
+- **note**：`Makefile` 的 `PKG_VERSION` 已随复审 bump 为 **1.27.0**，包版本与 CHANGELOG 对齐
 - **test**：5 个前端 JS `node --check` 通过；`mt5700.css` 括号平衡（1190/1190）；短信中心 A/B 对拍四档视口 diffCount=0（见上文）；无头浏览器实测（Chromium + 假 RPC）看板娘在桌面/平板/手机三档均完整可见、`art` 占卡宽 6.4%–17.9%、头像 76×76 与 64×64、与最坏情形工具条零交集；弹窗遮罩 9400、正文可滚、footer 可见、盒体在视口内、移动端 `align-items: flex-end`；日志页 27 条（24 后端 + 3 syslog）日期分隔与类别计数正确，「仅错误+警告」只剩 WRN/ERR，syslog 来源筛选生效，通知页签下类别条 `display: none`，导出含类别与来源，移动端折叠 58px→展开 99px，桌面「假折叠」归 0，console 零报错。`cargo check --release` 与 `cargo test --release` 已于 2026-10-23 在复审环境补跑：check 零错误零警告，test **280 passed / 0 failed / 2 ignored**
 
 ## v1.26.2 (2026-10-23)
