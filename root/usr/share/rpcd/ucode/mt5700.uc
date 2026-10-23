@@ -605,9 +605,13 @@ function usbCall(req) {
 		 * 卡住（sysfs 上有设备在异常热插拔时可能长时间阻塞在 d 状态），
 		 * 同样会把 rpcd 上下文一起拖死。 */
 		let tbin = findTimeoutBin();
-		let shCmd = '/bin/sh -c ' + script;
+		/* script 必须整体用单引号包住：fs.popen 等价于 `sh -c "<整串>"`，裸拼的话
+		 * 内层 sh 只会拿到第一个词（这里是 echo），剩下的 `for ... done` 跑到**没有
+		 * timeout 包裹**的外层 shell 里执行 —— 6s 保护形同不存在。
+		 * 写法与本文件 detectUsbNetdev() 里已验证的形态保持一致。 */
+		let shCmd = "/bin/sh -c '" + script + "'";
 		if (tbin != '') {
-			shCmd = tbin + ' 6 /bin/sh -c ' + script;
+			shCmd = tbin + ' 6 ' + shCmd;
 		}
 		p = fs.popen(shCmd, 'r');
 	} catch (e) {
