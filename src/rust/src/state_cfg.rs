@@ -96,7 +96,7 @@ mod tests {
     fn no_state_machine_or_write_then_read_command_is_cached() {
         for cmd in FORBIDDEN {
             assert!(
-                !cache_rules().iter().any(|r| r.key() == cmd.to_string()),
+                !cache_rules().iter().any(|r| r.key() == *cmd),
                 "{cmd} 属于状态机或写后读指令，缓存会让界面读到旧值"
             );
         }
