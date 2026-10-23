@@ -81,7 +81,10 @@ var rpcUsage = L.rpc.declare({
 var rpcUsageCtl = L.rpc.declare({
 	object: 'mt5700',
 	method: 'usage_ctl',
-	params: ['action', 'days'],
+	/* 这里的名字必须与 mt5700.uc 里 usage_ctl 的 args 键一致（action / day）：
+	 * LuCI 按 params 声明的名字映射位置参数，写成 'days' 会让 ucode 的
+	 * getStr(a,'day') 永远取不到值，清零日被后端夹成 1 号。 */
+	params: ['action', 'day'],
 	expect: {}
 });
 
