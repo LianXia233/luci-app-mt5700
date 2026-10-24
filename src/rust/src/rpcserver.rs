@@ -27,7 +27,17 @@ use tokio::io::AsyncRead;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 
-const RPC_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// 两次读取之间的空闲上限（不是单条请求的执行上限）。
+///
+/// 这个超时包住的是「读下一行请求」，而请求的**处理**发生在这之后，所以它本身
+/// 不限制任何命令的执行时长。原先取 30s 太小：`purge` 要逐区
+/// `AT+CPMS` → 等 500ms → `AT+CMGD=1,4`（每区最多 25s），`power` 要跑完整段
+/// 射频重启，这些动作最坏都在 60s 以上；而 ucode 侧给它们的是 70s 硬超时。
+/// 连接先断、ucode 等不到应答，用户看到的是「Rust 后端应答超时」，偏偏那次操作
+/// 其实已经成功了 —— 同一台设备上「点清空，报超时，刷新发现已清空」就是这个。
+/// 取 120s：大于所有 ucode 侧动作超时（最大 70s），保证先拿到后端的明确结论，
+/// 又给「空闲半开连接」留了一个合理的回收点。
+const RPC_READ_TIMEOUT: Duration = Duration::from_secs(120);
 /// RPC 请求行长度上限（防异常长行撑爆内存）。
 const MAX_RPC_LINE: usize = 8192;
 const CELLSCAN_ABORT_TOKEN: &str = "abcd";
@@ -699,6 +709,10 @@ impl RpcServer {
                         "entries": entries,
                         "fetchedAt": r.fetched_at_ms,
                         "totalLines": r.total_lines,
+                        /* 容量随列表一起回：前端要区分「一条都没有」与「有短信但一条都没
+                         * 解析出来」，只靠 entries 长度做不到。多读一次 `AT+CPMS?`
+                         * 会再占一次通道，这里复用 list 已付出的那次查询结果。 */
+                        "storage": r.storage.as_ref().map(storage_json),
                     }))
                 }
                 Err(e) => err(id, e),
@@ -856,12 +870,9 @@ impl RpcServer {
         // 状态缓存优先：白名单内的只读查询命中内存即毫秒级返回，下发 AT 的去重、
         // 刷新与断线失效都由缓存负责。miss / 非白名单 / 抓取失败一律走 live 路径，
         // 保证终端页手动执行同一条查询也能拿到真实结果。
-        match self.cache.resolve(&command).await {
-            Ok(Some(text)) => {
-                log_debug!("缓存命中: {}", command.trim());
-                return ok_response(&text);
-            }
-            _ => {}
+        if let Ok(Some(text)) = self.cache.resolve(&command).await {
+            log_debug!("缓存命中: {}", command.trim());
+            return ok_response(&text);
         }
 
         // 短信提交单独给足预算：`AT+CMGS=<长度>` 后面带 PDU 时，要把 TPDU 交给网络侧，
@@ -878,7 +889,10 @@ impl RpcServer {
             crate::atclient::COMMAND_TIMEOUT
         };
         if is_sms_submit {
-            log_info!("短信提交：等待模组回执，预算 {}s", cmd_timeout.as_secs());
+            // 用 {:?} 而不是 {}：这条命令里可能同时出现字面 `\r`（两个字符）与真实
+            // 控制字符（两段式的 Ctrl+Z），只有转义形式能区分「发出去了什么」。
+            // 稳态日志级别是 Warn，所以这行不会刷满 prolog；排查时用 -verbose。
+            log_info!("短信提交：等待模组回执，预算 {}s，原始串 {:?}", cmd_timeout.as_secs(), command);
         }
 
         // 外层超时 = 排队预算 + 应答预算 + 余量。
@@ -1178,7 +1192,7 @@ fn normalize_syscfgex(command: &str) -> String {
     if !command.starts_with("AT^SYSCFGEX") {
         return command.to_string();
     }
-    let cleaned = command.replace('\r', "").replace('\n', "").replace("OK", "");
+    let cleaned = command.replace(['\r', '\n'], "").replace("OK", "");
     if cleaned.contains(",\"\",\"\"") {
         let parts: Vec<&str> = cleaned.split(',').collect();
         if parts.len() >= 5 {
@@ -1210,7 +1224,7 @@ where
         if raw.len() >= max {
             overlong = true;
             let mut drain = Vec::new();
-            let _ = (&mut *reader).read_until(b'\n', &mut drain).await;
+            let _ = (*reader).read_until(b'\n', &mut drain).await;
         }
     } else {
         raw.pop();

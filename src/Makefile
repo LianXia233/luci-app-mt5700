@@ -62,7 +62,15 @@ ifeq ($(strip $(RUST_TARGET)),)
 $(error 无法推断 Rust 目标三元组（ARCH=$(ARCH) ARCH_PACKAGES=$(ARCH_PACKAGES) RUST_TRIPLE=$(RUST_TRIPLE)）。请显式传入 RUST_TRIPLE=<triple>；本构建禁止按宿主架构兜底，否则会产出错误架构的二进制)
 endif
 
-CARGO_TARGET_DIR := $(CURDIR)/target
+# 产物目录必须带包管理器格式后缀（FROM_APK 由 package.mk 置 1/空）。
+#
+# 为什么：SDK 在 25.12(apk) 与 24.10(opkg) 两套容器里各自构建，但 OUT_DIR 常常是
+# 同一份工作区目录（CNB 六个并行任务共享 ./out），build_dir 的 basename 也相同
+# （都是 luci-app-mt5700-<ver>）。Cargo 的 target/<triple>/release/ 因此会被两个
+# 构建共用：后跑的 cargo 看到「产物比源码新」就直接判定无需重编，把**另一套 C
+# 工具链链接出来的二进制**原样复制进本格式的包。同一架构的 apk / ipk 出现不同
+# 的二进制就是这么来的，且两边都不会报错。按格式分目录后互不相干。
+CARGO_TARGET_DIR := $(CURDIR)/target/$(if $(FROM_APK),apk,opkg)
 BIN := $(CARGO_TARGET_DIR)/$(RUST_TARGET)/release/at-webserver
 
 .PHONY: all compile clean install

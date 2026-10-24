@@ -131,6 +131,11 @@ pub struct SmsListResult {
     pub fetched_at_ms: i64,
     /// 列表为空时区分「真的没有」与「一条都解析不出来」。
     pub total_lines: usize,
+    /// 顺带读到的存储用量。
+    ///
+    /// 前端要拿它配合 `total_lines` 判断「模组里明明有短信，却一条都没解析出来」。
+    /// 读不到就是 `None` —— 那里显示「—」，不猜 0。
+    pub storage: Option<StorageInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +239,14 @@ pub struct SmsService {
     /// 短信本地归档句柄。由 main 在装配阶段注入（[`SmsService::set_archive`]），
     /// 未注入时 `send` 只走模组、不落盘 —— 单测因此不必准备文件系统。
     archive: std::sync::OnceLock<std::sync::Arc<crate::sms_store::SmsArchive>>,
+    /// 通知通道（「存储空间已满」推送用）。同样在装配阶段注入，未注入时只写日志。
+    ///
+    /// 为什么要绕到这里：模组回的 `+CMS ERROR: 322` / `^SMMEMFULL` 有两种来源 ——
+    /// URC 上报（`urc.rs` 负责）和**我们自己的提交应答**（`classify_cmgs_result`
+    /// 判成「存储满」）。后者是这次唯一能确认的现场，不在这里推一次，用户就只能
+    /// 等下一次 URC 或者自己去翻日志。标志位（`mem_full`）与推送是两件事：
+    /// 标志位一置位就不复位，推送只在「由满转满」的那一次发出。
+    notifier: std::sync::OnceLock<std::sync::Arc<crate::notify::Notifier>>,
 }
 
 impl SmsService {
@@ -263,6 +276,7 @@ impl SmsService {
             total_budget,
             rf_recover_ms: AtomicU64::new(RF_RECOVER_BUDGET.as_millis() as u64),
             archive: std::sync::OnceLock::new(),
+            notifier: std::sync::OnceLock::new(),
         })
     }
 
@@ -272,6 +286,38 @@ impl SmsService {
     /// —— 这两个入口被一堆既有用例直接调用，改签名等于把它们全改一遍。
     pub fn set_archive(&self, a: std::sync::Arc<crate::sms_store::SmsArchive>) {
         let _ = self.archive.set(a);
+    }
+
+    /// 注入通知通道（main 装配时调用一次）。
+    ///
+    /// 与 [`SmsService::set_archive`] 同理用 `OnceLock`：不动 `new` /
+    /// `with_timeouts` 的签名，既有用例不必跟着改。
+    pub fn set_notifier(&self, n: std::sync::Arc<crate::notify::Notifier>) {
+        let _ = self.notifier.set(n);
+    }
+
+    /// 「存储空间已满」的判定回收：置标志位，并在**首次**由未满转满时推一次通知。
+    ///
+    /// 不去重的话，一次批量删除期间每条被拒的分片都会推一条；反过来只在
+    /// 状态翻转时推，用户清理完再满还能再收到一次提醒。
+    fn mark_memory_full(&self) {
+        let first = !self.mem_full.swap(true, Ordering::Relaxed);
+        if !first {
+            return;
+        }
+        log_warn!("模组报告存储空间已满（短信提交被拒），已置存储满标志");
+        let Some(n) = self.notifier.get().cloned() else { return };
+        tokio::spawn(async move {
+            n.notify(crate::notify::Notification {
+                sender: String::new(),
+                content: String::new(),
+                kind: crate::notify::NotifyKind::MemoryFull,
+                memory_full: true,
+                qq_card: None,
+                time: crate::notify::now_string(),
+            })
+            .await;
+        });
     }
 
     /// 把一条短信写入本地归档（发送与接收共用）。
@@ -337,9 +383,19 @@ impl SmsService {
             .client
             .open_sms_transaction(&self.ctx, "sms.list", SMS_QUEUE_WAIT)
             .await?;
-
-        // 先确保 PDU 模式。查询只能确认「当前已经是 PDU 模式」时才跳过，
-        // 查询失败/看不懂一律强制设一次 —— CMGF=0 幂等，代价远小于模式歧义。
+        /*
+         * `AT+CMGL=4` 是**单条长命令**（满存储时几十条 PDU 一起回来），
+         * `run_in_transaction` 的协作让出只在命令边界发生，因此这条读命令
+         * 期间门外的页面查询一条都进不来 —— 实机上表现为「打开短信中心，
+         * 其它页面一起卡住十几秒」，正是 v1.29.0 声称已经解决的那个问题。
+         *
+         * 所以事务只负责「先切到 PDU 模式」这两条短命令，长读命令放开通道下发。
+         * 放开的时间窗里可能有后台巡检插进来改 `mem1` 或重设 `AT+CMGF`，
+         * 读回来的是**另一次同样合法的查询**结果，下一条短信照样按 `+CMTI`
+         * 的区号自己切回去（见 urc.rs），代价远小于把整站卡住。
+         *
+         * 模式查询失败/看不懂一律强制设一次 —— CMGF=0 幂等，代价远小于模式歧义。
+         */
         let mut mode = false;
         if let Ok(resp) = self
             .client
@@ -357,12 +413,13 @@ impl SmsService {
                 return Err(format!("切换到 PDU 模式失败：{}", last_line(&set.text())));
             }
         }
+        drop(tx);
 
+        // 模式已确认，长读命令改为不持事务下发（理由见上）。
         let resp = self
             .client
-            .run_in_transaction(&self.ctx, &tx, "AT+CMGL=4", SMS_LIST_TIMEOUT)
+            .send_sms_command(&self.ctx, "AT+CMGL=4", SMS_LIST_TIMEOUT)
             .await?;
-        drop(tx);
 
         // 手册 9.8.1 给了两种结局：成功是若干组「`+CMGL:` 头行 + PDU 行」再以 OK 收尾，
         // 失败是 `+CMS ERROR: <err>`。没有 OK 就别当成「存储区是空的」——
@@ -395,10 +452,24 @@ impl SmsService {
             })
             .collect();
 
+        // 容量只用于前端区分「空 / 解析不出」，读失败不影响列表本身，记 warn 即可。
+        let storage = match self
+            .client
+            .send_sms_command(&self.ctx, "AT+CPMS?", crate::atclient::COMMAND_TIMEOUT)
+            .await
+        {
+            Ok(resp) => parse_storage(&resp.lines),
+            Err(e) => {
+                log_warn!("读取短信列表后回读容量失败（不影响列表）：{e}");
+                None
+            }
+        };
+
         Ok(SmsListResult {
             entries,
             fetched_at_ms: crate::nettime::now_ms(),
             total_lines,
+            storage,
         })
     }
 
@@ -564,8 +635,8 @@ impl SmsService {
                 res
             };
             let (part_outcome, detail) = classify_cmgs_result(&res);
-            if part_outcome == SendOutcome::Rejected {
-                self.mem_full.store(is_memory_full_detail(&detail), Ordering::Relaxed);
+            if part_outcome == SendOutcome::Rejected && is_memory_full_detail(&detail) {
+                self.mark_memory_full();
             }
             parts.push(SendPartResult {
                 part_number: part.part_number as u32,
@@ -609,7 +680,14 @@ impl SmsService {
         }
 
         // 5) 无论成败都顺手读一次真实容量，前端展示的是模组当次读数。
-        let storage = self.read_storage_in_tx(&tx).await.ok();
+        //    读不到就留 None（界面显示「—」而不是 0/0），并记一条 warn 便于排查。
+        let storage = match self.read_storage_in_tx(&tx).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                log_warn!("发送后回读容量失败（不影响发送结论）：{e}");
+                None
+            }
+        };
         drop(tx);
 
         if outcome == SendOutcome::Accepted {
@@ -690,7 +768,15 @@ impl SmsService {
             }
         }
 
-        let storage = self.read_storage_in_tx(&tx).await.ok();
+        // 收尾回读容量：界面据此刷新用量条。回读失败不影响删除结论，但要留痕，
+        // 否则界面上「删成功了、容量还是 0/0」看起来像删除没生效。
+        let storage = match self.read_storage_in_tx(&tx).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                log_warn!("删除后回读容量失败（不影响删除结果）：{e}");
+                None
+            }
+        };
         drop(tx);
 
         Ok(DeleteResult {
@@ -714,7 +800,15 @@ impl SmsService {
             .open_sms_transaction(&self.ctx, "sms.purge", SMS_QUEUE_WAIT)
             .await?;
 
-        let storage = self.read_storage_in_tx(&tx).await.ok();
+        // 首个 `AT+CPMS?`：读不到不是致命错误（下面有 SM/ME 兜底），但要留痕——
+        // 静默 `.ok()` 会让「读不到容量」和「容量是空的」在日志里长得一模一样。
+        let storage = match self.read_storage_in_tx(&tx).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                log_warn!("清空短信：读取存储用量失败（按 SM/ME 兜底）：{e}");
+                None
+            }
+        };
         let mut mems: Vec<String> = Vec::new();
         if let Some(s) = &storage {
             for m in [&s.mem1, &s.mem2, &s.mem3] {
@@ -792,7 +886,23 @@ impl SmsService {
             }
         }
 
-        let storage = self.read_storage_in_tx(&tx).await.ok();
+        // 收尾回读：界面据此立刻刷新容量条。回读失败只影响这一次的展示值，
+        // 所以只记 warn、不写进 errors —— errors 是「哪些区没清掉」的清单，
+        // 混进容量问题会让界面把一次成功的清空报成失败。
+        let storage = match self.read_storage_in_tx(&tx).await {
+            Ok(s) => {
+                // 和 capacity() 同口径：真回落到未满就清掉存储满标志，
+                // 否则用户清空后界面仍一直提示「存储已满」。
+                if s.used < s.total {
+                    self.mem_full.store(false, Ordering::Relaxed);
+                }
+                Some(s)
+            }
+            Err(e) => {
+                log_warn!("清空短信后回读容量失败（不影响清空结果）：{e}");
+                None
+            }
+        };
         drop(tx);
         Ok(DeleteResult { requested: mems.len(), deleted, failed: Vec::new(), errors, storage })
     }
@@ -958,7 +1068,13 @@ impl SmsService {
             Ok(resp) => extract_quoted_number(&resp.text(), "+CSCA:").unwrap_or_default(),
             Err(_) => String::new(),
         };
-        let storage = self.read_storage_in_tx(&tx).await.ok();
+        let storage = match self.read_storage_in_tx(&tx).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                log_warn!("短信功能开关后回读容量失败：{e}");
+                None
+            }
+        };
         drop(tx);
 
         Ok(PowerResult {
@@ -1234,7 +1350,11 @@ impl SmsService {
             .client
             .run_in_transaction(&self.ctx, tx, "AT+CPMS?", crate::atclient::COMMAND_TIMEOUT)
             .await?;
-        parse_storage(&resp.lines).ok_or_else(|| "未能解析存储用量".into())
+        // 把模组原始应答带上：只回「未能解析存储用量」时，现场完全看不出是
+        // SIM 没就绪、区名不认识，还是容量回了 0（`parse_storage` 把 total=0 当「没读到」）。
+        parse_storage(&resp.lines).ok_or_else(|| {
+            format!("未能解析存储用量：{}", compact_detail(&resp.text()))
+        })
     }
 }
 
@@ -1636,12 +1756,35 @@ mod tests {
     fn smsc_input_rejects_what_pdu_cannot_encode() {
         // 手册 9.5.3 的字符集含 * 与 #，但中心号要被编进 PDU 的短信中心字段（BCD 数字），
         // 所以这两个字符在入口就拒掉，别让「设置成功、发信失败」这种状态出现。
-        assert_eq!(check_smsc_input(" +8613800755500 ").unwrap(), "+8613800755500");
-        for bad in ["86*123", "86#123", "+86+13800755500", "12", "861380075550000000001234",
-                    r#"8613800755500","SM"#, "8613800755500\r\nAT+CFUN=0"] {
+        assert_eq!(check_smsc_input(" +8613800000000 ").unwrap(), "+8613800000000");
+        for bad in ["86*123", "86#123", "+86+13800000000", "12", "861380000000000000001234",
+                    r#"8613800000000","SM"#, "8613800000000\r\nAT+CFUN=0"] {
             let err = check_smsc_input(bad).expect_err("should reject {bad:?}");
             assert!(err.contains(SMSC_FORMAT_HINT), "文案要指回 9.5.3：{err}");
         }
+    }
+
+    #[test]
+    fn memory_full_from_submit_answer_is_not_swallowed() {
+        // 提交被拒的三种现场文案都要判成「存储满」：URC 那条 `^SMMEMFULL`
+        // 走 urc.rs，而**这次提交的应答**只有 sms.rs 看得到。
+        for detail in ["+CMS ERROR: 322", "NO MEMORY FULL", "^SMMEMFULL", "ERROR: MEMORY FULL"] {
+            assert!(is_memory_full_detail(detail), "{detail} 应判为存储满");
+        }
+        // 普通拒绝不能误判：把一次号码错误也当成存储满，界面就会去清短信。
+        for detail in ["+CMS ERROR: 500", "ERROR", "+CME ERROR: 4", ""] {
+            assert!(!is_memory_full_detail(detail), "{detail} 不该判为存储满");
+        }
+    }
+
+    #[test]
+    fn cmgs_rejection_carries_memory_full_out_of_the_answer() {
+        // 判据链：提交被拒 → 应答里有 322 / MEMORY FULL → 置标志并推送。
+        // 这一条钉住「应答文案 → 存储满判定」这一跳，URC 那条路径测不到它。
+        let resp = AtResponse { lines: vec!["+CMS ERROR: 322".into()] };
+        let (outcome, detail) = classify_cmgs_result(&Ok(resp));
+        assert_eq!(outcome, SendOutcome::Rejected, "322 属于短信层拒绝");
+        assert!(is_memory_full_detail(&detail), "322 必须被认成存储满：{detail}");
     }
 
     #[test]
@@ -1729,21 +1872,21 @@ mod tests {
     fn quoted_number_extraction_handles_both_shapes() {
         // 部分固件不给第二参数
         assert_eq!(
-            extract_quoted_number("+CSCA: \"+8613800755500\"\r\nOK", "+CSCA:").as_deref(),
-            Some("+8613800755500")
+            extract_quoted_number("+CSCA: \"+8613800000000\"\r\nOK", "+CSCA:").as_deref(),
+            Some("+8613800000000")
         );
         assert_eq!(
-            extract_quoted_number("+CSCA: \"+8613800755500\",145\r\nOK", "+CSCA:").as_deref(),
-            Some("+8613800755500")
+            extract_quoted_number("+CSCA: \"+8613800000000\",145\r\nOK", "+CSCA:").as_deref(),
+            Some("+8613800000000")
         );
         assert_eq!(extract_quoted_number("OK", "+CSCA:"), None);
     }
 
     #[test]
     fn digits_eq_normalizes_country_prefix() {
-        assert!(digits_eq("+8613800755500", "8613800755500"));
-        assert!(digits_eq("1380075550 0", "13800755500"));
-        assert!(!digits_eq("13800138000", "13800755500"));
+        assert!(digits_eq("+8613800000000", "8613800000000"));
+        assert!(digits_eq("1380000000 0", "13800000000"));
+        assert!(!digits_eq("13800138000", "13800000000"));
     }
 
     #[test]
@@ -1843,7 +1986,7 @@ mod tests {
             if cmd.starts_with("AT+CFUN") || cmd.starts_with("AT^IMSSWITCH") {
                 return Reply::Lines(vec!["OK".into()]);
             }
-            Reply::ok(&["+CSCA: \"+8613800755500\",145"])
+            Reply::ok(&["+CSCA: \"+8613800000000\",145"])
         })
         .await;
         let r = svc.power_set(true, None).await.unwrap();
@@ -2000,7 +2143,7 @@ mod tests {
             "AT+CEUS?" => Reply::Lines(vec![ceus_line.into(), "OK".into()]),
             "AT+CFUN?" => Reply::Lines(vec!["+CFUN: 1".into(), "OK".into()]),
             "AT+CEREG?" => Reply::Lines(vec!["+CEREG: 0,1".into(), "OK".into()]),
-            "AT+CSCA?" => Reply::ok(&["+CSCA: \"+8613800755500\",145"]),
+            "AT+CSCA?" => Reply::ok(&["+CSCA: \"+8613800000000\",145"]),
             _ => Reply::ok(&[]),
         }
     }
@@ -2011,12 +2154,12 @@ mod tests {
         // 成功时不该多补一次 AT+CFUN=1（回滚只属于失败路径）。
         let (svc, modem, _ctx) = harness(power_ok("+CEUS: 0")).await;
         svc.set_rf_recover_budget(Duration::from_millis(0));
-        let r = svc.power_set(true, Some("+8613800755500".into())).await.unwrap();
+        let r = svc.power_set(true, Some("+8613800000000".into())).await.unwrap();
         assert!(r.enabled, "{:?}", r.failed_detail);
         assert_eq!(r.failed_at, None);
         let cmds = modem.cmds();
         assert_eq!(cmds.iter().filter(|c| c.as_str() == "AT+CFUN=1").count(), 1, "{cmds:?}");
-        assert!(cmds.iter().any(|c| c == r#"AT+CSCA="+8613800755500""#), "短信中心要在这串里写掉：{cmds:?}");
+        assert!(cmds.iter().any(|c| c == r#"AT+CSCA="+8613800000000""#), "短信中心要在这串里写掉：{cmds:?}");
         assert!(
             r.steps_done.iter().any(|s| s.contains("注册网络")),
             "射频确认结果要如实写进步骤：{:?}",
@@ -2107,7 +2250,7 @@ mod tests {
     async fn send_accepted_requires_cmgs_reference() {
         let (svc, modem, _ctx) = harness(script(vec![
             ("AT+CMGF?", Reply::Lines(vec!["+CMGF: 0".into(), "OK".into()])),
-            ("AT+CSCA?", Reply::Lines(vec!["+CSCA: \"+8613800755500\",145".into(), "OK".into()])),
+            ("AT+CSCA?", Reply::Lines(vec!["+CSCA: \"+8613800000000\",145".into(), "OK".into()])),
             ("AT+CMGS=", Reply::ok(&["+CMGS: 12"])),
             ("AT+CPMS?", Reply::Lines(vec!["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50".into(), "OK".into()])),
         ]))
@@ -2219,7 +2362,7 @@ mod tests {
         // 模组明确拒绝：`+CMS ERROR: 500`（典型的「未知错误/网络侧拒绝」）。
         let (svc, modem, _ctx) = harness(script(vec![
             ("AT+CMGF?", Reply::Lines(vec!["+CMGF: 0".into(), "OK".into()])),
-            ("AT+CSCA?", Reply::ok(&["+CSCA: \"+8613800755500\",145"])),
+            ("AT+CSCA?", Reply::ok(&["+CSCA: \"+8613800000000\",145"])),
             ("AT+CMGS=", Reply::Lines(vec!["+CMS ERROR: 500".into()])),
             ("AT+CPMS?", Reply::ok(&["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"])),
         ]))
@@ -2323,7 +2466,7 @@ mod tests {
         }
         let (svc, modem, _ctx) = harness(script(vec![
             ("AT+CMGF?", Reply::Lines(vec!["+CMGF: 0".into(), "OK".into()])),
-            ("AT+CSCA?", Reply::ok(&["+CSCA: \"+8613800755500\",145"])),
+            ("AT+CSCA?", Reply::ok(&["+CSCA: \"+8613800000000\",145"])),
             ("AT+CMGS=", Reply::ok(&["+CMGS: 12"])),
             ("AT+CPMS?", Reply::ok(&["+CPMS: \"ME\",3,50,\"ME\",3,50,\"ME\",3,50"])),
         ]))
