@@ -119,6 +119,29 @@ function jsonParse(s) {
 				else if (e == '"') { out += '"'; }
 				else if (e == '\\') { out += '\\'; }
 				else if (e == '/') { out += '/'; }
+				/*
+				 * \uXXXX —— 必须真正还原成字符，不能一个字母一个字母往外吐。
+				 *
+				 * 为什么这条不是「锦上添花」：AT 终端的应答里会出现 ESC(0x1B)、
+				 * Ctrl+Z(0x1A) 这类控制字符，serde_json 序列化时一定会写成
+				 * \u001b / \u001a。旧实现的 else 分支把它们拆成 'u','0','0','1','b'
+				 * 五个字符，于是 ucode 交给 rpcd、rpcd 再交给前端的那份
+				 * data 里，本来一个字节的控制字符变成了五个可见字符：
+				 *   - 页面显示的应答与实际下发/回传的内容不一致；
+				 *   - 任何拿应答再做判断的逻辑（例如把 \u001a 当作提交结束符）
+				 *     一律失配。
+				 * 这里只处理 BMP 内的四位数（JSON 里 \uXXXX 就是四位十六进制）；
+				 * 代理对（\uD8xx）在本插件的应答里不会出现，保持原样即可。
+				 */
+				else if (e == 'u') {
+					let hexs = substr(s, i + 1, 4);
+					if (length(hexs) == 4 && match(hexs, /^[0-9A-Fa-f]{4}$/) != null) {
+						out += chr(hex(hexs));
+						i += 4;
+					} else {
+						out += e;
+					}
+				}
 				else { out += e; }
 				i++;
 			} else if (c == '"') {
@@ -863,7 +886,8 @@ function rpcCall(method, params, timeoutSec) {
 			if (resp.error.message) {
 				msg = resp.error.message;
 			}
-			return { success: false, error: msg, cause: 'backend-error' };
+			/* 字段搬运与理由见 backendErrorShape 的注释 */
+			return backendErrorShape(resp.error, msg);
 		}
 		/* 后端能正常应答业务请求：清除熔断标记，恢复正常服务。
 		 * 注意清标记放在「拿到合法应答」之后，而不是「端口在监听」时 ——
@@ -876,6 +900,34 @@ function rpcCall(method, params, timeoutSec) {
 	} catch (e) {
 		return { success: false, error: '解析应答失败: ' + e.message, cause: 'parse-failed' };
 	}
+}
+
+/*
+ * 后端的 { id, error:{ message, ... } } 应答 → ucode 插件交给前端的扁平错误对象。
+ *
+ * 为什么要单独成函数：错误对象里的 cause 等字段是「分层预算」这套设计的判据
+ * （前端据它区分超时 / 端口未监听 / 熔断，见 rpc.js 的 noteCommandFailure），
+ * 而旧实现只把 message 搬出来，其余字段全丢，前端只能一律按「模组 ERROR」处理。
+ * 这里把它们平移到顶层，与业务结果形态（resp.cause / resp.error）保持同一套读法。
+ *
+ * 只搬标量：嵌套对象/数组不进错误对象，避免前端拿到形状不确定的字段。
+ */
+function backendErrorShape(err, msg) {
+	let out = { success: false, cause: 'backend-error' };
+	let ks = keys(err);
+	for (let i = 0; i < length(ks); i++) {
+		let k = ks[i];
+		if (k == 'message') {
+			continue;
+		}
+		let v = err[k];
+		if (v == null || type(v) == 'object' || type(v) == 'array') {
+			continue;
+		}
+		out[k] = v;
+	}
+	out.error = msg;
+	return out;
 }
 
 return {

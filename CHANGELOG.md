@@ -8,6 +8,58 @@
 
 ---
 
+## 未发布（main）
+
+### 全量代码审查与系统性修复：AT 通道并发、rpcd 参数契约、ucode 转义、温度六档表
+
+> 本轮对仓库做了一次全量审查（Rust 后端 21k 行 / 前端 24k 行 / init.d 与 ucode / 脚本与 CI），
+> 逐模块核对文档与实现。下面每条都是**已在本地复现、修复并跑过回归**的缺陷，不是「建议」。
+
+- **fix(at) 排队放行与超时收回不再互相抢通道**（`at_queue::PriLock::acquire`）：旧实现先放锁再检查 `holder`，超时/取消分支可能在「检查」与「返回 permit」之间把通道收回，于是调用方拿到一个已被收回的 permit 而其它命令也能同时进来 —— 通道独占被破坏，表现为极偶发的 AT 应答串线。现在「确认轮到」与「收回」在同一临界区内完成。新增回归用例 `timed_out_branch_and_grant_are_mutually_exclusive`
+- **fix(at) 排队预算不再被伪唤醒续期**：`acquire` 的等待循环里每次重建 `sleep(wait)`，任何非取消的伪唤醒都会把排队上限（8s）再续一个 8s，长事务期间用户的终端命令可能远超预期地挂住。改为单一 deadline，重试用剩余额度。新增回归用例 `queue_timeout_is_not_extended_by_spurious_wakeups`
+- **fix(rpc) `usage_ctl` 参数名与 ucode 契约不一致**：`rpc.js` 声明成 `params: ['action', 'days']`，而 ucode 的 args 与后端都读 `day`。LuCI 按名字组装请求，字面量 `days` 到不了 args，`int(getStr(a,'day'))` 恒为 0 —— 界面上改「每月几号自动清零」永远落回 1 号且无任何报错
+- **fix(rpc) `sms` 动作的 `enable` 错位到 `message`**：`rpcSms()` 的实参里 `enable` 排在 `message` 的位置，`power`（开/关短信功能，会动射频）传进来的布尔被塞进 `message` 字段。现按 ucode 的键序逐个对应，且只有 `power` / `set_ims` 才带 `enable`、只有 `store_drop` 才带 `all`（其余动作传 undefined，LuCI 会省略该字段）
+- **fix(ucode) JSON 解析器还原 `\uXXXX`**：本固件 ucode 无 `require('json')`，插件自带手写 `jsonParse()`，而它的 `\u` 分支落进了 `else { out += e; }`，把 `\u001b`（ESC）/`\u001a`（Ctrl+Z）拆成 `u001b` 五个字面字符。AT 终端的控制字符应答因此与后端实际内容不一致。新增 `tests/ucode-json-test.js`（从 .uc 源里原样抽函数体执行）
+- **fix(ui) 芯片温度恢复六档分级**：`tests/mock-modem/temp-level-test.js` 依赖 `TEMP_LEVELS` / `tempLevel`，但两者早已从渲染代码里消失 —— 该用例一直以「无法从源码抽取温度逻辑」退出 1，形同虚设。现把六档表（cold/cool/normal/warm/hot/high）放回 `network_status.js` 作为唯一实现，格子上色与卡片定级共用它；用例恢复为 26/26 通过
+- **fix(temp) 占用率除零与"容量 0 当已满"**：`timerpush::render_status` 在 `total == 0` 时走了除法分支（上游 `query_storage` 已把 0 视为没读到，这里再兜一层 filter），余量改用 `saturating_sub`
+- **chore(rust) 清掉全部编译/clippy 警告**（生产代码 0 警告）：死代码 `SmsTransaction::elapsed`、`PriLock::dispatch`；`combine_messages` / `NotifyTemplates::batch` 标注 `cfg_attr(not(test), allow(dead_code))` 并说明「攒批已移除、仅测试覆盖」的原因；`div_ceil` / `strip_prefix` / `sort_by_key` / `as_chunks` / `replace(['\r','\n'])` / `needless_borrow` 等机械项
+- **docs** README 曾写「`docs/sms-usage.md` 只在 GitHub 镜像仓库有，本仓库未收录」，而该文件就在本仓库 `docs/` 下 —— 改为直接链接，并在目录表补两条独立文档入口
+- **test(sim) 修复 simulate-push 的偶发假失败**：自检在 mock 日志文件还是空的时候就统计「拒绝过几次危险命令」，读到 0 次即判失败（与护栏本身无关）；顺带把「推送号码口径」观察项的抓取正则改对（默认模板首行是全局前缀，`发送者` 不在行首）
+- **test(e2e) 修复两段式提交用例的假失败**：同一条 PDU 在一次成功提交后再提交会被模组判为重复短信（回 ERROR），于是「两段式第二步」看起来像失败。改为改用不同 TP-MR 的第二条 PDU；另加 `E2E_DEBUG=1` 打印实际下发的命令形态
+
+### 全量代码审查（第三轮）：短信列表独占通道、存储满推送丢事件、解析失败冒充空列表
+
+> 前两轮修的是「报错的那批」和「文档承诺没做到的那批」。这一轮盯的是
+> 「不报错、只是慢 / 只是安静」的：通道被一条读命令独占、事件被自己吃掉、
+> 读失败与没数据长得一模一样。
+
+- **perf(sms) `AT+CMGL=4` 不再独占整条通道**：`list` 全程持有短信事务，而协作让出只发生在命令边界 ——
+  `AT+CMGL=4` 是**单条长命令**（满存储时几十条 PDU 一起回来），命令进行中门外的页面查询一条都进不来。
+  实机表现是「打开短信中心，其它页面一起卡住十几秒」，与 v1.29.0 声称已解决的「打开本页不再阻塞其它页面」正好相反。
+  现在只在事务内做 `AT+CMGF?` / `AT+CMGF=0` 两条短命令，长读命令放开通道下发
+- **fix(notify) 提交被 `+CMS ERROR: 322` / `^SMMEMFULL` 拒绝时不再丢推送**：URC 路由此前已能推「存储空间已满」，
+  但**我们自己这次提交的应答**里那条 322 只有 `send` 看得到，`urc.rs` 永远等不到。
+  结果是一次满存储发送被拒、界面只报「模组拒绝」、推送一条没有。现在判到存储满即置标志并推一次
+  （`SmsService::set_notifier` 注入通道；只在「由未满转满」那一次发，批量删除不会刷屏）。补两条单测钉住判定与文案映射
+- **fix(sms) 列表读得出、却一条都解析不出来时不再冒充「暂无短信」**：`list` 回包的 `totalLines`（本次应答原始行数）
+  早就有了，前端却完全没用。现在列表顺带回一次容量（`AT+CPMS?`，随列表一起回、前端不再多发一次请求），
+  并据此提示「模组有 N 条，但本次一条都没解析出来」而不是安静显示空列表
+
+### 全量代码审查（第二轮）：错误字段透传、长事务被掐断、静默 `.ok()` 吞掉容量失败、多架构构建串味
+
+> 第一轮修的是「会立刻出错」的那批；这一轮是文档里承诺过、代码却没做到的那批。
+> 每条都写明「文档怎么说 / 代码怎么做 / 现在改成什么」。
+
+- **fix(ucode) 后端进程级错误丢掉 `cause` 等字段**：`rpcCall` 解析到 `{"error":{"message":…}}` 时只把 `message` 搬进 `error`，其余字段（`code` / `cause`）全丢。而分层预算的判据正是 `cause`（`timeout` / `not-listening` / `circuit-open`），前端拿不到就一律按「模组 ERROR」处理 —— 一次后端超时会被计进「模组连续失败」熔断，也不会同步「后端不可用」标记。现在把 `error` 里的标量字段平移到顶层（嵌套对象/数组不外泄），与业务结果形态 `resp.cause` / `resp.error` 同一套读法；抽成 `backendErrorShape()` 并在 `tests/ucode-json-test.js` 补 6 条回归（用例数 8 → 14）
+- **fix(rpc) RPC 读超时 30s 会掐断长短信事务**：`RPC_READ_TIMEOUT` 包住的是「读下一行请求」，但连接一断，正在跑的 `purge` / `power` 就再也送不回应答 —— 而 ucode 侧给这两个动作的是 70s 硬超时，后端预算（排队 10s + 逐区 25s / 射频重启）本来就要跑过 30s。现象是「点清空 → 报后端应答超时 → 刷新发现已经清空」。放宽到 120s（大于所有 ucode 动作超时，先拿后端结论再谈回收）
+- **fix(sms) 容量回读的 `.ok()` 把失败洗成「容量 0/0」**：`read_storage_in_tx` 的四处收尾回读（发送 / 删除 / 清空 / 短信功能开关）既有 `AT+CPMS?` 没回就 `.ok()` 的地方，也有「回了 OK 但解析不出」的路径 —— 统一成「记 warn 并保留 `None`」，界面因此显示「—」而不是 0/0。`read_storage_in_tx` 的解析失败文案也带上模组原始应答（只回「未能解析存储用量」时现场无从判断是 SIM 没就绪、区名不认识还是容量回了 0）
+- **fix(sms) 清空后不复位存储满标志**：`purge_all` 不做「used < total 就清 `mem_full`」这一步，而 `capacity()` 与新增的收尾回读都做了。参考实现这个标志置位后永不复位，用户清空后界面仍一直提示「存储已满」；清空这条路径恰好最容易触发它
+- **fix(sms) 清空短信首个 `AT+CPMS?` 失败静默**：读不到就静默走 SM/ME 兜底，日志里「读不到容量」与「容量是空的」长得完全一样。现在失败记一条 warn 再兜底
+- **fix(build) 同一架构的 apk / ipk 会串用同一份 Rust target 目录**：`src/Makefile` 的 `CARGO_TARGET_DIR` 只按包名区分，而 SDK 里 build_dir 的 basename 相同（`luci-app-mt5700-<ver>`）、`OUT_DIR` 又常是同一份工作区 —— 后跑的那轮 `cargo build` 看到产物比源码新，直接跳过重编，把**另一套 C 工具链链接的二进制**复制进本格式的包，两边都不报错。改为按包管理器格式分目录（`target/$(if $(FROM_APK),apk,opkg)`）
+- **docs** `docs/sms-usage.md` 的「存储：0/0」排查项补上「后端日志会带原始应答」，并明确「容量读不到**不代表**删除/清空失败」
+
+---
+
 ## v1.29.0 (2026-10-23)
 
 ### 修复短信中心打开后其它页面卡死（issue #23）：AT 通道分级预算 + 租约瘦身 + 空态立绘更新
@@ -28,7 +80,28 @@
 - **style(ui) 空态立绘背景透明化**：移除 1000x1000 纯白底 rect，角色直接浮在卡片背景上（深浅色界面均不违和，角色本体零改动）
 - **feat(ui) 空态立绘换新**：`mt-anime-empty-svg` 由软云星光换成「小吱-喜欢」方图（140px 注入 + 轻浮动画 + id 实例隔离）
 - **chore(release) `PKG_VERSION` 1.28.0 → 1.29.0**
-- **test**：`cargo test` **299 passed / 0 failed / 2 ignored**（WSL Debian 本机）；`rpc.js` / `sms_center.js` / `mt5700.js` `node --check` 通过
+
+### 同步 GitHub 上游（issue #22）：整份并入上游 v1.29.0-r7，CNB 侧独有改动原样落回
+
+> 两个仓库又分岔了一轮：上游在 v1.26.2 之后继续走「QQ 富文本 / 日志分栏 / 默认 ME / 租约卡死修复」，
+> 本仓库则攒了 FOTA 重写、高精度授时、防火墙规则细化、读短信加密增强等自有改动。
+> 本版**以上游为基线整份同步**，再把本仓库独有的那部分补回去，避免两边继续各写一套。
+
+- **feat(qq) QQ 推送富文本化**：推送能力拆成独立模块 `qqpush.rs`（鉴权 / 发消息 / 富媒体组装 / 键盘 / 菜单），`notify.rs` 只面向事件与文案；四类事件（信笺 / 巡检 / 切换 / 定时状态）各有卡片版式，新增 `qq_msg_format` / `qq_keyboard_*` / `qq_menu_*` 与 `qq_menu` RPC
+- **feat(notify) 通道独立开关**：`wechat_enabled` / `qq_enabled` 均默认关闭，开关与凭据齐全才发送，两通道互不影响
+- **feat(logs) 运行日志按类别细分**：短信 / 拨号 / 网络 / AT / 系统 / 其他六类，类别胶囊实时显示条数并可点选筛选；「仅错误+警告」一键过滤、跨天分日期条、导出带类别
+- **feat(ui) 全局英雄区看板娘防遮挡 + 弹窗重做**，`compat.js` 把插件版本并入 `L.env.resource_version`（模块 URL 一律带 `?v=`）
+- **fix(at) 短信中心打开后其它页面卡死**（上游 issue #23）：非短信命令按优先级分级预算、缓存刷新避让短信模式、短信事务协作让出、租约 90s→30s，详见上游 v1.29.0 说明
+- **fix(log) 短信占用期间日志限流**：跳过不叫失败，每 30s 最多一条；恢复日志改到 `do_fetch` 成功末尾（原来放在循环内，路径刷新后永不触发）
+- **fix(rpc) ucode 方法表补登 `qq_menu`**：Rust 与 ACL 已注册，代理侧漏登记导致界面调用报 Method not found
+- **保留（本仓库独有，上游没有）**：
+  - `init.d` 防火墙规则细化——`at_rpc_wan_allow` 带 `dest_ip='@router'`（否则 fw4 会展开成转发放行）、`at_module_restrict` 源不限 + 追加 `at_module_restrict_self`（127.0.0.1 本机豁免），清理名单同步补 `at_module_restrict_self`；
+  - `iface_device_name()` 跟随 `@<V4接口>` 引用取真实网卡，日志不再打出 `@MT5700M` 这种伪设备名；
+  - CNB 云编译流水线 `.cnb.yml`（3 架构 × apk/ipk）与「本仓库 / GitHub 镜像仓库各自触发、各自发布」的文档口径；
+  - README 的目录导航与「问题反馈」一节；
+  - `tests/fota-state-test.js`（FOTA 前端纯函数单测，上游已改用页面内联实现）。
+- **chore(release)** `PKG_RELEASE` 1 → 7，与上游同号；`Cargo.toml` 版本号跟 `PKG_VERSION` 对齐为 1.29.0；`compat.js` 的 `MT5700_UI_VERSION` 同步到 1.29.0
+- **test**：`cargo test --release` **300 passed / 0 failed / 2 ignored**；`run-e2e.sh` **41/41**；`sms-center-render` **61**、`simulate-push` **63**（1 项观察）、`parse-extra` **42**、`hcsq` **29**、`nrssbid` **24**，前端 8 个单测全绿
 
 ### r8 冗余代码清理 + 注释按实现订正
 
@@ -188,7 +261,7 @@
 - **fix(sms) 一次性判据同时认两种分隔符**：`is_single_shot_cmgs()` 原来只看真实 CR，业务路径换成字面 `\r` 后会掉出判据；现在两种都认。ucode 的 `SMS_RPC_TIMEOUT_SEC` 判据同步跟上（它原来只匹配 `/^AT\+CMGS=[0-9]+\r/`，新形态会被 nc 的 12 秒硬超时掐断，一条本来成功的短信被报成失败）
 - **test(sms) 模组模型按实机语义改正**：`mock-modem.js` 现在区分三种形态——字面 `\r` 的一次性写法直接给回执；只报长度才给 `> `；进入 PDU 输入态后若这段数据不带 Ctrl+Z 就**什么都不回**（这正是真机上「长度 + 真 CR + PDU + CR 一次写完」的结局）。旧模型给提示符后的裸 PDU 也回 `+CMGS`，等于替真机兜底，测不出「显示成功但发不出去」
 - **test(sms) e2e 第 5 项重写为 5 条断言**：一次性形态拿到回执、只报长度只有提示符（不得算成功）、PDU + Ctrl+Z 拿到回执、`AT+CMGS=0` 被拒、长度与 PDU 字节数不符被拒；文件末尾新增第 12 项钉住「真 CR 一次写完 → 静默」（它会让通道按 40 秒预算等满，所以刻意排在最后一条）
-- **test(sms) 顺手修掉一个不诚实的夹具**：e2e 原来手写的 PDU `0001000B815221214365F70000AA0B4F60C6A21` 只有 19.5 字节，注释却写「共 21 字节」；两段式路径不校验长度，所以这个错数一直没暴露。改用手册 9.14.5 的原例（19 字节、`<length>` = 18），长度由 PDU 自己算出来，mock 侧新增按 `<length>` + SMSC 字段长度的校验，对不上就回 ERROR
+- **test(sms) 顺手修掉一个不诚实的夹具**：e2e 原来手写的 PDU `0001000B815221214365F70000AA0B4F60C6A21` 只有 19.5 字节，注释却写「共 21 字节」；两段式路径不校验长度，所以这个错数一直没暴露。改用手册 9.14.5 的原例（18 字节、`<length>` = 17），长度由 PDU 自己算出来，mock 侧新增按 `<length>` + SMSC 字段长度的校验，对不上就回 ERROR
 - **fix(time) 顺带发现：没有时区配置时「默认北京时间」从来没生效**：`localtime::resolve()` 的优先级是 libc > 内置解析器 > 北京兜底，而 glibc/musl 的 `localtime_r` 在完全没配时区时**不报错**、静默按 UTC 返回 `gmtoff = 0`——于是启动日志写着「未配置时区，使用默认北京时间 UTC+08:00」，推给用户的「时间：」却仍是 UTC 时刻，短信/来电推送的时间戳早 8 小时。现在只有真的读到 `TZ` / `/etc/TZ` / uci 配置时才采信 libc（`libc_offset_if_configured`），没配置就直接走兜底；配了则一切照旧，libc 的夏令时结果仍然优先
 - **test**：`cargo test` **263 项：261 passed / 0 failed / 2 ignored**，并在 TZ=UTC0、CST-8、EST5 三种宿主时区下各复跑一遍全绿；`tests/mock-modem/e2e-test.js` **41/41**（新增一次性形态与换形重试两条判据）；`simulate-push.js` **63 通过 / 0 失败**（修时区前是 61/2，失败的两条正是「时间戳 == 北京时间」与「不是 UTC 口径」）；前端 12 个套件 **331 条断言全绿**；`cargo build --release` 零警告；`node --check` 现存 35 个 JS 通过、`git diff --check` 干净
 
@@ -220,7 +293,7 @@
 - **fix(sms) 短信中心号码校验收敛到一个入口，并与 PDU 编码能力对齐**：`set_smsc` 与 `power_set` 原来各判各的，同一句号码在一个界面能存、另一个界面被拒。现共用 `check_smsc_input`（可选单个前导 `+`，其后 3～20 位纯数字），`sms_settings.js` 镜像同一条规则。**有意比 9.5.3 严**：手册给 `<sca>` 的字符集含 `*`、`#`，但发送时中心号要编进 PDU 的短信中心字段，那一栏只有 BCD 数字的位置——放开的话号码能被模组收下、回读也一致，下一次发信才在编码阶段失败，「中心号设好了、短信反而发不出去」比当场拒绝难解释得多。9.5.2／9.5.4（掉电保存=Y、仅当 PDU 的 SMSC 长度为 0 时 CSCA 才生效）写进注释与发送第 2 步的说明
 - **fix(sms) 序号 0 不再下发删除**：8.6.3 没写 `<index>` 的取值范围，而 0 在本插件里是「PDU 解析失败」的兜底值。列表侧 `indicesOf()` 用的 `>= 0` 会让「全选」把 0 一起带进 `AT+CMGD=0`，稳定换一句 `+CMS ERROR`；改为 `> 0`，后端 `delete()` 同步注明跳 0 的依据
 - **docs(sms) CNMI 与功能开关的注释按手册重写**：`AT+CNMI=2,1,0,2,0` 现在逐字段解释（mode／mt／bm／ds／bfr），并记下 8.3.3 的约束（mode 取 0 或 2 时 `mt` 不能取 2/3、`ds` 不能取 1）、8.3.2 与 8.3.4 的行为（模组重启后 CNMI 回到 0,0,0,0,0 且不掉电保存，所以每次连接都要重设）；`run_power_enable()` 注明 `AT+CFUN=0/1` 是本插件对「开关机」的替代做法，6.1.3 定义的真正复位是 `AT+CFUN=1,1`（仅 online 模式可用、范围受 NV2391 控制），替代做法是否等价**需真机确认**；`purge_all()` 补 8.6.2／8.6.3 语义（`delflag≠0` 时 `<index>` 被忽略、删除作用在 `<mem1>` 上、4=清空首选存储区含未读）
-- **docs(pdu) 小节号与字段含义校正**：`SubmitPart.tpdu_length` 注明依据 9.14.3／9.14.5（例句 `AT+CMGS=18` 配 19 字节、以 `00` 开头的 PDU，说明该长度不含 SMSC 字段），`CmglEntry.stat` 写全 9.8.3 的四个取值，`parse_cmgl_response` 的错文档（「两条命令的应答形状一样」）替换；测试辅助函数 `decode_submit_body` 的乱码标题（「直 HTTP 走的 TPDU 布局：skips SMSC →…」）与 BCD 字节数注释重写
+- **docs(pdu) 小节号与字段含义校正**：`SubmitPart.tpdu_length` 注明依据 9.14.3／9.14.5（例句以 `00` 开头的 18 字节 PDU 配 `<length>` = 17，说明该长度不含 SMSC 字段；文中「18」是手册书上那个数，与 PDU 实际字节数差一，别拿它当核对基准），`CmglEntry.stat` 写全 9.8.3 的四个取值，`parse_cmgl_response` 的错文档（「两条命令的应答形状一样」）替换；测试辅助函数 `decode_submit_body` 的乱码标题（「直 HTTP 走的 TPDU 布局：skips SMSC →…」）与 BCD 字节数注释重写
 - **refactor(sms) 孤立代码清理**：前端 `parse.js` 删除零引用的 `api.parseCMGL`（65 行，PDU 解析后端化后页面不再本地解 CMGL）与 `api.formatPDUTime`（22 行，时间串早在 v1.26.0 改由后端 `pdu.rs` 产出 `YY/MM/DD,HH:MM:SS`），两处残留的过期注释一并改指真实生产者；`pdu.rs::SubmitPart` 删从未使用的 `encoding`／`reference` 字段（连带两条 `#[allow(dead_code)]`），`urc.rs::PartialSms` 删只写不读的 `sender`；`sms_center.js` 联系人对象里再没人读的 `unreadCount` 删除。分片 TPDU 的 septet 计算收敛成一处（`CONCAT_UDH_SEPTETS + body`）——原来两种写法数值相同但要同步改两处
 - **ui(sms) 编码提示与后端实际选择对齐**：`renderHint()` 原来按「全是 ASCII 就走 GSM 7bit」估，而 `pick_encoding` 查的是 GSM 7bit 基本表＋扩展表，可打印 ASCII 里唯一不在表内的是反引号 `` ` ``（0x60），它得按 UCS2 发。补上这一条例外，文案改成「需按 UCS2 编码／可按 GSM 7bit 编码／预计拆成 N 条」，160／70 与 153／67 的分片上限与后端同口径
 - **docs(rpc) ucode 超时算式校正**：`mt5700.uc` 里解释 `list` 动作为何给 40 秒的注释还写着 `SMS_LIST_TIMEOUT(20)` 和「远不止 12s」，后端实际是 25 秒（`atclient.rs:37`）；口径写对，免得下次有人照注释去「对齐」

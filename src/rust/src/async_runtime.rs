@@ -241,7 +241,7 @@ impl TaskManager {
         for h in tasks.values() {
             out.push(h.info.read().await.clone());
         }
-        out.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        out.sort_by_key(|a| a.created_at);
         out
     }
 
@@ -270,8 +270,13 @@ impl TaskManager {
         let threshold = older_than.as_millis() as i64;
         let to_remove: Vec<String> = {
             let tasks = self.tasks.read().await;
+            // 先收集句柄再从读锁里出来：下面要逐条拿 info 的写/读锁，
+            // 在 tasks 读锁内 await 另一个锁会延长持有时间（也不利于后续维护）。
+            let handles: Vec<(String, Arc<TaskHandle>)> =
+                tasks.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            drop(tasks);
             let mut v = Vec::new();
-            for (id, h) in tasks.iter() {
+            for (id, h) in handles {
                 let info = h.info.read().await;
                 let Some(finished) = info.finished_at else { continue };
                 if !matches!(
@@ -284,7 +289,7 @@ impl TaskManager {
                     continue;
                 }
                 if now.saturating_sub(finished) > threshold {
-                    v.push(id.clone());
+                    v.push(id);
                 }
             }
             v
