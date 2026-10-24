@@ -40,7 +40,7 @@ const state = {
 	cnmi: '2,1,0,2,0',
 	clip: 1,
 	cmee: 2,
-	csca: '+8613800755500',
+	csca: '+8613800000000',
 	imei: '862234051234567',
 	rsrp: -95,      // 动态变化用于信号 URC
 	ims: '1,1,1',
@@ -153,6 +153,8 @@ function replyFor(cmd) {
 	if (c === 'AT+CGREG?') return '+CGREG: 0,5\r\nOK';
 	if (c === 'AT+C5GREG?') return '+C5GREG: 0,5\r\nOK';
 	if (c === 'AT+CREG?') return '+CREG: 0,1\r\nOK';
+	/* 开短信功能后会轮询到注册恢复；缺了这条，真机会一直等到 15s 预算耗尽 */
+	if (c === 'AT+CEREG?') return '+CEREG: 0,' + state.cereg + ',,"00001010","01A1B2C3",7\r\nOK';
 	if (c === 'AT+COPS?') return '+COPS: 0,0,"CHN-UNICOM",7\r\nOK';
 	if (c === 'AT+COPS=3,2') return 'OK';
 	/*
