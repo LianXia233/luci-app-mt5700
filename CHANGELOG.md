@@ -5,6 +5,50 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.36] - 2026-10-24
+
+### Fixed — 缺少 `timeout` 的固件上整条 AT 链路全哑（界面表现为 SIM「未知」）
+
+真机 Mwrt `@Manper-5.1.1150-24`（busybox 1.36.1）**既没有 `timeout` applet，
+也没有 `coreutils-timeout` 包**。而插件有 8 处 shell 调用写成 `timeout <秒> <命令>`
+（ucode 6 处 + `diag-probe.sh` 2 处）—— 缺这个程序时命令根本不执行，popen 读到空：
+
+- `mt5700.at` 对**任何**指令都回「Rust 后端无应答（已限时 45 秒）」，且**瞬间**返回
+  （实测 20/20，每次 0ms）→ 界面表现为 SIM「未知」、状态页全空；
+- 断网诊断、出口 IP、DoH、VoWiFi epdg 解析、OTA 下载同样全哑；
+- `diag-probe.sh` 内两条 DNS 探测恒失败（`dns_resolve_ok` 恒 0），
+  看起来像「DNS 坏了」，其实只是缺程序。
+
+Rust 后端与串口本身完全正常（绕过限时器直连 `nc 127.0.0.1 8765` 可拿到
+`+CPIN: READY`），极易误判成模组故障。
+
+#### 修法
+
+- 新增随包限时器 `/usr/share/mt5700/to`：`timeout` 的等价实现（后台执行 +
+  到期 `kill -9` + 退出码透传），并处理两个真机坑：
+  - **ash 会把异步列表的 stdin 强制接 /dev/null** ⇒ 先 `exec 3<&0`，后台命令
+    再 `<&3` 读回（否则 `nc` 收不到请求体，RPC 照旧全哑；`<&0` 与 `set -m` 都不行）；
+  - 用标记文件防 pid 复用误杀（不直接 kill 等待者）。
+- ucode 新增 `timeoutBin()`：`command -v timeout` 有就用系统 timeout，
+  没有就用随包脚本；6 处调用全部经它解析，不再出现裸 `'timeout ` 前缀。
+- `diag-probe.sh` 内新增 `to()` 兜底，两处 DNS 探测改走它。
+- Makefile 为替代脚本装 `0755`。
+
+#### 守卫
+
+- 新增 `tests/portable-timeout-contract.test.js`（29 项，含**真跑**行为断言：
+  正常结束透传 stdout / 退出码、超时确实中止、**stdin 透传**、无标记残留）。
+- `tests/line-endings-contract.test.js` 补扫 `root/` 下**无扩展名**脚本
+  （原来整类被漏掉 —— 新脚本正是这样带着 CRLF 装进设备，ash 报
+  `unexpected end of file (expecting "then")`，而本地测试全绿），并加自检。
+- 同步 3 处既有守卫的限时器写法（rpc-command-budget / ui-contract / diag-contract）。
+
+#### 真机验证（`192.168.88.1`）
+
+`AT^SIMSQ?` → `^SIMSQ: 1,12`、`AT+CPIN?` → `+CPIN: READY`、`AT+CSQ` → `+CSQ: 28,99`；
+并经 LuCI 的 HTTP `/ubus`（与浏览器同一条链路）确认前端收到
+`{"data":"^SIMSQ: 1,12\r\nOK","success":true}`。
+
 ## [2.4.35] - 2026-10-22
 
 ### Rust 后端全面优化（clippy 全清 + 三处语义修正）

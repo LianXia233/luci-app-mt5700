@@ -34,7 +34,15 @@ const SCAN = [
 	{ dir: 'htdocs', exts: ['.js', '.css', '.htm', '.html'] },
 	{ dir: 'tests', exts: ['.js'] },
 	{ dir: 'tools', exts: ['.py'] },
-	{ dir: 'root', exts: ['.uc', '.sh'] }
+	{ dir: 'root', exts: ['.uc', '.sh'] },
+	/*
+	 * ★ 无扩展名的随包脚本（如 root/usr/share/mt5700/to）也要查。
+	 *   原来只按扩展名筛，这一整类直接被漏掉 —— 2026-10-24 真机事故：
+	 *   那个脚本以 CRLF 装进设备，busybox ash 把 `then\r` 当成普通单词，
+	 *   报 "unexpected end of file (expecting \"then\")"，整个限时器不可执行，
+	 *   所有 AT 命令又回到「Rust 后端无应答」。本地 27 项测试却全绿。
+	 */
+	{ dir: 'root', exts: [''] }
 ];
 const SKIP_DIRS = ['node_modules', '.git', 'dist', 'build'];
 
@@ -65,6 +73,10 @@ const files = [];
 SCAN.forEach(function (s) { walk(path.join(ROOT, s.dir), s.exts, files); });
 ok('扫到了待检查的文本文件（否则本测试等于没跑）', files.length > 20,
 	'只扫到 ' + files.length + ' 个');
+/* ★ 自检：无扩展名脚本必须真的在扫描集合里，否则上面新加的那条是空转 */
+ok('★ 无扩展名随包脚本也被纳入扫描（如 usr/share/mt5700/to）',
+	files.some(function (p) { return /usr[\\/]share[\\/]mt5700[\\/]to$/.test(p); }),
+	'扫描集合里没有 usr/share/mt5700/to —— 无扩展名脚本又被漏掉了');
 
 /* 沾了 CRLF 的文件：给出「CRLF 行数 / 总行数」，便于判断整文件转换还是局部混入 */
 const crlfFiles = files.map(function (p) {

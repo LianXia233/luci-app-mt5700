@@ -183,7 +183,14 @@ for (const p of feFiles) {
  */
 const UCODE = path.join(ROOT, 'root', 'usr', 'share', 'rpcd', 'ucode', 'mt5700.uc');
 const ucodeSrc = fs.readFileSync(UCODE, 'utf8');
-ok('ucode 的 nc 调用被 timeout 包裹', /timeout\s+\d+\s+nc\s+127\.0\.0\.1/.test(ucodeSrc));
+/*
+ * ★ 2026-10-24：限时器不再写死 `timeout` —— 定制固件可能没有这个 applet
+ *   （Mwrt @Manper r33382 实测），硬编码会让 nc 根本不执行、所有 AT 瞬间失败。
+ *   现在统一经 timeoutBin() 解析（有 timeout 用它，没有用随包 /usr/share/mt5700/to）。
+ *   这里断言的核心不变：nc 必须被**某个**限时器包住，不许裸跑。
+ */
+ok('ucode 的 nc 调用被限时器包裹（timeoutBin 统一入口）',
+	/timeoutBin\(\) \+ ' \d+ nc 127\.0\.0\.1/.test(ucodeSrc));
 ok('★ ucode 的 nc 不带 -w（本固件 busybox nc 不支持，会导致所有 RPC 失败）',
 	!/nc\s+-w|nc[^'\n]*\s-w\s+\d/.test(ucodeSrc));
 

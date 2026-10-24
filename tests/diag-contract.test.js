@@ -68,8 +68,10 @@ function extractFn(s, name) {
 ok('采集脚本存在且是 sh', /^#!\/bin\/sh/.test(probeSrc));
 
 /* 脚本里唯一合法使用位置参数的地方就是函数自己的入参
-   （emit 的 $2、have_cmd 的 $1、两个 config_foreach 回调的 $1）。
-   把这四个函数体抠掉后再看主体有没有碰位置参数 —— 这是唯一可能的注入面。 */
+   （emit 的 $2、have_cmd 的 $1、两个 config_foreach 回调的 $1、to 的 "$@"）。
+   把这些函数体抠掉后再看主体有没有碰位置参数 —— 这是唯一可能的注入面。
+   ★ 2026-10-24 加入 to()：它只是把入参原样转交给限时器（timeout 或随包替代），
+     不读取脚本自己的 $1/$@，与 emit/have_cmd 同类，不属于注入面。 */
 function stripFn(src, name) {
 	const marker = name + '() {';
 	const a = src.indexOf(marker);
@@ -81,7 +83,7 @@ function stripFn(src, name) {
 	}
 	return src.slice(0, a) + src.slice(end);
 }
-const probeBody = ['emit', 'have_cmd', 'scan_zone', 'scan_sqm'].reduce(stripFn, probeSrc)
+const probeBody = ['emit', 'have_cmd', 'scan_zone', 'scan_sqm', 'to'].reduce(stripFn, probeSrc)
 	/* ★ 还要剥掉单引号区段：awk 程序里的 $1/$2/$3 是**awk 的字段引用**，
 	   不是 shell 位置参数（不剥会把 5 处 awk 全误判成"脚本接受了参数"）。 */
 	.replace(/'[^']*'/g, "''");
@@ -365,7 +367,9 @@ ok('源码里有足够多的检查项（粗筛，防整块被误删）', l1At >=
 
 ok('ucode 注册了 mt5700.sysdiag', /\bsysdiag: \{/.test(ucSrc));
 ok('★ sysdiag 不接受任何参数（args: {}，无用户输入面）', /sysdiag: \{\s*\n\s*args: \{\}/.test(ucSrc));
-ok('ucode 用 timeout 包住采集脚本', /popen\('timeout ' \+ DIAG_TIMEOUT/.test(ucSrc));
+/* ★ 2026-10-24：限时器改经 timeoutBin() 解析（定制固件可能没有 timeout applet），
+   约束不变：采集脚本必须被限时器包住。 */
+ok('ucode 用限时器包住采集脚本', /popen\(timeoutBin\(\) \+ ' ' \+ DIAG_TIMEOUT/.test(ucSrc));
 ok('采集超时 25s（脚本内部最坏约 15s，留足余量）', /const DIAG_TIMEOUT = 25;/.test(ucSrc));
 ok('读行数有上限（异常输出不会把响应撑爆）', /const DIAG_MAX_LINES = 200;/.test(ucSrc));
 ok('脚本缺失时返回明确错误而不是空结果',

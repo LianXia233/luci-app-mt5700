@@ -341,6 +341,48 @@ function rpcTmpUnlink(path) {
 	try { fs.unlink(path); } catch (e) { }
 }
 
+/*
+ * 限时器路径 —— 有 timeout 就用它，没有就退回随包的 /usr/share/mt5700/to。
+ *
+ * ★ 为什么必须探测（2026-10-24 真机：Mwrt @Manper r33382 / busybox 1.36.1）：
+ *   该固件的 busybox **没有编译 timeout applet**，/usr/bin/timeout 与
+ *   /bin/timeout 都不存在。而本文件 6 处 shell 调用都写成「timeout <秒> <命令>」，
+ *   缺它时命令根本不会执行，popen 只读到空 —— 表现为**所有 AT 命令瞬间失败**
+ *   并报「Rust 后端无应答（已限时 45 秒）」（实测 20/20，每次 0ms 返回），
+ *   而真正的病因一个字都不提。界面侧看到的就是 SIM「未知」、状态页全空、
+ *   诊断 / 出口 IP / DoH / VoWiFi epdg / OTA 全哑。
+ *   OpenWrt 上游默认带该 applet，所以这个坑只在定制固件上出现，极易误判成
+ *   「串口坏了」或「模组挂了」—— 实际 Rust 侧一切正常（nc 直连可拿到 +CPIN: READY）。
+ *
+ * 探测结果缓存在模块级变量：它描述「这台设备有没有某个程序」，是设备常量，
+ * 不是跨会话传值，不存在红线 24 的串号问题。
+ * ★ 定义必须放在 rpcCall 之前 —— ucode 没有函数提升（红线 14b）。
+ */
+let TIMEOUT_BIN = null;
+
+function timeoutBin() {
+	if (TIMEOUT_BIN != null) {
+		return TIMEOUT_BIN;
+	}
+	/* 先默认随包脚本：即使探测本身抛异常，RPC 也不会因此不可用 */
+	TIMEOUT_BIN = '/usr/share/mt5700/to';
+	try {
+		let p = fs.popen('command -v timeout 2>/dev/null', 'r');
+		if (p) {
+			let line = p.read('line');
+			p.close();
+			if (line != null) {
+				line = trim('' + line);
+				if (line != '') {
+					TIMEOUT_BIN = line;
+				}
+			}
+		}
+	} catch (e) {
+	}
+	return TIMEOUT_BIN;
+}
+
 function rpcCall(method, params) {
 	const rpcCfg = readRpcConfig();
 	const port = rpcCfg.port;
@@ -383,6 +425,9 @@ function rpcCall(method, params) {
 	 *
 	 * 注意：本固件的 busybox nc 是精简版，**不认 -w 选项**（传 -w 只会打印
 	 * usage 并立刻退出，会让所有 RPC 全部失败），限时只能靠外部的 timeout。
+	 * ★ 而 timeout 本身也不保证存在（有的定制固件没编译这个 applet），
+	 *   所以这里统一走 timeoutBin()：有就用，没有就换随包等价脚本
+	 *   （见 timeoutBin 的注释与 /usr/share/mt5700/to 的文件头）。
 	 *
 	 * 上限取 45 秒：后端最坏耗时是有上界的 ——
 	 * 普通命令 QUEUE_WAIT(8s) + WRITE(3s) + COMMAND_TIMEOUT(2s) = 13s，
@@ -396,7 +441,7 @@ function rpcCall(method, params) {
 	 *   一次正常的慢应答会被本层掐成「Rust 后端无应答」，病因完全对不上。
 	 */
 	try {
-		p = fs.popen('timeout 45 nc 127.0.0.1 ' + port + ' < ' + tmp, 'r');
+		p = fs.popen(timeoutBin() + ' 45 nc 127.0.0.1 ' + port + ' < ' + tmp, 'r');
 	} catch (e) {
 		rpcTmpUnlink(tmp);
 		return { success: false, error: '无法连接 Rust 后端' };
@@ -842,7 +887,7 @@ function diagFacts() {
 
 	let p;
 	try {
-		p = fs.popen('timeout ' + DIAG_TIMEOUT + ' /bin/sh ' + DIAG_PROBE, 'r');
+		p = fs.popen(timeoutBin() + ' ' + DIAG_TIMEOUT + ' /bin/sh ' + DIAG_PROBE, 'r');
 	} catch (e) {
 		return null;
 	}
@@ -929,7 +974,7 @@ function safeBindIp(s) {
 }
 
 function exitIpOnce(url, bind) {
-	let cmd = 'timeout ' + EXITIP_TIMEOUT + ' curl -sS --max-time 8';
+	let cmd = timeoutBin() + ' ' + EXITIP_TIMEOUT + ' curl -sS --max-time 8';
 	if (bind != null && bind != '') {
 		cmd = cmd + ' --interface ' + bind;
 	}
@@ -1488,7 +1533,7 @@ function dohLookup(fqdn, ecs) {
 	}
 	let p;
 	try {
-		p = fs.popen('timeout ' + DOH_TIMEOUT + ' curl -s -m ' + DOH_TIMEOUT
+		p = fs.popen(timeoutBin() + ' ' + DOH_TIMEOUT + ' curl -s -m ' + DOH_TIMEOUT
 			+ ' -H "accept: application/dns-json" "' + url + '" 2>&1', 'r');
 	} catch (e) {
 		return null;
@@ -1558,7 +1603,7 @@ function nsPickAddrs(lines, dns) {
 function nsLookup(fqdn, dns) {
 	let p;
 	try {
-		p = fs.popen('timeout ' + EPDG_TIMEOUT + ' nslookup ' + fqdn + ' ' + dns + ' 2>&1', 'r');
+		p = fs.popen(timeoutBin() + ' ' + EPDG_TIMEOUT + ' nslookup ' + fqdn + ' ' + dns + ' 2>&1', 'r');
 	} catch (e) {
 		return null;
 	}
@@ -2598,7 +2643,7 @@ function es9pPost(host, path, body) {
 	f.write(body);
 	f.close();
 
-	const cmd = 'timeout 45 curl -sS --max-time 35 -X POST' +
+	const cmd = timeoutBin() + ' 45 curl -sS --max-time 35 -X POST' +
 		" -H 'Content-Type: application/json'" +
 		" -H 'X-Admin-Protocol: gsma/rsp/v2.2.2'" +
 		" -H 'User-Agent: gsma-rsp-lpad'" +

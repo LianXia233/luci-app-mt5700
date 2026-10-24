@@ -89,12 +89,20 @@ if (fnMatch) {
 	}
 }
 
-/* ucode 侧的 nc 限时必须 >= APDU 最坏耗时（排队 8s + 应答 12s + 余量） */
+/*
+ * ucode 侧的 nc 限时必须 >= APDU 最坏耗时（排队 8s + 应答 12s + 余量）。
+ * ★ 2026-10-24：限时器不再写死 `timeout`（定制固件可能根本没这个 applet，
+ *   见 tests/portable-timeout-contract.test.js），统一经由 timeoutBin() 解析；
+ *   这里改成断言「45s 仍在原位，且入口是统一的」。
+ */
 const uc = fs.readFileSync(UCODE, 'utf8');
-ok('ucode 的 nc 限时已放宽到 45s（>= APDU 最坏 23s）', /timeout 45 nc/.test(uc),
+const NC_RE = /fs\.popen\(timeoutBin\(\) \+ ' (\d+) nc 127\.0\.0\.1 '/;
+const ncMatch = uc.match(NC_RE);
+ok('ucode 的 nc 限时已放宽到 45s（>= APDU 最坏 23s）', !!ncMatch && ncMatch[1] === '45',
 	'ucode 仍按旧预算限时，会把一次正常的慢应答掐成「Rust 后端无应答」');
-ok('ucode 反向：退回 20s 限时后必须判红',
-	!/timeout 45 nc/.test(uc.split('timeout 45 nc').join('timeout 20 nc')),
+const ncRegressed = uc.split(' 45 nc ').join(' 20 nc ');
+const ncMatch2 = ncRegressed.match(NC_RE);
+ok('ucode 反向：退回 20s 限时后必须判红', !ncMatch2 || ncMatch2[1] !== '45',
 	'回退后仍判为通过，限时检查无效');
 
 /* ---------------- P11：竞速后清定时器 ---------------- */

@@ -39,6 +39,19 @@ have_cmd() {
 	command -v "$1" >/dev/null 2>&1
 }
 
+# 限时执行：有 timeout 就用它，没有就退回随包的等价脚本。
+# ★ 2026-10-24 真机：Mwrt @Manper r33382 的 busybox 没编译 timeout applet，
+#   也没有 coreutils-timeout —— 原来直接写 timeout 会让这两条 DNS 探测
+#   永远失败（dns_resolve_ok 恒 0），看上去像「DNS 坏了」，其实是缺程序。
+#   同一病因还会让 ucode 的 6 处 shell 调用全哑（见 /usr/share/mt5700/to 文件头）。
+to() {
+	if have_cmd timeout; then
+		timeout "$@"
+	else
+		/usr/share/mt5700/to "$@"
+	fi
+}
+
 # 输出一条事实。值里禁止出现换行与 '='（前者会破坏行格式，后者会破坏解析），
 # 长度截断避免超长值把响应撑大。
 emit() {
@@ -243,9 +256,9 @@ else
 fi
 
 if have_cmd nslookup; then
-	timeout "$NS_TIMEOUT" nslookup www.qq.com >/dev/null 2>&1 && emit dns_resolve_ok 1 || emit dns_resolve_ok 0
+	to "$NS_TIMEOUT" nslookup www.qq.com >/dev/null 2>&1 && emit dns_resolve_ok 1 || emit dns_resolve_ok 0
 elif have_cmd drill; then
-	timeout "$NS_TIMEOUT" drill -Q www.qq.com >/dev/null 2>&1 && emit dns_resolve_ok 1 || emit dns_resolve_ok 0
+	to "$NS_TIMEOUT" drill -Q www.qq.com >/dev/null 2>&1 && emit dns_resolve_ok 1 || emit dns_resolve_ok 0
 else
 	emit dns_resolve_ok -1
 fi

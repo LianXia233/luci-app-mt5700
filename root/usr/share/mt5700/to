@@ -1,0 +1,67 @@
+#!/bin/sh
+# to —— 「timeout」的便携替代（部分定制固件的 busybox 没编译 timeout applet）
+#
+# 用法：to <秒> <命令> [参数...]
+#
+# 背景（2026-10-24 真机，Mwrt @Manper r33382 / busybox 1.36.1）：
+#   mt5700.uc 里 6 处 shell 调用（nc 桥、网络诊断、出口 IP、DoH、VoWiFi epdg、
+#   OTA 下载）都靠 `timeout <秒> <命令>` 限时。该固件既没有 busybox 的 timeout
+#   applet，也没有 coreutils-timeout 包 —— 命令根本不会执行，popen 只读到空，
+#   于是**所有** AT 命令瞬间报「Rust 后端无应答（已限时 45 秒）」，界面表现
+#   就是 SIM「未知」、状态页全空。Rust 后端其实完全正常（nc 直连可读 +CPIN）。
+#   本脚本就是给这类固件兜底的等价实现，由 ucode 的 timeoutBin() 探测后选用。
+#
+# 语义尽量贴近 GNU timeout：
+#   · 命令正常结束 → 返回命令自己的退出码；
+#   · 到期未结束 → kill -9，返回 128+9=137（GNU 用 124，但本插件只判非零）。
+#
+# ★ 为什么用标记文件而不是直接 kill 掉等待者：
+#   正常结束时若只 kill 掉「等待者」，它里面的 sleep 会变成孤儿、睡满全程后
+#   再执行 kill —— 那时 pid 可能已被无关进程复用，等于误杀别人。标记文件让
+#   等待者醒来先确认「这一轮还该不该下手」，pid 复用就不可能命中。
+#
+# ★★ 为什么必须 exec 3<&0（2026-10-24 真机踩过）：
+#   POSIX 规定：**关闭了作业控制的非交互 shell**，其异步列表（`cmd &`）的
+#   标准输入会被强制接到 /dev/null。于是「把命令丢后台 + 等它」这套写法会
+#   悄悄掐断 stdin —— 而本插件最要紧的用法恰恰是 `to 45 nc ... < 请求.json`：
+#   nc 读不到请求体，什么都不回，上层收到空，报「Rust 后端无应答」。
+#   实测对照（busybox ash 1.36.1）：
+#     cat & wait            → 无输出（stdin 已变 /dev/null）
+#     cat <&0 & wait        → 无输出（<&0 指的是已被改掉的 0）
+#     exec 3<&0; cat <&3 &  → 正常输出  ← 采用
+#   set -m 也不行：无 tty 时报 can't access tty; job control turned off。
+#
+# ★ 本脚本的 stdout 必须只有被调命令的输出：等待者已把自身输出重定向到
+#   /dev/null，否则它会攥住 popen 的管道，让 ucode 的 read('line') 白等满全程。
+
+secs="$1"
+if [ -z "$secs" ]; then
+	echo "to: 缺少秒数" >&2
+	exit 125
+fi
+shift
+if [ $# -eq 0 ]; then
+	echo "to: 缺少要执行的命令" >&2
+	exit 125
+fi
+
+mark="/tmp/.mt5700-to.$$"
+: > "$mark" 2>/dev/null
+
+# 先把调用方的 stdin 存到 fd 3，再让后台命令从 fd 3 读回（见上面 ★★ 那段）
+exec 3<&0
+
+"$@" <&3 &
+pid=$!
+
+( sleep "$secs"; [ -e "$mark" ] && kill -9 "$pid" 2>/dev/null; rm -f "$mark" ) >/dev/null 2>&1 &
+waiter=$!
+
+wait "$pid" 2>/dev/null
+st=$?
+
+# 正常结束时先撤标记再收等待者：醒来看到标记没了就什么都不做（见上面的说明）
+rm -f "$mark" 2>/dev/null
+kill -9 "$waiter" 2>/dev/null
+
+exit "$st"
