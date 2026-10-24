@@ -10,6 +10,17 @@
 
 ## 未发布（main）
 
+### 独立审查订正：fw4 规则解析、构建隔离变量、温度汇总口径、\uXXXX 编码、存储满标志
+
+> 对本批审查提交的独立复核（含实机 fw4/ucode 验证）发现的问题，逐条修复。
+
+- **fix(firewall) `at_rpc_wan_allow` 的 `dest_ip='@router'` 被 fw4 整条跳过**：fw4 的 `dest_ip` 按字面 IP/CIDR 解析（`parse_network` → `parse_subnet` → `iptoarr`），`@router` 引用非法，实机 `fw4 check` 证实规则被丢弃（`option 'dest_ip' specifies invalid value '@router'`）。改为只写 `src='lan'`、不写 dest/dest_ip——fw4 对只带源区域的规则落 input 链，目标即路由器本机；实机验证规则正确产出 `chain input_lan { tcp dport <port> accept }`
+- **fix(firewall) 删除 `at_module_restrict_self` 死规则**：本机访问模组走 output 链，fw4 的 zone 规则管不到它；`src_ip=127.0.0.1` 的 ACCEPT 落在 forward 链且排在 REJECT 之后，永远匹配不到任何真实流量。名字保留在清理名单里，清掉中间版本可能写入的残留
+- **fix(build) `CARGO_TARGET_DIR` 的格式判别变量写错**：`$(if $(FROM_APK),apk,opkg)` 里的 `FROM_APK` 在 OpenWrt 构建体系（含 24.10 分支与 feeds）中不存在，恒取 opkg 分支，apk/ipk 的 Cargo target 隔离形同虚设。改用 buildroot 真实的 Kconfig 开关 `CONFIG_USE_APK`（`include/package-pack.mk` 即按它分流产物格式）
+- **fix(ui) 温度汇总把无效读数当真实结温**：汇总循环与 `tempLevel()` 口径不一致，`v <= 0`（传感器未初始化）被计入最大值/均温——全 0 时徽章写「最高 0 ℃ · 均温 0 ℃」而格子全是「—」。汇总改用同一判据排除，一路有效读数都没有时徽章显示「最高 — ℃ · 均温 — ℃ · 未知」
+- **fix(ucode) `jsonParse()` 的 `\uXXXX` 改用 `uchr()` 编码**：`chr()` 是字节级的，>255 截断成 0xFF（实机验证 `chr(hex("4e2d"))` 得单字节 0xFF）；`uchr()` 编 UTF-8。当前 serde_json 只对 <0x20 控制字符写 `\u00XX`，故今天的行为不变，但不再隐式依赖序列化方的这一行为。顺带补上 `\b` / `\f`（serde_json 对 0x08/0x0C 写短转义，旧实现还原成字母 b/f）；`tests/ucode-json-test.js` 补 `\u4e2d` 与 `\b`/`\f` 用例
+- **fix(sms) 删除短信后不复位存储满标志**：`mem_full` 此前只在 `capacity()` / `purge_all()` 复位，用户只用删除（不清空）清出空间后，下一次提交被拒（`+CMS ERROR: 322`）不会再推「存储已满」。删除路径收尾回读容量时与另两处同口径复位
+
 ### 全量代码审查与系统性修复：AT 通道并发、rpcd 参数契约、ucode 转义、温度六档表
 
 > 本轮对仓库做了一次全量审查（Rust 后端 21k 行 / 前端 24k 行 / init.d 与 ucode / 脚本与 CI），
@@ -55,7 +66,7 @@
 - **fix(sms) 容量回读的 `.ok()` 把失败洗成「容量 0/0」**：`read_storage_in_tx` 的四处收尾回读（发送 / 删除 / 清空 / 短信功能开关）既有 `AT+CPMS?` 没回就 `.ok()` 的地方，也有「回了 OK 但解析不出」的路径 —— 统一成「记 warn 并保留 `None`」，界面因此显示「—」而不是 0/0。`read_storage_in_tx` 的解析失败文案也带上模组原始应答（只回「未能解析存储用量」时现场无从判断是 SIM 没就绪、区名不认识还是容量回了 0）
 - **fix(sms) 清空后不复位存储满标志**：`purge_all` 不做「used < total 就清 `mem_full`」这一步，而 `capacity()` 与新增的收尾回读都做了。参考实现这个标志置位后永不复位，用户清空后界面仍一直提示「存储已满」；清空这条路径恰好最容易触发它
 - **fix(sms) 清空短信首个 `AT+CPMS?` 失败静默**：读不到就静默走 SM/ME 兜底，日志里「读不到容量」与「容量是空的」长得完全一样。现在失败记一条 warn 再兜底
-- **fix(build) 同一架构的 apk / ipk 会串用同一份 Rust target 目录**：`src/Makefile` 的 `CARGO_TARGET_DIR` 只按包名区分，而 SDK 里 build_dir 的 basename 相同（`luci-app-mt5700-<ver>`）、`OUT_DIR` 又常是同一份工作区 —— 后跑的那轮 `cargo build` 看到产物比源码新，直接跳过重编，把**另一套 C 工具链链接的二进制**复制进本格式的包，两边都不报错。改为按包管理器格式分目录（`target/$(if $(FROM_APK),apk,opkg)`）
+- **fix(build) 同一架构的 apk / ipk 会串用同一份 Rust target 目录**：`src/Makefile` 的 `CARGO_TARGET_DIR` 只按包名区分，而 SDK 里 build_dir 的 basename 相同（`luci-app-mt5700-<ver>`）、`OUT_DIR` 又常是同一份工作区 —— 后跑的那轮 `cargo build` 看到产物比源码新，直接跳过重编，把**另一套 C 工具链链接的二进制**复制进本格式的包，两边都不报错。改为按包管理器格式分目录（`target/$(if $(CONFIG_USE_APK),apk,opkg)`；apk SDK 里 CONFIG_USE_APK=y、opkg SDK 里为空，buildroot 的 include/package-pack.mk 即按它分流产物格式）
 - **docs** `docs/sms-usage.md` 的「存储：0/0」排查项补上「后端日志会带原始应答」，并明确「容量读不到**不代表**删除/清空失败」
 
 ---

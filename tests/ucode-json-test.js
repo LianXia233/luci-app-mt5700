@@ -52,6 +52,10 @@ function int(v) {
 }
 function chr(v) { return String.fromCharCode(v); }
 function hex(v) { const n = parseInt(v, 16); return isNaN(n) ? 0 : n; }
+/* 真实 ucode 的 uchr() 把码点编成 UTF-8 多字节串（实机验证：uchr(0x4e2d) 是
+ * 3 字节）。这里的 JS 模拟用 UTF-16 码元，字符数与字节数在非 ASCII 上不一致——
+ * 但本用例钉住的是「\uXXXX 解码到正确码点」这个行为，两者在该断言下等价。 */
+function uchr(v) { return String.fromCodePoint(v); }
 
 /* 回调前向声明在 ucode 里写作 `parseVal = function () {...}`，
  * Node 里要补上声明才能构成闭包（ucode 的隐式提升在 JS 里不成立）。 */
@@ -60,8 +64,8 @@ const normalized = body.replace('let parseVal;', '');
 const jsBody = normalized.slice(0, mi)
 	+ normalized.slice(mi).replace('parseVal = function () {', 'const parseVal = function () {');
 
-const jsonParse = new Function('length', 'substr', 'match', 'int', 'chr', 'hex',
-	jsBody + '\nreturn jsonParse;')(length, substr, match, int, chr, hex);
+const jsonParse = new Function('length', 'substr', 'match', 'int', 'chr', 'hex', 'uchr',
+	jsBody + '\nreturn jsonParse;')(length, substr, match, int, chr, hex, uchr);
 
 /* ---- 用例 ---- */
 let pass = 0, fail = 0;
@@ -93,6 +97,21 @@ check('长度按字符计（控制字符各占 1）', data.length === 'AT\r\n\u0
 const bad = jsonParse(JSON.stringify({ x: '\\uZZZZ' }));
 check('非法 \\u 序列原样保留', bad.x.indexOf('uZZZZ') >= 0 || bad.x.indexOf('\\u') >= 0,
 	JSON.stringify(bad.x));
+
+/* \uXXXX 解码到正确码点：控制字符一个字节，非 ASCII 到正确码点（uchr 路径）。
+ * 锚住「不能用 chr()」这个回归：chr 是字节级的，>255 截断成 0xFF（实机验证）。
+ * 注意 JSON 文本必须真的含反斜杠+u 序列：不能用 JSON.stringify（它会把反斜杠
+ * 二次转义成 \\u，解码后只是字面 \u001b 六个字符，测不到 \u 分支）。 */
+const uni = jsonParse('{"esc":"\\u001b","cn":"\\u4e2d"}');
+check('\\u001b 解码为 ESC', uni.esc === '\u001b', JSON.stringify(uni.esc));
+check('\\u4e2d 解码为中', uni.cn === '\u4e2d', JSON.stringify(uni.cn));
+check('\\u 不残留字面 u001b / u4e2d',
+	uni.esc.indexOf('u001b') < 0 && uni.cn.indexOf('u4e2d') < 0);
+
+/* \b / \f：serde_json 对 0x08 / 0x0C 写短转义，旧实现落到 else 分支变成字母 b/f */
+const bf = jsonParse(JSON.stringify({ b: '\b', f: '\f' }));
+check('\\b 还原为退格', bf.b === '\b', JSON.stringify(bf.b));
+check('\\f 还原为换页', bf.f === '\f', JSON.stringify(bf.f));
 
 /* 中文与常规字段不受影响（确保没改坏原路径） */
 const cn = jsonParse(JSON.stringify({ msg: '短信中心', n: null, t: true, a: [1, 2] }));

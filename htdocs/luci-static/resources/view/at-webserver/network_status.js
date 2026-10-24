@@ -1927,8 +1927,11 @@ return L.view.extend({
 
 			var maxC = 0, sumC = 0, nC = 0;
 			items.forEach(function (it) {
+				/* 汇总口径与 tempLevel 一致：v <= 0 是传感器未初始化，不是真实读数。
+				 * 不排除的话，全 0 时徽章会写「最高 0 ℃ · 均温 0 ℃」而格子全是「—」，
+				 * 部分 0 时均温也会被向下拉偏。 */
 				var v = parseFloat(it.value);
-				if (!isNaN(v)) {
+				if (!isNaN(v) && v > 0) {
 					if (v > maxC) maxC = v;
 					sumC += v;
 					nC++;
@@ -1963,8 +1966,10 @@ return L.view.extend({
 				 * 故按最高通道定级，同时给出均温参考。 */
 				tempBadge.innerHTML = '';
 				var worst = tempLevel(maxC);
+				/* 一路有效读数都没有时不写 0——「最高 0 ℃」会被当成真实结温 */
+				var maxShow = nC ? maxC : '—';
 				tempBadge.appendChild(Mt5700.badge(
-					'最高 ' + maxC + ' ℃ · 均温 ' + avgC + ' ℃ · ' + tempLevelText(worst),
+					'最高 ' + maxShow + ' ℃ · 均温 ' + (avgC === null ? '—' : avgC) + ' ℃ · ' + tempLevelText(worst),
 					tempBadgeKind(worst)));
 			}
 		}

@@ -1039,10 +1039,13 @@ fw_reload_if_dirty() {
 # 按配置重建本插件的防火墙规则（先清旧、再按需新增）。
 #
 # src / dest 与 README「服务配置」页的说明保持一致：
-#   - RPC 端口放行只针对**内网 → 路由器**（src=lan, dest=路由器自身），
-#     配合 websocket_allow_wan=1 使用，不是把端口开放给 WAN 侧；
+#   - RPC 端口放行只针对**内网 → 路由器本机**（只写 src=lan、不写 dest/dest_ip：
+#     fw4 对只带源区域的规则走 input 链，目标天然是路由器自身。dest_ip 会被
+#     fw4 当字面 IP/CIDR 解析，写 '@router' 这类引用会让整条规则被跳过——
+#     实机 fw4 check 已验证）；
 #   - 模组管理口（network_host:network_port）默认对 WAN 侧 REJECT，可选放行
-#     （network_allow_wan=1）或限制为仅路由器本身可访问（network_restrict_access=1）。
+#     （network_allow_wan=1）或限制为仅路由器本身可访问（network_restrict_access=1，
+#     本机流量走 output 链，不受 zone 规则影响，天然放行）。
 apply_firewall_rules() {
 	local module_allow_wan restrict_module module_host module_port
 	local rpc_allow_wan rpc_port
@@ -1056,14 +1059,13 @@ apply_firewall_rules() {
 
 	fw_clean_rules
 
-	# RPC 对外监听时放行：源为内网、目标为路由器自身（dest_ip 必须写，
-	# 否则 fw4 会把规则展开到每个区域的默认目标上，语义变成「转发放行」而不是
-	# 「本机端口放行」）。路由器自身的地址由 fw4 在 reload 时解析。
+	# RPC 对外监听时放行：只带 src=lan 的规则落 fw4 的 input 链，目标即路由器
+	# 本机；不写 dest/dest_ip（dest_ip 按 IP/CIDR 解析，'@router' 之类引用非法，
+	# 整条规则会被 fw4 跳过）。
 	if [ "$rpc_allow_wan" -eq 1 ]; then
 		uci add firewall rule >/dev/null
 		uci set firewall.@rule[-1].name='at_rpc_wan_allow'
 		uci set firewall.@rule[-1].src='lan'
-		uci set firewall.@rule[-1].dest_ip='@router'
 		uci set firewall.@rule[-1].dest_port="$rpc_port"
 		uci set firewall.@rule[-1].proto='tcp'
 		uci set firewall.@rule[-1].target='ACCEPT'
@@ -1103,19 +1105,9 @@ apply_firewall_rules() {
 		uci set firewall.@rule[-1].proto='tcp'
 		uci set firewall.@rule[-1].target='REJECT'
 		uci set firewall.@rule[-1].enabled='1'
-		# 兜一条本机豁免：规则链里 REJECT 先命中就会拒绝，所以本地访问必须
-		# 单独放行在前面（源地址用 127.0.0.1，只覆盖本机进程），
-		# 否则「仅路由器可访问」会连路由器自己的诊断工具都挡住。
-		uci add firewall rule >/dev/null
-		uci set firewall.@rule[-1].name='at_module_restrict_self'
-		uci set firewall.@rule[-1].src='*'
-		uci set firewall.@rule[-1].src_ip='127.0.0.1'
-		uci set firewall.@rule[-1].dest='*'
-		uci set firewall.@rule[-1].dest_ip="$module_host"
-		uci set firewall.@rule[-1].dest_port="$module_port"
-		uci set firewall.@rule[-1].proto='tcp'
-		uci set firewall.@rule[-1].target='ACCEPT'
-		uci set firewall.@rule[-1].enabled='1'
+		# src='*' 使 REJECT 覆盖所有区域的转发放行；路由器本机访问模组走 output
+		# 链，fw4 的 zone 规则管不到它，无需本机豁免规则（写一条 src_ip=127.0.0.1
+		# 的 ACCEPT 落在 forward 链的规则里永远匹配不到本机流量，纯死代码）。
 		logger -t at-webserver "已将模组 AT 端口限制为仅路由器本身可访问"
 	fi
 

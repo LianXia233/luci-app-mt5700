@@ -770,8 +770,15 @@ impl SmsService {
 
         // 收尾回读容量：界面据此刷新用量条。回读失败不影响删除结论，但要留痕，
         // 否则界面上「删成功了、容量还是 0/0」看起来像删除没生效。
+        // 真回落到未满就清掉存储满标志（与 capacity()/purge_all 同口径）：否则
+        // 用户只用删除（不清空）清出空间后，下一次提交被拒不会再推「存储已满」。
         let storage = match self.read_storage_in_tx(&tx).await {
-            Ok(s) => Some(s),
+            Ok(s) => {
+                if s.used < s.total {
+                    self.mem_full.store(false, Ordering::Relaxed);
+                }
+                Some(s)
+            }
             Err(e) => {
                 log_warn!("删除后回读容量失败（不影响删除结果）：{e}");
                 None
