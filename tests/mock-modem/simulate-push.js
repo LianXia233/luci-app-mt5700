@@ -45,7 +45,9 @@ const RPC_PORT = 8765;
 const RPC_PORT_2 = 8766;
 /* 阶段三：开信号巡检后专用端口，避免与前两阶段抢监听 */
 const RPC_PORT_3 = 8767;
-const HOOK_PORT = 8899;
+/* webhook 接收端端口。默认 8899；本机该端口被别的进程占用时可用
+   HOOK_PORT=<n> node simulate-push.js 换一个（脚本会把该端口写进派生 UCI）。 */
+const HOOK_PORT = parseInt(process.env.HOOK_PORT, 10) || 8899;
 /* 实时直发的时间上限取 5 秒：短信/来电若走的是入队攒批路径，就会明显晚于这个时间才到 */
 const MERGE_WINDOW_MS = 5000;
 
@@ -238,6 +240,9 @@ function buildUciConfig() {
 	const overrides = {
 		websocket_port: "'" + RPC_PORT + "'",
 		wechat_webhook: "'http://127.0.0.1:" + HOOK_PORT + "/hook'",
+		/* 推送通道各自有独立开关（v1.28.0 起默认关闭）：只配 WebHook 不发。
+		 * 不打开这一项，下面所有「等了半天没收到推送」的断言都测不到推送链路本身。 */
+		wechat_enabled: "'1'",
 		notify_enabled: "'1'",
 		/* 定时推送调到最大（1440 分钟 = 24 小时）：它到点必发一条，
 		 * 若按默认 10 分钟跑，长用例里会混进与断言无关的周期性推送。
@@ -342,9 +347,19 @@ async function prepareSimDir() {
 	ensureUciStub();
 }
 
+/*
+ * 后端子进程的环境。
+ *
+ * 必须**清掉继承来的 TZ**：后端取时区的第一优先级是环境变量，第二步才是
+ * /etc/TZ 与 `uci get system.@system[0].timezone`。开发机/CI 里常常已经导出了
+ * TZ（GitHub Actions 上就是 TZ=Asia/Shanghai），不清掉的话「未配置时区 →
+ * 回落北京时间」「uci timezone=UTC0 → 跟随 UTC」这两组断言永远测不到真实分支：
+ * 后端直接用了继承来的 TZ，模拟出来的 uci 根本没被读到。
+ */
 function childEnv(extra) {
 	const sep = IS_WIN ? ';' : ':';
 	const env = Object.assign({}, process.env, extra || {});
+	delete env.TZ;
 	env.PATH = UCI_BIN_DIR + sep + (process.env.PATH || '');
 	return env;
 }
@@ -462,10 +477,19 @@ async function main() {
 
 	console.log('==> 1/7 启动本地 webhook 接收端 (127.0.0.1:' + HOOK_PORT + ')');
 	const hook = createHookServer({ outFile: path.join(SIM_DIR, 'hook-received.jsonl') });
-	await hook.listen(HOOK_PORT);
+	try {
+		await hook.listen(HOOK_PORT);
+	} catch (err) {
+		/* 端口被占用是最常见的「上次没退干净」场景：给出可执行的处置建议，
+		 * 而不是把 Node 的 EADDRINUSE 栈直接糊在屏幕上。 */
+		console.error('无法监听 127.0.0.1:' + HOOK_PORT + '：' + (err && err.message ? err.message : err));
+		console.error('多半是上一次模拟残留的接收端还在跑，先执行：fuser -k ' + HOOK_PORT + '/tcp  然后重试');
+		process.exit(1);
+	}
 
 	console.log('==> 2/7 启动 mock 模组 (TCP ' + MODEM_PORT + '，MOCK_QUIET=1)');
-	const mockLog = fs.createWriteStream(path.join(SIM_DIR, 'mock-modem.log'));
+	const mockLogPath = path.join(SIM_DIR, 'mock-modem.log');
+	const mockLog = fs.createWriteStream(mockLogPath);
 	const mock = track(spawn(process.execPath, [path.join(HERE, 'mock-modem.js'), String(MODEM_PORT)], {
 		cwd: HERE,
 		env: Object.assign({}, process.env, { MOCK_QUIET: '1' }),
@@ -475,7 +499,17 @@ async function main() {
 	mock.stderr.pipe(mockLog);
 	await waitPort(MODEM_PORT, 8000);
 
-	/* ---------- 护栏自检：危险命令必须被 mock 拒绝 ---------- */
+	/*
+	 * ---------- 护栏自检：危险命令必须被 mock 拒绝 ----------
+	 *
+	 * 必须等 mock 日志**真的可读**再往下走：上面只 waitPort 等到端口监听，
+	 * 而日志是异步写进 mockLog 文件流的。审计段（7. 安全审计）靠读同一个文件
+	 * 统计「拒绝过几次危险命令」，文件还是空的就会被判成 0 次 ——
+	 * 实测本地偶发「拒绝 0 次（含自检）」失败正是这个竞态，与护栏本身无关。
+	 * 等不到也继续（最多 2s），但至少不会在文件刚创建时就宣布结论。
+	 */
+	await waitFor(() => fs.existsSync(mockLogPath) && fs.statSync(mockLogPath).size > 0, 2000, 'mock 日志就绪')
+		.catch(() => {});
 	console.log('\n=== 0. 安全护栏自检（IMEI 写入 / 恢复出厂一律拒绝）===');
 	const forbid1 = await rawModemCommand('AT&F');
 	check('mock 拒绝恢复出厂命令 AT&F', forbid1.indexOf('ERROR') >= 0, forbid1.trim().slice(0, 40));
@@ -530,7 +564,9 @@ async function main() {
 	 * 而 Rust 侧推送直接用了 PDU 里的原始地址，两者对同一联系人显示不同。
 	 * 属于口径一致性问题，不是本次「模拟测试」引入的回归，故记为观察项。
 	 */
-	const senderShown = (/发送者:\s*(\S+)/.exec(smsRec.content) || [])[1] || '';
+	/* 默认模板首行是全局前缀（{time} {count}），「发送者」不在行首，
+	 * 因此不能锚在开头去抓；匹配冒号后到行尾的全部内容。 */
+	const senderShown = (/发送者[：:]\s*([^\n]+)/.exec(smsRec.content) || [])[1] || '';
 	if (/^86\d{11}$/.test(senderShown)) {
 		observe('推送号码带国家码 86，与短信中心的显示口径不一致',
 			'推送=' + senderShown + '，界面=' + FIRST_RECV.number);
@@ -629,7 +665,9 @@ async function main() {
 
 	/* ---------- 6. LuCI「发送测试通知」按钮 ---------- */
 	console.log('\n=== 5. 测试推送（通道连通性 + 按事件类型）===');
-	const TEST_TEXT = '喵～测试通知来啦！推送通道一切正常，链路畅通无阻喵！';
+	/* 文案只断言「是那条测试通知」，具体措辞归后端管：
+	 * 测试里再存一份原文，等于给自己造了个必须同步维护的第二事实源。 */
+	const TEST_TEXT = '测试通知：推送通道一切正常，链路畅通';
 	const markTest = hook.received.length;
 	/* 与 at() 一样必须带 auth_key：notify_test 是普通 RPC 方法，不带头会被拒（密钥错误） */
 	const testRes = await rpcConn2.rpc('notify_test', { channel: 'wechat', auth_key: AUTH });
@@ -664,7 +702,7 @@ async function main() {
 	check('短信测试实时直发（与真实短信同一路径）', Date.now() - tk < MERGE_WINDOW_MS,
 		(Date.now() - tk) + ' ms < ' + MERGE_WINDOW_MS + ' ms');
 	const smsTestText = smsTestRec ? smsTestRec.content : '';
-	check('套用真实短信模板（发送者占位符被填）', smsTestText.indexOf('发送者: 138****0000') >= 0,
+	check('套用真实短信模板（发送者占位符被填）', /发送者[：:]\s*138\*{4}0000/.test(smsTestText),
 		(smsTestText.split('\n').filter((l) => l.indexOf('发送者') >= 0)[0] || ''));
 	check('套用真实短信模板（内容占位符被填）', smsTestText.indexOf('这是一条模拟短信') >= 0);
 	check('测试短信自带标注，不会被当成真短信', smsTestText.indexOf('非真实短信') >= 0);
@@ -681,8 +719,10 @@ async function main() {
 	check('来电测试推送已送达 webhook', !!callTestRec);
 	check('来电测试实时直发（与真实来电同一路径）', Date.now() - tk2 < MERGE_WINDOW_MS, (Date.now() - tk2) + ' ms');
 	const callTestText = callTestRec ? callTestRec.content : '';
-	check('套用真实来电模板（标题与真实来电一致）', callTestText.indexOf('有电话打进来啦') >= 0,
-		callTestText.split('\n')[0] || '');
+	/* 来电模板首行是标题「来电」，全局前缀 {time} {count} 在它上一行。
+	 * 只钉「走的是来电模板」，不钉具体口吻——措辞属于文案调整范围。 */
+	check('套用真实来电模板（标题与真实来电一致）', /^来电$/m.test(callTestText),
+		callTestText.split('\n').filter((l) => l.trim())[0] || '');
 	check('测试来电正文含掩码号码与振铃状态', callTestText.indexOf('138****0000') >= 0 && callTestText.indexOf('状态：来电振铃') >= 0);
 	check('测试来电自带标注，不会被当成真来电', callTestText.indexOf('非真实来电') >= 0);
 
@@ -740,7 +780,9 @@ async function main() {
 	const sig = sigRec ? sigRec.content : '';
 	console.log('    ── 推送正文 ──');
 	sig.split('\n').forEach((l) => console.log('    ' + l));
-	check('标题带网络代际（5G / 4G）', /📶\s*(5G|4G)\s*信号巡检/.test(sig), sig.split('\n')[0] || '');
+	/* 纯文本推送的标题首行就是「<代际> 信号巡检」（图标只出现在 QQ 富文本卡片里），
+	 * 默认前缀 {time} {count} 在其上一行。 */
+	check('标题带网络代际（5G / 4G）', /^(5G|4G) 信号巡检$/m.test(sig), sig.split('\n')[0] || '');
 	check('给出具体频段号（NR 用 n 前缀）', sig.indexOf('n41') >= 0, 'n41');
 	check('给出下行频点与带宽', sig.indexOf('2565 MHz') >= 0 && sig.indexOf('100 MHz') >= 0,
 		'2565 MHz / 100 MHz');
@@ -748,7 +790,7 @@ async function main() {
 	check('未把 NR 误判成 LTE（两张 sysmode 表不可混用）', /频段：n\d/.test(sig) && sig.indexOf('4G') < 0,
 		(sig.split('\n').filter((l) => l.indexOf('频段') >= 0)[0] || ''));
 	check('四项指标齐全', ['RSRP', 'RSRQ', 'SINR', 'SIGNAL'].every((k) => sig.indexOf(k) >= 0));
-	check('文案已压缩（正文 ≤ 9 行）', sig.split('\n').length <= 9, sig.split('\n').length + ' 行');
+	check('文案已压缩（正文 ≤ 10 行）', sig.split('\n').length <= 10, sig.split('\n').length + ' 行');
 	check('推送不含插件名', sig.indexOf('mt5700') < 0);
 	/*
 	 * 借位置的消息（无发送时刻的发出短信）只调顺序、不造时刻 —— 这里顺带确认
@@ -782,11 +824,11 @@ async function main() {
 	const tp = timerRec ? timerRec.content : '';
 	console.log('    ── 推送正文 ──');
 	tp.split('\n').forEach((l) => console.log('    ' + l));
-	check('标题标明是定时推送的状态快照', tp.indexOf('🕒 当前状态（定时推送）') >= 0, tp.split('\n')[0] || '');
-	check('状态快照含网络代际与具体频段', /📶\s*(5G|4G)/.test(tp) && tp.indexOf('n41') >= 0,
-		tp.split('\n').filter((l) => l.indexOf('📶') >= 0)[0] || '');
+	check('标题标明是定时推送的状态快照', tp.indexOf('当前状态（定时推送）') >= 0, tp.split('\n')[0] || '');
+	check('状态快照含网络代际与具体频段', /(5G|4G)/.test(tp) && tp.indexOf('n41') >= 0,
+		tp.split('\n').filter((l) => /(5G|4G)/.test(l))[0] || '');
 	check('状态快照含短信存储用量（现读，非沿用旧状态）', tp.indexOf('短信存储') >= 0,
-		tp.split('\n').filter((l) => l.indexOf('💾') >= 0)[0] || '');
+		tp.split('\n').filter((l) => l.indexOf('短信存储') >= 0)[0] || '');
 	check('与巡检推送可区分（不会被当成重复推送）', tp.indexOf('信号巡检') < 0);
 	check('定时推送不含插件名', tp.indexOf('mt5700') < 0);
 

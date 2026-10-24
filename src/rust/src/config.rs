@@ -88,8 +88,8 @@ pub const LEGACY_DEFAULT_NOTIFY_INTERVAL_SECS: u64 = 60;
 /// 注意：这个函数只在「旧值不是出厂默认值」时才被调用（见 `timer_interval_from`）。
 #[allow(clippy::manual_div_ceil)] // 见 pdu.rs 同款说明：div_ceil 稳定于 Rust 1.73，老 OpenWrt 工具链会编译失败
 pub fn secs_to_timer_minutes(secs: u64) -> u64 {
-    let m = (secs + 59) / 60;
-    m.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN)
+    secs.div_ceil(60)
+        .clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN)
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +236,9 @@ pub struct NotifyTemplates {
     /// 信号变化文案模板。
     pub signal: String,
     /// 批量汇总标题（多条合并时使用）。v1.14.20 起生产路径逐条直发，
-    /// 该标题当前不会被触发，保留仅为兼容已有配置。
+    /// 该标题当前不会被触发，保留仅为兼容已有配置（`notify_tpl_batch` 仍可读可写），
+    /// 由 `notify::combine_messages` 的批量分支消费（仅单测覆盖）。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub batch: String,
     /// QQ 富文本短信卡片模板（仅 QQ Markdown 形态生效；空或 `{body}` = 用通用转换）。
     pub qq_sms_md: String,
