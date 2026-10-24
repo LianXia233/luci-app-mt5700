@@ -1,4 +1,5 @@
 config at-webserver 'config'
+	option wallpaper_enabled '1'          # 全局壁纸（三角网格+随机角色立绘）开关：1=显示（默认），0=关闭
 	option enabled '1'
 	option connection_type 'SERIAL'           # 默认 PCUI 优先：AT 走串口 /dev/ttyUSB1（PCUI）；网络 TCP 作为备用
 	option network_host '192.168.8.1'

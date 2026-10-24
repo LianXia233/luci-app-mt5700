@@ -9,7 +9,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.41.4';
+var MT5700_CSS_VERSION = '2.42.1';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -20,6 +20,70 @@ var MT5700_CSS_VERSION = '2.41.4';
 	link.rel = 'stylesheet';
 	link.href = cssPath;
 	document.head.appendChild(link);
+})();
+
+/*
+ * 插件全局背景：三角网格铺底（明暗主题自动切换），两个角色每次刷新随机显示其一、
+ * 随机落位。PC 与手机各用一套角色图，显示哪张由 CSS 断点决定（不依赖 UA）；
+ * 角色图都是透明抠图，明暗主题下都成立，因此角色与主题解耦、只做随机抽取。
+ * 网格层 fixed + pointer-events:none，应用内容经 .mt5700-app{z-index:1} 抬到其上。
+ */
+(function () {
+	function mountGlobalBg() {
+		if (document.getElementById('mt5700-global-bg')) return;
+		var layer = document.createElement('div');
+		layer.id = 'mt5700-global-bg';
+
+		var base = '/luci-static/resources/at-webserver/bg/';
+		var pick = function (a, b) { return Math.random() < 0.5 ? a : b; };
+		var mk = function (cls, file) {
+			var img = document.createElement('img');
+			img.className = 'mt-bg-char ' + cls;
+			img.alt = '';
+			img.src = base + file;
+			layer.appendChild(img);
+		};
+		mk('mt-bg-pc', pick('character-pc-light.webp', 'character-pc-dark.webp'));
+		mk('mt-bg-mobile', pick('character-mobile-light.webp', 'character-mobile-dark.webp'));
+
+		/* 随机落位：一律右侧，仅垂直偏移 / 旋转 / 透明度随机，水平只做少量抖动。
+		 * 层级由 CSS 保证：#mt5700-global-bg(z:0) 恒在 #maincontent(z:1) 之下，
+		 * 角色只出现在文字与数据的下层，绝不遮挡正文。 */
+		var rand = function (a, b) { return a + Math.random() * (b - a); };
+		var chars = layer.querySelectorAll('.mt-bg-char');
+		for (var i = 0; i < chars.length; i++) {
+			var el = chars[i];
+			el.style.right = rand(0, 3).toFixed(1) + 'vw';
+			el.style.bottom = rand(-2, 2).toFixed(1) + 'vh';
+			el.style.transform = 'rotate(' + rand(-5, 5).toFixed(1) + 'deg)';
+			el.style.opacity = rand(0.82, 0.96).toFixed(2);
+		}
+
+		(document.body || document.documentElement).appendChild(layer);
+	}
+
+	function startGlobalBg() {
+		/* 壁纸总开关：UCI at-webserver.config.wallpaper_enabled（服务配置页「界面」卡片），
+		 * 缺省视为开启；uci 读取失败（异常/超时）也按开启兜底，避免配置问题弄丢背景。 */
+		var boot = function (on) { if (on !== false) mountGlobalBg(); };
+		try {
+			if (window.L && L.uci && L.resolveDefault) {
+				L.resolveDefault(L.uci.load('at-webserver')).then(function () {
+					boot((L.uci.get('at-webserver', 'config', 'wallpaper_enabled') || '1') !== '0');
+				}).catch(function () { boot(true); });
+			} else {
+				boot(true);
+			}
+		} catch (e) {
+			boot(true);
+		}
+	}
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', startGlobalBg);
+	} else {
+		startGlobalBg();
+	}
 })();
 
 var Mt5700 = (function () {
@@ -1322,12 +1386,713 @@ var Mt5700 = (function () {
 
   </g>`;
 
+	/*
+	 * 空态伙伴立绘 mint（777×1000 竖图）：与主立绘同时显示，
+	 * 每次渲染位置随机（见 api.empty），渐变 id 走同一套 uid 改名防冲突。
+	 */
+	var MT_MINT_SVG = `<defs>
+    <!-- 前发与主发色渐变 -->
+    <linearGradient id="hairMainGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7BE0EF" />
+      <stop offset="50%" stop-color="#64C9DC" />
+      <stop offset="100%" stop-color="#4FB0C4" />
+    </linearGradient>
+
+    <!-- 后发亮部渐变 -->
+    <linearGradient id="backHairGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#5EC0D3" />
+      <stop offset="60%" stop-color="#4BA7BA" />
+      <stop offset="100%" stop-color="#3E8FA2" />
+    </linearGradient>
+
+    <!-- 后发深色内层渐变 -->
+    <linearGradient id="backHairDarkGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3F8E9F" />
+      <stop offset="100%" stop-color="#2E7283" />
+    </linearGradient>
+
+    <!-- 粉色挑染渐变 -->
+    <linearGradient id="pinkStreakGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FF7A93" />
+      <stop offset="65%" stop-color="#F86580" />
+      <stop offset="100%" stop-color="#E64F6B" />
+    </linearGradient>
+
+    <!-- 脸部震惊紫灰阴郁渐变 -->
+    <linearGradient id="faceGloomGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#9683A4" stop-opacity="0.95" />
+      <stop offset="58%" stop-color="#B8A5C2" stop-opacity="0.78" />
+      <stop offset="82%" stop-color="#FCEEE9" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- 口腔内部渐变 -->
+    <linearGradient id="mouthGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#C45555" />
+      <stop offset="100%" stop-color="#F5948D" />
+    </linearGradient>
+
+    <!-- 黑色服装渐变 -->
+    <linearGradient id="darkClothGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3D4046" />
+      <stop offset="100%" stop-color="#24262A" />
+    </linearGradient>
+
+    <!-- 靴子筒身光泽渐变 -->
+    <linearGradient id="bootShaftGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#464A51" />
+      <stop offset="35%" stop-color="#373A40" />
+      <stop offset="100%" stop-color="#282A2F" />
+    </linearGradient>
+
+    <!-- 铃铛金属渐变 -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF282" />
+      <stop offset="50%" stop-color="#F6C53A" />
+      <stop offset="100%" stop-color="#C98816" />
+    </linearGradient>
+  </defs>
+
+  <style>
+    .outline-bold {
+      stroke: #1B1817;
+      stroke-width: 5.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .outline {
+      stroke: #1B1817;
+      stroke-width: 4.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .outline-thin {
+      stroke: #1B1817;
+      stroke-width: 2.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+  </style>
+
+  <!-- ==================== 1. 后发与发尾层次 (Back Long Hair) ==================== -->
+  <g id="back-hair">
+    <!-- 后发主外轮廓 -->
+    <path class="outline-bold" fill="url(#backHairGrad)" d="
+      M 102,388
+      C 98,448 116,495 112,538
+      C 78,588 38,658 55,732
+      C 68,700 84,680 104,672
+      C 94,758 128,822 82,912
+      C 118,912 148,886 165,855
+      C 162,896 154,934 140,955
+      C 190,962 232,938 255,906
+      C 278,948 335,962 395,936
+      C 445,945 488,965 588,946
+      C 564,932 552,914 552,894
+      C 588,910 622,922 642,932
+      C 626,904 612,882 605,860
+      C 622,808 632,755 612,688
+      C 596,632 554,582 518,542
+      C 516,482 514,422 504,378
+      Z" />
+
+    <!-- 后发深青色内层阴影区 -->
+    <path fill="url(#backHairDarkGrad)" d="
+      M 164,492
+      C 172,610 182,730 165,855
+      C 162,896 154,934 140,955
+      C 190,962 232,938 255,906
+      C 278,948 335,962 395,936
+      C 445,945 488,965 588,946
+      C 564,932 552,914 552,894
+      C 582,908 615,920 642,932
+      C 626,904 612,882 605,860
+      C 535,880 330,875 280,775
+      C 295,665 312,580 315,505
+      Z" />
+
+    <!-- 后发分缕内部线条 -->
+    <path class="outline-thin" fill="none" d="M 162,482 C 166,515 168,546 168,572" />
+    <path class="outline-thin" fill="none" d="M 192,492 C 196,522 198,544 198,562" />
+    <path class="outline-thin" fill="none" d="M 465,495 C 468,512 470,524 470,536" />
+    <path class="outline-thin" fill="none" d="M 552,608 C 588,665 606,735 596,808" />
+    <path class="outline-thin" fill="none" d="M 255,906 C 248,892 246,878 248,865" />
+    <path class="outline-thin" fill="none" d="M 488,925 C 495,940 515,952 548,952" />
+  </g>
+
+  <!-- ==================== 2. 左右猫耳 (Cat Ears) ==================== -->
+  <g id="cat-ears">
+    <!-- 左猫耳 -->
+    <path class="outline-bold" fill="url(#hairMainGrad)" d="
+      M 172,202
+      C 100,222 32,260 -6,294
+      C -4,322 18,348 48,358
+      C 95,356 135,332 165,295
+      Z" />
+    <path fill="#8CE8F6" d="
+      M 162,210 C 102,228 42,260 4,292 C 35,275 98,242 158,224 Z" />
+    <path class="outline" fill="#F29CB3" d="
+      M -4,296
+      C 16,300 32,306 44,312
+      C 38,328 34,342 35,354
+      C 14,344 -2,320 -4,296 Z" />
+    <path class="outline" fill="#FFFFFF" d="
+      M 42,312
+      C 68,302 105,298 135,298
+      C 118,332 85,355 35,354
+      C 33,338 52,332 42,312 Z" />
+
+    <!-- 右猫耳 -->
+    <path class="outline-bold" fill="url(#hairMainGrad)" d="
+      M 488,180
+      C 542,196 592,218 621,242
+      C 618,272 586,306 546,328
+      C 522,295 495,245 488,180 Z" />
+    <path fill="#8CE8F6" d="
+      M 495,188 C 542,202 585,222 612,242 C 582,228 538,208 496,198 Z" />
+    <path class="outline" fill="#F29CB3" d="
+      M 619,245
+      C 592,254 562,265 538,273
+      C 546,292 552,308 552,323
+      C 585,304 614,272 619,245 Z" />
+    <path class="outline" fill="#FFFFFF" d="
+      M 535,273
+      C 555,272 572,274 584,276
+      C 568,292 562,308 552,323
+      C 542,312 532,292 535,273 Z" />
+  </g>
+
+  <!-- ==================== 3. 躯干、手臂与哥特风上衣 (Torso, Arms & Top) ==================== -->
+  <g id="torso-and-arms">
+    <!-- 脖子与阴影 -->
+    <path class="outline" fill="#FDECE6" d="M 334,508 L 335,542 L 372,542 L 368,508 Z" />
+    <path fill="#E4C6BE" d="M 335,512 C 348,522 360,522 368,515 L 369,535 L 335,535 Z" />
+
+    <!-- 左手臂 -->
+    <g id="left-arm">
+      <path class="outline" fill="#FDECE6" d="
+        M 235,550
+        C 205,556 175,568 152,582
+        L 175,612
+        C 198,598 222,588 245,585 Z" />
+      <path class="outline-thin" fill="#25272B" d="M 218,554 L 226,588 L 216,590 L 208,557 Z" />
+      <path class="outline-thin" fill="#25272B" d="M 192,562 L 204,595 L 194,599 L 182,567 Z" />
+      <path class="outline" fill="#FFFFFF" d="
+        M 155,576
+        C 168,582 182,595 188,608
+        L 172,618
+        C 164,604 150,592 138,586 Z" />
+      <path class="outline-bold" fill="url(#darkClothGrad)" d="
+        M 142,584
+        C 125,592 112,602 98,604
+        C 92,598 88,600 84,606
+        C 64,612 40,614 29,619
+        C 25,624 34,632 54,632
+        C 38,636 30,643 34,650
+        C 38,656 50,654 62,651
+        C 48,658 44,666 50,672
+        C 58,678 78,668 96,656
+        C 110,656 122,662 132,668
+        C 140,670 144,660 138,645
+        C 136,638 148,628 172,616
+        C 165,602 155,590 142,584 Z" />
+      <path class="outline-thin" fill="#D4DCE4" d="
+        M 92,600
+        C 108,608 124,622 135,638
+        L 126,642
+        C 116,628 102,614 86,606 Z" />
+    </g>
+
+    <!-- 右手臂 -->
+    <g id="right-arm">
+      <path class="outline" fill="#FDECE6" d="
+        M 476,525
+        C 495,522 512,520 524,520
+        L 525,550
+        C 510,552 492,555 480,558 Z" />
+      <path class="outline" fill="#FFFFFF" d="M 515,518 L 528,518 L 529,552 L 516,552 Z" />
+      <path class="outline-bold" fill="url(#darkClothGrad)" d="
+        M 528,518
+        C 545,517 562,516 576,515
+        C 595,508 614,502 624,504
+        C 628,508 622,516 606,522
+        C 626,522 642,526 642,534
+        C 642,540 632,543 622,543
+        C 634,546 640,552 636,558
+        C 630,564 608,562 590,560
+        C 588,572 588,585 582,588
+        C 575,590 566,576 558,560
+        C 546,555 536,552 528,552 Z" />
+      <path class="outline-thin" fill="#D4DCE4" d="
+        M 573,514
+        C 580,524 582,538 576,552
+        L 584,552
+        C 590,538 588,524 581,514 Z" />
+    </g>
+
+    <!-- 胸口皮肤底色与胸间三角镂空阴影 -->
+    <path class="outline" fill="#FDECE6" d="M 310,545 L 405,545 L 415,634 L 315,634 Z" />
+    <path fill="#DFB9B0" d="M 366,602 L 392,610 L 368,628 Z" />
+
+    <!-- 黑色抹胸与束腰短裤 (Corset & Pelvis Shorts) -->
+    <g id="corset">
+      <!-- 抹胸上沿 -->
+      <path class="outline-bold" fill="url(#darkClothGrad)" d="
+        M 296,600
+        C 315,582 355,582 376,602
+        C 388,585 412,585 426,605
+        C 428,618 422,628 412,632
+        C 398,622 392,612 384,606
+        C 374,616 362,626 322,634
+        C 306,628 296,615 296,600 Z" />
+
+      <!-- 束腰主体与胯部短裤底衬 (右侧收进右大腿后方) -->
+      <path class="outline-bold" fill="url(#darkClothGrad)" d="
+        M 322,634
+        C 355,628 388,628 412,632
+        L 418,698
+        L 402,748
+        L 375,830
+        L 318,820
+        L 268,778
+        L 296,748
+        L 328,672 Z" />
+
+      <!-- 束腰顶部铆钉黑皮带 -->
+      <path class="outline" fill="#202226" d="
+        M 321,633
+        C 355,627 388,627 413,632
+        L 413,646
+        C 388,641 355,641 323,647 Z" />
+      <circle cx="332" cy="640" r="2.3" fill="#E2E8F0" />
+      <circle cx="352" cy="638" r="2.3" fill="#E2E8F0" />
+      <circle cx="375" cy="637" r="2.3" fill="#E2E8F0" />
+      <circle cx="395" cy="638" r="2.3" fill="#E2E8F0" />
+      <circle cx="408" cy="640" r="2.3" fill="#E2E8F0" />
+
+      <!-- 束腰分割骨线与横向系带 -->
+      <path class="outline-thin" fill="none" d="M 350,646 L 341,728 L 335,765 L 302,790" />
+      <path class="outline-thin" fill="none" d="M 402,646 L 404,735" />
+      <path class="outline-thin" fill="none" stroke="#6C727A" d="M 350,685 C 368,690 386,690 402,684" />
+      <path class="outline-thin" fill="none" stroke="#6C727A" d="M 345,732 C 366,738 386,738 404,730" />
+
+      <!-- 菱形银扣 -->
+      <g fill="#E2E8F0" stroke="#1B1817" stroke-width="2.2">
+        <polygon points="346,666 354,677 346,688 338,677" />
+        <polygon points="402,664 409,674 402,684 395,674" />
+        <polygon points="341,716 349,728 341,740 333,728" />
+        <polygon points="404,715 411,725 404,735 397,725" />
+      </g>
+      <circle cx="346" cy="677" r="2" fill="#1B1817" />
+      <circle cx="402" cy="674" r="2" fill="#1B1817" />
+      <circle cx="341" cy="728" r="2" fill="#1B1817" />
+      <circle cx="404" cy="725" r="2" fill="#1B1817" />
+    </g>
+
+    <!-- 白色短款披肩外套与领口配饰 -->
+    <g id="white-shrug">
+      <path class="outline" fill="#FFFFFF" d="
+        M 225,546
+        C 258,542 298,538 335,535
+        L 348,595
+        C 325,596 305,602 296,612
+        L 292,592
+        L 240,618
+        L 234,600
+        C 238,582 234,562 225,546 Z" />
+      <path fill="#DCE3EA" d="
+        M 295,542 L 342,540 L 346,592 C 325,594 306,600 296,608 Z" />
+      <path class="outline-thin" fill="none" d="M 240,546 C 245,568 245,592 240,615" />
+      <path class="outline-thin" fill="none" d="M 300,582 L 344,578" />
+      <circle class="outline-thin" cx="252" cy="596" r="4" fill="#FFFFFF" />
+
+      <path class="outline" fill="#FFFFFF" d="
+        M 372,535
+        C 412,532 452,526 482,520
+        C 488,542 492,566 495,588
+        L 432,575
+        C 432,592 430,612 425,622
+        C 418,605 402,590 382,592
+        L 372,535 Z" />
+      <path class="outline-thin" fill="none" d="M 472,522 C 478,545 482,566 485,585" />
+      <circle class="outline-thin" cx="473" cy="570" r="4" fill="#FFFFFF" />
+      <rect class="outline-thin" x="392" y="574" width="25" height="9" rx="2" fill="#FFFFFF" />
+
+      <path class="outline" fill="#FFFFFF" d="
+        M 332,528 L 356,538 L 374,528 L 378,548 L 356,555 L 330,548 Z" />
+      <circle class="outline-thin" cx="358" cy="540" r="6.5" fill="#2563EB" />
+      <circle cx="356" cy="538" r="2" fill="#93C5FD" />
+      <path class="outline" fill="#25272B" d="
+        M 358,554
+        L 326,544 L 328,566 L 352,562
+        L 335,582 L 348,585 L 358,565
+        L 372,584 L 385,578 L 366,562
+        L 392,564 L 388,544 Z" />
+      <circle class="outline" cx="360" cy="560" r="12.5" fill="url(#goldGrad)" />
+      <path class="outline-thin" fill="none" d="M 348,557 C 356,554 365,554 372,557" />
+      <circle cx="360" cy="565" r="2.8" fill="#1B1817" />
+      <path class="outline-thin" fill="none" d="M 360,567 L 360,572" />
+    </g>
+
+    <!-- 左肩前方垂落的X型黑绳绑发 -->
+    <g id="shoulder-braid">
+      <path class="outline" fill="url(#hairMainGrad)" d="
+        M 248,505
+        C 244,528 250,552 268,568
+        L 292,566
+        C 302,546 298,520 286,505 Z" />
+      <path class="outline-thin" fill="none" stroke="#1B1817" stroke-width="5.5" d="M 250,518 L 295,542" />
+      <path class="outline-thin" fill="none" stroke="#1B1817" stroke-width="5.5" d="M 292,515 L 252,545" />
+      <rect class="outline-thin" x="264" y="562" width="30" height="8" rx="3.5" transform="rotate(-10 279 566)" fill="#25272B" />
+      <path class="outline" fill="url(#hairMainGrad)" d="
+        M 268,570
+        C 258,585 268,610 286,623
+        C 295,612 302,598 298,585
+        L 304,592
+        C 308,580 302,570 292,567 Z" />
+    </g>
+  </g>
+
+  <!-- ==================== 4. 双腿、大腿与长靴（严格按前后空间层次排列） ==================== -->
+  <g id="legs-and-boots">
+
+    <!-- 【第1层：左腿大腿肌肤与白色长筒袜（位于左靴后方）】 -->
+    <g id="left-leg-thigh-and-stocking">
+      <!-- 左大腿裸露皮肤（右端干净收入左靴翻边后方，不露出多余肉色三角） -->
+      <path class="outline-bold" fill="#FDECE6" d="
+        M 268,778
+        C 242,794 216,812 198,828
+        C 230,832 262,844 284,860
+        L 318,852
+        L 318,818
+        C 300,805 284,792 268,778 Z" />
+
+      <!-- 左大腿蜜桃粉椭圆红晕 -->
+      <ellipse cx="280" cy="810" rx="19" ry="11.5" transform="rotate(-28 280 810)" fill="#F5A99E" opacity="0.82" />
+
+      <!-- 左腿白色长筒袜主体（弯曲左膝 + 水平小腿压在大腿袜口前方） -->
+      <path class="outline-bold" fill="#FFFFFF" d="
+        M 198,828
+        C 176,846 170,870 182,890
+        C 208,915 262,922 320,922
+        L 320,852
+        L 278,858
+        C 256,842 226,832 198,828 Z" />
+
+      <!-- 左腿长袜底部与腿弯处的蓝灰赛璐璐阴影 -->
+      <path fill="#DCE2EA" d="
+        M 178,876
+        C 205,900 262,902 318,898
+        L 320,922
+        C 262,922 208,915 182,890
+        C 178,885 177,880 178,876 Z" />
+      <path fill="#DCE2EA" d="
+        M 250,862 C 272,866 296,866 318,862 L 318,852 L 278,858 Z" />
+
+      <!-- 重描左腿长筒袜外轮廓与小腿折叠压线（体现小腿在前、大腿在后的层次） -->
+      <path class="outline-bold" fill="none" d="
+        M 198,828
+        C 176,846 170,870 182,890
+        C 208,915 262,922 320,922
+        L 320,852
+        C 295,856 270,860 248,862" />
+      <!-- 袜口双道罗纹弧线（自然终止于小腿上沿后方） -->
+      <path class="outline" fill="none" d="M 198,828 C 226,832 256,842 278,858" />
+      <path class="outline-thin" fill="none" d="M 190,838 C 220,842 248,850 268,861" />
+    </g>
+
+    <!-- 【第2层：右腿大腿根部与白色过膝长袜（压在束腰右侧前方，但位于左脚短靴后方）】 -->
+    <g id="right-leg-thigh-and-stocking">
+      <!-- 1. 右大腿根部黑色短裤/打底包覆层（底部自然延伸至左靴后方，被左靴遮挡） -->
+      <path class="outline-bold" fill="#25272B" d="
+        M 362,832
+        C 374,802 388,772 402,745
+        C 430,762 456,784 478,808
+        C 466,842 452,868 438,885
+        L 360,865 Z" />
+      <!-- 右大腿黑色短裤受光面过渡 -->
+      <path fill="#33363C" d="
+        M 386,780 L 402,745 C 425,759 448,777 468,798 L 448,838 C 428,816 406,796 386,780 Z" />
+
+      <!-- 2. 右腿白色过膝长袜纯白底色 -->
+      <path fill="#FFFFFF" d="
+        M 402,745
+        C 425,692 454,634 482,605
+        C 508,586 538,595 552,625
+        C 568,660 582,702 592,735
+        L 506,755
+        L 495,688
+        C 490,732 484,775 478,808
+        C 456,784 430,762 402,745 Z" />
+
+      <!-- 3. 右腿过膝袜【修正后】的赛璐璐阴影：仅在大腿前缘窄月牙带 + 膝弯后方窄带，中间保持纯白 -->
+      <!-- 大腿前侧边缘窄月牙阴影 -->
+      <path fill="#DCE2EA" d="
+        M 402,745
+        C 425,692 454,634 482,605
+        C 492,596 502,592 512,592
+        C 486,608 462,650 438,706
+        C 429,727 422,744 416,755
+        C 411,751 406,748 402,745 Z" />
+      <!-- 大腿后侧（膝盖弯曲下方）窄阴影 -->
+      <path fill="#DCE2EA" d="
+        M 496,670
+        L 495,688
+        C 490,732 484,775 478,808
+        C 470,799 462,791 454,783
+        C 468,746 480,702 496,670 Z" />
+
+      <!-- 4. 右腿过膝袜外轮廓描边與袜口弧线、膝弯折痕（体现小腿压在大腿前方的折叠层次） -->
+      <path class="outline-bold" fill="none" d="
+        M 402,745
+        C 425,692 454,634 482,605
+        C 508,586 538,595 552,625
+        C 568,660 582,702 592,735
+        L 506,755
+        L 495,688
+        C 490,732 484,775 478,808
+        C 456,784 430,762 402,745 Z" />
+      <!-- 大腿中段袜口接缝弧线 -->
+      <path class="outline-thin" fill="none" d="M 424,702 C 448,718 470,735 488,752" />
+      <!-- 膝弯小腿压大腿的折痕延伸线 -->
+      <path class="outline" fill="none" d="M 496,668 L 495,695" />
+    </g>
+
+    <!-- 【第3层（前景）：左脚黑色短靴（位于右大腿根部正前方，形成正确遮挡）】 -->
+    <g id="left-boot-foreground">
+      <!-- 靴头主体 -->
+      <path class="outline-bold" fill="url(#bootShaftGrad)" d="
+        M 368,840
+        C 418,840 460,852 462,890
+        C 464,926 435,938 368,935
+        Z" />
+      <!-- 靴头底部暗面 -->
+      <path fill="#232529" d="
+        M 372,912 C 415,916 448,912 461,896 C 458,925 432,938 368,935 Z" />
+      <!-- 左靴宽大翻折护踝靴口 -->
+      <path class="outline-bold" fill="#3B3E45" d="
+        M 316,818
+        L 378,818
+        C 380,858 378,902 372,942
+        L 314,938
+        C 312,898 314,855 316,818 Z" />
+      <!-- 左靴口顶部开口竖线 -->
+      <path class="outline-thin" fill="none" d="M 358,818 L 357,842" />
+    </g>
+
+    <!-- 【第4层（前景）：右脚黑色长靴】 -->
+    <g id="right-boot-foreground">
+      <!-- 靴筒与靴面主体 -->
+      <path class="outline-bold" fill="url(#bootShaftGrad)" d="
+        M 505,755
+        L 598,732
+        C 605,785 618,845 634,892
+        C 640,912 632,924 612,925
+        C 582,926 548,928 528,924
+        C 518,920 518,895 520,865
+        L 505,755 Z" />
+      <!-- 靴筒右侧暗部层次与厚靴底 -->
+      <path fill="#26282C" d="
+        M 565,750
+        L 598,732
+        C 605,785 618,845 634,892
+        C 640,912 632,924 612,925
+        L 528,924
+        L 522,906
+        L 585,906
+        C 582,855 572,798 565,750 Z" />
+      <!-- 靴底分割线 -->
+      <path class="outline-thin" fill="none" d="M 520,908 C 555,912 595,910 635,904" />
+
+      <!-- 右靴宽大倾斜翻边靴口 -->
+      <path class="outline-bold" fill="#3D4148" d="
+        M 492,740
+        C 528,728 566,720 600,718
+        L 610,768
+        C 574,772 536,782 502,796
+        Z" />
+      <!-- 右靴口右侧暗面 -->
+      <path fill="#2E3136" d="
+        M 565,721 L 600,718 L 610,768 L 572,772 Z" />
+    </g>
+  </g>
+
+  <!-- ==================== 5. 头部与震惊表情五官 (Head & Facial Expression) ==================== -->
+  <g id="head-and-face">
+    <path class="outline-bold" fill="#FCEEE9" d="
+      M 218,340
+      C 212,405 224,465 252,492
+      C 288,512 342,518 395,512
+      C 448,505 478,478 482,445
+      C 484,415 472,365 462,330 Z" />
+
+    <path fill="url(#faceGloomGrad)" d="
+      M 218,340
+      C 214,395 222,445 245,475
+      C 288,452 335,442 385,442
+      C 425,442 458,452 480,462
+      C 482,425 472,368 462,330 Z" />
+
+    <line x1="264" y1="452" x2="265" y2="468" stroke="#4A424F" stroke-width="2.8" stroke-linecap="round" />
+    <line x1="273" y1="452" x2="274" y2="464" stroke="#4A424F" stroke-width="2.8" stroke-linecap="round" />
+    <line x1="282" y1="450" x2="283" y2="460" stroke="#4A424F" stroke-width="2.5" stroke-linecap="round" />
+
+    <line x1="442" y1="436" x2="443" y2="448" stroke="#4A424F" stroke-width="2.8" stroke-linecap="round" />
+    <line x1="452" y1="436" x2="453" y2="450" stroke="#4A424F" stroke-width="2.8" stroke-linecap="round" />
+    <line x1="464" y1="434" x2="465" y2="448" stroke="#4A424F" stroke-width="2.8" stroke-linecap="round" />
+
+    <g id="left-eye">
+      <ellipse class="outline-bold" cx="278" cy="412" rx="45" ry="29" transform="rotate(-11 278 412)" fill="#FFFFFF" />
+      <path class="outline-thin" fill="#FFFFFF" d="
+        M 238,435
+        C 234,442 238,450 246,450
+        C 254,450 258,442 252,436 Z" />
+    </g>
+
+    <g id="right-eye">
+      <ellipse class="outline-bold" cx="434" cy="404" rx="37" ry="25" transform="rotate(6 434 404)" fill="#FFFFFF" />
+      <path class="outline-thin" fill="#FFFFFF" d="
+        M 452,424
+        C 450,432 456,438 464,436
+        C 470,434 470,425 462,420 Z" />
+    </g>
+
+    <g id="mouth">
+      <path class="outline" fill="url(#mouthGrad)" d="
+        M 370,452
+        C 380,446 392,448 395,456
+        C 396,472 388,495 379,502
+        C 372,498 368,472 370,452 Z" />
+      <polygon points="371,453 379,452 374,463" fill="#FFFFFF" stroke="#1B1817" stroke-width="1.8" stroke-linejoin="round" />
+    </g>
+  </g>
+
+  <!-- ==================== 6. 前发、大呆毛、发箍与粉色挑染 (Front Hair & Headband) ==================== -->
+  <g id="front-hair-and-headband">
+    <path class="outline-bold" fill="#4BA8BC" d="
+      M 330,162
+      C 362,152 392,152 420,158
+      L 415,198
+      L 335,198 Z" />
+
+    <path class="outline-bold" fill="url(#hairMainGrad)" d="
+      M 210,202
+      C 245,152 292,150 342,196
+      C 365,160 398,148 430,156
+      C 485,190 542,255 562,335
+      C 574,385 568,435 552,472
+      C 542,458 528,438 512,418
+      C 514,435 518,455 522,475
+      C 512,492 495,505 474,510
+      C 480,478 476,438 470,402
+      C 448,382 418,358 392,338
+      C 398,358 402,385 402,412
+      C 392,412 384,405 375,392
+      C 374,400 372,412 368,422
+      C 356,418 348,405 342,388
+      C 340,398 334,412 325,420
+      C 308,395 302,352 302,305
+      C 282,342 242,372 218,392
+      C 215,445 232,485 262,502
+      C 252,518 235,532 215,528
+      C 186,508 162,462 152,412
+      C 148,432 148,458 158,480
+      C 135,468 120,445 122,422
+      L 175,260 Z" />
+
+    <path class="outline" fill="none" d="M 304,268 C 300,312 304,365 325,420" />
+    <path class="outline" fill="none" d="M 432,278 C 462,315 485,365 492,415" />
+
+    <!-- 黑色发箍 -->
+    <path class="outline-bold" fill="#323439" d="
+      M 225,265
+      C 278,220 342,196 402,194
+      L 412,232
+      C 350,238 282,268 225,318 Z" />
+
+    <!-- 头顶高耸大呆毛延伸至左侧大卷发 -->
+    <path class="outline-bold" fill="url(#hairMainGrad)" d="
+      M 342,196
+      C 325,135 302,88 278,62
+      C 212,98 152,178 112,288
+      C 92,340 60,362 42,348
+      C 32,338 35,318 42,302
+      C 22,328 20,378 44,412
+      C 64,436 102,436 128,412
+      C 148,390 162,352 172,310
+      C 192,232 232,162 275,135
+      C 295,142 315,165 342,196 Z" />
+    <path fill="#8CE8F6" d="
+      M 278,68 C 228,102 178,165 142,248 C 168,185 218,118 278,84 Z" />
+    <path class="outline" fill="none" d="M 138,342 C 118,382 85,402 58,395" />
+
+    <!-- 粉色挑染发缕 -->
+    <g id="pink-streak">
+      <path class="outline-bold" fill="url(#pinkStreakGrad)" d="
+        M 296,174
+        C 238,195 190,258 176,342
+        C 166,402 180,458 204,495
+        C 205,474 208,454 212,438
+        C 218,458 224,476 232,488
+        C 222,425 222,355 244,288
+        C 260,235 282,198 310,180 Z" />
+      <path fill="#D64864" d="
+        M 296,174 C 265,186 235,212 214,248 C 238,222 268,198 306,182 Z" />
+      <ellipse cx="206" cy="308" rx="4.5" ry="9" transform="rotate(12 206 308)" fill="#FFFFFF" />
+    </g>
+
+    <!-- 高光点与悬浮粗眉 -->
+    <ellipse cx="338" cy="318" rx="5" ry="10" transform="rotate(-5 338 318)" fill="#FFFFFF" />
+    <circle cx="350" cy="324" r="3.5" fill="#FFFFFF" />
+    <ellipse cx="443" cy="292" rx="4.5" ry="8" transform="rotate(-25 443 292)" fill="#FFFFFF" />
+
+    <path class="outline" fill="#52BED2" d="
+      M 248,372
+      C 262,355 288,350 304,358
+      C 305,368 282,376 248,372 Z" />
+    <path class="outline" fill="#52BED2" d="
+      M 384,335
+      C 402,328 428,336 436,350
+      C 425,358 398,352 384,335 Z" />
+
+    <!-- 头顶黑猫发饰 -->
+    <g id="black-cat-ornament">
+      <path class="outline" fill="url(#hairMainGrad)" d="
+        M 365,195 C 382,158 402,146 420,150 L 405,195 Z" />
+      <path class="outline-bold" fill="#323439" d="
+        M 498,225
+        C 518,228 528,242 522,258
+        C 515,272 495,270 476,255 Z" />
+      <path class="outline-bold" fill="#323439" d="M 412,150 L 434,128 L 456,144 Z" />
+      <path class="outline-bold" fill="#323439" d="M 480,158 L 508,168 L 498,195 Z" />
+      <path class="outline-bold" fill="#323439" d="
+        M 392,175
+        C 402,145 445,138 478,156
+        C 505,172 510,212 492,238
+        C 475,260 432,252 405,232
+        C 385,216 384,195 392,175 Z" />
+      <path fill="#484B52" d="
+        M 402,178 C 412,155 445,148 472,162 C 445,158 418,165 402,178 Z" />
+      <ellipse cx="430" cy="164" rx="14" ry="9.5" transform="rotate(15 430 164)" fill="#222428" stroke="#FFFFFF" stroke-width="3" />
+      <ellipse cx="482" cy="186" rx="14" ry="10.5" transform="rotate(35 482 186)" fill="#222428" stroke="#FFFFFF" stroke-width="3" />
+      <path class="outline-thin" fill="#F28B82" d="
+        M 442,176
+        L 462,184
+        C 456,198 446,205 440,202
+        C 436,198 438,186 442,176 Z" />
+      <polygon points="443,178 449,180 445,185" fill="#FFFFFF" />
+    </g>
+  </g>`;
+
 	api.empty = function (text) {
 		var el = E('div', { 'class': 'mt5700-empty' });
 		/*
-		 * 140px 见方：原图是 1000x1000 的方图；空态容器（.mt5700-empty）
-		 * 上下留白 36px，140px 在 320px 窄屏上也放得下，再大就开始挤正文。
+		 * 空白舞台：两个角色都在这一块空白区域里随机落位，每次刷新重掷。
+		 * 主立绘 140px（1000×1000 方图），伙伴 mint 68px（777×1000 竖图）。
+		 * 抛硬币定主图占左/右半场，双方各自在半场带状区随机取点 + 随机旋转，
+		 * 两图分居两侧天然不重叠；旋转加在定位壳上，不覆盖 svg 自身的漂浮动画。
 		 */
+		var stage = E('div', { 'class': 'mt-anime-empty-stage' });
+
 		var svg = svgEl('svg', {
 			'class': 'mt-anime-empty-svg',
 			viewBox: '0 0 1000 1000',
@@ -1339,7 +2104,41 @@ var Mt5700 = (function () {
 		svg.innerHTML = MT_ANIME_EMPTY_SVG
 			.replace(/id="([^"]+)"/g, 'id="$1-' + uid + '"')
 			.replace(/url\(#([^)]+)\)/g, 'url(#$1-' + uid + ')');
-		el.appendChild(svg);
+
+		var mint = svgEl('svg', {
+			'class': 'mt-anime-mint-svg',
+			viewBox: '0 0 777 1000',
+			width: '68',
+			height: '88',
+			xmlns: 'http://www.w3.org/2000/svg'
+		});
+		var uid2 = ++MT_ANIME_EMPTY_SEQ;
+		mint.innerHTML = MT_MINT_SVG
+			.replace(/id="([^"]+)"/g, 'id="$1-' + uid2 + '"')
+			.replace(/url\(#([^)]+)\)/g, 'url(#$1-' + uid2 + ')');
+
+		var mainSide = Math.random() < 0.5 ? 'left' : 'right';
+		var mainOff = Math.round(3 + Math.random() * 13);   /* 主图距边 3–16% */
+		var mainTop = Math.round(Math.random() * 24);       /* 主图顶部 0–24% */
+		var mintSide = mainSide === 'left' ? 'right' : 'left';
+		var mintOff = Math.round(3 + Math.random() * 15);   /* mint 距边 3–18% */
+		var mintTop = Math.round(8 + Math.random() * 44);   /* mint 顶部 8–52% */
+
+		var mainShell = E('div', { 'class': 'mt-anime-pos-shell mt-anime-pos-main' });
+		mainShell.style[mainSide] = mainOff + '%';
+		mainShell.style.top = mainTop + '%';
+		mainShell.style.transform = 'rotate(' + Math.round(-10 + Math.random() * 20) + 'deg)';
+		mainShell.appendChild(svg);
+		stage.appendChild(mainShell);
+
+		var mintShell = E('div', { 'class': 'mt-anime-pos-shell mt-anime-pos-mint' });
+		mintShell.style[mintSide] = mintOff + '%';
+		mintShell.style.top = mintTop + '%';
+		mintShell.style.transform = 'rotate(' + Math.round(-16 + Math.random() * 32) + 'deg)';
+		mintShell.appendChild(mint);
+		stage.appendChild(mintShell);
+
+		el.appendChild(stage);
 		el.appendChild(E('div', { 'class': 'mt5700-empty-text' }, text || '暂无数据喵~'));
 		return el;
 	};
