@@ -116,6 +116,8 @@ function jsonParse(s) {
 				if (e == 'n') { out += '\n'; }
 				else if (e == 't') { out += '\t'; }
 				else if (e == 'r') { out += '\r'; }
+				else if (e == 'b') { out += chr(8); }
+				else if (e == 'f') { out += chr(12); }
 				else if (e == '"') { out += '"'; }
 				else if (e == '\\') { out += '\\'; }
 				else if (e == '/') { out += '/'; }
@@ -130,13 +132,17 @@ function jsonParse(s) {
 				 *   - 页面显示的应答与实际下发/回传的内容不一致；
 				 *   - 任何拿应答再做判断的逻辑（例如把 \u001a 当作提交结束符）
 				 *     一律失配。
-				 * 这里只处理 BMP 内的四位数（JSON 里 \uXXXX 就是四位十六进制）；
-				 * 代理对（\uD8xx）在本插件的应答里不会出现，保持原样即可。
+				 * 必须用 uchr() 而不是 chr()：chr 是字节级的，值 >255 直接截断成
+				 * 0xFF（实机验证 chr(hex("4e2d")) 得到单字节 0xFF），一旦序列化方
+				 * 改成对非 ASCII 也走 \u 转义就会静默产出乱码；uchr 编 UTF-8。
+				 * serde_json 默认只对 <0x20 的控制字符写 \u00XX，但这里不依赖
+				 * 序列化方的这个行为。只处理 BMP 内的四位数（JSON 里 \uXXXX 就是
+				 * 四位十六进制）；代理对（\uD8xx）在本插件的应答里不会出现。
 				 */
 				else if (e == 'u') {
 					let hexs = substr(s, i + 1, 4);
 					if (length(hexs) == 4 && match(hexs, /^[0-9A-Fa-f]{4}$/) != null) {
-						out += chr(hex(hexs));
+						out += uchr(hex(hexs));
 						i += 4;
 					} else {
 						out += e;
