@@ -180,12 +180,22 @@ ok('视图不含 AT+CLCC 命令字面量', !/["']AT\+CLCC/.test(viewSrc));
 ok('视图不含裸 sendCommand 通道', !/sendCommand\(/.test(viewSrc));
 /* 前端白名单与后端同口径 */
 ok('视图有号码白名单正则', viewSrc.includes('/^\\+?\\[0-9\\*#\\]+$/') || viewSrc.includes("NUMBER_RE"));
-ok('CLCC 轮询存在（2s）', /interval\(2000/.test(viewSrc));
+/*
+ * ★ 2026-10-24：兜底轮询改为**自适应** —— 通话中 2s、空闲 5s。
+ *   依据：状态变化的主通道是 URC（^CCALLSTATE/^CEND → urcKick），这条只是
+ *   「URC 丢了 / 老后端没转发」的兜底。空闲时没有计时在跑，5s 延迟无感，
+ *   而 2s 等于每页 30 条/分钟白占独占串口（串口只有一条，rpcd 还是单线程）。
+ *   通话中保持 2s：接通/挂断回显不能迟滞。
+ */
+ok('CLCC 兜底轮询存在，且空闲 5s / 通话中 2s（自适应）',
+	/inCall\(\) \? 2000 : 5000/.test(viewSrc),
+	'仍是固定 2s：URC 才是主通道，空闲时不必这么密');
 ok('订阅来电推送并在 dispose 时退订',
 	viewSrc.includes('AtWs.client.subscribe(onPush)') &&
 	viewSrc.includes('AtWs.client.unsubscribe(onPush)'));
 ok('busy 时不叠加轮询（AT 通道独占串行）',
-	/if \(st\.busy\) \{ return; \}/.test(viewSrc));
+	/if \(!st\.busy\) refreshStatus\(\)/.test(viewSrc),
+	'busy 期间仍发 CLCC');
 
 /* ---------- ⑧ 静音 / 线路信息（ucode） ---------- */
 
@@ -454,12 +464,12 @@ ok('视图记录写出 direction 字段',
 ok('视图方向优先读 direction 字符串，退回 dir 整数（老记录兼容）',
 	viewSrc.includes("r.direction === 'incoming'") && viewSrc.includes('(r.dir === 1)'));
 
-/* ★ 2 秒轮询只允许 status 一条：串口独占、rpcd 单线程（红线 63/70）。
-   历史上自检曾一次发 4 条 AT，若混进轮询就会每 2 秒把 LuCI 卡住一次。 */
-ok('2 秒轮询里只有 status 查询（不许夹带别的动作）',
+/* ★ 兜底轮询只允许 status 一条：串口独占、rpcd 单线程（红线 63/70）。
+   历史上自检曾一次发 4 条 AT，若混进轮询就会每拍把 LuCI 卡住一次。 */
+ok('兜底轮询里只有 status 查询（不许夹带别的动作）',
 	(function () {
-		const i = viewSrc.indexOf('Mt5700.interval(2000');
-		const ivBlock = (i < 0) ? '' : viewSrc.slice(i, i + 400);
+		const i = viewSrc.indexOf('function clccTick()');
+		const ivBlock = (i < 0) ? '' : viewSrc.slice(i, i + 500);
 		return ivBlock.includes('refreshStatus()') && ivBlock.indexOf("AtWs.call('info'") < 0;
 	})());
 

@@ -1006,23 +1006,46 @@ return L.view.extend({
 		}
 		document.addEventListener('click', onGesture);
 
-		Mt5700.connectThen(function () {
+	/* ---------- CLCC 兜底轮询（自适应：空闲 5s / 通话中 2s） ---------- */
+
+	/*
+	 * ★ 为什么空闲能放慢：状态变化的主通道是 URC —— ^CCALLSTATE / ^CEND 一到，
+	 *   onPush → urcKick 立刻读一次 CLCC（见下方「URC 事件驱动」）。这条定时器
+	 *   只是「URC 丢了 / 老后端没转发」时的兜底：空闲时没有计时在跑，5s 的兜底
+	 *   延迟完全无感（2s 时每页 30 条/分钟，5s 时 12 条/分钟）。
+	 * ★ 为什么通话中仍 2s：接通/挂断的回显不能迟滞，此时 CLCC 是计时与状态的
+	 *   唯一现算来源（URC 只当触发器）。
+	 * ★ 为什么不用 Mt5700.interval：它是固定 setInterval，改不了「下一拍」。
+	 *   这里自排 setTimeout；句柄与停止标志在 _onDispose 里清，与 kickTimer 同一处置。
+	 */
+	var clccTimer = 0;
+	var clccStopped = false;
+
+	function inCall() {
+		return !!(st.calls && st.calls.length > 0);
+	}
+
+	function clccTick() {
+		if (clccStopped) return;
+		/* 页面已脱离文档（切页）：自停，绝不在别的页面上打 CLCC */
+		var doc = page && page.ownerDocument;
+		if (doc && !doc.contains(page)) { clccStopped = true; return; }
+		/* 操作进行中不叠加查询：AT 通道是独占串行的 */
+		if (!st.busy) refreshStatus();
+		clccTimer = setTimeout(clccTick, inCall() ? 2000 : 5000);
+	}
+
+	Mt5700.connectThen(function () {
 			/* 本页需要「秒级」状态可见性 —— 把事件轮询压到 500ms（见 tightenPoll） */
 			tightenPoll();
 			refreshStatus();
 			refreshInfo();
 			loadLog();
 			/*
-			 * 2s 轮询：CLCC 单条 65~133ms，与网络状态页的信号轮询同量级。
-			 * interval 自带 scopeEl 检查——离开页面自动停，不会跟用户抢串口。
-			 * ★ 它现在是**兜底**而不是主通道：状态变化由 URC 触发即时刷新，
-			 *   这一条负责兜住「URC 丢了 / 老后端没转发」的情况。
+			 * 首拍 2s（进页面先拿一次状态），之后按「是否在通话」自适应排下一拍。
+			 * 见 clccTick 上方说明。
 			 */
-			Mt5700.interval(2000, function () {
-				/* 操作进行中不叠加查询：AT 通道是独占串行的 */
-				if (st.busy) { return; }
-				refreshStatus();
-			}, page);
+			clccTimer = setTimeout(clccTick, 2000);
 		});
 
 		if (AtWs.client && AtWs.client.subscribe) {
@@ -1037,6 +1060,9 @@ return L.view.extend({
 			 *   refreshStatus —— 等于离开语音页之后仍有一条 CLCC 打到模组上。
 			 */
 			if (kickTimer) { clearTimeout(kickTimer); kickTimer = 0; }
+			/* CLCC 兜底轮询是自排 setTimeout，不在 Mt5700.interval 的托管名单里 */
+			clccStopped = true;
+			if (clccTimer) { clearTimeout(clccTimer); clccTimer = 0; }
 			/* 先还原轮询间隔再退订：此刻本页还订阅着，重启定时器用的是原值 */
 			restorePoll();
 			document.removeEventListener('click', onGesture);

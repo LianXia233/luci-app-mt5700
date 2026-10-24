@@ -5,6 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.38] - 2026-10-24
+
+### Changed — 语音通话页 CLCC 兜底轮询自适应（空闲 5s / 通话中 2s）
+
+通话状态的主通道是 URC（`^CCALLSTATE` / `^CEND` → `urcKick` 立即读一次 CLCC），
+原先固定 2s 的轮询只是「URC 丢了 / 老后端没转发」时的兜底 —— 空闲时每页仍打
+30 条/分钟，白占独占串口（串口只有一条，rpcd 还是单线程）。
+
+- 空闲 **5s**（12 条/分钟），通话中仍 **2s**：接通/挂断的回显不能迟滞，
+  此时 CLCC 是计时与状态的唯一现算来源。
+- 改用自排 `setTimeout` + `clccTick()` —— `Mt5700.interval` 是固定周期，改不了
+  「下一拍」。句柄与停止标志在 `_onDispose` 里清；页面脱离文档时自停
+  （与 `kickTimer` 同一处置）。
+- 同步 `tests/voice-call-contract.test.js` 的三条断言（原钉「固定 2s」与
+  `if (st.busy) { return; }`，后者在自排链里会直接掐死定时器）。
+
 ## [2.4.37] - 2026-10-24
 
 ### Changed — 定时锁频面板合并为单卡（修「编排配置没内容」）
