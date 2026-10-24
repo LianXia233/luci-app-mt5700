@@ -23,8 +23,20 @@ const fixtures = require(path.join(HERE, 'sms-fixtures.js'));
 let pass = 0;
 let fail = 0;
 
+/*
+ * 方向判定。
+ *
+ * GH 版把气泡重做成 IM 形态：气泡本体是中性样式（`.mt5700-sms-bubble`），
+ * 左右由**行容器** `.mt5700-sms-row.outgoing|incoming` 决定，头像也在行里。
+ * 所以方向要问气泡的 `parentNode`，而不是气泡自己的 className。
+ */
+function isSentBubble(b) {
+	const row = b && b.parentNode;
+	return !!row && String(row.className || '').indexOf('outgoing') >= 0;
+}
+
 function dirsOf(bubbles) {
-	return bubbles.map((b) => (b.className.indexOf('mt5700-sms-bubble-sent') >= 0 ? 'S' : 'R')).join('');
+	return bubbles.map((b) => (isSentBubble(b) ? 'S' : 'R')).join('');
 }
 
 function check(name, actual, expected) {
@@ -101,6 +113,27 @@ Object.defineProperty(Node.prototype, 'innerHTML', {
 	set: function (v) { this.childNodes = []; this._text = String(v); }
 });
 
+/*
+ * `classList`：真 DOM 节点都有，短信中心用它往页面/hero 上挂状态类
+ * （`mt5700-sms-shell`、`mt5700-sms-hero-compact`、`is-mobile-chat`）。
+ * 桩缺了这一项，页面第一行就抛 TypeError —— 那是桩不够，不是视图有问题。
+ */
+Node.prototype.classList = {
+	add: function () {
+		var cs = (this.className || '').split(/\s+/).filter(Boolean);
+		for (var i = 0; i < arguments.length; i++) {
+			if (cs.indexOf(arguments[i]) < 0) cs.push(arguments[i]);
+		}
+		this.className = cs.join(' ');
+	},
+	remove: function () {
+		var drop = Array.prototype.slice.call(arguments);
+		this.className = (this.className || '').split(/\s+/)
+			.filter(function (c) { return c && drop.indexOf(c) < 0; }).join(' ');
+	},
+	contains: function (c) { return (this.className || '').split(/\s+/).indexOf(c) >= 0; },
+	toggle: function (c, on) { if (on) this.classList.add(c); else this.classList.remove(c); }
+};
 Node.prototype.appendChild = function (c) { c.parentNode = this; this.childNodes.push(c); return c; };
 Node.prototype.removeChild = function (c) {
 	const i = this.childNodes.indexOf(c);
@@ -116,6 +149,20 @@ Node.prototype.dispatch = function (t, ev) {
 	(this._listeners[t] || []).forEach((fn) => fn(ev || {}));
 };
 Node.prototype.querySelector = function () { return null; };
+/*
+ * 表单提交：真机上「发送」按钮调 `form.requestSubmit()`，页面在 submit
+ * 事件里 send()。桩照同一语义派发，别让测试绕过页面真正的发送入口。
+ */
+Node.prototype.requestSubmit = function () { this.dispatch('submit', { preventDefault: () => {} }); };
+/* 版式测量：会话区靠 `getBoundingClientRect` 量文档坐标定高（纯 CSS 算不出
+ * 导航栏与 hero 的高度）。桩一律返回 0 尺寸 —— 本测试要钉的是渲染结果，
+ * 高度自适应另有实机与 render-shot.py 覆盖。 */
+Node.prototype.getBoundingClientRect = function () {
+	return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
+};
+Node.prototype.offsetHeight = 0;
+Node.prototype.offsetTop = 0;
+Node.prototype.clientHeight = 0;
 
 /* LuCI 的 E(tag, attrs, children) */
 function E(tag, attrs, children) {
@@ -138,7 +185,7 @@ function findAll(root, cls) {
 	const out = [];
 	(function walk(n) {
 		if (!n || !n.childNodes) return;
-		if (String(n.className || '').split(/\s+/).indexOf(cls) >= 0) out.push(n);
+		if (String(n.className || '').split(/\s+/).indexOf(cls) >= 0 || (n.tagName||'').toLowerCase() === cls) out.push(n);
 		n.childNodes.forEach(walk);
 	})(root);
 	return out;
@@ -146,6 +193,18 @@ function findAll(root, cls) {
 
 function textsOf(nodes) {
 	return nodes.map((n) => n.textContent);
+}
+
+/*
+ * 气泡里的「时刻」文本。
+ *
+ * 时刻与「删除」按钮被收进同一行（`.mt5700-sms-meta`，删除按钮不进正文），
+ * 所以取 `span.mt5700-sms-time` 的正文，而不是整行的 textContent —— 后者会
+ * 把按钮文字「删除」粘在时刻后面。
+ */
+function bubbleTime(b) {
+	const meta = findAll(b, 'mt5700-sms-time')[0];
+	return meta ? meta.textContent : null;
 }
 
 /* ==================== 3. 装载 sms_center.js 并渲染 ==================== */
@@ -186,26 +245,48 @@ function loadView(Parse, ls, opts) {
 		});
 	}
 
+	/*
+	 * `Mt5700.page()` 返回的是真 DOM 节点，短信中心会在它（以及 `_hero`）上挂
+	 * 状态类。桩节点必须带 classList，否则页面第一行就抛 TypeError —— 那是桩不够，
+	 * 不是视图有问题。
+	 */
 	const documentStub = {
 		createElement: (tag) => new Node(tag),
+		/* 高度自适应的第二次回扣会读整页 scrollHeight；桩给 0 表示「不溢出」 */
+		documentElement: { scrollHeight: 0 },
 		body: new Node('body'),
 		hidden: false,
 		/* 短信中心会订阅 visibilitychange（页面隐藏即释放前台会话） */
 		addEventListener: (t, fn) => { (documentStub._l = documentStub._l || {})[t] = fn; }
 	};
 
+	/* 统一样的按钮工厂：类名 + 可选点击回调（见 Mt5700.*Button 的说明） */
+	function makeButton(cls, label, fn) {
+		const b = E('button', { class: cls }, label);
+		if (typeof fn === 'function') b.addEventListener('click', fn);
+		return b;
+	}
+
 	const toasts = [];
 	const Mt5700 = {
-		page: () => ({ _body: new Node('div'), className: 'mt5700-page' }),
-		primaryButton: (label) => E('button', { class: 'mt5700-btn' }, label),
-		dangerButton: (label) => E('button', { class: 'mt5700-btn mt5700-btn-danger' }, label),
-		ghostButton: (label) => E('button', { class: 'mt5700-btn' }, label),
-		/* 删除按钮靠第二个参数挂 click，桩必须接住，否则删除流程测不到 */
-		button: (label, fn) => {
-			const b = E('button', { class: 'mt5700-btn' }, label);
-			if (typeof fn === 'function') b.addEventListener('click', fn);
-			return b;
+		page: () => {
+			const root = new Node('div');
+			root.className = 'mt5700-page';
+			root._body = new Node('div');
+			root._hero = new Node('div');
+			return root;
 		},
+		/*
+		 * 按钮桩必须接住第二个参数（点击回调）。
+		 *
+		 * `Mt5700.primaryButton/dangerButton/ghostButton(label, fn)` 是真接口：
+		 * 删除确认、发送、批量删除这些动作全靠这个回调。桩只造壳不挂事件时，
+		 * 弹窗里的「删除」点下去什么都不会发生，而测试还会以为点过了。
+		 */
+		primaryButton: (label, fn) => makeButton('mt5700-btn', label, fn),
+		dangerButton: (label, fn) => makeButton('mt5700-btn mt5700-btn-danger', label, fn),
+		ghostButton: (label, fn) => makeButton('mt5700-btn', label, fn),
+		button: (label, fn) => makeButton('mt5700-btn', label, fn),
 		empty: (text) => E('div', { class: 'mt5700-empty' }, text),
 		panelActions: function () {
 			const wrap = E('div', { class: 'mt5700-panel-actions' });
@@ -222,6 +303,17 @@ function loadView(Parse, ls, opts) {
 
 	const Ui = {
 		promptModal: () => {},
+		/*
+		 * 删除确认弹窗。
+		 *
+		 * GH 版把「删一条短信」做成了带勾选框的确认弹窗（可选「同时删除本地
+		 * 记录文件」），不再直接下发 `sms delete`。桩必须真的**点一下确认**，
+		 * 否则删除链一步都不会走 —— 那是桩偷懒，不是页面坏了。
+		 * 这里复用极简 DOM：拿 documentStub.body 上最后一个弹窗，点它的主按钮。
+		 */
+		confirmModal: (title, message, okText, onOk) => {
+			if (typeof onOk === 'function') onOk(true);
+		},
 		/* 真机上 Ui.startup 会等页面挂载完再回调；这里立即回调，让 refresh 跑起来 */
 		startup: (body, cb) => { cb(); }
 	};
@@ -266,6 +358,23 @@ function loadView(Parse, ls, opts) {
 						entries: backendEntries(), fetchedAt: Date.now(), totalLines: pduList.length
 					} });
 				}
+				/*
+				 * 归档三个动作：GH 版把「发出去的短信」落到路由器本地，
+				 * 页面每次刷新都会先问统计、选中会话时拉一次记录。
+				 * 这里给一份最小可用的空归档 —— 本测试钉的是模组侧列表的渲染，
+				 * 归档与模组存储合并成单条时间轴由 e2e 与实机覆盖。
+				 */
+				if (action === 'store_stats') {
+					return Promise.resolve({ success: true, result: {
+						dir: '/etc/at-webserver/SMS', totalBytes: 0, maxBytes: 2097152, conversations: []
+					} });
+				}
+				if (action === 'store_read') {
+					return Promise.resolve({ success: true, result: { entries: [] } });
+				}
+				if (action === 'store_drop') {
+					return Promise.resolve({ success: true, result: { scope: 'records', dropped: 0, touched: [] } });
+				}
 				if (action === 'capacity') {
 					return Promise.resolve({ success: true, result: { storage: STORAGE, memFull: false } });
 				}
@@ -290,7 +399,7 @@ function loadView(Parse, ls, opts) {
 					} });
 				}
 				if (action === 'purge' || action === 'set_storage' || action === 'get_smsc' || action === 'set_smsc') {
-					return Promise.resolve({ success: true, result: { storage: STORAGE, smsc: '+8613800755500' } });
+					return Promise.resolve({ success: true, result: { storage: STORAGE, smsc: '+8613800000000' } });
 				}
 				return Promise.resolve({ success: false, error: '未知短信动作 ' + action });
 			},
@@ -305,11 +414,30 @@ function loadView(Parse, ls, opts) {
 	);
 
 	const L = { view: { extend: (def) => def } };
+	/*
+	 * `window.requestAnimationFrame` / `setTimeout` 的桩：会话区高度要靠 JS 量
+	 * 文档坐标定高（纯 CSS 算不出导航栏与 hero 的高度），页面启动时会排一帧。
+	 * 桩按「同步回调」实现 —— 本测试要钉的是渲染结果，不是动画时序。
+	 */
+	const windowStub = {
+		requestAnimationFrame: (fn) => { fn(0); return 1; },
+		cancelAnimationFrame: () => {},
+		/* 两次重校（400/1500ms）不跑：本测试只钉首帧渲染结果 */
+		setTimeout: () => 0,
+		clearTimeout: () => {},
+		addEventListener: () => {},
+		getComputedStyle: () => ({ getPropertyValue: () => '' }),
+		innerHeight: 900,
+		innerWidth: 1440,
+		pageYOffset: 0,
+		scrollY: 0,
+		scrollTo: () => {}
+	};
 	const view = factory(
-		L, E, Mt5700, Ui, Parse, AtWs, documentStub, ls || makeLocalStorage(), {}, console
+		L, E, Mt5700, Ui, Parse, AtWs, documentStub, ls || makeLocalStorage(), windowStub, console
 	);
 	const page = view.render.call(view);
-	return { page, calls, toasts };
+	return { page, calls, toasts, doc: documentStub };
 }
 
 /* ==================== 4. 断言 ==================== */
@@ -335,7 +463,13 @@ async function main() {
 	const { page, calls } = loadView(Parse, ls);
 	/* refresh 走 Promise，等微任务队列清空后再读 DOM */
 	await new Promise((r) => setImmediate(r));
-	await new Promise((r) => setImmediate(r));
+	/*
+	 * 刷新链现在是异步的三段：归档统计 → 列表 → 容量，每段一次
+	 * Promise 跳转。原来只等一个 setImmediate 就断言，链路一变长
+	 * 就断言在「列表还没回来」的空页面上（会话数为 0）。
+	 * 这里按「等它稳定」处理：跑几轮微任务，再开始断言。
+	 */
+	for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
 
 	check('确实请求了短信列表（语义化接口）', calls.smsActions.indexOf('list') >= 0, true);
 	check('不再自行下发 AT+CMGL=4（改由后端事务执行）', calls.cmds.indexOf('AT+CMGL=4') < 0, true);
@@ -345,12 +479,25 @@ async function main() {
 
 	/* 存储用量：实机只认标准 `AT+CPMS?`（私有 `AT^CPMS?` 回 ERROR 导致用量永远 0 / 0）。
 	   这里同时断言「用了标准写法」与「没用私有写法」，防止前缀再次写错 */
-	const hints = findAll(page._body, 'mt5700-hint');
 	check('存储用量走后端 capacity（一次真实 AT+CPMS?）', calls.smsActions.indexOf('capacity') >= 0, true);
-	check('存储用量按后端读数渲染', hints.length ? hints[0].textContent : null, '存储：6 / 50');
+	/*
+	 * IM 版把「存储 6 / 50」从一条 hint 挪到了归档概览里的一行小字：
+	 * 断言整页文本包含后端读数，而不是钉死某一个 class 的第一个 hint
+	 * （那种写法一改版式就红，测不到真问题）。
+	 */
+	check('存储用量按后端读数渲染', String(page._body.textContent).indexOf('6 / 50') >= 0, true);
 
-	const contactItems = findAll(page._body, 'mt5700-sms-item');
-	const contactNumbers = contactItems.map((n) => n.childNodes[0].textContent);
+	/*
+	 * GH 版把会话列表重做成 IM 形态：每一项是 `<button class="mt5700-sms-conv">`，
+	 * 内部依次是头像 `<img>`、`.mt5700-sms-conv-copy`（号码 + 预览）、时间。
+	 * 号码不再等于 `childNodes[0].textContent`（那是头像，没有文字），
+	 * 要按类名取 `.mt5700-sms-conv-name`。
+	 */
+	const contactItems = findAll(page._body, 'mt5700-sms-conv');
+	const contactNumbers = contactItems.map((n) => {
+		const name = findAll(n, 'mt5700-sms-conv-name')[0];
+		return name ? name.textContent : '';
+	});
 	console.log(`  联系人列表（按最近联系时间倒序）: ${contactNumbers.join(' | ')}`);
 	check('会话数量', contactItems.length, 3);
 	check('会话顺序（最近的在前）', contactNumbers, ['10690000000', '13900139000', '13800138000']);
@@ -383,38 +530,41 @@ async function main() {
 		'好，会议室在 3 号楼 502。'
 	]);
 	check('方向序列 = 收-发-收', dirsOf(bubbles), 'RSR');
-	check('第 1 条是收到的气泡（左）', bubbles[0].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
-	check('第 2 条是发出的气泡（右）', bubbles[1].className.indexOf('mt5700-sms-bubble-sent') >= 0, true);
-	check('第 3 条是收到的气泡（左）', bubbles[2].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
+	check('第 1 条是收到的气泡（左）', isSentBubble(bubbles[0]), false);
+	check('第 2 条是发出的气泡（右）', isSentBubble(bubbles[1]), true);
+	check('第 3 条是收到的气泡（左）', isSentBubble(bubbles[2]), false);
 	/* 借位置只借顺序，时刻照旧如实标注，不把推断出来的位置伪装成真实时刻 */
-	check('借位置的那条仍如实标「时间未知」', bubbles[1].childNodes[1].textContent, '时间未知');
-	check('气泡内只留时刻（日期由分隔条承担）', /^\d{2}:\d{2}:\d{2}$/.test(bubbles[0].childNodes[1].textContent), true);
+	check('借位置的那条仍如实标「时间未知」', bubbleTime(bubbles[1]), '时间未知');
+	check('气泡内只留时刻（日期由分隔条承担）', /^\d{2}:\d{2}:\d{2}$/.test(bubbleTime(bubbles[0])), true);
 	const recvA = [bubbles[0]];
 
 	console.log('\n=== 3. 会话 B：只有收到 ===');
 	contactItems[contactNumbers.indexOf('13900139000')].dispatch('click');
 	bubbles = findAll(page._body, 'mt5700-sms-bubble');
 	check('气泡数量', bubbles.length, 1);
-	check('是收到的气泡（左）', bubbles[0].className.indexOf('mt5700-sms-bubble-recv') >= 0, true);
+	check('是收到的气泡（左）', isSentBubble(bubbles[0]), false);
 	check('无分区空态残留', findAll(page._body, 'mt5700-sms-section-empty').length, 0);
 
 	console.log('\n=== 4. 会话 C：发出的短信带绝对有效期 → 标注为近似时间 ===');
 	contactItems[contactNumbers.indexOf('10690000000')].dispatch('click');
 	bubbles = findAll(page._body, 'mt5700-sms-bubble');
 	check('气泡数量', bubbles.length, 2);
-	const sentC = bubbles.filter((b) => b.className.indexOf('mt5700-sms-bubble-sent') >= 0);
+	const sentC = bubbles.filter((b) => isSentBubble(b));
 	check('发出气泡 1 条', sentC.length, 1);
 	check('内容', sentC[0].childNodes[0].textContent, '收到，谢谢。');
-	check('时间带「非发送时刻」标注',
-		sentC[0].childNodes[1].textContent.slice(-6), '非发送时刻）');
-	check('近似时间文案完整',
-		sentC[0].childNodes[1].textContent.indexOf('（有效期，非发送时刻）') > 0, true);
+	/*
+	 * GH 版把这条文案收短了：气泡只标「（近似）」，完整含义
+	 * （SUBMIT 里只有 TP-VP、没有发送时刻）写在页面顶部说明与 CHANGELOG 里。
+	 * 断言钉的是「必须明确标出这不是精确发送时刻」，不再钉具体措辞。
+	 */
+	check('时间带「近似」标注',
+		String(bubbleTime(sentC[0])).slice(-4), '（近似）');
 
 	console.log('\n=== 5. 与推送链路口径一致：短信时间就是 PDU 时间戳（北京时间）===');
 	/* 收到短信的时刻在夹具里是「现在 − 32 分钟」，SCTS 按 UTC+8 生成；
 	   解析后显示的日历时间必须与生成时算好的期望值逐字一致 */
 	check('第一条时间 == 夹具生成的北京时间（时刻部分）',
-		recvA[0].childNodes[1].textContent, pduList[0].display.split(',')[1]);
+		bubbleTime(recvA[0]), pduList[0].display.split(',')[1]);
 	check('夹具期望值确实是北京时间口径', pduList[0].display.slice(0, 2),
 		String(fixtures.beijingParts(-32).year).padStart(2, '0'));
 
@@ -442,15 +592,18 @@ async function main() {
 		const r2 = loadView(Parse2, ls2);
 		await new Promise((r) => setImmediate(r));
 		await new Promise((r) => setImmediate(r));
-		const items2 = findAll(r2.page._body, 'mt5700-sms-item');
-		const nums2 = items2.map((n) => n.childNodes[0].textContent);
+		const items2 = findAll(r2.page._body, 'mt5700-sms-conv');
+		const nums2 = items2.map((n) => {
+			const name = findAll(n, 'mt5700-sms-conv-name')[0];
+			return name ? name.textContent : '';
+		});
 		check('本地缓存不再被合并进列表（会话数仍是 3）', items2.length, 3);
 		items2[nums2.indexOf(pduList[1].number)].dispatch('click');
 		const b2 = findAll(r2.page._body, 'mt5700-sms-bubble');
 		check('气泡仍是模组的 3 条（缓存不制造重复）', b2.length, 3);
 		check('方向序列仍是 收-发-收', dirsOf(b2), 'RSR');
 		/* 模组 SUBMIT 不含发送时刻时如实标注，不再拿本地时间冒充 */
-		check('模组没有时刻的那条仍如实标「时间未知」', b2[1].childNodes[1].textContent, '时间未知');
+		check('模组没有时刻的那条仍如实标「时间未知」', bubbleTime(b2[1]), '时间未知');
 	}
 
 	console.log('\n=== 7. 发送流程：走语义化接口，按三档结论处理 ===');
@@ -465,12 +618,16 @@ async function main() {
 	const SEND_TEXT = '回归测试短信 hello';
 
 	async function triggerSend(r, number, text) {
-		const items = findAll(r.page._body, 'mt5700-sms-item');
-		const nums = items.map((n) => n.childNodes[0].textContent);
+		const items = findAll(r.page._body, 'mt5700-sms-conv');
+		const nums = items.map((n) => {
+			const name = findAll(n, 'mt5700-sms-conv-name')[0];
+			return name ? name.textContent : '';
+		});
 		const target = items[nums.indexOf(number)];
 		if (!target) throw new Error('找不到联系人 ' + number);
 		target.dispatch('click');
-		const ta = findAll(r.page._body, 'mt5700-input')[0];
+		/* 输入区是 IM 版唯一的 textarea（类名由 CSS 定，桩里按标签取更稳） */
+		const ta = findAll(r.page._body, 'textarea')[0];
 		ta.value = text;
 		ta.dispatch('keydown', { key: 'Enter', shiftKey: false, preventDefault: () => {} });
 		for (let i = 0; i < 12; i++) await new Promise((r2) => setImmediate(r2));
@@ -547,12 +704,19 @@ async function main() {
 		const rD = loadView(loadParse(lsD), lsD);
 		await new Promise((r) => setImmediate(r));
 		await new Promise((r) => setImmediate(r));
-		const items = findAll(rD.page._body, 'mt5700-sms-item');
-		const nums = items.map((n) => n.childNodes[0].textContent);
+		const items = findAll(rD.page._body, 'mt5700-sms-conv');
+		const nums = items.map((n) => {
+			const name = findAll(n, 'mt5700-sms-conv-name')[0];
+			return name ? name.textContent : '';
+		});
 		items[nums.indexOf('13900139000')].dispatch('click');
 		const bubbles = findAll(rD.page._body, 'mt5700-sms-bubble');
-		/* 气泡内最后一个按钮就是「删除」 */
-		bubbles[0].childNodes[bubbles[0].childNodes.length - 1].dispatch('click');
+		/* 气泡内带 `mt5700-sms-del` 类名的按钮就是「删除」 */
+		const delBtn = findAll(bubbles[0], 'mt5700-sms-del')[0];
+		delBtn.dispatch('click');
+		/* 页面自己弹的是内联确认框（不是 Ui.confirmModal）：点里面的确认按钮 */
+		const modalOk = findAll(rD.doc.body, 'mt5700-btn-danger').pop();
+		if (modalOk) modalOk.dispatch('click');
 		for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r));
 		const del = rD.calls.smsCalls.filter((c) => c.action === 'delete')[0];
 		check('删除走 sms(delete)', !!del, true);
@@ -584,15 +748,20 @@ async function main() {
 		await new Promise((r) => setImmediate(r));
 
 		const pick = async function (number) {
-			const items = findAll(rE.page._body, 'mt5700-sms-item');
-			const nums = items.map((n) => n.childNodes[0].textContent);
+			const items = findAll(rE.page._body, 'mt5700-sms-conv');
+			const nums = items.map((n) => {
+				const name = findAll(n, 'mt5700-sms-conv-name')[0];
+				return name ? name.textContent : '';
+			});
 			const hit = nums.indexOf(number);
 			if (hit < 0) return false;
 			items[hit].dispatch('click');
 			for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r));
 			const bubbles = findAll(rE.page._body, 'mt5700-sms-bubble');
 			const last = bubbles[bubbles.length - 1];
-			last.childNodes[last.childNodes.length - 1].dispatch('click');
+			findAll(last, 'mt5700-sms-del')[0].dispatch('click');
+			const okBtn = findAll(rE.doc.body, 'mt5700-btn-danger').pop();
+			if (okBtn) okBtn.dispatch('click');
 			for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r));
 			return true;
 		}

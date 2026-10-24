@@ -61,7 +61,14 @@ function ucs2(text) {
 
 /* ---------- 时间 ---------- */
 
-/* UTC+8 = 8 × 4 个 15 分钟；PDU 时区字节 */
+/*
+ * UTC+8 = 8 × 4 = 32 个 15 分钟；PDU 时区字节。
+ *
+ * 这个字节**本身也要交换半字节**（和其它 BCD 字段一样，十位在低半字节）：
+ * 32 刻 → "32" → `0x23`。写成 `0x32` 会被读成 "23" 刻 = +345 分钟，
+ * 比东八区多 1 小时 45 分，而夹具下面另算的期望显示文本发现不了这一点 ——
+ * `check-sms-fixtures.js` 就是为这一格准备的。
+ */
 var BEIJING_TZ_QUARTERS = 32;
 
 /*
@@ -243,6 +250,8 @@ module.exports = {
 	cmgrText: cmgrText,
 	beijingParts: beijingParts,
 	timestampHex: timestampHex,
+	/* 只给离线校验脚本用（按 pdu.rs 的读法回读一份夹具） */
+	BEIJING_TZ_QUARTERS: BEIJING_TZ_QUARTERS,
 	CONTACT_A: CONTACT_A,
 	CONTACT_B: CONTACT_B,
 	CONTACT_C: CONTACT_C
