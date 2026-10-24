@@ -1305,8 +1305,8 @@ mod tests {
     #[test]
     fn encode_address_counts_octets_for_smsc() {
         // SMSC 的长度字节记 TOA + 号码字节数。
-        let sca = encode_address("+8613800755500", true, true).unwrap();
-        let digits = "8613800755500".len();
+        let sca = encode_address("+8613800000000", true, true).unwrap();
+        let digits = "8613800000000".len();
         let body_len = (digits + 1) / 2 + 1; // 号码字节（补 F）+ TOA
         assert_eq!(sca[0] as usize, body_len);
         assert_eq!(sca[1], 0x91, "带 + 时按国际号码编码");
@@ -1415,7 +1415,7 @@ mod tests {
         let plan = build_submit_parts(&SubmitOptions {
             destination: "13800138000".into(),
             message: text.clone(),
-            smsc: Some("+8613800755500".into()),
+            smsc: Some("+8613800000000".into()),
             validity: None,
             reference: Some(0x2A),
         })
