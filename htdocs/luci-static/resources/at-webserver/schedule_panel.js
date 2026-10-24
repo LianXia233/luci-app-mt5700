@@ -37,10 +37,15 @@ var SchedulePanel = (function () {
 		var cfg = null;
 		var draft = null;
 		var busy = false;
-		var expanded = false;
 
-		/* ---------- 运行状态卡（含总开关） ---------- */
-		var statusCard = Mt5700.card('定时锁频 · 运行状态',
+		/* ---------- 单卡：运行状态 + 总开关 + 编排（v2.4.37 合并） ----------
+		 * 原先是「运行状态」「编排配置」两张卡：后者默认只有一个「展开配置」
+		 * 按钮，未启用时更只有一行提示 —— 用户看到的就是「编排配置没内容」。
+		 * 状态与编排本来就是同一件事（一静一动），合成一张后：
+		 *   · 少一张卡、少一次点击；
+		 *   · 启用后直接看到表单，不会误判成功能坏了。
+		 */
+		var statusCard = Mt5700.card('定时锁频',
 			'按夜间/日间时段自动切换锁频；关闭后后端不再按时段切换');
 		var statusCardBody = E('div');
 		statusCard._body.appendChild(statusCardBody);
@@ -76,11 +81,9 @@ var SchedulePanel = (function () {
 			});
 		});
 
-		var formCard = Mt5700.card('定时锁频 · 编排配置',
-			'先在「运行状态」卡打开总开关；夜间/日间时段各自独立启用');
+		/* 编排表单容器：与状态行同一张卡，启用后直接渲染（不再折叠） */
 		var formBody = E('div');
-		formCard._body.appendChild(formBody);
-		body.appendChild(formCard);
+		statusCardBody.appendChild(formBody);
 
 		/* ---------- 通用小工具 ---------- */
 
@@ -247,11 +250,7 @@ var SchedulePanel = (function () {
 			formBody.appendChild(periodEditor('day', draft.day));
 
 			formBody.appendChild(Mt5700.panelActions(
-				Mt5700.primaryButton('保存编排', save),
-				Mt5700.button('收起', function () {
-					expanded = false;
-					schedRender();
-				}, 'ghost')
+				Mt5700.primaryButton('保存编排', save)
 			));
 		}
 
@@ -263,8 +262,8 @@ var SchedulePanel = (function () {
 					var parsed = Parse.parseScheduleResponse(res.data);
 					if (parsed) cfg = parsed;
 				}
-				schedRender();
-			}).catch(function () { schedRender(); });
+				renderStatusLine();
+			}).catch(function () { renderStatusLine(); });
 		}
 
 		function load() {
@@ -293,7 +292,8 @@ var SchedulePanel = (function () {
 					draft.day.lte = { type: cfg.day.lte.type, items: draft.day.lte };
 					draft.day.nr = { type: cfg.day.nr.type, items: draft.day.nr };
 				}
-				schedRender();
+				renderStatusLine();
+				renderForm();
 			});
 		}
 
@@ -354,8 +354,14 @@ var SchedulePanel = (function () {
 
 		/* 名字带 sched 前缀：宿主页面 network_settings.js 里另有一套 render，
 		   同名函数在合并后极易混淆（本文件就在它眼皮底下被调用）。 */
-		function schedRender() {
-			// 状态行
+
+		/*
+		 * 只刷状态行 —— 轮询走这条。
+		 * ★ 绝不重建表单：重建会把用户正在改的草稿冲掉。旧实现靠
+		 *   `if (expanded) return` 绕开这点，代价是「一编辑状态行就停止更新」；
+		 *   现在表单常驻，必须把「状态」与「表单」两条渲染路径彻底分开。
+		 */
+		function renderStatusLine() {
 			statusLine.innerHTML = '';
 			if (cfg && cfg.status) {
 				var st = cfg.status;
@@ -367,24 +373,17 @@ var SchedulePanel = (function () {
 			} else {
 				statusLine.appendChild(E('span', { 'class': 'mt5700-hint' }, '暂无运行状态'));
 			}
+		}
 
-			// 总开关状态：卡片始终显示——未启用时给出可行动的提示，而不是把整张卡藏掉
-			formCard.style.display = '';
+		/* 重建编排表单：只在「进入页面」与「保存后重载」时调用 */
+		function renderForm() {
 			formBody.innerHTML = '';
 			if (!cfg || !cfg.enabled || !draft) {
 				formBody.appendChild(E('div', { 'class': 'mt5700-hint' },
 					'定时锁频未启用：打开上方「启用定时锁频」开关后即可编排时段。'));
 				return;
 			}
-
-			if (!expanded) {
-				formBody.appendChild(Mt5700.primaryButton('展开配置', function () {
-					expanded = true;
-					buildForm();
-				}));
-			} else {
-				buildForm();
-			}
+			buildForm();
 		}
 
 		/* ---------- 初始化 ---------- */
@@ -399,17 +398,16 @@ var SchedulePanel = (function () {
 			load();
 		});
 
-		// 定时刷新运行状态（不覆盖表单草稿）
+		/*
+		 * 定时刷新运行状态：只刷状态行，不碰表单草稿。
+		 * ★ 间隔 60s（原 15s）：这里显示的是「当前时段 / 下次切换 / 已切换次数」，
+		 *   全部按小时甚至按天变化 —— 15s 一轮是白占独占串口
+		 *   （每进一次本页就是 4 条/分钟的无效 AT，而串口只有一条）。
+		 */
 		statusTimer = setInterval(function () {
-			if (expanded) return;
-			AtWs.client.sendCommand('AT+SCHED?').then(function (res) {
-				if (res.success && res.data) {
-					var parsed = Parse.parseScheduleResponse(res.data);
-					if (parsed) { cfg = parsed; schedRender(); }
-				}
-				/* 只读探测失败：界面保持「—」或原值，下一轮刷新会再试；不弹错是因为一次查询失败不值得打断用户操作 */
-			}).catch(function () {});
-		}, 15000);
+			if (typeof document !== 'undefined' && document.hidden) return;
+			refreshStatus();
+		}, 60000);
 
 		return statusCard;
 	};
