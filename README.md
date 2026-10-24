@@ -107,7 +107,10 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 
 ## 功能矩阵
 
-系统共集成 12 个独立管理页面（源码位于 `htdocs/luci-static/resources/view/at-webserver/`）：
+系统共集成 12 个独立管理页面（源码位于 `htdocs/luci-static/resources/view/at-webserver/`）。
+
+<details>
+<summary><b>功能矩阵：12 个页面的能力明细（点击展开）</b></summary>
 
 | 业务域 | 页面名称 | 核心功能与能力说明 |
 |:--|:--|:--|
@@ -124,19 +127,21 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 | | **运行日志** | 后端环形日志与系统 syslog 的统一入口，分「**运行日志** / **通知记录**」两个页签。运行时日志按**类别细分**：短信 / 拨号 / 网络 / AT / 系统 / 其他（每条挂类别徽章，类别胶囊实时显示条数、点一下就筛），另有关键词搜索、DBG/INF/WRN/ERR 级别、**「仅错误+警告」一键过滤**、来源（后端 / syslog）与条数上限（200 / 400 / 800 / 全部）；跨天插日期分隔条，长正文默认折 3 行、**真的被裁掉才出「展开」**，底部给出「共 N 条 · 错误 / 警告 / 信息 / 调试」统计，导出文件头部附类别与来源。通知记录页保留掉线告警、频段漂移记录，推送通道支持企业微信机器人、QQ 机器人（API v2，富文本卡片 + 内嵌键盘 + 自定义菜单）与 Webhook 实时推送；短信中心占用期间的后台跳过提示已限流（30s 一条）并区分于真失败 |
 | | **服务配置** | 守护进程参数、通信串口绑定、退避重试阈值与自愈巡检开关 |
 
+</details>
+
 ---
 
 ## 数据可信度与取数来源
 
 这个项目有一条贯穿始终的硬规则：**页面上每一个数字都必须能追溯到模组或内核的真实读数**。
 
+<details>
+<summary><b>四条取数硬规则 · 取数来源对照表与统计口径（点击展开）</b></summary>
+
 - **取不到就如实说取不到** —— 显示「—」或「模组未上报」，绝不用 `Math.random` 补一个、也不用别的参数凑一个看起来合理的值；
 - **缺口不连线** —— 信号趋势图某次轮询没读到就记 `null`，绘图时按断点断开，而不是把缺口连成一条并不存在的平滑线；
 - **速率不用累计值除个大概** —— 实时速率由相邻两次内核计数器的增量除以真实时间差得出；
 - **可核对** —— 取数来源集中在少数几个 AT 命令与 sysfs 节点上，任何人都能自己在设备上复现比对。
-
-<details>
-<summary><b>取数来源对照表与统计口径（点击展开）</b></summary>
 
 ### 取数来源对照表
 
@@ -184,6 +189,9 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 
 OpenWrt 的软件包架构标识为 `<base>[_<variant>]` 形式，**包管理系统执行严格的 variant 匹配**：
 
+<details>
+<summary><b>架构判定流程图 · 确认步骤 · 报错速查（点击展开）</b></summary>
+
 ```mermaid
 flowchart TD
     Start(["🔍 1. 设备架构查询<br/><code>cat /etc/apk/arch</code> 或 <code>grep OPENWRT_ARCH</code>"]) --> Check{"系统声明的基础架构及变体"}
@@ -216,9 +224,6 @@ flowchart TD
 > [!NOTE]
 > `aarch64_cortex-a53` 与 `aarch64_generic` 同属于 ARMv8-A 指令集，**底层二进制完全通用**。安装被阻断仅由包管理器元数据校验引起，并非硬件不兼容。
 
-<details>
-<summary><b>架构确认步骤与常见报错速查（点击展开）</b></summary>
-
 ### 1. 确认系统声明的有效架构
 
 ```sh
@@ -249,12 +254,15 @@ grep OPENWRT_ARCH /etc/openwrt_release
 
 > ⚠️ **兼容性提醒**：本插件会独占模组串口并直接发送 AT 指令，与 QModem 等同样占用模组串口的插件**不兼容**（完整说明见下方「本插件与 QModem 的关系」）。安装前请先卸载或停用其他占用同一模组串口的插件——拨号交给本插件即可，无需再装 QModem。
 
-#### 本插件与 QModem 的关系
+<details>
+<summary><b>本插件与 QModem 的关系（点击展开）</b></summary>
 
 - 两者都直接占用模组串口、直接下发 AT 指令，**同时运行会互相抢串口**，症状是偶发 `ERROR`、指令超时、拨号状态来回跳；
 - QModem 的「外部控制 / 被动模式」不会解除串口独占，只是少发几条查询指令，仍不能与本插件共存；
 - 想用本插件就**先停用（不是禁用菜单，而是 `stop` 服务或卸载）QModem**，反之亦然。来回切换时先 `service at-webserver stop` 再启另一个；
 - 本插件自己能完成接口创建、拨号、防火墙区域登记与开机自愈，不需要 QModem 配合。
+
+</details>
 
 ### 软件包安装
 
@@ -286,7 +294,8 @@ ls -l /usr/bin/at-webserver-rust
 ubus call service list '{"name":"at-webserver"}'
 ```
 
-### 串口路径选择建议
+<details>
+<summary><b>串口路径选择建议与自动探测优先级（点击展开）</b></summary>
 
 `serial_port` 支持三种取值：`auto`（自动探测）、`/dev/serial/by-id/<链接名>`（**推荐**）、`/dev/ttyUSB*`（回退）。
 
@@ -304,12 +313,17 @@ service at-webserver restart
 
 自动探测的优先级为：`by-id` 稳定链接 → `ttyUSB*`/`ttyACM*`/`ttyAP*` → `ttyS*`/`ttyAMA*`。AT 口识别依次依据**接口名整词匹配**（`PC UI` / `PCUI` / `AT PORT`）与 **`bInterfaceProtocol` 兜底**（`0x12`=PC UI、`0x14`=GPS），后者在 OEM 固件接口名留空时仍能正确认口。
 
+</details>
+
 ---
 
 ## 自动拨号与全链路协同机制
 
 > [!CAUTION]
 > **重要认知**：模组 AT 握手在线并不等同于路由器具备上网能力。数据面打通需跨越软硬件各层级协同。
+
+<details>
+<summary><b>拨号时序图 · 环节职责 · 故障排查速查（点击展开）</b></summary>
 
 <div align="center">
   <img src="docs/auto-dial-sequence.png" alt="MT5700M 5G 模组自动拨号与网络接入时序图" width="880"/>
@@ -340,9 +354,14 @@ service at-webserver restart
 | **一键自愈修复** | `/etc/init.d/at-webserver ensure_interfaces` | 重新校验接口并补全防火墙区域登记 |
 | **手动重试拉起** | `/etc/init.d/at-webserver on_uplink` | 立即重试触发接口 `ifup` |
 
+</details>
+
 ---
 
 ## 开机自启与自愈机制
+
+<details>
+<summary><b>开机自启、procd 守护与双栈解耦（点击展开）</b></summary>
 
 - **后端常驻保护（Rust 服务）**：
   - 由 `/etc/uci-defaults/at-webserver` 与 `postinst` 协同创建软链接 `/etc/rc.d/S99at-webserver`。
@@ -354,9 +373,14 @@ service at-webserver restart
 - **IPv4 / IPv6 双栈解耦**：
   - `MT5700M` 负责 IPv4 核心通路；`MT5700Mv6` 采用 `reqaddress=try` 动态绑定 `@MT5700M` 设备。即便运营商暂未分配 IPv6 前缀，亦绝不阻塞 IPv4 连通性。
 
+</details>
+
 ---
 
 ## UCI 配置参考 (`/etc/config/at-webserver`)
+
+<details>
+<summary><b>完整 UCI 配置项与注释（点击展开）</b></summary>
 
 ```ini
 config at-webserver 'config'
@@ -372,6 +396,8 @@ config at-webserver 'config'
     option cellscan_timeout '180'       # 扫频超时阈值(秒)，最低安全下限 10
 ```
 
+</details>
+
 ---
 
 ## 事件通知配置
@@ -379,7 +405,7 @@ config at-webserver 'config'
 事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件。**短信与来电实时直发**（事件一到就发），**信号与存储满同样即时直发**；此外还有一个独立定时器，每到一个间隔就推送一次**当前实际情况**（间隔可配置，单位分钟，默认 10）：
 
 <details>
-<summary><b>推送通道与配置项一览（点击展开）</b></summary>
+<summary><b>通道配置 · 事件类型 · 巡检与推送策略 · QQ 富文本与时间口径（点击展开）</b></summary>
 
 | 通道 | 配置项 | 说明 |
 |:--|:--|:--|
@@ -393,8 +419,6 @@ config at-webserver 'config'
 | 信号巡检 | `notify_poll_enabled` / `notify_poll_start` / `notify_poll_end` / `notify_poll_interval` / `notify_poll_all` / `notify_poll_delta` | 时段内主动轮询信号（本模组不主动上报信号读数） |
 | 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀（默认 `{time} {count}`，所有推送只带这一种前缀）+ 五类事件文案模板，支持占位符 |
 | 日志文件 | `log_file` | 本地逐条落盘（总开关关闭时仍写） |
-
-</details>
 
 ### 事件类型与推送路径
 
@@ -415,9 +439,6 @@ config at-webserver 'config'
 - **停止信号定时巡检** —— 否则关了开关后台仍在周期性占用串口，看起来像开关无效。
 
 LuCI 页面在关闭时会联动置灰四个事件类型开关与整块巡检子区块。
-
-<details>
-<summary><b>推送策略、QQ 富文本与时间口径（点击展开）</b></summary>
 
 ### 信号定时巡检
 
@@ -554,11 +575,16 @@ v1.28.0 起 QQ 推送不再只有纯文本。所有 QQ 机器人能力（鉴权�
 
 ## 更新日志
 
-版本历史见 **[CHANGELOG.md](CHANGELOG.md)**（按版本倒序，含每次改动的动机与实机验证结论）。
+版本历史见 **[CHANGELOG.md](CHANGELOG.md)**（按版本倒序）。
+
+<details>
+<summary><b>更新日志与各版本发布说明（点击展开）</b></summary>
 
 每个版本另有独立的发布说明，放在 [`docs/release-notes/`](docs/release-notes/) 下，命名规则为 `v<版本号>.md`，内容偏「这次为什么改、怎么验的」；升级前建议先读对应版本的那一篇。
 
 更早的版本说明见 [`docs/release-notes/`](docs/release-notes/) 目录全量列表。
+
+</details>
 
 ---
 
@@ -598,7 +624,10 @@ luci-app-mt5700/
 
 ## 本地测试
 
-提交前建议按下面三档跑一遍（全部不依赖硬件，mock 模组用 TCP 模拟 AT 口）：
+提交前建议按下面三档跑一遍（全部不依赖硬件，mock 模组用 TCP 模拟 AT 口）。
+
+<details>
+<summary><b>三档测试命令与用例说明（点击展开）</b></summary>
 
 ```sh
 # 1) Rust 后端单测（含 AT 队列并发、PDU 编解码、按月清零、短信归档等）
@@ -619,11 +648,16 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 `cause` 这类字段是「后端先出结论、ucode 次之、前端最宽」这套分层预算的判据，
 丢了它，一次后端超时就会被计进模组失败熔断。
 
+</details>
+
 ---
 
 ## 云编译与发布
 
-本仓库与 GitHub 镜像仓库**各自触发、各自发布**，构建逻辑共用同一份脚本 [`scripts/sdk-build.sh`](scripts/sdk-build.sh)——两边只在「谁触发、发到哪」上不同：
+本仓库与 GitHub 镜像仓库**各自触发、各自发布**，构建逻辑共用同一份脚本 [`scripts/sdk-build.sh`](scripts/sdk-build.sh)——两边只在「谁触发、发到哪」上不同。
+
+<details>
+<summary><b>流水线分工、构建矩阵与断言闸门（点击展开）</b></summary>
 
 | | 本仓库（CNB） | GitHub 镜像仓库 |
 |:--|:--|:--|
@@ -631,9 +665,6 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 | PR 校验 | 只编 `x86_64 · apk` 一个组合，验通过即止，**不发布** | 无 |
 | 正式发布 | `main` 分支 push 或手动 `api_trigger`，推 CNB Release | `main` push / `v*` 标签 / `workflow_dispatch`，推 GitHub Release |
 | 构建脚本 | `scripts/sdk-build.sh`（同一份） | `scripts/sdk-build.sh`（同一份） |
-
-<details>
-<summary><b>两边的矩阵与断言（点击展开）</b></summary>
 
 - **系统覆盖**：针对 `25.12.5` 自动构建 `apk`；针对 `24.10.8` 自动构建 `ipk`。
 - **架构矩阵**：全量覆盖 `x86_64`、`aarch64_cortex-a53`、`aarch64_generic`（共计 6 套构建组合）。
@@ -648,12 +679,17 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 
 ## 问题反馈
 
-提 Issue 走**本仓库**（CNB）即可，GitHub 镜像仓库也开着 Issues，两边维护者相同：
+提 Issue 走**本仓库**（CNB）即可，GitHub 镜像仓库也开着 Issues，两边维护者相同。
+
+<details>
+<summary><b>提 Issue 的渠道与需附信息（点击展开）</b></summary>
 
 - **本仓库**：仓库页 → Issues → 新建，适合贴设备型号、固件版本、`ubus call service list '{"name":"at-webserver"}'` 输出与日志片段；
 - **GitHub 镜像仓库**：[Issues](https://github.com/LianXia233/luci-app-mt5700/issues)，适合已经有 GitHub 账号、想顺带参与上游讨论的场景。
 
 反馈 AT 相关问题请附：模组型号与固件版本（`AT+CGMR`）、出问题的页面、复现步骤，以及能取到的最小原始报文（AT 终端页的收发记录，注意脱敏 IMEI / ICCID / 手机号）。日志走 `/var/log/at-webserver*`，重启即失，请先拷贝出来再重试。
+
+</details>
 
 ---
 
@@ -664,6 +700,9 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 ### 1. 开源许可证
 
 本项目以 **GNU General Public License v3.0** 发布，项目代码的使用、复制、修改及分发均须遵守该许可证条款。完整条款见仓库根目录 [`LICENSE`](LICENSE)。
+
+<details>
+<summary><b>许可信息表与分发义务（点击展开）</b></summary>
 
 | 项目 | 内容 |
 |:--|:--|
@@ -680,6 +719,8 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 3. 不得对本许可证授予的权利**附加额外限制**（第 10 条）。
 
 仅在本机安装、使用而不对外分发时，不触发上述义务。
+
+</details>
 
 <details>
 <summary><b>2. 角色素材与第三方知识产权（点击展开）</b></summary>
