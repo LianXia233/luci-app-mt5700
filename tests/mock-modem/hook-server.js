@@ -52,7 +52,12 @@ function createHookServer(opts) {
 	return {
 		received: received,
 		listen: function (port) {
-			return new Promise(function (resolve) {
+			return new Promise(function (resolve, reject) {
+				server.once('error', function (err) {
+					/* 端口被占用等监听失败必须走 reject：server 的 'error' 事件没人接
+					 * 会直接抛成未捕获异常，把整个模拟脚本带崩且看不出是哪一步。 */
+					reject(err);
+				});
 				server.listen(port, '127.0.0.1', function () { resolve(port); });
 			});
 		},
