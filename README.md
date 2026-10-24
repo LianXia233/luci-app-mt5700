@@ -65,6 +65,9 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
   <p><sub>图 1：网络状态控制台（展示 AT 通道状态、信号质谱打分及 5G NR 载波聚合参数）</sub></p>
 </div>
 
+<details>
+<summary><b>看板实时状态细节 · Tab 菜单增强 · 信号取数口径（点击展开）</b></summary>
+
 > [!TIP]
 > **Tab 菜单增强**  
 > `admin/modem/5g` 下的 12 个兄弟页面共用 LuCI 原生 Tab 菜单，插件在页面加载后对其做纯 DOM 增强（`at-webserver/tabmenu.js`，不改 LuCI 与主题、不拦截点击）：① **滚动位置保持** —— 横向可滚动主题下切换 / 返回 / 刷新页面后，菜单自动把当前选中项滚入可视区，不再重置到首项；用户手动滚动过的位置按路径记忆在 `sessionStorage`，刷新时选中项仍完整可见则原样恢复，否则回退为选中项居中；② **统一 SVG 图标** —— 12 个页签各配一枚 24×24 线性图标（`stroke=currentColor` 随主题配色，桌面 16px / 窄屏 15px），语义逐项匹配（网络状态=脉冲、网络设置=滑杆、拨号=插头、扫频=雷达、锁频=时钟、模组设置=芯片、升级=圆内上箭头、短信=气泡、短信设置=气泡+省略号、终端=提示符、日志=文件、服务配置=齿轮）。换行布局主题（bootstrap / material）不产生横向滚动，footstrap 等无 Tab 栏主题自动跳过。
@@ -86,6 +89,8 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 >
 > 各字段为编码值（RSRP：`-140 + n` dBm；SINR：`-20 + 0.2n` dB；RSRQ：`-19.5 + 0.5n` dB；RSSI/RSCP：`-121 + n` dBm；Ec/Io：`-32 + 0.5n` dB），`255` 表示未知或不可测，按无数据显示为「—」。
 > `^MONSC` 的 LTE 布局与 NR 不同（无 SINR、末位是 RSSI、PCI/ARFCN/TAC 为十六进制），插件按制式分别解析；信号优先取 `^MONSC` 的驻留小区读数，缺项（典型是 4G 下的 SINR）再由 `^HCSQ` 补齐。
+
+</details>
 
 ---
 
@@ -130,6 +135,9 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 - **速率不用累计值除个大概** —— 实时速率由相邻两次内核计数器的增量除以真实时间差得出；
 - **可核对** —— 取数来源集中在少数几个 AT 命令与 sysfs 节点上，任何人都能自己在设备上复现比对。
 
+<details>
+<summary><b>取数来源对照表与统计口径（点击展开）</b></summary>
+
 ### 取数来源对照表
 
 | 展示项 | 取数来源 | 备注 |
@@ -167,6 +175,8 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 >
 > **唯一例外**：若累计期间承载网卡计数器归零（接口 flap / 重新拨号），该段增量无法补记，
 > 重新驻网后会从新基线开始累计。峰值速率同理只在有采样的时段内计算。
+
+</details>
 
 ---
 
@@ -206,6 +216,9 @@ flowchart TD
 > [!NOTE]
 > `aarch64_cortex-a53` 与 `aarch64_generic` 同属于 ARMv8-A 指令集，**底层二进制完全通用**。安装被阻断仅由包管理器元数据校验引起，并非硬件不兼容。
 
+<details>
+<summary><b>架构确认步骤与常见报错速查（点击展开）</b></summary>
+
 ### 1. 确认系统声明的有效架构
 
 ```sh
@@ -227,6 +240,8 @@ grep OPENWRT_ARCH /etc/openwrt_release
 | `error: uninstallable arch: aarch64_generic` | 固件声明架构为 `aarch64_cortex-a53` | 重新下载并安装 `aarch64_cortex-a53` 安装包 |
 | `error: uninstallable arch: all` | 语言包架构未被识别 | 实测 apk-tools 3.0.5+ 已兼容，若报错可执行：<br>`echo all >> /etc/apk/arch` |
 | `luci-app-mt5700 (no such package): required by: luci-i18n-...` | 语言包依赖主包，未合并安装 | 将主包与语言包放入同一条 `apk add` / `opkg install` 指令中 |
+
+</details>
 
 ---
 
@@ -363,6 +378,9 @@ config at-webserver 'config'
 
 事件通知（来电/短信/信号变化/短信存储满）支持两条推送通道 + 本地日志文件。**短信与来电实时直发**（事件一到就发），**信号与存储满同样即时直发**；此外还有一个独立定时器，每到一个间隔就推送一次**当前实际情况**（间隔可配置，单位分钟，默认 10）：
 
+<details>
+<summary><b>推送通道与配置项一览（点击展开）</b></summary>
+
 | 通道 | 配置项 | 说明 |
 |:--|:--|:--|
 | 总开关 | `notify_enabled` | 自动推送总开关，默认 `1`；关闭后仅写本地日志、外发全部停止 |
@@ -375,6 +393,8 @@ config at-webserver 'config'
 | 信号巡检 | `notify_poll_enabled` / `notify_poll_start` / `notify_poll_end` / `notify_poll_interval` / `notify_poll_all` / `notify_poll_delta` | 时段内主动轮询信号（本模组不主动上报信号读数） |
 | 推送文案 | `notify_tpl_prefix` / `notify_tpl_sms` / `notify_tpl_call` / `notify_tpl_signal` / `notify_tpl_memory` / `notify_tpl_batch` | 全局前缀（默认 `{time} {count}`，所有推送只带这一种前缀）+ 五类事件文案模板，支持占位符 |
 | 日志文件 | `log_file` | 本地逐条落盘（总开关关闭时仍写） |
+
+</details>
 
 ### 事件类型与推送路径
 
@@ -395,6 +415,9 @@ config at-webserver 'config'
 - **停止信号定时巡检** —— 否则关了开关后台仍在周期性占用串口，看起来像开关无效。
 
 LuCI 页面在关闭时会联动置灰四个事件类型开关与整块巡检子区块。
+
+<details>
+<summary><b>信号定时巡检（点击展开）</b></summary>
 
 ### 信号定时巡检
 
@@ -418,7 +441,10 @@ option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅
 - **基线只在推送时刷新** —— 否则信号从 -80 缓慢漂移到 -95（每次仅差 2 dB）将永远越不过阈值，用户反而收不到「信号持续变差」这个最该知道的通知。
 - **推送内容**：巡检推送携带与网页「射频信号质量」卡片**等价的完整评估** —— 网络能力结论与其场景说明、信号强度 / 信号质量 / 信噪比 / 综合四项评级，以及 RSRP / RSRQ / SINR / SIGNAL 四行「基准 ≥ 阈值 → 实测值 → 结论」对照。标题给出网络代际（`5G` / `4G`），另有「频段」行给出具体频段号与带宽（如 `n41 · 2565 MHz / 100 MHz`，取自 `AT^HFREQINFO?` 的 `<band>`）。只报一个 RSRP 数字不足以判断链路是否真的可用。
 
-### 定时推送间隔与自定义文案
+</details>
+
+<details>
+<summary><b>定时推送间隔、文案模板与占位符（点击展开）</b></summary>
 
 - **定时推送间隔**：`notify_timer_interval` 单位是**分钟**，取值 1~1440（1 分钟 ~ 24 小时），越界会被自动夹取，默认 **10 分钟**。每到一个间隔后端就推送一次**当前实际情况**（最新信号读数 + 短信存储占用），不再看窗口内有没有事件 —— 这一轮风平浪静也照发。
 - **间隔怎么选（权衡）**：间隔越短，状态越新鲜，但推送条数越多、越容易打扰，也更容易撞上 QQ 官方主动消息频控；间隔越长越安静，可**两次之间发生的变化只能等到下一个整点才被看到**，且单次推送要承载的内容更满（状态快照含信号与存储两块），读起来更费劲。日常建议 5~30 分钟；只在需要长期静默时才调到小时级。
@@ -436,7 +462,23 @@ option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅
 | `{kind}` | 事件类型（`新短信` / `来电` / `信号变化` / `存储空间已满`） |
 | `{count}` | 合并消息条数（仅全局前缀与批量标题有意义） |
 
-### QQ 富文本推送、内嵌键盘与自定义菜单
+未知占位符会原样保留，便于发现拼写错误。默认文案为：
+
+```uci
+option notify_tpl_prefix ''                 # 全局前缀，每条推送首行；如 '[MyRouter] {time}'
+option notify_tpl_sms    '喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: {sender}\n内容: {content}'
+option notify_tpl_call   '喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}'
+option notify_tpl_signal '{content}'
+option notify_tpl_memory '喵呜～短信存储空间已经满啦，请尽快清理一下喵，不然可能收不到新的短信了哦！'
+option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看都有哪些消息吧！'
+```
+
+UCI 单个 option 不支持真实换行，模板中的换行以 `\n` 转义写入（LuCI 页面会自动转换，手改 UCI 需自行写 `\n`）。
+
+</details>
+
+<details>
+<summary><b>QQ 富文本推送、内嵌键盘与自定义菜单（点击展开）</b></summary>
 
 v1.28.0 起 QQ 推送不再只有纯文本。所有 QQ 机器人能力（鉴权、发消息、富媒体组装、键盘、菜单）收敛在独立模块 `src/rust/src/qqpush.rs`，`notify.rs` 只面向事件与文案模板。
 
@@ -469,20 +511,10 @@ v1.28.0 起 QQ 推送不再只有纯文本。所有 QQ 机器人能力（鉴权�
 
 两条排版约定（均经实机 QQ 验证）：分隔线一律用**空行包裹**的 `---`（CommonMark 中紧随段落的 `---` 会被当作 setext 二级标题下划线，把上文段落变成标题）；页脚用*斜体*（QQ Markdown 不支持 `<sub>` 等 HTML 标签，已实测确认）。短信卡片留空 = 内置默认卡片；写成 `{body}` 可改回通用转换（不加卡片版式）。
 
-  未知占位符会原样保留，便于发现拼写错误。默认文案为：
+</details>
 
-```uci
-option notify_tpl_prefix ''                 # 全局前缀，每条推送首行；如 '[MyRouter] {time}'
-option notify_tpl_sms    '喵呜～，有新短信到啦！快来看看是谁给你发消息了喵~\n发送者: {sender}\n内容: {content}'
-option notify_tpl_call   '喵呜～有电话打进来啦，快接起来看看是谁找你喵！\n{content}'
-option notify_tpl_signal '{content}'
-option notify_tpl_memory '喵呜～短信存储空间已经满啦，请尽快清理一下喵，不然可能收不到新的短信了哦！'
-option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看都有哪些消息吧！'
-```
-
-  UCI 单个 option 不支持真实换行，模板中的换行以 `\n` 转义写入（LuCI 页面会自动转换，手改 UCI 需自行写 `\n`）。
-
-### 推送自检（测试推送）
+<details>
+<summary><b>推送自检（测试推送）</b></summary>
 
 通知卡片提供两个粒度的自检入口，回答的是两个不同的问题：
 
@@ -497,7 +529,10 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 - **信号不走类型化测试**：信号指标是真实读数，造一条假的「RSRP -xx dBm」测不出任何东西。验证请用真实巡检 —— 把 `notify_poll_interval` 临时调小（下限 30 秒）等一轮，或直接看通知日志里的历史巡检记录；
 - 等价的 RPC 调用（供脚本化自检）：`{"method":"notify_test","params":{"channel":"sms"}}`，`channel` 可取 `qq` / `wechat` / `sms` / `call`。
 
-### 时区与时间口径
+</details>
+
+<details>
+<summary><b>时区与时间口径（点击展开）</b></summary>
 
 **所有对外时间一律使用本机系统时区** —— 即 LuCI「系统 → 时间同步 → 时区」写下的 UCI `system.@system[0].timezone`；系统未配置时默认**北京时间（UTC+08:00）**。覆盖范围：通知日志时间戳、推送正文里的 `{time}`、短信中心每条短信的时刻、定时锁频的「下一次切换时刻」。
 
@@ -513,7 +548,10 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 
 **为什么必须显式注入**：`TZ` 环境变量只由 `/etc/profile` 为**登录 shell** 导出，procd 拉起的守护进程拿不到；本固件又不打包 tzdata（`/usr/share/zoneinfo` 不存在），musl 的 `localtime_r` 在无 `TZ` 时会**静默退化成 UTC**。故 init.d 在启动时按上述顺序取值，并通过 `procd_set_param env TZ=...` 注入给后端。
 
-### QQ 机器人通道说明
+</details>
+
+<details>
+<summary><b>QQ 机器人通道说明（点击展开）</b></summary>
 
 - **启用条件**：AppID、AppSecret、目标 ID 三项全部非空。
 - **凭据安全**：AppSecret 建议不写入 UCI，改由环境变量注入（`QQ_BOT_APP_SECRET`；AppID 可用 `QQ_BOT_APP_ID`），环境变量优先于 UCI。可在 `/etc/init.d/at-webserver` 的 `procd_set_param env` 处追加。
@@ -524,6 +562,8 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
   3. 脚本输出 openid 与现成的 UCI 配置命令，粘贴执行即可。凭据与 openid 不经手第三方。
 - **鉴权**：`POST https://api.bot.qq.com/app/getAppAccessToken` 换取 `access_token`（7200 秒），服务自动缓存并在过期前 120 秒刷新。
 - **已知限制**：本服务为单向推送、不连 WebSocket，所有消息均为**主动消息**（不带 `msg_id`），受官方频控约束（群 30~60 条/分钟、单关系 20 条/分钟、1000 条/群/天，未认证/认证档不同），且 QQ 用户关闭「允许主动发送」后推送会失败；频道主动推送官方要求机器人保持 WebSocket 在线，`channel` 模式可能被平台拒绝。默认 10 分钟的定时推送间隔（每天 144 条）远低于上述频控；若把间隔调到 1 分钟（每天 1440 条），请先确认不会撞上限。
+
+</details>
 
 ---
 
@@ -538,6 +578,9 @@ option notify_tpl_batch  '喵～有一批新通知需要查看哦，快来看看
 ---
 
 ## 源码目录结构
+
+<details>
+<summary><b>源码目录树（点击展开）</b></summary>
 
 ```
 luci-app-mt5700/
@@ -563,6 +606,8 @@ luci-app-mt5700/
 ├── tests/                                  # 前端解析单测、ucode JSON 解析单测与 mock-modem E2E 用例
 └── .cnb.yml                                # CNB 云编译流水线（3 架构 × apk/ipk，见下方「云编译与发布」）
 ```
+
+</details>
 
 ---
 
@@ -602,12 +647,15 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 | 正式发布 | `main` 分支 push 或手动 `api_trigger`，推 CNB Release | `main` push / `v*` 标签 / `workflow_dispatch`，推 GitHub Release |
 | 构建脚本 | `scripts/sdk-build.sh`（同一份） | `scripts/sdk-build.sh`（同一份） |
 
-两边的矩阵与断言一致：
+<details>
+<summary><b>两边的矩阵与断言（点击展开）</b></summary>
 
 - **系统覆盖**：针对 `25.12.5` 自动构建 `apk`；针对 `24.10.8` 自动构建 `ipk`。
 - **架构矩阵**：全量覆盖 `x86_64`、`aarch64_cortex-a53`、`aarch64_generic`（共计 6 套构建组合）。
 - **硬性断言防御**：构建阶段比对 SDK 输出的 `CONFIG_TARGET_ARCH_PACKAGES` 与矩阵架构标识，不一致立即阻断并硬失败，确保产物元数据绝对精确。
 - **汇总闸门**：汇总阶段看不到 6 个主包就拒绝发布，不留「流水线绿了但附件不在」的缝；发布随包附 `ARCH-GUIDE.txt`。
+
+</details>
 
 本仓库的版本号取自 `Makefile` 的 `PKG_VERSION`，不用 tag 名，所以日常推送会刷新同版本 Release，不会越推越乱。
 
@@ -648,7 +696,8 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 
 仅在本机安装、使用而不对外分发时，不触发上述义务。
 
-### 2. 看板娘角色版权声明
+<details>
+<summary><b>2. 看板娘角色版权声明（点击展开）</b></summary>
 
 本项目界面中使用的看板娘角色「薄荷」（Mint），为游戏《异环》（NTE / Neverness to Everness）中的登场角色，相关素材的权利归属如下。
 
@@ -663,13 +712,18 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 
 本项目与苏州幻塔网络科技有限公司、Hotta Studio、完美世界及《异环》官方之间，不存在任何明示或暗示的隶属、合作、赞助或授权关系。
 
-### 3. 第三方知识产权与 GPL 边界
+</details>
+
+<details>
+<summary><b>3. 第三方知识产权与 GPL 边界（点击展开）</b></summary>
 
 GPL-3.0 许可证仅适用于本项目有权以该许可证发布的代码及相关原创内容，**不自动涵盖**「薄荷」角色形象、游戏原始素材及其他第三方知识产权。
 
 角色素材以**聚合（aggregate）**形式与本项目代码一并打包分发（GPLv3 第 5 条末段），其权利状态不因打包、也不因本项目采用 GPL-3.0 而发生改变。对上述内容的使用、复制、修改或再分发，须遵守相关权利人的授权条件及适用法律法规。
 
 逐项清单、权利人、素材指纹与来源说明见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
+
+</details>
 
 ### 4. 名称与商标
 
