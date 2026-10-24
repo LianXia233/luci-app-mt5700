@@ -516,6 +516,20 @@ return L.view.extend({
 		notifCard._body.appendChild(notifBody);
 		body.appendChild(notifCard);
 
+		/* ---------- 界面 ---------- */
+		/* 全局壁纸开关：只影响前端展示（mt5700.js 的全局背景层），后端不读这个键。
+		 * 存在 uci 是为了跨页面/跨会话记住偏好；缺省视为开启。 */
+		var uiCard = Mt5700.card('界面', '外观显示');
+		var uiBody = E('div', { 'class': 'mt5700-form-grid' });
+		uiCard._body.appendChild(uiBody);
+		body.appendChild(uiCard);
+
+		var wallpaperSwitch = E('div', { 'class': 'mt5700-switch' });
+		var wallpaperChk = E('input', { type: 'checkbox' });
+		wallpaperSwitch.appendChild(wallpaperChk);
+		uiBody.appendChild(Mt5700.formGroup('显示全局壁纸', wallpaperSwitch,
+			'三角网格壁纸 + 随机角色立绘（每次刷新随机显示其一）。保存后刷新页面生效。'));
+
 		function mkCheck() {
 			var wrap = E('div', { 'class': 'mt5700-switch' });
 			var input = E('input', { type: 'checkbox' });
@@ -1041,6 +1055,7 @@ return L.view.extend({
 		wsBindSel.value = bindCur === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
 		authKeyInput.value = String(get('websocket_auth_key', ''));
 		schedChk.checked = get('schedule_enabled', '0') === '1';
+		wallpaperChk.checked = get('wallpaper_enabled', '1') !== '0';
 		notifyMaster.input.checked = get('notify_enabled', '1') === '1';
 		notifyCalls.input.checked = get('notify_call', '1') === '1';
 		notifySms.input.checked = get('notify_sms', '1') === '1';
@@ -1139,6 +1154,7 @@ return L.view.extend({
 			set('websocket_allow_wan', bind === '0.0.0.0' ? '1' : '0');
 			set('websocket_auth_key', authKeyInput.value.trim());
 			set('schedule_enabled', schedChk.checked ? '1' : '0');
+			set('wallpaper_enabled', wallpaperChk.checked ? '1' : '0');
 			set('notify_enabled', notifyMaster.input.checked ? '1' : '0');
 			set('notify_call', notifyCalls.input.checked ? '1' : '0');
 			set('notify_sms', notifySms.input.checked ? '1' : '0');
