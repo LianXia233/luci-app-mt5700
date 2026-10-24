@@ -565,14 +565,22 @@ jobs:
           fi
 
           # ---- 头部：预览版专属说明（正式版为空，摘要格式与原先完全一致）----
+          # 这段是预览版唯一「必须醒目」的信息：把「这是测试版本、别拿去生产」放在
+          # Releases 页面的第一行，避免用户把自动构建产物当成正式版装到在网设备上。
           if [ "$CHANNEL" = "preview" ]; then
             SHORT_SHA="${GITHUB_SHA:0:7}"
             {
-              echo "> ### 预览版（Pre-release）"
+              echo "> ## ⚠️ 测试版本 · 仅供验证，请勿用于生产环境"
               echo ">"
-              echo "> 由 \`main\` 分支自动构建，用于验证最新改动。**不是**正式发布版本："
-              echo "> 它不会替换正式版 [\`v${VER}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${VER})，"
-              echo "> 也不会成为仓库的 latest。"
+              echo "> 本包由 \`main\` 分支**自动构建**，**不是**正式发布版本：可能包含未完成的改动、"
+              echo "> 尚未实机验证的修复，也可能被下一次构建随时取代。"
+              echo ">"
+              echo "> - **适用**：验证最新改动、复现问题、给开发反馈。"
+              echo "> - **不适用**：生产环境 / 长期运行的设备。要稳定版本请用正式版"
+              echo ">   [\`v${VER}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${VER})。"
+              echo "> - 本预览版**不会**替换正式版，也**不会**成为仓库的 latest。"
+              echo ">"
+              echo "> ### 构建信息"
               echo ">"
               echo "> | 项 | 值 |"
               echo "> |:--|:--|"
@@ -582,8 +590,8 @@ jobs:
               echo "> | 构建时间 | $(date -u '+%Y-%m-%d %H:%M UTC') |"
               echo "> | 构建矩阵 | 3 架构 ×（apk · OpenWrt 25.12.5 / ipk · OpenWrt 24.10.8） |"
               echo ">"
-              echo "> 安装方式与正式版完全相同（见下方「安装」）。生产环境请优先用正式版，"
-              echo "> 只在需要验证本次改动时才用这份预览包。"
+              echo "> ⚠️ 装之前请先备份配置（\`sysupgrade -b\`）；测试版不建议直接覆盖在网设备。"
+              echo "> 安装方式与正式版完全相同（见下方「安装」）。"
               echo ""
             } >> "$HEADER"
           fi
@@ -618,7 +626,8 @@ jobs:
           TITLE="AT WebServer ${TAG}"
           if [ "$PRERELEASE" = "true" ]; then
             FLAGS+=(--prerelease)
-            TITLE="${TITLE}（预览版）"
+            # 标题同样带警示：Releases 列表页一眼能看出这是测试版，不是正式版
+            TITLE="⚠️ AT WebServer ${TAG}（测试版本 · 仅供验证）"
           fi
           if [ -n "$BODY" ] && [ -s "$BODY" ]; then
             gh release create "$TAG" "${FILES[@]}" \
