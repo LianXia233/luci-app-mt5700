@@ -765,7 +765,18 @@ return L.view.extend({
 				}
 				var r = res.result || {};
 				state.fetchedAt = r.fetchedAt || 0;
-				buildContacts((r.entries || []).map(toUiMessage));
+				var entries = r.entries || [];
+				/*
+				 * 读得出应答行、却一条都解析不出来：后端把「一条都没有」和
+				 * 「一条都解析不出」都归成 entries 为空（r.totalLines 是本次应答的
+				 * 原始行数）。混为一谈的后果是 SIM 卡没就绪 / PDU 形态不认识时，
+				 * 页面安静地显示「暂无短信」，用户以为短信被清空了 —— 一条提示
+				 * 比一句谎话强。
+				 */
+				if (!entries.length && (r.totalLines || 0) > 0 && (r.storage && r.storage.total > 0))
+					Mt5700.warning('模组有 ' + r.storage.total + ' 条短信，但本次一条都没解析出来'
+						+ '（应答 ' + r.totalLines + ' 行）。可能是短信格式异常，请刷新或查看运行日志。');
+				buildContacts(entries.map(toUiMessage));
 				return null;
 			}).catch(function () {
 				Mt5700.error('获取短信列表失败');

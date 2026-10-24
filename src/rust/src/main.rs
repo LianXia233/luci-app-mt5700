@@ -120,6 +120,9 @@ async fn run(verbose: bool) -> Result<(), String> {
     // 与模组格位的生命周期解耦（见 sms_store 模块头）。
     let sms_archive = std::sync::Arc::new(crate::sms_store::SmsArchive::at_default_dir());
     sms.set_archive(sms_archive.clone());
+    // 提交被模组以「存储满」拒绝（+CMS ERROR: 322 / ^SMMEMFULL）时补一次推送：
+    // 那种应答只出现在 `send` 的返回里，URC 侧看不到。
+    sms.set_notifier(notifier.clone());
     let mut rpc = RpcServer::new(
         client.clone(),
         cfg.websocket.auth_key.clone(),
