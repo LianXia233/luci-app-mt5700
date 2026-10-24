@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.29.0-blue.svg?style=flat-square)](https://github.com/LianXia233/luci-app-mt5700/releases)
+[![Version](https://img.shields.io/badge/Version-v1.29.0-blue.svg?style=flat-square)](CHANGELOG.md)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -43,14 +43,18 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 | 章节 | 章节 |
 |:--|:--|
 | [界面预览](#界面预览) | [系统拓扑与数据链路](#系统拓扑与数据链路) |
+| [短信功能使用文档](docs/sms-usage.md) | [短信链路协议与命令参考](docs/sms-at-protocol.md) |
 | [功能矩阵](#功能矩阵) | [数据可信度与取数来源](#数据可信度与取数来源) |
 | [架构选型决策流](#架构选型决策流) | [安装与快速启动](#安装与快速启动) |
 | [自动拨号与全链路协同机制](#自动拨号与全链路协同机制) | [开机自启与自愈机制](#开机自启与自愈机制) |
 | [UCI 配置参考](#uci-配置参考-etcconfigat-webserver) | [事件通知配置](#事件通知配置) |
-| [云编译与发布](#云编译与发布) | [更新日志](#更新日志) |
+| [本地测试](#本地测试) | [云编译与发布](#云编译与发布) |
+| [更新日志](#更新日志) | [问题反馈](#问题反馈) |
 | [源码目录结构](#源码目录结构) | [许可证与版权声明](#许可证与版权声明) |
 
 > 独立文档：**[短信链路协议与命令参考](docs/sms-at-protocol.md)**（发送/接收/读取三条链路的 AT 序列与取值理由、PDU 字段与编码表、删除语义、三层超时预算、命令速查与已核对报文）· [更新日志](CHANGELOG.md) · [各版本发布说明](docs/release-notes/)
+>
+> 短信页面怎么用、每条提示怎么处置的说明文档见 **[短信功能使用文档](docs/sms-usage.md)**（操作步骤、关闭短信功能的副作用、常见提示的处置方式、验收清单）。
 
 ---
 
@@ -135,7 +139,7 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 | 实时上下行速率、本次使用量 | `/sys/class/net/<承载网卡>/statistics/{rx,tx}_bytes` | 经 rpcd `netrate` 方法读取，**全程不下发 AT 命令**，不占用 AT 通道 |
 | SIM 签约速率 | `AT^DSAMBR=<cid>`（手册 16.17） | 4G/5G 均可用；取不到时兜底 `AT+C5GQOSRDP` 的 Session-AMBR |
 | SIM 状态 / IMSI / ICCID | `AT+CPIN?` / `AT+CIMI` / `AT^ICCID?` | |
-| 芯片温度 | `AT^CHIPTEMP?` | 基带 / Sub-6G PA 分开 |
+| 芯片温度 | `AT^CHIPTEMP?` | 手册 17.1.1 的 12 路传感器全部展示；按六档（`低温 / 温和 / 正常 / 偏暖 / 偏高 / 过高`）逐路定级，卡片按**最热通道**给出整体结论（散热看的是最高结温，不是平均值） |
 | 上下行发射功率 | `AT^NTXPOWER?`（NR）、`AT^TXPOWER?`（LTE GUL） | NR 下 `AT^TXPOWER?` 恒返回 ERROR，属正常 |
 | 模组累计流量 | `AT^DSFLOWQRY` | 模组侧累计，与路由器接口计数是两套口径 |
 
@@ -228,11 +232,18 @@ grep OPENWRT_ARCH /etc/openwrt_release
 
 ## 安装与快速启动
 
-> ⚠️ **兼容性提醒**：本插件会独占模组串口并直接发送 AT 指令，与 QModem 等同样占用模组串口的插件**不兼容**（完整说明见文首）。安装前请先卸载或停用其他占用同一模组串口的插件——拨号交给本插件即可，无需再装 QModem。
+> ⚠️ **兼容性提醒**：本插件会独占模组串口并直接发送 AT 指令，与 QModem 等同样占用模组串口的插件**不兼容**（完整说明见下方「本插件与 QModem 的关系」）。安装前请先卸载或停用其他占用同一模组串口的插件——拨号交给本插件即可，无需再装 QModem。
+
+#### 本插件与 QModem 的关系
+
+- 两者都直接占用模组串口、直接下发 AT 指令，**同时运行会互相抢串口**，症状是偶发 `ERROR`、指令超时、拨号状态来回跳；
+- QModem 的「外部控制 / 被动模式」不会解除串口独占，只是少发几条查询指令，仍不能与本插件共存；
+- 想用本插件就**先停用（不是禁用菜单，而是 `stop` 服务或卸载）QModem**，反之亦然。来回切换时先 `service at-webserver stop` 再启另一个；
+- 本插件自己能完成接口创建、拨号、防火墙区域登记与开机自愈，不需要 QModem 配合。
 
 ### 软件包安装
 
-在 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 页面下载与设备架构完全对应的软件包后安装（主包已内嵌 Rust 后端）：
+在本仓库的 Releases 页面（GitHub 镜像仓库同样发布）下载与设备架构完全对应的软件包后安装（主包已内嵌 Rust 后端）：
 
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
@@ -549,19 +560,67 @@ luci-app-mt5700/
 ├── po/                                     # 国际化语言包 (zh_Hans)
 ├── scripts/                                # SDK 矩阵打包、QQ openid 抓取等辅助脚本
 ├── docs/                                   # README 配图、各版本发布说明 (release-notes/)
-└── tests/                                  # 前端解析单测与 mock-modem E2E 用例
+├── tests/                                  # 前端解析单测、ucode JSON 解析单测与 mock-modem E2E 用例
+└── .cnb.yml                                # CNB 云编译流水线（3 架构 × apk/ipk，见下方「云编译与发布」）
 ```
+
+---
+
+## 本地测试
+
+提交前建议按下面三档跑一遍（全部不依赖硬件，mock 模组用 TCP 模拟 AT 口）：
+
+```sh
+# 1) Rust 后端单测（含 AT 队列并发、PDU 编解码、按月清零、短信归档等）
+cd src/rust && cargo test --release && cargo clippy --release
+
+# 2) 前端解析 / 渲染单测（无需后端）
+for f in tests/*.js; do node "$f" || break; done
+for f in tests/mock-modem/{hcsq,nrssbid,parse-extra,sms-center-render,temp-level,check-sms-fixtures}.js; do node "$f" || break; done
+
+# 3) 端到端链路（mock 模组 + 真实后端 + RPC 协议）
+cd tests/mock-modem && sh run-e2e.sh        # 41 项断言
+node simulate-push.js                       # 推送链路 / 时区 / 定时推送
+```
+
+`tests/ucode-json-test.js` 覆盖 rpcd ucode 插件里手写 JSON 解析器的转义还原
+（该解析器经手**所有** RPC 应答，一旦偏差不会报错，只会让页面显示与后端实际内容不一致），
+以及后端进程级错误（`{error:{message,...}}`）到前端错误对象的字段搬运 ——
+`cause` 这类字段是「后端先出结论、ucode 次之、前端最宽」这套分层预算的判据，
+丢了它，一次后端超时就会被计进模组失败熔断。
 
 ---
 
 ## 云编译与发布
 
-本项目依托 GitHub Actions（`.github/workflows/build-openwrt.yml`）实现全自动化矩阵云编译：
+本仓库与 GitHub 镜像仓库**各自触发、各自发布**，构建逻辑共用同一份脚本 [`scripts/sdk-build.sh`](scripts/sdk-build.sh)——两边只在「谁触发、发到哪」上不同：
+
+| | 本仓库（CNB） | GitHub 镜像仓库 |
+|:--|:--|:--|
+| 流水线定义 | [`.cnb.yml`](.cnb.yml) | [`.github/workflows/build-openwrt.yml`](.github/workflows/build-openwrt.yml) |
+| PR 校验 | 只编 `x86_64 · apk` 一个组合，验通过即止，**不发布** | 无 |
+| 正式发布 | `main` 分支 push 或手动 `api_trigger`，推 CNB Release | `main` push / `v*` 标签 / `workflow_dispatch`，推 GitHub Release |
+| 构建脚本 | `scripts/sdk-build.sh`（同一份） | `scripts/sdk-build.sh`（同一份） |
+
+两边的矩阵与断言一致：
 
 - **系统覆盖**：针对 `25.12.5` 自动构建 `apk`；针对 `24.10.8` 自动构建 `ipk`。
 - **架构矩阵**：全量覆盖 `x86_64`、`aarch64_cortex-a53`、`aarch64_generic`（共计 6 套构建组合）。
 - **硬性断言防御**：构建阶段比对 SDK 输出的 `CONFIG_TARGET_ARCH_PACKAGES` 与矩阵架构标识，不一致立即阻断并硬失败，确保产物元数据绝对精确。
-- 编译通过后自动推送构建产物至 [Release](https://github.com/LianXia233/luci-app-mt5700/releases)，并随包打包发布 `ARCH-GUIDE.txt`。
+- **汇总闸门**：汇总阶段看不到 6 个主包就拒绝发布，不留「流水线绿了但附件不在」的缝；发布随包附 `ARCH-GUIDE.txt`。
+
+本仓库的版本号取自 `Makefile` 的 `PKG_VERSION`，不用 tag 名，所以日常推送会刷新同版本 Release，不会越推越乱。
+
+---
+
+## 问题反馈
+
+提 Issue 走**本仓库**（CNB）即可，GitHub 镜像仓库也开着 Issues，两边维护者相同：
+
+- **本仓库**：仓库页 → Issues → 新建，适合贴设备型号、固件版本、`ubus call service list '{"name":"at-webserver"}'` 输出与日志片段；
+- **GitHub 镜像仓库**：[Issues](https://github.com/LianXia233/luci-app-mt5700/issues)，适合已经有 GitHub 账号、想顺带参与上游讨论的场景。
+
+反馈 AT 相关问题请附：模组型号与固件版本（`AT+CGMR`）、出问题的页面、复现步骤，以及能取到的最小原始报文（AT 终端页的收发记录，注意脱敏 IMEI / ICCID / 手机号）。日志走 `/var/log/at-webserver*`，重启即失，请先拷贝出来再重试。
 
 ---
 
