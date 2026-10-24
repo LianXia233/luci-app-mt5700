@@ -65,11 +65,14 @@ var SchedulePanel = (function () {
 			'关闭后后端不再按时段切换锁频；开启后才能编辑下方编排'));
 		schedChk.addEventListener('change', function () {
 			var on = schedChk.checked;
+			/* 立即跟随开关灰/亮表单，不必等 uci commit 与后端重载（体感与真实状态一致） */
+			setFormDisabled(!on);
 			try {
 				L.uci.set('at-webserver', 'config', 'schedule_enabled', on ? '1' : '0');
 			} catch (e) {
 				Mt5700.error('无法写入配置');
 				schedChk.checked = !on;
+				setFormDisabled(!schedChk.checked);
 				return;
 			}
 			AtWs.uci.uciCommit('at-webserver').then(function () {
@@ -78,6 +81,7 @@ var SchedulePanel = (function () {
 			}).catch(function () {
 				Mt5700.error('保存失败');
 				schedChk.checked = !on;
+				setFormDisabled(!schedChk.checked);
 			});
 		});
 
@@ -268,7 +272,10 @@ var SchedulePanel = (function () {
 
 		function load() {
 			return refreshStatus().then(function () {
-				if (cfg && cfg.enabled) {
+				/* ★ 只要读到 cfg 就建草稿（原来还要求 cfg.enabled）：后端返回的
+				 *   check_interval / 夜间 / 日间字段即使 enabled:false 也是可用的，
+				 *   那正是用户要改的东西 —— 不能因为「还没启用」就什么都不给看。 */
+				if (cfg) {
 					draft = {
 						check_interval: cfg.check_interval,
 						timeout: cfg.timeout,
@@ -375,15 +382,41 @@ var SchedulePanel = (function () {
 			}
 		}
 
-		/* 重建编排表单：只在「进入页面」与「保存后重载」时调用 */
+		/*
+		 * 表单**常驻**：开关只决定「能不能改」，不决定「看不看得见」。
+		 *
+		 * ★ 红线 86：藏起来的控件等于没有 —— 之前关闭时整张表单被换成一行提示，
+		 *   用户看到的就只是「一个开关」，根本不知道还有时段与锁频可配。
+		 *   关闭时把控件灰掉、并说明为什么不能改，信息不丢、动作也明确。
+		 *
+		 * ★ 也不再拿后端 cfg.enabled 当门槛：总开关写的是 UCI `schedule_enabled`，
+		 *   后端要等 procd 重载（reload_trigger）才会把它读进去，两者不同步的窗口里
+		 *   表单会凭空消失 —— 这正是「只有一个开关、没有修改配置」的直接成因。
+		 */
 		function renderForm() {
 			formBody.innerHTML = '';
-			if (!cfg || !cfg.enabled || !draft) {
+			if (!draft) {
 				formBody.appendChild(E('div', { 'class': 'mt5700-hint' },
-					'定时锁频未启用：打开上方「启用定时锁频」开关后即可编排时段。'));
+					'暂时读不到当前配置（AT+SCHED? 无应答），稍后切回本页会自动重试。'));
 				return;
 			}
 			buildForm();
+			var on = !!schedChk.checked;
+			if (!on) {
+				formBody.insertBefore(E('div', { 'class': 'mt5700-hint' },
+					'定时锁频当前是关闭的：打开上方「启用定时锁频」开关后才能修改并保存。'
+					+ '下面是现有配置，先供查看。'),
+					formBody.firstChild);
+			}
+			setFormDisabled(!on);
+		}
+
+		/* 开关关闭时把整张表单灰掉（不隐藏）：原生 disabled 自带灰化外观 */
+		function setFormDisabled(off) {
+			var els = formBody.querySelectorAll('input, select, textarea, button');
+			for (var i = 0; i < els.length; i++) {
+				els[i].disabled = !!off;
+			}
 		}
 
 		/* ---------- 初始化 ---------- */

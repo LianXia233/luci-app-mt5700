@@ -5,6 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.39] - 2026-10-24
+
+### Fixed — 定时锁频「只有一个开关、看不到编排配置」
+
+关闭定时锁频时整张编排表单被换成一行提示，用户看到的就只有「一个开关」，根本
+不知道还有时段与锁频可配 —— 违反「藏起来的控件等于没有」。
+
+另有一处独立成因：表单显隐还依赖后端 `AT+SCHED?` 的 `enabled`，而总开关写的是
+UCI `schedule_enabled`；后端要等 procd 重载（`procd_add_reload_trigger`）才读到，
+两者不同步的窗口里表单会凭空消失（真机取证：`AT+SCHED?` 返回 `"enabled":false`、
+UCI 为 `0` 时页面只剩开关）。
+
+- **表单常驻**：开关只控制「能不能改」。关闭时把控件与「保存编排」一起灰掉
+  （原生 `disabled`），并在表单顶部说明原因，配置照样可见。
+- **草稿构建不再要求 `cfg.enabled`**：后端返回的 `check_interval` / 夜间 / 日间
+  字段即使 `enabled:false` 也是可用的，正是要改的内容。
+- 切换开关**立即**灰/亮表单，不等 `uci commit` 与后端重载；写入失败时把视觉状态
+  一并回滚，避免界面与真实状态不一致。
+
 ## [2.4.38] - 2026-10-24
 
 ### Changed — 语音通话页 CLCC 兜底轮询自适应（空闲 5s / 通话中 2s）
