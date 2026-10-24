@@ -14,7 +14,8 @@
 # apk 对 <base>_<variant> 做严格匹配，两者不可互换，因此本脚本以 SDK 实际报告的
 # ARCH_PACKAGES 为准命名 out/<arch>/，从根上消除「文件名说 A、包内是 B」的错配。
 #
-# 说明: Rust 交叉编译使用 zig 作为链接器；cargo/rust/zig 只装进容器 /opt，不写入仓库。
+# 说明: Rust 交叉编译使用 zig 作为链接器；cargo/rust/zig 装进 <仓库>/.toolchain
+#       （已 gitignore，可用 TOOLCHAIN_DIR 覆盖），不写进仓库源码树。
 set -e
 
 EXPECTED_ARCH="$1"
@@ -22,10 +23,55 @@ RUST_TRIPLE="$2"
 VER="$3"
 [ -n "$EXPECTED_ARCH" ] && [ -n "$RUST_TRIPLE" ] && [ -n "$VER" ] || { echo "usage: sdk-build.sh <EXPECTED_ARCH> <RUST_TRIPLE> <VER> [TARGET_DIR]"; exit 1; }
 
-echo "==> 仓库挂载: /work / out:/out（构建开始, 期望架构=$EXPECTED_ARCH ver=$VER）"
+# 仓库挂载点：GitHub Actions 用 docker run -v "$PWD:/work"；CNB 的脚本任务跑在
+# 流水线容器里，工作区是 $CNB_BUILD_WORKSPACE，容器里挂成 /work（见 .cnb.yml）。
+# 顺序：先 /work（两侧 CI 与本地 docker run -v "$PWD:/work" 都挂这里），
+# 再脚本自身所在的仓库，最后才看 CNB_BUILD_WORKSPACE——CNB 步骤容器里它是宿主路径，
+# 容器内不一定存在。
+WORK_DIR="${WORK_DIR:-}"
+if [ -z "$WORK_DIR" ]; then
+	if [ -d /work ] && [ -f /work/Makefile ]; then
+		WORK_DIR=/work
+	elif [ -f "$(dirname "$0")/../Makefile" ]; then
+		WORK_DIR=$(cd "$(dirname "$0")/.." && pwd)
+	elif [ -n "${CNB_BUILD_WORKSPACE:-}" ] && [ -f "$CNB_BUILD_WORKSPACE/Makefile" ]; then
+		WORK_DIR="$CNB_BUILD_WORKSPACE"
+	else
+		WORK_DIR=$(cd "$(dirname "$0")/.." && pwd)
+	fi
+fi
+[ -f "$WORK_DIR/Makefile" ] || { echo "ERROR: 仓库目录不可用（WORK_DIR=$WORK_DIR）"; exit 1; }
+
+# 产物目录与工具链目录都允许外部覆盖：
+#   OUT_DIR        —— 产物落点。默认 /out（GitHub Actions 挂的就是它）；CNB 传
+#                     /work/out，产物跟着挂载直接落回工作区，后续 Stage 与发布步骤都读得到。
+#   TOOLCHAIN_DIR  —— Rust 工具链与 zig 的安装根（RUSTUP_HOME/CARGO_HOME/zig 都在其下）。
+OUT_DIR="${OUT_DIR:-/out}"
+mkdir -p "$OUT_DIR" 2>/dev/null || true
+[ -w "$OUT_DIR" ] || { echo "ERROR: 产物目录不可写（OUT_DIR=$OUT_DIR）"; exit 1; }
+
+# ---- 工具链目录怎么选 ----
+# 按顺序取第一个真的能写的：
+#   1) TOOLCHAIN_DIR  显式指定（CNB 传 /work/.toolchain/<任务名>）
+#   2) <仓库>/.toolchain  落在工作区里，容器可写、CI 跨步骤共享（默认）
+#   3) /opt           官方 SDK 镜像的常规位，root 跑时可用
+#   4) $HOME/.cache/mt5700-toolchain、/tmp  最后兜底
+# 不能把 /opt 当默认：openwrt/sdk 镜像在部分平台以非 root 跑，/opt 归 root 且 0755,
+# 建子目录直接 EACCES。写死 /opt 的后果不是"装不上工具链"，而是脚本在解析参数后
+# 第八行就退出、一个产物都没有，直到下一步的架构闸门才报「架构不一致」。
+TC_DIR=""
+for d in "${TOOLCHAIN_DIR:-}" "$WORK_DIR/.toolchain" /opt "${HOME:-/}/.cache/mt5700-toolchain" /tmp; do
+	[ -n "$d" ] || continue
+	mkdir -p "$d" 2>/dev/null || true
+	if [ -w "$d" ]; then TC_DIR="$d"; break; fi
+done
+[ -n "$TC_DIR" ] || { echo "ERROR: 找不到可写的工具链目录（TOOLCHAIN_DIR=/${TOOLCHAIN_DIR:-未设置}, uid=$(id -u)）"; exit 1; }
+[ -z "${TOOLCHAIN_DIR:-}" ] || [ "$TC_DIR" = "$TOOLCHAIN_DIR" ] \
+	|| echo "WARN: TOOLCHAIN_DIR=$TOOLCHAIN_DIR 不可写，改用 $TC_DIR"
+echo "==> 仓库目录: $WORK_DIR / 产物目录: $OUT_DIR / 工具链: $TC_DIR（构建开始, 期望架构=$EXPECTED_ARCH ver=$VER）"
 
 # ---------- 构建阶段划分（CI 细分步骤：依赖安装 / 构建执行可分两个容器运行） ----------
-# SDK_BUILD_PHASE=deps  → 仅依赖安装：基础工具 + Rust 工具链 + zig（CI 侧挂载 /opt 卷持久化）
+# SDK_BUILD_PHASE=deps  → 仅依赖安装：基础工具 + Rust 工具链 + zig（CI 侧挂载工具链卷持久化）
 # SDK_BUILD_PHASE=build → 仅构建执行：定位 SDK + 放入包 + feeds + 编译 + 产物收集
 # 默认 all              → 一次性完整构建（本地调试与旧行为兼容）
 PHASE="${SDK_BUILD_PHASE:-all}"
@@ -96,9 +142,9 @@ if phase_run build; then
   echo "==> SDK 根目录: $SDK_DIR"
 fi
 
-# ---------- 2) Rust 工具链（仅容器内 /opt 卷，CI 分步运行时可持久化） ----------
-export RUSTUP_HOME=/opt/rust
-export CARGO_HOME=/opt/cargo
+# ---------- 2) Rust 工具链（仅容器内 $TC_DIR，CI 分步运行时可持久化） ----------
+export RUSTUP_HOME="$TC_DIR/rust"
+export CARGO_HOME="$TC_DIR/cargo"
 export PATH="$CARGO_HOME/bin:$PATH"
 
 if phase_run deps; then
@@ -123,18 +169,29 @@ fi
 ZIG_VER=0.13.0
 if phase_run deps; then
   echo "==> 【依赖安装 3/3】zig 交叉链接器 $ZIG_VER"
-  if [ ! -x "/opt/bin/zig" ]; then
-    mkdir -p /opt/bin
-    curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
-      | tar -xJ -C /opt
-    ln -sf "/opt/zig-linux-x86_64-${ZIG_VER}/zig" /opt/bin/zig
+  if [ ! -x "$TC_DIR/bin/zig" ]; then
+    mkdir -p "$TC_DIR/bin"
+    # 源站偶发 5xx / 限速，退一格走 GitHub Release 镜像（同一份官方产物）
+    ZIG_TAR="$TC_DIR/zig.tar.xz"
+    for u in \
+      "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
+      "https://github.com/ziglang/zig/releases/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz"
+    do
+      echo "==> 下载 zig: $u"
+      if curl -fsSL --retry 3 --retry-delay 2 -o "$ZIG_TAR" "$u"; then break; fi
+      rm -f "$ZIG_TAR"
+    done
+    [ -s "$ZIG_TAR" ] || { echo "ERROR: zig $ZIG_VER 下载失败"; exit 1; }
+    tar -xJf "$ZIG_TAR" -C "$TC_DIR"
+    rm -f "$ZIG_TAR"
+    ln -sf "$TC_DIR/zig-linux-x86_64-${ZIG_VER}/zig" "$TC_DIR/bin/zig"
   fi
 fi
-if [ ! -x /opt/bin/zig ]; then
-  echo "ERROR: zig 不可用（依赖安装阶段未运行或 /opt 卷未持久化），请先以 SDK_BUILD_PHASE=deps 运行"
+if [ ! -x "$TC_DIR/bin/zig" ]; then
+  echo "ERROR: zig 不可用（依赖安装阶段未运行或工具链卷未持久化），请先以 SDK_BUILD_PHASE=deps 运行"
   exit 1
 fi
-export PATH="/opt/bin:$PATH"
+export PATH="$TC_DIR/bin:$PATH"
 zig version
 
 # Rust triple → zig target 映射（zig 使用 arm-* 而非 armv7-*）
@@ -149,7 +206,7 @@ esac
 
 # 生成 zig 链接器 wrapper + cargo 全局配置（幂等，构建阶段也会自愈重建）
 # 过滤 zig 不认识的 OpenWrt/LLD 旗标（aarch64_cortex-a53 会注入 --fix-cortex-a53-843419）
-cat > /opt/zig-linker <<EOF
+cat > "$TC_DIR/zig-linker" <<EOF
 #!/bin/sh
 # zig 0.13 不支持 --fix-cortex-a53-843419 等 LLD 专有旗标，链接时丢弃
 for a in "\$@"; do
@@ -159,14 +216,14 @@ for a in "\$@"; do
   esac
   shift
 done
-exec /opt/bin/zig cc -target ${ZIG_TARGET} "\$@"
+exec $TC_DIR/bin/zig cc -target ${ZIG_TARGET} "\$@"
 EOF
-chmod +x /opt/zig-linker
-sh -n /opt/zig-linker && echo "==> zig-linker 语法 OK, target=${ZIG_TARGET}"
+chmod +x "$TC_DIR/zig-linker"
+sh -n "$TC_DIR/zig-linker" && echo "==> zig-linker 语法 OK, target=${ZIG_TARGET}"
 mkdir -p "${CARGO_HOME}"
 cat > "${CARGO_HOME}/config.toml" <<EOF
 [target.${RUST_TRIPLE}]
-linker = "/opt/zig-linker"
+linker = "$TC_DIR/zig-linker"
 # 关键修复：让 zig 全权负责 crt（crt1/crti/crtn 等），rustc 不再传递
 # self-contained crt，否则两者叠加导致 ld.lld duplicate symbol:
 # _start/_init/_fini/_start_c（此前云编译在链接阶段必然失败）。
@@ -176,7 +233,7 @@ EOF
 echo "==> zig linker: ${RUST_TRIPLE} -> ${ZIG_TARGET}"
 
 if [ "$PHASE" = "deps" ]; then
-  echo "==> 【依赖安装】阶段完成（Rust 工具链与 zig 已就绪并持久化到 /opt 卷）"
+  echo "==> 【依赖安装】阶段完成（Rust 工具链与 zig 已就绪并持久化到 $TC_DIR）"
   exit 0
 fi
 
@@ -187,7 +244,7 @@ echo "==> 【构建执行 2/5】放入软件包源码到 buildroot"
 # 并把 at-webserver-rust 二进制装进同一个包，不再有独立的 at-webserver-rust 包。
 rm -rf package/luci-app-mt5700
 mkdir -p package/luci-app-mt5700
-cp -r /work/Makefile /work/htdocs /work/po /work/root /work/src package/luci-app-mt5700/
+cp -r "$WORK_DIR"/Makefile "$WORK_DIR"/htdocs "$WORK_DIR"/po "$WORK_DIR"/root "$WORK_DIR"/src package/luci-app-mt5700/
 # 确保 init.d / uci-defaults / hotplug / libexec 可执行（cp -r 在部分环境可能丢 +x）
 chmod 0755 package/luci-app-mt5700/root/etc/init.d/at-webserver
 chmod 0755 package/luci-app-mt5700/root/etc/uci-defaults/at-webserver
@@ -300,22 +357,22 @@ if [ -n "$EXPECT_ELF" ] && command -v file >/dev/null 2>&1; then
 fi
 
 echo "==> 【构建执行 5/5】收集与校验产物"
-# ---------- 7) 收集产物到 /out/<真实架构>/（白名单：只收本项目包）----------
+# ---------- 7) 收集产物到 $OUT_DIR/<真实架构>/（白名单：只收本项目包）----------
 # 系统库（libc/libgcc1/libstdcpp6/libatomic1/libquadmath1/libpthread/librt 等）由 opkg/apk
 # 在安装时按依赖自动解决，不应出现在 Release 资产里。
-mkdir -p "/out/${ARCH_PKGS}"
+mkdir -p "$OUT_DIR/${ARCH_PKGS}"
 find bin -type f \( -name '*.apk' -o -name '*.ipk' \) \
 	\( -name 'luci-app-mt5700*' -o -name 'luci-i18n-mt5700*' \) \
-	-exec cp {} "/out/${ARCH_PKGS}/" \;
+	-exec cp {} "$OUT_DIR/${ARCH_PKGS}/" \;
 echo "==> 产物（仅本项目包）："
-ls -la "/out/${ARCH_PKGS}/"
+ls -la "$OUT_DIR/${ARCH_PKGS}/"
 echo "==> bin 下全部包（排查用）："
 find bin -type f \( -name '*.apk' -o -name '*.ipk' \) 2>/dev/null | sort | head -50
 
 # 架构元数据：workflow 用它核对「矩阵期望架构 == SDK 实际架构」，
 # 也随 artifact 保留，便于事后追溯某个包究竟是哪个架构编出来的。
 APK_VER=$(apk --version 2>/dev/null | head -1 || true)
-cat > "/out/${ARCH_PKGS}/ARCH.txt" <<EOF
+cat > "$OUT_DIR/${ARCH_PKGS}/ARCH.txt" <<EOF
 ARCH_PACKAGES=${ARCH_PKGS}
 EXPECTED_ARCH=${EXPECTED_ARCH}
 MATCH=$([ "$ARCH_PKGS" = "$EXPECTED_ARCH" ] && echo yes || echo no)
@@ -325,12 +382,12 @@ OPENWRT_VER=${VER}
 RUST_TRIPLE=${RUST_TRIPLE}
 APK_TOOLS=${APK_VER:-none}
 EOF
-cat "/out/${ARCH_PKGS}/ARCH.txt"
+cat "$OUT_DIR/${ARCH_PKGS}/ARCH.txt"
 
 # 产物完整性闸门：缺任一必需包就让构建失败，避免再次发布不可安装的 Release
 for p in luci-app-mt5700; do
-	if [ -z "$(find "/out/${ARCH_PKGS}" -type f -name "${p}*" -print -quit)" ]; then
-		echo "ERROR: /out/${ARCH_PKGS} 缺少 ${p} 包产物（arch=${ARCH_PKGS}）"
+	if [ -z "$(find "$OUT_DIR/${ARCH_PKGS}" -type f -name "${p}*" -print -quit)" ]; then
+		echo "ERROR: $OUT_DIR/${ARCH_PKGS} 缺少 ${p} 包产物（arch=${ARCH_PKGS}）"
 		exit 1
 	fi
 done
@@ -338,7 +395,7 @@ done
 # 单包必须内含后端二进制。
 # OpenWrt 24.10+ .apk 不是标准 tar.gz（file 显示 data），不能用 tar 列目录。
 # 校验策略：ipk 用 tar 列文件；apk 用「安装树 + 包体体积」判定。
-PKG_FILE=$(find "/out/${ARCH_PKGS}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
+PKG_FILE=$(find "$OUT_DIR/${ARCH_PKGS}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
 [ -n "$PKG_FILE" ] || { echo "ERROR: 未找到 luci-app-mt5700 主包"; exit 1; }
 PKG_SZ=$(wc -c < "$PKG_FILE")
 echo "==> 校验主包: $(basename "$PKG_FILE") (${PKG_SZ} bytes)"
@@ -377,5 +434,5 @@ echo "==> 【构建执行】阶段完成（arch=${ARCH_PKGS}）"
 fi
 
 if [ "$PHASE" = "build" ]; then
-	echo "==> 【构建执行】阶段完成（全部产物已输出到 /out 卷）"
+	echo "==> 【构建执行】阶段完成（全部产物已输出到 $OUT_DIR）"
 fi
