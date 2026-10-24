@@ -1816,6 +1816,82 @@ return L.view.extend({
 			carrierBox.innerHTML = caHtml;
 		}
 
+		/* ---------- 芯片温度分档表（唯一实现） ----------
+		 * 为什么是 6 档而不是 3 档：三档只有「正常 / 偏高 / 过热」，40℃ 与 52℃
+		 * 会显示成同一个档，看不出季节性的缓慢升温；而散热判断恰恰需要这层分辨率。
+		 *
+		 * 这张表同时被三处消费，必须只此一份：
+		 *   1) 温度格子的着色（tempLevel → CSS 变量）；
+		 *   2) 卡片的整体定级（按最热通道取档，见 renderTempAdv）；
+		 *   3) tests/mock-modem/temp-level-test.js —— 它按字面量正则从本文件抽取
+		 *      阈值表与函数体，改了写法（例如换用箭头函数/对象常量）测试会直接
+		 *      报「无法从源码抽取温度逻辑」而不是静默放过。
+		 * 曾把它当零引用导出从 mt5700.js 删掉过，渲染侧退回三档内联阈值，
+		 * mt5700.css 里的 temp-* 六档色从此无人写 —— 别再拆开。
+		 */
+		var TEMP_LEVELS = [
+			{ level: 'high',   min: 77 },
+			{ level: 'hot',    min: 69 },
+			{ level: 'warm',   min: 61 },
+			{ level: 'normal', min: 53 },
+			{ level: 'cool',   min: 35 },
+			{ level: 'cold',   min: -Infinity }
+		];
+
+		/* 温度值 → 档位（cold/cool/normal/warm/hot/high）；无效值返回 null。
+		 * 0 与负值都视为「没读到」：0℃ 的基带结温是传感器未初始化的表现，
+		 * 把它当真实读数会画出满格绿色的假温度。 */
+		function tempLevel(value) {
+			var v = parseFloat(value);
+			if (isNaN(v) || v <= 0) return null;
+			for (var i = 0; i < TEMP_LEVELS.length; i++) {
+				if (v >= TEMP_LEVELS[i].min) return TEMP_LEVELS[i].level;
+			}
+			return null;
+		}
+
+		/* 档位 → 颜色变量。只用 mt5700.css 里**确实存在**的主题变量：
+		 *   danger（红）/ amber（橙）/ green（绿）/ cyan（蓝）/ text-muted（灰）。
+		 * 六档要挤进五个色，故 warm 与 hot 共用 amber，靠档位文案区分。
+		 * --mt5700-orange / --mt5700-blue 都不在色板里，写
+		 * var(--mt5700-orange, #xxx) 虽然能靠兜底色渲染，但暗色主题下那一格
+		 * 不会跟着变 —— 不引入色板外的变量。 */
+		function tempColor(level) {
+			switch (level) {
+				case 'high': return 'var(--mt5700-danger)';
+				case 'hot':
+				case 'warm': return 'var(--mt5700-amber)';
+				case 'normal': return 'var(--mt5700-green)';
+				case 'cool': return 'var(--mt5700-cyan)';
+				case 'cold': return 'var(--mt5700-cyan)';
+				default: return 'var(--mt5700-text-muted)';
+			}
+		}
+
+		/* 档位 → 中文短语（卡片整体定级用） */
+		function tempLevelText(level) {
+			switch (level) {
+				case 'high': return '过高';
+				case 'hot': return '偏高';
+				case 'warm': return '偏暖';
+				case 'normal': return '正常';
+				case 'cool': return '温和';
+				case 'cold': return '低温';
+				default: return '未知';
+			}
+		}
+
+		/* 档位 → Mt5700.badge 的 kind */
+		function tempBadgeKind(level) {
+			switch (level) {
+				case 'high': return 'danger';
+				case 'hot': return 'warning';
+				case 'warm': return 'warning';
+				case 'cold': return 'neutral';
+				default: return 'info';
+			}
+		}
+
 		/* ---------- 芯片温度渲染 (折叠面板内部，严格根据设备 AT^CHIPTEMP 真实上报) ---------- */
 		function renderTempAdv() {
 			tempBody.innerHTML = '';
@@ -1851,9 +1927,10 @@ return L.view.extend({
 
 			var maxC = 0, sumC = 0, nC = 0;
 			items.forEach(function (it) {
-				if (it.value != null && !isNaN(parseFloat(it.value))) {
-					if (it.value > maxC) maxC = it.value;
-					sumC += parseFloat(it.value);
+				var v = parseFloat(it.value);
+				if (!isNaN(v)) {
+					if (v > maxC) maxC = v;
+					sumC += v;
 					nC++;
 				}
 			});
@@ -1861,13 +1938,14 @@ return L.view.extend({
 
 			var grid = E('div', { 'class': 'mt-temp-grid' });
 			items.forEach(function (it) {
-				var has = it.value != null && !isNaN(parseFloat(it.value));
+				var lv = tempLevel(it.value);
+				var has = lv != null;
 				var v = has ? parseFloat(it.value) : 0;
-				var color = !has ? 'var(--mt5700-text-muted)'
-					: (v >= 75 ? 'var(--mt5700-danger)' : (v >= 60 ? 'var(--mt5700-amber)' : 'var(--mt5700-green)'));
+				/* 格子着色与卡片定级共用同一张分档表，避免「格子黄、徽章绿」的自相矛盾 */
+				var color = tempColor(lv);
 				var pct = has ? Math.min(100, (v / 85) * 100) : 0;
-
-				var cell = E('div', { 'style': 'background:var(--mt5700-subtle-bg); padding:10px; border-radius:8px; text-align:center; border:1px solid var(--mt5700-border-subtle);' }, [
+				var cell = E('div', { 'class': 'mt-temp-cell temp-' + (lv || 'unknown'),
+					'style': 'background:var(--mt5700-subtle-bg); padding:10px; border-radius:8px; text-align:center; border:1px solid var(--mt5700-border-subtle);' }, [
 					E('div', { 'style': 'font-size:11px; color:var(--mt5700-text-muted); font-weight:600;' }, it.label),
 					E('div', { 'style': 'font-size:15px; font-weight:800; font-family:monospace; color:' + color + '; margin:4px 0;' }, has ? (v + ' ℃') : '—'),
 					E('div', { 'style': 'height:4px; background:rgba(0,0,0,0.08); border-radius:2px; overflow:hidden;' }, [
@@ -1879,15 +1957,15 @@ return L.view.extend({
 			tempBody.appendChild(grid);
 
 			if (tempBadge) {
-				/* 分级与格子的着色同一口径（≥75 危险、≥60 偏高，其余正常）。
+				/* 定级与格子的着色同一口径（都走 tempLevel 六档表）。
 				 * 早先这里恒写「温和」——那是已删除的 tempLevel 分级留下的死文案，
 				 * 会让 90℃ 的 PA 也显示成温和。散热看的是最热的结温，
 				 * 故按最高通道定级，同时给出均温参考。 */
 				tempBadge.innerHTML = '';
-				var hot = parseFloat(maxC);
-				var lv = hot >= 75 ? { text: '过热', kind: 'danger' }
-					: (hot >= 60 ? { text: '偏高', kind: 'warning' } : { text: '温和', kind: 'info' });
-				tempBadge.appendChild(Mt5700.badge('最高 ' + hot + ' ℃ · 均温 ' + avgC + ' ℃ · ' + lv.text, lv.kind));
+				var worst = tempLevel(maxC);
+				tempBadge.appendChild(Mt5700.badge(
+					'最高 ' + maxC + ' ℃ · 均温 ' + avgC + ' ℃ · ' + tempLevelText(worst),
+					tempBadgeKind(worst)));
 			}
 		}
 

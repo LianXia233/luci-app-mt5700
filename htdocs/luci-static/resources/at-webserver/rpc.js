@@ -81,9 +81,11 @@ var rpcUsage = L.rpc.declare({
 var rpcUsageCtl = L.rpc.declare({
 	object: 'mt5700',
 	method: 'usage_ctl',
-	/* 这里的名字必须与 mt5700.uc 里 usage_ctl 的 args 键一致（action / day）：
-	 * LuCI 按 params 声明的名字映射位置参数，写成 'days' 会让 ucode 的
-	 * getStr(a,'day') 永远取不到值，清零日被后端夹成 1 号。 */
+	/* 第二个参数必须叫 `day`（单日，1~31），与 ucode 的 args 声明
+	 * `{action, day}` 和后端 usage_ctl 的 `params.day` 三处同名。
+	 * 曾写成 `days`：LuCI 按名字组装请求，字面量 `days` 不会出现在
+	 * args 里，ucode 那边 `int(getStr(a,'day'))` 恒为 0，
+	 * 「每月几号自动清零」永远是默认 1 号 —— 而界面上改完没有任何报错。 */
 	params: ['action', 'day'],
 	expect: {}
 });
@@ -609,20 +611,36 @@ ATClient.prototype.sms = function (action, params, retried) {
 		});
 	}
 	var budget = SMS_ACTION_TIMEOUT_MS[action] || self.commandTimeout;
+	/*
+	 * 形参顺序必须与上面 `rpcSms` 的 params 声明、ucode 的 args 声明
+	 * （也就是 JSON 键序）三者严格一致：LuCI 按**位置**把实参绑到
+	 * params 的名字上，rpcd/ucode 再按名字取值，中间任何一处错位都会让
+	 * 参数落到相邻字段。改顺序时请三处一起改。
+	 */
+	/* `enable` 只属于 `power` / `set_ims`，`all` 只属于 `store_drop`：
+	 * 其余动作传 undefined（LuCI 会把它从 JSON 里省略）。
+	 * 这条不是洁癖 —— `false` 是**合法布尔**，会一路序列化到后端，
+	 * 而 `power` 会真的动射频，不能让一个含义错位的 false 误触发关闭。 */
+	var enable = (action === 'power' || action === 'set_ims')
+		? (params.enable === true || params.enable === '1' || params.enable === 'true')
+		: undefined;
+	var all = (action === 'store_drop')
+		? (params.all === true || params.all === '1' || params.all === 'true')
+		: undefined;
 	var req = rpcSms(
-		action,
-		params.destination,
-		params.message,
-		params.smsc,
-		params.mem,
-		params.indices,
-		params.session_id,
-		params.ttl_ms,
-		params.dedup_key,
-		params.enable === true || params.enable === '1' || params.enable === 'true',
-		params.number,
-		params.items,
-		params.all === true || params.all === '1' || params.all === 'true'
+		action,                 // action
+		params.destination,     // destination
+		params.message,         // message
+		params.smsc,            // smsc
+		params.mem,             // mem
+		params.indices,         // indices
+		params.session_id,      // session_id
+		params.ttl_ms,          // ttl_ms
+		params.dedup_key,       // dedup_key
+		enable,                 // enable
+		params.number,          // number
+		params.items,           // items
+		all                     // all
 	);
 	return withTimeout(req, budget, '短信操作超时（模组可能正忙或正在重连，请稍后重试）')
 		.then(function (resp) {
@@ -1532,9 +1550,9 @@ function fetchUsage() {
  * day 仅在 set_reset_day 时使用（每月几号，1~31）。
  */
 function fetchUsageCtl(action, day) {
-	var params = { action: action };
-	if (day != null) params.day = Number(day) || 0;
-	return withTimeout(rpcUsageCtl(action, params.day || 0), 5000, '使用量操作超时')
+	/* day 只在 set_reset_day 时有效；其余动作传 undefined，LuCI 会省略该参数 */
+	var d = (day == null) ? undefined : (Number(day) || 0);
+	return withTimeout(rpcUsageCtl(action, d), 5000, '使用量操作超时')
 		.then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
