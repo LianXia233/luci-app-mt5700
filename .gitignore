@@ -2,6 +2,12 @@
 src/rust/target/
 target/
 
+# CI 产物、日志与工具链（CNB 流水线写在工作区内，见 .cnb.yml 文件头说明）
+/out/
+/dist/
+ci-logs/
+/.toolchain/
+
 # 测试依赖
 tests/mock-modem/node_modules/
 

@@ -1,5 +1,7 @@
 msgid ""
-msgstr "Content-Type: text/plain; charset=UTF-8"
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
 
 msgid "5G 模组"
 msgstr "5G 模组"
@@ -34,8 +36,8 @@ msgstr "短信设置"
 msgid "AT 调试终端"
 msgstr "AT 调试终端"
 
-msgid "通知日志"
-msgstr "通知日志"
+msgid "运行日志"
+msgstr "运行日志"
 
 msgid "服务配置"
 msgstr "服务配置"
