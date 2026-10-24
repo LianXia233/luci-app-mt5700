@@ -510,10 +510,10 @@ fn prepare_log_file(path: &str) -> Result<String, String> {
     if let Some(dir) = abs.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("创建日志目录 {} 失败: {e}", dir.display()))?;
     }
+    // append(true) 已隐含写权限，显式再写 write(true) 是冗余
     let f = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
-        .write(true)
         .open(&abs)
         .map_err(|e| format!("日志文件不可写 {}: {e}", abs.display()))?;
     drop(f);
@@ -636,7 +636,7 @@ pub fn normalize_phone_number(raw: &str) -> String {
 }
 
 /// 按事件类型选出对应的文案模板。
-pub fn template_for<'a>(tpl: &'a NotifyTemplates, kind: NotifyKind) -> &'a str {
+pub fn template_for(tpl: &NotifyTemplates, kind: NotifyKind) -> &str {
     match kind {
         NotifyKind::Sms => &tpl.sms,
         NotifyKind::Call => &tpl.call,
@@ -708,6 +708,14 @@ pub fn render_prefix_str(tpl: &NotifyTemplates, count: usize) -> String {
 /// 单条：直接套用该事件类型的模板。
 /// 多条：`{batch}` 标题 + 分隔线 + 逐条「序号 + 该事件类型的模板渲染结果」。
 /// 两种形态都会在最前面加全局前缀（若配置了）。
+///
+/// **生产路径不会走多条分支**：v1.14.20 起事件一律逐条实时直发，
+/// 攒批（合并窗口）已经移除，`{batch}` 模板键保留只为兼容已有配置。
+/// 之所以还留着这个函数，是因为它是「模板渲染 + 前缀拼接」的唯一端到端
+/// 断言入口 —— 单测靠它覆盖占位符替换、未知占位符保留、存储满兜底文案、
+/// 前缀 `{count}`/`{time}` 取值这些规则。删掉它，这些规则就只剩分散的
+/// 单点断言，模板改动容易漏测。改动渲染逻辑时请同步更新这里的测试。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn combine_messages(msgs: &[Notification], tpl: &NotifyTemplates) -> String {
     if msgs.is_empty() {
         return String::new();

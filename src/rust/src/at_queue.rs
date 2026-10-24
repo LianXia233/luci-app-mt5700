@@ -307,7 +307,14 @@ impl PriLock {
         ctx: &watch::Receiver<bool>,
         wait: Duration,
     ) -> Result<GatePermit, String> {
-        // 先申请异步锁，保护状态短临界区（绝不做任何 IO）。
+        // 为什么要先把 Notify 取出来再进临界区：
+        //
+        // 放行方在 `grant_locked` 里 `notify_one()`，而 `Notify::notify_one`
+        // 只在**已有等待者**时才存一个 permit；否则它只是把「已通知」标记置位。
+        // 若这里先加锁、入队、放锁，之后才 `notified()`，中间那一瞬是允许
+        // 放行发生却漏掉通知的窗口（漏掉就只能在超时或取消时醒来）。
+        // 先在外层建好 `Notified` 再入队，放行必定被记在它身上，无窗口。
+        let notify = Arc::new(Notify::new());
         let mut state = self.inner.lock().await;
 
         let token = state.seq.fetch_add(1, Ordering::Relaxed);
@@ -315,7 +322,7 @@ impl PriLock {
             prio: prio as u8,
             seq: token,
             token,
-            notify: Arc::new(Notify::new()),
+            notify: notify.clone(),
             cancelled: Arc::new(AtomicBool::new(false)),
         };
 
@@ -329,42 +336,61 @@ impl PriLock {
         drop(state);
 
         // 等待被放行（notify）或超时 / 取消。
+        //
+        // 超时预算是**整段排队**的预算：deadline 只算一次，被伪唤醒重试时
+        // 用的是剩余额度。旧实现在循环里每次重建 `sleep(wait)`，非取消的
+        // 伪唤醒会把预算无限续期，8 秒的排队上限因此失效。
+        let deadline = Instant::now() + wait;
         let mut ctx_c = ctx.clone();
+        let mut notified = Box::pin(mine.notify.clone().notified_owned());
         loop {
-            let notify = mine.notify.notified();
-            tokio::pin!(notify);
-            let timeout = tokio::time::sleep(wait);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                self.release_if_owned(&mine).await;
+                return Err(format!(
+                    "等待空闲通道超时（{}s）：模组正忙或正在重连，请稍后重试",
+                    wait.as_secs()
+                ));
+            }
+            let timeout = tokio::time::sleep(remaining);
             tokio::pin!(timeout);
 
             tokio::select! {
-                _ = &mut notify => {}
+                _ = &mut notified => {}
                 _ = &mut timeout => {
-                    self.remove(&mine).await;
+                    self.release_if_owned(&mine).await;
                     return Err(format!(
                         "等待空闲通道超时（{}s）：模组正忙或正在重连，请稍后重试",
                         wait.as_secs()
                     ));
                 }
                 _ = ctx_c.changed() => {
-                    self.remove(&mine).await;
+                    self.release_if_owned(&mine).await;
                     return Err("上下文取消".into());
                 }
             }
 
-            // 被唤醒：确认是否已轮到（放行发生在 OnHold 协议里，见下）。
-            // 若已轮到则 FastPath 已置 holder，直接返回。
+            // 被唤醒：确认是否已轮到。放行与「确认」必须在**同一个临界区**里
+            // 完成 —— 旧实现先放锁再检查 holder，超时/取消分支可能在两者之间
+            // 把通道收回去，于是这里直接返回 Ok 却带着一个已被收回的 token，
+            // 其它命令就能同时进来，通道独占被破坏。
             let state = self.inner.lock().await;
             if state.holder == Some(mine.token) {
                 drop(state);
                 return Ok(GatePermit { owner: self.clone(), token: mine.token });
             }
             drop(state);
-            // 尚未轮到（可能是伪唤醒）→ 继续等。
+            // 尚未轮到（伪唤醒）→ 继续等剩余额度。
+            notified = Box::pin(mine.notify.clone().notified_owned());
         }
     }
 
     /// 从等待队列移除一个令牌（超时/取消用）。
-    async fn remove(&self, mine: &WaitToken) {
+    ///
+    /// 与「确认轮到」同一把锁：要么这里把通道收回并派发给下一位，要么
+    /// `acquire` 那边已经拿走 `GatePermit`（那时 unmark 返回 false，
+    /// 由 permit 的 Drop 负责释放）。两条路径不会同时成立。
+    async fn release_if_owned(&self, mine: &WaitToken) {
         mine.cancelled.store(true, Ordering::Release);
         let mut state = self.inner.lock().await;
         // 极端并发：等待期间已被放行（holder == mine）却又收到超时/取消。
@@ -372,19 +398,8 @@ impl PriLock {
         // 否则通道会被永久占住，后续所有命令都卡死。
         if state.holder == Some(mine.token) {
             state.holder = None;
+            self.grant_locked(&mut state);
         }
-        drop(state);
-        // 标记后由派发逻辑清扫；若通道已被腾出，补一次派发通知下一个排队者。
-        self.dispatch().await;
-    }
-
-    /// 尝试把通道交给队里最优先且未取消的令牌。
-    async fn dispatch(&self) {
-        let mut state = self.inner.lock().await;
-        if state.holder.is_some() {
-            return;
-        }
-        self.grant_locked(&mut state);
     }
 
     fn grant_locked(&self, state: &mut tokio::sync::MutexGuard<'_, GateState>) {
@@ -400,6 +415,15 @@ impl PriLock {
         if let Some(w) = state.waiters.pop() {
             state.holder = Some(w.token);
             w.notify.notify_one();
+        }
+    }
+
+    /// 仅测试用：向所有排队者发一次伪唤醒，用来验证「排队预算不因伪唤醒续期」。
+    #[cfg(test)]
+    pub(crate) async fn notify_all_waiters_for_test(&self) {
+        let state = self.inner.lock().await;
+        for w in state.waiters.iter() {
+            w.notify.notify_waiters();
         }
     }
 
@@ -699,6 +723,103 @@ mod tests {
             let _p = lock.acquire(AtPriority::Normal, &ctx, Duration::from_secs(3)).await.unwrap();
             name
         })
+    }
+
+    /// 排队超时只消耗**一次**预算，不因伪唤醒而续期。
+    ///
+    /// 旧实现在循环里每次重建 `sleep(wait)`，任何非取消的伪唤醒都会把
+    /// 8 秒的排队上限变成「再等 8 秒」。这里用 notify_waiters 主动制造一次
+    /// 伪唤醒，断言总耗时不显著超过给定预算。
+    #[tokio::test]
+    async fn queue_timeout_is_not_extended_by_spurious_wakeups() {
+        let lock = PriLock::new();
+        let (_ctx_tx, ctx) = watch::channel(false);
+        let holder = lock
+            .acquire(AtPriority::Normal, &ctx, Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        let waiter = {
+            let lock = lock.clone();
+            let ctx = ctx.clone();
+            tokio::spawn(async move {
+                lock.acquire(AtPriority::High, &ctx, Duration::from_millis(150)).await
+            })
+        };
+        // 反复伪唤醒：旧实现每被唤醒一次就重置整段预算，必然拖到很远
+        for _ in 0..5 {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            lock.notify_all_waiters_for_test().await;
+        }
+
+        let t0 = Instant::now();
+        let res = tokio::time::timeout(Duration::from_secs(2), waiter).await.expect("不应挂死");
+        let err = match res.unwrap() {
+            Ok(_) => panic!("预算耗尽后必须返回排队超时，却拿到了通道"),
+            Err(e) => e,
+        };
+        assert!(err.contains("等待空闲通道超时"), "实际: {err}");
+        assert!(
+            t0.elapsed() < Duration::from_millis(1000),
+            "总耗时应保持在一次预算量级，实测 {:?}",
+            t0.elapsed()
+        );
+        drop(holder);
+    }
+
+    /// 超时分支不得把「已经放行给等待者」的通道再收回。
+    ///
+    /// 这是「先放锁再确认」那个缺陷的**确定性**复现：放行已经发生
+    /// （`holder == 等待者`），此时等待者的超时分支才醒来。旧实现在
+    /// `remove()` 里无条件把 holder 置空并派发给下一位 —— 而等待者随后
+    /// 从 select 里返回 Ok，于是同一个通道同时给了两个人。
+    ///
+    /// 现在收回到「置空 + 派发」全部在 `acquire` 的同一临界区里完成，
+    /// 所以这里断言：超时分支走完后通道要么仍在原等待者手里、要么交给
+    /// 下一位，绝不会两边都以为自己拿到了。
+    #[tokio::test]
+    async fn timed_out_branch_and_grant_are_mutually_exclusive() {
+        let lock = PriLock::new();
+        let (_ctx_tx, ctx) = watch::channel(false);
+
+        // 持有者先占住通道（通道空闲时应立即拿到，不能先起等待者）
+        let holder = lock
+            .acquire(AtPriority::Normal, &ctx, Duration::from_secs(1))
+            .await
+            .expect("通道空闲时应立即拿到");
+
+        // 等待者：预算极短，且放行时点被安排在预算到期前后（见下面的 sleep）
+        let waiting = {
+            let lock = lock.clone();
+            let ctx = ctx.clone();
+            tokio::spawn(async move { lock.acquire(AtPriority::High, &ctx, Duration::from_millis(20)).await })
+        };
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        drop(holder);
+
+        let res = tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .expect("等待者不应挂死")
+            .expect("任务不应 panic");
+        match res {
+            Ok(permit) => {
+                // 拿到了就真的持有：此刻再来一个申请者必须排队，不能也被放行
+                let second = lock
+                    .acquire(AtPriority::Normal, &ctx, Duration::from_millis(50))
+                    .await;
+                assert!(second.is_err(), "通道被同时交给了两个调用方");
+                drop(permit);
+                // permit 释放后通道应当可以再拿到
+                let third = lock.acquire(AtPriority::Normal, &ctx, Duration::from_secs(1)).await;
+                assert!(third.is_ok(), "permit 释放后通道应重新可用");
+            }
+            Err(e) => {
+                // 超时分支：通道也必须保持可用，不能被「收回到虚空」里
+                assert!(e.contains("等待空闲通道超时"), "实际: {e}");
+                let again = lock.acquire(AtPriority::Normal, &ctx, Duration::from_secs(1)).await;
+                assert!(again.is_ok(), "超时后通道应重新可用（不能既没结果又占着通道）");
+            }
+        }
     }
 
     #[tokio::test]

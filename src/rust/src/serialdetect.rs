@@ -44,7 +44,7 @@ const OTHER_SERIAL_PREFIXES: &[&str] = &["ttyS", "ttyAMA"];
 fn is_prefixed(name: &str, prefixes: &[&str]) -> bool {
     let base = name.trim_end_matches(|c: char| c.is_ascii_digit());
     let has_digit = name.len() > base.len();
-    has_digit && prefixes.iter().any(|p| base == *p)
+    has_digit && prefixes.contains(&base)
 }
 
 fn is_usb_serial(name: &str) -> bool {

@@ -213,18 +213,19 @@ pub fn render_status_card_md(sample: Option<&Sample>, storage: Option<(u64, u64)
         None => out.push_str("### 网络状态\n信号：暂无读数（未注册 / 无服务 / 模组忙）\n"),
     }
 
-    if let Some((used, total)) = storage {
+    // 容量按「已读到」处理：`query_storage` 对 total == 0 已经返回 None，
+    // 走到这里 total 必定 > 0（否则就是上游改了契约，除零会直接 panic）。
+    if let Some((used, total)) = storage.filter(|(_, total)| *total > 0) {
         out.push_str("\n### 短信存储状态\n");
-        if total > 0 && used >= total {
+        if used >= total {
             out.push_str(&format!("**已用：** `{used} / {total}` 条（已满）\n"));
             out.push_str("*存储已满，清理前可能收不到新短信。*\n");
         } else {
-            out.push_str(&format!("**已用：** `{used} / {total}` 条\n"));
-            if total > 0 {
-                let pct = used * 100 / total;
-                let remain = total - used;
-                out.push_str(&format!("*存储占用率：{pct}%，剩余 {remain} 条空间。*\n"));
-            }
+            let pct = used * 100 / total;
+            let remain = total - used;
+            out.push_str(&format!(
+                "**已用：** `{used} / {total}` 条\n*存储占用率：{pct}%，剩余 {remain} 条空间。*\n"
+            ));
         }
     }
 

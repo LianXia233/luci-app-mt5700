@@ -761,28 +761,26 @@ pub(crate) async fn query_monsc(
             return info;
         }
         info.rat = parts[0].trim_matches('"').to_string();
+        // 字段不足时保持默认值（全空），由调用方回退 ^HCSQ —— 绝不能按下标硬取，
+        // 那会 panic 在 URC 分发循环里，把整条上报链路一起带走。
         match info.rat.as_str() {
-            "NR" => {
-                if parts.len() >= 11 {
-                    info.arfcn = parts[3].clone();
-                    info.cell_id = parts[5].clone();
-                    info.pci = hex_to_dec(&parts[6]);
-                    info.tac = parts[7].clone();
-                    info.rsrp = parts[8].clone();
-                    info.rsrq = parts[9].clone();
-                    info.sinr = parts[10].clone();
-                }
+            "NR" if parts.len() >= 11 => {
+                info.arfcn = parts[3].clone();
+                info.cell_id = parts[5].clone();
+                info.pci = hex_to_dec(&parts[6]);
+                info.tac = parts[7].clone();
+                info.rsrp = parts[8].clone();
+                info.rsrq = parts[9].clone();
+                info.sinr = parts[10].clone();
             }
-            "LTE" => {
-                if parts.len() >= 10 {
-                    info.arfcn = parts[3].clone();
-                    info.cell_id = parts[4].clone();
-                    info.pci = hex_to_dec(&parts[5]);
-                    info.tac = parts[6].clone();
-                    info.rsrp = parts[7].clone();
-                    info.rsrq = parts[8].clone();
-                    info.rssi = parts[9].clone();
-                }
+            "LTE" if parts.len() >= 10 => {
+                info.arfcn = parts[3].clone();
+                info.cell_id = parts[4].clone();
+                info.pci = hex_to_dec(&parts[5]);
+                info.tac = parts[6].clone();
+                info.rsrp = parts[7].clone();
+                info.rsrq = parts[8].clone();
+                info.rssi = parts[9].clone();
             }
             _ => {}
         }

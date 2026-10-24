@@ -153,8 +153,8 @@ async function main() {
 	 *   长度 + 真 CR + PDU + CR 一次写完 → 实机只回显命令然后静默（见文件末尾第 12 项）。
 	 */
 	{
-		/* 手册 9.14.5 的原始举例：整条 PDU 19 字节，SMSC 字段 1 字节（00 = 用模组
-		 * 自己存的中心号）+ TPDU 18 字节，所以 <length> 是 18（9.14.3：长度不含
+		/* 手册 9.14.5 的原始举例：整条 PDU 18 字节，SMSC 字段 1 字节（00 = 用模组
+		 * 自己存的中心号）+ TPDU 17 字节，所以 <length> 是 17（9.14.3：长度不含
 		 * SMSC 字段）。长度一律由 PDU 算出来，不再手写 —— 旧夹具写的 21 字节
 		 * 其实只有 19.5 字节，两段式路径不校验长度，所以一直没暴露。 */
 		const pdu = '0015660B3108108300F00008FF044F60597D';
@@ -173,8 +173,22 @@ async function main() {
 			(r2.data ? String(r2.data).replace(/\r/g, '\\r').slice(0, 20) : r2.error) || '无应答');
 
 		/* 两段式第二步：PDU + Ctrl+Z(0x1A)。0x1A 经 JSON \u001a 转义穿过 RPC 链路，
-		 * serde_json 解析还原后原样写入串口 —— 这条链路本身也是被测对象。 */
-		const r3 = atResult(await at(pdu + '\x1A'));
+		 * serde_json 解析还原后原样写入串口 —— 这条链路本身也是被测对象。
+		 *
+		 * **必须和一次性形态用不同的 PDU**：上面那条一次性提交成功后 mock 里存了
+		 * TPDU，同一条再提交会被判成重复短信（模组对重复 TPDU 回 ERROR），
+		 * 于是这里看到的是「重复」而不是「两段式是否走通」。
+		 * 改成只动 TP-MR（TPDU 内偏移 1，即 PDU 字符串的第 4~5 个字符）的第二条
+		 * PDU 即可：「两条不同的短信」是正常的用户场景，比人为重置 mock 状态更贴近实机。 */
+		const pdu2 = pdu.slice(0, 2) + pdu.slice(2, 4) + (pdu.slice(4, 6) === '00' ? '01' : '00') + pdu.slice(6);
+		/* 诊断开关：E2E_DEBUG=1 时把实际下发的命令形态打到屏幕上。
+		 * 这类「字面 \\r / 真 CR / 控制字符被转义链改写」的问题只能靠
+		 * 「到底发出去了什么」定位，默认不打（避免刷屏）。 */
+		if (process.env.E2E_DEBUG) {
+			console.log('[e2e] oneShot =', JSON.stringify(oneShotCmd));
+			console.log('[e2e] payload =', JSON.stringify(pdu2 + '\x1A'));
+		}
+		const r3 = atResult(await at(pdu2 + '\x1A'));
 		check('两段式第二步（PDU+Ctrl+Z）拿到 +CMGS 回执',
 			r3.success && String(r3.data).indexOf('+CMGS') >= 0 && String(r3.data).indexOf('OK') >= 0,
 			(r3.data ? String(r3.data).replace(/\r/g, '\\r').slice(0, 40) : r3.error) || '无应答');

@@ -138,7 +138,7 @@ fn sha256(data: &[u8]) -> [u8; 32] {
 	msg.extend_from_slice(&bit_len.to_be_bytes());
 
 	let mut w = [0u32; 64];
-	for chunk in msg.chunks_exact(64) {
+	for chunk in msg.as_chunks::<64>().0 {
 		for i in 0..16 {
 			w[i] = u32::from_be_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]]);
 		}
@@ -889,7 +889,7 @@ impl SmsArchive {
 			conversations.push(meta);
 		}
 
-		conversations.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+		conversations.sort_by_key(|c| std::cmp::Reverse(c.updated_at_ms));
 		ArchiveStats {
 			dir: self.dir.display().to_string(),
 			total_bytes,
