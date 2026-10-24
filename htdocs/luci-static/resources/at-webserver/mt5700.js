@@ -9,7 +9,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.40.0';
+var MT5700_CSS_VERSION = '2.41.4';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -75,130 +75,198 @@ var Mt5700 = (function () {
 		return el;
 	}
 
+	/*
+	 * QAM 星座图 (v2.41 重绘)
+	 * 与空间流图共用 320×190 视窗，保证两图同比例、渲染后高度一致、样式对齐。
+	 * 状态表达：按模组实际上报的调制方式绘制对应阶数的星座点阵
+	 *   QPSK 2×2=4 点 / 16QAM 4×4=16 点 / 64QAM 6×6=36 点 / 256QAM 16×16=256 点，
+	 * 点阵越密代表单符号承载比特越多；每种调制一个主题色，角标实时显示当前调制。
+	 */
 	api.constellationSvg = function (modType) {
+		var W = 320, H = 190, CX = 160, CY = 100;
 		var svg = svgEl('svg', {
 			'class': 'mt-constellation-svg',
-			viewBox: '0 0 160 140',
+			viewBox: '0 0 ' + W + ' ' + H,
 			fill: 'none',
 			xmlns: 'http://www.w3.org/2000/svg'
 		});
 
-		// 背景与坐标系 (中心点 80, 70)
-		svg.appendChild(svgEl('rect', { x: '4', y: '4', width: '152', height: '132', rx: '12', fill: 'rgba(15, 23, 42, 0.65)', stroke: 'rgba(167, 139, 250, 0.25)', 'stroke-width': '1' }));
-		svg.appendChild(svgEl('circle', { cx: '80', cy: '70', r: '46', stroke: 'rgba(56, 189, 248, 0.2)', 'stroke-width': '1', 'stroke-dasharray': '4 4' }));
-
-		// 坐标轴 I / Q
-		svg.appendChild(svgEl('line', { x1: '16', y1: '70', x2: '144', y2: '70', stroke: 'rgba(255, 255, 255, 0.2)', 'stroke-width': '1' }));
-		svg.appendChild(svgEl('line', { x1: '80', y1: '12', x2: '80', y2: '128', stroke: 'rgba(255, 255, 255, 0.2)', 'stroke-width': '1' }));
-
-		var textI = svgEl('text', { x: '138', y: '66', fill: '#94a3b8', 'font-size': '8', 'font-family': 'sans-serif' });
-		textI.textContent = 'I';
-		svg.appendChild(textI);
-
-		var textQ = svgEl('text', { x: '84', y: '20', fill: '#94a3b8', 'font-size': '8', 'font-family': 'sans-serif' });
-		textQ.textContent = 'Q';
-		svg.appendChild(textQ);
-
-		// 生成星座图阵列点 (按 16QAM / 64QAM / 256QAM)
-		var points = [];
 		var mod = String(modType || '').toUpperCase();
+
+		/* 按调制阶数选点阵、点径与主题色 (点间距随阶数收敛，模拟真实判决域收缩) */
+		var spec = { color: '#a78bfa', levels: [-48, -16, 16, 48], r: '2.4', glow: true };   // 16QAM
 		if (mod.indexOf('QPSK') >= 0) {
-			[-20, 20].forEach(function (x) {
-				[-20, 20].forEach(function (y) { points.push([80 + x, 70 + y]); });
-			});
+			spec = { color: '#38bdf8', levels: [-36, 36], r: '3.4', glow: true };
 		} else if (mod.indexOf('256QAM') >= 0) {
-			/* 256QAM 必须画 16×16 = 256 个映射点；与 64QAM 共用 6×6 点阵的话，
-			 * 角标写着 256QAM、图上却只有 36 个点，可视化就是假的。 */
-			for (var ix = 0; ix < 16; ix++) {
-				for (var iy = 0; iy < 16; iy++) {
-					points.push([80 - 37.5 + ix * 5, 70 - 37.5 + iy * 5]);
-				}
-			}
+			/* 256QAM 必须画 16×16 = 256 个映射点，角标与图必须一致 */
+			var lv256 = [];
+			for (var k = 0; k < 16; k++) lv256.push(-60 + k * 8);
+			spec = { color: '#34d399', levels: lv256, r: '1.3', glow: false };
 		} else if (mod.indexOf('64QAM') >= 0) {
-			[-36, -24, -12, 12, 24, 36].forEach(function (x) {
-				[-36, -24, -12, 12, 24, 36].forEach(function (y) { points.push([80 + x, 70 + y]); });
-			});
-		} else {
-			// 默认 16QAM (4x4 阵列)
-			[-32, -11, 11, 32].forEach(function (x) {
-				[-32, -11, 11, 32].forEach(function (y) { points.push([80 + x, 70 + y]); });
-			});
+			spec = { color: '#f472b6', levels: [-60, -36, -12, 12, 36, 60], r: '2', glow: true };
 		}
 
-		// 星座点着色与光晕
-		/* 256 点时半径缩小，避免点阵糊成一团 */
-		var ptR = points.length > 64 ? '1.4' : '2.5';
-		points.forEach(function (pt) {
-			svg.appendChild(svgEl('circle', {
-				cx: String(pt[0]),
-				cy: String(pt[1]),
-				r: ptR,
-				fill: '#38bdf8',
-				'class': 'mt-anim-pulse'
-			}));
+		var defs = svgEl('defs');
+		defs.innerHTML =
+			'<radialGradient id="mtqam-bg" cx="50%" cy="42%" r="82%">' +
+			'<stop offset="0%" stop-color="#1d3050"/>' +
+			'<stop offset="55%" stop-color="#131c30"/>' +
+			'<stop offset="100%" stop-color="#0b1120"/>' +
+			'</radialGradient>' +
+			'<radialGradient id="mtqam-glow" cx="50%" cy="50%" r="50%">' +
+			'<stop offset="0%" stop-color="' + spec.color + '" stop-opacity="0.5"/>' +
+			'<stop offset="100%" stop-color="' + spec.color + '" stop-opacity="0"/>' +
+			'</radialGradient>' +
+			'<linearGradient id="mtqam-badge" x1="0" y1="0" x2="1" y2="1">' +
+			'<stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#38bdf8"/>' +
+			'</linearGradient>';
+		svg.appendChild(defs);
+
+		// 深空面板底
+		svg.appendChild(svgEl('rect', { x: '2', y: '2', width: String(W - 4), height: String(H - 4), rx: '14', fill: 'url(#mtqam-bg)', stroke: 'rgba(167, 139, 250, 0.28)', 'stroke-width': '1' }));
+
+		// 参考同心环 (SNR 越高可用判决域越大)
+		[22, 44, 66].forEach(function (r) {
+			svg.appendChild(svgEl('circle', { cx: CX, cy: CY, r: r, stroke: 'rgba(148, 163, 184, 0.15)', 'stroke-width': '1', 'stroke-dasharray': '3 5' }));
 		});
 
-		// 调制方式类型角标
-		svg.appendChild(svgEl('rect', { x: '10', y: '10', width: '50', height: '16', rx: '5', fill: 'rgba(139, 92, 246, 0.35)', stroke: '#a78bfa', 'stroke-width': '1' }));
-		var badge = svgEl('text', { x: '35', y: '21', 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '8.5', 'font-weight': 'bold', 'font-family': 'sans-serif' });
-		badge.textContent = mod || '16QAM';
+		// I/Q 坐标轴与箭头
+		svg.appendChild(svgEl('line', { x1: '20', y1: CY, x2: W - 18, y2: CY, stroke: 'rgba(255,255,255,0.22)', 'stroke-width': '1' }));
+		svg.appendChild(svgEl('line', { x1: CX, y1: '18', x2: CX, y2: H - 14, stroke: 'rgba(255,255,255,0.22)', 'stroke-width': '1' }));
+		svg.appendChild(svgEl('path', { d: 'M ' + (W - 25) + ' ' + (CY - 3.5) + ' L ' + (W - 18) + ' ' + CY + ' L ' + (W - 25) + ' ' + (CY + 3.5), stroke: 'rgba(255,255,255,0.4)', 'stroke-width': '1', fill: 'none' }));
+		svg.appendChild(svgEl('path', { d: 'M ' + (CX - 3.5) + ' 25 L ' + CX + ' 18 L ' + (CX + 3.5) + ' 25', stroke: 'rgba(255,255,255,0.4)', 'stroke-width': '1', fill: 'none' }));
+		var tI = svgEl('text', { x: W - 28, y: CY - 7, fill: '#94a3b8', 'font-size': '9.5', 'font-style': 'italic', 'font-family': 'sans-serif' });
+		tI.textContent = 'I';
+		svg.appendChild(tI);
+		var tQ = svgEl('text', { x: CX + 7, y: '27', fill: '#94a3b8', 'font-size': '9.5', 'font-style': 'italic', 'font-family': 'sans-serif' });
+		tQ.textContent = 'Q';
+		svg.appendChild(tQ);
+
+		// 星座点: 光晕 + 实点 (256QAM 点太多不再逐点光晕，避免 500+ 节点卡顿)
+		var seq = 0;
+		spec.levels.forEach(function (lvx) {
+			spec.levels.forEach(function (lvy) {
+				var px = CX + lvx, py = CY + lvy;
+				if (spec.glow) {
+					svg.appendChild(svgEl('circle', { cx: px, cy: py, r: '7', fill: 'url(#mtqam-glow)' }));
+				}
+				var dot = svgEl('circle', { cx: px, cy: py, r: spec.r, fill: spec.color, 'class': 'mt-anim-pulse' });
+				if (spec.glow) dot.style.animationDelay = ((seq % 9) * 0.24) + 's';
+				seq++;
+				svg.appendChild(dot);
+			});
+		});
+
+		// 左上角调制角标 (渐变胶囊，显示当前真实调制)
+		var label = mod || '16QAM';
+		var bw = 16 + label.length * 6.8;
+		svg.appendChild(svgEl('rect', { x: '12', y: '10', width: bw, height: '20', rx: '10', fill: 'url(#mtqam-badge)', opacity: '0.95' }));
+		var badge = svgEl('text', { x: 12 + bw / 2, y: '24', 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '10', 'font-weight': 'bold', 'font-family': 'sans-serif' });
+		badge.textContent = label;
 		svg.appendChild(badge);
 
 		return svg;
 	};
 
+	/*
+	 * MIMO 空间流图 (v2.41 重绘)
+	 * 与星座图共用 320×190 视窗、同款深空面板，保证样式对齐。
+	 * 状态表达：按下行码字数点亮对应数量的空间流 (基站 TX → 模组 RX)，
+	 * 流上叠加流动光点表示数据传输；未参与的天线位灰显，真实反映当前 MIMO 阶数。
+	 */
 	api.mimoSvg = function (rank) {
+		var W = 320, H = 190;
 		var svg = svgEl('svg', {
 			'class': 'mt-mimo-svg',
-			viewBox: '0 0 200 140',
+			viewBox: '0 0 ' + W + ' ' + H,
 			fill: 'none',
 			xmlns: 'http://www.w3.org/2000/svg'
 		});
 
 		var numRank = parseInt(rank, 10) || 4;
-		svg.appendChild(svgEl('rect', { x: '4', y: '4', width: '192', height: '132', rx: '12', fill: 'rgba(15, 23, 42, 0.65)', stroke: 'rgba(167, 139, 250, 0.25)', 'stroke-width': '1' }));
-
-		// 左侧基站发射天线阵列 Tx1..Tx4
-		var txY = [32, 54, 76, 98];
-		txY.forEach(function (y, i) {
-			svg.appendChild(svgEl('circle', { cx: '24', cy: String(y), r: '4', fill: '#8b5cf6', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('line', { x1: '16', y1: String(y), x2: '24', y2: String(y), stroke: '#a78bfa', 'stroke-width': '2' }));
-			var t = svgEl('text', { x: '10', y: String(y + 3), fill: '#94a3b8', 'font-size': '7', 'font-family': 'monospace' });
-			t.textContent = 'T' + (i + 1);
-			svg.appendChild(t);
-		});
-
-		// 右侧模组接收天线阵列 Rx1..Rx4
-		var rxY = [32, 54, 76, 98];
-		rxY.forEach(function (y, i) {
-			svg.appendChild(svgEl('circle', { cx: '176', cy: String(y), r: '4', fill: '#38bdf8', 'class': 'mt-anim-pulse' }));
-			svg.appendChild(svgEl('line', { x1: '176', y1: String(y), x2: '184', y2: String(y), stroke: '#38bdf8', 'stroke-width': '2' }));
-			var t = svgEl('text', { x: '186', y: String(y + 3), fill: '#94a3b8', 'font-size': '7', 'font-family': 'monospace' });
-			t.textContent = 'R' + (i + 1);
-			svg.appendChild(t);
-		});
-
-		// 空间流波束连接曲线
+		if (numRank < 1) numRank = 1;
+		if (numRank > 4) numRank = 4;
 		var streamColors = ['#8b5cf6', '#38bdf8', '#f472b6', '#34d399'];
-		for (var s = 0; s < Math.min(numRank, 4); s++) {
-			var startY = txY[s];
-			var endY = rxY[s];
-			var pathData = 'M 24 ' + startY + ' C 75 ' + (startY - 10) + ', 125 ' + (endY + 10) + ', 176 ' + endY;
-			svg.appendChild(svgEl('path', {
-				d: pathData,
-				stroke: streamColors[s % streamColors.length],
-				'stroke-width': '2.2',
-				'stroke-linecap': 'round',
-				'stroke-dasharray': '5 3',
-				'class': 'mt-anim-stream'
-			}));
+
+		var defs = svgEl('defs');
+		defs.innerHTML =
+			'<radialGradient id="mtmimo-bg" cx="50%" cy="42%" r="82%">' +
+			'<stop offset="0%" stop-color="#2a2444"/>' +
+			'<stop offset="55%" stop-color="#171326"/>' +
+			'<stop offset="100%" stop-color="#0d0a18"/>' +
+			'</radialGradient>' +
+			'<linearGradient id="mtmimo-badge" x1="0" y1="0" x2="1" y2="1">' +
+			'<stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#f472b6"/>' +
+			'</linearGradient>';
+		svg.appendChild(defs);
+
+		// 与星座图同款深空面板底
+		svg.appendChild(svgEl('rect', { x: '2', y: '2', width: String(W - 4), height: String(H - 4), rx: '14', fill: 'url(#mtmimo-bg)', stroke: 'rgba(167, 139, 250, 0.28)', 'stroke-width': '1' }));
+
+		// 列标题: 基站发射 / 模组接收
+		var ht = svgEl('text', { x: '46', y: '30', 'text-anchor': 'middle', fill: '#94a3b8', 'font-size': '9', 'font-family': 'sans-serif', 'letter-spacing': '1' });
+		ht.textContent = '基站 TX';
+		svg.appendChild(ht);
+		var hr = svgEl('text', { x: '274', y: '30', 'text-anchor': 'middle', fill: '#94a3b8', 'font-size': '9', 'font-family': 'sans-serif', 'letter-spacing': '1' });
+		hr.textContent = '模组 RX';
+		svg.appendChild(hr);
+
+		// 4 个天线位，未激活的灰显 (真实反映参与复用的流数)
+		var antY = [56, 88, 120, 152];
+		for (var i = 0; i < 4; i++) {
+			var active = i < numRank;
+			var dotFill = active ? streamColors[i] : 'rgba(148, 163, 184, 0.30)';
+			var lineStroke = active ? streamColors[i] : 'rgba(148, 163, 184, 0.30)';
+			var txtFill = active ? '#cbd5e1' : '#475569';
+
+			svg.appendChild(svgEl('line', { x1: '38', y1: antY[i], x2: '56', y2: antY[i], stroke: lineStroke, 'stroke-width': '2', 'stroke-linecap': 'round' }));
+			var tc = svgEl('circle', { cx: '44', cy: antY[i], r: active ? '4.5' : '3.2', fill: dotFill });
+			if (active) tc.setAttribute('class', 'mt-anim-pulse');
+			svg.appendChild(tc);
+			var tt = svgEl('text', { x: '22', y: antY[i] + 3.5, fill: txtFill, 'font-size': '8.5', 'font-family': 'monospace' });
+			tt.textContent = 'T' + (i + 1);
+			svg.appendChild(tt);
+
+			svg.appendChild(svgEl('line', { x1: '264', y1: antY[i], x2: '282', y2: antY[i], stroke: lineStroke, 'stroke-width': '2', 'stroke-linecap': 'round' }));
+			var rc = svgEl('circle', { cx: '276', cy: antY[i], r: active ? '4.5' : '3.2', fill: dotFill });
+			if (active) rc.setAttribute('class', 'mt-anim-pulse');
+			svg.appendChild(rc);
+			var rt = svgEl('text', { x: '289', y: antY[i] + 3.5, fill: txtFill, 'font-size': '8.5', 'font-family': 'monospace' });
+			rt.textContent = 'R' + (i + 1);
+			svg.appendChild(rt);
 		}
 
-		// 徽标显示 Rank
-		svg.appendChild(svgEl('rect', { x: '68', y: '112', width: '64', height: '16', rx: '5', fill: 'rgba(56, 189, 248, 0.25)', stroke: '#38bdf8', 'stroke-width': '1' }));
-		var rText = svgEl('text', { x: '100', y: '123', 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '8.5', 'font-weight': 'bold', 'font-family': 'sans-serif' });
-		rText.textContent = 'MIMO ' + numRank + '×' + numRank;
-		svg.appendChild(rText);
+		// 激活的空间流: 曲线 + 流动光点
+		for (var s = 0; s < numRank; s++) {
+			var y = antY[s];
+			var d = 'M 56 ' + y + ' C 120 ' + (y - 18) + ', 200 ' + (y + 18) + ', 264 ' + y;
+			var path = svgEl('path', {
+				d: d,
+				stroke: streamColors[s],
+				'stroke-width': '2.4',
+				'stroke-linecap': 'round',
+				'stroke-dasharray': '7 5',
+				opacity: '0.9',
+				'class': 'mt-anim-stream'
+			});
+			path.setAttribute('id', 'mtmimo-path-' + s);
+			svg.appendChild(path);
+
+			/* 沿曲线流动的数据光点 (SMIL animateMotion) */
+			var fly = svgEl('circle', { r: '2.8', fill: '#ffffff', opacity: '0.95' });
+			var motion = svgEl('animateMotion', { dur: (2.1 + s * 0.4) + 's', repeatCount: 'indefinite' });
+			motion.appendChild(svgEl('mpath', { href: '#mtmimo-path-' + s }));
+			fly.appendChild(motion);
+			svg.appendChild(fly);
+		}
+
+		// 左上角 Rank 角标 (与星座图角标同款式)
+		var label = 'MIMO ' + numRank + '×' + numRank;
+		var bw = 16 + label.length * 6.4;
+		svg.appendChild(svgEl('rect', { x: '12', y: '10', width: bw, height: '20', rx: '10', fill: 'url(#mtmimo-badge)', opacity: '0.95' }));
+		var badge = svgEl('text', { x: 12 + bw / 2, y: '24', 'text-anchor': 'middle', fill: '#ffffff', 'font-size': '10', 'font-weight': 'bold', 'font-family': 'sans-serif' });
+		badge.textContent = label;
+		svg.appendChild(badge);
 
 		return svg;
 	};
