@@ -160,8 +160,10 @@ jobs:
           echo "stale=$stale" >> "$GITHUB_OUTPUT"
 
       # 依赖安装与构建执行分为两个 SDK 容器运行：
-      #   依赖安装阶段把 Rust 工具链与 zig 装进 /opt 卷（宿主机 .ci-toolchain 目录持久化），
-      #   构建执行阶段复用同一 /opt 卷，无需重复下载工具链。
+      #   依赖安装阶段把 Rust 工具链与 zig 装进工具链卷（宿主机 .ci-toolchain 目录，
+      #   容器内 TOOLCHAIN_DIR=/opt），构建执行阶段复用同一卷，无需重复下载工具链。
+      # 注意：/opt 是脚本认得的「兜底」位，别把它当唯一约定——CNB 侧传的是
+      # TOOLCHAIN_DIR=/work/.toolchain/<任务名>、OUT_DIR=/work/out/<任务名>。
       - name: 依赖安装（Rust 工具链 + zig 交叉链接器，SDK 容器内）
         if: steps.stale.outputs.stale != 'true'
         run: |
@@ -169,6 +171,7 @@ jobs:
           docker run --rm --user root \
             -v "$PWD:/work" \
             -v "$PWD/.ci-toolchain:/opt" \
+            -e TOOLCHAIN_DIR=/opt \
             -e SDK_BUILD_PHASE=deps \
             openwrt/sdk:${{ matrix.image }} \
             /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}" 2>&1 | tee deps.log
@@ -185,6 +188,8 @@ jobs:
             -v "$PWD:/work" \
             -v "$PWD/.ci-toolchain:/opt" \
             -v "$PWD/out:/out" \
+            -e OUT_DIR=/out \
+            -e TOOLCHAIN_DIR=/opt \
             -e SDK_BUILD_PHASE=build \
             openwrt/sdk:${{ matrix.image }} \
             /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}" 2>&1 | tee build.log
