@@ -163,6 +163,24 @@ try {
 		const s = Parse.parseFotaState('^FOTASTATE: 12,"MC5700-CN-V1.2.3",1024,"desc"');
 		return s && s.version === 'MC5700-CN-V1.2.3' && s.packetSize === 1024;
 	})(), 'ok');
+	// 《FOTA 升级指南》4.1.1 实机示例：12 的版本号**不带引号**，描述段一路到行尾
+	check('FOTASTATE 12 指南形态（版本号不带引号）', (() => {
+		const s = Parse.parseFotaState('^FOTASTATE: 12,V100R001C00B002,6129664,1.product_name="MT5700M-CN";2.update_mode="0";3.source_version="V100R001C00B002";en-us');
+		return s && s.state === 12 && s.version === 'V100R001C00B002' && s.packetSize === 6129664;
+	})(), 'ok');
+	check('FOTASTATE 13 指南双错误码形态（13,13 / 13,51）', (() => {
+		const a = Parse.parseFotaState('^FOTASTATE: 13,13');
+		const b = Parse.parseFotaState('^FOTASTATE: 13,51');
+		return a && a.state === 13 && a.errorCode === 13 && b && b.errorCode === 51;
+	})(), 'ok');
+	// 指南 4.1.1/§5：发起 FOTA 前用 +CEREG? 确认注册（1 本网 / 5 漫游）
+	check('CEREG 注册状态解析（指南 4.1.1 示例）', (() => {
+		const ok = Parse.parseCeregStat('+CEREG: 2,1,"102F","002D811F",7');
+		const roaming = Parse.parseCeregStat('+CEREG: 0,5');
+		const searching = Parse.parseCeregStat('+CEREG: 0,2');
+		const bad = Parse.parseCeregStat('OK');
+		return ok === 1 && roaming === 5 && searching === 2 && bad === null;
+	})(), 'ok');
 	check('FOTA 状态 70 = 升级失败、50 = 准备升级',
 		Parse.fotaStateMeta(70).text === '升级失败' && Parse.fotaStateMeta(50).text === '准备升级', 'ok');
 	check('FOTA 仅在 30/31/40 可取消（AT^FOTADL=0）',
