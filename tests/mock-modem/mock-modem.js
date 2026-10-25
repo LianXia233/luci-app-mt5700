@@ -406,9 +406,65 @@ function replyFor(cmd) {
 	if (c.startsWith('AT^THERM')) return 'OK';
 	/* AT&F / AT+RESET / AT^RESET 已由上面的 FORBIDDEN 护栏拦截，此处刻意不实现 */
 	if (c === 'AT+CGMR') return 'MT5700M_CN_A0_V002\r\nOK';
-	/* 手册 15.5.3：状态取值 10/11/12/13/14/20/30/31/40/50/70，空闲是 10（不是 0） */
-	if (c === 'AT^FOTASTATE?') return '^FOTASTATE: 10\r\nOK';
-	if (c.startsWith('AT^FOTA')) return 'OK';
+	/*
+	 * FOTA 状态机（手册 15.5.3 + 《FOTA 升级指南》4.1.1）：
+	 * OEMDL 在 IDLE(10) 下发后随 FOTASTATE? 轮询推进 11→12→30，30 期间每次
+	 * FOTADLQ 前进约 5%，下满即 40；FWUP 仅在 40 接受并进入 50；FOTADL=0 取消
+	 * 回 10；FOTADL=1 从 31 续传回 30。12 的版本号按指南示例**不带引号**
+	 * （`12,V100R001C00B002,6129664,…`），防止前端解析只认手册带引号形态的回归。
+	 */
+	const FOTA_PKG_SIZE = 68315612;   // 指南 4.1.1 FOTADLQ 示例的 file_size
+	const FOTA_STEP = 3451955;        // 每次进度查询前进约 5%
+	if (c === 'AT^FOTASTATE?') {
+		if (!state.fota) state.fota = { st: 10, polls: 0, dl: 0 };
+		var f = state.fota;
+		f.polls++;
+		if (f.st === 11 && f.polls >= 2) { f.st = 12; f.polls = 0; }
+		else if (f.st === 12 && f.polls >= 2) { f.st = 30; f.polls = 0; }
+		else if (f.st === 30 && f.dl >= FOTA_PKG_SIZE) { f.st = 40; f.polls = 0; }
+		var extra = f.st === 12
+			? ',V100R001C00B002,6129664,1.product_name="MT5700M-CN";2.update_mode="0";3.source_version="V100R001C00B002";en-us'
+			: '';
+		return '^FOTASTATE: ' + f.st + extra + '\r\nOK';
+	}
+	if (c === 'AT^FOTADLQ') {
+		var f2 = state.fota || (state.fota = { st: 10, polls: 0, dl: 0 });
+		if (f2.st === 30) f2.dl = Math.min(FOTA_PKG_SIZE, f2.dl + FOTA_STEP);
+		/* 指南示例原文拼写就是 FIRMWARM1，照抄以校验解析不依赖文件名字符串 */
+		return '^FOTADLQ: 1,"FIRMWARM1",' + f2.dl + ',' + FOTA_PKG_SIZE + '\r\nOK';
+	}
+	if (c.startsWith('AT^FOTAOEMDL=')) {
+		var f3 = state.fota || (state.fota = { st: 10, polls: 0, dl: 0 });
+		if (f3.st !== 10) return '+CME ERROR: 54';   // 指南：非 IDLE 下发撞冲突态
+		f3.st = 11; f3.polls = 0; f3.dl = 0;
+		return 'OK';
+	}
+	if (c === 'AT^FOTADL=0') {
+		var f4 = state.fota;
+		if (f4 && f4.st >= 30 && f4.st <= 40) { f4.st = 10; f4.dl = 0; f4.polls = 0; return 'OK'; }
+		return '+CME ERROR: 3';
+	}
+	if (c === 'AT^FOTADL=1') {
+		var f5 = state.fota;
+		if (f5 && f5.st === 31) { f5.st = 30; return 'OK'; }
+		return '+CME ERROR: 3';
+	}
+	/* AT^FOTAFAULT=SUSPEND/QUERYFAIL/DLFAIL/UPFAIL：故障注入，验证前端挂起续传与失败链路 */
+	if (c.startsWith('AT^FOTAFAULT=')) {
+		var mode = c.slice('AT^FOTAFAULT='.length);
+		var f6 = state.fota || (state.fota = { st: 10, polls: 0, dl: 0 });
+		if (mode === 'SUSPEND' && f6.st === 30) { f6.st = 31; return 'OK'; }
+		if (mode === 'QUERYFAIL') { f6.st = 13; return 'OK'; }
+		if (mode === 'DLFAIL') { f6.st = 20; return 'OK'; }
+		if (mode === 'UPFAIL' && f6.st === 40) { f6.st = 70; return 'OK'; }
+		return '+CME ERROR: 3';
+	}
+	if (c === 'AT^FWUP') {
+		var f7 = state.fota;
+		if (f7 && f7.st === 40) { f7.st = 50; return 'OK'; }   // 指南规范：仅 40 后接受
+		return 'ERROR';
+	}
+	if (c.startsWith('AT^FOTA')) return 'OK';   // FOTAMODE 等设置类
 	if (c === 'AT^CELLSCAN=STATE') return '^CELLSCAN: 0,0\r\nOK';
 	if (c === 'AT^CELLSCAN=ABORT') return '^CELLSCAN: 0,0\r\nOK';
 	if (c.startsWith('AT^CELLSCAN=')) return '^CELLSCAN: 0,0\r\nOK';

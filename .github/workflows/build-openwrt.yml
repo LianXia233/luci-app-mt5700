@@ -18,15 +18,19 @@ name: OpenWrt 软件包云编译（apk + ipk）
 #     error: uninstallable arch: aarch64_cortex-a53
 #   反之亦然。这不是 CPU 不兼容（两者都是 ARMv8-A 指令集），而是元数据不匹配。
 #
-# 触发：push 到 main、打 v* 标签、或手动 workflow_dispatch
+# 触发：push v* 标签、或手动 workflow_dispatch（预览版仅手动，不再随 main 推送自动构建）
 # 产物：每次编译成功后自动发布 GitHub Release，分**两条互不干扰**的通道
 #   - 正式版（stable）：push 标签 v*，或手动派发时选 stable → tag 用标签名
 #     （如 v1.29.0），同名则覆盖更新；会成为 GitHub 的 latest。
-#   - 预览版（preview）：push main（开发中的默认路径），或手动派发时选 preview →
+#   - 预览版（preview）：**仅手动派发**（workflow_dispatch 选 preview，默认）→
 #     tag 为 preview-v<PKG_VERSION>-r<PKG_RELEASE>（如 preview-v1.29.0-r8），
 #     带 Pre-release 标记。**不会**触碰正式版 Release，也不会抢占 latest。
 #
-# 为什么要分通道：main 上每次提交都会触发编译，若沿用「main 推送 → 覆盖 v<VERSION>」，
+# 为什么预览版改为仅手动：main 上每次 push 都自动编译，开发中的小改动静很大
+# （6 个矩阵各跑一遍 SDK），产物也随每次提交堆积；改为手动后，需要出验证包时
+# 在 Actions 页面点一次 Run workflow 即可，main 推送不再产生构建。
+#
+# 为什么要分通道：此前 main 上每次 push 都会触发编译，若沿用「main 推送 → 覆盖 v<VERSION>」，
 # 开发中的中间产物会直接盖掉用户正在用的正式版 —— 而正式版的资产版本往往落后于
 # Makefile 的 PKG_RELEASE（正式版资产停在 r3 时，main 上已经是 r8 就很常见）。
 # 预览版用 preview- 前缀带来两个额外好处：
@@ -39,7 +43,6 @@ name: OpenWrt 软件包云编译（apk + ipk）
 
 on:
   push:
-    branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
@@ -136,6 +139,10 @@ jobs:
 
       # ------------------------------------------------------------------
       # 陈旧提交检查：连续推送会为每个中间 commit 各起一个 run
+      #
+      # 注意：预览版改为仅手动派发后，分支 push 已不触发本工作流，此检查
+      # 目前不会命中（tag 推送与手动 dispatch 都不是 branch push）——保留
+      # 作为防御：若将来重新放开分支 push 触发，它自动恢复作用。
       #
       # 背景（真实故障）：批量改动用「一次一个文件」的方式推送时，每个文件都是
       # 一个独立 commit，push 事件逐 commit 触发 —— 24 个 run 排队，其中
@@ -283,9 +290,9 @@ jobs:
           [ -n "$VER" ] || VER="0.0.0-dev"
           [ -n "$REL" ] || REL="0"
 
-          # 通道判定：tag 推送恒为正式版；main 推送恒为预览版；手动派发按输入选择。
-          # 之所以让 main 走预览版：main 上的提交是开发中间态，让它直接覆盖
-          # v<VERSION> 会把用户正在用的正式版换掉（见文件头「为什么要分通道」）。
+          # 通道判定：tag 推送恒为正式版；手动派发按输入选择（默认 preview）。
+          # 预览版已改为仅手动派发（见文件头），最后的 else 分支只是防御性兜底，
+          # 正常不会再有第三种事件走到那里。
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             CHANNEL=stable
           elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
@@ -577,7 +584,7 @@ jobs:
             {
               echo "> ## ⚠️ 测试版本 · 仅供验证，请勿用于生产环境"
               echo ">"
-              echo "> 本包由 \`main\` 分支**自动构建**，**不是**正式发布版本：可能包含未完成的改动、"
+              echo "> 本预览版由 **手动派发**（Run workflow）构建，**不是**正式发布版本：可能包含未完成的改动、"
               echo "> 尚未实机验证的修复，也可能被下一次构建随时取代。"
               echo ">"
               echo "> - **适用**：验证最新改动、复现问题、给开发反馈。"

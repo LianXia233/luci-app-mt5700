@@ -1272,6 +1272,9 @@ var Parse = (function () {
 	 * 手册 15.5.1：查询态为 `^FOTASTATE: <status>`；
 	 * <status> 为 13 / 20 时带 <error_code>；12 时（主动上报）带
 	 * <version>,<packet_size>,<description>。
+	 * 12 的 <version> 两种形态都要认：手册示例带引号（"MC…"），《FOTA 升级指南》
+	 * 4.1.1 的实机示例**不带引号**（`12,V100R001C00B002,6129664,1.product_name=…`），
+	 * 只认带引号会把指南机型的新版本号与包大小整段丢掉。
 	 */
 	api.parseFotaState = function (text) {
 		var str = String(text || '').replace(/\r/g, '');
@@ -1281,13 +1284,23 @@ var Parse = (function () {
 		var out = { state: state, errorCode: null, version: '', packetSize: null };
 		if (m[2] != null && (state === 13 || state === 20)) out.errorCode = parseInt(m[2], 10);
 		if (state === 12) {
-			var v = str.match(/\^FOTASTATE:\s*12\s*,\s*"([^"]*)"(?:\s*,\s*([0-9]+))?/);
+			var v = str.match(/\^FOTASTATE:\s*12\s*,\s*(?:"([^"]*)"|([^",]*))\s*(?:,\s*([0-9]+))?/);
 			if (v) {
-				out.version = v[1];
-				out.packetSize = v[2] != null ? parseInt(v[2], 10) : null;
+				out.version = (v[1] != null ? v[1] : v[2]).trim();
+				out.packetSize = v[3] != null ? parseInt(v[3], 10) : null;
 			}
 		}
 		return out;
+	};
+
+	/*
+	 * `+CEREG: <n>,<stat>[,<tac>,<ci>,<AcT>]`（指南 4.1.1 用它确认已注册网络，
+	 * §5【建议】注册成功后再进行 FOTA）。stat：1 本网注册 / 5 漫游注册，
+	 * 其余（0 未注册 2 搜网中 3 拒绝 4 未知）都视为不可升级。
+	 */
+	api.parseCeregStat = function (text) {
+		var m = String(text || '').replace(/\r/g, '').match(/\+CEREG:\s*([0-9]+)\s*,\s*([0-9]+)/);
+		return m ? parseInt(m[2], 10) : null;
 	};
 
 	/*
