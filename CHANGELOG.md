@@ -8,6 +8,20 @@
 
 ---
 
+## v1.30.5（2026-10-25）
+
+### fix(ui) 夜间模式兼容：主题明暗检测 + 暗色样式收口（issue #26）
+
+> 修复暗色主题下顶部选择栏（#tabmenu 可滑动页签条）与日志页等界面看不清的问题。本地以 Argon 2.x（无标记暗色）/ Aurora（`data-darkmode` + 运行时切换）/ 官方亮色三场景截图验证，新增 theme 44 项、tabmenu 38 项、存量 170 项单测全部通过。
+
+- **feat(ui) 新增主题明暗检测模块 `at-webserver/theme.js`**：按优先级判定当前明暗——主题显式标记（Aurora `data-darkmode`、Argon 3 `data-argon-mode`、通用 `data-theme`/class 约定）→ `color-scheme` / body 背景亮度实测（Argon 2.x 手动暗色无任何 DOM 标记、dark.css 直接内联，只能探测）→ `prefers-color-scheme` 兜底；结论写入 `<html>` 的 `at-dark` / `at-light` class 与 `data-at-theme`，经 MutationObserver + matchMedia 跟随 Aurora 顶部按钮等运行时切换
+- **fix(css) 暗色变量切换由 `prefers-color-scheme` 改为 `html.at-dark` 驱动**：原先 14 处 `@media (prefers-color-scheme: dark)` 只跟随系统，与主题明暗不一致时页面明暗混杂（系统暗色 + 主题亮色 → 组件先行变暗、主题仍亮；反之深色页面浮白色组件）。同时激活 CSS 里写好却从未生效的 `[data-theme="dark"]` / `.dark-theme` 死选择器（统一收敛为 `.at-dark`，无任何 JS 设置过这些类，等于暗色适配此前从未生效）
+- **fix(css) 输入框 / 下拉 / 次级按钮 / 表格行等写死的浅色底暗色收口**：`mt5700.css` / `at.css` 末尾统一追加 `html.at-dark` 覆盖段，修复暗色下白底刺眼、浅字不可读
+- **fix(ui) 顶部选择栏（#tabmenu）对比度兜底**：部分主题（如 Argon 2.x）暗色下未选中页签文字仍是写死的深灰 `#404040`，叠在深底上几乎不可见。tabmenu.js 实测首个未选中页签文字与所在背景的对比度，低于 3:1 时给容器加 `.at-tabmenu-fix` 提亮（主题自身适配正常时零改动）；检测先摘类再测量，避免「已修复的亮字」被误判为主题原色导致类反复摘除
+- **feat(ui) 全局壁纸立绘跟随主题明暗**：启用 v1.30.2 预留的深色角色素材——立绘按 theme.js 判定选 light / dark 变体，运行时切换主题自动换图（三角网格本就由 CSS `html.at-dark` 切换）
+- **chore(css) 样式版本 at.css 1.11.2 → 1.12.0、mt5700.css 2.42.1 → 2.43.0**（升级后刷新页面生效）；顺带清理选择器列表中的 14 处重复项
+- **test** 新增 `tests/theme-test.js`（44 项：颜色解析 / 亮度 / 对比度、各主题标记识别、背景探测、优先级、端到端写入与翻转通知）；`tests/tabmenu-test.js` 补对比度兜底 5 项（DOM 桩补 `classList.toggle`）
+
 ## v1.30.4（2026-10-25）
 
 ### fix(upgrade) FOTA 对照《FOTA 升级指南》V200R001C20（2024-05-17）核对修正

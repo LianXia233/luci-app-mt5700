@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
-/* global L */
+'require at-webserver/theme';
+/* global L, AtTheme */
 /**
  * at-webserver/tabmenu.js —— LuCI Tab 菜单增强（SVG 图标 + 滚动位置保持）
  *
@@ -289,6 +290,84 @@ var AtTabmenu = (function () {
 		if (!restored) centerInView(item);
 	}
 
+	/* ================= 主题 Tab 栏可读性兜底（issue #26） =================
+	 * 部分主题（如 Argon 2.x）暗色模式下未选中 Tab 文字仍是写死的深灰，
+	 * 叠在暗色页面上对比度极低，顶部选择栏几乎不可见。
+	 * 这里实测首个未选中 Tab 文字与所在背景的对比度，不足时给 #tabmenu
+	 * 容器加 .at-tabmenu-fix（样式见 mt5700.css 末尾），把文字提亮；
+	 * 主题自身明暗适配正常时对比度达标，零改动。图标用 currentColor 自动跟随。
+	 */
+
+	// 从 el 向上找第一个不透明背景（含全透明层穿透），全透明时回落白色
+	function effectiveBackColor(el, win, themeUtil) {
+		var node = el;
+		while (node && node.nodeType === 1 && node !== document.documentElement) {
+			try {
+				var bg = themeUtil.parseColor(win.getComputedStyle(node).backgroundColor);
+				if (bg && bg.a > 0) return bg;
+			} catch (e) { break; }
+			node = node.parentNode;
+		}
+		return { r: 255, g: 255, b: 255, a: 1 };
+	}
+
+	// 首个未选中 Tab 的 <a>（与 isActiveLi 同一判定口径）
+	function firstInactiveLink(container) {
+		var items = container.querySelectorAll('li[class*="tabmenu-item-"]');
+		for (var i = 0; i < items.length; i++) {
+			var a = items[i].querySelector('a');
+			if (a && !isActiveLi(items[i], a)) return a;
+		}
+		return null;
+	}
+
+	// 对比度不足（< 3:1，WCAG 大字号下限）→ 需要 Tab 文字提亮
+	function tabNeedsFix(link, win, themeUtil) {
+		if (!link || !win || typeof win.getComputedStyle !== 'function') return false;
+		try {
+			var fg = themeUtil.parseColor(win.getComputedStyle(link).color);
+			if (!fg) return false;
+			return themeUtil.contrastRatio(fg, effectiveBackColor(link, win, themeUtil)) < 3;
+		} catch (e) { return false; }
+	}
+	api.effectiveBackColor = effectiveBackColor;
+	api.firstInactiveLink = firstInactiveLink;
+	api.tabNeedsFix = tabNeedsFix;
+
+	var contrastFixBound = false;
+
+	function checkTabContrast() {
+		var container = document.getElementById('tabmenu');
+		if (!container) return;
+		// 先摘掉兜底类再测量：修复本身会提亮文字，带着类复测会把「已修复」
+		// 误判成「主题本来就好」，导致类被反复摘除（反馈回路）。
+		var hadFix = false;
+		try { hadFix = container.classList.contains('at-tabmenu-fix'); } catch (e) { }
+		if (hadFix) {
+			try { container.classList.remove('at-tabmenu-fix'); } catch (e) { }
+		}
+		var link = firstInactiveLink(container);
+		var themeUtil = (typeof window !== 'undefined' && window.AtTheme) ? window.AtTheme : null;
+		if (!themeUtil) return;
+		var fix = tabNeedsFix(link, window, themeUtil);
+		try { container.classList.toggle('at-tabmenu-fix', fix); } catch (e) { /* ignore */ }
+	}
+
+	function bindContrastWatch() {
+		if (contrastFixBound) return;
+		contrastFixBound = true;
+		// 首检放在布局稳定后（菜单由主题异步渲染，样式计算需等一帧）
+		setTimeout(checkTabContrast, 0);
+		if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+			window.requestAnimationFrame(checkTabContrast);
+		}
+		// 主题运行时切换（Aurora 顶部按钮等）后复查
+		if (typeof window !== 'undefined' && window.AtTheme && window.AtTheme.onChange) {
+			window.AtTheme.onChange(function () { setTimeout(checkTabContrast, 60); });
+		}
+	}
+	api.checkTabContrast = checkTabContrast;
+
 	/* ================= 增强主流程 ================= */
 
 	var currentItem = null;
@@ -322,6 +401,9 @@ var AtTabmenu = (function () {
 	function bindEvents() {
 		if (eventsBound) return;
 		eventsBound = true;
+
+		// 主题 Tab 栏对比度兜底检测（暗色主题下未选中项可能深底深字）
+		bindContrastWatch();
 
 		// 视口变化 / 字体加载后 tab 宽度可能变化，重新校正选中项位置
 		var reapply = debounce(function () {

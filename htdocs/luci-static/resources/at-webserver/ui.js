@@ -1,8 +1,9 @@
 'use strict';
 'require baseclass';
 'require at-webserver/compat';
+'require at-webserver/theme';
 'require at-webserver/rpc';
-/* global L, AtWs */
+/* global L, AtWs, AtTheme */
 /**
  * LuCI 页面公共 UI 辅助：连接状态条、面板、字段、提示、加载态。
  * 统一各页面的交互语义：加载态、错误提示、确认弹窗、自动刷新。
@@ -12,7 +13,9 @@
 // uhttpd 给静态资源的 Last-Modified 为 1970，浏览器会长期复用缓存；LuCI 主题同样
 // 采用「css?v=版本」的做法（aurora: main.css?v=1.3.1）。样式版本随包版本递增，
 // 保证升级/修复样式后用户刷新即可生效。
-var AT_CSS_VERSION = '1.11.2';
+var AT_CSS_VERSION = '1.12.0';
+// 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
+if (window.AtTheme) window.AtTheme.apply();
 
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION;
