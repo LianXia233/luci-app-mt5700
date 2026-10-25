@@ -119,7 +119,14 @@ function makeEl(tag) {
 	el.classList = {
 		add: function (c) { if (el._classes.indexOf(c) < 0) el._classes.push(c); },
 		remove: function (c) { el._classes = el._classes.filter(function (x) { return x !== c; }); },
-		contains: function (c) { return el._classes.indexOf(c) >= 0; }
+		contains: function (c) { return el._classes.indexOf(c) >= 0; },
+		toggle: function (c, force) {
+			const has = el._classes.indexOf(c) >= 0;
+			const want = force == null ? !has : !!force;
+			if (want && !has) el._classes.push(c);
+			if (!want && has) el._classes = el._classes.filter(function (x) { return x !== c; });
+			return want;
+		}
 	};
 	return el;
 }
@@ -452,6 +459,61 @@ const TWELVE_TABS = [
 			icons.length === 2 && icons[0].children[0].children.length === 2 &&
 			icons[0].children[0].children[0].tag === 'circle',
 			'parts=' + icons[0].children[0].children.length);
+	}
+
+	/* ---------- 11. 主题 Tab 栏对比度兜底（issue #26） ---------- */
+	{
+		/* 加载真实 theme.js 作为 themeUtil（与浏览器 require 链一致） */
+		const themeSrc = fs.readFileSync(path.join(libDir, 'theme.js'), 'utf8');
+		const themeFactory = new Function('L', 'document', 'window',
+			themeSrc);
+		const L_THEME = { Class: { extend: function (o) { return function () { Object.assign(this, o); }; } } };
+
+		function makeContrastEnv(linkColor, stripBg) {
+			const env = makeEnv('/cgi-bin/luci/admin/modem/5g/logs');
+			env.documentStub.documentElement = { nodeType: 1, parentNode: null };
+			env.windowStub.AtTheme = new (themeFactory(L_THEME, env.documentStub, env.windowStub))();
+			const api = loadModule(env); // 求值即挂 window.AtTabmenu，返回实例
+			const dom = buildTabmenu(env, {
+				tabs: [{ name: 'status', title: '网络状态' }, { name: 'logs', title: '运行日志' }],
+				activeKey: 'logs', scrollable: false
+			});
+			const firstLi = dom.strip.children[0]; // 首个未选中项的 li
+			const a = firstLi.children[0];
+			a._computed = { color: linkColor };
+			dom.strip._computed = { overflowX: 'visible', backgroundColor: stripBg };
+			return { env: env, dom: dom, api: api };
+		}
+
+		/* Argon 2.x 暗色：深灰字挂在深底上，对比度不足 → 需要提亮 */
+		{
+			const c = makeContrastEnv('#404040', 'rgb(24, 24, 25)');
+			const link = c.api.firstInactiveLink(c.dom.tabmenu);
+			check('对比度兜底: 识别首个未选中 Tab', !!link);
+			check('对比度兜底: 深底深字判定需修复', c.api.tabNeedsFix(link, c.env.windowStub, c.env.windowStub.AtTheme),
+				'fg=#404040 bg=rgb(24,24,25)');
+		}
+		/* 亮色主题：深灰字挂白底，对比度充足 → 零改动 */
+		{
+			const c = makeContrastEnv('#404040', 'rgb(255, 255, 255)');
+			const link = c.api.firstInactiveLink(c.dom.tabmenu);
+			check('对比度兜底: 白底深字无需修复', !c.api.tabNeedsFix(link, c.env.windowStub, c.env.windowStub.AtTheme));
+		}
+		/* 端到端：enhance + 对比度检查后按对比度给容器加/不加 .at-tabmenu-fix */
+		{
+			const c = makeContrastEnv('#404040', 'rgb(24, 24, 25)');
+			c.api.enhance();
+			c.api.checkTabContrast();
+			check('对比度兜底: 暗色场景容器挂 .at-tabmenu-fix',
+				c.dom.tabmenu.classList.contains('at-tabmenu-fix'));
+		}
+		{
+			const c = makeContrastEnv('#404040', 'rgb(255, 255, 255)');
+			c.api.enhance();
+			c.api.checkTabContrast();
+			check('对比度兜底: 亮色场景容器零改动',
+				!c.dom.tabmenu.classList.contains('at-tabmenu-fix'));
+		}
 	}
 
 	/* ---------- 汇总 ---------- */

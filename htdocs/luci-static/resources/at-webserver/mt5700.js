@@ -1,15 +1,18 @@
 'use strict';
 'require baseclass';
 'require at-webserver/compat';
+'require at-webserver/theme';
 'require at-webserver/tabmenu';
-/* global L */
+/* global L, AtTheme */
 /**
  * MT5700 LuCI 前端公共组件库：页面骨架、卡片/面板、表单控件、
  * 信号仪表与网络能力总评（木桶原理取最差项），以及实时速率折线图。
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.42.1';
+var MT5700_CSS_VERSION = '2.43.0';
+// 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
+if (window.AtTheme) window.AtTheme.apply();
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -23,9 +26,10 @@ var MT5700_CSS_VERSION = '2.42.1';
 })();
 
 /*
- * 插件全局背景：三角网格铺底（明暗主题自动切换），两个角色每次刷新随机显示其一、
- * 随机落位。PC 与手机各用一套角色图，显示哪张由 CSS 断点决定（不依赖 UA）；
- * 角色图都是透明抠图，明暗主题下都成立，因此角色与主题解耦、只做随机抽取。
+ * 插件全局背景：三角网格铺底（网格明暗由 CSS html.at-dark 切换），两个角色每次
+ * 刷新随机显示其一、随机落位。PC 与手机各用一套角色图，显示哪张由 CSS 断点决定
+ * （不依赖 UA）；角色立绘分 light / dark 两套变体，随主题明暗选择
+ * （at-webserver/theme.js 判定），运行时切换主题自动换图。
  * 网格层 fixed + pointer-events:none，应用内容经 .mt5700-app{z-index:1} 抬到其上。
  */
 (function () {
@@ -35,16 +39,29 @@ var MT5700_CSS_VERSION = '2.42.1';
 		layer.id = 'mt5700-global-bg';
 
 		var base = '/luci-static/resources/at-webserver/bg/';
-		var pick = function (a, b) { return Math.random() < 0.5 ? a : b; };
-		var mk = function (cls, file) {
+		var variant = function () {
+			return (window.AtTheme && typeof window.AtTheme.dark === 'function' && window.AtTheme.dark()) ? 'dark' : 'light';
+		};
+		var mk = function (cls, kind) {
 			var img = document.createElement('img');
 			img.className = 'mt-bg-char ' + cls;
 			img.alt = '';
-			img.src = base + file;
+			img.setAttribute('data-kind', kind);
+			img.src = base + 'character-' + kind + '-' + variant() + '.webp';
 			layer.appendChild(img);
+			return img;
 		};
-		mk('mt-bg-pc', pick('character-pc-light.webp', 'character-pc-dark.webp'));
-		mk('mt-bg-mobile', pick('character-mobile-light.webp', 'character-mobile-dark.webp'));
+		var pc = mk('mt-bg-pc', 'pc');
+		var mobile = mk('mt-bg-mobile', 'mobile');
+
+		/* 主题运行时切换（Aurora 顶部按钮等）→ 换对应明暗变体立绘 */
+		if (window.AtTheme && typeof window.AtTheme.onChange === 'function') {
+			window.AtTheme.onChange(function () {
+				var v = variant();
+				if (pc) pc.src = base + 'character-pc-' + v + '.webp';
+				if (mobile) mobile.src = base + 'character-mobile-' + v + '.webp';
+			});
+		}
 
 		/* 随机落位：一律右侧，仅垂直偏移 / 旋转 / 透明度随机，水平只做少量抖动。
 		 * 层级由 CSS 保证：#mt5700-global-bg(z:0) 恒在 #maincontent(z:1) 之下，
