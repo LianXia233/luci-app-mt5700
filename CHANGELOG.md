@@ -5,6 +5,42 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.43] - 2026-10-26
+
+### Changed — 版式重做（页面壳 / 卡片 / 读数 / 表格 / 控件）
+
+只动视觉层：页面结构、交互、组件 API、AT 行为零改动。`MT5700_CSS_VERSION` 5.11.0。
+
+- **页头压成横条**：标题 28px → 22px，说明并到标题右侧同一行，左侧一道 3px 主色竖线，
+  下面一条发丝线收口。页头高度约 90px → 46px，首屏能多露出一整张卡。
+- **卡片去「浮岛」**：不再有阴影与 hover 阴影加深（卡片本身不可点，浮起在暗示可点），
+  只用 1px 实线 + 12px 圆角；标题前加主色竖条做层级锚点，标题与说明同行。
+- **读数改「发丝带」**：原来每个读数是一个带阴影的小盒子，6 个读数就是 6 块浮岛；
+  现在整组读数合成一条带 1px 分隔的读数带（`gap:1px` + 底色，任意列数都严丝合缝），
+  读数左对齐、20px/600，去掉 hover 上浮。
+- **表格收紧**：表头改 11px 中性小标 + 凹陷底，行内距 12px → 9px，一屏多 3~4 行。
+- **控件收紧**：按钮固定 34px 高、8px 圆角、去阴影与位移；输入框 34px；徽章改 6px 小方角。
+- **主色换靛蓝 `#4f46e5`**（原 `#2563eb` 与「信息蓝」分不开），30 处硬编码 tint 同步替换。
+- 仪表 / 速率格 / EID 身份块改为卡片内的「凹陷井」；eSIM 行去阴影、终端去阴影；
+  清理 reduced-motion 里已无对象的 hover 位移规则。
+
+### Fixed — Argon 把裸 `h2`/`h3` 画成卡片（真机实测）
+
+Argon 的 cascade.css 对**裸标题标签**生效：
+
+```css
+h2 { padding:1rem 1.25rem; background:var(--white); border-radius:.25rem; box-shadow:0 4px 8px … }
+h3 { padding:.8755rem 1.25rem; display:block; width:100%; background:var(--white); … }
+```
+
+我们的页面标题是 h2、卡片标题是 h3，于是：页面标题外面真的多出一个白色方块
+（实测 104×56、圆角 4px、带阴影），卡片标题被 `width:100%` 撑满整行、副标题被挤到
+第二行（实测标题宽 1196px = 整行宽，卡头白占 88px 高）。两处都不会报错，只会「看着不对」。
+
+修法：在 `.mt5700-page-title` / `.mt5700-card-title` 里清掉宿主的 background / box-shadow /
+border-radius / padding，并用 `width: fit-content` 收回 h3 的宽度。
+新增守卫 `tests/host-heading-reset-contract.test.js`（15 项，含反向验证）。
+
 ## [2.4.42] - 2026-10-26
 
 ### Changed — 菜单信息架构重组（12 项平铺 → 1 个总览 + 4 组）

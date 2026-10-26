@@ -16,29 +16,31 @@
 
 /* ---------- CSS Variables ---------- */
 :root {
-  /* 颜色
-     ★ 2026-10-26 视觉改版：去玻璃、去半透明卡片。
-       原来卡片是 rgba(255,255,255,.82) + backdrop-filter，在 Argon 这类
-       自带背景图的主题下会「透出」底色，发灰、边界也糊；改成纯白 + 实边后
-       对比度和层次都清楚，同时省掉一层 backdrop-filter 合成开销。 */
-  --mt5700-bg: #f6f7f9;
+  /* 颜色：三种中性面（画布 / 卡片 / 凹陷块）+ 一条主色
+     ★ 2026-10-26 版式重做：不再走「浮动卡片 + 彩色阴影」那套。
+       层次改由三种面 + 1px 实线表达，阴影只留给真正浮起来的层
+       （弹窗 / 提示条 / 底部应用条）。主色由蓝 #2563eb 换到靛蓝 #4f46e5：
+       与「信息蓝」在语义上分开，和绿/黄/红三档状态色也拉开色相差。 */
+  --mt5700-bg: #f3f4f7;
   --mt5700-card-bg: #ffffff;
   --mt5700-card-bg-hover: #ffffff;
-  --mt5700-glass-bg: rgba(255, 255, 255, 0.9);
+  /* 凹陷面：表头、指标条、内嵌块。比卡片略深，用来「切」出结构，不用边框堆叠 */
+  --mt5700-surface-sunken: #f7f8fa;
+  --mt5700-glass-bg: #f7f8fa;
   --mt5700-float-bg: #ffffff;
-  --mt5700-text: #101828;
-  --mt5700-text-secondary: #475467;
-  --mt5700-text-muted: #8a94a6;
-  --mt5700-border: #e7e9ee;
-  --mt5700-border-subtle: #eceef2;
-  --mt5700-divider: rgba(16, 24, 40, 0.07);
-  /* sticky 表头专用不透明底：亮色用极浅灰，与纯白卡片区分出「表头」这一层 */
-  --mt5700-table-head-bg: #fafbfc;
+  --mt5700-text: #0e1626;
+  --mt5700-text-secondary: #4a5568;
+  --mt5700-text-muted: #8b95a7;
+  --mt5700-border: #e3e7ee;
+  --mt5700-border-subtle: #edf0f5;
+  --mt5700-divider: #f0f2f6;
+  /* sticky 表头专用不透明底：亮色用浅灰，与纯白卡片区分出「表头」这一层 */
+  --mt5700-table-head-bg: #f7f8fa;
   /* iOS 风格开关专用：关态轨道要的是「一块浅灰填充」，不是描边色。
      复用 --mt5700-border-subtle 的话暗色下只有 0.08 alpha，轨道几乎看不见，
      所以单列两个变量随主题切换。开态沿用 --mt5700-accent，与页面按钮同色。 */
-  --mt5700-switch-off: #eaecf0;
-  --mt5700-switch-knob-sh: 0 3px 8px rgba(16, 24, 40, 0.16), 0 1px 1px rgba(16, 24, 40, 0.16);
+  --mt5700-switch-off: #e6e9f0;
+  --mt5700-switch-knob-sh: 0 1px 3px rgba(14, 22, 38, 0.2);
 
   /* 玻璃效果：改版后不再使用（保留变量是为了不改各处引用；置 none 即关闭合成） */
   --mt5700-blur: 0px;
@@ -59,12 +61,13 @@
   --mt5700-shadow-lg: var(--mt5700-sh-3);
   --mt5700-shadow-xl: var(--mt5700-sh-float);
 
-  /* 圆角：收敛成三档（控件 10 / 卡片 14 / 胶囊 999） */
-  --mt5700-radius-sm: 8px;
-  --mt5700-radius-md: 10px;
-  --mt5700-radius-lg: 14px;
-  --mt5700-radius-xl: 18px;
-  --mt5700-radius-full: 9999px;
+  /* 圆角：收敛成三档（控件 6 / 卡片 12 / 胶囊 999）——
+     小圆角配 1px 细线才显得「精密」，大圆角 + 实线会往玩具感走 */
+  --mt5700-radius-sm: 6px;
+  --mt5700-radius-md: 8px;
+  --mt5700-radius-lg: 12px;
+  --mt5700-radius-xl: 16px;
+  --mt5700-radius-full: 999px;
 
   /* 间距 */
   --mt5700-space-xs: 4px;
@@ -74,18 +77,20 @@
   --mt5700-space-xl: 32px;
 
   /* 状态色
-     ★ 2026-10-26：主色由 #3b82f6 改为 #2563eb（更深一档，白字对比度更好）；
-       绿/黄/红同族换到更沉的一组，避免和信号等级色（sig-*）撞得看不清。 */
-  --mt5700-accent: #2563eb;
-  --mt5700-accent-light: #3b82f6;
-  --mt5700-success: #12b76a;
-  --mt5700-success-light: #32d583;
-  --mt5700-warning: #f79009;
-  --mt5700-warning-light: #fdb022;
-  --mt5700-danger: #f04438;
-  --mt5700-danger-light: #f97066;
-  --mt5700-info: #2563eb;
-  --mt5700-info-light: #3b82f6;
+     ★ 2026-10-26 版式重做：主色改用靛蓝 #4f46e5（原来 #2563eb 太接近
+       「信息蓝」，和徽章 info 分不开）；绿/黄/红同族压暗一档，
+       在纯白卡上更沉，不会抢主色。 */
+  --mt5700-accent: #4f46e5;
+  --mt5700-accent-hover: #4338ca;
+  --mt5700-accent-light: #6366f1;
+  --mt5700-success: #0f9d58;
+  --mt5700-success-light: #34b37a;
+  --mt5700-warning: #e08700;
+  --mt5700-warning-light: #f5a524;
+  --mt5700-danger: #dc2f2f;
+  --mt5700-danger-light: #f0655f;
+  --mt5700-info: #4f46e5;
+  --mt5700-info-light: #6366f1;
   /* 信号等级色 (绿→青→黄→橙→红 平滑映射) */
   --mt5700-sig-exc: #10b981;
   --mt5700-sig-good: #06b6d4;
@@ -113,22 +118,27 @@
 /* 暗色模式 */
 @media (prefers-color-scheme: dark) {
   :root {
-    /* 2026-10-26：与亮色同步去玻璃 —— 卡片改不透明深灰，边界用实色细线 */
-    --mt5700-bg: #0f1115;
-    --mt5700-card-bg: #171a21;
-    --mt5700-card-bg-hover: #1c2029;
-    --mt5700-glass-bg: rgba(28, 32, 41, 0.9);
-    --mt5700-float-bg: #1c2029;
-    --mt5700-text: #eef0f7;
-    --mt5700-text-secondary: #a4adc2;
-    --mt5700-text-muted: #646e85;
-    --mt5700-border: #262b36;
-    --mt5700-border-subtle: #21262f;
-    --mt5700-divider: rgba(255, 255, 255, 0.07);
+    /* 2026-10-26：与亮色同步 —— 不透明面 + 实线；凹陷面比卡片亮一档 */
+    --mt5700-bg: #0b0e14;
+    --mt5700-card-bg: #12161e;
+    --mt5700-card-bg-hover: #12161e;
+    --mt5700-surface-sunken: #171c26;
+    --mt5700-glass-bg: #171c26;
+    --mt5700-float-bg: #1a202b;
+    --mt5700-text: #eef1f6;
+    --mt5700-text-secondary: #a6b0c2;
+    --mt5700-text-muted: #6b7688;
+    --mt5700-border: #232a36;
+    --mt5700-border-subtle: #1d232d;
+    --mt5700-divider: #1d232d;
     /* sticky 表头专用不透明底：与卡片同色但全不透明，滚动时不透字 */
-    --mt5700-table-head-bg: #171a21;
-    --mt5700-switch-off: #2a3040;
-    --mt5700-switch-knob-sh: 0 3px 8px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(0, 0, 0, 0.3);
+    --mt5700-table-head-bg: #171c26;
+    --mt5700-switch-off: #2a3242;
+    --mt5700-switch-knob-sh: 0 1px 3px rgba(0, 0, 0, 0.5);
+    /* 暗底上主色提亮一档，否则 #4f46e5 与 #12161e 的对比不足 */
+    --mt5700-accent: #6366f1;
+    --mt5700-accent-hover: #818cf8;
+    --mt5700-info: #6366f1;
     --mt5700-sh-1: 0 1px 2px rgba(0, 0, 0, 0.3);
     --mt5700-sh-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.35);
     --mt5700-sh-3: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.4);
@@ -141,90 +151,158 @@
    L1 - 应用壳与环境背景层
    ========================================================================== */
 
-/* ---------- 页面容器 ---------- */
+/* ---------- 页面容器 ----------
+   版式重做（2026-10-26）：页面标题不再是独立的一大块留白，而是压成一条
+   「标题 + 说明」的横条，左侧一道 3px 主色竖线作为锚点，下面一条发丝线收口。
+   原来 28px 标题 + 24px 下边距，光页头就吃掉近 90px；现在约 46px，
+   首屏能多露出一整张卡。 */
 .mt5700-page {
   max-width: 1400px;
   margin: 0 auto;
 }
 
-/* 页面主体：纵向弹性布局，统一卡片间距（修复卡片贴叠问题） */
+/* 页面主体：纵向弹性布局，统一卡片间距 */
 .mt5700-page-body {
   display: flex;
   flex-direction: column;
-  gap: var(--mt5700-space-lg);
+  gap: var(--mt5700-space-md);
   min-width: 0;
 }
 
 .mt5700-page-header {
-  margin-bottom: var(--mt5700-space-xl);
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 0 12px 14px;
+  margin-bottom: var(--mt5700-space-md);
+  border-bottom: 1px solid var(--mt5700-divider);
+}
+
+/* 左侧竖线：整页的视觉锚点，与卡片标题的小竖条同色同宽 */
+.mt5700-page-header::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 15px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--mt5700-accent);
 }
 
 .mt5700-page-title {
-  font-size: var(--mt5700-font-size-3xl) !important;
+  font-size: 22px !important;
   /* ★ 元素是 h2（mt5700.js 的 Mt5700.page），而 LuCI Argon 会给 h1~h6 强加
      `font-weight: normal !important`。不加 !important 的话这里的 700 会被宿主主题
      直接压掉，页面标题看着和正文一样细 —— 与同文件 .mt5700-card .mt5700-metric-value
      那条「几何/排版关键项一律 !important」是同一个坑。 */
   font-weight: 700 !important;
   color: var(--mt5700-text);
-  margin: 0 0 var(--mt5700-space-sm) 0;
-  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+
+  /* ★★ Argon 把**裸 h2 当卡片画**（cascade.css：
+        h2 { padding: 1rem 1.25rem; font-size: 1.25rem; border-radius: .25rem;
+             background: var(--white); box-shadow: 0 4px 8px rgba(0,0,0,.03); }
+     它只按标签选，我们的 h2 直接被套上白底 + 内边距 + 阴影 —— 真机实测页面标题
+     外面真的多出一个白色方块（104×56，圆角 4px）。必须在这里显式清掉，
+     否则「页头横条」会被这个假卡片毁掉。 */
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  border: 0;
+  padding: 0;
 }
 
 .mt5700-page-subtitle {
-  font-size: var(--mt5700-font-size-base);
-  color: var(--mt5700-text-secondary);
+  font-size: var(--mt5700-font-size-sm);
+  color: var(--mt5700-text-muted);
   margin: 0;
 }
 
 /* ==========================================================================
-   L2 - 主容器卡片 (玻璃拟态 + 多层阴影)
+   L2 - 主容器卡片（平面 + 发丝线，版式重做 2026-10-26）
+   --------------------------------------------------------------------------
+   原先每张卡都带多层阴影与 hover 阴影加深，在 6~10 张卡的页面上会糊成一片
+   「浮岛」，且卡本身不可点，hover 反而在暗示可点。现在卡片只用 1px 实线 +
+   12px 圆角表达边界，卡片标题前加一道主色竖条做层级锚点。
    ========================================================================== */
 .mt5700-card {
   position: relative;
   background: var(--mt5700-card-bg);
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
   border: 1px solid var(--mt5700-border);
   border-radius: var(--mt5700-radius-lg);
-  box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
   overflow: hidden;
-  transition: box-shadow var(--mt5700-transition-base), transform var(--mt5700-transition-base), background var(--mt5700-transition-base);
-}
-
-.mt5700-card:hover {
-  background: var(--mt5700-card-bg-hover);
-  box-shadow: var(--mt5700-sh-3), var(--mt5700-sh-inset);
 }
 
 .mt5700-card-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--mt5700-space-md);
-  padding: var(--mt5700-space-lg) var(--mt5700-space-lg) var(--mt5700-space-sm) var(--mt5700-space-lg);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 11px 16px;
   border-bottom: 1px solid var(--mt5700-divider);
 }
 
+/* 标题竖条：与页头竖线同一套语言，宽度/圆角完全一致 */
 .mt5700-card-title {
-  font-size: var(--mt5700-font-size-lg);
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  /* ★ 必须显式 fit-content：h3 是块级盒，光把 display 改成 flex 仍然是
+     「块级 flex 容器」——它照旧占满整行，副标题就被挤到第二行（真机实测：
+     标题宽 1196px = 整行宽，副标题只能换行）。fit-content 让标题回到
+     「按内容宽度」，同一行才装得下「标题 + 说明 + 右侧操作」。 */
+  width: fit-content;
+  max-width: 100%;
+  font-size: var(--mt5700-font-size-base);
+  /* 同上：h3 会被 Argon 压成 normal */
+  font-weight: 600 !important;
+  line-height: 1.4;
   color: var(--mt5700-text);
   margin: 0;
+  letter-spacing: 0.01em;
+
+  /* ★★ Argon 的裸 h3 同样被当成卡片：
+        h3 { padding: .8755rem 1.25rem; display: block; width: 100%;
+             background: var(--white); border-radius: .25rem; line-height: 1; }
+     其中 `width: 100%` 就是副标题被挤到第二行的元凶（真机实测标题宽 1196px）。
+     这条与上面的 fit-content 是配套的：一个清掉宿主给的盒子，一个收回宽度。 */
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.mt5700-card-title::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--mt5700-accent);
 }
 
 .mt5700-card-subtitle {
-  font-size: var(--mt5700-font-size-sm);
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--mt5700-font-size-xs);
   color: var(--mt5700-text-muted);
-  margin: var(--mt5700-space-xs) 0 0 0;
+  margin: 0;
+  line-height: 1.5;
 }
 
 .mt5700-card-extra {
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .mt5700-card-body {
-  padding: var(--mt5700-space-lg);
+  padding: var(--mt5700-space-md);
 }
 
 /* ==========================================================================
@@ -232,8 +310,8 @@
    ========================================================================== */
 .mt5700-grid {
   display: grid;
-  gap: var(--mt5700-space-lg);
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--mt5700-space-md);
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
 .mt5700-grid-2 { grid-template-columns: repeat(2, 1fr); }
@@ -252,37 +330,32 @@
 }
 
 /* ==========================================================================
-   L3 - 浮动数据卡片 (悬浮微位移 + 微光)
+   L3 - 指标条（版式重做 2026-10-26）
+   --------------------------------------------------------------------------
+   原来每个读数是一个独立的小圆角盒子，自带阴影与 hover 上浮，6 个读数就是
+   6 块「浮岛」，读数一多整卡像贴满便签。现在整组读数合并成**一条**带发丝
+   分隔的读数带：容器 1px 网格线做分隔（gap:1px + 底色），单元格只留底色。
+   顺带去掉 hover 上浮 —— 读数不可点，浮动在误导。
    ========================================================================== */
 .mt5700-metric {
-  position: relative;
-  background: var(--mt5700-glass-bg);
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
-  border: 1px solid var(--mt5700-border);
-  border-radius: var(--mt5700-radius-md);
-  box-shadow: var(--mt5700-sh-1), var(--mt5700-sh-inset);
-  padding: var(--mt5700-space-md);
-  text-align: center;
-  transition: transform var(--mt5700-transition-base), box-shadow var(--mt5700-transition-base);
-}
-
-.mt5700-metric:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
+  background: var(--mt5700-card-bg);
+  padding: 10px 12px;
+  text-align: left;
+  min-width: 0;
 }
 
 .mt5700-metric-label {
-  font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--mt5700-space-xs);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--mt5700-text-secondary);
+  letter-spacing: 0.01em;
+  margin-bottom: 3px;
 }
 
 .mt5700-metric-value {
-  font-size: var(--mt5700-font-size-2xl);
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
   color: var(--mt5700-text);
   word-break: break-all;
   /* 等宽数字：读数类页面（网络状态 1s 轮询、信号/速率刷新）数值跳动时
@@ -295,15 +368,22 @@
 .mt5700-metric-value.warning { color: var(--mt5700-warning); }
 .mt5700-metric-value.danger { color: var(--mt5700-danger); }
 
+/* 读数带：gap:1px + 底色 = 任意列数下都严丝合缝的发丝分隔，不依赖 nth-child */
 .mt5700-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 1px;
+  background: var(--mt5700-border-subtle);
+  border: 1px solid var(--mt5700-border-subtle);
+  border-radius: var(--mt5700-radius-md);
+  overflow: hidden;
 }
 
 /* ==========================================================================
    L3 - 环形仪表 (Circular Gauge, SVG)
    ========================================================================== */
+/* 仪表格：改成卡片内的「凹陷格」——与指标读数带同一套语言
+   （面比卡片深一档 + 边线），不再自带阴影/上浮。 */
 .mt5700-gauge {
   position: relative;
   display: flex;
@@ -311,18 +391,9 @@
   align-items: center;
   gap: var(--mt5700-space-sm);
   padding: var(--mt5700-space-md) var(--mt5700-space-sm);
-  background: var(--mt5700-glass-bg);
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
-  border: 1px solid var(--mt5700-border);
-  border-radius: var(--mt5700-radius-lg);
-  box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
-  transition: transform var(--mt5700-transition-base), box-shadow var(--mt5700-transition-base);
-}
-
-.mt5700-gauge:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--mt5700-sh-3), var(--mt5700-sh-inset);
+  background: var(--mt5700-surface-sunken);
+  border: 1px solid var(--mt5700-border-subtle);
+  border-radius: var(--mt5700-radius-md);
 }
 
 .mt5700-gauge-dial {
@@ -348,7 +419,7 @@
   fill: none;
   stroke-linecap: round;
   transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.4s ease;
-  filter: drop-shadow(0 0 5px rgba(37, 99, 235, 0.35));
+  filter: drop-shadow(0 0 5px rgba(79, 70, 229, 0.35));
 }
 
 .mt5700-gauge-center {
@@ -389,11 +460,11 @@
   border-radius: var(--mt5700-radius-full);
 }
 
-.mt5700-gauge-caption.exc { background: rgba(16, 185, 129, 0.14); color: #0d9e6e; }
+.mt5700-gauge-caption.exc { background: rgba(15, 157, 88, 0.14); color: #0d9e6e; }
 .mt5700-gauge-caption.good { background: rgba(6, 182, 212, 0.14); color: #0891b2; }
-.mt5700-gauge-caption.fair { background: rgba(245, 158, 11, 0.16); color: #b45309; }
+.mt5700-gauge-caption.fair { background: rgba(224, 135, 0, 0.16); color: #b45309; }
 .mt5700-gauge-caption.poor { background: rgba(249, 115, 22, 0.16); color: #c2410c; }
-.mt5700-gauge-caption.bad { background: rgba(239, 68, 68, 0.14); color: #dc2626; }
+.mt5700-gauge-caption.bad { background: rgba(220, 47, 47, 0.14); color: #dc2626; }
 
 @media (prefers-color-scheme: dark) {
   .mt5700-gauge-caption.exc { color: #34d399; }
@@ -452,7 +523,8 @@
   align-items: center;
   justify-content: center;
   gap: var(--mt5700-space-sm);
-  padding: 10px 20px;
+  height: 34px;
+  padding: 0 16px;
   font-size: var(--mt5700-font-size-sm);
   font-weight: 500;
   font-family: var(--mt5700-font-sans);
@@ -462,18 +534,17 @@
   /* 只过渡真正会变的这几项。原先是 `all` —— 将来只要有人给按钮加个
      padding/width 变化，就会变成布局属性参与动画，每帧重排重绘。 */
   transition:
-    background-color var(--mt5700-transition-base),
-    border-color var(--mt5700-transition-base),
-    color var(--mt5700-transition-base),
-    box-shadow var(--mt5700-transition-base),
-    transform var(--mt5700-transition-base);
+    background-color var(--mt5700-transition-fast),
+    border-color var(--mt5700-transition-fast),
+    color var(--mt5700-transition-fast),
+    box-shadow var(--mt5700-transition-fast);
   white-space: nowrap;
   user-select: none;
   outline: none;
 }
 
 .mt5700-btn:focus-visible {
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.28);
 }
 
 .mt5700-btn:disabled {
@@ -483,68 +554,53 @@
   filter: grayscale(0.4);
 }
 
-/* 按下态统一：轻微下沉，营造 L4 触感 */
+/* 按下态：只压暗，不做位移 —— 位移会让同一行里的相邻按钮跟着抖 */
 .mt5700-btn:active:not(:disabled) {
-  transform: translateY(0) scale(0.98);
-  transition-duration: 80ms;
+  filter: brightness(0.94);
 }
 
 .mt5700-btn-primary {
   background: var(--mt5700-accent);
   color: white;
   border-color: var(--mt5700-accent);
-  box-shadow: var(--mt5700-sh-1);
 }
 
 .mt5700-btn-primary:hover:not(:disabled) {
-  background: #2563eb;
-  border-color: #2563eb;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35), var(--mt5700-sh-1);
-}
-
-.mt5700-btn-primary:active:not(:disabled) {
-  transform: translateY(0);
+  background: var(--mt5700-accent-hover);
+  border-color: var(--mt5700-accent-hover);
 }
 
 .mt5700-btn-secondary {
   background: var(--mt5700-card-bg);
   color: var(--mt5700-text);
-  border-color: var(--mt5700-border-subtle);
+  border-color: var(--mt5700-border);
 }
 
 .mt5700-btn-secondary:hover:not(:disabled) {
-  background: var(--mt5700-card-bg-hover);
+  background: var(--mt5700-surface-sunken);
   border-color: var(--mt5700-text-muted);
-  transform: translateY(-1px);
 }
 
 .mt5700-btn-success {
   background: var(--mt5700-success);
   color: white;
   border-color: var(--mt5700-success);
-  box-shadow: var(--mt5700-sh-1);
 }
 
 .mt5700-btn-success:hover:not(:disabled) {
-  background: #059669;
-  border-color: #059669;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35), var(--mt5700-sh-1);
+  background: #0b8a4b;
+  border-color: #0b8a4b;
 }
 
 .mt5700-btn-danger {
   background: var(--mt5700-danger);
   color: white;
   border-color: var(--mt5700-danger);
-  box-shadow: var(--mt5700-sh-1);
 }
 
 .mt5700-btn-danger:hover:not(:disabled) {
-  background: #dc2626;
-  border-color: #dc2626;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35), var(--mt5700-sh-1);
+  background: #c02626;
+  border-color: #c02626;
 }
 
 .mt5700-btn-ghost {
@@ -554,7 +610,7 @@
 }
 
 .mt5700-btn-ghost:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(14, 22, 38, 0.05);
   color: var(--mt5700-text);
 }
 
@@ -565,25 +621,27 @@
 }
 
 .mt5700-btn-sm {
-  padding: 6px 12px;
+  height: 26px;
+  padding: 0 10px;
   font-size: var(--mt5700-font-size-xs);
 }
 
 .mt5700-btn-lg {
-  padding: 12px 24px;
+  height: 40px;
+  padding: 0 22px;
   font-size: var(--mt5700-font-size-base);
 }
 
 .mt5700-btn-icon {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   border-radius: var(--mt5700-radius-md);
 }
 
 .mt5700-btn-sm.mt5700-btn-icon {
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
 }
 
 .mt5700-btn-group {
@@ -599,10 +657,11 @@
 
 .mt5700-label {
   display: block;
-  font-size: var(--mt5700-font-size-sm);
-  font-weight: 500;
-  color: var(--mt5700-text);
-  margin-bottom: var(--mt5700-space-xs);
+  font-size: var(--mt5700-font-size-xs);
+  font-weight: 600;
+  color: var(--mt5700-text-secondary);
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
 }
 
 .mt5700-label-required::after {
@@ -612,12 +671,15 @@
 
 .mt5700-input {
   width: 100%;
-  padding: 10px 14px;
+  /* 用 min-height 而不是 height：同一个类也被 textarea 复用 */
+  min-height: 34px;
+  padding: 7px 10px;
   font-size: var(--mt5700-font-size-sm);
   font-family: var(--mt5700-font-sans);
+  line-height: 1.4;
   color: var(--mt5700-text);
   background: var(--mt5700-card-bg);
-  border: 1px solid var(--mt5700-border-subtle);
+  border: 1px solid var(--mt5700-border);
   border-radius: var(--mt5700-radius-md);
   transition: border-color var(--mt5700-transition-fast), box-shadow var(--mt5700-transition-fast);
   outline: none;
@@ -625,7 +687,7 @@
 
 .mt5700-input:focus {
   border-color: var(--mt5700-accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.14);
 }
 
 .mt5700-input::placeholder {
@@ -635,7 +697,7 @@
 .mt5700-input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--mt5700-surface-sunken);
 }
 
 .mt5700-hint {
@@ -662,8 +724,8 @@
   font-size: var(--mt5700-font-size-sm);
   line-height: 1.6;
   color: var(--mt5700-text-secondary);
-  background: rgba(37, 99, 235, 0.06);
-  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: rgba(79, 70, 229, 0.06);
+  border: 1px solid rgba(79, 70, 229, 0.18);
   border-radius: var(--mt5700-radius-md);
 }
 
@@ -678,34 +740,34 @@
   line-height: 16px;
   text-align: center;
   border-radius: 50%;
-  background: rgba(37, 99, 235, 0.16);
+  background: rgba(79, 70, 229, 0.16);
   color: var(--mt5700-accent);
 }
 
 .mt5700-notice-success {
-  background: rgba(16, 185, 129, 0.06);
-  border-color: rgba(16, 185, 129, 0.18);
+  background: rgba(15, 157, 88, 0.06);
+  border-color: rgba(15, 157, 88, 0.18);
 }
 .mt5700-notice-success::before {
-  background: rgba(16, 185, 129, 0.16);
+  background: rgba(15, 157, 88, 0.16);
   color: var(--mt5700-success);
 }
 
 .mt5700-notice-warning {
-  background: rgba(245, 158, 11, 0.07);
-  border-color: rgba(245, 158, 11, 0.2);
+  background: rgba(224, 135, 0, 0.07);
+  border-color: rgba(224, 135, 0, 0.2);
 }
 .mt5700-notice-warning::before {
-  background: rgba(245, 158, 11, 0.18);
+  background: rgba(224, 135, 0, 0.18);
   color: var(--mt5700-warning);
 }
 
 .mt5700-notice-danger {
-  background: rgba(239, 68, 68, 0.06);
-  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(220, 47, 47, 0.06);
+  border-color: rgba(220, 47, 47, 0.2);
 }
 .mt5700-notice-danger::before {
-  background: rgba(239, 68, 68, 0.16);
+  background: rgba(220, 47, 47, 0.16);
   color: var(--mt5700-danger);
 }
 
@@ -715,8 +777,8 @@
 .mt5700-danger-zone {
   margin-top: var(--mt5700-space-lg);
   padding: var(--mt5700-space-md);
-  background: rgba(239, 68, 68, 0.03);
-  border: 1px solid rgba(239, 68, 68, 0.28);
+  background: rgba(220, 47, 47, 0.03);
+  border: 1px solid rgba(220, 47, 47, 0.28);
   border-radius: var(--mt5700-radius-md);
 }
 
@@ -860,12 +922,12 @@
 }
 
 .mt5700-switch input[type="checkbox"]:hover:not(:disabled):checked {
-  background: #2563eb;
+  background: #4338ca;
 }
 
 .mt5700-switch input[type="checkbox"]:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.25);
 }
 
 .mt5700-switch input[type="checkbox"]:disabled {
@@ -875,7 +937,7 @@
 }
 
 .mt5700-checkbox input[type="checkbox"]:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline: 2px solid rgba(79, 70, 229, 0.5);
   outline-offset: 2px;
 }
 
@@ -884,7 +946,9 @@
   cursor: not-allowed;
 }
 
-/* ---------- 表格 ---------- */
+/* ---------- 表格 ----------
+   表头改成「11px 中性小标 + 凹陷底」：表格是数据区，标题不该跟卡片标题抢层级；
+   行高由 12px 收紧到 9px，一屏能多看到 3~4 行（读数类表格更实用）。 */
 .mt5700-table-wrapper {
   overflow-x: auto;
   border-radius: var(--mt5700-radius-md);
@@ -900,16 +964,19 @@
 
 .mt5700-table th {
   text-align: left;
-  padding: 12px 16px;
+  padding: 8px 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--mt5700-text);
-  background: rgba(0, 0, 0, 0.02);
-  border-bottom: 1px solid var(--mt5700-divider);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mt5700-text-muted);
+  background: var(--mt5700-table-head-bg);
+  border-bottom: 1px solid var(--mt5700-border);
   white-space: nowrap;
 }
 
 .mt5700-table td {
-  padding: 12px 16px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--mt5700-divider);
   color: var(--mt5700-text-secondary);
   vertical-align: middle;
@@ -920,15 +987,15 @@
 .mt5700-table tbody tr:last-child td { border-bottom: none; }
 
 .mt5700-table tbody tr:hover {
-  background: rgba(37, 99, 235, 0.04);
+  background: rgba(79, 70, 229, 0.035);
 }
 
 .mt5700-table-striped tbody tr:nth-child(even) {
-  background: rgba(0, 0, 0, 0.01);
+  background: rgba(14, 22, 38, 0.015);
 }
 
 .mt5700-table-striped tbody tr:nth-child(even):hover {
-  background: rgba(37, 99, 235, 0.04);
+  background: rgba(79, 70, 229, 0.05);
 }
 
 /* 分组标题行：多组「项目 → 值」合并进一张表时用它分隔（如「连接诊断 / 地址与 DNS」）。
@@ -950,15 +1017,19 @@
   background: transparent;
 }
 
-/* ---------- 状态标签 ---------- */
+/* ---------- 状态标签 ----------
+   胶囊改小方角（6px）：整页圆角已经收敛，徽章再用满圆会显得只有它是软的。
+   字号 11px / 字重 600，三五个并排时读起来是一排「量值」而不是一排装饰。 */
 .mt5700-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  font-size: var(--mt5700-font-size-xs);
-  font-weight: 500;
-  border-radius: var(--mt5700-radius-full);
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  border-radius: var(--mt5700-radius-sm);
   white-space: nowrap;
 }
 
@@ -969,14 +1040,14 @@
   background: currentColor;
 }
 
-.mt5700-badge-success { background: rgba(16, 185, 129, 0.12); color: var(--mt5700-success); }
-.mt5700-badge-warning { background: rgba(245, 158, 11, 0.12); color: var(--mt5700-warning); }
-.mt5700-badge-danger { background: rgba(239, 68, 68, 0.12); color: var(--mt5700-danger); }
-.mt5700-badge-info { background: rgba(37, 99, 235, 0.12); color: var(--mt5700-accent); }
+.mt5700-badge-success { background: rgba(15, 157, 88, 0.1); color: var(--mt5700-success); }
+.mt5700-badge-warning { background: rgba(224, 135, 0, 0.12); color: var(--mt5700-warning); }
+.mt5700-badge-danger { background: rgba(220, 47, 47, 0.1); color: var(--mt5700-danger); }
+.mt5700-badge-info { background: rgba(79, 70, 229, 0.1); color: var(--mt5700-accent); }
 /* primary：Mt5700.badge(..., 'primary') 在「定时锁频」页使用（当前时段）。
    此前 CSS 缺这一条，徽章只能落到基础 .mt5700-badge 上（无配色）。取强调色，与 info 同族。 */
-.mt5700-badge-primary { background: rgba(37, 99, 235, 0.16); color: var(--mt5700-accent); }
-.mt5700-badge-neutral { background: rgba(0, 0, 0, 0.05); color: var(--mt5700-text-secondary); }
+.mt5700-badge-primary { background: rgba(79, 70, 229, 0.14); color: var(--mt5700-accent); }
+.mt5700-badge-neutral { background: rgba(14, 22, 38, 0.05); color: var(--mt5700-text-secondary); }
 
 /* ---------- AT 服务状态卡片 (L2，独立命名空间，不依赖 LuCI 主题) ---------- */
 .mt5700-status-card {
@@ -992,28 +1063,24 @@
 
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
 
-  padding: 18px 22px;
+  padding: 14px 18px;
 
   border: 1px solid var(--mt5700-border);
-  border-radius: 20px;
+  border-radius: var(--mt5700-radius-lg);
 
   background: var(--mt5700-card-bg);
 
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
-
-  box-shadow:
-    0 10px 35px rgba(35, 55, 48, 0.10),
-    inset 0 1px 0 rgba(255,255,255,.55);
+  /* 版式重做：与其它卡片同一套「平面 + 发丝线」，不再单独浮起 ——
+     它是页面第一块内容，比下面的卡片更「重」会显得上下不是一层。
+     26px 的彩色阴影也去掉了：在灰底上会泛出一圈绿光。 */
 
   color: var(--mt5700-text);
 
   transition:
     background .3s ease,
     border-color .3s ease,
-    box-shadow .3s ease,
     color .3s ease;
 }
 
@@ -1270,10 +1337,6 @@
        --mt5700-text 的暗色值（原来自带的是偏绿的 rgba(30,37,34)，和别的卡片发青的
        rgba(32,38,54) 放一起明显不同色） */
     --mt5700-status-muted: #87938d;
-
-    box-shadow:
-      0 12px 40px rgba(0,0,0,.24),
-      inset 0 1px 0 rgba(255,255,255,.035);
   }
 
   .mt5700-status-rpc {
@@ -1502,34 +1565,26 @@
 .mt5700-speed-box {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   gap: 2px;
-  text-align: center;
-  background: var(--mt5700-glass-bg);
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
-  border: 1px solid var(--mt5700-border);
+  text-align: left;
+  /* 与 .mt5700-gauge 同口径：卡片内的凹陷格，不再是一个自带阴影的浮岛 */
+  background: var(--mt5700-surface-sunken);
+  border: 1px solid var(--mt5700-border-subtle);
   border-radius: var(--mt5700-radius-md);
-  box-shadow: var(--mt5700-sh-1), var(--mt5700-sh-inset);
   padding: var(--mt5700-space-md);
-  transition: transform var(--mt5700-transition-base), box-shadow var(--mt5700-transition-base);
-}
-
-.mt5700-speed-box:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--mt5700-sh-2), var(--mt5700-sh-inset);
 }
 
 .mt5700-speed-label {
   font-size: var(--mt5700-font-size-xs);
-  color: var(--mt5700-text-muted);
+  color: var(--mt5700-text-secondary);
   font-weight: 500;
 }
 
 .mt5700-speed-value {
-  font-size: 26px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 600;
   color: var(--mt5700-accent);
   font-variant-numeric: tabular-nums;
 }
@@ -1575,9 +1630,9 @@
   transition: background var(--mt5700-transition-fast);
 }
 
-.mt5700-sms-item:hover { background: rgba(37, 99, 235, 0.04); }
+.mt5700-sms-item:hover { background: rgba(79, 70, 229, 0.04); }
 
-.mt5700-sms-item.active { background: rgba(37, 99, 235, 0.08); }
+.mt5700-sms-item.active { background: rgba(79, 70, 229, 0.08); }
 
 .mt5700-sms-item-number {
   font-weight: 600;
@@ -1648,7 +1703,6 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--mt5700-radius-md);
   overflow: hidden;
-  box-shadow: var(--mt5700-sh-2);
 }
 
 .mt5700-terminal-header {
@@ -1739,14 +1793,14 @@
 }
 
 .mt5700-step-done {
-  background: rgba(16, 185, 129, 0.14);
-  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(15, 157, 88, 0.14);
+  border-color: rgba(15, 157, 88, 0.35);
   color: #0d9e6e;
 }
 
 .mt5700-step-current {
-  background: rgba(37, 99, 235, 0.14);
-  border-color: rgba(37, 99, 235, 0.4);
+  background: rgba(79, 70, 229, 0.14);
+  border-color: rgba(79, 70, 229, 0.4);
   color: #1a5eab;
   font-weight: 600;
   box-shadow: var(--mt5700-sh-1);
@@ -1875,6 +1929,8 @@
 
 /* ---------- 表格内紧凑按钮 ---------- */
 .mt5700-table .mt5700-btn {
+  /* 基础 .mt5700-btn 已固定 34px 高；表格行里的按钮要跟行高走，必须显式放开 */
+  height: auto;
   padding: 4px 10px;
   font-size: 12px;
 }
@@ -1984,7 +2040,7 @@
    而这里原写作 .at-sms-del —— 类名不一致，导致下面这套「小号 ✕」样式从未生效过。
    现改用与 JS 一致的类名；同时去掉 display:none + hover 显隐：触屏没有 hover，
    那样会让删除按钮在手机上永远点不到。位置相关声明一并去掉，保持当前实际版面不变。 */
-.mt5700-sms-del { padding: 0 6px; font-size: 11px; line-height: 18px; }
+.mt5700-sms-del { height: auto; padding: 0 6px; font-size: 11px; line-height: 18px; }
 
 /* ---------- 短信批量删除（2026-09-28 重做）----------
    原来复用的是「同意条款」那组样式（.mt5700-agree-list + .mt5700-inline）：
@@ -2017,7 +2073,7 @@
 	cursor: pointer;
 	transition: background 0.15s ease;
 }
-.mt5700-sms-pick-row:hover { background: rgba(37, 99, 235, 0.05); }
+.mt5700-sms-pick-row:hover { background: rgba(79, 70, 229, 0.05); }
 .mt5700-sms-pick-row .mt5700-checkbox { flex: 0 0 auto; padding-top: 1px; }
 .mt5700-sms-pick-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mt5700-sms-pick-head { display: flex; align-items: center; gap: var(--mt5700-space-sm); flex-wrap: wrap; }
@@ -2226,7 +2282,6 @@
 .mt5700-segmented-btn.is-active {
   background: var(--mt5700-accent);
   color: #fff;
-  box-shadow: var(--mt5700-sh-1);
 }
 
 /* ==========================================================================
@@ -2369,8 +2424,8 @@
   gap: 6px;
   flex-wrap: nowrap;
 }
-.mt5700-dns-edit .mt5700-input { padding: 4px 8px; }
-.mt5700-dns-edit .mt5700-btn { padding: 3px 10px; }
+.mt5700-dns-edit .mt5700-input { min-height: 0; padding: 4px 8px; }
+.mt5700-dns-edit .mt5700-btn { height: auto; padding: 3px 10px; }
 
 /* ==========================================================================
    读数胶囊（一排「名称 + 数值 + 单位」的小胶囊）
@@ -2505,12 +2560,10 @@
 /* ---------- 身份块（EID） ---------- */
 .mt5700-esim-idbox {
   padding: var(--mt5700-space-md);
-  background: var(--mt5700-glass-bg);
-  backdrop-filter: var(--mt5700-glass);
-  -webkit-backdrop-filter: var(--mt5700-glass);
-  border: 1px solid var(--mt5700-border);
+  /* 与 .mt5700-gauge / .mt5700-speed-box 同口径：卡片内的凹陷井 */
+  background: var(--mt5700-surface-sunken);
+  border: 1px solid var(--mt5700-border-subtle);
   border-radius: var(--mt5700-radius-md);
-  box-shadow: var(--mt5700-sh-1), var(--mt5700-sh-inset);
 }
 
 .mt5700-esim-idlabel {
@@ -2574,17 +2627,13 @@
   position: relative;
   padding: var(--mt5700-space-md);
   padding-left: calc(var(--mt5700-space-md) + 6px);
-  background: var(--mt5700-glass-bg);
+  background: var(--mt5700-card-bg);
   border: 1px solid var(--mt5700-border);
   border-radius: var(--mt5700-radius-md);
-  box-shadow: var(--mt5700-sh-1);
-  transition: box-shadow var(--mt5700-transition-base), background var(--mt5700-transition-base);
+  transition: border-color var(--mt5700-transition-base);
 }
 
-.mt5700-esim-row:hover {
-  background: var(--mt5700-card-bg-hover);
-  box-shadow: var(--mt5700-sh-2);
-}
+.mt5700-esim-row:hover { border-color: var(--mt5700-text-muted); }
 
 /* 左侧状态条：颜色即状态（未启用用中性灰，不抢视线） */
 .mt5700-esim-row::before {
@@ -2747,12 +2796,16 @@
  */
 
 /* ==========================================================================
-   动效降级（v5.6.0）
+   动效降级（v5.6.0，v5.11.0 精简）
    --------------------------------------------------------------------------
-   两类收益：① 可访问性 —— 系统级「减少动态效果」偏好必须被尊重；
-   ② 性能 —— CPE 的 CPU 带 18px 毛玻璃 + 多层阴影本来就吃力，
-   关掉装饰性动效直接省合成器开销。
+   ① 可访问性 —— 系统级「减少动态效果」偏好必须被尊重；
+   ② 性能 —— CPE 的 CPU 带毛玻璃 + 多层阴影本来就吃力，关掉装饰性动效
+      直接省合成器开销。
    保留 spinner 的旋转：它是「正在处理」的唯一反馈，停转会被误判为卡死。
+
+   ★ v5.11.0 起卡片/读数/仪表/按钮都不再做 hover 位移（改为只变色），
+     这里原先那组「:hover 时 transform: none」已无对象，一并删除 ——
+     留着会让人以为还在靠它兜位移。
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
   .mt5700-card,
@@ -2766,18 +2819,6 @@
     transition: none !important;
   }
 
-  .mt5700-card:hover,
-  .mt5700-metric:hover,
-  .mt5700-gauge:hover,
-  .mt5700-speed-box:hover,
-  .mt5700-btn-primary:hover:not(:disabled),
-  .mt5700-btn-success:hover:not(:disabled),
-  .mt5700-btn-danger:hover:not(:disabled),
-  .mt5700-btn-secondary:hover:not(:disabled) {
-    transform: none;
-  }
-
-  
   .mt5700-status-card.is-online .mt5700-status-dot,
   .mt5700-gauge-bar {
     animation: none !important;
