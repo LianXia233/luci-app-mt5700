@@ -149,10 +149,10 @@ ok('ACL write 段含 mt5700.call',
 /* ---------- ⑤ 菜单 ---------- */
 
 const menu = JSON.parse(menuSrc);
-ok('菜单有「语音通话」页', !!menu['admin/modem/5g/voice-call']);
+ok('菜单有「语音通话」页', !!menu['admin/modem/5g/comm/voice']);
 ok('菜单指向 voice_call 视图',
-	menu['admin/modem/5g/voice-call'] &&
-	menu['admin/modem/5g/voice-call'].action.path === 'at-webserver/voice_call');
+	menu['admin/modem/5g/comm/voice'] &&
+	menu['admin/modem/5g/comm/voice'].action.path === 'at-webserver/voice_call');
 
 /* ---------- ⑥ rpc.js 接线 ---------- */
 

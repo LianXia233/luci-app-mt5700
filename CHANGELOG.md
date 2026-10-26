@@ -5,6 +5,42 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.42] - 2026-10-26
+
+### Changed — 菜单信息架构重组（12 项平铺 → 1 个总览 + 4 组）
+
+12 个页面原来平铺在同一层，找「短信设置」得在 12 行里数。重组为：
+
+- **网络状态**（总览，仍是点击顶级入口后的落地页）
+- **网络**：网络设置、拨号设置
+- **模组**：模组设置、模组升级、eSIM 管理
+- **通信**：语音通话、短信中心、短信设置
+- **工具**：AT 调试终端、运行日志、服务配置
+
+**页面内容、交互与 AT 行为零改动**，只改菜单树与路径：
+
+| 旧路径 | 新路径 |
+|---|---|
+| `/admin/modem/5g/settings` | `/admin/modem/5g/network/settings` |
+| `/admin/modem/5g/dial` | `/admin/modem/5g/network/dial` |
+| `/admin/modem/5g/modem-settings` | `/admin/modem/5g/modem/settings` |
+| `/admin/modem/5g/upgrade` | `/admin/modem/5g/modem/upgrade` |
+| `/admin/modem/5g/esim` | `/admin/modem/5g/modem/esim` |
+| `/admin/modem/5g/voice-call` | `/admin/modem/5g/comm/voice` |
+| `/admin/modem/5g/sms` | `/admin/modem/5g/comm/sms` |
+| `/admin/modem/5g/sms-settings` | `/admin/modem/5g/comm/sms-settings` |
+| `/admin/modem/5g/terminal` | `/admin/modem/5g/tools/terminal` |
+| `/admin/modem/5g/logs` | `/admin/modem/5g/tools/logs` |
+| `/admin/modem/5g/config` | `/admin/modem/5g/tools/config` |
+
+★ 旧书签会 404，属预期。
+
+新增 `tests/menu-ia-contract.test.js`（23 项）：菜单 JSON 可解析、每个 view 的
+path 必须命中真实视图文件、12 个页面一个不少、分组不能是空壳、同级 order 不重复
+—— 菜单拼错一个字母不会报错，只会让那一页从菜单里消失，这条守卫就是防这个。
+
+真机验证：12 条新路径全部 `HTTP 200`，旧路径 `404`；登录页与后台无 500。
+
 ## [2.4.41] - 2026-10-26
 
 ### Changed — 全局视觉改版（去玻璃化 + 圆角/阴影收敛）
