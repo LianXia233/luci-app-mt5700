@@ -2353,3 +2353,5 @@ if __name__ == "__main__":
     # 先装信号兜底再进门：一旦开始变异，任何中断都必须先还原
     _install_signal_guard()
     sys.exit(main())
+
+# CI 验证分支标记：仅用于触发 contract-check（验证守卫锚点修复），不合并。
