@@ -1753,8 +1753,8 @@ MUTATIONS = [
     (
         "ACL 的 write 段没放行 smslog（add/del/clear 全被拒，页面只落「读不到」）",
         "acljson",
-        "\t\t\t\t\t\"events\",\n\t\t\t\t\t\"es9p\",\n\t\t\t\t\t\"exitip\",\n\t\t\t\t\t\"vowifi\",\n\t\t\t\t\t\"vowifi_set\",\n\t\t\t\t\t\"smslog\"",
-        "\t\t\t\t\t\"events\",\n\t\t\t\t\t\"es9p\",\n\t\t\t\t\t\"exitip\",\n\t\t\t\t\t\"vowifi\",\n\t\t\t\t\t\"vowifi_set\"",
+        "\t\t\t\t\t\"events\",\n\t\t\t\t\t\"selfheal\",\n\t\t\t\t\t\"es9p\",\n\t\t\t\t\t\"exitip\",\n\t\t\t\t\t\"vowifi\",\n\t\t\t\t\t\"vowifi_set\",\n\t\t\t\t\t\"smslog\"",
+        "\t\t\t\t\t\"events\",\n\t\t\t\t\t\"selfheal\",\n\t\t\t\t\t\"es9p\",\n\t\t\t\t\t\"exitip\",\n\t\t\t\t\t\"vowifi\",\n\t\t\t\t\t\"vowifi_set\"",
         "ACL 的 write 允许 mt5700.smslog",
     ),
 
