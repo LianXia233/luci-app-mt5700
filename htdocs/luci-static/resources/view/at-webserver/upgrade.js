@@ -199,6 +199,10 @@ return L.view.extend({
 						'请先阅读并同意免责声明，然后填写 FOTA 服务器地址。'));
 				}
 				upgradeBody.appendChild(Mt5700.formGroup('FOTA 服务器地址', urlInput, '支持 http / https 协议，结尾自动补 /'));
+				/* 破坏力写在按钮正上方：这一步烧的是模组固件，中途断电变砖，
+				   而且整机最后会重启一次。免责声明弹窗里虽有，但用户点之前看不出风险。 */
+				upgradeBody.appendChild(Mt5700.impact(['烧写期间', { b: '整机断网' },
+					'，结束后自动重启；中途断电可能导致模组无法启动。升级前请确认供电稳定。']));
 				upgradeBody.appendChild(Mt5700.panelActions(startBtn));
 			}
 

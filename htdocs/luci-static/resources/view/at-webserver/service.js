@@ -263,6 +263,12 @@ return L.view.extend({
 		statusHint.style.display = 'none';
 		statusBody.appendChild(statusHint);
 
+		/* 三个按钮的破坏力差得很远，而差别只在确认框里才说清 ——
+		   停在按钮旁边，点之前就知道该选哪个。 */
+		statusBody.appendChild(Mt5700.impact(['「重载」只重启进程，', { b: '不断网' },
+			'（约 2 秒）；「重启」与「停止」会让全部页面的 AT 功能一起失效，',
+			'期间读不到状态、短信和信号；停止后要点「重载」才恢复。']));
+
 		function renderStatus(st) {
 			statusRow.innerHTML = '';
 			statusRow.appendChild(Mt5700.badge(st.label, st.variant));
