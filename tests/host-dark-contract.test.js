@@ -109,7 +109,7 @@ console.log('\n== D. 不跟随系统明暗（浅色纸面是设计本身） ==')
 
 has('mt5700.css 里没有 prefers-color-scheme 分支',
 	css.indexOf('prefers-color-scheme') < 0,
-	'一旦加上分支，插件就会在深色系统下变成另一套皮肤，与 design-v8 的浅色纸面冲突');
+	'一旦加上分支，插件就会在深色系统下变成另一套皮肤，与现有的浅色纸面设计冲突');
 
 console.log('\n== E. 反向验证：把修复删掉必须判红 ==');
 

@@ -390,8 +390,7 @@ RETIRED = {
     '扫频': ('全网扫频（同上）', ['CHANGELOG.md'], True),
 }
 # 历史/报告类文件里出现旧功能名是正常的，不算残留
-HISTORY_OK = ('CHANGELOG.md', 'docs/', 'po/', 'FRONTEND_REVIEW_REPORT.md',
-              'ESIM_GAP_ANALYSIS.md', 'tools/find-orphans.py')
+HISTORY_OK = ('CHANGELOG.md', 'docs/', 'po/', 'tools/find-orphans.py')
 
 
 def _is_comment_line(trimmed):

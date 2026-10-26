@@ -1120,7 +1120,7 @@ var Mt5700 = (function () {
 		 *     根源：子树重建后 wrap 与 tip 都是新对象、hoverRect 归 null、show 类丢失，
 		 *     而光标静止时浏览器不会补发 mousemove，**要等用户动一下鼠标才恢复**。
 		 *     本缓存既不修复也不加重它（改前每事件重取 rect，同样会闪断）。
-		 *     根治要把 tip 提到每秒重建的子树之外，见 FRONTEND_REVIEW_REPORT.md 第九节。
+		 *     根治要把 tip 提到每秒重建的子树之外，见 docs/FRONTEND_REVIEW_REPORT.md 第九节。
 		 *     缓存真正引入的偏差只有一条：悬停期间容器宽度变了，旧 rect 会残留到
 		 *     mouseleave（改前下一次 mousemove 就自愈）。
 		 */

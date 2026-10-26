@@ -2721,7 +2721,7 @@ return L.view.extend({
 		rateChk.addEventListener('change', function () { setRateEnabled(rateChk.checked); });
 		/* ★ E(tag, attrs, text) 只挂载第 3 个参数，第 4 个起会被**静默丢弃**
 		   （它是全站共用 helper，改成变参影响面太大，footgun 已记在
-		   FRONTEND_REVIEW_REPORT.md）。所以 label 必须分两步建 ——
+		   docs/FRONTEND_REVIEW_REPORT.md）。所以 label 必须分两步建 ——
 		   原来写成 E('label', {}, rateChk, document.createTextNode(' 实时监测'))，
 		   「实时监测」这四个字从来就没显示过，只剩一个光秃秃的勾选框。 */
 		var rateLabel = E('label', {}, rateChk);
