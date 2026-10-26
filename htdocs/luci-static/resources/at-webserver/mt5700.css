@@ -3235,3 +3235,840 @@
     animation: none !important;
   }
 }
+
+/* ==== BEGIN v9-shell（由 tools/gen-shell-css.py 生成，勿手改） ==== */
+/* 来源：docs/design-v9/index.html 的 <style> 块，经作用域化后原样搬入。
+   作用域：所有规则限定在 .mt5700-sh 内，不影响 Argon 与 LuCI 其它页面。
+   重新生成：python tools/gen-shell-css.py */
+/* ============================================================
+   设计令牌 —— 只有两套：深色（默认）/ 浅色。没有第三套、也不跟随系统明暗
+   （页面外观由用户自己决定）。
+   ============================================================ */
+.mt5700-sh, body.mt5700-sh-on {
+  --bg: #0A0D12;
+  --panel: #111721;
+  --panel-2: #151C28;
+  --panel-3: #1A2230;
+  --line: #212B3A;
+  --line-2: #2C3949;
+  --ink: #E7EEF9;
+  --ink-2: #96A5BA;
+  --ink-3: #64748C;
+  --accent: #3D7EFF;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(61, 126, 255, .13);
+  --ok: #2DD4A7;
+  --warn: #F2B03D;
+  --bad: #F2585B;
+  --ok-soft: rgba(45, 212, 167, .12);
+  --warn-soft: rgba(242, 176, 61, .13);
+  --bad-soft: rgba(242, 88, 91, .13);
+  --r-sm: 8px;
+  --r: 14px;
+  --r-lg: 20px;
+  --shadow: 0 1px 0 rgba(255,255,255,.02) inset;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.mt5700-sh[data-theme="light"], html[data-theme="light"] body.mt5700-sh-on {
+  --bg: #F3F5F9;
+  --panel: #FFFFFF;
+  --panel-2: #FAFBFD;
+  --panel-3: #F1F4F9;
+  --line: #E2E7F0;
+  --line-2: #CFD7E4;
+  --ink: #0D141F;
+  --ink-2: #55647C;
+  --ink-3: #8695AA;
+  --accent: #1F5FE0;
+  --accent-soft: rgba(31, 95, 224, .09);
+  --ok: #0C9B74;
+  --warn: #B07300;
+  --bad: #CE3437;
+  --ok-soft: rgba(12, 155, 116, .10);
+  --warn-soft: rgba(176, 115, 0, .11);
+  --bad-soft: rgba(206, 52, 55, .10);
+  --shadow: 0 1px 2px rgba(13, 20, 31, .04);
+}
+.mt5700-sh, .mt5700-sh * { box-sizing: border-box; }
+.mt5700-sh html, .mt5700-sh body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.mt5700-sh button { font-family: inherit; font-size: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+.mt5700-sh a { color: inherit; text-decoration: none; }
+.mt5700-sh svg { display: block; }
+
+
+/* ============================================================
+   外壳：自有左栏 + 自有顶栏。
+   不用 LuCI 的菜单、面包屑、内容区 —— 这一层就是「全新」的地方。
+   ============================================================ */
+.mt5700-sh .app {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+
+/* ---------- 左栏 ---------- */
+.mt5700-sh .rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 0 0 10px;
+}
+.mt5700-sh .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 18px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.mt5700-sh .brand-mark {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(145deg, var(--accent), #6BA0FF);
+  display: grid; place-items: center;
+  flex: none;
+}
+.mt5700-sh .brand-mark svg { width: 18px; height: 18px; stroke: #fff; stroke-width: 2; fill: none; }
+.mt5700-sh .brand-tx b { display: block; font-size: 13px; font-weight: 650; letter-spacing: .01em; }
+.mt5700-sh .brand-tx span { display: block; font-size: 10.5px; color: var(--ink-3); letter-spacing: .04em; }
+.mt5700-sh .rail-nav { flex: 1; overflow-y: auto; padding: 12px 10px 6px; }
+.mt5700-sh .rail-group { margin-bottom: 14px; }
+.mt5700-sh .rail-group > p {
+  margin: 0 0 6px;
+  padding: 0 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.mt5700-sh .nav-i {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  margin-bottom: 1px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: left;
+  transition: background .12s, color .12s;
+}
+.mt5700-sh .nav-i svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.7; fill: none; flex: none; }
+.mt5700-sh .nav-i:hover { background: var(--panel-2); color: var(--ink); }
+.mt5700-sh .nav-i.is-on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.mt5700-sh .nav-i.is-on::before {
+  content: "";
+  position: absolute; left: -10px; top: 50%;
+  width: 3px; height: 16px; margin-top: -8px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.mt5700-sh .nav-i .cnt {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.mt5700-sh .rail-foot { padding: 10px 12px 0; border-top: 1px solid var(--line); }
+.mt5700-sh .svc {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 9px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.mt5700-sh .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
+.mt5700-sh .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.mt5700-sh .dot.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.mt5700-sh .svc b { color: var(--ink); font-weight: 600; }
+
+
+/* ---------- 顶栏 ---------- */
+.mt5700-sh .main { min-width: 0; display: flex; flex-direction: column; }
+.mt5700-sh .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 56px;
+  padding: 0 22px;
+  /* 不用 backdrop-filter：真机（老内核）与无头截图都会把它渲染成一块实色，
+     顶栏直接变成一条色带。这里用不透明底色，视觉上没区别。 */
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.mt5700-sh .crumb-title { font-size: 14px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.mt5700-sh .crumb-sub { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt5700-sh .search {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 8px;
+  width: 260px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-3);
+  font-size: 12.5px;
+  transition: border-color .12s;
+}
+.mt5700-sh .search:hover { border-color: var(--line-2); color: var(--ink-2); }
+.mt5700-sh .search svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; }
+.mt5700-sh .search kbd {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  color: var(--ink-3);
+}
+.mt5700-sh .icon-btn {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--ink-2);
+}
+.mt5700-sh .icon-btn:hover { color: var(--ink); border-color: var(--line-2); }
+.mt5700-sh .icon-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.mt5700-sh .pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mt5700-sh .pill svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 2.2; fill: none; }
+
+
+/* ---------- 画布 ---------- */
+.mt5700-sh .canvas { padding: 22px 22px 40px; max-width: 1560px; }
+.mt5700-sh .pg { display: none; }
+.mt5700-sh .pg.is-on { display: block; animation: fade .18s ease-out; }
+@keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.mt5700-sh .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+.mt5700-sh .c3 { grid-column: span 3; }
+.mt5700-sh .c4 { grid-column: span 4; }
+.mt5700-sh .c5 { grid-column: span 5; }
+.mt5700-sh .c6 { grid-column: span 6; }
+.mt5700-sh .c7 { grid-column: span 7; }
+.mt5700-sh .c8 { grid-column: span 8; }
+.mt5700-sh .c12 { grid-column: span 12; }
+
+
+/* ---------- 面板 ---------- */
+.mt5700-sh .panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.mt5700-sh .panel-h {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.mt5700-sh .panel-h h3 { margin: 0; font-size: 12.5px; font-weight: 650; letter-spacing: .01em; white-space: nowrap; }
+.mt5700-sh .panel-h .sub { font-size: 11.5px; color: var(--ink-3); }
+.mt5700-sh .panel-h .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+.mt5700-sh .panel-b { padding: 16px; flex: 1; }
+.mt5700-sh .panel-b.flush { padding: 0; display: flex; flex-direction: column; }
+
+
+/* ---------- 结论块：整页第一眼 ---------- */
+.mt5700-sh .verdict {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding: 22px 24px 18px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, var(--ok-soft), transparent 58%),
+    var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.mt5700-sh .verdict.is-warn { background: radial-gradient(120% 140% at 0% 0%, var(--warn-soft), transparent 58%), var(--panel); }
+.mt5700-sh .verdict.is-bad { background: radial-gradient(120% 140% at 0% 0%, var(--bad-soft), transparent 58%), var(--panel); }
+.mt5700-sh .v-eyebrow {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+.mt5700-sh .verdict.is-warn .v-eyebrow { color: var(--warn); }
+.mt5700-sh .verdict.is-bad .v-eyebrow { color: var(--bad); }
+.mt5700-sh .v-eyebrow .dot { width: 6px; height: 6px; }
+.mt5700-sh .v-title {
+  margin: 9px 0 6px;
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 680;
+  letter-spacing: -.025em;
+}
+.mt5700-sh .v-meta { font-size: 13px; color: var(--ink-2); max-width: 620px; }
+.mt5700-sh .v-meta b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+.mt5700-sh .v-nums { display: flex; gap: 26px; align-items: flex-start; }
+.mt5700-sh .v-num { text-align: right; }
+.mt5700-sh .v-num i { display: block; font-style: normal; font-size: 10.5px; color: var(--ink-3); letter-spacing: .05em; text-transform: uppercase; margin-bottom: 2px; }
+.mt5700-sh .v-num b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.mt5700-sh .v-num b em { font-style: normal; font-size: 11px; color: var(--ink-3); font-weight: 500; margin-left: 2px; }
+.mt5700-sh .v-num b.ok { color: var(--ok); }
+.mt5700-sh .v-num b.warn { color: var(--warn); }
+
+
+/* ---------- 链路：四段 ---------- */
+.mt5700-sh .chain {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 20px -24px -18px;
+  background: var(--line);
+  border-top: 1px solid var(--line);
+}
+.mt5700-sh .chain-seg {
+  position: relative;
+  padding: 13px 16px 14px;
+  background: var(--panel);
+  min-width: 0;
+}
+.mt5700-sh .chain-seg::before {
+  content: "";
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--ok);
+}
+.mt5700-sh .chain-seg.warn::before { background: var(--warn); }
+.mt5700-sh .chain-seg.bad::before { background: var(--bad); }
+.mt5700-sh .chain-seg.idle::before { background: var(--line-2); }
+.mt5700-sh .ch-k { display: flex; align-items: baseline; gap: 6px; }
+.mt5700-sh .ch-k span { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.mt5700-sh .ch-k b { font-size: 11.5px; font-weight: 600; color: var(--ink-2); letter-spacing: .02em; }
+.mt5700-sh .ch-v { margin-top: 4px; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+.mt5700-sh .ch-v.ok { color: var(--ok); }
+.mt5700-sh .ch-v.warn { color: var(--warn); }
+.mt5700-sh .ch-v.bad { color: var(--bad); }
+.mt5700-sh .ch-v.idle { color: var(--ink-3); font-weight: 500; }
+.mt5700-sh .ch-e {
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+
+/* ---------- KPI ---------- */
+.mt5700-sh .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.mt5700-sh .kpi {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 14px 15px 10px;
+  min-width: 0;
+}
+.mt5700-sh .kpi-k {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--ink-3);
+  letter-spacing: .02em;
+}
+.mt5700-sh .kpi-k svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.mt5700-sh .kpi-v {
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.mt5700-sh .kpi-v em { font-style: normal; font-size: 11.5px; font-weight: 500; color: var(--ink-3); margin-left: 3px; letter-spacing: 0; }
+.mt5700-sh .kpi-f { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+.mt5700-sh .spark { width: 100%; height: 30px; margin-top: 8px; }
+.mt5700-sh .spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.mt5700-sh .spark .area { fill: var(--accent); opacity: .10; stroke: none; }
+
+
+/* ---------- 信号条 ---------- */
+.mt5700-sh .bars { display: flex; align-items: flex-end; gap: 3px; height: 34px; }
+.mt5700-sh .bars i { width: 7px; border-radius: 2px; background: var(--line-2); }
+.mt5700-sh .bars i.on { background: var(--ok); }
+.mt5700-sh .bars i.on.warn { background: var(--warn); }
+
+
+/* ---------- 载波 ---------- */
+.mt5700-sh .carriers { display: flex; flex-direction: column; gap: 1px; background: var(--line); flex: 1; }
+.mt5700-sh .car {
+  display: grid;
+  grid-template-columns: 54px 1fr 78px 62px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--panel);
+  font-size: 12.5px;
+  flex: 1;
+}
+.mt5700-sh .car .tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 5px;
+  padding: 2px 6px;
+  text-align: center;
+}
+.mt5700-sh .car .tag.pcc { color: var(--ink); background: var(--panel-3); }
+.mt5700-sh .car .nm { color: var(--ink-2); }
+.mt5700-sh .car .bw { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); text-align: right; }
+.mt5700-sh .car .q { text-align: right; font-family: var(--mono); font-size: 11.5px; }
+.mt5700-sh .car .q.ok { color: var(--ok); }
+.mt5700-sh .car .q.warn { color: var(--warn); }
+
+
+/* ---------- 键值表 ---------- */
+.mt5700-sh .kv { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 0; }
+.mt5700-sh .kv > dt, .mt5700-sh .kv > dd {
+  margin: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  min-width: 0;
+}
+.mt5700-sh .kv > dt { color: var(--ink-3); }
+.mt5700-sh .kv > dd {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.mt5700-sh .kv > dt:last-of-type, .mt5700-sh .kv > dd:last-of-type { border-bottom: 0; }
+
+
+/* ---------- 按钮 ---------- */
+.mt5700-sh .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 9px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+.mt5700-sh .btn:hover { background: var(--panel-3); border-color: var(--ink-3); }
+.mt5700-sh .btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.9; fill: none; }
+.mt5700-sh .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.mt5700-sh .btn.primary:hover { filter: brightness(1.08); }
+.mt5700-sh .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); background: var(--bad-soft); }
+.mt5700-sh .btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.mt5700-sh .btn.ghost:hover { background: var(--panel-2); color: var(--ink); }
+.mt5700-sh .btn[disabled] { opacity: .42; cursor: not-allowed; }
+.mt5700-sh .btn.sm { height: 27px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; }
+
+
+/* ---------- 影响预告 ---------- */
+.mt5700-sh .impact {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.mt5700-sh .impact svg { width: 15px; height: 15px; stroke: var(--warn); stroke-width: 2; fill: none; flex: none; margin-top: 1px; }
+.mt5700-sh .impact b { color: var(--ink); font-weight: 650; }
+
+
+/* ---------- 徽标 ---------- */
+.mt5700-sh .badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.mt5700-sh .badge.ok { background: var(--ok-soft); color: var(--ok); }
+.mt5700-sh .badge.warn { background: var(--warn-soft); color: var(--warn); }
+.mt5700-sh .badge.bad { background: var(--bad-soft); color: var(--bad); }
+.mt5700-sh .badge.neutral { background: var(--panel-3); color: var(--ink-2); }
+.mt5700-sh .badge.acc { background: var(--accent-soft); color: var(--accent); }
+
+
+/* ---------- 分段 ---------- */
+.mt5700-sh .seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--panel-3);
+  gap: 2px;
+  flex: none;
+}
+.mt5700-sh .seg button {
+  height: 24px;
+  padding: 0 11px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.mt5700-sh .seg button.is-on { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+
+
+/* ---------- 诊断行 ---------- */
+.mt5700-sh .diag { display: flex; flex-direction: column; }
+.mt5700-sh .diag-row {
+  display: grid;
+  grid-template-columns: 22px 168px minmax(0, 1fr) 92px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.mt5700-sh .diag-row:last-child { border-bottom: 0; }
+.mt5700-sh .diag-row.warn { background: var(--warn-soft); }
+.mt5700-sh .diag-row .ic { display: grid; place-items: center; }
+.mt5700-sh .diag-row .ic svg { width: 15px; height: 15px; stroke-width: 2.2; fill: none; }
+.mt5700-sh .ic.ok svg { stroke: var(--ok); }
+.mt5700-sh .ic.warn svg { stroke: var(--warn); }
+.mt5700-sh .ic.bad svg { stroke: var(--bad); }
+.mt5700-sh .diag-row .nm { font-weight: 550; }
+.mt5700-sh .diag-row .ev { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt5700-sh .diag-row .ac { text-align: right; }
+
+
+/* ---------- 占位页 ---------- */
+.mt5700-sh .stub {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  padding: 40px;
+  text-align: center;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r);
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.mt5700-sh .stub b { display: block; color: var(--ink-2); font-size: 14px; margin-bottom: 6px; }
+
+
+/* ---------- 命令面板 ---------- */
+.mt5700-sh .palette-mask {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: none;
+  background: rgba(4, 7, 12, .58);
+  backdrop-filter: blur(3px);
+}
+.mt5700-sh .palette-mask.is-on { display: block; }
+.mt5700-sh .palette {
+  width: min(560px, calc(100vw - 32px));
+  margin: 88px auto 0;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,.45);
+}
+.mt5700-sh .palette input {
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.mt5700-sh .palette input::placeholder { color: var(--ink-3); }
+.mt5700-sh .palette ul { margin: 0; padding: 6px; list-style: none; max-height: 320px; overflow-y: auto; }
+.mt5700-sh .palette li {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.mt5700-sh .palette li svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.mt5700-sh .palette li.is-cur, .mt5700-sh .palette li:hover { background: var(--accent-soft); color: var(--accent); }
+.mt5700-sh .palette li i { margin-left: auto; font-style: normal; font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
+
+
+/* ---------- 说明条 ---------- */
+.mt5700-sh .note {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 0 0 18px;
+  padding: 13px 15px;
+  border-radius: var(--r);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+.mt5700-sh .note b { color: var(--ink); }
+.mt5700-sh .note svg { width: 16px; height: 16px; stroke: var(--accent); stroke-width: 2; fill: none; flex: none; margin-top: 1px; }
+
+
+/* ---------- 窄屏：分级降级 ----------
+   设计基准宽 1560（入库预览图都按这个宽度拍）。
+   之前的写法在 1180 一刀把所有栅格压成 span 12 —— 而 1180~1366 正是常见
+   笔记本窗口，等于把「控制台」变成「一行一张卡」。改为三级：
+     1360 以下：KPI 4 列改 2×2，左右并排的面板上下排
+     1120 以下：左栏收成图标条，链路 4 段改 2×2
+      760 以下：单列（手机）
+   ============================================================ */
+@media (max-width: 1360px) {
+.mt5700-sh .c3 { grid-column: span 6; }
+          /* 只动 4 个指标：2×2，左右面板仍并排 */
+.mt5700-sh .v-nums { gap: 18px; }
+}
+@media (max-width: 1120px) {
+.mt5700-sh .app { grid-template-columns: 68px minmax(0, 1fr); }
+.mt5700-sh .brand-tx, .mt5700-sh .nav-i span, .mt5700-sh .rail-group > p, .mt5700-sh .svc span { display: none; }
+.mt5700-sh .nav-i { justify-content: center; padding: 9px; }
+.mt5700-sh .nav-i .cnt { display: none; }
+.mt5700-sh .brand { justify-content: center; padding: 14px 0; }
+.mt5700-sh .chain { grid-template-columns: 1fr 1fr; }
+.mt5700-sh .c5, .mt5700-sh .c6, .mt5700-sh .c7, .mt5700-sh .c8 { grid-column: span 12; }
+  /* 面板整体上下排，不留半格空档 */
+.mt5700-sh .search { width: 180px; }
+.mt5700-sh .search kbd { display: none; }
+}
+@media (max-width: 760px) {
+.mt5700-sh .canvas { padding: 14px 12px 30px; }
+.mt5700-sh .v-title { font-size: 23px; }
+.mt5700-sh .verdict { grid-template-columns: 1fr; gap: 14px; }
+.mt5700-sh .v-nums { justify-content: flex-start; }
+.mt5700-sh .chain { grid-template-columns: 1fr; }
+.mt5700-sh .c3, .mt5700-sh .c4, .mt5700-sh .c5, .mt5700-sh .c6, .mt5700-sh .c7, .mt5700-sh .c8 { grid-column: span 12; }
+.mt5700-sh .diag-row { grid-template-columns: 20px 1fr auto; }
+.mt5700-sh .diag-row .ev { display: none; }
+}
+/* ==== END v9-shell ==== */
+
+/* ==========================================================================
+   v9 外壳：接管整屏（手写段，不参与生成）
+   --------------------------------------------------------------------------
+   目标只有一个：**真机长成 docs/design-v9 预览图那样**。
+
+   做法不是重写 12 个页面，而是把 Argon 的壳藏掉、把内容区交给自有外壳，
+   再把 v9 的调色板接到现有 --mt5700-* 令牌上 —— 组件一行不改，整站跟着变。
+   这条路径的好处是「旧页面的功能全在」，坏处是页面内部的排布仍旧是老样子，
+   得逐页再向原型靠（见 network_status 的 total 改造）。
+   ========================================================================== */
+
+/* ---------- 1. 藏掉 Argon 的壳 ---------- */
+body.mt5700-sh-on #mainmenu,
+body.mt5700-sh-on .main-left,
+body.mt5700-sh-on #modemenu,
+body.mt5700-sh-on .breadcrumb,
+body.mt5700-sh-on footer,
+body.mt5700-sh-on .main > footer,
+body.mt5700-sh-on .main-right > header,
+body.mt5700-sh-on .main-right > .header { display: none !important; }
+
+/* ---------- 2. 内容区还给外壳 ---------- */
+/* 只有「外壳已成功接管」才藏旧壳（mt5700-sh-armed 由 JS 在搬家完成后加）：
+   万一 Argon 结构变了、搬家失败，旧界面必须还能看。 */
+/* ★ 必须写 `> .main`：Argon 的容器叫 .main，外壳里那一列也叫 .main，
+   只写 `.main` 会把外壳自己的主列一起 display:none（实测右侧整片空白）。 */
+body.mt5700-sh-on.mt5700-sh-armed > .main { display: none !important; }
+body.mt5700-sh-on > .main {
+  padding: 0 !important; margin: 0 !important; background: #0A0D12;
+}
+body.mt5700-sh-on .main-right {
+  width: 100% !important; max-width: none !important;
+  margin: 0 !important; padding: 0 !important; background: transparent !important;
+}
+body.mt5700-sh-on #maincontent {
+  padding: 0 !important; margin: 0 !important; width: 100% !important;
+}
+body.mt5700-sh-on #maincontent > .container {
+  padding: 0 !important; margin: 0 !important;
+  width: 100% !important; max-width: none !important;
+}
+body.mt5700-sh-on #view { width: 100% !important; }
+
+/* ---------- 3. 令牌映射：v9 调色板 → 现有 --mt5700-* ----------
+   组件全都走令牌，所以这里换一遍就等于整站换肤。
+   --bg / --panel / --ink 这些是原型里的名字，由上面生成的区段定义。
+   选择器带上 body：弹窗/提示层挂在 body 上、在壳外，不给它就会回到旧浅色。 */
+.mt5700-sh,
+body.mt5700-sh-on {
+  --mt5700-bg: var(--bg);
+  --mt5700-card-bg: var(--panel);
+  --mt5700-card-bg-hover: var(--panel-2);
+  --mt5700-surface-sunken: var(--panel-3);
+  --mt5700-glass-bg: var(--panel-3);
+  --mt5700-float-bg: var(--panel-2);
+  --mt5700-table-head-bg: var(--panel-3);
+  --mt5700-text: var(--ink);
+  --mt5700-text-secondary: var(--ink-2);
+  --mt5700-text-muted: var(--ink-3);
+  --mt5700-border: var(--line);
+  --mt5700-border-subtle: var(--line);
+  --mt5700-divider: var(--line);
+  --mt5700-switch-off: var(--line-2);
+  --mt5700-accent: var(--accent);
+  --mt5700-accent-hover: var(--accent);
+  --mt5700-accent-light: var(--accent);
+  --mt5700-on-accent: var(--accent-ink);
+  --mt5700-success: var(--ok);
+  --mt5700-success-light: var(--ok);
+  --mt5700-warning: var(--warn);
+  --mt5700-warning-light: var(--warn);
+  --mt5700-danger: var(--bad);
+  --mt5700-danger-light: var(--bad);
+  --mt5700-info: var(--accent);
+  --mt5700-info-light: var(--accent);
+  --mt5700-shadow-sm: none;
+  --mt5700-shadow-md: none;
+  --mt5700-shadow-lg: none;
+  --mt5700-shadow-xl: 0 20px 48px rgba(0, 0, 0, .5);
+  --mt5700-sh-1: none;
+  --mt5700-sh-2: none;
+  --mt5700-sh-3: none;
+  --mt5700-sh-float: 0 20px 48px rgba(0, 0, 0, .5);
+  --mt5700-radius-sm: 8px;
+  --mt5700-radius-md: 10px;
+  --mt5700-radius-lg: 14px;
+  --mt5700-radius-xl: 20px;
+  --mt5700-font-sans: var(--sans);
+  --mt5700-font-mono: var(--mono);
+  --mt5700-font-size-3xl: 26px;
+}
+
+/* 外壳自己铺满视口，且不跟着 LuCI 的 body 颜色走 */
+.mt5700-sh {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 4. 旧页面容器在外壳里要「消失」 ----------
+   .mt5700-page 原本是「嵌在 LuCI 白底上的一块深色面板」，现在外壳就是面板，
+   它若再画一层底色与圆角，会套两层框。 */
+.mt5700-sh .mt5700-page {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+  color: var(--mt5700-text);
+}
+/* 页面自己的标题挪进了顶栏，正文里不再重复一遍 */
+.mt5700-sh .mt5700-page-header { display: none !important; }
+
+/* ---------- 6. 正文按原型的 12 列栅格重排 ----------
+   原型里总览是「结论卡满宽 → 4 个指标一行 → 左宽右窄两块面板」。旧页面把
+   所有区块一列往下堆，所以光换壳还是不像。这里把正文容器改成 12 列栅格，
+   按区块位置分配跨列数 —— 只动布局，不动任何取数与交互。 */
+.mt5700-sh .mt5700-page-body {
+  display: grid !important;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px 26px 40px;
+  align-content: start;
+}
+.mt5700-sh .mt5700-page-body > * { grid-column: span 12; min-width: 0; }
+/* 空占位块在栅格里会撑出一道 14px 的缝，直接不参与布局 */
+.mt5700-sh .mt5700-page-body > div:empty { display: none !important; }
+/* 载波与聚合（左宽）+ 信号质量（右窄）：对应原型的 c7 / c5 */
+.mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(1) { grid-column: span 7; }
+.mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(2) { grid-column: span 5; }
+/* 页脚的「一键排查」等宽块保持满宽 */
+.mt5700-sh .mt5700-page-body > .mt5700-cards { grid-column: span 12; }
+
+@media (max-width: 1120px) {
+  .mt5700-sh .mt5700-page-body { padding: 14px 14px 30px; }
+  .mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(1),
+  .mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(2) { grid-column: span 12; }
+}
+/* ---------- 5. 宿主给 header 加的装饰伪元素 ----------
+   Argon 用 `header::after` 画了一块主色装饰（实测 inset 11.5px/22px、
+   1264×32、背景 #5E72E4）。我们自己的顶栏也是 `<header>`，于是被凭空多画了
+   一条蓝色横带 —— 而且它在 DOM 里查不到（伪元素选择器 getComputedStyle 才看得到），
+   一度被误判成「旧页面残留图层」。
+   判据：`getComputedStyle(.topbar,'::after').backgroundColor` 非透明就必须在这里清。 */
+.mt5700-sh .topbar::before,
+.mt5700-sh .topbar::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+}
+
+/* 顶栏本身也只留一条细线：宿主对 header 的背景/内边距同样有意图外的设定。
+   还要把文字色钉回来 —— Argon 给 header 设了白色字，浅色主题下顶栏标题
+   「总览」就成了白底白字（实测只有把浏览器切到浅色才暴露）。 */
+.mt5700-sh .topbar {
+  padding: 0 22px !important;
+  background: var(--bg) !important;
+  background-clip: border-box !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--line) !important;
+  box-shadow: none !important;
+  color: var(--ink) !important;
+}
+.mt5700-sh .topbar .crumb-title { color: var(--ink) !important; }
+.mt5700-sh .topbar .crumb-sub { color: var(--ink-3) !important; }

@@ -19,7 +19,7 @@
  * 后，设备上 CSS 内容已经是新的，用户浏览器却还在用旧副本 —— 代码改了界面没变。
  * 守卫：tests/css-cachebust-contract.test.js（mt5700.css 内容指纹一变就必须改这里）。
  */
-var MT5700_CSS_VERSION = '5.14.1';
+var MT5700_CSS_VERSION = '6.2.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -106,7 +106,12 @@ var Mt5700 = (function () {
 				try { cleanups[ci](); } catch (e) { /* 清理失败不能影响其余 */ }
 			}
 			cleanups.length = 0;
+			/* 外壳是全局单例：页面走了就得拆，否则下一页面会套在两个壳里 */
+			api.unmountShell();
 		});
+
+		/* v9 外壳：等节点进文档后接管整屏（见文件末尾「v9 外壳」段） */
+		shWhenAttached(node);
 		return node;
 	};
 
@@ -1403,6 +1408,248 @@ var Mt5700 = (function () {
 	 * 同一 helper 多份实现正是「改了 A 处，B 处纹丝不动」那类问题的来源
 	 * （见 ui.js 里那段死代码清理说明）。
 	 */
+	/* ================= v9 外壳（接管整屏） ================= */
+	/*
+	 * 为什么搭在 JS 里而不是改 12 个视图：导航与顶栏若各页各写一遍，迟早漏一页。
+	 * 全站只有一个入口 —— api.page() —— 从那儿挂载，谁也跑不掉。
+	 *
+	 * 真机 DOM（2026-10-26 探针实测，别照文档猜）：
+	 *   body > .main > (#mainmenu.main-left) + (.main-right > #maincontent
+	 *            > .container > #view > .mt5700-page)
+	 * 所以做法是：把 .mt5700-page 搬进外壳的 canvas，再给 body 加
+	 * mt5700-sh-armed 把 .main 藏掉。
+	 *
+	 * ★ 搬运失败（Argon 结构变了）时**不加那个 class**：旧界面照常显示。
+	 *   宁可不好看，也不能白屏 —— 用户进不来就什么都修不了。
+	 */
+
+	var SH_ICON = {
+		overview: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+		radio: '<path d="M5 19V13M10 19V9M15 19v-4M20 19V5"/>',
+		wan: '<path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8.5"/>',
+		esim: '<rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M8 9.5h4v5H8z"/><path d="M15 9.5h2M15 14.5h2"/>',
+		device: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18.5h2"/>',
+		upgrade: '<path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/>',
+		sms: '<path d="M21 12a8 8 0 0 1-8 8H8l-4 3v-6.5A8 8 0 0 1 12 4h1a8 8 0 0 1 8 8z"/>',
+		voice: '<path d="M5 4h3.5l2 4.5-2.2 1.6a12 12 0 0 0 5.6 5.6l1.6-2.2L20 15.5V19a1.5 1.5 0 0 1-1.7 1.5A15.5 15.5 0 0 1 3.5 5.7 1.5 1.5 0 0 1 5 4z"/>',
+		at: '<path d="M5 6h14M5 12h9M5 18h12"/>',
+		logs: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5"/>',
+		service: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2 2M16.4 16.4l2 2M18.4 5.6l-2 2M7.6 16.4l-2 2"/>'
+	};
+
+	/* 12 个真实页面全在导航里 —— 少一个就是「藏起来的入口等于没有」 */
+	var SH_NAV = [
+		{ g: '概览', items: [
+			{ p: 'overview', u: 'admin/modem/5g/status', t: '总览' }
+		] },
+		{ g: '网络', items: [
+			{ p: 'radio', u: 'admin/modem/5g/network/settings', t: '无线与频段' },
+			{ p: 'wan', u: 'admin/modem/5g/network/dial', t: '接入与拨号' }
+		] },
+		{ g: '卡与设备', items: [
+			{ p: 'esim', u: 'admin/modem/5g/modem/esim', t: 'eSIM' },
+			{ p: 'device', u: 'admin/modem/5g/modem/settings', t: '模组信息' },
+			{ p: 'upgrade', u: 'admin/modem/5g/modem/upgrade', t: '模组升级' }
+		] },
+		{ g: '通信', items: [
+			{ p: 'sms', u: 'admin/modem/5g/comm/sms', t: '短信' },
+			{ p: 'smscfg', u: 'admin/modem/5g/comm/sms-settings', t: '短信设置' },
+			{ p: 'voice', u: 'admin/modem/5g/comm/voice', t: '语音' }
+		] },
+		{ g: '工具', items: [
+			{ p: 'at', u: 'admin/modem/5g/tools/terminal', t: 'AT 终端' },
+			{ p: 'logs', u: 'admin/modem/5g/tools/logs', t: '运行日志' },
+			{ p: 'service', u: 'admin/modem/5g/tools/config', t: '服务与升级' }
+		] }
+	];
+
+	var MOON = '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/>';
+	var SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/>';
+
+	var _shell = null;
+
+	function shIcon(name) {
+		var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		s.setAttribute('viewBox', '0 0 24 24');
+		s.setAttribute('stroke-linecap', 'round');
+		s.setAttribute('stroke-linejoin', 'round');
+		s.innerHTML = SH_ICON[name] || SH_ICON.service;
+		return s;
+	}
+
+	function shThemeRead() {
+		try {
+			return window.localStorage.getItem('mt5700-theme') === 'light' ? 'light' : 'dark';
+		} catch (e) { return 'dark'; }
+	}
+
+	function shThemeApply(root, theme) {
+		root.setAttribute('data-theme', theme);
+		/* html 上也挂一份：弹窗层在 body 上、不在壳内，靠它继承到同一套明暗 */
+		try { document.documentElement.setAttribute('data-theme', theme); } catch (e) { /* 无所谓 */ }
+		var btn = root.querySelector('.sh-theme');
+		if (btn) btn.innerHTML = '';
+		if (btn) {
+			var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+			s.setAttribute('viewBox', '0 0 24 24');
+			s.setAttribute('stroke-linecap', 'round');
+			s.innerHTML = theme === 'dark' ? MOON : SUN;
+			btn.appendChild(s);
+		}
+	}
+
+	function shCurrentPath() {
+		var here = window.location.pathname.replace(/\/+$/, '');
+		return here;
+	}
+
+	function shBuild(title, subtitle) {
+		var root = E('div', { 'class': 'mt5700-sh' });
+		shThemeApply(root, shThemeRead());
+
+		var app = E('div', { 'class': 'app' });
+
+		/* ---- 左栏 ---- */
+		var rail = E('aside', { 'class': 'rail' });
+		var brand = E('div', { 'class': 'brand' });
+		var mark = E('div', { 'class': 'brand-mark' });
+		mark.innerHTML = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">' +
+			'<path d="M4 17V9M9 17V5M14 17v-6M19 17V7"/></svg>';
+		brand.appendChild(mark);
+		var btx = E('div', { 'class': 'brand-tx' });
+		btx.appendChild(E('b', {}, 'H5000M'));
+		btx.appendChild(E('span', {}, 'MT5700 CONSOLE'));
+		brand.appendChild(btx);
+		rail.appendChild(brand);
+
+		var nav = E('nav', { 'class': 'rail-nav' });
+		var here = shCurrentPath();
+		for (var gi = 0; gi < SH_NAV.length; gi++) {
+			var grp = SH_NAV[gi];
+			var box = E('div', { 'class': 'rail-group' });
+			box.appendChild(E('p', {}, grp.g));
+			for (var ii = 0; ii < grp.items.length; ii++) {
+				var it = grp.items[ii];
+				var href = L.url(it.u);
+				var btn = E('button', {
+					'class': 'nav-i' + (here === href.replace(/\/+$/, '') ? ' is-on' : '')
+				});
+				btn.setAttribute('data-u', it.u);
+				btn.appendChild(shIcon(it.p));
+				btn.appendChild(E('span', {}, it.t));
+				btn.addEventListener('click', function () {
+					window.location.href = L.url(this.getAttribute('data-u'));
+				});
+				box.appendChild(btn);
+			}
+			nav.appendChild(box);
+		}
+		rail.appendChild(nav);
+
+		var foot = E('div', { 'class': 'rail-foot' });
+		var svc = E('div', { 'class': 'svc' });
+		svc.innerHTML = '<i></i>';
+		svc.appendChild(E('span', {}, '返回 LuCI'));
+		svc.style.cursor = 'pointer';
+		svc.addEventListener('click', function () { window.location.href = L.url('admin/status/overview'); });
+		foot.appendChild(svc);
+		rail.appendChild(foot);
+
+		/* ---- 右栏 ---- */
+		var main = E('div', { 'class': 'main' });
+		var top = E('header', { 'class': 'topbar' });
+		top.appendChild(E('span', { 'class': 'crumb-title' }, title || ''));
+		top.appendChild(E('span', { 'class': 'crumb-sub' }, subtitle || ''));
+		var tbtn = E('button', { 'class': 'icon-btn sh-theme' });
+		tbtn.setAttribute('title', '切换明暗');
+		tbtn.addEventListener('click', function () {
+			var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+			shThemeApply(root, next);
+			try { window.localStorage.setItem('mt5700-theme', next); } catch (e) { /* 隐私模式忽略 */ }
+		});
+		top.appendChild(tbtn);
+		main.appendChild(top);
+
+		var canvas = E('div', { 'class': 'canvas' });
+		main.appendChild(canvas);
+
+		app.appendChild(rail);
+		app.appendChild(main);
+		root.appendChild(app);
+		shThemeApply(root, root.getAttribute('data-theme'));
+		return { root: root, canvas: canvas, top: top };
+	}
+
+	/*
+	 * 挂载。返回 true 表示接管成功；false 表示没接管（旧界面继续用）。
+	 * 不要在 node 还没进文档时调用 —— 先 rAF 等它进 DOM。
+	 */
+	api.mountShell = function (node) {
+		if (!node || !node.ownerDocument) return false;
+		var h = node.querySelector('.mt5700-page-title');
+		var s = node.querySelector('.mt5700-page-subtitle');
+		var title = h ? h.textContent : '';
+		var sub = s ? s.textContent : '';
+
+		/* 顶栏标题用导航名（总览 / 无线与频段 …），与原型一致；
+		   页面自己的标题（网络状态）只在找不到导航项时兜底。 */
+		var here = shCurrentPath();
+		for (var gi = 0; gi < SH_NAV.length; gi++) {
+			for (var ii = 0; ii < SH_NAV[gi].items.length; ii++) {
+				var it = SH_NAV[gi].items[ii];
+				if (L.url(it.u).replace(/\/+$/, '') === here) title = it.t;
+			}
+		}
+
+		if (_shell) api.unmountShell();
+
+		var built = shBuild(title, sub);
+		built.canvas.appendChild(node);
+		document.body.appendChild(built.root);
+		/* 搬完了才敢藏旧壳 */
+		document.body.classList.add('mt5700-sh-on', 'mt5700-sh-armed');
+		_shell = { root: built.root, node: node };
+
+		/* 有些组件按挂载时的容器宽度算过尺寸，换父节点后补一次。
+		   用 createEvent 而不是 new Event(...)：undefined-fn 守卫把 `Event`
+		   当成未定义的函数调用（它只认白名单里的宿主对象），这里绕开。 */
+		setTimeout(function () {
+			try {
+				var ev = document.createEvent('Event');
+				ev.initEvent('resize', true, true);
+				window.dispatchEvent(ev);
+			} catch (e) { /* 老浏览器 */ }
+		}, 30);
+		return true;
+	};
+
+	api.unmountShell = function () {
+		if (!_shell) return;
+		try {
+			if (_shell.root && _shell.root.parentNode) {
+				_shell.root.parentNode.removeChild(_shell.root);
+			}
+		} catch (e) { /* 已经不在文档里，无所谓 */ }
+		document.body.classList.remove('mt5700-sh-on', 'mt5700-sh-armed');
+		_shell = null;
+	};
+
+	/* 等节点进文档：LuCI 是 render() 返回之后才 append，最多等约 1 秒 */
+	function shWhenAttached(node) {
+		var tries = 0;
+		function tick() {
+			if (!node.isConnected) {
+				if (++tries < 60) {
+					if (window.requestAnimationFrame) window.requestAnimationFrame(tick);
+					else setTimeout(tick, 16);
+				}
+				return;
+			}
+			api.mountShell(node);
+		}
+		tick();
+	}
+
 	api.E = E;
 
 	return api;

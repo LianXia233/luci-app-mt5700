@@ -6,8 +6,8 @@
 <title>MT5700 Console · 界面重做提案</title>
 <style>
 /* ============================================================
-   设计令牌 —— 只有两套：深色（默认）/ 浅色。没有第三套、没有
-   prefers-color-scheme 自动切换（页面外观由用户自己决定）。
+   设计令牌 —— 只有两套：深色（默认）/ 浅色。没有第三套、也不跟随系统明暗
+   （页面外观由用户自己决定）。
    ============================================================ */
 :root {
   --bg: #0A0D12;
@@ -182,8 +182,9 @@ svg { display: block; }
   gap: 14px;
   height: 56px;
   padding: 0 22px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: blur(10px);
+  /* 不用 backdrop-filter：真机（老内核）与无头截图都会把它渲染成一块实色，
+     顶栏直接变成一条色带。这里用不透明底色，视觉上没区别。 */
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 .crumb-title { font-size: 14px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
