@@ -151,7 +151,38 @@
   border: 0;
   border-radius: 0;
   padding: 0;
+  /* ★ 必须显式给 color：宿主（Argon）在系统深色下把 body 正文设成 #ccc，
+     本插件是固定浅色纸面，继承下来就是白底浅灰字（实测 1.6:1，等于看不见）。
+     所有没单独指定颜色的文本（表格单元格、hint、li、textarea 占位符）都靠这一行。 */
+  color: var(--mt5700-text);
 }
+
+/* 宿主深色兜底（Argon 的 dark.css 用 !important 钉死了表单控件）
+   --------------------------------------------------------------
+   实测 dark.css 里有：
+     select,input{color:#ccc;background-color:transparent !important;border:1px solid #252526}
+     select{background-color:#1e1e1e !important}
+     .btn,button,select,input{border:1px solid #3c3c3c !important}
+   本插件是固定浅色纸面，被它一钉就是 #1e1e1e 底 + 深色字（对比度 ≈1.2:1，
+   等于看不见），ghost 按钮还凭空多出一圈灰边。
+   宿主用了 !important，这里只能用同等强度钉回来 —— 全部限定在 .mt5700-page
+   之内，不影响宿主其它页面。 */
+.mt5700-page select,
+.mt5700-page input:not([type="checkbox"]):not([type="radio"]),
+.mt5700-page textarea {
+  background-color: var(--mt5700-surface-sunken) !important;
+  border-color: var(--mt5700-border) !important;
+}
+
+.mt5700-page .mt5700-btn,
+.mt5700-page .mt5700-segmented-btn {
+  border-color: transparent !important;
+}
+.mt5700-page .mt5700-btn-primary { border-color: var(--mt5700-accent) !important; }
+.mt5700-page .mt5700-btn-secondary { border-color: var(--mt5700-border) !important; }
+.mt5700-page .mt5700-btn-success { border-color: var(--mt5700-success) !important; }
+.mt5700-page .mt5700-btn-danger { border-color: var(--mt5700-danger) !important; }
+.mt5700-page .mt5700-segmented-btn.is-active { border-color: var(--mt5700-accent) !important; }
 
 /* 内容区：**无缝分区**（不是卡片流）
    --------------------------------------------------------------

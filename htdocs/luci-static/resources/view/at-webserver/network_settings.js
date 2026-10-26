@@ -59,6 +59,10 @@ return L.view.extend({
 		body.appendChild(lockCard);
 		var lockCardSub = lockCard.querySelector('.mt5700-card-subtitle');
 		var lockEditorBox = E('div');
+		/* 影响预告放在编辑器之前：保存锁频要先切飞行模式，这一步会立刻断网，
+		   而卡头说明里一个字都没提。用户点之前就得知道。 */
+		lockBody.appendChild(Mt5700.impact(['保存时先切飞行模式再重新驻网：', { b: '当前连接会中断' },
+			'；锁到本地区没有的频段就再也连不上，得回本页改回「关闭」或换频段。']));
 		lockBody.appendChild(lockEditorBox);
 
 		/* ---------- 定时锁频（v2.4.31 从独立页面并入，实现见 schedule_panel.js） ----------

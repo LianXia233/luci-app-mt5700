@@ -5,6 +5,31 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.46] - 2026-10-26
+
+### Fixed — 系统深色模式下整页看不清（真机实测，宿主污染）
+
+插件是固定浅色纸面，但 Argon 的 `dark.css` 会从外部把颜色钉死：
+
+- `.mt5700-page` 继承到 `body{color:#ccc}` —— 白底浅灰字 ≈1.6:1，
+  所有没单独指定颜色的文本（表格单元格 / hint / li）全部看不清；
+- `select{background-color:#1e1e1e !important}` —— 下拉框深底 + 我们的深色字
+  ≈1.2:1，等于看不见（「自动刷新 5 秒」就是这种情况）；
+- `.btn,button{border:1px solid #3c3c3c !important}` —— ghost 按钮凭空多一圈灰边。
+
+修法：` .mt5700-page` 显式声明 `color`，并用同等强度的 `!important` 把表单控件
+的底色/边框、以及各按钮变体的边框钉回来（全部限定在 `.mt5700-page` 内）。
+新增守卫 `tests/host-dark-contract.test.js`（13 项，含三条反向断言）。
+
+### Changed — 影响预告铺到「锁频设置」
+
+保存锁频要先切飞行模式，这一步会立刻断网，而原本文案一个字都没提。
+现在按钮下方常驻一条影响预告：「保存时先切飞行模式再重新驻网：当前连接会中断；
+锁到本地区没有的频段就再也连不上，得回本页改回「关闭」或换频段。」
+
+CSS 版本 5.14.1（指纹 `1d3737f01acf4b32`）。验证：92 个测试文件全绿、
+`verify-guards` 193 项全绿、真机明暗两种系统偏好下六页截图核对。
+
 ## [2.4.45] - 2026-10-26
 
 ### Changed — 第五次改版：结论先行（结构与配色一起动）
