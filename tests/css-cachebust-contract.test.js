@@ -47,8 +47,10 @@ const js = fs.readFileSync(JSP, 'utf8');
  *              callbar / num-display / verdict 四组件；metric 等宽数字；
  *              prefers-reduced-motion 降级）→ 5.6.0
  *   2026-09-20  eSIM 管理页重排（EID 等宽块 / Profile 行卡 / 卡内分区标题）→ 5.5.20
+ *   2026-10-26  全局视觉改版（去玻璃/去半透明卡片、阴影三层→两层、主色加深、
+ *              圆角收敛三档、表格等宽数字）→ 5.10.0
  */
-const CSS_FINGERPRINT = '048987bddfc322dc';
+const CSS_FINGERPRINT = 'd8b248d7dd533709';
 
 let pass = 0;
 const fails = [];
