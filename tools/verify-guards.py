@@ -1847,10 +1847,14 @@ MUTATIONS = [
         "★ LTE 锚点 + NR 在用 → 5G-NR",
     ),
     (
-        "renderConn 没把载波表交给 ratDisplay（改了纯函数却没接线 —— 最常见的半程修复）",
+        # 2026-10-26：连接状态卡的「网络制式」格已删（去重），ratDisplay 的唯一调用点
+        # 搬到了结论卡，签名也从 `state.cell.sysMode` 变成局部变量 `cell.sysMode`。
+        # 变异随之改锚 —— 要求不变：**载波表必须真的传给 ratDisplay**，
+        # 少传这一路，NSA 下的 LTE 锚点就会被判成 4G（2026-09-29 真机 bug）。
+        "结论卡没把载波表交给 ratDisplay（改了纯函数却没接线 —— 最常见的半程修复）",
         "nsjs3",
-        "ratDisplay(state.cell.sysMode, state.carriers,",
-        "ratDisplay(state.cell.sysMode, [],",
+        "ratDisplay(cell.sysMode, state.carriers,",
+        "ratDisplay(cell.sysMode, [],",
         "走统一判定入口 ratDisplay",
     ),
     (
@@ -2228,7 +2232,36 @@ def _install_signal_guard():
             pass        # 非主线程 / 平台不支持，忽略
 
 
+def check_anchors():
+    """只校验变异锚点，不跑任何测试（约 1 秒）。
+
+    为什么单独有这个模式：删改 UI 之后，断言改了、**变异锚点没跟着改** 是这类
+    检查最常失效的方式（2026-10-26 实例：删掉「网络制式」格后 ratDisplay 调用点
+    搬家，变异锚点仍指向旧签名，CI 报「出现 0 次」）。完整验证要跑十几分钟，
+    没有人会在每次改完界面后跑 —— 这个模式可以。
+    """
+    bad = 0
+    for i, (name, tgt, old, new, key) in enumerate(MUTATIONS, 1):
+        if tgt not in TARGETS:
+            print(f"[{i}] ✗ 目标键未登记：{tgt}（{name}）")
+            bad += 1
+            continue
+        text = TARGETS[tgt].read_text(encoding="utf-8")
+        cnt = text.count(old)
+        if cnt != 1:
+            rel = TARGETS[tgt].relative_to(ROOT) if str(TARGETS[tgt]).startswith(str(ROOT)) else TARGETS[tgt]
+            print(f"[{i}] ✗ 锚点出现 {cnt} 次：{name}")
+            print(f"      锚  ：{old!r}")
+            print(f"      目标：{rel}")
+            bad += 1
+    print(f"\n锚点自检：{len(MUTATIONS) - bad}/{len(MUTATIONS)} 可用")
+    return 0 if bad == 0 else 1
+
+
 def main():
+    if "--anchors" in sys.argv:
+        return check_anchors()
+
     for tgt in ("js", "esimjs", "js2", "mt5700js"):
         rc0, out0 = run_test(tgt)
         print("基线[%s]:" % tgt, "绿色（0 失败）" if rc0 == 0 else "红！先修基线再验证守卫")

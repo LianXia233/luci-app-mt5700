@@ -113,6 +113,14 @@ run_py() { # run_py <说明> <脚本> [脚本参数...]   ← 说明必须放第
 	"$PY" "$@" || FAIL=$((FAIL + 1))
 }
 
+step "变异锚点自检（CI: python3 tools/verify-guards.py --anchors）"
+# CI-STEP: python3 tools/verify-guards.py --anchors
+# 只查锚点、不跑测试，1 秒出结果：删改 UI 后「断言改了、锚点没改」是这类检查
+# 最常失效的方式，跑完整验证要十几分钟，没人会每次都跑。
+if ! "$PY" tools/verify-guards.py --anchors; then
+    FAILED=$((FAILED + 1))
+fi
+
 step "守卫有效性验证（CI: python3 tools/verify-guards.py）"
 # CI-STEP: python3 tools/verify-guards.py
 # ★ 该工具靠 node 跑 JS 测试来判定"变异有没有被断言检出"：没有 node 时它必然 exit 1，
