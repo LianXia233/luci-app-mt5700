@@ -44,6 +44,17 @@ return L.view.extend({
 		Mt5700.renderConnectionBar(connBar);
 		body.appendChild(connBar);
 
+		/* ---------- 结论区（2026-10-26 新增） ----------
+		 * 位置刻意在状态条之后、所有卡片之前：整页第一眼是「有没有网」，
+		 * 而不是六张卡片的第一行字。见 renderVerdict 的注释。
+		 * ★ 这两个节点必须在这里就建好并挂上：函数体后面的 `var todoBox = …`
+		 *   声明会提升、赋值不会，晚一步 append 会拿到 undefined —— 真机上就是
+		 *   一个 appendChild 报 TypeError、整页空白（已实测踩过）。 */
+		var verdict = Mt5700.verdict();
+		var todoBox = E('div');
+		body.appendChild(verdict);
+		body.appendChild(todoBox);
+
 		/* ---------- 面板骨架（按「一个主题一张卡片」组织，避免信息重叠） ---------- */
 
 		/* ① 信号质量：主小区 RSRP/RSRQ/SINR + 信号百分比 + 调制方式(MCS)
@@ -1077,6 +1088,13 @@ return L.view.extend({
 			box.firstChild.insertBefore(Mt5700.badge(summaryText,
 				bad ? 'danger' : (warnN ? 'warning' : (t.ran && !t.busy ? 'success' : 'neutral'))), btn);
 
+			/* 影响预告写在按钮正下方：这是一条会占住独占 AT 通道的动作，期间同页
+			   其它读数都会变慢。用户点之前就该知道，塞进 tooltip 等于没说。
+			   ★ 时长是真机量出来的（正常约 3 秒；断网时 L3 那几次 ICMP/TCP 会吃满
+			   超时，最慢十几秒），不能按「感觉」写 —— 写小了用户以为卡死。 */
+			box.appendChild(Mt5700.impact(['点一次约 ', { b: '3 秒' },
+				'，断网时最慢十几秒：期间 AT 通道被占用，同页读数会变慢；全程只读，不改任何配置。']));
+
 			/* 三层计数：一眼看出问题落在哪一层，不用到底部明细里数 */
 			var chips = E('div', { 'class': 'mt5700-diag-chips' });
 			DIAG_LAYERS.forEach(function (L) {
@@ -1409,6 +1427,178 @@ return L.view.extend({
 
 			/* PLMN / TAC / 小区 / PCI 已并入「载波与聚合」卡片：那才是描述主小区的地方，
 			   而且原表里的「频点」列其实取的是 TAC（0x14225C），标错了，真频点在载波表里。 */
+		}
+
+		/* ================= 结论区（一句结论 + 四段链路） =================
+		 *
+		 * 这一页有 6 个区、二十多个读数，但用户进页面其实只想知道三件事：
+		 *   「现在有没有网」→ 一句结论
+		 *   「哪一段不通」  → 链路条：模组 → SIM → 注册 → 拨号
+		 *   「那要做什么」  → 下面的「需要处理」
+		 *
+		 * ★ 结论**不读新数据**，只消费别的区已在用的 state：单一数据源，
+		 *   不会出现「结论说可以上网、连接状态却显示未注册」这种自相矛盾。
+		 * ★ 判定严格按链路顺序短路：先断的那一段决定结论。四段各自出结论的话，
+		 *   同一屏上就会同时出现「已连接」与「未注册」。
+		 *
+		 * 设备信息（devState）走 60 秒节流，首屏前几拍是 null —— SIM 段此时显示
+		 * 「读取中」而不是「异常」：没取到 ≠ 有问题。
+		 */
+		function simKnown() { return !!devState; }
+		function simWarnNow() { return devState ? Parse.simIsWarn(devState.sim) : false; }
+
+		function firstV4Addr() {
+			var list = buildAddrList();
+			for (var i = 0; i < list.length; i++) {
+				if (list[i].family === 'IPv4') return list[i];
+			}
+			return null;
+		}
+
+		/* 信号等级 → 结论区的语气（Parse.signalLevel 是全局唯一分级口径） */
+		function sigTone(v) {
+			var lv = Parse.signalLevel(v);
+			if (lv == null) return '';
+			if (lv === 'exc' || lv === 'good') return 'ok';
+			if (lv === 'fair') return 'warn';
+			return 'bad';
+		}
+
+		function renderVerdict() {
+			var cell = state.cell || {};
+			var registered = hasAnyPsService(state.psRegStatEps, state.psRegStat, cell);
+			var v4 = firstV4Addr();
+			var gw = state.dhcpv4 ? state.dhcpv4.gateway : '';
+			var mt = maxModuleTemp();
+			var main = (state.carriers || [])[0] || null;
+			var band = main ? bandLabel(main.sysMode, main.band) : '';
+			var rat = ratDisplay(cell.sysMode, state.carriers,
+				state.diag && state.diag.endc, registered === true);
+			var op = (state.operator && state.operator !== '未知运营商') ? state.operator : '';
+			var down = splitSpeedUI(state.rtDown || 0, 'bytes');
+			var up = splitSpeedUI(state.rtUp || 0, 'bytes');
+
+			/* ---- 四段链路的判定 ---- */
+			var simTone = simWarnNow() ? 'bad' : (simKnown() ? 'ok' : 'mute');
+			var regTone = registered === true ? 'ok' : (registered === false ? 'bad' : 'mute');
+			var dialTone = v4 ? 'ok' : (registered === true ? 'warn' : 'mute');
+
+			/* ---- 一句结论 ---- */
+			/* 默认语气留空（= 主色中性）：首屏还没读到数据时不是「存疑」，
+			   拿琥珀色去吓用户一轮是误报。只有真的判出断点才换 warn / bad。 */
+			var tone = '';
+			var title = '正在读取模组状态';
+			var sub = ['首屏读数要几秒钟，这一块会自动更新。'];
+
+			if (simWarnNow()) {
+				tone = 'bad';
+				title = 'SIM 卡未就绪';
+				sub = ['模组认不到这张卡，网络与短信都用不了。先确认卡插好、没有被 PIN 锁定。'];
+			} else if (registered === false) {
+				tone = 'bad';
+				title = '未注册到网络';
+				sub = ['模组读得到卡，但没有驻留到任何网络。常见原因是射频被关、天线没接好或频段被锁死。'];
+			} else if (registered === true && !v4) {
+				tone = 'warn';
+				title = '已注册，但还没拿到地址';
+				sub = ['驻留成功却没有 IP，通常是 APN 配置不对，或者 PDP 上下文没激活。'];
+			} else if (v4) {
+				tone = 'ok';
+				title = '已连接，可以上网';
+				sub = ['已获取地址 ', { b: v4.address }];
+				if (gw) { sub.push('，网关 ', { b: gw }); }
+				/* 「实时监测」关掉时采样根本不在跑，此时 rtDown 是上一轮的残值，
+				   写进结论会变成一句假的现状 —— 那种情况下只说地址，不说速率。 */
+				if (rateOn) {
+					sub.push('，当前下行 ' + down.value + ' ' + down.unit);
+				}
+				sub.push('。');
+			}
+
+			/* ---- 需要处理：只收「真的会挡住用户」的事项，没网时最多两条 ---- */
+			var todos = [];
+			function gotoDiag() {
+				if (diagCard && diagCard.scrollIntoView) {
+					diagCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}
+			}
+			if (simWarnNow()) {
+				todos.push({
+					title: 'SIM 卡未就绪',
+					note: '当前无法上网；短信与通话同样不可用。',
+					actions: [{ label: '去排查', variant: 'secondary', onClick: gotoDiag }]
+				});
+			} else if (registered === false) {
+				todos.push({
+					title: '没有注册到网络',
+					note: '当前无法上网。',
+					actions: [{ label: '去排查', variant: 'secondary', onClick: gotoDiag }]
+				});
+			} else if (registered === true && !v4) {
+				todos.push({
+					title: '已注册但没拿到地址',
+					note: '路由器上不去网，客户端也拿不到地址。',
+					actions: [{ label: '去排查', variant: 'secondary', onClick: gotoDiag }]
+				});
+			}
+			/* 温度跟排查项用同一档阈值（70 提示 / 85 告警），两处永远一致 */
+			if (mt.max != null && mt.max >= 70) {
+				todos.push({
+					title: '模组温度 ' + mt.max + ' ℃',
+					note: mt.max >= 85 ? '已经很高，会降速甚至掉网，先改善通风。' : '偏高，留意散热。',
+					actions: [{ label: '去排查', variant: 'secondary', onClick: gotoDiag }]
+				});
+			}
+
+			var todoNode = Mt5700.todo(todos);
+			todoBox.innerHTML = '';
+			if (todoNode) todoBox.appendChild(todoNode);
+
+			verdict.update({
+				tone: tone,
+				eyebrow: [op, rat && rat !== '—' ? rat : '', band].filter(function (x) { return x; }),
+				title: title,
+				sub: sub,
+				chips: [
+					{ label: '温度', value: mt.max == null ? '—' : mt.max + ' ℃' },
+					{ label: 'APN', value: state.apn },
+					{ label: '累计下行', value: (state.flow && state.flow.totalRxFlow != null)
+						? AtWs.formatFlow(state.flow.totalRxFlow) : '—' }
+				],
+				nums: [
+					{ label: 'RSRP', value: cell.rsrp, unit: 'dBm', tone: sigTone(cell.rsrp) },
+					{ label: 'SINR', value: cell.sinr, unit: 'dB', tone: sigTone(cell.sinr) },
+					{ label: '下行', value: down.value, unit: down.unit },
+					{ label: '上行', value: up.value, unit: up.unit }
+				],
+				rail: [
+					{
+						no: '01', name: '模组', tone: simKnown() ? 'ok' : 'mute',
+						text: simKnown() ? '运行正常' : '读取中',
+						sub: devState && devState.model ? devState.model : ''
+					},
+					{
+						no: '02', name: 'SIM 卡', tone: simTone,
+						text: !simKnown() ? '读取中'
+							: (simWarnNow() ? Parse.simShort(devState.sim) : '已就绪'),
+						/* 证据行给「是哪张卡」：ICCID 尾 6 位。
+						   ★ 不放状态码（1 / 11）—— 那是模组内部枚举，用户无从对照，
+						     而 11 在本机是长期正常态，写出来只会被当成故障码。 */
+						sub: simKnown() && devState.iccid
+							? ('…' + String(devState.iccid).slice(-6)) : ''
+					},
+					{
+						no: '03', name: '网络注册', tone: regTone,
+						text: registered === true ? '已注册' : (registered === false ? '未注册' : '读取中'),
+						sub: registered === true && band ? band : ''
+					},
+					{
+						no: '04', name: '拨号连接', tone: dialTone,
+						text: v4 ? '已连接' : (registered === true ? '未获取地址' : '未开始'),
+						sub: v4 ? (v4.address + (gw ? ' / ' + gw : '')) : ''
+					}
+				]
+			});
 		}
 
 		/* 环形仪表实例只创建一次，之后每次刷新仅更新数值与弧线 */
@@ -2426,6 +2616,8 @@ return L.view.extend({
 					renderSignal();
 					renderCarriers();
 					renderConn();
+					/* 结论区跟着快档走：信号与注册状态一变，第一句话也要跟着变 */
+					renderVerdict();
 				});
 			});
 		}
@@ -2797,6 +2989,9 @@ return L.view.extend({
 			});
 			slowRunning = chain.then(function () {
 				slowRunning = null;
+				/* 地址 / 网关 / 温度 / APN 全在慢档：它们决定结论区的副标题与「需要处理」，
+				   所以慢档整轮跑完再画一次（快档那边已经画过一次，先出的是信号与注册）。 */
+				if (!disposed) renderVerdict();
 			});
 			return slowRunning;
 		}
@@ -2872,6 +3067,9 @@ return L.view.extend({
 		renderConn();
 		renderSignal();
 		renderCarriers();
+		/* 结论区先画一次空态：首屏前几秒数据还没回来，这一块要显示「正在读取」，
+		   而不是一片空白等第一轮刷新（用户会以为页面坏了）。 */
+		renderVerdict();
 		renderConnDetail();    /* 连接明细：诊断 + 地址与 DNS（一张表） */
 		renderTools();   /* 断网排查：右列总控卡 + 底部满宽明细卡 */
 		renderSpeed();

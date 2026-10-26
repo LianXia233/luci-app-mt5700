@@ -19,7 +19,7 @@
  * 后，设备上 CSS 内容已经是新的，用户浏览器却还在用旧副本 —— 代码改了界面没变。
  * 守卫：tests/css-cachebust-contract.test.js（mt5700.css 内容指纹一变就必须改这里）。
  */
-var MT5700_CSS_VERSION = '5.12.0';
+var MT5700_CSS_VERSION = '5.14.0';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -150,6 +150,197 @@ var Mt5700 = (function () {
 		if (color) v.classList.add(color);
 		m.appendChild(v);
 		return m;
+	};
+
+	/* ================= 结论区（verdict） + 链路条（rail） ================= */
+
+	/*
+	 * 进页面第一眼应该是一句**结论**，而不是二十个读数。
+	 *
+	 * 用法：
+	 *   var v = Mt5700.verdict();
+	 *   body.appendChild(v);
+	 *   v.update({
+	 *     tone: 'ok',                        // ok | warn | bad —— 只决定竖线与状态点
+	 *     eyebrow: ['中国联通', '5G SA', 'n78'],
+	 *     title: '已连接，可以上网',
+	 *     sub: ['已获取地址 ', { b: '10.1.2.3' }, '，DNS 正常'],
+	 *     nums: [{ label: 'RSRP', value: '-83', unit: 'dBm', tone: 'ok' }],
+	 *     rail: [{ no: '01', name: '模组', tone: 'ok',
+	 *              text: '运行正常', sub: 'MT5700M-CN' }]
+	 *   });
+	 *
+	 * ★ 为什么 update 是**整块重建**而不是逐个 setText：这一块只有 4 段链路 +
+	 *   至多 4 个读数，重建成本可以忽略；而逐字段维护「保留旧值 / 取不到显示 —」
+	 *   极容易漏一处，出现「换了卡结论还是上一张卡」这类不报错的静默错误。
+	 *
+	 * ★ tone 只影响颜色，不改文案：同一个数字在三种语气下都要能读，
+	 *   不能让「变红」成为唯一的信息载体（色弱用户看不见）。
+	 */
+	api.verdict = function () {
+		var node = E('div', { 'class': 'mt5700-verdict' });
+		var main = E('div', { 'class': 'mt5700-verdict-main' });
+		var lead = E('div', { 'class': 'mt5700-verdict-lead' });
+		var eyebrow = E('div', { 'class': 'mt5700-verdict-eyebrow' });
+		var title = E('div', { 'class': 'mt5700-verdict-title' });
+		var dot = E('span', { 'class': 'mt5700-verdict-dot' });
+		var titleTx = E('span');
+		var sub = E('p', { 'class': 'mt5700-verdict-sub' });
+		var chips = E('div', { 'class': 'mt5700-verdict-chips' });
+		var nums = E('div', { 'class': 'mt5700-verdict-nums' });
+		var rail = E('div', { 'class': 'mt5700-rail' });
+
+		title.appendChild(dot);
+		title.appendChild(titleTx);
+		lead.appendChild(eyebrow);
+		lead.appendChild(title);
+		lead.appendChild(sub);
+		lead.appendChild(chips);
+		main.appendChild(lead);
+		main.appendChild(nums);
+		node.appendChild(main);
+		node.appendChild(rail);
+
+		/* 语气修饰符集中在一处拼：CSS 侧 .is-ok/.is-warn/.is-bad 三档 */
+		function toneCls(base, tone) {
+			return base + (tone ? ' is-' + tone : '');
+		}
+
+		/*
+		 * sub 允许混排「普通文字 + 等宽强调值」（地址、网关这类要对得上的值走等宽）。
+		 * 只接受两种元素：字符串，或 { b: '值' } —— 不接受任意 HTML，
+		 * 页面上的值全部来自 AT 回包，拼 HTML 等于把回包内容当代码执行。
+		 */
+		function fillSub(parts) {
+			sub.innerHTML = '';
+			if (!parts) { sub.style.display = 'none'; return; }
+			sub.style.display = '';
+			(Array.isArray(parts) ? parts : [parts]).forEach(function (p) {
+				if (p == null) return;
+				if (typeof p === 'object' && p.b != null) {
+					sub.appendChild(E('b', null, String(p.b)));
+				} else {
+					sub.appendChild(document.createTextNode(String(p)));
+				}
+			});
+		}
+
+		node.update = function (cfg) {
+			cfg = cfg || {};
+			node.className = toneCls('mt5700-verdict', cfg.tone);
+			titleTx.textContent = cfg.title || '';
+
+			eyebrow.innerHTML = '';
+			var eb = (cfg.eyebrow || []).filter(function (t) { return t; });
+			eb.forEach(function (t, i) {
+				if (i) eyebrow.appendChild(E('span', null, '·'));
+				eyebrow.appendChild(E('span', null, String(t)));
+			});
+			eyebrow.style.display = eb.length ? '' : 'none';
+
+			fillSub(cfg.sub);
+
+			chips.innerHTML = '';
+			(cfg.chips || []).forEach(function (c) {
+				if (!c) return;
+				var chip = E('span', { 'class': 'mt5700-chip' });
+				if (c.label) chip.appendChild(document.createTextNode(c.label + ' '));
+				chip.appendChild(E('b', null, String(c.value == null ? '—' : c.value)));
+				chips.appendChild(chip);
+			});
+			chips.style.display = chips.childNodes.length ? '' : 'none';
+
+			nums.innerHTML = '';
+			(cfg.nums || []).forEach(function (n) {
+				if (!n) return;
+				var cell = E('div', { 'class': 'mt5700-vnum' });
+				cell.appendChild(E('div', { 'class': 'mt5700-vnum-label' }, n.label));
+				var hasVal = n.value != null && n.value !== '';
+				var val = E('div', { 'class': toneCls('mt5700-vnum-value', n.tone) },
+					hasVal ? String(n.value) : '—');
+				/* 没取到就不挂单位：「— dBm」会读成「读数是某个值，单位 dBm」，
+				   而事实是这一项没有值。留一个干净的「—」才不含歧义。 */
+				if (hasVal && n.unit) val.appendChild(E('i', null, String(n.unit)));
+				cell.appendChild(val);
+				nums.appendChild(cell);
+			});
+			nums.style.display = nums.childNodes.length ? '' : 'none';
+
+			rail.innerHTML = '';
+			(cfg.rail || []).forEach(function (seg) {
+				if (!seg) return;
+				var s = E('div', { 'class': toneCls('mt5700-rail-seg', seg.tone) });
+				var key = E('div', { 'class': 'mt5700-rail-key' });
+				key.appendChild(E('i'));
+				key.appendChild(document.createTextNode(
+					(seg.no ? seg.no + ' ' : '') + (seg.name || '')));
+				s.appendChild(key);
+				s.appendChild(E('div', { 'class': 'mt5700-rail-text' }, seg.text || ''));
+				if (seg.sub) s.appendChild(E('div', { 'class': 'mt5700-rail-sub' }, seg.sub));
+				rail.appendChild(s);
+			});
+			rail.style.display = rail.childNodes.length ? '' : 'none';
+			return node;
+		};
+
+		return node;
+	};
+
+	/* ================= 需要处理（todo） + 影响预告（impact） ================= */
+
+	/*
+	 * 「需要处理」条：**有问题才出现**，没有就整块不占地方（不留一条「一切正常」）。
+	 * items: [{ title, note, actions: [{ label, variant, onClick }] }]
+	 *
+	 * ★ 为什么把「还能不能上网」写进这一条：用户看到黄条第一反应是「我现在还有网吗」。
+	 *   先说影响（当前可正常上网），再给去向（去处理），他才有余裕决定要不要立刻动。
+	 * ★ 返回 null 而不是空盒子：调用方 append 前不用判断，也不会有隐藏节点占着 DOM。
+	 */
+	api.todo = function (items) {
+		if (!items || !items.length) return null;
+		var wrap = E('div');
+		items.forEach(function (it) {
+			if (!it || !it.title) return;
+			var row = E('div', { 'class': 'mt5700-todo' });
+			row.appendChild(E('span', { 'class': 'mt5700-todo-icon' }, '!'));
+			var tx = E('div', { 'class': 'mt5700-todo-text' });
+			tx.appendChild(E('b', null, it.title));
+			if (it.note) tx.appendChild(E('span', null, it.note));
+			row.appendChild(tx);
+			if (it.actions && it.actions.length) {
+				var acts = E('div', { 'class': 'mt5700-todo-actions' });
+				it.actions.forEach(function (a) {
+					if (!a || !a.label) return;
+					var v = a.variant || 'secondary';
+					var btn = E('button', {
+						'class': 'mt5700-btn mt5700-btn-sm mt5700-btn-' + v,
+						'type': 'button'
+					}, a.label);
+					if (a.onClick) btn.addEventListener('click', a.onClick);
+					acts.appendChild(btn);
+				});
+				row.appendChild(acts);
+			}
+			wrap.appendChild(row);
+		});
+		return wrap.childNodes.length ? wrap : null;
+	};
+
+	/*
+	 * 「影响预告」：写在会断网/会占串口的按钮**上方**，说明三件事 ——
+	 * 会发生什么 · 大概多久 · 影响谁。塞进 tooltip 等于没有（触摸屏没有 hover）。
+	 */
+	api.impact = function (parts) {
+		var box = E('div', { 'class': 'mt5700-impact' });
+		box.appendChild(E('span', { 'class': 'mt5700-impact-bar' }));
+		var tx = E('div', { 'class': 'mt5700-impact-text' });
+		(Array.isArray(parts) ? parts : [parts]).forEach(function (p) {
+			if (p == null) return;
+			if (typeof p === 'object' && p.b != null) tx.appendChild(E('b', null, String(p.b)));
+			else tx.appendChild(document.createTextNode(String(p)));
+		});
+		box.appendChild(tx);
+		return box;
 	};
 
 	/* ================= 分段选择器（单选按钮组） ================= */
