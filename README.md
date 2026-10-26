@@ -10,6 +10,8 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
 [![Live Demo](https://img.shields.io/badge/Demo-GitHub%20Pages-4183C4.svg?style=flat-square&logo=github)](https://lianxia233.github.io/luci-app-mt5700/)
+[![主仓库](https://img.shields.io/badge/主仓库-GitHub-181717.svg?style=flat-square&logo=github)](https://github.com/LianXia233/luci-app-mt5700)
+[![镜像仓库](https://img.shields.io/badge/镜像仓库-CNB-2F54EB.svg?style=flat-square)](https://cnb.cool/LianXia233/luci-app-mt5700)
 
 <p align="center">
   <b>单包融合交付</b>：集成 12 个原生 LuCI 现代化管理页面与高性能常驻后端 <code>/usr/bin/at-webserver-rust</code><br>
@@ -19,6 +21,12 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 </div>
 
 ---
+
+> 📌 **仓库定位**
+>
+> - **GitHub 是主仓库**：[LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700) —— 代码、Issue、Release 均以此为准；
+> - **CNB 是镜像仓库**：[cnb.cool/LianXia233/luci-app-mt5700](https://cnb.cool/LianXia233/luci-app-mt5700) —— 内容与主仓库保持一致，方便国内网络访问与下载；
+> - **提 Issue / 提建议请优先使用 GitHub**（[Issues](https://github.com/LianXia233/luci-app-mt5700/issues)）。镜像仓库只为访问方便，反馈请回到主仓库，避免同一问题两边各记一份。
 
 > ⚠️ **兼容性说明**
 >
@@ -266,7 +274,7 @@ grep OPENWRT_ARCH /etc/openwrt_release
 
 ### 软件包安装
 
-在本仓库的 Releases 页面（GitHub 镜像仓库同样发布）下载与设备架构完全对应的软件包后安装（主包已内嵌 Rust 后端）：
+在 **GitHub 主仓库**的 [Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 页面下载与设备架构完全对应的软件包后安装（CNB 镜像仓库同样发布，主仓库为准）：
 
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
@@ -615,7 +623,7 @@ luci-app-mt5700/
 ├── scripts/                                # SDK 矩阵打包、QQ openid 抓取等辅助脚本
 ├── docs/                                   # README 配图、各版本发布说明 (release-notes/)
 ├── tests/                                  # 前端解析单测、ucode JSON 解析单测与 mock-modem E2E 用例
-└── .cnb.yml                                # CNB 云编译流水线（3 架构 × apk/ipk，见下方「云编译与发布」）
+└── .cnb.yml                                # CNB 镜像仓库云编译流水线（3 架构 × apk/ipk，见下方「云编译与发布」）
 ```
 
 </details>
@@ -654,16 +662,17 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 
 ## 云编译与发布
 
-本仓库与 GitHub 镜像仓库**各自触发、各自发布**，构建逻辑共用同一份脚本 [`scripts/sdk-build.sh`](scripts/sdk-build.sh)——两边只在「谁触发、发到哪」上不同。
+**GitHub 主仓库**与 **CNB 镜像仓库**各自触发、各自发布，构建逻辑共用同一份脚本 [`scripts/sdk-build.sh`](scripts/sdk-build.sh)——两边只在「谁触发、发到哪」上不同，产物以 GitHub Release 为准。
 
 <details>
 <summary><b>流水线分工、构建矩阵与断言闸门（点击展开）</b></summary>
 
-| | 本仓库（CNB） | GitHub 镜像仓库 |
+| | GitHub 主仓库 | CNB 镜像仓库 |
 |:--|:--|:--|
-| 流水线定义 | [`.cnb.yml`](.cnb.yml) | [`.github/workflows/build-openwrt.yml`](.github/workflows/build-openwrt.yml) |
-| PR 校验 | 只编 `x86_64 · apk` 一个组合，验通过即止，**不发布** | 无 |
-| 正式发布 | `main` 分支 push 或手动 `api_trigger`，推 CNB Release | `main` push / `v*` 标签 / `workflow_dispatch`，推 GitHub Release |
+| 仓库地址 | [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700) | [cnb.cool/LianXia233/luci-app-mt5700](https://cnb.cool/LianXia233/luci-app-mt5700) |
+| 流水线定义 | [`.github/workflows/build-openwrt.yml`](.github/workflows/build-openwrt.yml) | `.cnb.yml` |
+| PR 校验 | 无 | 只编 `x86_64 · apk` 一个组合，验通过即止，**不发布** |
+| 正式发布 | `main` push / `v*` 标签 / `workflow_dispatch`，推 GitHub Release | `main` 分支 push 或手动 `api_trigger`，推 CNB Release |
 | 构建脚本 | `scripts/sdk-build.sh`（同一份） | `scripts/sdk-build.sh`（同一份） |
 
 - **系统覆盖**：针对 `25.12.5` 自动构建 `apk`；针对 `24.10.8` 自动构建 `ipk`。
@@ -673,19 +682,19 @@ node simulate-push.js                       # 推送链路 / 时区 / 定时推�
 
 </details>
 
-本仓库的版本号取自 `Makefile` 的 `PKG_VERSION`，不用 tag 名，所以日常推送会刷新同版本 Release，不会越推越乱。
+版本号取自 `Makefile` 的 `PKG_VERSION`，不用 tag 名，所以日常推送会刷新同版本 Release，不会越推越乱。
 
 ---
 
 ## 问题反馈
 
-提 Issue 走**本仓库**（CNB）即可，GitHub 镜像仓库也开着 Issues，两边维护者相同。
+**GitHub 是主仓库，提 Issue 一律优先走 [GitHub Issues](https://github.com/LianXia233/luci-app-mt5700/issues)**；[CNB 镜像仓库](https://cnb.cool/LianXia233/luci-app-mt5700) 只是镜像，反馈请回到主仓库，避免同一问题两边各记一份。
 
 <details>
 <summary><b>提 Issue 的渠道与需附信息（点击展开）</b></summary>
 
-- **本仓库**：仓库页 → Issues → 新建，适合贴设备型号、固件版本、`ubus call service list '{"name":"at-webserver"}'` 输出与日志片段；
-- **GitHub 镜像仓库**：[Issues](https://github.com/LianXia233/luci-app-mt5700/issues)，适合已经有 GitHub 账号、想顺带参与上游讨论的场景。
+- **GitHub Issues（首选）**：[新建 Issue](https://github.com/LianXia233/luci-app-mt5700/issues/new)，适合贴设备型号、固件版本、`ubus call service list '{"name":"at-webserver"}'` 输出与日志片段；
+- **CNB 镜像仓库**：仅用于国内访问与下载，**不建议**在那里提反馈（处理以 GitHub 为准）。
 
 反馈 AT 相关问题请附：模组型号与固件版本（`AT+CGMR`）、出问题的页面、复现步骤，以及能取到的最小原始报文（AT 终端页的收发记录，注意脱敏 IMEI / ICCID / 手机号）。日志走 `/var/log/at-webserver*`，重启即失，请先拷贝出来再重试。
 

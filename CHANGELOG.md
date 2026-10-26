@@ -21,6 +21,7 @@
 - **feat(ui) 全局壁纸立绘跟随主题明暗**：启用 v1.30.2 预留的深色角色素材——立绘按 theme.js 判定选 light / dark 变体，运行时切换主题自动换图（三角网格本就由 CSS `html.at-dark` 切换）
 - **chore(css) 样式版本 at.css 1.11.2 → 1.12.0、mt5700.css 2.42.1 → 2.43.0**（升级后刷新页面生效）；顺带清理选择器列表中的 14 处重复项
 - **test** 新增 `tests/theme-test.js`（44 项：颜色解析 / 亮度 / 对比度、各主题标记识别、背景探测、优先级、端到端写入与翻转通知）；`tests/tabmenu-test.js` 补对比度兜底 5 项（DOM 桩补 `classList.toggle`）
+- **docs(repo)** 明确仓库定位：**GitHub 为唯一主仓库**（代码 / Issue / Release 以此为准），**CNB 为镜像仓库**（`https://cnb.cool/LianXia233/luci-app-mt5700`，仅供国内访问与下载）。README 文首新增「仓库定位」提示块与两枚仓库徽章，「软件包安装」「云编译与发布」「问题反馈」三处的「本仓库 = CNB / GitHub 镜像」口径统一改为「GitHub 主仓库 / CNB 镜像仓库」，并写明提 Issue 与提建议**优先使用 GitHub**
 
 ## v1.30.4（2026-10-25）
 
