@@ -623,16 +623,26 @@ svg { display: block; }
 .note b { color: var(--ink); }
 .note svg { width: 16px; height: 16px; stroke: var(--accent); stroke-width: 2; fill: none; flex: none; margin-top: 1px; }
 
-/* ---------- 窄屏 ---------- */
-@media (max-width: 1180px) {
+/* ---------- 窄屏：分级降级 ----------
+   设计基准宽 1560（入库预览图都按这个宽度拍）。
+   之前的写法在 1180 一刀把所有栅格压成 span 12 —— 而 1180~1366 正是常见
+   笔记本窗口，等于把「控制台」变成「一行一张卡」。改为三级：
+     1360 以下：KPI 4 列改 2×2，左右并排的面板上下排
+     1120 以下：左栏收成图标条，链路 4 段改 2×2
+      760 以下：单列（手机）
+   ============================================================ */
+@media (max-width: 1360px) {
+  .c3 { grid-column: span 6; }          /* 只动 4 个指标：2×2，左右面板仍并排 */
+  .v-nums { gap: 18px; }
+}
+@media (max-width: 1120px) {
   .app { grid-template-columns: 68px minmax(0, 1fr); }
   .brand-tx, .nav-i span, .rail-group > p, .svc span { display: none; }
   .nav-i { justify-content: center; padding: 9px; }
   .nav-i .cnt { display: none; }
   .brand { justify-content: center; padding: 14px 0; }
-  .c3, .c4, .c5, .c6 { grid-column: span 12; }
-  .c7, .c8 { grid-column: span 12; }
-  .v-nums { gap: 18px; }
+  .chain { grid-template-columns: 1fr 1fr; }
+  .c5, .c6, .c7, .c8 { grid-column: span 12; }  /* 面板整体上下排，不留半格空档 */
   .search { width: 180px; }
   .search kbd { display: none; }
 }
@@ -641,7 +651,8 @@ svg { display: block; }
   .v-title { font-size: 23px; }
   .verdict { grid-template-columns: 1fr; gap: 14px; }
   .v-nums { justify-content: flex-start; }
-  .chain { grid-template-columns: 1fr 1fr; }
+  .chain { grid-template-columns: 1fr; }
+  .c3, .c4, .c5, .c6, .c7, .c8 { grid-column: span 12; }
   .diag-row { grid-template-columns: 20px 1fr auto; }
   .diag-row .ev { display: none; }
 }
