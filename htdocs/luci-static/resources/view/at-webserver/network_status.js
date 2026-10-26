@@ -55,6 +55,27 @@ return L.view.extend({
 		body.appendChild(verdict);
 		body.appendChild(todoBox);
 
+		/* ---------- KPI 行（v9：4 张指标卡，各占 3 列） ----------
+		 * 原型里结论卡下面是「下行速率 / 上行速率 / 信号质量 / 本月流量」四张卡。
+		 * 值由各自的刷新回调推给它们（见 renderSpeed / renderSignal / renderFlow），
+		 * 这里只建壳，不发任何请求。
+		 * ★ 趋势线用本轮监测的历史点归一化，不额外采样 —— 串口独占，多一条就是多一份延迟。 */
+		var kpiDown = Mt5700.kpi('下行速率', '<path d="M12 5v14M6 13l6 6 6-6"/>');
+		var kpiUp = Mt5700.kpi('上行速率', '<path d="M12 19V5M6 11l6-6 6 6"/>');
+		var kpiSinr = Mt5700.kpi('信号质量', '<path d="M5 19V13M10 19V9M15 19v-6M20 19V5"/>');
+		var kpiFlow = Mt5700.kpi('本月流量', '<path d="M12 4v6M12 14v6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="12" r="8.5"/>');
+		var sparkDown = Mt5700.spark([]);
+		var sparkUp = Mt5700.spark([]);
+		kpiDown.el.appendChild(sparkDown.el);
+		kpiUp.el.appendChild(sparkUp.el);
+		kpiSinr.el.appendChild(E('div', { 'class': 'bars' }));
+		/* 4 张卡直接作为栅格子项：套一层容器会打断
+		   `.mt5700-page-body > .mt5700-c3` 这类子选择器（display:contents 也不行）。 */
+		[kpiDown, kpiUp, kpiSinr, kpiFlow].forEach(function (k) {
+			k.el.classList.add('mt5700-c3');
+			body.appendChild(k.el);
+		});
+
 		/* ---------- 面板骨架（按「一个主题一张卡片」组织，避免信息重叠） ---------- */
 
 		/* ① 信号质量：主小区 RSRP/RSRQ/SINR + 信号百分比 + 调制方式(MCS)
@@ -65,7 +86,7 @@ return L.view.extend({
 		signalCard._body.appendChild(sigGrid);
 		var mcsGrid = E('div', { 'class': 'mt5700-metrics mt5700-mt-md' });
 		signalCard._body.appendChild(mcsGrid);
-		body.appendChild(signalCard);
+		/* 挂载在文件末尾的排版段（12 列栅格，顺序与 v9 原型一致），这里不 append */
 
 		/* ② 连接状态：注册 / 运营商 / 签约速率 + 一张「连接明细」表。
 		 * 连接诊断、地址与 DNS 两张表已合并成一张（见 renderConnDetail）。 */
@@ -78,11 +99,12 @@ return L.view.extend({
 		var connDetailBox = E('div', { 'class': 'mt5700-mt-md' });
 		connCard._body.appendChild(connDetailBox);
 
-		/* ③ 载波与聚合：^HFREQINFO 载波列表 + 聚合状态（原「载波聚合」+「辅载波信号」合并） */
-		var carrierCard = Mt5700.card('载波与聚合', '主小区身份与各载波');
+		/* ③ 载波聚合：^HFREQINFO 载波列表 + 聚合状态（原「载波聚合」+「辅载波信号」合并）
+		 * 标题按 v9 原型改回「载波聚合」，与预览图逐字一致。 */
+		var carrierCard = Mt5700.card('载波聚合', '主小区身份与各载波');
+		carrierCard.classList.add('mt5700-c7');
 		var carrierBox = E('div');
 		carrierCard._body.appendChild(carrierBox);
-		body.appendChild(carrierCard);
 
 		/* ④ 速率与流量：实时速率 + 速率曲线 + 收发流量统计（原三张卡合并）
 		 * 头部放「实时监测」开关：关掉后停止每秒采样（不再读接口计数器），
@@ -97,8 +119,10 @@ return L.view.extend({
 		rateCard._body.appendChild(flowGrid);
 
 
-		/* ⑤ SIM 与设备：SIM 卡、模块标识与 5G 模块温度（同一张表铺开，不跳转、不重复） */
-		var devCard = Mt5700.card('SIM 与设备', 'SIM、模块标识与模块温度');
+		/* ⑤ 设备与身份：SIM 卡、模块标识与 5G 模块温度（同一张表铺开，不跳转、不重复）
+		 * 标题按 v9 原型改作「设备与身份」，占据原型里 c5 那一格。 */
+		var devCard = Mt5700.card('设备与身份', 'SIM、模块标识与模块温度');
+		devCard.classList.add('mt5700-c5');
 		var devBody = E('div');
 		devCard._body.appendChild(devBody);
 
@@ -128,25 +152,70 @@ return L.view.extend({
 		var diagDetailBody = E('div', { 'class': 'mt5700-diag-detail mt5700-mt-md' });
 		diagCard._body.appendChild(diagDetailBody);
 
-		/* 版式（「左右要对称」+「SIM 与设备下面的空白要有价值」）：
-		     载波与聚合（满宽，表格含逐载波 RSRP/RSRQ/SINR/强度）
-		     信号质量（满宽）
-		     连接状态 | 右列（SIM 与设备 → 断网排查）  ← 双列卡区 .mt5700-cards
-		     速率与流量（满宽）
-		     断网排查明细（已收进右列卡内，不再满宽铺底）
-		   右列两张卡用 .mt5700-stack 纵向堆叠，把左列的空白补上（实测左右差 ≈ 70px）。
-		   之前的「SIM + 速率」右列比左列高一大截，是因为速率卡带着 170px 曲线；
-		   换成纯表格的卡后高度正好。窄屏单列时按 DOM 顺序降级：
-		   连接状态 → SIM 与设备 → 断网排查 → 速率与流量 → 断网排查明细。 */
-		var duoRight = E('div', { 'class': 'mt5700-stack' });
-		duoRight.appendChild(devCard);
-		duoRight.appendChild(diagCard);
-		var duo = E('div', { 'class': 'mt5700-cards' });
-		duo.appendChild(connCard);
-		duo.appendChild(duoRight);
-		body.appendChild(duo);
+		/* ---------- 常用动作（v9 原型里的 c12 面板） ----------
+		 * 原型放五个按钮，其中「重启模组」是灰的并附一句原因。这里照做，
+		 * 但**每个按钮都必须是真能用的**：
+		 *   · 连接自检 → 滚到下方「断网排查」并直接触发，不新增第二套自检逻辑；
+		 *   · 锁定频段 / 运行日志 / 服务与升级 → 跳对应页面；
+		 *   · 重启模组 → 禁用 + 说明（没有对应后端能力，界面上不许装作能用）。
+		 * 红线 86：动作类控件常驻可见，不可用就灰化并写清原因，不隐藏。 */
+		var actionCard = Mt5700.card('常用动作', '点击后立即执行；会中断连接的动作先说明影响');
+		actionCard.classList.add('mt5700-c12');
+		var actionRow = E('div', { 'class': 'mt5700-action-row' });
+		actionCard._body.appendChild(actionRow);
+
+		function actionBtn(label, primary, onClick, disabled) {
+			var cls = 'btn' + (primary ? ' primary' : '') + (disabled ? ' danger' : '');
+			var b = E('button', { 'class': cls }, label);
+			if (disabled) b.disabled = true;
+			else b.addEventListener('click', onClick);
+			actionRow.appendChild(b);
+			return b;
+		}
+		actionBtn('连接自检', true, function () {
+			if (diagCard.scrollIntoView) diagCard.scrollIntoView({ block: 'center', behavior: 'smooth' });
+			if (typeof runDiagnosis === 'function') runDiagnosis();
+		});
+		actionBtn('锁定频段', false, function () {
+			window.location.href = L.url('admin/modem/5g/network/settings');
+		});
+		actionBtn('运行日志', false, function () {
+			window.location.href = L.url('admin/modem/5g/tools/logs');
+		});
+		actionBtn('服务与升级', false, function () {
+			window.location.href = L.url('admin/modem/5g/tools/config');
+		});
+		actionBtn('重启模组', false, null, true);
+		actionCard._body.appendChild(E('p', { 'class': 'mt5700-hint mt5700-mt-sm' },
+			'重启模组需要先停 AT 服务，当前会话会立刻断开；本插件不提供该操作，' +
+			'需要时到「服务与升级」重启服务。'));
+
+		/* ---------- 版式（严格对齐 v9 原型） ----------
+		     结论卡（满宽）
+		     KPI ×4（各 3 列）
+		     载波聚合（7） | 设备与身份（5）
+		     常用动作（满宽）
+		     信号质量（7） | 速率与流量（5）
+		     连接状态（满宽）
+		     断网排查（满宽）
+		     服务状态条（满宽，垫底）
+		   全部卡片都是 .mt5700-page-body 的直接子元素 —— 套 .mt5700-cards 之类的
+		   容器会打断 12 列栅格的子选择器，跨列规则就失效（踩过）。 */
+		carrierCard.classList.add('mt5700-c7');
+		devCard.classList.add('mt5700-c5');
+		signalCard.classList.add('mt5700-c7');
+		rateCard.classList.add('mt5700-c5');
+		connCard.classList.add('mt5700-c12');
+		diagCard.classList.add('mt5700-c12');
+
+		body.appendChild(carrierCard);
+		body.appendChild(devCard);
+		body.appendChild(actionCard);
+		body.appendChild(signalCard);
 		body.appendChild(rateCard);
-		body.insertBefore(carrierCard, signalCard);
+		body.appendChild(connCard);
+		body.appendChild(diagCard);
+		body.appendChild(connBar);
 
 		/* ---------- 状态 ---------- */
 
@@ -1516,6 +1585,9 @@ return L.view.extend({
 			}
 
 			/* ---- 需要处理：只收「真的会挡住用户」的事项，没网时最多两条 ---- */
+			/* 顶栏那个状态徽标跟结论卡同源：一处判定，两处显示 ——
+			   分开算迟早出现「顶栏说已连接、卡片说未注册」。 */
+			Mt5700.shellPill(tone, title);
 			var todos = [];
 			function gotoDiag() {
 				if (diagCard && diagCard.scrollIntoView) {
@@ -1620,6 +1692,26 @@ return L.view.extend({
 			sigGauges.rsrp.set(c.rsrp);
 			sigGauges.rsrq.set(c.rsrq);
 			sigGauges.sinr.set(c.sinr);
+
+			/* KPI 的「信号质量」：数值用 SINR，柱子按等级点亮（与原型一致）。
+			   没有读数时不点亮任何一格，也不写 0 —— 0 dB 与「没读到」是两件事。 */
+			kpiSinr.set(c.sinr == null || c.sinr === '' ? '—' : c.sinr, 'SINR');
+			var barsBox = kpiSinr.el.querySelector('.bars');
+			if (barsBox) {
+				/* 柱高固定 8 档，点亮格数由 SINR 换算（-5dB→1 格，23dB 以上满格）；
+				   SINR 低于 10 时用警示色 —— 与页面里信号仪表的判级口径一致。 */
+				var lit = (c.sinr == null || c.sinr === '') ? 0
+					: Math.max(1, Math.min(8, Math.round((Number(c.sinr) + 5) / 3.5)));
+				var warnTone = (c.sinr != null && Number(c.sinr) < 10);
+				var heights = [8, 12, 16, 20, 24, 28, 32, 34];
+				barsBox.innerHTML = '';
+				for (var bi = 0; bi < 8; bi++) {
+					var ib = E('i');
+					ib.style.height = heights[bi] + 'px';
+					if (bi < lit) ib.className = warnTone ? 'on warn' : 'on';
+					barsBox.appendChild(ib);
+				}
+			}
 		}
 
 		/*
@@ -2025,12 +2117,29 @@ return L.view.extend({
 				chart.innerHTML = '';
 				chart.appendChild(E('div', { 'class': 'mt5700-hint' },
 					'实时速率监测已关闭（不再每秒读取接口计数器）；累计流量统计仍会自动刷新。'));
+				kpiDown.set('—', '');
+				kpiUp.set('—', '');
+				sparkDown.set([]);
+				sparkUp.set([]);
 				return;
 			}
 			var d = splitSpeedUI(state.rtDown, 'bytes');
 			var u = splitSpeedUI(state.rtUp, 'bytes');
 			speedRow.appendChild(Mt5700.speedBox('↓ 下行', d.value + ' ' + d.unit));
 			speedRow.appendChild(Mt5700.speedBox('↑ 上行', u.value + ' ' + u.unit));
+
+			/* KPI 跟随同一次采样，不额外读接口。趋势线按本段监测的峰值归一化，
+			   这样空口速度变化才看得出来（绝对值归一会被一两个尖峰压成全 0）。 */
+			kpiDown.set(d.value, d.unit);
+			kpiUp.set(u.value, u.unit);
+			var maxD = 0, maxU = 0, i;
+			for (i = 0; i < history.length; i++) {
+				if (history[i].down > maxD) maxD = history[i].down;
+				if (history[i].up > maxU) maxU = history[i].up;
+			}
+			sparkDown.set(history.map(function (h) { return maxD ? h.down / maxD : 0; }));
+			sparkUp.set(history.map(function (h) { return maxU ? h.up / maxU : 0; }));
+
 			renderChart();
 		}
 
@@ -2126,6 +2235,19 @@ return L.view.extend({
 			].forEach(function (it) {
 				flowGrid.appendChild(Mt5700.metric(it.label, it.value));
 			});
+
+			/* KPI「本月流量」：累计收 + 发，副标题给本次会话。取不到就写「—」，
+			   不能写 0（见上面注释：0 与「没读到」必须区分）。 */
+			var totB = (f.totalRxFlow == null && f.totalTxFlow == null) ? null
+				: (Number(f.totalRxFlow || 0) + Number(f.totalTxFlow || 0));
+			var curB = (f.lastRxFlow == null && f.lastTxFlow == null) ? null
+				: (Number(f.lastRxFlow || 0) + Number(f.lastTxFlow || 0));
+			if (totB == null) {
+				kpiFlow.set('—', '', '');
+			} else {
+				var fs = AtWs.formatFlow(totB).split(' ');
+				kpiFlow.set(fs[0], fs[1] || '', curB == null ? '' : '本次会话 ' + AtWs.formatFlow(curB));
+			}
 		}
 
 		function renderTemp() {

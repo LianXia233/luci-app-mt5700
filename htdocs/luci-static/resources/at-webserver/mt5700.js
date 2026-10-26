@@ -19,7 +19,7 @@
  * 后，设备上 CSS 内容已经是新的，用户浏览器却还在用旧副本 —— 代码改了界面没变。
  * 守卫：tests/css-cachebust-contract.test.js（mt5700.css 内容指纹一变就必须改这里）。
  */
-var MT5700_CSS_VERSION = '6.2.0';
+var MT5700_CSS_VERSION = '6.3.4';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -1567,6 +1567,12 @@ var Mt5700 = (function () {
 			shThemeApply(root, next);
 			try { window.localStorage.setItem('mt5700-theme', next); } catch (e) { /* 隐私模式忽略 */ }
 		});
+		/* 状态徽标：由页面把结论卡的判定结果推过来（api.shellPill），
+		   壳自己不去读数据 —— 否则「顶栏与结论卡各算一遍」迟早打架。 */
+		var pill = E('span', { 'class': 'pill sh-pill mute' });
+		pill.innerHTML = '<svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 13l5 5L20 6"/></svg>';
+		pill.appendChild(E('span', { 'class': 'sh-pill-t' }, '读取中'));
+		top.appendChild(pill);
 		top.appendChild(tbtn);
 		main.appendChild(top);
 
@@ -1649,6 +1655,93 @@ var Mt5700 = (function () {
 		}
 		tick();
 	}
+
+	/* ================= v9 指标卡（KPI） ================= */
+	/*
+	 * 原型里总览有一行 4 张指标卡：下行速率 / 上行速率 / 信号质量 / 本月流量。
+	 * 它们的排版在这套设计里是独立的（大数字 + 单位 + 迷你趋势），跟旧
+	 * .mt5700-metric 那种「标签在上、数值在下」的读数格不是一回事，所以单列组件。
+	 *
+	 * 返回 { el, set(v, unit, note) }：值由页面在各自的刷新回调里推，
+	 * 组件自己不取数 —— 避免这里再发一轮 AT（串口独占，多一条就是多一份延迟）。
+	 */
+	api.kpi = function (label, icon) {
+		var el = E('div', { 'class': 'kpi' });
+		var head = E('div', { 'class': 'kpi-k' });
+		if (icon) {
+			var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+			s.setAttribute('viewBox', '0 0 24 24');
+			s.setAttribute('stroke-linecap', 'round');
+			s.innerHTML = icon;
+			head.appendChild(s);
+		}
+		head.appendChild(document.createTextNode(label));
+		el.appendChild(head);
+
+		var v = E('div', { 'class': 'kpi-v' });
+		var num = E('b', {}, '—');
+		var unit = E('em', {}, '');
+		v.appendChild(num);
+		v.appendChild(unit);
+		el.appendChild(v);
+
+		var note = E('div', { 'class': 'kpi-f' }, '');
+		el.appendChild(note);
+
+		return {
+			el: el,
+			set: function (val, u, n) {
+				num.textContent = (val === null || val === undefined || val === '') ? '—' : String(val);
+				unit.textContent = u || '';
+				note.textContent = n || '';
+			}
+		};
+	};
+
+	/*
+	 * 迷你趋势线（原型里的 .spark）。points 是 0~1 的数组，右端为最新。
+	 * 数据不足时保留一条平线，不要空着 —— 空 svg 在深色底上就是一块缺口。
+	 */
+	api.spark = function (points) {
+		var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('class', 'spark');
+		svg.setAttribute('viewBox', '0 0 120 30');
+		svg.setAttribute('preserveAspectRatio', 'none');
+
+		var poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+		var area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+		area.setAttribute('class', 'area');
+		svg.appendChild(area);
+		svg.appendChild(poly);
+
+		function draw(arr) {
+			var n = arr.length;
+			if (!n) return;
+			var pts = [];
+			for (var i = 0; i < n; i++) {
+				var x = n === 1 ? 0 : (i / (n - 1)) * 120;
+				var y = 28 - Math.max(0, Math.min(1, arr[i])) * 24;
+				pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+			}
+			poly.setAttribute('points', pts.join(' '));
+			area.setAttribute('points', '0,30 ' + pts.join(' ') + ' 120,30');
+		}
+		draw(points || []);
+
+		return { el: svg, set: draw };
+	};
+
+	/*
+	 * 顶栏状态徽标。tone: ok / warn / bad / mute。
+	 * 由页面在渲染结论卡时调用（一处判定、两处显示）。
+	 */
+	api.shellPill = function (tone, text) {
+		var el = document.querySelector('.mt5700-sh .sh-pill');
+		if (!el) return;
+		el.className = 'pill sh-pill ' + (tone || 'mute');
+		var t = el.querySelector('.sh-pill-t');
+		if (t) t.textContent = text || '';
+	};
 
 	api.E = E;
 

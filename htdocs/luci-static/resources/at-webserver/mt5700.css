@@ -4034,16 +4034,88 @@ body.mt5700-sh-on {
 .mt5700-sh .mt5700-page-body > * { grid-column: span 12; min-width: 0; }
 /* 空占位块在栅格里会撑出一道 14px 的缝，直接不参与布局 */
 .mt5700-sh .mt5700-page-body > div:empty { display: none !important; }
-/* 载波与聚合（左宽）+ 信号质量（右窄）：对应原型的 c7 / c5 */
-.mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(1) { grid-column: span 7; }
-.mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(2) { grid-column: span 5; }
-/* 页脚的「一键排查」等宽块保持满宽 */
-.mt5700-sh .mt5700-page-body > .mt5700-cards { grid-column: span 12; }
+/* 跨列由卡片自己带类决定（.mt5700-c3/.c5/.c7/.c12）——
+   用 :nth-of-type 会把「以后插入一张卡就全错位」埋进去，且 KPI 卡不是 .mt5700-card。 */
+.mt5700-sh .mt5700-page-body > .mt5700-c3 { grid-column: span 3; }
+.mt5700-sh .mt5700-page-body > .mt5700-c5 { grid-column: span 5; }
+.mt5700-sh .mt5700-page-body > .mt5700-c7 { grid-column: span 7; }
+.mt5700-sh .mt5700-page-body > .mt5700-c12 { grid-column: span 12; }
 
+/* 「常用动作」按钮行 */
+.mt5700-sh .mt5700-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 顶栏状态徽标的三档配色（原型只画了 ok 一档，warn/bad/mute 是本插件补的：
+   真机上这三种状态都会出现，不能只有绿色） */
+.mt5700-sh .pill.warn { background: var(--warn-soft); color: var(--warn); }
+.mt5700-sh .pill.bad { background: var(--bad-soft); color: var(--bad); }
+.mt5700-sh .pill.mute { background: var(--panel-3); color: var(--ink-3); }
+
+/* 旧页面里的行内徽标进了 12 列栅格会被拉成一条长条（实测「SIM：已初始化」
+   被撑到 163×24 的实心绿块、字还压没了）——按 v9 的 pill 口径重画：
+   淡底 + 同色字 + 内容宽度，别用实心底把文字吃掉。 */
+.mt5700-sh .mt5700-card .mt5700-carrier-badge {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  max-width: 100%;
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--ok-soft) !important;
+  color: var(--ok) !important;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+/* 结论卡右侧读数按 v9 口径：标签大写小字、数值大号等宽（原型 .v-num 的尺寸）。
+   数值放大是这套设计的主要「仪表感」来源，保持原样会显得是另一套设计。 */
+.mt5700-sh .mt5700-verdict-nums { gap: 26px; }
+.mt5700-sh .mt5700-vnum-label {
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.mt5700-sh .mt5700-vnum-value {
+  font-family: var(--mono);
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.mt5700-sh .mt5700-vnum-value i {
+  font-size: 10.5px;
+  font-style: normal;
+  letter-spacing: 0;
+  color: var(--ink-3);
+  margin-left: 3px;
+}
+/* 徽标放顶栏右侧，长文案要能截断而不是把顶栏撑破 */
+.mt5700-sh .pill.sh-pill {
+  margin-left: auto;
+  max-width: 260px;
+  overflow: hidden;
+}
+.mt5700-sh .pill.sh-pill .sh-pill-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1360px) {
+  .mt5700-sh .mt5700-page-body > .mt5700-c3 { grid-column: span 6; }
+  .mt5700-sh .mt5700-page-body > .mt5700-c5,
+  .mt5700-sh .mt5700-page-body > .mt5700-c7 { grid-column: span 12; }
+}
 @media (max-width: 1120px) {
   .mt5700-sh .mt5700-page-body { padding: 14px 14px 30px; }
-  .mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(1),
-  .mt5700-sh .mt5700-page-body > .mt5700-card:nth-of-type(2) { grid-column: span 12; }
 }
 /* ---------- 5. 宿主给 header 加的装饰伪元素 ----------
    Argon 用 `header::after` 画了一块主色装饰（实测 inset 11.5px/22px、
