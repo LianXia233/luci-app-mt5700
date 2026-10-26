@@ -208,14 +208,6 @@ start_service() {
 at_webserver_post_start() {
 	config_load at-webserver
 
-	# 音频驱动：仅当模组暴露出 USB Audio Class 接口时才装载随包的 ALSA
-	# 依赖链（11 个模块，顺序敏感，见 root/usr/share/mt5700/audio-ko.sh）。
-	# 当前 MT5700M-CN 没有 Audio Class，这里会立刻返回、一个模块都不装 ——
-	# 它在等的是「换成带 UAC 的模组」那个场景。
-	# 放在后台段里是因为 insmod 虽然只要几百毫秒，也没有理由挡着 start 返回；
-	# usb hotplug 已有同源入口，这里只兜住「开机时设备早已在、hotplug 未触发」。
-	/usr/share/mt5700/audio-ko.sh load >/dev/null 2>&1 || true
-
 	# 网络接口 MT5700M 的启动对齐（见下方 ensure_modem_interface 注释）
 	ensure_modem_interface
 

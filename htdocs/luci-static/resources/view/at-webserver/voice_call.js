@@ -26,8 +26,9 @@
  *   · 蓝牙：手册零条蓝牙命令，没有 HFP 可走。
  *   · SoC：AFE 节点 status=disabled，无 /dev/snd；通话中 PCM 引脚采样 120 次全 0。
  *   ⇒ 信令全通、音频断在硬件。想听到声音只有一条路：**换带 USB Audio Class
- *     的模组**。软件侧已经备好 —— 插件随包带了 11 个 ALSA 内核模块，
- *     检测到 UAC 接口就自动装载，不需要重编固件（见 root/usr/share/mt5700/audio-ko.sh）。
+ *     的模组**。2.4.48 起插件不再随包带 ALSA 内核模块（本该设备用不到，
+ *     平白占包体积），所以换模组后要出声，驱动得由固件自带的 kmod 提供，
+ *     本插件不做任何自动装载。
  *
  * ★ 状态来源：URC 打头，CLCC 兜底（2026-10-22 实测推翻了此前这里的结论）。
  *   此前写着「私有 URC 受 AT^CURC 控制、实测一个都不报」—— 那是误判：它们
@@ -64,7 +65,8 @@ return L.view.extend({
 		body.appendChild(E('div', {
 			'class': 'mt5700-notice mt5700-notice-warning'
 		}, '这一页只管信令：能拨能接、状态与记录齐全，但通话内容听不到'
-			+ '（MT5700M-CN 没有 USB Audio Class，换带 UAC 的模组即可）。'));
+			+ '（MT5700M-CN 没有 USB Audio Class；换带 UAC 的模组是唯一出路，'
+			+ '驱动需由固件自带）。'));
 
 		/* ---------- 常量 ---------- */
 

@@ -189,11 +189,6 @@ TARGETS = {
     #   AT+CLCC 应答体、前端一条收不到、而所有本地测试全绿」。
     #   跨层断言写在 voice-call-contract 里，所以单独挂键，别复用 voicejs。
     "rustat": ROOT / "src" / "rust" / "src" / "atclient.rs",
-    # ★ 2026-10-22 音频内核模块（换带 UAC 的模组后自动装载）：
-    #   装载器与它的哈希清单各挂一个键 —— 清单格式错一次就是 11 条全 FAILED，
-    #   而这件事只能在部署时才发现，所以让静态断言也能被变异验证。
-    "audioko": ROOT / "root" / "usr" / "share" / "mt5700" / "audio-ko.sh",
-    "audiosum": ROOT / "root" / "usr" / "share" / "mt5700" / "audio" / "6.12.112" / "SHA256SUMS",
     "uc9": ROOT / "root" / "usr" / "share" / "rpcd" / "ucode" / "mt5700.uc",
 }
 
@@ -275,8 +270,6 @@ TARGET_TEST = {
     "voicejs": ROOT / "tests" / "voice-call-contract.test.js",
     "voicecopy": ROOT / "tests" / "ui-copy-contract.test.js",
     "rustat": ROOT / "tests" / "voice-call-contract.test.js",
-    "audioko": ROOT / "tests" / "audio-ko-contract.test.js",
-    "audiosum": ROOT / "tests" / "audio-ko-contract.test.js",
     "uc9": ROOT / "tests" / "voice-call-contract.test.js",
     # ★ rpc.js 的第三个键：**通话响应透传**（2026-10-16 真实故障）。
     #   既有 7 个 rpcjs* 键分别跑 single-source / vowifi / retry-offload /
@@ -2081,44 +2074,6 @@ MUTATIONS = [
         "\t\t\tif (kickTimer) { clearTimeout(kickTimer); kickTimer = 0; }\n",
         "\n",
         "离开页面清掉 URC 合并定时器",
-    ),
-    (
-        # 去掉 UAC 判据：插任何 USB 设备（U 盘、键鼠）都会往内核塞 11 个音频模块。
-        # 当前这台机器上就是每次都白装一遍再失败，日志刷屏。
-        "装载器：不判 UAC 就装载（插个 U 盘也装 11 个音频模块）",
-        "audioko",
-        "\thas_uac || return 3\n",
-        "\n",
-        "先判 UAC 再进装载循环",
-    ),
-    (
-        # 不做连字符→下划线转换：lsmod 里叫 snd_usb_audio，比对永远不命中，
-        # 于是每次 load 都重复 insmod，第二次起全报 File exists 并被当失败。
-        "装载器：模块名不转换（snd-usb-audio 永远判为「未加载」→ 重复 insmod）",
-        "audioko",
-        'echo "$1" | tr \'-\' \'_\'\n',
-        'echo "$1"\n',
-        "模块名做 连字符→下划线 转换",
-    ),
-    (
-        # 后缀退回 .ko：OpenWrt 打包期 scripts/gen-dependencies.sh 会扫每个
-        # `*.ko` 的 .modinfo depends=，展开后与包自身 provides 做差集。本批
-        # 依赖 usbcore，而 usbcore 各平台内建、没有 usbcore.ko 可供 ⇒ 差集
-        # 恒非空，包在任何平台都编不过（2026-10-22 CI 真炸过）。
-        "装载器：模块后缀退回 .ko（打包扫 depends，usbcore.ko 必然缺失）",
-        "audioko",
-        'f="$dir/$m.kmod"\n',
-        'f="$dir/$m.ko"\n',
-        "装载器取的是 .kmod 后缀",
-    ),
-    (
-        # SHA256SUMS 写成三段（名字 大小 哈希）：sha256sum -c 把大小当文件名，
-        # 11 条全 FAILED —— 2026-10-22 真踩过，部署到设备时才发现。
-        "哈希清单：格式写成三段（sha256sum -c 全部 FAILED）",
-        "audiosum",
-        "  soundcore.kmod\n",
-        "  soundcore.kmod 14552\n",
-        "sha256sum -c 认的",
     ),
     (
         # 把取证语言写回用户文案：2026-10-22 之前语音页那条提示就是这么开的头，

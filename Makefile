@@ -18,7 +18,7 @@ PKG_NAME:=luci-app-mt5700
 # 版本号是**发布契约**：make / CI / opkg 升级都认它。改动一旦合入 main
 # 就必须递增（PKG_RELEASE 用于同版本重新打包）。详见 CHANGELOG.md。
 # ─────────────────────────────────────────────────────────────
-PKG_VERSION:=2.4.47
+PKG_VERSION:=2.4.48
 PKG_RELEASE:=1
 
 # 许可与维护者：opkg/apk 的元数据与 OpenWrt 包索引都读这两个字段。
@@ -38,8 +38,6 @@ define Build/Prepare
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/at-webserver 2>/dev/null || true
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/uci-defaults/at-webserver 2>/dev/null || true
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/net/99-mt5700-renew 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/usb/99-mt5700-audio 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/usr/share/mt5700/audio-ko.sh 2>/dev/null || true
 	chmod 0755 $(PKG_BUILD_DIR)/root/usr/share/mt5700/to 2>/dev/null || true
 endef
 

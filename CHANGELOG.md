@@ -5,6 +5,39 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.48] - 2026-10-26
+
+### Removed — 音频内核模块移出包（957KB，占包体积的四成）
+
+2.4.30 把 11 个 ALSA 内核模块（`root/usr/share/mt5700/audio/6.12.112/*.kmod`）
+随包分发，等的是「换成带 USB Audio Class 的模组」那一天。但这台设备的 USB
+没有 Audio Class（`AT^SETMODE` 九个模式全为数据口、SoC 无 `/dev/snd`、
+PCM 引脚采样全 0），模块在本机永远走不到 insmod —— 却是包体积里最大的一块：
+
+| 版本 | 包内文件合计 | 构成 |
+|:--|--:|:--|
+| v2.0.0 | 574 KB | 前端 + ucode |
+| v2.3.49 | 1343 KB | 加 jsQR（252 KB，eSIM 二维码） |
+| v2.4.36 | 2512 KB | **加 11 个音频模块（957 KB）** |
+| 本版 | **1603 KB** | 音频模块移出 |
+
+一次卸载，`.kmod` 这类未压缩 ELF 在包里几乎 1:1 占位，所以是实打实的收益。
+
+同步清掉的五处引用（少一处就是半截引用）：
+
+- `root/usr/share/mt5700/audio-ko.sh`：装载器（probe UAC / 顺序 insmod / 卸载）
+- `root/etc/hotplug.d/usb/99-mt5700-audio`：插拔事件入口（目录已空，一并删掉）
+- `root/etc/init.d/at-webserver`：post_start 里的兜底装载
+- `Makefile`：两条对应的 chmod
+- `tests/audio-ko-contract.test.js` 与 `tools/verify-guards.py` 里 4 条变异样例
+  （189 项仍全部检出、还原逐字节一致）
+
+语音页文案同步改口径：原文写「插件已随包带模块，检测到 UAC 接口就自动装载」，
+现在不能这么承诺了 —— 改成「换带 UAC 的模组是唯一出路，驱动需由固件自带」。
+
+真机影响：无。这些模块从来没在本机加载过（每次 probe 都返回「没有 UAC」），
+移出后语音页行为、AT 通道、通话信令全部不变。
+
 ## [2.4.47] - 2026-10-26
 
 ### Changed — 影响预告再铺两页（服务配置 / 模组升级）
