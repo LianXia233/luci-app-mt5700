@@ -19,7 +19,7 @@
  * 后，设备上 CSS 内容已经是新的，用户浏览器却还在用旧副本 —— 代码改了界面没变。
  * 守卫：tests/css-cachebust-contract.test.js（mt5700.css 内容指纹一变就必须改这里）。
  */
-var MT5700_CSS_VERSION = '6.3.4';
+var MT5700_CSS_VERSION = '6.4.1';
 (function () {
 	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
 	var links = document.querySelectorAll('link[rel="stylesheet"]');
@@ -1567,6 +1567,11 @@ var Mt5700 = (function () {
 			shThemeApply(root, next);
 			try { window.localStorage.setItem('mt5700-theme', next); } catch (e) { /* 隐私模式忽略 */ }
 		});
+		/* 顶栏工具区：页面把「对整页生效」的控件（刷新间隔、手动刷新）放这里，
+		   比挂在某张卡片头上更诚实 —— 那张卡只管自己的话才该放卡头。 */
+		var tools = E('div', { 'class': 'sh-tools' });
+		top.appendChild(tools);
+
 		/* 状态徽标：由页面把结论卡的判定结果推过来（api.shellPill），
 		   壳自己不去读数据 —— 否则「顶栏与结论卡各算一遍」迟早打架。 */
 		var pill = E('span', { 'class': 'pill sh-pill mute' });
@@ -1611,6 +1616,14 @@ var Mt5700 = (function () {
 
 		var built = shBuild(title, sub);
 		built.canvas.appendChild(node);
+		/* 页面在 render 阶段就建好了控件（那时外壳还没挂），先挂在页面里，
+		   等外壳挂载时再「认领」搬进顶栏 —— 这样控件不会晚一帧才出现。 */
+		var slot = node.querySelector('[data-sh-slot="tools"]');
+		if (slot) {
+			var box = built.root.querySelector('.sh-tools');
+			if (box) box.appendChild(slot);
+		}
+
 		document.body.appendChild(built.root);
 		/* 搬完了才敢藏旧壳 */
 		document.body.classList.add('mt5700-sh-on', 'mt5700-sh-armed');
@@ -1741,6 +1754,17 @@ var Mt5700 = (function () {
 		el.className = 'pill sh-pill ' + (tone || 'mute');
 		var t = el.querySelector('.sh-pill-t');
 		if (t) t.textContent = text || '';
+	};
+
+	/*
+	 * 顶栏插槽：页面在 render 阶段先拿到一个占位容器，外壳挂载时整块搬进顶栏。
+	 * 为什么不直接返回顶栏节点：render 发生在节点入文档之前，那时外壳还不存在。
+	 * 占位容器带 data-sh-slot 属性，mountShell 里按属性认领。
+	 */
+	api.shellSlot = function (name) {
+		var el = E('div', { 'class': 'mt5700-sh-slot' });
+		el.setAttribute('data-sh-slot', name || 'tools');
+		return el;
 	};
 
 	api.E = E;

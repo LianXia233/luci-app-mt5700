@@ -170,8 +170,16 @@ ok('未知运营商不拼进标题（免得标题变长还无意义）',
 	/state\.operator\s*!==\s*'未知运营商'/.test(src));
 ok('renderConn 里刷新标题（运营商是慢档才拿到的）',
 	extractFn(src, 'renderConn').indexOf('connTitleEl') !== -1);
-ok('★ 网络制式走统一判定入口 ratDisplay，并传齐四路输入（制式 / 载波 / EN-DC / 是否真驻留）',
-	/ratDisplay\(state\.cell\.sysMode,\s*state\.carriers,\s*state\.diag\s*&&\s*state\.diag\.endc,\s*hasAnyPsService\(/.test(src));
+/* 2026-10-26 去重：连接状态卡里的「网络制式」格已删（结论卡卡头已在显示制式），
+   这条不放松，只是改盯**现存的调用点** —— 结论卡里的那次 ratDisplay。
+   四路输入仍要齐：制式 / 载波 / EN-DC / 是否真驻留（本处由 registered 传入，
+   而 registered 必须来自 hasAnyPsService 的判定，不能是别的近似值）。 */
+ok('★ 制式走统一判定入口 ratDisplay，并传齐四路输入（制式 / 载波 / EN-DC / 是否真驻留）',
+	/ratDisplay\(cell\.sysMode,\s*state\.carriers,\s*state\.diag\s*&&\s*state\.diag\.endc,\s*registered\s*===\s*true\)/.test(src));
+ok('★ 第四路「是否真驻留」来自 hasAnyPsService（不是随手取个布尔）',
+	/registered\s*=\s*hasAnyPsService\(/.test(src));
+ok('★ 制式只由 ratDisplay 产出（页面上不出现第二处拼装）',
+	!/['"]5GA-NR['"]/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')));
 
 /*
  * ===========================================================================

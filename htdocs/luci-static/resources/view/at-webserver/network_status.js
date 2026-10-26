@@ -38,14 +38,15 @@ return L.view.extend({
 		var page = Mt5700.page('网络状态', '实时网络信息与信号质量');
 		var body = page._body;
 
-		/* ---------- 顶部连接状态条 ----------
-		 * 与其它页一致的 at-status-card（AT 服务 / RPC / SIM），不再做读数带。 */
-		var connBar = E('div');
-		Mt5700.renderConnectionBar(connBar);
-		body.appendChild(connBar);
+		/* ---------- 顶部连接状态条已取消（2026-10-26 去重） ----------
+		 * 它显示的「AT 服务在线 / RPC 地址 / SIM 已初始化」与两处重复：
+		 *   ① 顶栏状态徽标（后端在线与否）
+		 *   ② 结论卡链路段 01「就绪」、02「SIM 已就绪」
+		 * 同一页把「服务在跑」说三遍没有收益，删掉这一条。
+		 * RPC 地址属于排障信息，归「服务与升级」页（那里本来就有进程与端口）。 */
 
 		/* ---------- 结论区（2026-10-26 新增） ----------
-		 * 位置刻意在状态条之后、所有卡片之前：整页第一眼是「有没有网」，
+		 * 位置刻意在所有卡片之前：整页第一眼是「有没有网」，
 		 * 而不是六张卡片的第一行字。见 renderVerdict 的注释。
 		 * ★ 这两个节点必须在这里就建好并挂上：函数体后面的 `var todoBox = …`
 		 *   声明会提升、赋值不会，晚一步 append 会拿到 undefined —— 真机上就是
@@ -78,15 +79,13 @@ return L.view.extend({
 
 		/* ---------- 面板骨架（按「一个主题一张卡片」组织，避免信息重叠） ---------- */
 
-		/* ① 信号质量：主小区 RSRP/RSRQ/SINR + 信号百分比 + 调制方式(MCS)
-		 * 刷新控制（自动刷新 + 手动刷新）归位到这张卡的头部（相关控件按业务归位） */
-		var sigExtra = E('div');
-		var signalCard = Mt5700.card('信号质量', '主小区信号与调制方式', sigExtra);
-		var sigGrid = E('div', { 'class': 'mt5700-metrics' });
-		signalCard._body.appendChild(sigGrid);
-		var mcsGrid = E('div', { 'class': 'mt5700-metrics mt5700-mt-md' });
-		signalCard._body.appendChild(mcsGrid);
-		/* 挂载在文件末尾的排版段（12 列栅格，顺序与 v9 原型一致），这里不 append */
+		/* ① 信号质量卡已取消（2026-10-26 去重）：
+		 * RSRP/RSRQ/SINR 原本在结论卡、KPI、载波表、这张卡的仪表里各出现一次
+		 * （SINR 一处页面出现 4 遍），而 v9 原型的总览根本没有这张卡。
+		 * 独有内容按「就近归位」处理，一个都不丢：
+		 *   · 调制方式（MCS / 层数）→ 结论卡 chips（页面上唯一一处）
+		 *   · 自动刷新 + 手动刷新 → 顶栏工具区（本来就是对整页生效的全局设置）
+		 *   · 信号强度百分比 → 删（与 RSRP 是同一件事的两种写法） */
 
 		/* ② 连接状态：注册 / 运营商 / 签约速率 + 一张「连接明细」表。
 		 * 连接诊断、地址与 DNS 两张表已合并成一张（见 renderConnDetail）。 */
@@ -111,8 +110,6 @@ return L.view.extend({
 		 * 流量统计仍随慢档刷新。 */
 		var rateExtra = E('div');
 		var rateCard = Mt5700.card('速率与流量', '实时速率与流量统计', rateExtra);
-		var speedRow = E('div', { 'class': 'mt5700-speed-row' });
-		rateCard._body.appendChild(speedRow);
 		var chart = E('div', { 'class': 'mt5700-chart' });
 		rateCard._body.appendChild(chart);
 		var flowGrid = E('div', { 'class': 'mt5700-metrics mt5700-metrics-flow mt5700-mt-md' });
@@ -195,27 +192,23 @@ return L.view.extend({
 		     KPI ×4（各 3 列）
 		     载波聚合（7） | 设备与身份（5）
 		     常用动作（满宽）
-		     信号质量（7） | 速率与流量（5）
+		     速率与流量（满宽，只留曲线与累计 —— 当前值已在 KPI）
 		     连接状态（满宽）
 		     断网排查（满宽）
-		     服务状态条（满宽，垫底）
 		   全部卡片都是 .mt5700-page-body 的直接子元素 —— 套 .mt5700-cards 之类的
 		   容器会打断 12 列栅格的子选择器，跨列规则就失效（踩过）。 */
 		carrierCard.classList.add('mt5700-c7');
 		devCard.classList.add('mt5700-c5');
-		signalCard.classList.add('mt5700-c7');
-		rateCard.classList.add('mt5700-c5');
+		rateCard.classList.add('mt5700-c12');
 		connCard.classList.add('mt5700-c12');
 		diagCard.classList.add('mt5700-c12');
 
 		body.appendChild(carrierCard);
 		body.appendChild(devCard);
 		body.appendChild(actionCard);
-		body.appendChild(signalCard);
 		body.appendChild(rateCard);
 		body.appendChild(connCard);
 		body.appendChild(diagCard);
-		body.appendChild(connBar);
 
 		/* ---------- 状态 ---------- */
 
@@ -1474,16 +1467,10 @@ return L.view.extend({
 			var ambrU = splitSpeedUI(state.ambrUp, 'kbps');
 			var grid = E('div', { 'class': 'mt5700-metrics' });
 			[
-				{ label: '网络状态', value: state.networkStatus, color: 'info' },
-			/* 制式「5GA-NR / 5G-NR / 4G-LTE」由 ratDisplay 统一判定（规则与真机依据见那里）。
-			   ★ 不能再传 `state.carriers.length` —— NSA 下它把 LTE 锚点与 NR 辅载波一起
-			   数进来，分母就错了；ratDisplay 内部按 per-carrier <sysmode> 自己取 NR 条数。
-			   第四参是「是否真的驻留上」：未注册时显示「—」，不把模组的残留制式字段
-			   当成正在用的网络（真机依据见 systemModeLabel 注释）。 */
-			{ label: '网络制式', value: ratDisplay(state.cell.sysMode, state.carriers,
-				state.diag && state.diag.endc,
-				hasAnyPsService(state.psRegStatEps, state.psRegStat, state.cell)) },
-				/* 信号强度不在此重复：上方环形仪表与顶部状态条已各有一处 */
+			/* 「网络状态 已注册」「网络制式 5G-NR」已删（2026-10-26 去重）：
+			   注册状态在结论卡链路段 03、制式在结论卡卡头（中国移动 · 5G-NR · n41）
+			   与载波表的「制式」列各有一处 —— 同一页说三遍不增加信息。
+			   这里只留别处没有的：APN、QCI、签约速率。 */
 				{ label: 'APN', value: state.apn },
 				{ label: 'QCI', value: state.qci },
 				/* 连接状态面板展示的是签约速率（AT^DSAMBR），不是瞬时速率 */
@@ -1631,11 +1618,11 @@ return L.view.extend({
 				eyebrow: [op, rat && rat !== '—' ? rat : '', band].filter(function (x) { return x; }),
 				title: title,
 				sub: sub,
+				/* chips 只放「别处没有」的东西：温度在「设备与身份」、APN 在「连接状态」、
+				   累计流量在「流量」面板 —— 放这儿就是同一句话说三遍。
+				   调制方式（MCS/层数）只在这一处出现，所以留它。 */
 				chips: [
-					{ label: '温度', value: mt.max == null ? '—' : mt.max + ' ℃' },
-					{ label: 'APN', value: state.apn },
-					{ label: '累计下行', value: (state.flow && state.flow.totalRxFlow != null)
-						? AtWs.formatFlow(state.flow.totalRxFlow) : '—' }
+					{ label: '调制', value: mcsDisplay(state.downlinkMCS) }
 				],
 				nums: [
 					{ label: 'RSRP', value: cell.rsrp, unit: 'dBm', tone: sigTone(cell.rsrp) },
@@ -1673,25 +1660,8 @@ return L.view.extend({
 			});
 		}
 
-		/* 环形仪表实例只创建一次，之后每次刷新仅更新数值与弧线 */
-		var sigGauges = null;
-
 		function renderSignal() {
 			var c = state.cell;
-			if (!sigGauges) {
-				sigGrid.innerHTML = '';
-				sigGauges = {
-					rsrp: Mt5700.gauge('RSRP', 'dBm', 'rsrp'),
-					rsrq: Mt5700.gauge('RSRQ', 'dB', 'rsrq'),
-					sinr: Mt5700.gauge('SINR', 'dB', 'sinr')
-				};
-				sigGrid.appendChild(sigGauges.rsrp.el);
-				sigGrid.appendChild(sigGauges.rsrq.el);
-				sigGrid.appendChild(sigGauges.sinr.el);
-			}
-			sigGauges.rsrp.set(c.rsrp);
-			sigGauges.rsrq.set(c.rsrq);
-			sigGauges.sinr.set(c.sinr);
 
 			/* KPI 的「信号质量」：数值用 SINR，柱子按等级点亮（与原型一致）。
 			   没有读数时不点亮任何一格，也不写 0 —— 0 dB 与「没读到」是两件事。 */
@@ -2110,10 +2080,9 @@ return L.view.extend({
 		 * 早期版本两者共用一组变量，导致签约速率会盖掉实时速率、反之亦然。
 		 */
 		function renderSpeed() {
-			speedRow.innerHTML = '';
+			/* 当前速率只画在 KPI 里（原型就是这么排的）；这张卡只负责曲线与累计，
+			   两个地方各画一遍「0 bps」是在浪费首屏高度。 */
 			if (!rateOn) {
-				speedRow.appendChild(Mt5700.speedBox('↓ 下行', '—'));
-				speedRow.appendChild(Mt5700.speedBox('↑ 上行', '—'));
 				chart.innerHTML = '';
 				chart.appendChild(E('div', { 'class': 'mt5700-hint' },
 					'实时速率监测已关闭（不再每秒读取接口计数器）；累计流量统计仍会自动刷新。'));
@@ -2125,8 +2094,6 @@ return L.view.extend({
 			}
 			var d = splitSpeedUI(state.rtDown, 'bytes');
 			var u = splitSpeedUI(state.rtUp, 'bytes');
-			speedRow.appendChild(Mt5700.speedBox('↓ 下行', d.value + ' ' + d.unit));
-			speedRow.appendChild(Mt5700.speedBox('↑ 上行', u.value + ' ' + u.unit));
 
 			/* KPI 跟随同一次采样，不额外读接口。趋势线按本段监测的峰值归一化，
 			   这样空口速度变化才看得出来（绝对值归一会被一两个尖峰压成全 0）。 */
@@ -2218,20 +2185,15 @@ return L.view.extend({
 			function flowText(v) { return v == null ? '—' : AtWs.formatFlow(v); }
 			/* 峰值是「本轮实时监测」内的最大值（关掉监测再开即归零），
 			   单位与 rtDown/rtUp、state.peakDown/peakUp 一致（字节/秒），显示同样走 splitSpeedUI。 */
-			function peakText(bps) {
-				if (!bps) return '—';
-				var s = splitSpeedUI(bps, 'bytes');
-				return s.value + ' ' + s.unit;
-			}
+			/* 8 项里删掉 4 项重复/无用的（2026-10-26 去重）：
+			   · 当前下行/上行流量 —— KPI「本月流量」的副标已给本次会话合计；
+			   · 峰值 —— 没流量时恒为「—」，有流量时又只是曲线的极值，看一眼曲线就有。
+			   留下的 4 项都是别处没有的：时长两个维度 + 分方向的累计流量。 */
 			[
 				{ label: '当前会话时长', value: durText(f.lastDsTime, false) },
-				{ label: '当前下行流量', value: flowText(f.lastRxFlow) },
-				{ label: '当前上行流量', value: flowText(f.lastTxFlow) },
 				{ label: '累计时长', value: durText(f.totalDsTime, true) },
 				{ label: '累计下行', value: flowText(f.totalRxFlow) },
-				{ label: '累计上行', value: flowText(f.totalTxFlow) },
-				{ label: '峰值下行', value: peakText(state.peakDown) },
-				{ label: '峰值上行', value: peakText(state.peakUp) }
+				{ label: '累计上行', value: flowText(f.totalTxFlow) }
 			].forEach(function (it) {
 				flowGrid.appendChild(Mt5700.metric(it.label, it.value));
 			});
@@ -2415,19 +2377,9 @@ return L.view.extend({
 			return txt;
 		}
 
-		function renderMCS() {
-			mcsGrid.innerHTML = '';
-			var dl = state.downlinkMCS, ul = state.uplinkMCS;
-			[
-				/* 信号强度百分比由 PS 状态解析得到（state.cell.signalPercent），
-				   之前只存不用 —— 环形仪表给的是 dBm 绝对值，这里补一个直观的百分比。 */
-				{ label: '信号强度', value: state.cell.signalPercent || '—' },
-				{ label: '下行调制', value: mcsDisplay(dl) },
-				{ label: '上行调制', value: mcsDisplay(ul) }
-			].forEach(function (it) {
-				mcsGrid.appendChild(Mt5700.metric(it.label, it.value));
-			});
-		}
+		/* renderMCS 已并入 renderVerdict 的 chips（调制方式在页面上只留一处）：
+		   信号强度百分比与环形仪表的 RSRP 是同一件事的两种写法，一并去掉。
+		   调制数据变化时调 renderVerdict() 即可，不再是独立的一次渲染。 */
 
 		/* ---------- 数据获取 ---------- */
 
@@ -2656,7 +2608,7 @@ return L.view.extend({
 				return AtWs.client.sendCommand('AT^MCS=0');
 			}).then(function (ul) {
 				if (ul.success && ul.data) state.uplinkMCS = Parse.parseMCS(ul.data);
-				renderMCS();
+				renderVerdict();
 		loadDeviceInfo();
 			});
 		}
@@ -3178,8 +3130,12 @@ return L.view.extend({
 		};
 		document.addEventListener('visibilitychange', onVisibility);
 
-		/* 刷新控制归位到「信号质量」卡片头部，不再单独占一行 */
-		sigExtra.appendChild(Mt5700.panelActions(
+		/* 刷新控制搬到顶栏工具区：它本来就是对整页生效的全局设置，
+		   留在某张卡片头上等于暗示「只管这张卡」，而且那张卡已经删了。
+		   占位容器先留在页面里（渲染阶段外壳还不存在），挂载时整块搬进顶栏。 */
+		var refreshSlot = Mt5700.shellSlot('tools');
+		body.appendChild(refreshSlot);
+		refreshSlot.appendChild(Mt5700.panelActions(
 			ar.el,
 			Mt5700.primaryButton('刷新', function () { refreshAll(); })
 		));
@@ -3197,7 +3153,7 @@ return L.view.extend({
 		renderSpeed();
 		renderFlow();
 		renderTemp();
-		renderMCS();
+		renderVerdict();
 
 		/* 自定义 DNS 是 UCI 侧的静态配置，跟 AT 无关，单独加载；
 		   拿到后重绘一次，让「主/备 DNS」显示成自定义值并带上「自定义」徽章。

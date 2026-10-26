@@ -4041,6 +4041,33 @@ body.mt5700-sh-on {
 .mt5700-sh .mt5700-page-body > .mt5700-c7 { grid-column: span 7; }
 .mt5700-sh .mt5700-page-body > .mt5700-c12 { grid-column: span 12; }
 
+/* 顶栏工具区（刷新间隔 + 手动刷新）：页面在 render 阶段先建好控件挂在页面里，
+   外壳挂载时整块搬进来。所以两个位置都要能排开。 */
+.mt5700-sh .sh-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.mt5700-sh .sh-tools .mt5700-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+/* 顶栏只有 56px 高，控件统一压到 32px 并与原型同款描边 */
+.mt5700-sh .sh-tools select,
+.mt5700-sh .sh-tools .mt5700-btn {
+  height: 32px;
+  font-size: 12px;
+}
+.mt5700-sh-slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* 「常用动作」按钮行 */
 .mt5700-sh .mt5700-action-row {
   display: flex;
