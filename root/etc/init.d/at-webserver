@@ -6,8 +6,9 @@ STOP=10
 # 手动维护入口（`/etc/init.d/at-webserver ensure_interfaces`）。
 # 刻意只做「对齐」，不动后端进程：restart 会打断进行中的 AT 作业（eSIM 写卡、
 # 短信、锁频）并清空内存环形日志，排查「有信号却上不了网」时不该付出这个代价。
-EXTRA_COMMANDS="ensure_interfaces"
-EXTRA_HELP="	ensure_interfaces	补建/补登记模组接口并尝试拉起（排查「有信号却上不了网」）"
+EXTRA_COMMANDS="ensure_interfaces selfheal"
+EXTRA_HELP="	ensure_interfaces	补建/补登记模组接口并尝试拉起（排查「有信号却上不了网」）
+	selfheal	自愈：检测并修复本插件自身组件（--auto 供 cron 使用）"
 
 USE_PROCD=1
 PROG=/usr/bin/at-webserver-rust
@@ -516,6 +517,107 @@ reload_service() {
 	start "$@"
 
 	logger -t at-webserver "配置重新加载完成"
+}
+
+# ---------- 自愈（只修自家组件，绝不碰 network / wireless） ----------
+#
+# 用法：
+#   /etc/init.d/at-webserver selfheal            手动（命令行）：探测 + 修复
+#   /etc/init.d/at-webserver selfheal --auto     cron 每 5 分钟：必要时重启服务或 rpcd
+#   /etc/init.d/at-webserver selfheal --from-ubus  由 rpcd 调用：**不探测**，直接修
+#
+# ★ 为什么要有 --from-ubus 这个模式（2026-10-26 真机踩到）：
+#   本脚本经 ubus 方法被调用时，自己就跑在 rpcd 里；此时再 `ubus call mt5700 at`
+#   是让**单线程的 rpcd 等自己**——必然超时，于是把「一切正常」误判成「AT 坏了」
+#   并白白重启一次服务（实测：CLI 说「一切正常」、ubus 说「已重启 AT 服务」）。
+#   所以这个模式下不做 AT 探测：前端只在连续 3 次读失败后才调它，本身就带着判据。
+#
+# ★ 为什么分成这些模式：
+#   ubus 对象 mt5700 缺失 = rpcd 没加载 ucode 插件（如 ucode-mod-* 与 libucode
+#   ABI 错位那次事故），唯一的修法是重启 rpcd —— 而重启 rpcd 会**踢掉所有 LuCI
+#   登录**。经 rpcd 调用的路径不能重启 rpcd（等于让处理本次请求的进程自杀），
+#   所以那种情况只交给 cron 的 --auto。
+#
+# ★ 保护阈值（防止把正常的长操作误判成故障）：
+#   · auto 模式要求**连续 2 次**探测失败（≈10 分钟）才动手：eSIM 写卡、短信发送
+#     动辄占住串口十几秒到几十秒，单次失败不能当故障。
+#   · 服务重启 10 分钟冷却、rpcd 重启 30 分钟冷却；状态放 /tmp（重启即清）。
+#   · uci at-webserver.config.enabled=0（用户主动停用）时一律不动手。
+#   · 每个动作都写 logger，事后可查「谁在什么时候重启过什么」。
+selfheal() {
+	local mode="manual"
+	[ "$1" = "--auto" ] && mode="auto"
+	[ "$1" = "--from-ubus" ] && mode="ubus"
+
+	local dir="/tmp/mt5700-selfheal"
+	mkdir -p "$dir" 2>/dev/null
+
+	# 用户主动停用 → 什么都不做（自愈不该把用户停掉的服务拉起来）
+	[ "$(uci -q get at-webserver.config.enabled 2>/dev/null || echo 1)" = "0" ] && return 0
+
+	local now obj="no" at_ok="no"
+	now=$(date +%s)
+
+	ubus list 2>/dev/null | grep -qx mt5700 && obj="yes"
+	if [ "$obj" = "yes" ] && [ "$mode" != "ubus" ]; then
+		# 用随包限时器包住：ubus call 自身不带超时，AT 通道卡死时会一直挂着
+		if [ -x /usr/share/mt5700/to ]; then
+			/usr/share/mt5700/to 12 ubus call mt5700 at '{"cmd":"AT"}' 2>/dev/null \
+				| grep -q '"success": *true' && at_ok="yes"
+		else
+			ubus call mt5700 at '{"cmd":"AT"}' 2>/dev/null \
+				| grep -q '"success": *true' && at_ok="yes"
+		fi
+	fi
+	# ubus 模式：不探测，按「调用方已判定需要修复」处理（见上方 ★）
+	[ "$mode" = "ubus" ] && [ "$obj" = "yes" ] && at_ok="unknown"
+
+	if [ "$obj" = "yes" ] && [ "$at_ok" = "yes" ]; then
+		echo 0 > "$dir/fail" 2>/dev/null
+		[ "$mode" = "manual" ] && echo "自愈检查：一切正常（ubus 对象在、AT 通道可用）"
+		return 0
+	fi
+
+	local fail last
+	fail=$(( $(cat "$dir/fail" 2>/dev/null || echo 0) + 1 ))
+	echo "$fail" > "$dir/fail" 2>/dev/null
+	last=$(cat "$dir/last" 2>/dev/null || echo 0)
+
+	if [ "$mode" = "auto" ] && [ "$fail" -lt 2 ]; then
+		logger -t at-webserver "自愈：发现异常（对象=$obj AT=$at_ok），连续 ${fail} 次，先观察"
+		return 0
+	fi
+
+	if [ $((now - last)) -lt 600 ]; then
+		logger -t at-webserver "自愈：异常持续（对象=$obj AT=$at_ok），10 分钟冷却中，跳过"
+		echo "10 分钟冷却中（上次动作 $((now - last)) 秒前），本次跳过"
+		return 0
+	fi
+	echo "$now" > "$dir/last" 2>/dev/null
+
+	if [ "$obj" = "no" ]; then
+		if [ "$mode" != "auto" ]; then
+			echo "ubus 对象 mt5700 缺失：请在命令行执行 selfheal --auto（重启 rpcd 会中断当前请求）"
+			return 1
+		fi
+		local rlast
+		rlast=$(cat "$dir/rpcd" 2>/dev/null || echo 0)
+		if [ $((now - rlast)) -lt 1800 ]; then
+			logger -t at-webserver "自愈：mt5700 对象缺失，但 rpcd 重启冷却中（30 分钟）"
+			return 1
+		fi
+		echo "$now" > "$dir/rpcd" 2>/dev/null
+		logger -t at-webserver "自愈：mt5700 对象缺失（rpcd 未加载 ucode 插件），重启 rpcd"
+		/etc/init.d/rpcd restart >/dev/null 2>&1
+		sleep 2
+		ubus list 2>/dev/null | grep -qx mt5700 && echo 0 > "$dir/fail" 2>/dev/null
+		return 0
+	fi
+
+	logger -t at-webserver "自愈：AT 通道无响应，重启 at-webserver"
+	/etc/init.d/at-webserver restart >/dev/null 2>&1
+	[ "$mode" = "manual" ] && echo "已重启 AT 服务"
+	return 0
 }
 
 # 手动自愈入口：/etc/init.d/at-webserver ensure_interfaces

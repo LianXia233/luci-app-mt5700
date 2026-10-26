@@ -434,29 +434,91 @@ var Mt5700 = (function () {
 		 * ★ 11 不再当告警：本卡长期停在 1,11，实测短信收发正常，
 		 *   且自愈推卡也推不动它 —— 详见 parse.js 的码表注释。
 		 */
-		function refreshSimStatus() {
-			if (!cl.connected) {
-				simValue.textContent = '—';
-				simBox.classList.remove('is-warn');
-				return;
-			}
-			cl.sendCommand('AT^SIMSQ?').then(function (res) {
+		/*
+		 * SIM 状态的失败计数与自愈冷却。
+		 * 模块级（不是卡片级）：切页回来不该把「已经连坏几次」的事实清零，
+		 * 否则每进一次页面就重新数，永远到不了自愈阈值。
+		 */
+		var simFail = 0;
+		var simHealAt = 0;
+
+		/*
+		 * 读一次 SIMSQ，失败的**原因**要能分开：
+		 *   · answered=false：这一条根本没读回来（忙态 / 通道故障）→ 该重试、可自愈
+		 *   · answered=true 但解析不出：模组答了，内容不认识 → 界面显示「未知」，
+		 *     这不是通道问题，不该触发重启
+		 * 红线 23 的同一个道理：把「读不出来」伪装成「没有」会误导排查。
+		 */
+		function readSimsq(attempt) {
+			return cl.sendCommand('AT^SIMSQ?').then(function (res) {
 				/*
 				 * 状态解析走 Parse.parseSimsq（全插件唯一真源），不要在这里另写一份正则：
 				 * 此前这里自己 match 取 m[2]，与 parse.js 的正则分家，将来改任一侧
 				 * （比如应答多带一个字段）另一边都会悄悄失配。
 				 */
 				var sim = res && res.success ? Parse.parseSimsq(res.data) : null;
-				if (!sim) {
+				if (sim) return { sim: sim, answered: true };
+				/* 模组答了但解析不出：不重试，直接交给界面显示「未知」 */
+				if (res && res.success) return { sim: null, answered: true };
+				/* 读失败：600ms 后补一次（忙态通常几十毫秒就过去了） */
+				if (attempt < 2) {
+					return new Promise(function (resolve) {
+						setTimeout(function () { resolve(readSimsq(attempt + 1)); }, 600);
+					});
+				}
+				return { sim: null, answered: false };
+			}).catch(function () {
+				if (attempt < 2) {
+					return new Promise(function (resolve) {
+						setTimeout(function () { resolve(readSimsq(attempt + 1)); }, 600);
+					});
+				}
+				return { sim: null, answered: false };
+			});
+		}
+
+		/*
+		 * 连续失败到阈值才自愈一次（5 分钟冷却）。
+		 * ★ 为什么不是一失败就重启：restart 会打断 eSIM 写卡、短信、锁频，
+		 *   还会清空内存环形日志 —— 一次偶发忙态不值得付这个代价。
+		 * ★ 为什么是 3 次：SIM 卡每 15s 刷新一次，3 次 ≈ 45 秒的持续失败，
+		 *   已排除「刚好在忙」；再久用户就一直在看「读取失败」了。
+		 */
+		function maybeSelfHeal() {
+			if (simFail < 3) return;
+			var now = Date.now();
+			if (now - simHealAt < 5 * 60 * 1000) return;
+			simHealAt = now;
+			AtWs.selfHeal().then(function (r) {
+				/* 自愈后给服务 3 秒拉起，再补读一次；失败也不弹错——下一轮轮询会兜 */
+				if (r && r.success) setTimeout(refreshSimStatus, 3000);
+			});
+		}
+
+		function refreshSimStatus() {
+			if (!cl.connected) {
+				simValue.textContent = '—';
+				simBox.classList.remove('is-warn');
+				return;
+			}
+			readSimsq(1).then(function (r) {
+				if (r.sim) {
+					simFail = 0;
+					simValue.textContent = r.sim.shortLabel;
+					simBox.classList.toggle('is-warn', r.sim.warn);
+					return;
+				}
+				if (r.answered) {
+					/* 模组答了、内容不认识：不是通道问题，不算失败次数 */
+					simFail = 0;
 					simValue.textContent = '未知';
 					simBox.classList.remove('is-warn');
 					return;
 				}
-				simValue.textContent = sim.shortLabel;
-				simBox.classList.toggle('is-warn', sim.warn);
-			}).catch(function () {
-				simValue.textContent = '未知';
-				simBox.classList.remove('is-warn');
+				simFail++;
+				simValue.textContent = '读取失败';
+				simBox.classList.add('is-warn');
+				maybeSelfHeal();
 			});
 		}
 

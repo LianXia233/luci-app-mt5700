@@ -80,6 +80,25 @@ var rpcSysDiag = L.rpc.declare({
 });
 
 /*
+ * 自愈：只重启本插件自己的 AT 服务（不动 network / wireless / firewall）。
+ *
+ * 何时调用（见 mt5700.js 的 SIM 状态卡）：
+ *   连续 3 次读不到 SIM 状态、且 5 分钟内没试过 —— 也就是「不是一次偶发忙态，
+ *   而是通道真的坏了」。手动点「一键修复」也走这里。
+ *
+ * ★ 为什么不在每次失败就调：restart 会打断进行中的 AT 作业（eSIM 写卡、短信、
+ *   锁频）、清空内存环形日志。把它做成「连续失败 + 冷却」才敢自动调。
+ * ★ ubus 对象本身缺失时这个方法是**不存在的** —— 那种情况由 cron 的
+ *   `selfheal --auto` 处理（它会重启 rpcd），前端无从下手。
+ */
+var rpcSelfHeal = L.rpc.declare({
+	object: 'mt5700',
+	method: 'selfheal',
+	params: [],
+	expect: {}
+});
+
+/*
  * ES9+ 转发（eSIM profile 下载用）。
  *
  * 浏览器没法直连运营商的 SM-DP+ 服务器：SM-DP+ 不发 CORS 头，跨域会被拦
@@ -1971,10 +1990,27 @@ function fetchCall(action, number, digit, record) {
 	});
 }
 
+/**
+ * 触发一次自愈（只重启本插件的 AT 服务，不动网络）。
+ * 返回 { success, output, error }；「连续失败才调」「5 分钟冷却」由调用方负责。
+ */
+function runSelfHeal() {
+	return rpcSelfHeal().then(function (res) {
+		return {
+			success: !!(res && res.success),
+			output: (res && res.output) || '',
+			error: (res && res.error) || null
+		};
+	}).catch(function (err) {
+		return { success: false, output: '', error: (err && err.message) || '自愈调用失败' };
+	});
+}
+
 var AtWs = {
 	client: atClient(),
 	netRate: fetchNetRate,
 	sysDiag: fetchSysDiag,
+	selfHeal: runSelfHeal,
 	smsLog: fetchSmsLog,
 	es9p: es9pPost,
 	exitIp: fetchExitIp,

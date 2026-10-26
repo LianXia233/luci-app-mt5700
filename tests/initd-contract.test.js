@@ -136,7 +136,10 @@ ok('ensure_wan_zone 仍是幂等实现（列表里已有就返回，不重载防
 	/case " \$list " in[\s\S]*?\*" \$iface "\*\) return 0/.test(SRC));
 
 /* ---------- 6. ensure_interfaces 子命令必须零副作用 ---------- */
-ok('EXTRA_COMMANDS 暴露 ensure_interfaces', /EXTRA_COMMANDS="ensure_interfaces"/.test(SRC));
+/* ★ 2026-10-26：EXTRA_COMMANDS 现在是 "ensure_interfaces selfheal"，
+   断言改成「两者都在」而不是精确等于 —— 新增自愈子命令不该让这条守卫失效。 */
+ok('EXTRA_COMMANDS 暴露 ensure_interfaces',
+	/EXTRA_COMMANDS="[^"]*\bensure_interfaces\b/.test(SRC));
 const ensureInterfacesCode = bodyCode(SRC, 'ensure_interfaces');
 ok('能定位到 ensure_interfaces 函数体', ensureInterfacesCode !== null);
 ok('★ ensure_interfaces 不重启后端：不得出现 killall / restart / ubus call service delete',

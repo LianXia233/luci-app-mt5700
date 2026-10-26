@@ -125,4 +125,18 @@ fi
 # rpcd reload 只重载 rpcd 自身，不会动到后端进程与串口。
 /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 
+# ---------- 自愈巡检（cron 每 5 分钟） ----------
+#
+# 只做一件事：把 /etc/init.d/at-webserver selfheal --auto 挂到 cron。
+# 阈值、冷却、动作边界全在 selfheal() 里（见 init.d 的注释），这里只管落地。
+# 幂等：已存在就不再追加（重复安装/升级都不会堆出多条）。
+if [ -f /etc/crontabs/root ] || [ -d /etc/crontabs ]; then
+	mkdir -p /etc/crontabs 2>/dev/null
+	touch /etc/crontabs/root 2>/dev/null
+	if ! grep -q 'at-webserver selfheal --auto' /etc/crontabs/root 2>/dev/null; then
+		echo '*/5 * * * * /etc/init.d/at-webserver selfheal --auto >/dev/null 2>&1' >> /etc/crontabs/root
+		/etc/init.d/cron restart >/dev/null 2>&1 || true
+	fi
+fi
+
 exit 0

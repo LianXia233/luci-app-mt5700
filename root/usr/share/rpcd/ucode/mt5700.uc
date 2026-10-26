@@ -3410,6 +3410,37 @@ return {
 				return { success: true, at: time(), facts: facts };
 			}
 		},
+		/* 自愈：只修本插件自己的组件（AT 服务 / rpcd 的 ucode 插件注册），
+		   绝不动 network / wireless / firewall —— 自动动作本身不该成为断网源。
+
+		   ★ 手动模式（本方法）只做「重启 AT 服务」：
+		     ubus 对象缺失时唯一修法是重启 rpcd，而本方法就跑在 rpcd 里，
+		     在那里重启 rpcd 等于让处理本次请求的进程自杀。对象缺失的情况
+		     交给 cron 的 `selfheal --auto`（独立进程）。
+		   ★ 必须传 --from-ubus：脚本此时跑在 rpcd 里，若它再做 `ubus call`
+		     就是让单线程的 rpcd 等自己 —— 必然超时，把「一切正常」误判成故障。
+		   ★ 阈值与冷却全在 init.d 的 selfheal() 里，这里只负责触发并回传输出。 */
+		selfheal: {
+			args: {},
+			call: function (req) {
+				let p;
+				try {
+					p = fs.popen('/etc/init.d/at-webserver selfheal --from-ubus', 'r');
+				} catch (e) {
+					return { success: false, error: '无法执行自愈入口' };
+				}
+				if (!p) {
+					return { success: false, error: '无法执行自愈入口' };
+				}
+				let out = '';
+				let line;
+				while ((line = p.read('line')) != null) {
+					out += line + '\n';
+				}
+				p.close();
+				return { success: true, output: trim(out) };
+			}
+		},
 		/* 出口 IP 探测：从路由器侧取「互联网看到的我」—— 换卡换 IP 的判定依据。
 		   只回原文（端点 id + 响应前 64 字节），解析与合法性校验在前端。
 		   bind 可选：绑定到指定源 IP，多出口时用它锁定蜂窝那条链路。 */

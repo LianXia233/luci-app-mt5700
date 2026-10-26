@@ -5,6 +5,37 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.40] - 2026-10-26
+
+### Added — 自愈（只修自家组件，绝不碰网络）
+
+意外发生时不再只能靠人工 SSH。分三层：
+
+- **SIM 状态卡**：读失败与「模组答了但内容不认识」分开显示
+  （`读取失败` vs `未知`，红线 23 的同一条纪律），读失败先 600ms 后补一次；
+  连续 **3 次**（≈45s）仍失败且距上次自愈超 5 分钟，才调一次自愈。
+- **手动自愈** `mt5700.selfheal`（ubus）：由前端触发，重启 AT 服务，10 分钟冷却。
+- **自动巡检** cron 每 5 分钟跑 `/etc/init.d/at-webserver selfheal --auto`：
+  要求**连续 2 次**（≈10 分钟）探测失败才动手——eSIM 写卡、短信发送这类正常
+  长操作动辄占住串口十几秒，单次失败不能当故障。
+
+边界（写进 `tests/selfheal-contract.test.js`，改坏即判红）：
+
+- 只允许 `at-webserver restart` 与 `rpcd restart`，**禁止** wifi / wireless /
+  network / ifup / firewall 任何动作（这个插件 2026-09-20 删掉过看门狗，
+  原因正是「自动动作本身也是断网源」）。
+- ubus 对象缺失（rpcd 没加载 ucode 插件）只由 cron 处理：重启 rpcd 会踢掉所有
+  LuCI 登录，且经 rpcd 调用时重启 rpcd ＝ 让处理本次请求的进程自杀。
+- `uci at-webserver.config.enabled=0`（用户主动停用）时一律不动手。
+- 冷却：动作 10 分钟、rpcd 30 分钟；状态放 `/tmp`，重启即清；每个动作写 logger。
+
+#### 修掉的真机坑
+
+`selfheal` 经 ubus 被调用时自己就跑在 rpcd 里，若再做 `ubus call`，单线程的
+rpcd 会**自己等自己** → 必然超时 → 把「一切正常」误判成故障并白重启一次
+（实测：CLI 报「一切正常」、ubus 报「已重启 AT 服务」）。因此新增
+`--from-ubus` 模式：跳过探测，按「调用方已判定需要修复」处理。
+
 ## [2.4.39] - 2026-10-24
 
 ### Fixed — 定时锁频「只有一个开关、看不到编排配置」
