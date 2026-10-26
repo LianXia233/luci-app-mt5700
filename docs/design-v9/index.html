@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MT5700 Console · 界面重做提案</title>
+<style>
+/* ============================================================
+   设计令牌 —— 只有两套：深色（默认）/ 浅色。没有第三套、没有
+   prefers-color-scheme 自动切换（页面外观由用户自己决定）。
+   ============================================================ */
+:root {
+  --bg: #0A0D12;
+  --panel: #111721;
+  --panel-2: #151C28;
+  --panel-3: #1A2230;
+  --line: #212B3A;
+  --line-2: #2C3949;
+  --ink: #E7EEF9;
+  --ink-2: #96A5BA;
+  --ink-3: #64748C;
+  --accent: #3D7EFF;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(61, 126, 255, .13);
+  --ok: #2DD4A7;
+  --warn: #F2B03D;
+  --bad: #F2585B;
+  --ok-soft: rgba(45, 212, 167, .12);
+  --warn-soft: rgba(242, 176, 61, .13);
+  --bad-soft: rgba(242, 88, 91, .13);
+  --r-sm: 8px;
+  --r: 14px;
+  --r-lg: 20px;
+  --shadow: 0 1px 0 rgba(255,255,255,.02) inset;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html[data-theme="light"] {
+  --bg: #F3F5F9;
+  --panel: #FFFFFF;
+  --panel-2: #FAFBFD;
+  --panel-3: #F1F4F9;
+  --line: #E2E7F0;
+  --line-2: #CFD7E4;
+  --ink: #0D141F;
+  --ink-2: #55647C;
+  --ink-3: #8695AA;
+  --accent: #1F5FE0;
+  --accent-soft: rgba(31, 95, 224, .09);
+  --ok: #0C9B74;
+  --warn: #B07300;
+  --bad: #CE3437;
+  --ok-soft: rgba(12, 155, 116, .10);
+  --warn-soft: rgba(176, 115, 0, .11);
+  --bad-soft: rgba(206, 52, 55, .10);
+  --shadow: 0 1px 2px rgba(13, 20, 31, .04);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; font-size: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+svg { display: block; }
+
+/* ============================================================
+   外壳：自有左栏 + 自有顶栏。
+   不用 LuCI 的菜单、面包屑、内容区 —— 这一层就是「全新」的地方。
+   ============================================================ */
+.app {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ---------- 左栏 ---------- */
+.rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 0 0 10px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 18px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.brand-mark {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(145deg, var(--accent), #6BA0FF);
+  display: grid; place-items: center;
+  flex: none;
+}
+.brand-mark svg { width: 18px; height: 18px; stroke: #fff; stroke-width: 2; fill: none; }
+.brand-tx b { display: block; font-size: 13px; font-weight: 650; letter-spacing: .01em; }
+.brand-tx span { display: block; font-size: 10.5px; color: var(--ink-3); letter-spacing: .04em; }
+
+.rail-nav { flex: 1; overflow-y: auto; padding: 12px 10px 6px; }
+.rail-group { margin-bottom: 14px; }
+.rail-group > p {
+  margin: 0 0 6px;
+  padding: 0 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.nav-i {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  margin-bottom: 1px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: left;
+  transition: background .12s, color .12s;
+}
+.nav-i svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.7; fill: none; flex: none; }
+.nav-i:hover { background: var(--panel-2); color: var(--ink); }
+.nav-i.is-on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-i.is-on::before {
+  content: "";
+  position: absolute; left: -10px; top: 50%;
+  width: 3px; height: 16px; margin-top: -8px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.nav-i .cnt {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+.rail-foot { padding: 10px 12px 0; border-top: 1px solid var(--line); }
+.svc {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 9px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; box-shadow: 0 0 0 3px var(--ok-soft); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.dot.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.svc b { color: var(--ink); font-weight: 600; }
+
+/* ---------- 顶栏 ---------- */
+.main { min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 56px;
+  padding: 0 22px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.crumb-title { font-size: 14px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.crumb-sub { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.search {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 8px;
+  width: 260px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-3);
+  font-size: 12.5px;
+  transition: border-color .12s;
+}
+.search:hover { border-color: var(--line-2); color: var(--ink-2); }
+.search svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; }
+.search kbd {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  color: var(--ink-3);
+}
+
+.icon-btn {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--ink-2);
+}
+.icon-btn:hover { color: var(--ink); border-color: var(--line-2); }
+.icon-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pill svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 2.2; fill: none; }
+
+/* ---------- 画布 ---------- */
+.canvas { padding: 22px 22px 40px; max-width: 1560px; }
+.pg { display: none; }
+.pg.is-on { display: block; animation: fade .18s ease-out; }
+@keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+.c3 { grid-column: span 3; }
+.c4 { grid-column: span 4; }
+.c5 { grid-column: span 5; }
+.c6 { grid-column: span 6; }
+.c7 { grid-column: span 7; }
+.c8 { grid-column: span 8; }
+.c12 { grid-column: span 12; }
+
+/* ---------- 面板 ---------- */
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.panel-h {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.panel-h h3 { margin: 0; font-size: 12.5px; font-weight: 650; letter-spacing: .01em; white-space: nowrap; }
+.panel-h .sub { font-size: 11.5px; color: var(--ink-3); }
+.panel-h .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+.panel-b { padding: 16px; flex: 1; }
+.panel-b.flush { padding: 0; display: flex; flex-direction: column; }
+
+/* ---------- 结论块：整页第一眼 ---------- */
+.verdict {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding: 22px 24px 18px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, var(--ok-soft), transparent 58%),
+    var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.verdict.is-warn { background: radial-gradient(120% 140% at 0% 0%, var(--warn-soft), transparent 58%), var(--panel); }
+.verdict.is-bad { background: radial-gradient(120% 140% at 0% 0%, var(--bad-soft), transparent 58%), var(--panel); }
+
+.v-eyebrow {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+.verdict.is-warn .v-eyebrow { color: var(--warn); }
+.verdict.is-bad .v-eyebrow { color: var(--bad); }
+.v-eyebrow .dot { width: 6px; height: 6px; }
+
+.v-title {
+  margin: 9px 0 6px;
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 680;
+  letter-spacing: -.025em;
+}
+.v-meta { font-size: 13px; color: var(--ink-2); max-width: 620px; }
+.v-meta b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+
+.v-nums { display: flex; gap: 26px; align-items: flex-start; }
+.v-num { text-align: right; }
+.v-num i { display: block; font-style: normal; font-size: 10.5px; color: var(--ink-3); letter-spacing: .05em; text-transform: uppercase; margin-bottom: 2px; }
+.v-num b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.v-num b em { font-style: normal; font-size: 11px; color: var(--ink-3); font-weight: 500; margin-left: 2px; }
+.v-num b.ok { color: var(--ok); }
+.v-num b.warn { color: var(--warn); }
+
+/* ---------- 链路：四段 ---------- */
+.chain {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 20px -24px -18px;
+  background: var(--line);
+  border-top: 1px solid var(--line);
+}
+.chain-seg {
+  position: relative;
+  padding: 13px 16px 14px;
+  background: var(--panel);
+  min-width: 0;
+}
+.chain-seg::before {
+  content: "";
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--ok);
+}
+.chain-seg.warn::before { background: var(--warn); }
+.chain-seg.bad::before { background: var(--bad); }
+.chain-seg.idle::before { background: var(--line-2); }
+.ch-k { display: flex; align-items: baseline; gap: 6px; }
+.ch-k span { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.ch-k b { font-size: 11.5px; font-weight: 600; color: var(--ink-2); letter-spacing: .02em; }
+.ch-v { margin-top: 4px; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+.ch-v.ok { color: var(--ok); }
+.ch-v.warn { color: var(--warn); }
+.ch-v.bad { color: var(--bad); }
+.ch-v.idle { color: var(--ink-3); font-weight: 500; }
+.ch-e {
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- KPI ---------- */
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.kpi {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 14px 15px 10px;
+  min-width: 0;
+}
+.kpi-k {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--ink-3);
+  letter-spacing: .02em;
+}
+.kpi-k svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.kpi-v {
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.kpi-v em { font-style: normal; font-size: 11.5px; font-weight: 500; color: var(--ink-3); margin-left: 3px; letter-spacing: 0; }
+.kpi-f { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+.spark { width: 100%; height: 30px; margin-top: 8px; }
+.spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.spark .area { fill: var(--accent); opacity: .10; stroke: none; }
+
+/* ---------- 信号条 ---------- */
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 34px; }
+.bars i { width: 7px; border-radius: 2px; background: var(--line-2); }
+.bars i.on { background: var(--ok); }
+.bars i.on.warn { background: var(--warn); }
+
+/* ---------- 载波 ---------- */
+.carriers { display: flex; flex-direction: column; gap: 1px; background: var(--line); flex: 1; }
+.car {
+  display: grid;
+  grid-template-columns: 54px 1fr 78px 62px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--panel);
+  font-size: 12.5px;
+  flex: 1;
+}
+.car .tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 5px;
+  padding: 2px 6px;
+  text-align: center;
+}
+.car .tag.pcc { color: var(--ink); background: var(--panel-3); }
+.car .nm { color: var(--ink-2); }
+.car .bw { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); text-align: right; }
+.car .q { text-align: right; font-family: var(--mono); font-size: 11.5px; }
+.car .q.ok { color: var(--ok); }
+.car .q.warn { color: var(--warn); }
+
+/* ---------- 键值表 ---------- */
+.kv { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 0; }
+.kv > dt, .kv > dd {
+  margin: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  min-width: 0;
+}
+.kv > dt { color: var(--ink-3); }
+.kv > dd {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.kv > dt:last-of-type, .kv > dd:last-of-type { border-bottom: 0; }
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 9px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+.btn:hover { background: var(--panel-3); border-color: var(--ink-3); }
+.btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.9; fill: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); background: var(--bad-soft); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.btn.ghost:hover { background: var(--panel-2); color: var(--ink); }
+.btn[disabled] { opacity: .42; cursor: not-allowed; }
+.btn.sm { height: 27px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; }
+
+/* ---------- 影响预告 ---------- */
+.impact {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 26%, transparent);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.impact svg { width: 15px; height: 15px; stroke: var(--warn); stroke-width: 2; fill: none; flex: none; margin-top: 1px; }
+.impact b { color: var(--ink); font-weight: 650; }
+
+/* ---------- 徽标 ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.bad { background: var(--bad-soft); color: var(--bad); }
+.badge.neutral { background: var(--panel-3); color: var(--ink-2); }
+.badge.acc { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- 分段 ---------- */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--panel-3);
+  gap: 2px;
+  flex: none;
+}
+.seg button {
+  height: 24px;
+  padding: 0 11px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.seg button.is-on { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+
+/* ---------- 诊断行 ---------- */
+.diag { display: flex; flex-direction: column; }
+.diag-row {
+  display: grid;
+  grid-template-columns: 22px 168px minmax(0, 1fr) 92px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.diag-row:last-child { border-bottom: 0; }
+.diag-row.warn { background: var(--warn-soft); }
+.diag-row .ic { display: grid; place-items: center; }
+.diag-row .ic svg { width: 15px; height: 15px; stroke-width: 2.2; fill: none; }
+.ic.ok svg { stroke: var(--ok); }
+.ic.warn svg { stroke: var(--warn); }
+.ic.bad svg { stroke: var(--bad); }
+.diag-row .nm { font-weight: 550; }
+.diag-row .ev { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diag-row .ac { text-align: right; }
+
+/* ---------- 占位页 ---------- */
+.stub {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  padding: 40px;
+  text-align: center;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r);
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.stub b { display: block; color: var(--ink-2); font-size: 14px; margin-bottom: 6px; }
+
+/* ---------- 命令面板 ---------- */
+.palette-mask {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: none;
+  background: rgba(4, 7, 12, .58);
+  backdrop-filter: blur(3px);
+}
+.palette-mask.is-on { display: block; }
+.palette {
+  width: min(560px, calc(100vw - 32px));
+  margin: 88px auto 0;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,.45);
+}
+.palette input {
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.palette input::placeholder { color: var(--ink-3); }
+.palette ul { margin: 0; padding: 6px; list-style: none; max-height: 320px; overflow-y: auto; }
+.palette li {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.palette li svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.palette li.is-cur, .palette li:hover { background: var(--accent-soft); color: var(--accent); }
+.palette li i { margin-left: auto; font-style: normal; font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
+
+/* ---------- 说明条 ---------- */
+.note {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 0 0 18px;
+  padding: 13px 15px;
+  border-radius: var(--r);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+.note b { color: var(--ink); }
+.note svg { width: 16px; height: 16px; stroke: var(--accent); stroke-width: 2; fill: none; flex: none; margin-top: 1px; }
+
+/* ---------- 窄屏 ---------- */
+@media (max-width: 1180px) {
+  .app { grid-template-columns: 68px minmax(0, 1fr); }
+  .brand-tx, .nav-i span, .rail-group > p, .svc span { display: none; }
+  .nav-i { justify-content: center; padding: 9px; }
+  .nav-i .cnt { display: none; }
+  .brand { justify-content: center; padding: 14px 0; }
+  .c3, .c4, .c5, .c6 { grid-column: span 12; }
+  .c7, .c8 { grid-column: span 12; }
+  .v-nums { gap: 18px; }
+  .search { width: 180px; }
+  .search kbd { display: none; }
+}
+@media (max-width: 760px) {
+  .canvas { padding: 14px 12px 30px; }
+  .v-title { font-size: 23px; }
+  .verdict { grid-template-columns: 1fr; gap: 14px; }
+  .v-nums { justify-content: flex-start; }
+  .chain { grid-template-columns: 1fr 1fr; }
+  .diag-row { grid-template-columns: 20px 1fr auto; }
+  .diag-row .ev { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- ===================== 左栏 ===================== -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17V9M9 17V5M14 17v-6M19 17V7"/></svg>
+      </div>
+      <div class="brand-tx">
+        <b>H5000M</b>
+        <span>MT5700 CONSOLE</span>
+      </div>
+    </div>
+
+    <nav class="rail-nav">
+      <div class="rail-group">
+        <p>概览</p>
+        <button class="nav-i is-on" data-p="overview">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+          <span>总览</span>
+        </button>
+        <button class="nav-i" data-p="diag">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4.2"/></svg>
+          <span>连接自检</span>
+          <span class="cnt">33</span>
+        </button>
+      </div>
+
+      <div class="rail-group">
+        <p>网络</p>
+        <button class="nav-i" data-p="radio">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V13M10 19V9M15 19v-4M20 19V5"/></svg>
+          <span>无线与频段</span>
+        </button>
+        <button class="nav-i" data-p="wan">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8.5"/></svg>
+          <span>接入与拨号</span>
+        </button>
+      </div>
+
+      <div class="rail-group">
+        <p>卡与设备</p>
+        <button class="nav-i" data-p="esim">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M8 9.5h4v5H8z"/><path d="M15 9.5h2M15 14.5h2"/></svg>
+          <span>eSIM</span>
+        </button>
+        <button class="nav-i" data-p="device">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18.5h2"/></svg>
+          <span>模组信息</span>
+        </button>
+      </div>
+
+      <div class="rail-group">
+        <p>通信</p>
+        <button class="nav-i" data-p="sms">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H8l-4 3v-6.5A8 8 0 0 1 12 4h1a8 8 0 0 1 8 8z"/></svg>
+          <span>短信</span>
+          <span class="cnt">2</span>
+        </button>
+        <button class="nav-i" data-p="voice">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h3.5l2 4.5-2.2 1.6a12 12 0 0 0 5.6 5.6l1.6-2.2L20 15.5V19a1.5 1.5 0 0 1-1.7 1.5A15.5 15.5 0 0 1 3.5 5.7 1.5 1.5 0 0 1 5 4z"/></svg>
+          <span>语音</span>
+        </button>
+      </div>
+
+      <div class="rail-group">
+        <p>工具</p>
+        <button class="nav-i" data-p="at">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h9M5 18h12"/></svg>
+          <span>AT 终端</span>
+        </button>
+        <button class="nav-i" data-p="logs">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5"/></svg>
+          <span>运行日志</span>
+        </button>
+        <button class="nav-i" data-p="service">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2 2M16.4 16.4l2 2M18.4 5.6l-2 2M7.6 16.4l-2 2"/></svg>
+          <span>服务与升级</span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="svc">
+        <span class="dot"></span>
+        <span>AT 服务 <b>在线</b></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===================== 主区 ===================== -->
+  <div class="main">
+    <header class="topbar">
+      <span class="crumb-title" id="tb-title">总览</span>
+      <span class="crumb-sub" id="tb-sub">中国移动 · 5G SA · n78</span>
+
+      <button class="search" id="search-btn">
+        <svg viewBox="0 0 24 24" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+        <span>搜索页面与动作</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+
+      <span class="pill">
+        <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 13l5 5L20 6"/></svg>
+        已连接
+      </span>
+
+      <button class="icon-btn" id="theme-btn" title="切换明暗">
+        <svg id="theme-icon" viewBox="0 0 24 24" stroke-linecap="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg>
+      </button>
+    </header>
+
+    <main class="canvas">
+
+      <!-- ================= 总览 ================= -->
+      <section class="pg is-on" id="pg-overview">
+        <div class="note">
+          <svg viewBox="0 0 24 24" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>
+          <div><b>这一版换的是壳，不是皮。</b>左边栏、顶栏、内容网格全部由插件自己画，不再嵌在 LuCI 的菜单和内容区里；读数从「表格行」变成「态势板」。深色为默认，右上角可切浅色。</div>
+        </div>
+
+        <div class="grid">
+          <!-- 结论 -->
+          <div class="verdict c12">
+            <div>
+              <span class="v-eyebrow"><span class="dot"></span>链路完整</span>
+              <h1 class="v-title">已连接，可以上网</h1>
+              <p class="v-meta">走 <b>n78</b> 独立组网，出口地址 <b>10.1.2.3</b>，网关 <b>10.1.2.1</b>；本机已下发 128 个地址给客户端。</p>
+            </div>
+            <div class="v-nums">
+              <div class="v-num"><i>下行</i><b>312<em>Mbps</em></b></div>
+              <div class="v-num"><i>上行</i><b>48<em>Mbps</em></b></div>
+              <div class="v-num"><i>信号</i><b class="ok">-83<em>dBm</em></b></div>
+              <div class="v-num"><i>温度</i><b>41<em>℃</em></b></div>
+            </div>
+
+            <div class="chain">
+              <div class="chain-seg">
+                <div class="ch-k"><span>01</span><b>模组</b></div>
+                <div class="ch-v ok">在线</div>
+                <div class="ch-e">+CFUN: 1 · 已运行 3d 04h</div>
+              </div>
+              <div class="chain-seg">
+                <div class="ch-k"><span>02</span><b>SIM 卡</b></div>
+                <div class="ch-v ok">已就绪</div>
+                <div class="ch-e">+CPIN: READY · 状态码 11</div>
+              </div>
+              <div class="chain-seg">
+                <div class="ch-k"><span>03</span><b>网络注册</b></div>
+                <div class="ch-v ok">5G SA 已注册</div>
+                <div class="ch-e">+C5GREG: 0,1 · 46000</div>
+              </div>
+              <div class="chain-seg">
+                <div class="ch-k"><span>04</span><b>拨号</b></div>
+                <div class="ch-v ok">已获取地址</div>
+                <div class="ch-e">CID 1 · 3gnet · ACTIVE</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI -->
+          <div class="kpi c3">
+            <div class="kpi-k">
+              <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+              下行速率
+            </div>
+            <div class="kpi-v">312<em>Mbps</em></div>
+            <svg class="spark" viewBox="0 0 120 30" preserveAspectRatio="none">
+              <polygon class="area" points="0,30 0,22 12,18 24,20 36,12 48,14 60,9 72,11 84,6 96,8 108,4 120,5 120,30"/>
+              <polyline points="0,22 12,18 24,20 36,12 48,14 60,9 72,11 84,6 96,8 108,4 120,5"/>
+            </svg>
+          </div>
+          <div class="kpi c3">
+            <div class="kpi-k">
+              <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+              上行速率
+            </div>
+            <div class="kpi-v">48<em>Mbps</em></div>
+            <svg class="spark" viewBox="0 0 120 30" preserveAspectRatio="none">
+              <polygon class="area" points="0,30 0,24 12,22 24,25 36,20 48,23 60,19 72,21 84,17 96,19 108,16 120,18 120,30"/>
+              <polyline points="0,24 12,22 24,25 36,20 48,23 60,19 72,21 84,17 96,19 108,16 120,18"/>
+            </svg>
+          </div>
+          <div class="kpi c3">
+            <div class="kpi-k">
+              <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M5 19V13M10 19V9M15 19v-6M20 19V5"/></svg>
+              信号质量
+            </div>
+            <div class="kpi-v">22<em>SINR</em></div>
+            <div class="bars" style="margin-top:10px">
+              <i class="on" style="height:8px"></i><i class="on" style="height:12px"></i>
+              <i class="on" style="height:16px"></i><i class="on" style="height:20px"></i>
+              <i class="on" style="height:24px"></i><i class="on warn" style="height:28px"></i>
+              <i style="height:32px"></i><i style="height:34px"></i>
+            </div>
+          </div>
+          <div class="kpi c3">
+            <div class="kpi-k">
+              <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M12 4v6M12 14v6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="12" r="8.5"/></svg>
+              本月流量
+            </div>
+            <div class="kpi-v">128.4<em>GB</em></div>
+            <div class="kpi-f">今日 6.2 GB · 未设上限</div>
+          </div>
+
+          <!-- 载波 -->
+          <div class="panel c7">
+            <div class="panel-h">
+              <h3>载波聚合</h3>
+              <span class="sub">3 载波 · NSA 未启用</span>
+              <div class="right"><span class="badge acc">CA 已激活</span></div>
+            </div>
+            <div class="panel-b flush">
+              <div class="carriers">
+                <div class="car">
+                  <span class="tag pcc">PCC</span>
+                  <span class="nm">n78 · 小区 0x14225C</span>
+                  <span class="bw">100 MHz</span>
+                  <span class="q ok">-83 dBm</span>
+                </div>
+                <div class="car">
+                  <span class="tag">SCC1</span>
+                  <span class="nm">n41 · 小区 0x14225D</span>
+                  <span class="bw">60 MHz</span>
+                  <span class="q ok">-91 dBm</span>
+                </div>
+                <div class="car">
+                  <span class="tag">SCC2</span>
+                  <span class="nm">B3 &nbsp;· 小区 0x14225E</span>
+                  <span class="bw">20 MHz</span>
+                  <span class="q warn">-104 dBm</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 设备 -->
+          <div class="panel c5">
+            <div class="panel-h">
+              <h3>设备与身份</h3>
+              <div class="right"><span class="badge neutral">已脱敏</span></div>
+            </div>
+            <div class="panel-b">
+              <dl class="kv">
+                <dt>型号</dt><dd>MT5700M-CN</dd>
+                <dt>固件</dt><dd>V200R001C20B025</dd>
+                <dt>IMEI</dt><dd>86••••••••••42</dd>
+                <dt>ICCID</dt><dd>8986••••••••••••0931</dd>
+                <dt>频段</dt><dd>n78 / n41 / B3</dd>
+              </dl>
+            </div>
+          </div>
+
+          <!-- 动作 -->
+          <div class="panel c12">
+            <div class="panel-h">
+              <h3>常用动作</h3>
+              <span class="sub">点击后立即执行，会中断连接的动作会先说明影响</span>
+            </div>
+            <div class="panel-b" style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn primary">
+                <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                重新拨号
+              </button>
+              <button class="btn">连接自检</button>
+              <button class="btn">锁定频段</button>
+              <button class="btn">查看日志</button>
+              <button class="btn danger" disabled>重启模组</button>
+              <span style="font-size:11.5px;color:var(--ink-3);align-self:center;margin-left:4px">
+                重启模组需要先停 AT 服务，当前会话会立刻断开
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 自检 ================= -->
+      <section class="pg" id="pg-diag">
+        <div class="grid">
+          <div class="panel c12">
+            <div class="panel-h">
+              <h3>连接自检</h3>
+              <span class="sub">按链路顺序逐段验证，先断的那一段决定结论</span>
+              <div class="right">
+                <div class="seg">
+                  <button class="is-on">模组与空口</button>
+                  <button>系统与网络</button>
+                  <button>端到端连通</button>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--line)">
+              <span class="badge ok">通过 11</span>
+              <span class="badge warn">存疑 1</span>
+              <span class="badge neutral">未通过 0</span>
+              <span style="font-size:11.5px;color:var(--ink-3);margin-left:auto;font-family:var(--mono)">耗时 3.3 s · 只读</span>
+              <button class="btn primary sm">
+                <svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M20 11A8 8 0 1 0 12 20"/><path d="M20 5v6h-6"/></svg>
+                重新自检
+              </button>
+            </div>
+
+            <div class="diag">
+              <div class="diag-row">
+                <span class="ic ok"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                <span class="nm">射频开关</span>
+                <span class="ev">+CFUN: 1</span>
+                <span class="ac"><span class="badge ok">通过</span></span>
+              </div>
+              <div class="diag-row">
+                <span class="ic ok"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                <span class="nm">SIM 就绪</span>
+                <span class="ev">+CPIN: READY</span>
+                <span class="ac"><span class="badge ok">通过</span></span>
+              </div>
+              <div class="diag-row">
+                <span class="ic ok"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                <span class="nm">APN 配置</span>
+                <span class="ev">CID 1 · 3gnet · IP</span>
+                <span class="ac"><span class="badge ok">通过</span></span>
+              </div>
+              <div class="diag-row">
+                <span class="ic ok"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                <span class="nm">网络注册</span>
+                <span class="ev">+C5GREG: 0,1 · SA</span>
+                <span class="ac"><span class="badge ok">通过</span></span>
+              </div>
+              <div class="diag-row">
+                <span class="ic ok"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                <span class="nm">PDP 上下文</span>
+                <span class="ev">CID 1 · ACTIVE</span>
+                <span class="ac"><span class="badge ok">通过</span></span>
+              </div>
+              <div class="diag-row warn">
+                <span class="ic warn"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M12 8v5M12 16.5h.01"/><path d="M10.2 4.3L3 17a2 2 0 0 0 1.7 3h14.6a2 2 0 0 0 1.7-3L13.8 4.3a2 2 0 0 0-3.6 0z"/></svg></span>
+                <span class="nm">转发 TTL</span>
+                <span class="ev">flow offload 开启 · 转发后 TTL 63</span>
+                <span class="ac"><button class="btn sm">处理</button></span>
+              </div>
+              <div class="diag-row">
+                <span class="ic ok"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                <span class="nm">DNS 解析</span>
+                <span class="ev">www.baidu.com → 110.242.68.66</span>
+                <span class="ac"><span class="badge ok">通过</span></span>
+              </div>
+              <div class="diag-row">
+                <span class="ic ok"><svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                <span class="nm">HTTPS 连通</span>
+                <span class="ev">443 · 握手 210 ms</span>
+                <span class="ac"><span class="badge ok">通过</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel c12">
+            <div class="panel-b" style="padding:0">
+              <div class="impact">
+                <svg viewBox="0 0 24 24" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/></svg>
+                <div>自检会独占 AT 通道约 <b>3 秒</b>（断网时最慢十几秒），期间本页读数刷新会变慢；全程只读，不改任何配置。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 无线与频段 ================= -->
+      <section class="pg" id="pg-radio">
+        <div class="grid">
+          <div class="panel c5">
+            <div class="panel-h"><h3>射频状态</h3></div>
+            <div class="panel-b">
+              <dl class="kv">
+                <dt>服务域</dt><dd>数据 + 语音</dd>
+                <dt>制式</dt><dd>NR SA</dd>
+                <dt>首选网络</dt><dd>自动</dd>
+                <dt>当前频段</dt><dd>n78</dd>
+                <dt>ARFCN</dt><dd>504990</dd>
+                <dt>PCI</dt><dd>128</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="panel c7">
+            <div class="panel-h">
+              <h3>频段锁定</h3>
+              <span class="sub">写入后需重新驻网</span>
+              <div class="right"><span class="badge neutral">未锁定 · 自动</span></div>
+            </div>
+            <div class="panel-b flush">
+              <div class="carriers">
+                <div class="car">
+                  <span class="tag pcc">n78</span>
+                  <span class="nm">3.5 GHz · 100 MHz</span>
+                  <span class="bw">正在使用</span>
+                  <span class="q ok">-83 dBm</span>
+                </div>
+                <div class="car">
+                  <span class="tag">n41</span>
+                  <span class="nm">2.6 GHz · 60 MHz</span>
+                  <span class="bw">载波聚合</span>
+                  <span class="q ok">-91 dBm</span>
+                </div>
+                <div class="car">
+                  <span class="tag">B3</span>
+                  <span class="nm">1.8 GHz · 20 MHz</span>
+                  <span class="bw">载波聚合</span>
+                  <span class="q warn">-104 dBm</span>
+                </div>
+                <div class="car">
+                  <span class="tag">n28</span>
+                  <span class="nm">700 MHz · 20 MHz</span>
+                  <span class="bw">可用</span>
+                  <span class="q warn">-112 dBm</span>
+                </div>
+                <div class="car">
+                  <span class="tag">B8</span>
+                  <span class="nm">900 MHz · 10 MHz</span>
+                  <span class="bw">可用</span>
+                  <span class="q warn">-108 dBm</span>
+                </div>
+              </div>
+            </div>
+            <div class="panel-b" style="flex:none;border-top:1px solid var(--line)">
+              <div class="impact" style="margin-bottom:14px">
+                <svg viewBox="0 0 24 24" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/></svg>
+                <div>保存时会先切飞行模式再重新驻网：<b>当前连接会中断</b>；锁到本地没有的频段就再也连不上，需回到本页改回自动。</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn primary">保存并应用</button>
+                <button class="btn ghost">恢复自动</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 其余页占位 ================= -->
+      <section class="pg" id="pg-wan"><div class="stub"><div><b>接入与拨号</b>PDP 上下文、APN、DMZ 与 USB 模式</div></div></section>
+      <section class="pg" id="pg-esim"><div class="stub"><div><b>eSIM</b>Profile 列表、下载与切换（本页结构已定，未画原型）</div></div></section>
+      <section class="pg" id="pg-device"><div class="stub"><div><b>模组信息</b>型号、固件、IMEI/ICCID 与温度</div></div></section>
+      <section class="pg" id="pg-sms"><div class="stub"><div><b>短信</b>会话列表 + 对话阅读区（双栏）</div></div></section>
+      <section class="pg" id="pg-voice"><div class="stub"><div><b>语音</b>拨号盘、通话记录；音频通道缺失时按钮保留但灰化并说明原因</div></div></section>
+      <section class="pg" id="pg-at"><div class="stub"><div><b>AT 终端</b>命令输入 + 等宽回显，支持常用命令收藏</div></div></section>
+      <section class="pg" id="pg-logs"><div class="stub"><div><b>运行日志</b>按等级过滤的实时流</div></div></section>
+      <section class="pg" id="pg-service"><div class="stub"><div><b>服务与升级</b>进程状态、重载/重启/停止，与 FOTA 升级</div></div></section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ================= 命令面板 ================= -->
+<div class="palette-mask" id="palette">
+  <div class="palette">
+    <input id="palette-input" placeholder="跳转到页面，或输入动作…">
+    <ul id="palette-list"></ul>
+  </div>
+</div>
+
+<script>
+(function () {
+  var PAGES = [
+    { id: 'overview', name: '总览', sub: '链路状态与速率', group: '概览' },
+    { id: 'diag', name: '连接自检', sub: '按链路逐段验证', group: '概览' },
+    { id: 'radio', name: '无线与频段', sub: '服务域、频段锁定', group: '网络' },
+    { id: 'wan', name: '接入与拨号', sub: 'PDP、APN、DMZ', group: '网络' },
+    { id: 'esim', name: 'eSIM', sub: 'Profile 管理', group: '卡与设备' },
+    { id: 'device', name: '模组信息', sub: '型号与身份', group: '卡与设备' },
+    { id: 'sms', name: '短信', sub: '收件箱与发送', group: '通信' },
+    { id: 'voice', name: '语音', sub: '拨号与通话记录', group: '通信' },
+    { id: 'at', name: 'AT 终端', sub: '直接下发命令', group: '工具' },
+    { id: 'logs', name: '运行日志', sub: '按等级过滤', group: '工具' },
+    { id: 'service', name: '服务与升级', sub: '进程与 FOTA', group: '工具' }
+  ];
+
+  var navs = document.querySelectorAll('.nav-i');
+  var pgs = document.querySelectorAll('.pg');
+  var tbTitle = document.getElementById('tb-title');
+  var tbSub = document.getElementById('tb-sub');
+
+  function current(id) {
+    for (var i = 0; i < PAGES.length; i++) if (PAGES[i].id === id) return PAGES[i];
+    return { name: id, sub: '' };
+  }
+
+  function show(id) {
+    for (var i = 0; i < pgs.length; i++) pgs[i].classList.toggle('is-on', pgs[i].id === 'pg-' + id);
+    for (var j = 0; j < navs.length; j++) navs[j].classList.toggle('is-on', navs[j].getAttribute('data-p') === id);
+    var p = current(id);
+    tbTitle.textContent = p.name;
+    tbSub.textContent = p.sub;
+    window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+  }
+
+  for (var i = 0; i < navs.length; i++) {
+    navs[i].addEventListener('click', function () { show(this.getAttribute('data-p')); });
+  }
+
+  /* ---------- 主题 ---------- */
+  var root = document.documentElement;
+  var themeBtn = document.getElementById('theme-btn');
+  var themeIcon = document.getElementById('theme-icon');
+  var SUN = '<path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6L4.2 4.2M19.8 19.8l-1.4-1.4M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4"/><circle cx="12" cy="12" r="4"/>';
+  var MOON = '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/>';
+
+  function paintTheme() {
+    themeIcon.innerHTML = root.getAttribute('data-theme') === 'dark' ? MOON : SUN;
+  }
+  paintTheme();
+  themeBtn.addEventListener('click', function () {
+    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    paintTheme();
+  });
+
+  /* ---------- 命令面板 ---------- */
+  var mask = document.getElementById('palette');
+  var input = document.getElementById('palette-input');
+  var list = document.getElementById('palette-list');
+
+  function renderList(kw) {
+    var q = kw.trim().toLowerCase();
+    var hits = PAGES.filter(function (p) {
+      return !q || (p.name + p.sub + p.group).toLowerCase().indexOf(q) >= 0;
+    });
+    list.innerHTML = '';
+    hits.forEach(function (p, idx) {
+      var li = document.createElement('li');
+      if (idx === 0) li.className = 'is-cur';
+      li.innerHTML = '<svg viewBox="0 0 24 24" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>' +
+        '<span>' + p.name + '</span><i>' + p.group + '</i>';
+      li.addEventListener('click', function () { closePalette(); show(p.id); });
+      list.appendChild(li);
+    });
+    if (!hits.length) {
+      list.innerHTML = '<li style="cursor:default">没有匹配的页面</li>';
+    }
+  }
+
+  function openPalette() {
+    mask.classList.add('is-on');
+    input.value = '';
+    renderList('');
+    setTimeout(function () { input.focus(); }, 20);
+  }
+  function closePalette() { mask.classList.remove('is-on'); }
+
+  document.getElementById('search-btn').addEventListener('click', openPalette);
+  mask.addEventListener('click', function (e) { if (e.target === mask) closePalette(); });
+  input.addEventListener('input', function () { renderList(this.value); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closePalette();
+    if (e.key === 'Enter') {
+      var first = list.querySelector('li.is-cur') || list.querySelector('li');
+      if (first) first.click();
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      mask.classList.contains('is-on') ? closePalette() : openPalette();
+    }
+    if (e.key === 'Escape' && mask.classList.contains('is-on')) closePalette();
+  });
+
+  /* ---------- 分段控件 ---------- */
+  document.querySelectorAll('.seg').forEach(function (seg) {
+    seg.addEventListener('click', function (e) {
+      if (e.target.tagName !== 'BUTTON') return;
+      seg.querySelectorAll('button').forEach(function (b) { b.classList.remove('is-on'); });
+      e.target.classList.add('is-on');
+    });
+  });
+})();
+</script>
+</body>
+</html>
