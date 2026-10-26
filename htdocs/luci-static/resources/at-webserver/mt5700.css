@@ -16,54 +16,66 @@
 
 /* ---------- CSS Variables ---------- */
 :root {
-  /* 颜色：三种中性面（画布 / 卡片 / 凹陷块）+ 一条主色
-     ★ 2026-10-26 版式重做：不再走「浮动卡片 + 彩色阴影」那套。
-       层次改由三种面 + 1px 实线表达，阴影只留给真正浮起来的层
-       （弹窗 / 提示条 / 底部应用条）。主色由蓝 #2563eb 换到靛蓝 #4f46e5：
-       与「信息蓝」在语义上分开，和绿/黄/红三档状态色也拉开色相差。 */
-  --mt5700-bg: #f3f4f7;
-  --mt5700-card-bg: #ffffff;
-  --mt5700-card-bg-hover: #ffffff;
-  /* 凹陷面：表头、指标条、内嵌块。比卡片略深，用来「切」出结构，不用边框堆叠 */
-  --mt5700-surface-sunken: #f7f8fa;
-  --mt5700-glass-bg: #f7f8fa;
-  --mt5700-float-bg: #ffffff;
-  --mt5700-text: #0e1626;
-  --mt5700-text-secondary: #4a5568;
-  --mt5700-text-muted: #8b95a7;
-  --mt5700-border: #e3e7ee;
-  --mt5700-border-subtle: #edf0f5;
-  --mt5700-divider: #f0f2f6;
-  /* sticky 表头专用不透明底：亮色用浅灰，与纯白卡片区分出「表头」这一层 */
-  --mt5700-table-head-bg: #f7f8fa;
-  /* iOS 风格开关专用：关态轨道要的是「一块浅灰填充」，不是描边色。
-     复用 --mt5700-border-subtle 的话暗色下只有 0.08 alpha，轨道几乎看不见，
-     所以单列两个变量随主题切换。开态沿用 --mt5700-accent，与页面按钮同色。 */
-  --mt5700-switch-off: #e6e9f0;
-  --mt5700-switch-knob-sh: 0 1px 3px rgba(14, 22, 38, 0.2);
+  /* ======================================================================
+     「琥珀深色控制台」v6 —— 2026-10-26 第三次重做
+     ----------------------------------------------------------------------
+     用户两次反馈「还是原来的样子」，前两版都只是换令牌/调间距，视觉语言
+     没变（白卡片 + 细边框 + 左对齐读数 = 通用后台）。这一版换语言：
 
-  /* 玻璃效果：改版后不再使用（保留变量是为了不改各处引用；置 none 即关闭合成） */
+       · **插件整体是一块深色面板**：`.mt5700-page` 给出底色、圆角与内边距，
+         嵌在 LuCI 浅色内容区里像一台仪表（Portainer / Grafana 的嵌入口）。
+         不再跟随系统明暗 —— 深色就是设计本身，跟着系统反而不是它了。
+       · **主色琥珀金 #f5b942**：与状态绿/黄/红全部拉开色相；深底上做
+         文字对比 11:1，做主按钮时用深色字（#171102）而不是白字。
+       · **层次靠三种面**：画布 #0d1117 / 卡片 #151c26 / 凹陷 #10161f，
+         加 1px 细线；卡片顶部一道琥珀高光线（--mt5700-edge-light），
+         深色里唯一允许的「光」，让层级有方向。
+       · **数字是主角**：等宽 + 紧字距 + 26px，标签 10px 大写灰。
+         仪表感来自排印，不来自阴影与圆角。
+     ====================================================================== */
+  --mt5700-bg: #0d1117;
+  --mt5700-card-bg: #151c26;
+  --mt5700-card-bg-hover: #1a2431;
+  /* 凹陷面：表头、读数格、内嵌块 —— 比卡片深一档，用来「切」出结构 */
+  --mt5700-surface-sunken: #10161f;
+  --mt5700-glass-bg: #10161f;
+  --mt5700-float-bg: #1b2532;
+  --mt5700-text: #e9eef5;
+  --mt5700-text-secondary: #a9b6c8;
+  --mt5700-text-muted: #6d7c91;
+  --mt5700-border: #26313f;
+  --mt5700-border-subtle: #1c2632;
+  --mt5700-divider: #1f2935;
+  /* sticky 表头专用不透明底 */
+  --mt5700-table-head-bg: #111923;
+  /* 开关关态轨道：深色下要一块实心灰，复用 border-subtle 会看不见 */
+  --mt5700-switch-off: #2b3644;
+  --mt5700-switch-knob-sh: 0 1px 2px rgba(0, 0, 0, 0.5);
+
+  /* 玻璃效果：整套语言已不用（保留变量名，避免各处引用报 undefined） */
   --mt5700-blur: 0px;
   --mt5700-saturate: 100%;
   --mt5700-glass: none;
 
-  /* 阴影 (Z 轴深度)：由三层降到两层，去掉白色内描边 —— 内描边在浅底上会显脏 */
-  --mt5700-sh-1: 0 1px 2px rgba(16, 24, 40, 0.04);
-  --mt5700-sh-2: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
-  --mt5700-sh-3: 0 2px 4px rgba(16, 24, 40, 0.04), 0 8px 20px rgba(16, 24, 40, 0.06);
-  --mt5700-sh-float: 0 4px 10px rgba(16, 24, 40, 0.06), 0 12px 28px rgba(16, 24, 40, 0.1);
-  /* 用「零尺寸内阴影」占位而不是 none：这个变量会被拼进 `box-shadow: var(--sh-2), var(--sh-inset)`，
-     写成 none 会让整条声明失效 */
+  /* 阴影：深色底下阴影要更重才看得出来；浮层（弹窗/提示/应用条）才用 */
+  --mt5700-sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --mt5700-sh-2: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --mt5700-sh-3: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --mt5700-sh-float: 0 12px 32px rgba(0, 0, 0, 0.6);
+  /* 用「零尺寸内阴影」占位而不是 none：这个变量会被拼进
+     `box-shadow: var(--sh-2), var(--sh-inset)`，写成 none 会让整条声明失效 */
   --mt5700-sh-inset: inset 0 0 0 0 rgba(0, 0, 0, 0);
+  /* 卡片顶部高光线（见 .mt5700-card::before） */
+  --mt5700-edge-light: linear-gradient(90deg,
+    rgba(245, 185, 66, 0), rgba(245, 185, 66, 0.5) 22%, rgba(245, 185, 66, 0.5) 78%, rgba(245, 185, 66, 0));
   /* 兼容旧变量名 */
   --mt5700-shadow-sm: var(--mt5700-sh-1);
   --mt5700-shadow-md: var(--mt5700-sh-2);
   --mt5700-shadow-lg: var(--mt5700-sh-3);
   --mt5700-shadow-xl: var(--mt5700-sh-float);
 
-  /* 圆角：收敛成三档（控件 6 / 卡片 12 / 胶囊 999）——
-     小圆角配 1px 细线才显得「精密」，大圆角 + 实线会往玩具感走 */
-  --mt5700-radius-sm: 6px;
+  /* 圆角：小圆角 + 细线才「精密」，大圆角在深色里会糊成一块 */
+  --mt5700-radius-sm: 5px;
   --mt5700-radius-md: 8px;
   --mt5700-radius-lg: 12px;
   --mt5700-radius-xl: 16px;
@@ -76,38 +88,40 @@
   --mt5700-space-lg: 24px;
   --mt5700-space-xl: 32px;
 
-  /* 状态色
-     ★ 2026-10-26 版式重做：主色改用靛蓝 #4f46e5（原来 #2563eb 太接近
-       「信息蓝」，和徽章 info 分不开）；绿/黄/红同族压暗一档，
-       在纯白卡上更沉，不会抢主色。 */
-  --mt5700-accent: #4f46e5;
-  --mt5700-accent-hover: #4338ca;
-  --mt5700-accent-light: #6366f1;
-  --mt5700-success: #0f9d58;
-  --mt5700-success-light: #34b37a;
-  --mt5700-warning: #e08700;
-  --mt5700-warning-light: #f5a524;
-  --mt5700-danger: #dc2f2f;
-  --mt5700-danger-light: #f0655f;
-  --mt5700-info: #4f46e5;
-  --mt5700-info-light: #6366f1;
-  /* 信号等级色 (绿→青→黄→橙→红 平滑映射) */
-  --mt5700-sig-exc: #10b981;
-  --mt5700-sig-good: #06b6d4;
-  --mt5700-sig-fair: #f59e0b;
-  --mt5700-sig-poor: #f97316;
-  --mt5700-sig-bad: #ef4444;
+  /* 状态色（全部按深底调亮一档） */
+  --mt5700-accent: #f5b942;
+  --mt5700-accent-hover: #ffc95e;
+  --mt5700-accent-light: #fbd98a;
+  /* 琥珀上不放白字：对比只有 1.9:1，必须用深色字 */
+  --mt5700-on-accent: #171102;
+  --mt5700-success: #3fb27f;
+  --mt5700-success-light: #63c99a;
+  --mt5700-warning: #e0a33a;
+  --mt5700-warning-light: #efb95c;
+  --mt5700-danger: #e2564d;
+  --mt5700-danger-light: #f0827c;
+  /* 「信息」用青而不用主色：琥珀在本项目里代表「动作/主操作」，
+     信息、链接、中性提示要能和它分开（原来 info 直接等于 accent，
+     深色底上会到处发金光，分不清哪里能点） */
+  --mt5700-info: #56b6e0;
+  --mt5700-info-light: #7cc7ea;
+  /* 信号等级色 (绿→青→黄→橙→红)，深底提亮 */
+  --mt5700-sig-exc: #34d399;
+  --mt5700-sig-good: #22d3ee;
+  --mt5700-sig-fair: #fbbf24;
+  --mt5700-sig-poor: #fb923c;
+  --mt5700-sig-bad: #f87171;
 
-  /* 字体 */
+  /* 字体：数字走等宽，仪表读数才不会跳 */
   --mt5700-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
   --mt5700-font-mono: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, monospace;
-  --mt5700-font-size-xs: 12px;
-  --mt5700-font-size-sm: 13px;
-  --mt5700-font-size-base: 14px;
-  --mt5700-font-size-lg: 16px;
-  --mt5700-font-size-xl: 18px;
-  --mt5700-font-size-2xl: 22px;
-  --mt5700-font-size-3xl: 28px;
+  --mt5700-font-size-xs: 11px;
+  --mt5700-font-size-sm: 12px;
+  --mt5700-font-size-base: 13px;
+  --mt5700-font-size-lg: 14px;
+  --mt5700-font-size-xl: 16px;
+  --mt5700-font-size-2xl: 20px;
+  --mt5700-font-size-3xl: 26px;
 
   /* 动画 */
   --mt5700-transition-fast: 150ms ease;
@@ -115,57 +129,32 @@
   --mt5700-transition-slow: 300ms ease;
 }
 
-/* 暗色模式 */
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* 2026-10-26：与亮色同步 —— 不透明面 + 实线；凹陷面比卡片亮一档 */
-    --mt5700-bg: #0b0e14;
-    --mt5700-card-bg: #12161e;
-    --mt5700-card-bg-hover: #12161e;
-    --mt5700-surface-sunken: #171c26;
-    --mt5700-glass-bg: #171c26;
-    --mt5700-float-bg: #1a202b;
-    --mt5700-text: #eef1f6;
-    --mt5700-text-secondary: #a6b0c2;
-    --mt5700-text-muted: #6b7688;
-    --mt5700-border: #232a36;
-    --mt5700-border-subtle: #1d232d;
-    --mt5700-divider: #1d232d;
-    /* sticky 表头专用不透明底：与卡片同色但全不透明，滚动时不透字 */
-    --mt5700-table-head-bg: #171c26;
-    --mt5700-switch-off: #2a3242;
-    --mt5700-switch-knob-sh: 0 1px 3px rgba(0, 0, 0, 0.5);
-    /* 暗底上主色提亮一档，否则 #4f46e5 与 #12161e 的对比不足 */
-    --mt5700-accent: #6366f1;
-    --mt5700-accent-hover: #818cf8;
-    --mt5700-info: #6366f1;
-    --mt5700-sh-1: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --mt5700-sh-2: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.35);
-    --mt5700-sh-3: 0 2px 4px rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.4);
-    --mt5700-sh-float: 0 4px 10px rgba(0, 0, 0, 0.4), 0 12px 28px rgba(0, 0, 0, 0.45);
-    --mt5700-sh-inset: inset 0 0 0 0 rgba(0, 0, 0, 0);
-  }
-}
-
 /* ==========================================================================
    L1 - 应用壳与环境背景层
    ========================================================================== */
 
-/* ---------- 页面容器 ----------
-   版式重做（2026-10-26）：页面标题不再是独立的一大块留白，而是压成一条
-   「标题 + 说明」的横条，左侧一道 3px 主色竖线作为锚点，下面一条发丝线收口。
-   原来 28px 标题 + 24px 下边距，光页头就吃掉近 90px；现在约 46px，
-   首屏能多露出一整张卡。 */
+/* ==========================================================================
+   L1 - 深色控制台面板（v6，2026-10-26）
+   --------------------------------------------------------------------------
+   插件在 LuCI 浅色内容区里是一块**整块的深色面板**：底色 + 圆角 + 内边距
+   都由 .mt5700-page 给出。这是「一眼看上去就不是原来那套」的关键 ——
+   以前卡片各自白底描边浮在页面上，现在整块先成为一台仪表，卡片是仪表里的
+   分层。深色不跟随系统：它就是设计语言本身。
+   ========================================================================== */
 .mt5700-page {
   max-width: 1400px;
   margin: 0 auto;
+  background: var(--mt5700-bg);
+  border: 1px solid var(--mt5700-border);
+  border-radius: 14px;
+  padding: 18px 20px 24px;
 }
 
 /* 页面主体：纵向弹性布局，统一卡片间距 */
 .mt5700-page-body {
   display: flex;
   flex-direction: column;
-  gap: var(--mt5700-space-md);
+  gap: 14px;
   min-width: 0;
 }
 
@@ -202,7 +191,7 @@
   color: var(--mt5700-text);
   margin: 0;
   line-height: 1.25;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 
   /* ★★ Argon 把**裸 h2 当卡片画**（cascade.css：
         h2 { padding: 1rem 1.25rem; font-size: 1.25rem; border-radius: .25rem;
@@ -224,11 +213,11 @@
 }
 
 /* ==========================================================================
-   L2 - 主容器卡片（平面 + 发丝线，版式重做 2026-10-26）
+   L2 - 卡片（深色面板内的提升层）
    --------------------------------------------------------------------------
-   原先每张卡都带多层阴影与 hover 阴影加深，在 6~10 张卡的页面上会糊成一片
-   「浮岛」，且卡本身不可点，hover 反而在暗示可点。现在卡片只用 1px 实线 +
-   12px 圆角表达边界，卡片标题前加一道主色竖条做层级锚点。
+   卡片是「面板里浮起的一层」：底色比画布亮一档 + 1px 细线 + 顶部一道琥珀
+   高光线（::before）。高光线是深色里唯一允许的「光」，替代了以前的阴影分层
+   —— 阴影在深底上只会发闷，一道 1px 亮线就能把层级说清楚。
    ========================================================================== */
 .mt5700-card {
   position: relative;
@@ -236,6 +225,19 @@
   border: 1px solid var(--mt5700-border);
   border-radius: var(--mt5700-radius-lg);
   overflow: hidden;
+}
+
+/* 顶部高光线：从中点向两侧淡出，只盖卡片宽度的中间 56% */
+.mt5700-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 22%;
+  right: 22%;
+  height: 1px;
+  background: var(--mt5700-edge-light);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .mt5700-card-header {
@@ -345,17 +347,21 @@
 }
 
 .mt5700-metric-label {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.4;
-  color: var(--mt5700-text-secondary);
-  letter-spacing: 0.01em;
-  margin-bottom: 3px;
+  color: var(--mt5700-text-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
 }
 
 .mt5700-metric-value {
-  font-size: 20px;
+  /* 等宽 + 紧字距：读数跳动时列宽不抖，也更有仪表感 */
+  font-family: var(--mt5700-font-mono);
+  font-size: 24px;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
   color: var(--mt5700-text);
   word-break: break-all;
   /* 等宽数字：读数类页面（网络状态 1s 轮询、信号/速率刷新）数值跳动时
@@ -373,8 +379,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
   gap: 1px;
-  background: var(--mt5700-border-subtle);
-  border: 1px solid var(--mt5700-border-subtle);
+  background: var(--mt5700-divider);
   border-radius: var(--mt5700-radius-md);
   overflow: hidden;
 }
@@ -460,19 +465,11 @@
   border-radius: var(--mt5700-radius-full);
 }
 
-.mt5700-gauge-caption.exc { background: rgba(15, 157, 88, 0.14); color: #0d9e6e; }
-.mt5700-gauge-caption.good { background: rgba(6, 182, 212, 0.14); color: #0891b2; }
-.mt5700-gauge-caption.fair { background: rgba(224, 135, 0, 0.16); color: #b45309; }
-.mt5700-gauge-caption.poor { background: rgba(249, 115, 22, 0.16); color: #c2410c; }
-.mt5700-gauge-caption.bad { background: rgba(220, 47, 47, 0.14); color: #dc2626; }
-
-@media (prefers-color-scheme: dark) {
-  .mt5700-gauge-caption.exc { color: #34d399; }
-  .mt5700-gauge-caption.good { color: #22d3ee; }
-  .mt5700-gauge-caption.fair { color: #fbbf24; }
-  .mt5700-gauge-caption.poor { color: #fb923c; }
-  .mt5700-gauge-caption.bad { color: #f87171; }
-}
+.mt5700-gauge-caption.exc { background: rgba(63, 178, 127, 0.14); color: var(--mt5700-sig-exc); }
+.mt5700-gauge-caption.good { background: rgba(34, 211, 238, 0.14); color: var(--mt5700-sig-good); }
+.mt5700-gauge-caption.fair { background: rgba(251, 191, 36, 0.14); color: var(--mt5700-sig-fair); }
+.mt5700-gauge-caption.poor { background: rgba(251, 146, 60, 0.14); color: var(--mt5700-sig-poor); }
+.mt5700-gauge-caption.bad { background: rgba(248, 113, 113, 0.14); color: var(--mt5700-sig-bad); }
 
 /* ==========================================================================
    L4 - 实时速率图表 (折线 + 悬浮提示 + 图例)
@@ -544,7 +541,7 @@
 }
 
 .mt5700-btn:focus-visible {
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.28);
+  box-shadow: 0 0 0 3px rgba(245, 185, 66, 0.3);
 }
 
 .mt5700-btn:disabled {
@@ -561,8 +558,12 @@
 
 .mt5700-btn-primary {
   background: var(--mt5700-accent);
-  color: white;
+  /* ★ 琥珀底上不能放白字（对比 1.9:1），必须深色字 */
+  color: var(--mt5700-on-accent);
   border-color: var(--mt5700-accent);
+  font-weight: 600;
+  /* 深色底上主按钮带一圈极淡的光晕，让它成为视觉焦点 */
+  box-shadow: 0 0 18px rgba(245, 185, 66, 0.16);
 }
 
 .mt5700-btn-primary:hover:not(:disabled) {
@@ -571,13 +572,13 @@
 }
 
 .mt5700-btn-secondary {
-  background: var(--mt5700-card-bg);
+  background: #1b2532;
   color: var(--mt5700-text);
   border-color: var(--mt5700-border);
 }
 
 .mt5700-btn-secondary:hover:not(:disabled) {
-  background: var(--mt5700-surface-sunken);
+  background: #222d3b;
   border-color: var(--mt5700-text-muted);
 }
 
@@ -588,8 +589,8 @@
 }
 
 .mt5700-btn-success:hover:not(:disabled) {
-  background: #0b8a4b;
-  border-color: #0b8a4b;
+  background: #35946e;
+  border-color: #35946e;
 }
 
 .mt5700-btn-danger {
@@ -599,8 +600,8 @@
 }
 
 .mt5700-btn-danger:hover:not(:disabled) {
-  background: #c02626;
-  border-color: #c02626;
+  background: #c94b43;
+  border-color: #c94b43;
 }
 
 .mt5700-btn-ghost {
@@ -610,14 +611,8 @@
 }
 
 .mt5700-btn-ghost:hover:not(:disabled) {
-  background: rgba(14, 22, 38, 0.05);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--mt5700-text);
-}
-
-@media (prefers-color-scheme: dark) {
-  .mt5700-btn-ghost:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
-  }
 }
 
 .mt5700-btn-sm {
@@ -657,10 +652,11 @@
 
 .mt5700-label {
   display: block;
-  font-size: var(--mt5700-font-size-xs);
-  font-weight: 600;
-  color: var(--mt5700-text-secondary);
-  letter-spacing: 0.02em;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mt5700-text-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   margin-bottom: 6px;
 }
 
@@ -675,10 +671,11 @@
   min-height: 34px;
   padding: 7px 10px;
   font-size: var(--mt5700-font-size-sm);
-  font-family: var(--mt5700-font-sans);
+  font-family: var(--mt5700-font-mono);
   line-height: 1.4;
   color: var(--mt5700-text);
-  background: var(--mt5700-card-bg);
+  /* 输入区比卡片深一档：形成「可键入的凹陷」 */
+  background: var(--mt5700-surface-sunken);
   border: 1px solid var(--mt5700-border);
   border-radius: var(--mt5700-radius-md);
   transition: border-color var(--mt5700-transition-fast), box-shadow var(--mt5700-transition-fast);
@@ -687,7 +684,7 @@
 
 .mt5700-input:focus {
   border-color: var(--mt5700-accent);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.14);
+  box-shadow: 0 0 0 3px rgba(245, 185, 66, 0.14);
 }
 
 .mt5700-input::placeholder {
@@ -724,8 +721,8 @@
   font-size: var(--mt5700-font-size-sm);
   line-height: 1.6;
   color: var(--mt5700-text-secondary);
-  background: rgba(79, 70, 229, 0.06);
-  border: 1px solid rgba(79, 70, 229, 0.18);
+  background: rgba(86, 182, 224, 0.07);
+  border: 1px solid rgba(86, 182, 224, 0.2);
   border-radius: var(--mt5700-radius-md);
 }
 
@@ -740,8 +737,8 @@
   line-height: 16px;
   text-align: center;
   border-radius: 50%;
-  background: rgba(79, 70, 229, 0.16);
-  color: var(--mt5700-accent);
+  background: rgba(86, 182, 224, 0.18);
+  color: var(--mt5700-info-light);
 }
 
 .mt5700-notice-success {
@@ -777,8 +774,8 @@
 .mt5700-danger-zone {
   margin-top: var(--mt5700-space-lg);
   padding: var(--mt5700-space-md);
-  background: rgba(220, 47, 47, 0.03);
-  border: 1px solid rgba(220, 47, 47, 0.28);
+  background: rgba(226, 86, 77, 0.06);
+  border: 1px solid rgba(226, 86, 77, 0.3);
   border-radius: var(--mt5700-radius-md);
 }
 
@@ -953,7 +950,7 @@
   overflow-x: auto;
   border-radius: var(--mt5700-radius-md);
   border: 1px solid var(--mt5700-border-subtle);
-  background: var(--mt5700-card-bg);
+  background: var(--mt5700-surface-sunken);
 }
 
 .mt5700-table {
@@ -965,9 +962,9 @@
 .mt5700-table th {
   text-align: left;
   padding: 8px 12px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--mt5700-text-muted);
   background: var(--mt5700-table-head-bg);
@@ -979,6 +976,7 @@
   padding: 9px 12px;
   border-bottom: 1px solid var(--mt5700-divider);
   color: var(--mt5700-text-secondary);
+  font-family: var(--mt5700-font-sans);
   vertical-align: middle;
   /* 等宽数字：表格每 5s 刷新一次，比例字体会让列宽左右抖 */
   font-variant-numeric: tabular-nums;
@@ -987,15 +985,15 @@
 .mt5700-table tbody tr:last-child td { border-bottom: none; }
 
 .mt5700-table tbody tr:hover {
-  background: rgba(79, 70, 229, 0.035);
+  background: rgba(245, 185, 66, 0.05);
 }
 
 .mt5700-table-striped tbody tr:nth-child(even) {
-  background: rgba(14, 22, 38, 0.015);
+  background: rgba(255, 255, 255, 0.022);
 }
 
 .mt5700-table-striped tbody tr:nth-child(even):hover {
-  background: rgba(79, 70, 229, 0.05);
+  background: rgba(245, 185, 66, 0.07);
 }
 
 /* 分组标题行：多组「项目 → 值」合并进一张表时用它分隔（如「连接诊断 / 地址与 DNS」）。
@@ -1040,14 +1038,14 @@
   background: currentColor;
 }
 
-.mt5700-badge-success { background: rgba(15, 157, 88, 0.1); color: var(--mt5700-success); }
-.mt5700-badge-warning { background: rgba(224, 135, 0, 0.12); color: var(--mt5700-warning); }
-.mt5700-badge-danger { background: rgba(220, 47, 47, 0.1); color: var(--mt5700-danger); }
-.mt5700-badge-info { background: rgba(79, 70, 229, 0.1); color: var(--mt5700-accent); }
+.mt5700-badge-success { background: rgba(63, 178, 127, 0.12); color: var(--mt5700-success-light); }
+.mt5700-badge-warning { background: rgba(224, 163, 58, 0.14); color: var(--mt5700-warning-light); }
+.mt5700-badge-danger { background: rgba(226, 86, 77, 0.12); color: var(--mt5700-danger-light); }
+.mt5700-badge-info { background: rgba(86, 182, 224, 0.12); color: var(--mt5700-info-light); }
 /* primary：Mt5700.badge(..., 'primary') 在「定时锁频」页使用（当前时段）。
    此前 CSS 缺这一条，徽章只能落到基础 .mt5700-badge 上（无配色）。取强调色，与 info 同族。 */
-.mt5700-badge-primary { background: rgba(79, 70, 229, 0.14); color: var(--mt5700-accent); }
-.mt5700-badge-neutral { background: rgba(14, 22, 38, 0.05); color: var(--mt5700-text-secondary); }
+.mt5700-badge-primary { background: rgba(245, 185, 66, 0.14); color: var(--mt5700-accent); }
+.mt5700-badge-neutral { background: rgba(255, 255, 255, 0.06); color: var(--mt5700-text-secondary); }
 
 /* ---------- AT 服务状态卡片 (L2，独立命名空间，不依赖 LuCI 主题) ---------- */
 .mt5700-status-card {
@@ -1056,7 +1054,7 @@
      （绿 #35b879、正文 #17211d、底色 0.62 alpha），与同一页上的徽章、仪表
      用的是两个绿、两种白，并排看就是「不像一套东西」。 */
   --mt5700-status-color: var(--mt5700-success);
-  --mt5700-status-muted: #7b8781;
+  --mt5700-status-muted: #8fa0b4;
 
   width: 100%;
   box-sizing: border-box;
@@ -1221,8 +1219,9 @@
 
   border-radius: 11px;
 
-  background: rgba(255,255,255,.42);
-  border: 1px solid rgba(0,0,0,.045);
+  /* 深色控制台：芯片是比卡片再深一档的凹陷小块 */
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.07);
 
   font-family:
     ui-monospace,
@@ -1257,13 +1256,13 @@
 /* SIM 芯片告警态。JS 侧 renderConnectionBar 会 toggle('is-warn', sim.warn)，
    早先 CSS 缺这条规则 ⇒ 状态类挂上了却没有样式，告警永远看不见。 */
 .mt5700-status-sim.is-warn {
-  background: rgba(231, 166, 59, .16);
-  border-color: rgba(231, 166, 59, .42);
+  background: rgba(245, 185, 66, .13);
+  border-color: rgba(245, 185, 66, .38);
 }
 
 .mt5700-status-sim.is-warn .mt5700-status-rpc-label,
 .mt5700-status-sim.is-warn .mt5700-status-rpc-value {
-  color: #a8681b;
+  color: var(--mt5700-warning-light);
 }
 
 /* 状态配色 */
@@ -1330,35 +1329,6 @@
 }
 
 /* 深色模式 */
-@media (prefers-color-scheme: dark) {
-
-  .mt5700-status-card {
-    /* 暗色下只改次级灰度；底色/描边/正文跟随 --mt5700-card-bg / --mt5700-border /
-       --mt5700-text 的暗色值（原来自带的是偏绿的 rgba(30,37,34)，和别的卡片发青的
-       rgba(32,38,54) 放一起明显不同色） */
-    --mt5700-status-muted: #87938d;
-  }
-
-  .mt5700-status-rpc {
-    background: rgba(255,255,255,.035);
-    border-color: rgba(255,255,255,.06);
-  }
-
-  .mt5700-status-rpc-value {
-    color: var(--mt5700-text);
-  }
-
-  .mt5700-status-sim.is-warn {
-    background: rgba(231, 166, 59, .12);
-    border-color: rgba(231, 166, 59, .34);
-  }
-
-  .mt5700-status-sim.is-warn .mt5700-status-rpc-label,
-  .mt5700-status-sim.is-warn .mt5700-status-rpc-value {
-    color: #f0b45c;
-  }
-}
-
 /* ==========================================================================
    模态框 (最高 Z 层)
    ========================================================================== */
@@ -1442,7 +1412,7 @@
 .mt5700-toast-success { background: var(--mt5700-success); color: white; }
 .mt5700-toast-error { background: var(--mt5700-danger); color: white; }
 .mt5700-toast-warning { background: var(--mt5700-warning); color: white; }
-.mt5700-toast-info { background: var(--mt5700-accent); color: white; }
+.mt5700-toast-info { background: var(--mt5700-accent); color: var(--mt5700-on-accent); }
 
 .mt5700-toast-hide {
   animation: mt5700-toast-out 0.3s ease forwards;
@@ -1614,7 +1584,7 @@
 
 .mt5700-sms-list-header {
   padding: var(--mt5700-space-md);
-  background: rgba(0, 0, 0, 0.02);
+  background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid var(--mt5700-divider);
 }
 
@@ -1659,7 +1629,7 @@
 
 .mt5700-sms-detail-header {
   padding: var(--mt5700-space-md);
-  background: rgba(0, 0, 0, 0.02);
+  background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid var(--mt5700-divider);
 }
 
@@ -1746,7 +1716,7 @@
   word-break: break-word;
 }
 
-.mt5700-terminal-prompt { color: #60a5fa; }
+.mt5700-terminal-prompt { color: var(--mt5700-info-light); }
 
 .mt5700-terminal-input {
   width: 100%;
@@ -1793,22 +1763,17 @@
 }
 
 .mt5700-step-done {
-  background: rgba(15, 157, 88, 0.14);
-  border-color: rgba(15, 157, 88, 0.35);
-  color: #0d9e6e;
+  background: rgba(63, 178, 127, 0.14);
+  border-color: rgba(63, 178, 127, 0.35);
+  color: var(--mt5700-success-light);
 }
 
 .mt5700-step-current {
-  background: rgba(79, 70, 229, 0.14);
-  border-color: rgba(79, 70, 229, 0.4);
-  color: #1a5eab;
+  background: rgba(245, 185, 66, 0.14);
+  border-color: rgba(245, 185, 66, 0.4);
+  color: var(--mt5700-accent);
   font-weight: 600;
   box-shadow: var(--mt5700-sh-1);
-}
-
-@media (prefers-color-scheme: dark) {
-  .mt5700-step-done { color: #34d399; }
-  .mt5700-step-current { color: #60a5fa; }
 }
 
 .mt5700-progress { margin: 12px 0; }
@@ -1825,7 +1790,7 @@
 .mt5700-progress-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #1a5eab, #4b8fd6);
+  background: linear-gradient(90deg, var(--mt5700-accent), var(--mt5700-accent-light));
   transition: width 0.4s ease;
 }
 
@@ -1847,7 +1812,8 @@
   max-height: 420px;
   min-height: 160px;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.04);
+  /* 深色控制台里的日志区比卡片再深一档 */
+  background: rgba(0, 0, 0, 0.32);
   border-radius: 10px;
   padding: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1857,10 +1823,6 @@
   word-break: break-all;
 }
 
-@media (prefers-color-scheme: dark) {
-  .mt5700-terminal-log { background: rgba(255, 255, 255, 0.05); }
-}
-
 .mt5700-inline {
   display: flex;
   align-items: center;
@@ -1868,15 +1830,9 @@
   flex-wrap: wrap;
 }
 
-.mt5700-log-ok { color: #0d9e6e; }
-.mt5700-log-err { color: #dc2626; }
-.mt5700-log-cmd { color: #1a5eab; font-weight: 600; }
-
-@media (prefers-color-scheme: dark) {
-  .mt5700-log-ok { color: #34d399; }
-  .mt5700-log-err { color: #f87171; }
-  .mt5700-log-cmd { color: #60a5fa; }
-}
+.mt5700-log-ok { color: var(--mt5700-success-light); }
+.mt5700-log-err { color: var(--mt5700-danger-light); }
+.mt5700-log-cmd { color: var(--mt5700-info-light); font-weight: 600; }
 
 /* ---------- 运行日志行（复用 .mt5700-terminal-log 做滚动容器） ----------
    只补四个规则：行容器 / 行间分隔线 / 时间列 / 消息列。
@@ -2259,9 +2215,9 @@
   flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--mt5700-border-subtle);
+  border: 1px solid var(--mt5700-border);
   border-radius: var(--mt5700-radius-md);
-  background: var(--mt5700-glass-bg);
+  background: var(--mt5700-surface-sunken);
 }
 .mt5700-segmented-btn {
   padding: 6px 14px;
@@ -2281,7 +2237,8 @@
 }
 .mt5700-segmented-btn.is-active {
   background: var(--mt5700-accent);
-  color: #fff;
+  color: var(--mt5700-on-accent);
+  font-weight: 600;
 }
 
 /* ==========================================================================
@@ -2434,8 +2391,8 @@
    管脚含义，页面无法解读），胶囊本身是通用组件，保留备用。
    一排小胶囊：名称（次要色、小字）+ 数值（等宽、加粗），单位只在末尾出现一次。
 
-   ① 底色取 rgba(127,127,127,0.07)，与 .mt5700-lock-item 同一套路 —— 亮暗主题
-      都看得见。不用 .mt5700-badge-neutral：它是 rgba(0,0,0,.05)，暗色下等于没底。
+   ① 底色取 rgba(127,127,127,0.07)，与 .mt5700-lock-item 同一套路 —— 在深色
+      控制台里也看得见。不用 .mt5700-badge-neutral：它是淡白 0.06，做底太跳。
    ② 胶囊必须 flex:0 0 auto + white-space:nowrap。上一版容器用的是 .mt5700-grow
       （flex:1 1 240px），在窄栏里会被**压缩到内容宽度以下**，再撞上
       .mt5700-mono 的 word-break:break-all，「ADC0 1799」就地断行，一排读数
