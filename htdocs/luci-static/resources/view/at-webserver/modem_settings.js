@@ -226,14 +226,27 @@ return L.view.extend({
 		/*
 		 * 「修改IMEI」（恢复此前更新中误删除的入口）。
 		 * 写入指令 AT^PHYNUM=IMEI,<imei>；改写设备唯一标识属高危操作，
-		 * 流程强制 5 次确认：2 次风险告知 → 2 次输入新 IMEI（两次必须完全
-		 * 一致）→ 1 次最终确认，弹窗全部使用插件统一弹窗样式（Mt5700.confirm）。
+		 * 流程强制 5 次确认：2 次风险告知 → 2 次输入新 IMEI（须为 15 位纯
+		 * 数字且通过 Luhn 校验位校验，两次必须完全一致）→ 1 次最终确认，
+		 * 弹窗全部使用插件统一弹窗样式（Mt5700.confirm）。
 		 */
 		imeiBody.appendChild(sysCtlItem(
 			'is-danger', '修改设备 IMEI', '高危操作：改写模组出厂唯一硬件标识，需连续 5 次确认（含两次 IMEI 输入一致性校验）。',
 			'修改IMEI', 'danger',
 			startImeiModify
 		));
+
+		/* IMEI 第 15 位是 Luhn 校验位（同 ISO/IEC 7812-1 银行卡算法）：
+		 * 从左起第 2、4…14 位翻倍（超过 9 则减 9），全部求和后须能被 10 整除 */
+		function luhnValid(imei) {
+			var sum = 0;
+			for (var i = 0; i < 15; i++) {
+				var d = parseInt(imei.charAt(i), 10);
+				if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+				sum += d;
+			}
+			return sum % 10 === 0;
+		}
 
 		/* 输入步骤：复用插件确认弹窗（Mt5700.confirm），内嵌数字输入框并即时过滤非法字符 */
 		function askImeiInput(message, okText, onValid) {
@@ -245,13 +258,18 @@ return L.view.extend({
 			});
 			var content = E('div', { style: 'display:flex; flex-direction:column; gap:8px; text-align:left;' }, [
 				E('div', {}, message),
-				E('div', { style: 'font-size:12px; color:var(--mt5700-text-secondary);' }, '仅允许 15 位纯数字（0-9），输入非数字字符会被自动过滤'),
+				E('div', { style: 'font-size:12px; color:var(--mt5700-text-secondary);' }, '仅允许 15 位纯数字（0-9），末位校验位需通过 Luhn 校验'),
 				input
 			]);
 			Mt5700.confirm(content, function () {
 				var v = String(input.value || '').trim();
 				if (!/^\d{15}$/.test(v)) {
 					Mt5700.error('IMEI 必须为 15 位纯数字，请重新输入');
+					askImeiInput(message, okText, onValid);
+					return;
+				}
+				if (!luhnValid(v)) {
+					Mt5700.error('IMEI 末位校验位未通过 Luhn 校验，请核对后重新输入');
 					askImeiInput(message, okText, onValid);
 					return;
 				}
@@ -310,7 +328,7 @@ return L.view.extend({
 		imeiBody.appendChild(Mt5700.fieldNote(
 			'IMEI 为模组出厂写入的唯一设备标识（读取自 AT+CGSN）。「修改IMEI」为高危功能，需连续 5 次确认。',
 			[
-				'两次输入的新 IMEI 必须完全一致，才会下发写入指令 AT^PHYNUM=IMEI,<imei>。',
+				'新 IMEI 须为 15 位纯数字且末位校验位通过 Luhn 校验，两次输入完全一致后才会下发写入指令 AT^PHYNUM=IMEI,<imei>。',
 				'改写 IMEI 可能违反当地无线电通信法律法规，由此产生的后果需自行承担。'
 			]
 		));
