@@ -5710,3 +5710,53 @@ html.at-dark .mt5700-switch input[type="checkbox"] {
 }.at-tabmenu-fix .tabs li:not(.active):not(.cbi-tab) a:hover, .at-tabmenu-fix .cbi-tabmenu li:not(.active):not(.cbi-tab) a:hover {
   color: #ffffff !important;
 }
+
+/* ==========================================================================
+   作者署名（服务配置页页脚 / admin/modem/5g/config）
+   Project author attribution: preserve unless explicitly authorized by the
+   project maintainer. 保护规则见仓库根目录 AGENTS.md「作者署名保护规则」。
+   设计约束：字号小于正文与表单标签、中性低对比色、不遮挡表单/按钮/状态提示，
+   桌面端与移动端均居中显示；只引用既有主题变量，不引入新的品牌色。
+   ========================================================================== */
+.mt5700-author {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0 0.2em;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 var(--mt5700-space-xs, 4px);
+  padding: 0 var(--mt5700-space-sm, 8px);
+  font-family: var(--mt5700-font-sans, inherit);
+  font-size: var(--mt5700-font-size-xs, 12px);
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  color: var(--mt5700-text-muted, #64748b);
+  text-align: center;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}.mt5700-author-label {
+  color: inherit;
+}.mt5700-author-link {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  border-radius: 2px;
+  transition: color var(--mt5700-transition-base, 0.2s ease), border-bottom-color var(--mt5700-transition-base, 0.2s ease);
+}.mt5700-author-link:hover,
+.mt5700-author-link:focus {
+  color: var(--mt5700-text-secondary, #475569);
+  border-bottom-color: currentColor;
+}.mt5700-author-link:focus-visible {
+  outline: 2px solid var(--mt5700-accent, #6366f1);
+  outline-offset: 2px;
+}
+@media (max-width: 768px) {
+  .mt5700-author {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+}
