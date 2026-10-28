@@ -8,7 +8,11 @@
 # 检查项：
 #   1) tests/static-check.js —— JS 语法（node --check）、JSON 合法性、
 #      行尾 LF、menu.d 中 view 路由是否存在对应视图文件；
-#   2) tests/*-test.js —— 仓库内的零依赖单元测试脚本（逐个执行，任一失败即中止）。
+#   2) tests/author-attribution-test.js —— 作者信息检查（单独一个步骤，失败最先暴露），
+#      校验页面 admin/modem/5g/config 的署名文案「作者：LianXia233」、链接指向主仓库、
+#      target/rel 安全属性、字号与居中、未扩散到其他视图、AGENTS.md 规则仍在；
+#   3) tests/*-test.js —— 其余零依赖单元测试脚本（逐个执行，任一失败即中止；
+#      第 2 项的文件已单独执行，循环内跳过，避免重复）。
 #
 # 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
 #      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
@@ -21,28 +25,41 @@
 #   1) 合并门禁：本工作流是 main 分支的合并前门禁，提交须全绿才算通过。
 #      本地等价命令：
 #        node tests/static-check.js
+#        node tests/author-attribution-test.js
 #        for f in tests/*-test.js; do node "$f" || exit 1; done
 #
 #   2) 检查项只增不减：不得为了「修绿」而删除、注释掉、跳过或弱化既有检查步骤
-#      （static-check 的四项检查、测试脚本的逐个执行）。确需调整时，必须在同一
-#      提交内说明原因，并保留同等或更强的覆盖范围。
+#      （static-check 的四项检查、作者信息检查、测试脚本的逐个执行）。确需调整时，
+#      必须在同一提交内说明原因，并保留同等或更强的覆盖范围。
 #
 #   3) 测试脚本自动纳入：新增 tests/*-test.js 会被自动执行，无需修改本文件；
 #      文件名须以 -test.js 结尾，且保持零依赖（不得 require 第三方包，也不得
 #      依赖网络、设备或特定操作系统）。
 #
-#   4) 项目维护规则：改动视图、样式、菜单或测试之前，先读仓库根目录 AGENTS.md。
+#   4) 作者署名约定：`LianXia233` 是本项目指定的作者署名标识。
+#      · 页面 `admin/modem/5g/config`（视图 view/at-webserver/service.js）底部的
+#        署名「作者：LianXia233」及其 GitHub 链接
+#        https://github.com/LianXia233/luci-app-mt5700 属于明确要求保留的页面元素；
+#      · 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写、去重或 AI 自动修改，
+#        都必须保留该署名与链接，不得删除、隐藏、替换或破坏；
+#      · 改动该页面后须自查：署名是否仍在、链接地址是否正确、桌面端与移动端是否
+#        正常显示、是否与表单/按钮/状态提示重叠；
+#      · 仅当项目维护者明确授权时方可删除或修改署名，且须在授权范围内最小化改动；
+#      · 本节由 tests/author-attribution-test.js 落实为可执行断言，随检查项 2 在每次
+#        push / PR 时运行，署名缺失或链接变更会直接使 CI 失败。完整条款见 AGENTS.md。
+#
+#   5) 项目维护规则：改动视图、样式、菜单或测试之前，先读仓库根目录 AGENTS.md。
 #      其中列有必须保留的页面元素清单与改动后的检查要求；不得以重构、去重、
 #      风格统一或自动化清理为由移除清单内的元素。
 #
-#   5) 行尾强制 LF：Shell、Python、配置与本工作流一律 LF。CRLF 会导致 BusyBox
+#   6) 行尾强制 LF：Shell、Python、配置与本工作流一律 LF。CRLF 会导致 BusyBox
 #      ash 与 procd 侧脚本失败；仓库已用 .gitattributes 强制 eol=lf，检查项 3
 #      会在 CI 中兜底拦截。
 #
-#   6) 依赖与时长：不引入 npm 依赖与第三方 action，单次运行控制在 1 分钟内；
+#   7) 依赖与时长：不引入 npm 依赖与第三方 action，单次运行控制在 1 分钟内；
 #      新增检查应优先写成 tests/ 下的零依赖 Node 脚本。
 #
-#   7) 权限边界：本工作流只读仓库，不得为其申请 contents: write；打包、发布、
+#   8) 权限边界：本工作流只读仓库，不得为其申请 contents: write；打包、发布、
 #      Release 清理等写操作一律留在 build-openwrt.yml，由 tag 或手动触发。
 #
 #   维护提示：本文件属于 GitHub 工作流，推送对它的修改需要具备 workflow 作用域
@@ -83,6 +100,9 @@ jobs:
       - name: 静态检查（语法 / JSON / 行尾 / 路由）
         run: node tests/static-check.js
 
+      - name: 作者信息检查
+        run: node tests/author-attribution-test.js
+
       - name: 单元测试（零依赖脚本）
         run: |
           set -euo pipefail
@@ -94,6 +114,9 @@ jobs:
           fi
           echo "共 ${#files[@]} 个测试脚本"
           for f in "${files[@]}"; do
+            if [ "${f}" = "tests/author-attribution-test.js" ]; then
+              continue
+            fi
             echo "::group::${f}"
             node "$f"
             echo "::endgroup::"
