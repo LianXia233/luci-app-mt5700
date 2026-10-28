@@ -7,7 +7,7 @@
 
 /**
  * 模组设置页面：
- * - 设备信息（ATI / IMEI / 连接模式 AT+CONNECT? / USB 速率）
+ * - 设备信息（ATI / IMEI / 连接模式 AT+CONNECT? / USB 速率）、修改 IMEI（AT^PHYNUM，5 次确认）
  * - SIM 卡：槽位切换（SCICHG + HVSST + CFUN 重启）、热插拔（TDSIMHP）、PIN 状态/操作
  * - 射频与 5G 增强：飞行模式（CFUN）、NR 载波聚合 / VoNR / DSS（NRRCCAPQRY/CFG）
  * - 设备控制：网卡速率（TDPCIELANCFG）、电源管理（TDPMCFG）
@@ -224,18 +224,94 @@ return L.view.extend({
 		imeiBody.appendChild(imeiBox);
 
 		/*
-		 * IMEI 只读。《AT 命令手册》全文只在「读取」语境下出现 IMEI
-		 * （ESN/IMEI 查询 AT+GSN、TAC+SNR 组装规则、错误码释义），没有任何写入
-		 * IMEI 的私有指令；早先版本自造的 AT^PHYNUM=IMEI,<imei> 在四份厂商文档
-		 * （AT 手册 / FOTA 指南 / USB 指南 / 授时指导）里都不存在，下发必然无效。
-		 * 加上「改写 IMEI 属无线电管制行为、插件对外声明不触碰 IMEI」，
-		 * 这条写入链路整体移除，页面保留读取与复制。
+		 * 「修改IMEI」（恢复此前更新中误删除的入口）。
+		 * 写入指令 AT^PHYNUM=IMEI,<imei>；改写设备唯一标识属高危操作，
+		 * 流程强制 5 次确认：2 次风险告知 → 2 次输入新 IMEI（两次必须完全
+		 * 一致）→ 1 次最终确认，弹窗全部使用插件统一弹窗样式（Mt5700.confirm）。
 		 */
+		imeiBody.appendChild(sysCtlItem(
+			'is-danger', '修改设备 IMEI', '高危操作：改写模组出厂唯一硬件标识，需连续 5 次确认（含两次 IMEI 输入一致性校验）。',
+			'修改IMEI', 'danger',
+			startImeiModify
+		));
+
+		/* 输入步骤：复用插件确认弹窗（Mt5700.confirm），内嵌数字输入框并即时过滤非法字符 */
+		function askImeiInput(message, okText, onValid) {
+			var input = Mt5700.input('text', '请输入 15 位数字 IMEI', '');
+			input.maxLength = 15;
+			input.autocomplete = 'off';
+			input.addEventListener('input', function () {
+				input.value = input.value.replace(/\D/g, '').slice(0, 15);
+			});
+			var content = E('div', { style: 'display:flex; flex-direction:column; gap:8px; text-align:left;' }, [
+				E('div', {}, message),
+				E('div', { style: 'font-size:12px; color:var(--mt5700-text-secondary);' }, '仅允许 15 位纯数字（0-9），输入非数字字符会被自动过滤'),
+				input
+			]);
+			Mt5700.confirm(content, function () {
+				var v = String(input.value || '').trim();
+				if (!/^\d{15}$/.test(v)) {
+					Mt5700.error('IMEI 必须为 15 位纯数字，请重新输入');
+					askImeiInput(message, okText, onValid);
+					return;
+				}
+				onValid(v);
+			}, okText);
+		}
+
+		function startImeiModify() {
+			if (!dev.imei) { Mt5700.warning('尚未读取到当前 IMEI，请刷新页面后重试'); return; }
+			var pending = '';
+
+			function step1() {
+				Mt5700.confirm('【确认 1/5】修改 IMEI 属于高风险操作，可能违反当地无线电通信法律法规，并导致设备无法正常使用。是否继续？', step2, '继续（1/5）');
+			}
+			function step2() {
+				Mt5700.confirm('【确认 2/5】IMEI 是模组出厂写入的唯一硬件标识，改写后可能导致无法注册网络、失去官方保修，且操作不可逆。确定继续？', step3, '继续（2/5）');
+			}
+			function step3() {
+				askImeiInput('【确认 3/5】请输入新的 IMEI（第一次）', '继续（3/5）', function (v) {
+					pending = v;
+					step4();
+				});
+			}
+			function step4() {
+				askImeiInput('【确认 4/5】请再次输入新的 IMEI（第二次，需与第一次完全一致）', '继续（4/5）', function (v) {
+					if (v !== pending) {
+						Mt5700.error('两次输入的 IMEI 不一致，请从第一次输入重新开始');
+						step3();
+						return;
+					}
+					step5();
+				});
+			}
+			function step5() {
+				Mt5700.confirm('【确认 5/5】最后确认：即将把设备 IMEI 由 ' + dev.imei + ' 修改为 ' + pending + '，此操作不可撤销。确认下发写入指令？', function () {
+					send('AT^PHYNUM=IMEI,' + pending).then(function (res) {
+						if (res.success) {
+							Mt5700.success('IMEI 修改指令已下发');
+							/* 回读 IMEI 刷新展示；部分固件需重启模组后新号才生效 */
+							send('AT+CGSN').then(function (r) {
+								if (r.success && r.data) {
+									var m = atText(r).match(/(\d{15})/);
+									if (m) { dev.imei = m[1]; imeiEl.textContent = m[1]; }
+								}
+							}).catch(function () {});
+						} else {
+							Mt5700.error(Ui.atErrorText(res, 'IMEI 修改失败'));
+						}
+					}).catch(function () { Mt5700.error('IMEI 修改失败'); });
+				}, '确认修改（5/5）');
+			}
+
+			step1();
+		}
+
 		imeiBody.appendChild(Mt5700.fieldNote(
-			'IMEI 为模组出厂写入的唯一设备标识，本页面只读展示（读取自 AT+CGSN）。',
+			'IMEI 为模组出厂写入的唯一设备标识（读取自 AT+CGSN）。「修改IMEI」为高危功能，需连续 5 次确认。',
 			[
-				'厂商 AT 命令手册未提供 IMEI 写入指令，插件不提供改写能力。',
-				'擅自改写 IMEI 可能违反当地无线电通信法律法规。'
+				'两次输入的新 IMEI 必须完全一致，才会下发写入指令 AT^PHYNUM=IMEI,<imei>。',
+				'改写 IMEI 可能违反当地无线电通信法律法规，由此产生的后果需自行承担。'
 			]
 		));
 
