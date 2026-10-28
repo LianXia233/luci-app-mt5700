@@ -322,6 +322,12 @@ impl RpcServer {
                 if cmd.is_empty() {
                     return serde_json::json!({ "id": id, "error": { "code": -32602, "message": "缺少参数 cmd" } });
                 }
+                // IMEI 写入防护：AT^PHYNUM=IMEI,<imei> 是「修改IMEI」功能的写入通道。
+                // 前端已做格式 + Luhn 校验，这里在后端再兜一层（防绕过 UI 直调 RPC）。
+                if let Err(reason) = validate_imei_write(cmd) {
+                    log_warn!("拒绝 IMEI 写入（{}）: {:?}", reason, cmd);
+                    return serde_json::json!({ "id": id, "error": { "code": -32002, "message": format!("IMEI 校验失败：{reason}") } });
+                }
                 let resp = self.run_command(cmd).await;
                 serde_json::json!({ "id": id, "result": {
                     "success": resp.success,
@@ -1233,4 +1239,70 @@ where
         }
     }
     Ok(Some((String::from_utf8_lossy(&raw).into_owned(), overlong)))
+}
+
+/// IMEI 写入指令（`AT^PHYNUM=IMEI,<imei>`）的结构校验：
+/// `<imei>` 必须是 15 位纯数字，且末位校验位通过 Luhn 算法
+/// （左起第 2、4…14 位翻倍、超 9 减 9，全部求和被 10 整除）。
+/// 非 IMEI 写入指令一律放行；返回 Err(原因) 时 RPC 层拒绝下发模组。
+fn validate_imei_write(cmd: &str) -> Result<(), String> {
+    let imei = match cmd.strip_prefix("AT^PHYNUM=IMEI,") {
+        Some(rest) => rest.trim(),
+        None => return Ok(()),
+    };
+    if imei.len() != 15 || !imei.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("须为 15 位数字".into());
+    }
+    // 全为数字已确认，`b - b'0'` 不会下溢
+    let mut sum: u32 = 0;
+    for (i, b) in imei.bytes().enumerate() {
+        let mut d = (b - b'0') as u32;
+        if i % 2 == 1 {
+            d *= 2;
+            if d > 9 {
+                d -= 9;
+            }
+        }
+        sum += d;
+    }
+    if sum % 10 != 0 {
+        return Err("末位校验位未通过 Luhn 校验".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod imei_write_guard_tests {
+    use super::validate_imei_write;
+
+    #[test]
+    fn 非写入指令不受影响() {
+        assert!(validate_imei_write("AT+CSQ").is_ok());
+        assert!(validate_imei_write("AT+CGSN").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM?").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI").is_ok()); // 无逗号参数，不构成写入
+    }
+
+    #[test]
+    fn 合法_imei_通过() {
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,490154203237518").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,862234051234567").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI, 490154203237518 ").is_ok()); // 容忍首尾空白
+    }
+
+    #[test]
+    fn 非法_格式拒绝() {
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,12345").is_err()); // 位数不足
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,1234567890123456").is_err()); // 超长
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,12345678901234a").is_err()); // 含非数字
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,").is_err()); // 空
+    }
+
+    #[test]
+    fn 校验位错拒绝() {
+        // 490154203237518 合法，末位改成 9 即非法
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,490154203237519").is_err());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,123456789012345").is_err());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,862234051234560").is_err());
+    }
 }
