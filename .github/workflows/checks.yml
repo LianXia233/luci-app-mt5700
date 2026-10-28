@@ -8,11 +8,10 @@
 # 检查项：
 #   1) tests/static-check.js —— JS 语法（node --check）、JSON 合法性、
 #      行尾 LF、menu.d 中 view 路由是否存在对应视图文件；
-#   2) tests/author-attribution-test.js —— 作者信息检查（单独一个步骤，失败最先暴露），
-#      校验页面 admin/modem/5g/config 的署名文案「作者：LianXia233」、链接指向主仓库、
-#      target/rel 安全属性、字号与居中、未扩散到其他视图、AGENTS.md 规则仍在；
-#   3) tests/*-test.js —— 其余零依赖单元测试脚本（逐个执行，任一失败即中止；
-#      第 2 项的文件已单独执行，循环内跳过，避免重复）。
+#   2) tests/*-test.js —— 仓库内的零依赖单元测试脚本（逐个执行，任一失败即中止）。
+#      其中 tests/author-attribution-test.js 负责校验作者信息：署名文案
+#      「作者：LianXia233」、链接指向主仓库、target/rel 安全属性、字号与居中、
+#      未扩散到其他视图、AGENTS.md 规则仍在。
 #
 # 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
 #      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
@@ -25,11 +24,10 @@
 #   1) 合并门禁：本工作流是 main 分支的合并前门禁，提交须全绿才算通过。
 #      本地等价命令：
 #        node tests/static-check.js
-#        node tests/author-attribution-test.js
 #        for f in tests/*-test.js; do node "$f" || exit 1; done
 #
 #   2) 检查项只增不减：不得为了「修绿」而删除、注释掉、跳过或弱化既有检查步骤
-#      （static-check 的四项检查、作者信息检查、测试脚本的逐个执行）。确需调整时，
+#      （static-check 的四项检查、测试脚本的逐个执行，含作者信息检查）。确需调整时，
 #      必须在同一提交内说明原因，并保留同等或更强的覆盖范围。
 #
 #   3) 测试脚本自动纳入：新增 tests/*-test.js 会被自动执行，无需修改本文件；
@@ -100,9 +98,6 @@ jobs:
       - name: 静态检查（语法 / JSON / 行尾 / 路由）
         run: node tests/static-check.js
 
-      - name: 作者信息检查
-        run: node tests/author-attribution-test.js
-
       - name: 单元测试（零依赖脚本）
         run: |
           set -euo pipefail
@@ -114,9 +109,6 @@ jobs:
           fi
           echo "共 ${#files[@]} 个测试脚本"
           for f in "${files[@]}"; do
-            if [ "${f}" = "tests/author-attribution-test.js" ]; then
-              continue
-            fi
             echo "::group::${f}"
             node "$f"
             echo "::endgroup::"
