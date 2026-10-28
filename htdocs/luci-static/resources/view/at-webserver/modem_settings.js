@@ -273,6 +273,11 @@ return L.view.extend({
 					askImeiInput(message, okText, onValid);
 					return;
 				}
+				if (v === dev.imei) {
+					Mt5700.error('新 IMEI 与当前 IMEI 相同，无需修改');
+					askImeiInput(message, okText, onValid);
+					return;
+				}
 				onValid(v);
 			}, okText);
 		}
@@ -328,7 +333,7 @@ return L.view.extend({
 		imeiBody.appendChild(Mt5700.fieldNote(
 			'IMEI 为模组出厂写入的唯一设备标识（读取自 AT+CGSN）。「修改IMEI」为高危功能，需连续 5 次确认。',
 			[
-				'新 IMEI 须为 15 位纯数字且末位校验位通过 Luhn 校验，两次输入完全一致后才会下发写入指令 AT^PHYNUM=IMEI,<imei>。',
+				'新 IMEI 须为 15 位纯数字、末位校验位通过 Luhn 校验，且不能与当前 IMEI 相同；两次输入完全一致后才会下发写入指令 AT^PHYNUM=IMEI,<imei>。',
 				'改写 IMEI 可能违反当地无线电通信法律法规，由此产生的后果需自行承担。'
 			]
 		));
