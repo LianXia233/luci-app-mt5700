@@ -1221,6 +1221,22 @@ return L.view.extend({
 		var bottomActions = Mt5700.panelActions(saveBtn, saveStatus);
 		body.appendChild(bottomActions);
 
+		/* ---------- 作者署名（页脚） ----------
+		 * Project author attribution: preserve unless explicitly authorized by the
+		 * project maintainer. 保护规则见仓库根目录 AGENTS.md「作者署名保护规则」。
+		 * 该元素为项目明确要求保留的项目元素：任何 UI 重构、样式调整、组件替换、
+		 * 模板重写都必须保留署名文案与其指向仓库的链接。
+		 */
+		body.appendChild(E('div', { 'class': 'mt5700-author' }, [
+			E('span', { 'class': 'mt5700-author-label' }, '作者：'),
+			E('a', {
+				'class': 'mt5700-author-link',
+				'href': 'https://github.com/LianXia233/luci-app-mt5700',
+				'target': '_blank',
+				'rel': 'noopener noreferrer'
+			}, 'LianXia233')
+		]));
+
 		// 任何表单控件变更都标记为「未保存」，与 CBI 表单行为对齐
 		page.addEventListener('change', function () { AtWs.uci.markDirty(); });
 		page.addEventListener('input', function () { AtWs.uci.markDirty(); });
