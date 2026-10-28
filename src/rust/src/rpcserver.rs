@@ -328,6 +328,19 @@ impl RpcServer {
                     log_warn!("拒绝 IMEI 写入（{}）: {:?}", reason, cmd);
                     return serde_json::json!({ "id": id, "error": { "code": -32002, "message": format!("IMEI 校验失败：{reason}") } });
                 }
+                // 新旧一致检查：写入前回读当前 IMEI，相同则拒发（写同值只会白耗一次
+                // NVRAM 写入）。回读失败时不拦截，交由结构校验与模组自身兜底。
+                if let Some(new_imei) = cmd.strip_prefix("AT^PHYNUM=IMEI,").map(str::trim) {
+                    let cur = self.run_command("AT+CGSN").await;
+                    if cur.success {
+                        if let Some(actual) = extract_imei15(cur.data.as_deref().unwrap_or("")) {
+                            if actual == new_imei {
+                                log_warn!("拒绝 IMEI 写入（新 IMEI 与当前 IMEI 相同）: {:?}", cmd);
+                                return serde_json::json!({ "id": id, "error": { "code": -32003, "message": "新 IMEI 与当前 IMEI 相同，无需修改" } });
+                            }
+                        }
+                    }
+                }
                 let resp = self.run_command(cmd).await;
                 serde_json::json!({ "id": id, "result": {
                     "success": resp.success,
@@ -1271,9 +1284,30 @@ fn validate_imei_write(cmd: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 从 AT 应答文本中提取第一个恰好连续 15 位的数字串（即 IMEI）。
+/// 无匹配（如应答异常或为 16 位 IMEISV）时返回 None，调用方应放行不拦。
+fn extract_imei15(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut run_start: Option<usize> = None;
+    // 追加一个非数字哨兵，保证以数字结尾的串也能在循环内收尾
+    for (i, b) in bytes.iter().copied().chain(std::iter::once(b' ')).enumerate() {
+        if b.is_ascii_digit() {
+            if run_start.is_none() {
+                run_start = Some(i);
+            }
+        } else if let Some(s) = run_start {
+            if i - s == 15 {
+                return Some(text[s..i].to_string());
+            }
+            run_start = None;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod imei_write_guard_tests {
-    use super::validate_imei_write;
+    use super::{extract_imei15, validate_imei_write};
 
     #[test]
     fn 非写入指令不受影响() {
@@ -1304,5 +1338,20 @@ mod imei_write_guard_tests {
         assert!(validate_imei_write("AT^PHYNUM=IMEI,490154203237519").is_err());
         assert!(validate_imei_write("AT^PHYNUM=IMEI,123456789012345").is_err());
         assert!(validate_imei_write("AT^PHYNUM=IMEI,862234051234560").is_err());
+    }
+
+    #[test]
+    fn 提取_imei15_常规应答() {
+        assert_eq!(extract_imei15("862234051234567\r\nOK").as_deref(), Some("862234051234567"));
+        assert_eq!(extract_imei15("862234051234567").as_deref(), Some("862234051234567")); // 无行尾
+        assert_eq!(extract_imei15("AT+CGSN\n490154203237518\nOK").as_deref(), Some("490154203237518"));
+    }
+
+    #[test]
+    fn 提取_imei15_异常应答返回_none() {
+        assert_eq!(extract_imei15("ERROR"), None);
+        assert_eq!(extract_imei15(""), None);
+        assert_eq!(extract_imei15("12345678901234"), None); // 14 位
+        assert_eq!(extract_imei15("8622340512345678"), None); // 16 位 IMEISV，无恰好 15 位段
     }
 }
