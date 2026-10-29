@@ -38,6 +38,53 @@ var BINARY = '/usr/bin/at-webserver-rust';
 var BY_ID_DIR = '/dev/serial/by-id';
 
 /**
+ * 扫描 procd service.list 响应里的实例运行状态（load/fetchRunning/refreshStatus 三处共用）。
+ * 末尾的 svc.running/svc.pid 兜底是给非标准应答留的；正常 procd 顶层不携带这两个字段。
+ */
+function scanProcdInstances(svc) {
+	svc = svc || {};
+	var running = false;
+	var pid = null;
+	if (svc.instances) {
+		Object.keys(svc.instances).forEach(function (k) {
+			var it = svc.instances[k] || {};
+			if (it.running || it.pid) {
+				running = true;
+				if (!pid && it.pid) pid = it.pid;
+			}
+		});
+	}
+	if (!running && (svc.running || svc.pid)) {
+		running = true;
+		pid = svc.pid || null;
+	}
+	return { running: running, pid: pid };
+}
+
+/**
+ * 归一化 rpcd file.list 应答：兼容数组 / {entries} / {name: type} 映射三种形态。
+ */
+function normalizeFileList(raw) {
+	var entries = [];
+	if (Array.isArray(raw)) {
+		entries = raw;
+	} else if (raw && Array.isArray(raw.entries)) {
+		entries = raw.entries;
+	} else if (raw && typeof raw === 'object') {
+		// 某些 rpcd 返回 { name: type } 映射
+		Object.keys(raw).forEach(function (k) {
+			var v = raw[k];
+			if (v && typeof v === 'object') {
+				entries.push(Object.assign({ name: k }, v));
+			} else {
+				entries.push({ name: k, type: String(v || '') });
+			}
+		});
+	}
+	return entries;
+}
+
+/**
  * 由多源状态推导服务状态标签、颜色与原因提示。
  * 优先级：运行中 > 已禁用 > 未安装 > 不可执行 > 未注册 > 已停止
  */
@@ -123,22 +170,7 @@ return L.view.extend({
 				netIfaces = [];
 			}
 			var raw = res[2];
-			var entries = [];
-			if (Array.isArray(raw)) {
-				entries = raw;
-			} else if (raw && Array.isArray(raw.entries)) {
-				entries = raw.entries;
-			} else if (raw && typeof raw === 'object') {
-				// 某些 rpcd 返回 { name: type } 映射
-				Object.keys(raw).forEach(function (k) {
-					var v = raw[k];
-					if (v && typeof v === 'object') {
-						entries.push(Object.assign({ name: k }, v));
-					} else {
-						entries.push({ name: k, type: String(v || '') });
-					}
-				});
-			}
+			var entries = normalizeFileList(raw);
 			var serials = [];
 			entries.forEach(function (e) {
 				var name = e && (e.name || e.path || '');
@@ -159,21 +191,7 @@ return L.view.extend({
 			 */
 			var byIdEntries = (function () {
 				var r = res[4];
-				var list = [];
-				if (Array.isArray(r)) {
-					list = r;
-				} else if (r && Array.isArray(r.entries)) {
-					list = r.entries;
-				} else if (r && typeof r === 'object') {
-					Object.keys(r).forEach(function (k) {
-						var v = r[k];
-						if (v && typeof v === 'object') {
-							list.push(Object.assign({ name: k }, v));
-						} else {
-							list.push({ name: k, type: String(v || '') });
-						}
-					});
-				}
+				var list = normalizeFileList(r);
 				var out = [];
 				list.forEach(function (e) {
 					var n = e && (e.name || '');
@@ -191,21 +209,9 @@ return L.view.extend({
 			/* ---------- 服务状态多源判定 ---------- */
 			var svc = (res[1] && res[1][SERVICE]) || {};
 			var registered = !!(res[1] && res[1][SERVICE]);
-			var found = false;
-			var pid = null;
-			if (svc.instances) {
-				Object.keys(svc.instances).forEach(function (k) {
-					var it = svc.instances[k] || {};
-					if (it.running || it.pid) {
-						found = true;
-						if (!pid && it.pid) pid = it.pid;
-					}
-				});
-			}
-			if (!found && (svc.running || svc.pid)) {
-				found = true;
-				pid = svc.pid || null;
-			}
+			var procd = scanProcdInstances(svc);
+			var found = procd.running;
+			var pid = procd.pid;
 
 			var st = res[3];
 			// rpcd file.stat 返回 {type:'file', mode:0755, ...}；失败时返回 null
@@ -216,7 +222,6 @@ return L.view.extend({
 			enabled = enabled === null || enabled === undefined ? '1' : String(enabled);
 
 			return {
-				service: svc,
 				running: found,
 				registered: registered,
 				pid: pid,
@@ -433,8 +438,7 @@ return L.view.extend({
 		wsCard._body.appendChild(wsBody);
 		rowConn.appendChild(wsCard);
 
-		var wsHostInput = Mt5700.input('text', '留空表示本机', '');
-		wsBody.appendChild(Mt5700.formGroup('监听地址', wsHostInput, '保留兼容：RPC 固定监听 127.0.0.1，该键不再生效'));
+		/* 旧 UCI 键 websocket_host 已废弃：RPC 固定监听 127.0.0.1，页面不再提供输入框 */
 
 		var wsPortInput = Mt5700.input('number', '8765', '');
 		wsPortInput.min = 1;
@@ -1150,7 +1154,6 @@ return L.view.extend({
 	dnsV6A.value = String(get('dns_v6_1', DNS_DEFAULTS.v6_1));
 	dnsV6B.value = String(get('dns_v6_2', DNS_DEFAULTS.v6_2));
 	dnsExclChk.checked = get('dns_exclusive', '1') !== '0';
-		wsHostInput.value = '';
 		wsPortInput.value = String(get('websocket_port', '8765'));
 		var bindCur = get('websocket_bind', '');
 		if (!bindCur) {
@@ -1411,19 +1414,7 @@ return L.view.extend({
 		// 拉取当前实例状态，用于操作后复核，避免「提示成功但实际没起来」
 		function fetchRunning() {
 			return rpcServiceList(SERVICE).catch(function () { return {}; }).then(function (resp) {
-				var svc = (resp && resp[SERVICE]) || {};
-				var running = false;
-				var pid = null;
-				if (svc.instances) {
-					Object.keys(svc.instances).forEach(function (k) {
-						var it = svc.instances[k] || {};
-						if (it.running || it.pid) {
-							running = true;
-							if (!pid && it.pid) pid = it.pid;
-						}
-					});
-				}
-				return { running: running, pid: pid };
+				return scanProcdInstances((resp && resp[SERVICE]) || {});
 			});
 		}
 
@@ -1433,20 +1424,10 @@ return L.view.extend({
 				L.uci.load(SERVICE)
 			]).then(function (res) {
 				var svc = (res[0] && res[0][SERVICE]) || {};
-				var found = false;
-				var pid = null;
-				if (svc.instances) {
-					Object.keys(svc.instances).forEach(function (k) {
-						var it = svc.instances[k] || {};
-						if (it.running || it.pid) {
-							found = true;
-							if (!pid && it.pid) pid = it.pid;
-						}
-					});
-				}
+				var procd = scanProcdInstances(svc);
 				var en = L.uci.get(SERVICE, 'config', 'enabled');
-				state.running = found;
-				state.pid = pid;
+				state.running = procd.running;
+				state.pid = procd.pid;
 				state.registered = !!(res[0] && res[0][SERVICE]);
 				state.enabled = (en === null || en === undefined) ? '1' : String(en);
 

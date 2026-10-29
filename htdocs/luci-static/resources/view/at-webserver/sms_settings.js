@@ -294,10 +294,12 @@ return L.view.extend({
 		};
 		AtWs.client.subscribe(ussdHandler);
 
-		self._dispose = function () {
+		/* 离开本页（hash 路由切换）时退订 USSD 推送并清掉等待超时。
+		 * LuCI view 无 dispose 钩子，原先的 _dispose 从不执行 */
+		Ui.onLeave(function () {
 			AtWs.client.unsubscribe(ussdHandler);
 			if (ussdTimeout) clearTimeout(ussdTimeout);
-		};
+		});
 
 		/* ---------- 短信开关步骤 ---------- */
 

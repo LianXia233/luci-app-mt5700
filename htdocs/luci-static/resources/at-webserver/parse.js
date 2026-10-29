@@ -122,12 +122,6 @@ var Parse = (function () {
 	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
 	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
 	 */
-	/*
-	 * AT+CGPADDR：一行可携带**多个地址**（双栈时为 IPv4 + IPv6 各一个）。
-	 * 实测：+CGPADDR: 1,"198.51.100.10","32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
-	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
-	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
-	 */
 	api.parseCgpaddr = function (text) {
 		var out = [];
 		String(text).split(/\r?\n/).forEach(function (line) {
@@ -845,6 +839,30 @@ var Parse = (function () {
 		if ([257, 258, 260, 261].indexOf(Number(band)) >= 0) return 3;
 		if ([41, 48, 77, 78, 79].indexOf(Number(band)) >= 0) return 1;
 		return 0;
+	};
+
+	/* ARFCN → 频段号反推（邻区展示与一键锁频共用，单一来源）。
+	 * 区间依据 3GPP TS 38.104 / 36.101 的信道号范围。
+	 * n77 与 n78 的 NR-ARFCN 区间完全重叠（620000-680000），单凭频点不可区分，
+	 * 按国内现网部署约定统一归为 n78 —— 旧版 network_settings 的表把 77 排在
+	 * 78 之前，78 分支实际不可达，且与状态页的判定口径不一致。 */
+	var LTE_ARFCN_BANDS = [
+		[1, 0, 599], [3, 1200, 1949], [5, 2400, 2649], [8, 3450, 3799],
+		[34, 36200, 36349], [38, 37750, 38249], [39, 38250, 38649], [40, 38650, 39649], [41, 39650, 41589]
+	];
+	var NR_ARFCN_BANDS = [
+		[1, 422000, 434000], [3, 376000, 396000], [5, 173800, 175000], [8, 185000, 192000],
+		[28, 151600, 160600], [41, 499200, 537999], [78, 620000, 680000], [79, 693334, 733333]
+	];
+	api.bandFromArfcn = function (kind, arfcn) {
+		if (arfcn == null || arfcn === '') return '';
+		var ch = Number(arfcn);
+		if (isNaN(ch)) return '';
+		var map = kind === 'LTE' ? LTE_ARFCN_BANDS : NR_ARFCN_BANDS;
+		for (var i = 0; i < map.length; i++) {
+			if (ch >= map[i][1] && ch <= map[i][2]) return String(map[i][0]);
+		}
+		return '';
 	};
 
 	var checkArfcn = function (label, raw) {

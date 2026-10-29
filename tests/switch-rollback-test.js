@@ -5,8 +5,9 @@
  * 场景：模组拒绝 AT^THERMAUTOFUN（或请求失败）时，CA/MIMO 等开关必须把
  * checkbox 恢复到操作前的状态，否则界面会长期显示与模组实际策略相反的值。
  *
- * 做法：从 modem_settings.js 中抽出 makeSwitch 源码，在 node 里用 mock DOM 驱动，
- * 分别覆盖「成功 / 模组拒绝 / 请求 reject / handler 抛异常 / 老式 handler」五条路径。
+ * 做法：从 ui.js 中抽出 Ui.switch（带回滚约定的开关实现，modem_settings.js /
+ * dial.js 等视图统一使用）源码，在 node 里用 mock DOM 驱动，分别覆盖
+ * 「成功 / 模组拒绝 / 请求 reject / handler 抛异常 / 老式 handler」五条路径。
  *
  * 运行：node tests/switch-rollback-test.js
  */
@@ -14,13 +15,13 @@
 const fs = require('fs');
 const path = require('path');
 
-const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
-const code = fs.readFileSync(path.join(viewDir, 'modem_settings.js'), 'utf8');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const code = fs.readFileSync(path.join(libDir, 'ui.js'), 'utf8');
 
-const start = code.indexOf('function makeSwitch');
-const end = code.indexOf('function atText');
+const start = code.indexOf('api.switch = function');
+const end = code.indexOf('api.promptModal');
 if (start < 0 || end < 0) {
-	console.log('FAIL  未能在 modem_settings.js 中定位 makeSwitch');
+	console.log('FAIL  未能在 ui.js 中定位 Ui.switch');
 	process.exit(1);
 }
 
@@ -47,7 +48,7 @@ function mockE(tag, attrs) {
 	};
 }
 
-const factory = new Function('E', code.slice(start, end) + '\n;return makeSwitch;');
+const factory = new Function('E', 'var api = {};\n' + code.slice(start, end) + '\n;return api.switch;');
 const makeSwitch = factory(mockE);
 
 let results = [];

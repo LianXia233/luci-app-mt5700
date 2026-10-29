@@ -607,16 +607,6 @@ function netrateCall(req) {
  * 与 rpcCall() 里 fs.popen(nc ...) 的既有做法一致；speed/version 均为 sysfs
  * 直读，全程不发任何 AT 命令，不占用 AT 通道、不干扰模组。
  */
-/* 查单字符分隔符下标（ucode 全局 index 在本固件未必可用，用 substr 逐字符扫描） */
-function strIndexOf(s, ch) {
-	let n = length(s);
-	for (let i = 0; i < n; i++) {
-		if (substr(s, i, 1) == ch) {
-			return i;
-		}
-	}
-	return -1;
-}
 
 function usbCall(req) {
 	const script = 'echo USB_SCAN; '
@@ -663,13 +653,13 @@ function usbCall(req) {
 		}
 		if (substr(line, 0, 4) == 'USB=') {
 			let rest = trim(substr(line, 4));
-			let i = strIndexOf(rest, '|');
+			let i = index(rest, '|');
 			if (i < 0) {
 				continue;
 			}
 			speed = trim(substr(rest, 0, i));
 			let tail = substr(rest, i + 1);
-			let k = strIndexOf(tail, '|');
+			let k = index(tail, '|');
 			if (k >= 0) {
 				product = trim(substr(tail, 0, k));
 				version = trim(substr(tail, k + 1));

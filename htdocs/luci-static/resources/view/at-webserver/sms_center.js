@@ -73,16 +73,7 @@ function smsAvatar(isSent, sizeCls) {
 	});
 }
 
-function smsFmtBytes(n) {
-	n = Number(n) || 0;
-	if (n < 1024) {
-		return n + ' B';
-	}
-	if (n < 1024 * 1024) {
-		return (n / 1024).toFixed(1) + ' KB';
-	}
-	return (n / 1024 / 1024).toFixed(1) + ' MB';
-}
+/* 字节数人话化统一走 AtWs.formatFlow（rpc.js 单一来源），本页不再自留一份 */
 
 return L.view.extend({
 	render: function () {
@@ -104,8 +95,6 @@ return L.view.extend({
 			selectedContact: '',
 			messages: [],        /* 当前联系人消息 */
 			storage: { used: 0, total: 0 },
-			/* 本次列表数据的抓取时刻（后端给出），用于确认界面不是旧快照 */
-			fetchedAt: 0,
 			/* 本地归档统计：{ totalBytes, maxBytes, conversations: [...] } */
 			archive: { totalBytes: 0, maxBytes: 0, conversations: [] },
 			/* 会话搜索关键字 */
@@ -329,8 +318,8 @@ return L.view.extend({
 				return;
 			}
 			archiveInfo.textContent = '本地归档：' + list.length + ' 个会话 · '
-				+ smsFmtBytes(a.totalBytes) + ' / '
-				+ (a.maxBytes ? smsFmtBytes(a.maxBytes) : '—');
+				+ AtWs.formatFlow(a.totalBytes) + ' / '
+				+ (a.maxBytes ? AtWs.formatFlow(a.maxBytes) : '—');
 		}
 
 		/*
@@ -477,39 +466,51 @@ return L.view.extend({
 		}
 
 		/*
+		 * 时刻文案：日期已由分隔条给出，气泡内只留时刻（会话视图与归档弹窗共用）。
+		 * 时间未知时如实显示「时间未知」：空白会让人以为渲染丢了，直接不显示
+		 * 又会让人默认它是刚刚。近似时间（来自 TP-VP 有效期或本机时钟）额外标注，
+		 * 避免被当成精确发送时刻。
+		 */
+		function smsTimeText(time, timeApprox) {
+			var t = time ? (String(time).split(',')[1] || time) : '时间未知';
+			if (time && timeApprox) {
+				t += '（近似）';
+			}
+			return t;
+		}
+
+		/* 气泡行骨架（两处渲染路径共用）：row + 气泡按收发方向就位，对方在左、自己在右 */
+		function buildSmsRow(isSent, bubble) {
+			var row = smsEl('div', {
+				'class': 'mt5700-sms-row ' + (isSent ? 'outgoing' : 'incoming')
+			});
+			if (isSent) {
+				row.appendChild(bubble);
+				row.appendChild(smsAvatar(true, 'mt5700-sms-avatar-sm'));
+			} else {
+				row.appendChild(smsAvatar(false, 'mt5700-sms-avatar-sm'));
+				row.appendChild(bubble);
+			}
+			return row;
+		}
+
+		/*
 		 * 单条消息气泡（含时间、长短信缺失提示与删除按钮）。
 		 *
 		 * 结构照演示稿：头像与气泡并排，收到时头像在左、发出时头像在右。
 		 */
 		function buildBubble(m) {
 			var isSent = m.type === 'sent';
-			var row = smsEl('div', {
-				'class': 'mt5700-sms-row ' + (isSent ? 'outgoing' : 'incoming')
-			});
 			var bubble = smsEl('div', { 'class': 'mt5700-sms-bubble' });
 
 			bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-text' },
 				m.content || '(空消息)'));
 
-			/*
-			 * 时间未知时如实显示「时间未知」：
-			 * 空白会让人以为渲染丢了，直接不显示又会让人默认它是刚刚。
-			 * 近似时间（来自 TP-VP 有效期或本机时钟）额外标注，避免被当成精确发送时刻。
-			 *
-			 * 日期已由分隔条给出，气泡内只留时刻，
-			 * 否则每条消息都把年月日重复一遍，读起来很吵。
-			 */
-			var timeText = m.time
-				? (String(m.time).split(',')[1] || m.time)
-				: '时间未知';
-			if (m.time && m.timeApprox) {
-				timeText += '（近似）';
-			}
-
 			/* 时刻与删除按钮收进同一行：否则「删除」会独占一行，
 			 * 每个气泡底部都多出一块空白，手机上尤其明显。 */
 			var meta = smsEl('div', { 'class': 'mt5700-sms-meta' });
-			meta.appendChild(smsEl('span', { 'class': 'mt5700-sms-time' }, timeText));
+			meta.appendChild(smsEl('span', { 'class': 'mt5700-sms-time' },
+				smsTimeText(m.time, m.timeApprox)));
 			var del = Mt5700.button('删除', function () { deleteMessage(m); }, 'danger');
 			del.className = 'mt5700-sms-del';
 			meta.appendChild(del);
@@ -525,14 +526,7 @@ return L.view.extend({
 					'该条解析失败：' + m.error));
 			}
 
-			if (isSent) {
-				row.appendChild(bubble);
-				row.appendChild(smsAvatar(true, 'mt5700-sms-avatar-sm'));
-			} else {
-				row.appendChild(smsAvatar(false, 'mt5700-sms-avatar-sm'));
-				row.appendChild(bubble);
-			}
-			return row;
+			return buildSmsRow(isSent, bubble);
 		}
 
 		/*
@@ -764,7 +758,6 @@ return L.view.extend({
 					return null;
 				}
 				var r = res.result || {};
-				state.fetchedAt = r.fetchedAt || 0;
 				var entries = r.entries || [];
 				/*
 				 * 读得出应答行、却一条都解析不出来：后端把「一条都没有」和
@@ -1160,68 +1153,57 @@ return L.view.extend({
 			});
 		}
 
+		/* 短信弹窗脚手架（本页四处弹窗共用）：建 mask/box、写标题、挂到 body、
+		 * 点遮罩关闭。返回 { mask, box, close }，正文与底部按钮由调用方追加。 */
+		function smsModal(title) {
+			var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
+			var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+			box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' }, title));
+			mask.appendChild(box);
+			document.body.appendChild(mask);
+			mask.addEventListener('click', function (e) {
+				if (e.target === mask) {
+					close();
+				}
+			});
+			function close() {
+				if (mask.parentNode) {
+					mask.parentNode.removeChild(mask);
+				}
+			}
+			return { mask: mask, box: box, close: close };
+		}
+
 		/* 查看某个会话的归档记录（弹窗内展示，不干扰当前会话） */
 		function viewArchive(number) {
 			AtWs.client.sms('store_read', { number: number }).then(function (res) {
-				var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
-				var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+				var modal = smsModal('归档：' + number);
 				var body2 = smsEl('div', { 'class': 'mt5700-sms-modal-scroll' });
-
-				box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' },
-					'归档：' + number));
 
 				if (!res.success) {
 					body2.appendChild(Mt5700.empty('读取失败：' + String(res.error || '')));
-				} else {
-					var entries = (res.result && res.result.entries) || [];
-					if (!entries.length) {
-						body2.appendChild(Mt5700.empty('该会话没有归档记录'));
 					} else {
-						entries.forEach(function (e) {
-							var isSent = e.direction === 'sent';
-							var row = smsEl('div', {
-								'class': 'mt5700-sms-row '
-									+ (isSent ? 'outgoing' : 'incoming')
+						var entries = (res.result && res.result.entries) || [];
+						if (!entries.length) {
+							body2.appendChild(Mt5700.empty('该会话没有归档记录'));
+						} else {
+							entries.forEach(function (e) {
+								var isSent = e.direction === 'sent';
+								var bubble = smsEl('div', { 'class': 'mt5700-sms-bubble' });
+								bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-text' },
+									e.content || '(空消息)'));
+								bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-time' },
+									smsTimeText(e.time, e.timeApprox)));
+								body2.appendChild(buildSmsRow(isSent, bubble));
 							});
-							var bubble = smsEl('div', { 'class': 'mt5700-sms-bubble' });
-							var t = e.time
-								? (String(e.time).split(',')[1] || e.time)
-								: '时间未知';
-							bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-text' },
-								e.content || '(空消息)'));
-							bubble.appendChild(smsEl('div', { 'class': 'mt5700-sms-time' },
-								t + (e.timeApprox ? '（近似）' : '')));
-							if (isSent) {
-								row.appendChild(bubble);
-								row.appendChild(smsAvatar(true, 'mt5700-sms-avatar-sm'));
-							} else {
-								row.appendChild(smsAvatar(false, 'mt5700-sms-avatar-sm'));
-								row.appendChild(bubble);
-							}
-							body2.appendChild(row);
-						});
+						}
 					}
-				}
 
-				box.appendChild(body2);
+				modal.box.appendChild(body2);
 
 				var actions2 = smsEl('div', { 'class': 'mt5700-modal-footer' });
-				actions2.appendChild(Mt5700.ghostButton('关闭', close));
-				box.appendChild(actions2);
-
-				mask.appendChild(box);
-				mask.addEventListener('click', function (e) {
-					if (e.target === mask) {
-						close();
-					}
-				});
-				document.body.appendChild(mask);
-
-				function close() {
-					if (mask.parentNode) {
-						mask.parentNode.removeChild(mask);
-					}
-				}
+				actions2.appendChild(Mt5700.ghostButton('关闭', modal.close));
+				modal.box.appendChild(actions2);
 			}).catch(function () {
 				Mt5700.error('读取归档失败');
 			});
@@ -1240,22 +1222,19 @@ return L.view.extend({
 				}
 				return refreshArchiveStats();
 			}).then(function () {
-				var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
-				var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+				var modal = smsModal('本地短信归档');
+				var box = modal.box;
 				var listEl = smsEl('div', { 'class': 'mt5700-agree-list mt5700-sms-modal-list' });
-
-				box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' },
-					'本地短信归档'));
 
 				var a = state.archive || {};
 				var list = a.conversations || [];
 				box.appendChild(smsEl('p', { 'class': 'mt5700-hint' },
-					'已用 ' + smsFmtBytes(a.totalBytes) + ' / 上限 '
+					'已用 ' + AtWs.formatFlow(a.totalBytes) + ' / 上限 '
 					/*
 					 * 上限读不到时显示「—」而不是「0 B」：0 B 会被当成
 					 * 「配额为零」这种真实状态，比不知道更误导。
 					 */
-					+ (a.maxBytes ? smsFmtBytes(a.maxBytes) : '—')
+					+ (a.maxBytes ? AtWs.formatFlow(a.maxBytes) : '—')
 					+ '（' + list.length + ' 个会话，超出后自动淘汰最旧的）'));
 
 				if (!list.length) {
@@ -1271,7 +1250,7 @@ return L.view.extend({
 						});
 						left.appendChild(smsEl('strong', {}, c.number || '未知号码'));
 						left.appendChild(smsEl('span', { 'class': 'mt5700-hint' },
-							(c.count || 0) + ' 条 · ' + smsFmtBytes(c.bytes)
+							(c.count || 0) + ' 条 · ' + AtWs.formatFlow(c.bytes)
 							+ (c.lastContent ? ' · ' + c.lastContent : '')));
 						row.appendChild(left);
 
@@ -1296,7 +1275,7 @@ return L.view.extend({
 				box.appendChild(listEl);
 
 				var actions = smsEl('div', { 'class': 'mt5700-modal-footer' });
-				actions.appendChild(Mt5700.ghostButton('关闭', close));
+				actions.appendChild(Mt5700.ghostButton('关闭', modal.close));
 				var purgeBtn = Mt5700.dangerButton('清空全部归档', function () {
 					Mt5700.confirm('确定清空全部本地归档记录？', function () {
 						dropArchiveConversation('', true);
@@ -1304,20 +1283,6 @@ return L.view.extend({
 				});
 				actions.appendChild(purgeBtn);
 				box.appendChild(actions);
-
-				mask.appendChild(box);
-				mask.addEventListener('click', function (e) {
-					if (e.target === mask) {
-						close();
-					}
-				});
-				document.body.appendChild(mask);
-
-				function close() {
-					if (mask.parentNode) {
-						mask.parentNode.removeChild(mask);
-					}
-				}
 			});
 		}
 
@@ -1335,11 +1300,10 @@ return L.view.extend({
 		 */
 		function confirmDeleteModal(message, onOk, opts) {
 			var localOnly = !!(opts && opts.localOnly);
-			var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
-			var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+			var modal = smsModal(message);
+			var box = modal.box;
 			var chk = smsEl('input', { type: 'checkbox' });
 
-			box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' }, message));
 			var optRow = smsEl('label', {
 				'class': 'mt5700-inline mt5700-sms-opt-row'
 			}, [chk, smsEl('span', {}, '同时删除本地记录文件')]);
@@ -1348,28 +1312,14 @@ return L.view.extend({
 			}
 
 			var actions = smsEl('div', { 'class': 'mt5700-modal-footer' });
-			actions.appendChild(Mt5700.ghostButton('取消', close));
+			actions.appendChild(Mt5700.ghostButton('取消', modal.close));
 			var okBtn = Mt5700.dangerButton('删除', function () {
 				var alsoLocal = localOnly ? true : !!chk.checked;
-				close();
+				modal.close();
 				onOk(alsoLocal);
 			});
 			actions.appendChild(okBtn);
 			box.appendChild(actions);
-
-			mask.appendChild(box);
-			mask.addEventListener('click', function (e) {
-				if (e.target === mask) {
-					close();
-				}
-			});
-			document.body.appendChild(mask);
-
-			function close() {
-				if (mask.parentNode) {
-					mask.parentNode.removeChild(mask);
-				}
-			}
 		}
 
 		/* ================= 删除 ================= */
@@ -1435,12 +1385,10 @@ return L.view.extend({
 
 		/* 批量删除：勾选条目后按批下发，并可选同步删除本地归档 */
 		function batchDelete() {
-			var mask = smsEl('div', { 'class': 'mt5700-modal-mask mt5700-sms-modal-mask' });
-			var box = smsEl('div', { 'class': 'mt5700-modal mt5700-sms-modal' });
+			var modal = smsModal('批量删除短信');
+			var box = modal.box;
 			var listEl = smsEl('div', { 'class': 'mt5700-agree-list mt5700-sms-modal-list' });
 			var checked = [];
-
-			box.appendChild(smsEl('div', { 'class': 'mt5700-modal-title' }, '批量删除短信'));
 
 			var messages = currentMessages();
 			var pickBoxes = [];
@@ -1549,11 +1497,11 @@ return L.view.extend({
 			box.appendChild(optRow);
 
 			var actions = smsEl('div', { 'class': 'mt5700-modal-footer' });
-			actions.appendChild(Mt5700.ghostButton('取消', close));
+			actions.appendChild(Mt5700.ghostButton('取消', modal.close));
 
 			var confirmBtn = Mt5700.dangerButton('删除所选', function () {
 				var alsoLocal = !!alsoLocalChk.checked;
-				close();
+				modal.close();
 				if (!checked.length) {
 					Mt5700.warning('请先选择要删除的短信');
 					return;
@@ -1625,20 +1573,6 @@ return L.view.extend({
 			/* 别漏了这一步：按钮建出来不挂到弹窗上，弹窗就只剩「取消」 */
 			actions.appendChild(confirmBtn);
 			box.appendChild(actions);
-
-			mask.appendChild(box);
-			mask.addEventListener('click', function (e) {
-				if (e.target === mask) {
-					close();
-				}
-			});
-			document.body.appendChild(mask);
-
-			function close() {
-				if (mask.parentNode) {
-					mask.parentNode.removeChild(mask);
-				}
-			}
 		}
 
 		/*
@@ -1756,20 +1690,25 @@ return L.view.extend({
 		}
 
 		/* 页面隐藏（切到别的页签/熄屏）也视为离开：释放让后台巡检恢复 */
-		document.addEventListener('visibilitychange', function () {
+		var onVisibility = function () {
 			if (document.hidden) {
 				closeSession();
 			} else if (!sessionId) {
 				openSession();
 			}
-		});
+		};
+		document.addEventListener('visibilitychange', onVisibility);
 
-		self._dispose = function () {
+		/* 离开本页（hash 路由切换）时退订推送、摘除全局监听并释放短信租约。
+		 * LuCI view 没有 dispose 钩子：原先写在 _dispose 里的清理从不执行，
+		 * 租约心跳会在切走后长期续命（压制后台巡检），监听器也随反复进出累积。 */
+		Ui.onLeave(function () {
 			AtWs.client.unsubscribe(newSmsHandler);
+			document.removeEventListener('visibilitychange', onVisibility);
 			window.removeEventListener('resize', refit);
 			window.removeEventListener('orientationchange', refit);
 			closeSession();
-		};
+		});
 
 		/* ================= 窄屏：列表 / 会话 切换 ================= */
 

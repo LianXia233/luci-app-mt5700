@@ -21,8 +21,7 @@ return L.view.extend({
 		/* ---------- 锁频编辑器状态 ---------- */
 		var lockState = {
 			lteType: 0, lteMobility: 0, lteItems: [{}],
-			nrType: 0, nrMobility: 0, nrItems: [{}],
-			option5g: null
+			nrType: 0, nrMobility: 0, nrItems: [{}]
 		};
 
 		/* LTE 锁频 + NR 锁频：表单相近且各自不高，双列并排省掉两整行占位 */
@@ -343,7 +342,6 @@ return L.view.extend({
 				if (res.success && res.data) {
 					var m = String(res.data).match(/\^C5GOPTION:\s*(\d+),(\d+),(\d+)/);
 					if (m) {
-						lockState.option5g = { nr_sa_support_flag: Number(m[1]), nr_dc_mode: Number(m[2]), gc_access_mode: Number(m[3]) };
 						/* 文案严格按手册 13.17.3 的三项定义：
 						 *   <nr_sa_support_flag> 0=不支持 NR 以 SA 工作 / 1=支持
 						 *   <nr_dc_mode>         0=不支持辅连接 / 1=仅 EN-DC /
@@ -406,20 +404,11 @@ return L.view.extend({
 		}
 		renderNeighbors();
 
-		// 由频点反推频段
+		// 由频点反推频段：映射表统一收敛在 Parse.bandFromArfcn（单一来源）；
+		// 本页锁频命令需要 Number|null 契约（null → 提示手动选择频段）
 		function getBandFromArfcn(kind, arfcn) {
-			if (kind === 'LTE') {
-				var lteMap = [[1, 0, 599], [3, 1200, 1949], [5, 2400, 2649], [8, 3450, 3799], [34, 36200, 36349], [38, 37750, 38249], [39, 38250, 38649], [40, 38650, 39649], [41, 39650, 41589]];
-				for (var i = 0; i < lteMap.length; i++) {
-					if (arfcn >= lteMap[i][1] && arfcn <= lteMap[i][2]) return lteMap[i][0];
-				}
-				return null;
-			}
-			var nrMap = [[1, 422000, 434000], [3, 376000, 396000], [5, 173800, 175000], [8, 185000, 192000], [28, 151600, 160600], [41, 499200, 537999], [77, 620000, 680000], [78, 620000, 653333], [79, 693334, 733333]];
-			for (var j = 0; j < nrMap.length; j++) {
-				if (arfcn >= nrMap[j][1] && arfcn <= nrMap[j][2]) return nrMap[j][0];
-			}
-			return null;
+			var b = Parse.bandFromArfcn(kind, arfcn);
+			return b === '' ? null : Number(b);
 		}
 
 		/* 邻区测量值取值（手册 13.10.3）：
@@ -548,10 +537,9 @@ return L.view.extend({
 			fetchCurrent();
 		});
 
-		self._dispose = function () {
-			if (autoTimer) clearInterval(autoTimer);
-			AtWs.client.unsubscribe(rejectHandler);
-		};
+		/* 离开本页（hash 路由切换）时退订推送；autoTimer 走 Ui.interval 已随切页自动 clear。
+		 * LuCI view 无 dispose 钩子，原先的 _dispose 从不执行 */
+		Ui.onLeave(function () { AtWs.client.unsubscribe(rejectHandler); });
 
 		return page;
 	}

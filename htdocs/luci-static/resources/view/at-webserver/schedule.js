@@ -332,7 +332,8 @@ return L.view.extend({
 			}).catch(function () {});
 		}, 15000);
 
-		self._dispose = function () { clearInterval(statusTimer); };
+		/* 离开本页（hash 路由切换）时停掉状态轮询；LuCI view 无 dispose 钩子，_dispose 从不执行 */
+		Ui.onLeave(function () { clearInterval(statusTimer); });
 
 		return page;
 	}

@@ -4,7 +4,6 @@
 		"read": {
 			"uci": [
 				"at-webserver",
-				"firewall",
 				"network"
 			],
 			"ubus": {
@@ -13,35 +12,24 @@
 					"read",
 					"stat"
 				],
-				"luci": [
-					"getInitList",
-					"getRealtimeStats"
+				"mt5700": [
+					"at",
+					"events",
+					"netrate",
+					"usage",
+					"usage_ctl",
+					"logs",
+					"notify_test",
+					"qq_bind_status",
+					"qq_menu",
+					"sms",
+					"usb"
 				],
-			"mt5700": [
-				"at",
-				"events",
-				"netrate",
-				"usage",
-				"usage_ctl",
-				"logs",
-				"notify_test",
-				"qq_bind_status",
-				"qq_menu",
-				"sms",
-				"usb"
-			],
 				"log": [
 					"read"
 				],
-				"rc": [
-					"list"
-				],
 				"service": [
-					"list",
-					"get_data"
-				],
-				"system": [
-					"info"
+					"list"
 				],
 				"uci": [
 					"get",
@@ -53,23 +41,10 @@
 				"/dev": [
 					"list"
 				],
-				"/dev/*": [
-					"stat"
-				],
-				"/dev/serial": [
-					"list"
-				],
 				"/dev/serial/by-id": [
 					"list"
 				],
-				"/dev/serial/by-id/*": [
-					"stat"
-				],
 				"/etc/config/at-webserver": [
-					"read",
-					"stat"
-				],
-				"/etc/config/firewall": [
 					"read",
 					"stat"
 				],
@@ -109,9 +84,6 @@
 					"read",
 					"stat"
 				],
-				"luci": [
-					"setInitAction"
-				],
 				"mt5700": [
 					"at",
 					"events",
@@ -124,10 +96,7 @@
 				],
 				"service": [
 					"set",
-					"delete",
-					"update",
-					"reload",
-					"restart"
+					"delete"
 				],
 				"uci": [
 					"add",
@@ -142,11 +111,6 @@
 			},
 			"file": {
 				"/etc/config/at-webserver": [
-					"write",
-					"read",
-					"stat"
-				],
-				"/etc/config/firewall": [
 					"write",
 					"read",
 					"stat"

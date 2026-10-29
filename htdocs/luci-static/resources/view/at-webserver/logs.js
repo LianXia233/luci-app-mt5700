@@ -1,8 +1,9 @@
 'use strict';
 'require fs';
 'require uci';
+'require at-webserver/ui';
 'require at-webserver/mt5700';
-/* global L, Mt5700 */
+/* global L, Ui, Mt5700 */
 
 /**
  * 运行日志页
@@ -309,16 +310,10 @@ return L.view.extend({
 		body.appendChild(catBar);
 
 		/* ---------------- 工具栏 ---------------- */
-		var levelSel = Mt5700.select([
-			{ label: '全部级别', value: 'all' },
-			{ label: '仅调试', value: 'DBG' },
-			{ label: '仅信息', value: 'INF' },
-			{ label: '仅警告', value: 'WRN' },
-			{ label: '仅错误', value: 'ERR' }
-		], 'all');
 
-		/* 下拉的外观用内联样式确保稳定生效，并契合 Soft Anime 紫色调调色板 */
-		(function styleSelect(el) {
+		/* 下拉的外观用内联样式确保稳定生效，并契合 Soft Anime 紫色调调色板
+		 * （本页三处下拉共用；withFocus 为 true 时附加 focus/blur 高亮） */
+		function stylePurpleSelect(el, withFocus) {
 			if (!el) return;
 			var ARROW = "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' "
 				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%238b5cf6' "
@@ -344,15 +339,26 @@ return L.view.extend({
 			Object.keys(base).forEach(function (k) { el.style.setProperty(k, base[k], 'important'); });
 			el.addEventListener('mouseenter', function () { el.style.setProperty('background-color', BG_HOVER, 'important'); });
 			el.addEventListener('mouseleave', function () { el.style.setProperty('background-color', BG_CLOSED, 'important'); });
-			el.addEventListener('focus', function () {
-				el.style.setProperty('border-color', '#8b5cf6', 'important');
-				el.style.setProperty('box-shadow', '0 0 0 3px rgba(139,92,246,0.20)', 'important');
-			});
-			el.addEventListener('blur', function () {
-				el.style.setProperty('border-color', 'rgba(139,92,246,0.28)', 'important');
-				el.style.setProperty('box-shadow', 'none', 'important');
-			});
-		})(levelSel);
+			if (withFocus) {
+				el.addEventListener('focus', function () {
+					el.style.setProperty('border-color', '#8b5cf6', 'important');
+					el.style.setProperty('box-shadow', '0 0 0 3px rgba(139,92,246,0.20)', 'important');
+				});
+				el.addEventListener('blur', function () {
+					el.style.setProperty('border-color', 'rgba(139,92,246,0.28)', 'important');
+					el.style.setProperty('box-shadow', 'none', 'important');
+				});
+			}
+		}
+
+		var levelSel = Mt5700.select([
+			{ label: '全部级别', value: 'all' },
+			{ label: '仅调试', value: 'DBG' },
+			{ label: '仅信息', value: 'INF' },
+			{ label: '仅警告', value: 'WRN' },
+			{ label: '仅错误', value: 'ERR' }
+		], 'all');
+		stylePurpleSelect(levelSel, true);
 		levelSel.addEventListener('change', function () {
 			state.level = levelSel.value;
 			if (errWrnChk.checked) {
@@ -380,33 +386,7 @@ return L.view.extend({
 			{ label: '后端内存', value: 'backend' },
 			{ label: 'syslog', value: 'syslog' }
 		], 'all');
-		(function styleSelect2(el) {
-			if (!el) return;
-			var ARROW = "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%238b5cf6' "
-				+ "stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
-			var BG_CLOSED = 'rgba(139,92,246,0.08)';
-			var BG_HOVER = 'rgba(139,92,246,0.15)';
-			var base = {
-				'-webkit-appearance': 'none', '-moz-appearance': 'none', 'appearance': 'none',
-				'background': BG_CLOSED + ' ' + ARROW + ' no-repeat right 10px center',
-				'background-size': '12px 12px',
-				'padding': '0 32px 0 14px',
-				'border': '1px solid rgba(139,92,246,0.28)',
-				'border-radius': '10px',
-				'color': '#8b5cf6',
-				'font-weight': '500',
-				'font-size': '13px',
-				'height': '36px',
-				'line-height': '36px',
-				'box-shadow': 'none',
-				'text-shadow': 'none',
-				'cursor': 'pointer'
-			};
-			Object.keys(base).forEach(function (k) { el.style.setProperty(k, base[k], 'important'); });
-			el.addEventListener('mouseenter', function () { el.style.setProperty('background-color', BG_HOVER, 'important'); });
-			el.addEventListener('mouseleave', function () { el.style.setProperty('background-color', BG_CLOSED, 'important'); });
-		})(srcSel);
+		stylePurpleSelect(srcSel);
 		srcSel.addEventListener('change', function () { state.source = srcSel.value; renderList(); });
 
 		/* 条数上限下拉 */
@@ -416,33 +396,7 @@ return L.view.extend({
 			{ label: '最新 800 条', value: '800' },
 			{ label: '全部', value: '0' }
 		], '400');
-		(function styleSelect3(el) {
-			if (!el) return;
-			var ARROW = "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-				+ "viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.75L6 8.25L9.5 4.75' fill='none' stroke='%238b5cf6' "
-				+ "stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")";
-			var BG_CLOSED = 'rgba(139,92,246,0.08)';
-			var BG_HOVER = 'rgba(139,92,246,0.15)';
-			var base = {
-				'-webkit-appearance': 'none', '-moz-appearance': 'none', 'appearance': 'none',
-				'background': BG_CLOSED + ' ' + ARROW + ' no-repeat right 10px center',
-				'background-size': '12px 12px',
-				'padding': '0 32px 0 14px',
-				'border': '1px solid rgba(139,92,246,0.28)',
-				'border-radius': '10px',
-				'color': '#8b5cf6',
-				'font-weight': '500',
-				'font-size': '13px',
-				'height': '36px',
-				'line-height': '36px',
-				'box-shadow': 'none',
-				'text-shadow': 'none',
-				'cursor': 'pointer'
-			};
-			Object.keys(base).forEach(function (k) { el.style.setProperty(k, base[k], 'important'); });
-			el.addEventListener('mouseenter', function () { el.style.setProperty('background-color', BG_HOVER, 'important'); });
-			el.addEventListener('mouseleave', function () { el.style.setProperty('background-color', BG_CLOSED, 'important'); });
-		})(limitSel);
+		stylePurpleSelect(limitSel);
 		limitSel.addEventListener('change', function () { state.limit = Number(limitSel.value); renderList(); });
 
 		var searchInput = Mt5700.input('text', '按关键词过滤，如 拨号 / eth2 / 警告', '');
@@ -502,13 +456,14 @@ return L.view.extend({
 		panel.appendChild(clearRow);
 
 		/* ---------------- 过滤与统计 ---------------- */
-		function applyFilters(list) {
+		/* skipCategory 为 true 时不做类别过滤（供类别计数联动使用） */
+		function applyFilters(list, skipCategory) {
 			var q = state.query.toLowerCase();
 			var out = [];
 			for (var i = 0; i < list.length; i++) {
 				var e = list[i];
 				/* 类别过滤 */
-				if (state.category !== 'all' && e.cat !== state.category) continue;
+				if (!skipCategory && state.category !== 'all' && e.cat !== state.category) continue;
 				/* 来源过滤 */
 				if (state.source !== 'all' && e.src !== state.source) continue;
 				/* 级别过滤 */
@@ -567,7 +522,7 @@ return L.view.extend({
 
 			var all = state.entries;
 			/* 先按级别/关键词/来源过滤（不过滤类别，类别用于计数） */
-			var filteredForCounts = applyFiltersNoCategory(all);
+			var filteredForCounts = applyFilters(all, true);
 			var totals = computeCategoryTotals(filteredForCounts);
 
 			/* 更新类别条计数 */
@@ -622,24 +577,6 @@ return L.view.extend({
 
 			/* footer 统计 */
 			renderFooter(all, list);
-		}
-
-		/* 不过滤类别的过滤（用于类别计数联动） */
-		function applyFiltersNoCategory(list) {
-			var q = state.query.toLowerCase();
-			var out = [];
-			for (var i = 0; i < list.length; i++) {
-				var e = list[i];
-				if (state.source !== 'all' && e.src !== state.source) continue;
-				if (state.level === 'errwrn') {
-					if (e.level !== 'ERR' && e.level !== 'WRN') continue;
-				} else if (state.level !== 'all') {
-					if (e.level !== state.level) continue;
-				}
-				if (q && e.msg.toLowerCase().indexOf(q) < 0) continue;
-				out.push(e);
-			}
-			return out;
 		}
 
 		/* 更新类别条按钮的计数与激活状态 */
@@ -741,6 +678,24 @@ return L.view.extend({
 			return row;
 		}
 
+		/* 底部「顶部/底部」滚动按钮（运行日志与通知记录两个页签共用） */
+		function buildScrollActions() {
+			return E('span', { 'class': 'mt5700-logfooter-actions' }, [
+				E('button', {
+					'class': 'mt5700-logscroll-btn',
+					'type': 'button',
+					'title': '滚动到顶部',
+					'click': function () { listEl.scrollTo({ top: 0, behavior: 'smooth' }); }
+				}, '↑ 顶部'),
+				E('button', {
+					'class': 'mt5700-logscroll-btn',
+					'type': 'button',
+					'title': '滚动到底部',
+					'click': function () { listEl.scrollTo({ top: listEl.scrollHeight, behavior: 'smooth' }); }
+				}, '↓ 底部')
+			]);
+		}
+
 		function renderFooter(all, filtered) {
 			/* 统计各级别数量 */
 			var errCount = 0, wrnCount = 0, infCount = 0, dbgCount = 0;
@@ -756,22 +711,8 @@ return L.view.extend({
 			if (!state.syslogOk) text += ' · syslog 不可读';
 
 			var footerStats = E('span', { 'class': 'mt5700-logfooter-text' }, text);
-			var scrollActions = E('span', { 'class': 'mt5700-logfooter-actions' }, [
-				E('button', {
-					'class': 'mt5700-logscroll-btn',
-					'type': 'button',
-					'title': '滚动到顶部',
-					'click': function () { listEl.scrollTo({ top: 0, behavior: 'smooth' }); }
-				}, '↑ 顶部'),
-				E('button', {
-					'class': 'mt5700-logscroll-btn',
-					'type': 'button',
-					'title': '滚动到底部',
-					'click': function () { listEl.scrollTo({ top: listEl.scrollHeight, behavior: 'smooth' }); }
-				}, '↓ 底部')
-			]);
 			footer.appendChild(footerStats);
-			footer.appendChild(scrollActions);
+			footer.appendChild(buildScrollActions());
 		}
 
 		function renderNotify() {
@@ -798,22 +739,8 @@ return L.view.extend({
 			listEl.appendChild(frag);
 
 			var footerStats = E('span', { 'class': 'mt5700-logfooter-text' }, '共 ' + lines.length + ' 条 · 文件：' + notifyPath);
-			var scrollActions = E('span', { 'class': 'mt5700-logfooter-actions' }, [
-				E('button', {
-					'class': 'mt5700-logscroll-btn',
-					'type': 'button',
-					'title': '滚动到顶部',
-					'click': function () { listEl.scrollTo({ top: 0, behavior: 'smooth' }); }
-				}, '↑ 顶部'),
-				E('button', {
-					'class': 'mt5700-logscroll-btn',
-					'type': 'button',
-					'title': '滚动到底部',
-					'click': function () { listEl.scrollTo({ top: listEl.scrollHeight, behavior: 'smooth' }); }
-				}, '↓ 底部')
-			]);
 			footer.appendChild(footerStats);
-			footer.appendChild(scrollActions);
+			footer.appendChild(buildScrollActions());
 		}
 
 		function renderAll() {
@@ -958,7 +885,8 @@ return L.view.extend({
 		}
 
 		refresh(false).then(schedule);
-		self._dispose = function () { if (timer) clearInterval(timer); };
+		/* 离开本页（hash 路由切换）时停掉自动刷新；LuCI view 无 dispose 钩子，_dispose 从不执行 */
+		Ui.onLeave(function () { if (timer) clearInterval(timer); });
 
 		return page;
 	}

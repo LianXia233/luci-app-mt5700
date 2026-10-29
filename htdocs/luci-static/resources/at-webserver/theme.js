@@ -227,6 +227,22 @@ var AtTheme = (function () {
 	}
 	api.apply = apply;
 
+	/**
+	 * 注入一份样式表（幂等：同 href 已存在则跳过）。
+	 * mt5700.js 与 ui.js 的样式注入共用此入口，调用前各自先 apply() 落主题结论。
+	 */
+	api.injectCss = function (cssPath) {
+		if (typeof document === 'undefined') return;
+		var links = document.querySelectorAll('link[rel="stylesheet"]');
+		for (var i = 0; i < links.length; i++) {
+			if (links[i].getAttribute('href') === cssPath) return;
+		}
+		var link = document.createElement('link');
+		link.rel = 'stylesheet';
+		link.href = cssPath;
+		document.head.appendChild(link);
+	};
+
 	api.dark = function () { return current === 'dark'; };
 	api.current = function () { return current; };
 
