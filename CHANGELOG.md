@@ -8,6 +8,21 @@
 
 ---
 
+## v1.30.8（2026-10-30）
+
+### refactor 冗余代码清理：死代码删除、生命周期收敛、重复逻辑合并
+
+> 同一份逻辑散落在多处、各自演化出不同口径：ARFCN → 频段的映射有三份互相矛盾的表（其中 n78 分支因排序问题实际不可达），7 个视图各写一套「离开页面」清理（而 LuCI view 的 `_dispose` 钩子从不执行，等于从不清理），下拉美化与滚动按钮在单个文件里重复三四遍。本次统一收口，并把审查中发现的钩子时序缺陷与频段表错误一并修掉。详见 [`docs/release-notes/v1.30.8.md`](docs/release-notes/v1.30.8.md)。
+
+- **refactor(deadcode) 删除零引用死代码**：`rpc.js` 移除 `sendBatch` / `reconnect` / `disconnect` / `clearPendingCommands` / `setConnection` / `authKey` 及配套的 `loadConfig`；`mt5700.js` 移除恒不执行的 `pageKey` 自动匹配与 13 项 `badgeMap`（12 处 `Mt5700.page()` 调用点已全部显式传参）、死机制 `api.interval` / `_timers`、无用 `node._mascot`；`mt5700.uc` 用内建 `index()` 取代手写的 `strIndexOf`（ucode 官方文档确认同为 0-based、未找到返回 -1）
+- **refactor(lifecycle) 7 个视图的清理收敛到 `Ui.onLeave`**：新增 `Ui.onLeave` / `Ui.interval`，路由切换（hashchange）时自动退订推送、释放会话租约、摘除挂在 document/window 上的监听器，取代从不执行的 `_dispose`；`Ui.switch` 由 `modem_settings` 上提到公共库（与旧 `makeSwitch` 逐字符一致，5 个开关行为不变）
+- **refactor(dedupe) 文件内重复逻辑合并**：`logs.js` 三处下拉美化 → `stylePurpleSelect`、两处滚动按钮 → `buildScrollActions`、两处过滤器参数化；`service.js` 三处 procd 实例扫描 → `scanProcdInstances`、`file.list` 结果归一化 → `normalizeFileList`，并删除只写不读的「监听地址」输入框；`sms_center.js` 四处弹窗脚手架 → `smsModal()`、气泡渲染共用 `buildSmsRow`，时间与字节格式化改走 `AtWs.formatFlow`
+- **refactor(acl) RPC 权限收窄**：移除零调用的 `rc.list`、`system.info`、`get_data`、`service.update/reload/restart`、`firewall` 与 `/dev/*` 文件访问；`rc.init` 保留（`service.js` 依赖）
+- **fix(ui) 切页钩子改为同步快照**：`hashchange` 处理器原先在 `setTimeout(0)` 回调内才读取 `_hooks`，若目标视图的 `load()` 能纯微任务走完（如命中本地缓存）就会抢先注册完毕、被当作离场钩子一并清理 —— 刚进页面就被摘掉轮询与监听器，甚至误调 `closeSession()`。改为本 tick 内同步快照，清理动作仍延后一拍
+- **fix(parse) 按 TS 38.104 订正 NR-ARFCN 频段表**：恢复被删的 n77（620000–680000 / 3.3–4.2GHz），n78 收窄回 620000–653333 并排在 n77 之前 —— 重叠区判 n78、653334–680000 判 n77，消除「3.8–4.2GHz 被误标为 n78」；顺带订正 n3（`361000–376000`）与 n5（`173800–178800`）两处历史遗留区间
+- **note(ui) 两处会看到但无害的显示差异**：字节格式化统一到 `formatFlow` 后 KB 小数位由 1 位变 2 位（`25.9 KB` → `25.88 KB`），且 ≥1GB 由原来「没有 GB 层级」（`5120.0 MB`）修正为正常显示 GB/TB；`service.js` 的 procd 状态判定兜底被统一抬齐，消掉了「首屏显示运行中、重载后却查不到」的既有不一致
+- **test** `static-check` 4/4 与 12 个单测全通过；IMEI 相关代码零改动（纯增删行 × `grep -i imei` 零命中），本地 `send()` 与 `modem_settings` 的 IMEI 路径保持原样
+
 ## v1.30.7（2026-10-29）
 
 ### feat(notify) 网络切换提醒防刷屏：信号类通知最小间隔 + QQ 通道节流
