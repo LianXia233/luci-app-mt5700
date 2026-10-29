@@ -668,6 +668,97 @@ return L.view.extend({
 			'单位 dB，范围 1-30，默认 3，仅在「仅变化时推送」下生效。1=任何一档变化都推，30=只推剧烈变化。'));
 		notifBody.appendChild(pollBox);
 
+		/* ---------- 推送频率限制（防刷屏） ----------
+		 *
+		 * 为什么必须有它：模组在 LTE↔NR 覆盖边缘来回切换时，巡检每一轮都判定为「有变化」
+		 * —— 上面的「变化阈值」只管 RSRP 波动，管不住制式切换（模式一变必推）。
+		 * 于是「推送间隔」实际退化成了「巡检间隔」：默认 300 秒轮询下，
+		 * 一次来回切换能连着推好几条，把 QQ 刷屏。
+		 *
+		 * 因此在「该不该推」之上再加一层时间闸门：两条信号类通知之间至少间隔 N 分钟，
+		 * 默认 60（一小时最多一条）。范围上限 10080 = 7 天，0 = 不限频（回到旧行为）。
+		 *
+		 * 只管信号类：短信与来电仍由模组上报、实时直发；
+		 * 上面的「定时推送间隔」也不受限制（那是用户自己定的固定节奏，压它就是替用户做决定）。
+		 * 被闸门压住的那轮不会刷新基线，累计变化在到点后立刻补推，不会因为限频而永远漏掉。 */
+		var rateMinInput = Mt5700.input('number', '60', '');
+		rateMinInput.min = 0;
+		rateMinInput.max = 10080;
+		rateMinInput.step = 1;
+		/* 快捷档位：先给几个常见量级，顺便说明 0 的含义（防刷屏默认开启，要刷屏才选 0） */
+		var rateQuick = Mt5700.select([
+			{ label: '自定义（手动填上面）', value: '' },
+			{ label: '5 分钟', value: '5' },
+			{ label: '15 分钟', value: '15' },
+			{ label: '30 分钟', value: '30' },
+			{ label: '1 小时（默认）', value: '60' },
+			{ label: '3 小时', value: '180' },
+			{ label: '6 小时', value: '360' },
+			{ label: '12 小时', value: '720' },
+			{ label: '24 小时', value: '1440' },
+			{ label: '不限频（旧行为，切换频繁时会刷屏）', value: '0' }
+		], '60');
+		var rateHuman = E('span', { 'class': 'mt5700-hint' }, '');
+		function rateText(min) {
+			var raw = String(min == null ? '' : min).trim();
+			var n = parseInt(raw, 10);
+			if (raw === '' || isNaN(n) || n < 0) {
+				return '当前值为空或非法，保存后按默认 1 小时处理';
+			}
+			if (n === 0) {
+				return '不限频：每次判定为「有变化」都立即推送（制式来回切换时可能一分钟好几条）';
+			}
+			if (n > 10080) {
+				return '当前值 ' + n + ' 分钟超出上限，保存后按 10080 分钟（7 天）处理';
+			}
+			var d = Math.floor(n / 1440), h = Math.floor((n % 1440) / 60), m = n % 60;
+			var parts = [];
+			if (d) parts.push(d + ' 天');
+			if (h) parts.push(h + ' 小时');
+			if (m || !parts.length) parts.push(m + ' 分钟');
+			return '信号类通知最少间隔 ' + parts.join(' ') + '，即这段时间内最多一条';
+		}
+		function rateSync() {
+			rateQuick.value = rateMinInput.value;
+			rateHuman.textContent = rateText(rateMinInput.value);
+		}
+		rateQuick.addEventListener('change', function () {
+			if (rateQuick.value) rateMinInput.value = rateQuick.value;
+			rateHuman.textContent = rateText(rateMinInput.value);
+		});
+		rateMinInput.addEventListener('input', rateSync);
+
+		var rateBox = E('div', { 'class': 'mt5700-poll-box mt5700-form-grid' });
+		rateBox.appendChild(E('div', { 'class': 'mt5700-poll-title' }, '推送频率限制（防刷屏）'));
+		rateBox.appendChild(Mt5700.formGroup('网络切换提醒最小间隔（分钟）', rateMinInput,
+			'范围 0-10080，默认 60（一小时内最多一条），0=不限频。' +
+			'只约束信号类通知（网络切换提醒）；短信与来电始终实时直发，' +
+			'上面的「定时推送间隔」也不受此项限制。'));
+		rateBox.appendChild(Mt5700.formGroup('快捷间隔', rateQuick, rateHuman));
+		notifBody.appendChild(rateBox);
+
+		/* QQ 主动消息节流：把「一次挤进来一批」摊平成按间隔排队发送。
+		 * 平台频控是群 30~60 条/分钟、单聊 20 条/分钟，超限会被直接丢弃甚至封禁，
+		 * 因此这里默认 10 条/分钟 —— 注意是延后发送而不是丢弃，消息仍会送达。 */
+		var qqRateInput = Mt5700.input('number', '10', '');
+		qqRateInput.min = 0;
+		qqRateInput.max = 60;
+		qqRateInput.step = 1;
+		var qqRateHuman = E('span', { 'class': 'mt5700-hint' }, '');
+		var QQ_RATE_TAIL = '。QQ 平台频控：群 30~60 条/分钟、单聊 20 条/分钟，超限的消息会被平台直接丢弃。';
+		function qqRateText(n) {
+			if (isNaN(n) || n < 0) return '当前值为空或非法，保存后按默认 10 条/分钟处理' + QQ_RATE_TAIL;
+			if (n === 0) return '不节流：按事件发生顺序立即发送' + QQ_RATE_TAIL;
+			if (n > 60) n = 60;
+			/* 上限 60 条/分钟 ⇒ 间隔最小正好 1 秒，不需要毫秒分支 */
+			var gapMs = Math.round(60000 / n);
+			var gapText = (gapMs / 1000).toFixed(gapMs % 1000 ? 1 : 0) + ' 秒';
+			return '最多 ' + n + ' 条/分钟（约每 ' + gapText + '一条），超出的排队延后发送而不是丢弃' + QQ_RATE_TAIL;
+		}
+		qqRateInput.addEventListener('input', function () {
+			qqRateHuman.textContent = qqRateText(parseInt(qqRateInput.value, 10));
+		});
+
 		/* 控件联动：总开关是根，巡检开关次之，阈值只对「仅变化时推送」有意义。
 		 * 置灰后控件不再响应输入，用户一眼能看出哪些项当前不起作用。 */
 		function syncPollState() {
@@ -677,6 +768,12 @@ return L.view.extend({
 				el.disabled = !pollOn;
 			});
 			pollDeltaInput.disabled = !pollOn || pollModeSel.value !== 'change';
+			/* 频率闸门只作用于信号类通知：信号开关关掉时它没有约束对象，一并置灰。
+			 * 巡检关掉但 URC 上报仍在的场合不用操心 —— 本模组不自发上报信号，
+			 * 关掉巡检就等于没有信号推送。 */
+			var rateOn = notifyMaster.input.checked && notifySignal.input.checked;
+			rateMinInput.disabled = !rateOn;
+			rateQuick.disabled = !rateOn;
 		}
 
 		function syncNotifyState() {
@@ -691,6 +788,7 @@ return L.view.extend({
 		notifyMaster.input.addEventListener('change', syncNotifyState);
 		pollEnable.input.addEventListener('change', syncPollState);
 		pollModeSel.addEventListener('change', syncPollState);
+		notifySignal.input.addEventListener('change', syncPollState);
 
 		/* QQ 机器人（官方 API v2）：AppID+AppSecret+目标 ID 全部填写后启用 */
 		var qqAppIdInput = Mt5700.input('text', 'QQ 开放平台 AppID（纯数字）', '');
@@ -730,6 +828,12 @@ return L.view.extend({
 	notifBody.appendChild(Mt5700.formGroup('QQ 消息格式', qqFormatSel,
 		'富文本 = Markdown 结构化消息（标题、列表、引用排版）；纯文本为兜底形态。'
 		+ '「自动」在富文本发送失败时自动改发纯文本，保证消息不丢失。'));
+	/* 节流目前只实现在 QQ 通道（QqSender）上：刷屏问题就是 QQ 侧反馈的，
+	 * 而且平台对主动消息有明确频控（群 30~60 条/分钟、单聊 20 条/分钟）。
+	 * 企业微信 webhook 未接这层，若将来也要限，应在 Notifier 的通道投递处统一做。
+	 * 两级限制层次不同：上面的「最小间隔」决定「这条通知到底发不发」，
+	 * 这里决定「已经确定要发的消息隔多久发一条」。 */
+	notifBody.appendChild(Mt5700.formGroup('QQ 每分钟最多条数', qqRateInput, qqRateHuman));
 	notifBody.appendChild(Mt5700.formGroup('富文本附带「打开管理页」按钮', qqKbChk.wrap,
 		'在 QQ 富文本消息底部附带一个跳转按钮，点击直达本机管理页。'
 		+ '按钮跳转地址填在下一项；留空则按局域网 IP 自动推导。'));
@@ -1073,6 +1177,10 @@ return L.view.extend({
 		qqKbChk.input.checked = get('qq_keyboard_enabled', '0') === '1';
 		qqKbUrlInput.value = String(get('qq_keyboard_url', ''));
 		qqMenuChk.input.checked = get('qq_menu_enabled', '0') === '1';
+		/* 节流条数：UCI 里可能是空值或脏数据，回落默认 10；0 是合法值（= 不节流），不能当空处理 */
+		var qqRateRaw = parseInt(get('qq_max_per_minute', '10'), 10);
+		qqRateInput.value = String(isNaN(qqRateRaw) ? 10 : qqRateRaw);
+		qqRateHuman.textContent = qqRateText(parseInt(qqRateInput.value, 10));
 		/* 定时推送间隔（分钟）。旧的 notify_interval（秒）由后端换算迁移，
 		 * 这里把换算结果显示出来并说明一句，避免用户以为自己填过的频率丢了。 */
 		var timerRaw = String(get('notify_timer_interval', ''));
@@ -1100,6 +1208,13 @@ return L.view.extend({
 		pollIntervalInput.value = String(parseInt(get('notify_poll_interval', '300'), 10) || 300);
 		pollModeSel.value = get('notify_poll_all', '0') === '1' ? 'always' : 'change';
 		pollDeltaInput.value = String(parseInt(get('notify_poll_delta', '3'), 10) || 3);
+		/* 网络切换提醒最小间隔（分钟）。升级前的 UCI 里没有这一项，按默认 60 显示，
+		 * 保存后写入 —— 也就是「装上新版本就等于开了防刷屏」，不需要用户额外操作。
+		 * 0 是合法值（不限频），所以这里不能用 || 兜底。 */
+		var rateRaw = parseInt(get('notify_signal_min_interval', '60'), 10);
+		rateMinInput.value = String(isNaN(rateRaw) || rateRaw < 0 ? 60 : rateRaw);
+		rateQuick.value = rateMinInput.value;
+		rateHuman.textContent = rateText(rateMinInput.value);
 		/* 载入完成后按当前值同步一次置灰状态 */
 		syncNotifyState();
 		tplPrefixInput.value = tplFromUci(String(get('notify_tpl_prefix', '')));
@@ -1187,6 +1302,14 @@ return L.view.extend({
 			set('notify_poll_interval', String(parseInt(pollIntervalInput.value, 10) || 300));
 			set('notify_poll_all', pollModeSel.value === 'always' ? '1' : '0');
 			set('notify_poll_delta', String(parseInt(pollDeltaInput.value, 10) || 3));
+			/* 频率闸门与 QQ 节流：夹取到各自范围，空值按默认（60 分钟 / 10 条）。
+			 * 这里刻意不「顺手」清掉旧值 —— 用户填 0 是明确的「我要不限频」，照写。 */
+			var rateMin = parseInt(rateMinInput.value, 10);
+			if (isNaN(rateMin) || rateMin < 0) rateMin = 60;
+			set('notify_signal_min_interval', String(Math.min(10080, rateMin)));
+			var qqRate = parseInt(qqRateInput.value, 10);
+			if (isNaN(qqRate) || qqRate < 0) qqRate = 10;
+			set('qq_max_per_minute', String(Math.min(60, qqRate)));
 			set('notify_tpl_prefix', tplToUci(tplPrefixInput.value));
 			set('notify_tpl_sms', tplToUci(tplSmsInput.value));
 			set('notify_tpl_call', tplToUci(tplCallInput.value));

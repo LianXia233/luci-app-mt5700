@@ -20,14 +20,14 @@
 
 use crate::atclient::{AtClient, COMMAND_TIMEOUT};
 use crate::config::{in_poll_window, PollConfig};
-use crate::notify::{Notification, NotifyKind, Notifier, SENDER_SIGNAL};
+use crate::notify::{min_interval_hold, Notification, NotifyKind, Notifier, SENDER_SIGNAL};
 use crate::schedule::sleep_ctx;
 use crate::signalgrade::{Assessment, Grade, Level, SignalInput};
 use crate::urc::{parse_signal_reading, query_hfreqinfo, query_monsc};
 use crate::{log_debug, log_info};
 use chrono::Timelike;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{watch, Mutex};
 
 /// 单次睡眠的最长分片（秒）。
@@ -49,6 +49,32 @@ struct WatchState {
     have: bool,
     last_rsrp: f64,
     last_mode: String,
+    /// 上一次**实际推送**的时刻，供最小间隔门控（`notify_signal_min_interval`）用。
+    /// `None` = 本进程还没推过。
+    last_push: Option<Instant>,
+}
+
+impl WatchState {
+    /// 记下一轮「确实推送了」：基线刷成此刻的读数，限频时钟也拨到这里。
+    ///
+    /// 两者必须一起更新 —— 基线只在推送时刷新是这个模块的既有约定（见结构体注释），
+    /// 而「上次推送时刻」正是最小间隔门控的比较起点，漏掉它等于门控永远不生效。
+    fn note_push(&mut self, sample: &Sample) {
+        self.have = true;
+        self.last_rsrp = sample.rsrp;
+        self.last_mode = sample.rat.clone();
+        self.last_push = Some(Instant::now());
+    }
+}
+
+/// 一轮巡检的推送判定结果。分成三种而不是一个 bool：
+/// 「没达到阈值」与「被限频压住」在日志里必须能区分开，否则用户为了查
+/// 「为什么没推」只能看到同一句话，无从判断是阈值调太高还是限频在起作用。
+enum Decision {
+    Push,
+    NoChange,
+    /// 变化已达标，但距上次推送还差这么久
+    Held(Duration),
 }
 
 pub struct SignalWatcher {
@@ -104,9 +130,23 @@ impl SignalWatcher {
             return;
         };
 
-        let push = {
+        /*
+         * 判定分两层。
+         * 第一层是「变化够不够大」：`should_push` 里的制式切换（LTE ↔ NR）就是
+         * 用户看到的「网络切换提醒」，它**必定**达标 —— 而临界位置上来回横跳时，
+         * 每一轮都「切换」，于是巡检间隔多短就推多密（一分钟内堆好几条）。
+         *
+         * 第二层是「距上次推送够不够久」（`notify_signal_min_interval`，默认一小时），
+         * 只管事件驱动的这一类。选「每次巡检都推送」（`poll.always`）时不介入：
+         * 那种模式下节奏本来就是用户用巡检间隔直接定的，再套一层限频等于两个开关
+         * 互相遮蔽 —— 用户把间隔调到 60 秒却一小时才收到一条，只会以为功能坏了。
+         *
+         * 被限频压住时**不刷新基线**：比较基准仍是上次推送时的 RSRP 与制式，
+         * 间隔一到，这一小时里累计的变化当场就能判出来，限频不会变成漏报。
+         */
+        let decision = {
             let mut st = self.state.lock().await;
-            let push = should_push(
+            if !should_push(
                 self.poll.always,
                 st.have,
                 self.poll.delta,
@@ -114,23 +154,43 @@ impl SignalWatcher {
                 &st.last_mode,
                 sample.rsrp,
                 &sample.rat,
-            );
-            if push {
-                st.have = true;
-                st.last_rsrp = sample.rsrp;
-                st.last_mode = sample.rat.clone();
+            ) {
+                Decision::NoChange
+            } else if self.poll.always {
+                st.note_push(&sample);
+                Decision::Push
+            } else {
+                let now = Instant::now();
+                match min_interval_hold(st.last_push, now, self.notifier.signal_min_interval()) {
+                    Some(rest) => Decision::Held(rest),
+                    None => {
+                        st.note_push(&sample);
+                        Decision::Push
+                    }
+                }
             }
-            push
         };
 
-        if !push {
-            log_debug!(
-                "信号巡检：RSRP {:.0} dBm（{}），变化未达阈值（{:.0} dB），不推送",
-                sample.rsrp,
-                sample.rat,
-                self.poll.delta
-            );
-            return;
+        match decision {
+            Decision::Push => {}
+            Decision::NoChange => {
+                log_debug!(
+                    "信号巡检：RSRP {:.0} dBm（{}），变化未达阈值（{:.0} dB），不推送",
+                    sample.rsrp,
+                    sample.rat,
+                    self.poll.delta
+                );
+                return;
+            }
+            Decision::Held(rest) => {
+                log_debug!(
+                    "信号巡检：RSRP {:.0} dBm（{}）变化已达标，但距上次推送不足最小间隔（还需 {:.0} 分钟），本条不推送",
+                    sample.rsrp,
+                    sample.rat,
+                    rest.as_secs_f64() / 60.0
+                );
+                return;
+            }
         }
 
         log_info!("信号巡检触发推送：RSRP {:.0} dBm（{}）", sample.rsrp, sample.rat);

@@ -28,7 +28,7 @@
 //! - 消息类型总览：<https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/type/overview.html>
 //! - 自定义菜单：<https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_menu.put.html>
 
-use crate::{log_error, log_info, log_warn};
+use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::QqNotifyConfig;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -42,6 +42,10 @@ const QQ_SEND_MAX_RETRIES: u32 = 3;
 /// Markdown 连续失败后的静默冷却：期间 Auto 模式直接发纯文本，
 /// 避免每条消息都先撞一次墙（无权限 / 内容被拒时尤其明显）。
 const MD_COOLDOWN: Duration = Duration::from_secs(600);
+/// 节流等待上限：预约的槽位排到 2 分钟之后就直接发，不再无限挂下去。
+/// 排队排到这种长度，说明刷屏的源头在事件侧（该用 `notify_signal_min_interval`
+/// 限），而不是靠发送端继续攒队 —— 攒队只会让推送晚点几分钟到、内容还是那几条。
+const PACE_MAX_WAIT: Duration = Duration::from_secs(120);
 
 /// 消息格式（UCI `qq_msg_format`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,9 +104,13 @@ pub struct QqSender {
     keyboard: Option<QqKeyboard>,
     /// 是否启用自定义菜单（启动时自动配置一次，或用 qq_menu RPC 手动配置）。
     menu_enabled: bool,
+    /// 通道节流（条/分钟，0=不节流），来自 UCI `qq_max_per_minute`。
+    max_per_minute: u64,
     token: Mutex<Option<QqToken>>,
     /// Markdown 冷却截止时刻；Some(Instant) 且未到期时 Auto 直接发纯文本。
     md_cooldown: std::sync::Mutex<Option<Instant>>,
+    /// 最近一次**已预约**的发送时刻（节流槽位指针，见 [`QqSender::reserve_slot`]）。
+    last_send: std::sync::Mutex<Option<Instant>>,
 }
 
 struct QqToken {
@@ -147,14 +155,75 @@ impl QqSender {
             format: QqMsgFormat::from_uci(&cfg.msg_format),
             keyboard,
             menu_enabled: cfg.menu_enabled,
+            max_per_minute: cfg.max_per_minute,
             token: Mutex::new(None),
             md_cooldown: std::sync::Mutex::new(None),
+            last_send: std::sync::Mutex::new(None),
         })
     }
 
     /// 目标类型（供日志与状态展示）。
     pub fn target_type(&self) -> &str {
         &self.target_type
+    }
+
+    // ---------- 通道节流（qq_max_per_minute）----------
+
+    /// 两次投递之间的最小间隔；`Duration::ZERO` 表示不节流（`max_per_minute = 0`）。
+    ///
+    /// 用「间隔」而不是「每分钟计数」：固定窗口计数在窗口交界处会放过双倍的量
+    /// （上一窗最后 1 秒 + 本窗最初 1 秒），而间隔预约是严格均匀的节奏，
+    /// 不需要额外处理窗口边界。
+    pub fn throttle_gap(&self) -> Duration {
+        if self.max_per_minute == 0 {
+            return Duration::ZERO;
+        }
+        // 条数已在配置层夹到 1..=60，这里不会再除 0；60 条/分钟 = 1 秒一条是最密的一档。
+        // 用毫秒而不是整秒：7 条/分钟按秒算是 8 秒（截断后实际能塞进 7.5 条），
+        // 按毫秒算是 8571 毫秒，与页面提示的「约每 8.6 秒」一致。
+        Duration::from_millis(60_000 / self.max_per_minute.max(1))
+    }
+
+    /// 为下一条消息预约一个发送时刻（**同步**预约，异步等待，见 [`QqSender::pace`]）。
+    ///
+    /// 预约制而不是「到了再看一眼上次时间」：多条消息由 `notify` 各自 `tokio::spawn`
+    /// 出去，若都只在发送前比较 `last + gap`，它们会挤在同一时刻一起撞向平台频控。
+    /// 每次预约都以上一个槽位为基准顺延，天然把并发请求排成队列。
+    /// 长时间空闲后（上个槽已落在过去）以当前时刻为基准，不会攒出一串「补发」。
+    fn reserve_slot(&self, now: Instant) -> Instant {
+        let gap = self.throttle_gap();
+        let mut guard = match self.last_send.lock() {
+            Ok(g) => g,
+            // 锁中毒（仅在有任务 panic 时发生）时不阻塞发送：宁可不节流，
+            // 也不能让「记录上次发送时刻」变成推送链路上的新故障点。
+            Err(_) => return now,
+        };
+        if gap.is_zero() {
+            *guard = Some(now);
+            return now;
+        }
+        let slot = match *guard {
+            Some(prev) => (prev + gap).max(now),
+            None => now,
+        };
+        *guard = Some(slot);
+        slot
+    }
+
+    /// 等到自己预约的槽位再放行。等待上限 [`PACE_MAX_WAIT`]：
+    /// 队列被拉长到几分钟以上，说明事件本身就在刷屏，那时候该限的是源头
+    /// （见 `notify_signal_min_interval`），而不是把发送任务无限挂下去。
+    async fn pace(&self) {
+        let gap = self.throttle_gap();
+        if gap.is_zero() {
+            return;
+        }
+        let slot = self.reserve_slot(Instant::now());
+        let wait = slot.saturating_duration_since(Instant::now()).min(PACE_MAX_WAIT);
+        if !wait.is_zero() {
+            log_debug!("QQ 通道节流：等 {:.1}s 后发送（上限 {} 条/分钟）", wait.as_secs_f64(), self.max_per_minute);
+            tokio::time::sleep(wait).await;
+        }
     }
 
     /// 当前消息格式（供状态展示）。
@@ -185,7 +254,12 @@ impl QqSender {
     }
 
     /// 发送一条消息（按形态路由，Markdown 失败时按配置降级）。
+    ///
+    /// 进门先过通道节流（[`QqSender::pace`]）：所有 QQ 投递都从这里出去，
+    /// 节流只需要在这一个点生效。降级（Markdown → 纯文本）发生在同一次调用内部，
+    /// 不会被当成「第二条消息」再排一次队。
     pub async fn send(&self, msg: QqMessage) -> Result<(), String> {
+        self.pace().await;
         match msg {
             QqMessage::Text(t) => self.send_text(&t).await,
             QqMessage::Markdown { content } => self.send_markdown(&content).await,
@@ -672,6 +746,8 @@ mod tests {
             keyboard_enabled: false,
             keyboard_url: String::new(),
             menu_enabled: false,
+            // 与出厂默认一致：节流只在 send() 里生效，单测不发网络请求，不受影响
+            max_per_minute: crate::config::DEFAULT_QQ_MAX_PER_MIN,
         }
     }
 
@@ -884,6 +960,58 @@ mod tests {
         assert!(s.md_cooling(), "失败后应进入冷却");
     }
 
+    // ---------- 通道节流（qq_max_per_minute）----------
+
+    fn sender_with_per_minute(max_per_minute: u64) -> QqSender {
+        let mut cfg = qq_cfg("c2c");
+        cfg.max_per_minute = max_per_minute;
+        QqSender::from_config(&cfg).expect("应构造成功")
+    }
+
+    #[test]
+    fn throttle_gap_derives_from_per_minute_count() {
+        // 0 = 用户显式选了「不节流」
+        assert_eq!(sender_with_per_minute(0).throttle_gap(), Duration::ZERO);
+        assert_eq!(sender_with_per_minute(10).throttle_gap(), Duration::from_secs(6));
+        // 最密的一档：60 条/分钟 = 每秒一条
+        assert_eq!(sender_with_per_minute(60).throttle_gap(), Duration::from_secs(1));
+        // 非整除档位保留毫秒精度：按整秒截断会让实际速率略高于用户设定的上限
+        assert_eq!(sender_with_per_minute(7).throttle_gap(), Duration::from_millis(8571));
+        // 出厂默认换算出 6 秒，落在单关系 20 条/分钟的频控之下
+        assert_eq!(sender_of("c2c").throttle_gap(), Duration::from_secs(6));
+    }
+
+    #[test]
+    fn reserve_slot_queues_requests_instead_of_bunching_them() {
+        // 同一时刻涌进来的四条（典型场景：多条短信同时到达）必须排成
+        // 6 秒一条的队列，而不是挤在同一秒一起撞平台频控。
+        let s = sender_with_per_minute(10);
+        let t0 = Instant::now();
+        assert_eq!(s.reserve_slot(t0), t0, "首条不等");
+        assert_eq!(s.reserve_slot(t0), t0 + Duration::from_secs(6));
+        assert_eq!(s.reserve_slot(t0), t0 + Duration::from_secs(12));
+        assert_eq!(s.reserve_slot(t0), t0 + Duration::from_secs(18));
+    }
+
+    #[test]
+    fn reserve_slot_reanchors_after_idle_so_no_backlog_burst() {
+        // 空闲一小时后再来一条：立刻发。若仍按「上一个槽 + 间隔」排队，
+        // 就等于把这条消息无端压后 6 秒 —— 节流不该制造补发。
+        let s = sender_with_per_minute(10);
+        let t0 = Instant::now();
+        s.reserve_slot(t0);
+        let later = t0 + Duration::from_secs(3600);
+        assert_eq!(s.reserve_slot(later), later);
+    }
+
+    #[test]
+    fn reserve_slot_is_passthrough_when_throttling_is_off() {
+        let s = sender_with_per_minute(0);
+        let t0 = Instant::now();
+        assert_eq!(s.reserve_slot(t0), t0);
+        assert_eq!(s.reserve_slot(t0), t0, "不节流时同一时刻也能连续预约");
+    }
+
     /// 真实接口冒烟测试（默认跳过）：
     ///   QQ_BOT_APP_ID=xxx QQ_BOT_APP_SECRET=xxx cargo test -- --ignored qq_real_api
     /// 凭据只经环境变量传入，严禁写死在代码里。
@@ -924,6 +1052,7 @@ mod tests {
             keyboard_enabled: false,
             keyboard_url: String::new(),
             menu_enabled: false,
+            max_per_minute: crate::config::DEFAULT_QQ_MAX_PER_MIN,
         })
         .expect("配置应完整");
         let _ = tokio::runtime::Runtime::new()
