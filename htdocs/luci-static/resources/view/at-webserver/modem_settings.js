@@ -109,36 +109,7 @@ return L.view.extend({
 		body.appendChild(modemStyle);
 
 		/* ---------- 通用小工具 ---------- */
-		/*
-		 * 开关回滚约定（Codex P2：模组拒绝 AT 指令时必须还原勾选状态）。
-		 *
-		 * - onChange 返回 Promise 时，以 resolve 值判定成败：false 代表模组拒绝、
-		 *   超时或请求异常，此时统一把 checkbox 恢复到操作前的状态；
-		 * - handler 内部只负责「发指令 + 提示」，不再各自写回滚，避免漏写；
-		 * - 返回 undefined 的老式 handler 不触发回滚，保持向后兼容。
-		 */
-		function makeSwitch(onChange) {
-			var wrap = E('div', { 'class': 'mt5700-switch' });
-			var input = E('input', { type: 'checkbox' });
-			input.addEventListener('change', function () {
-				var checked = input.checked;
-				var result;
-				try {
-					result = onChange(checked, input);
-				} catch (e) {
-					input.checked = !checked;
-					return;
-				}
-				if (!result || typeof result.then !== 'function') return;
-				result.then(function (ok) {
-					if (ok === false) input.checked = !checked;
-				}).catch(function () {
-					input.checked = !checked;
-				});
-			});
-			wrap.appendChild(input);
-			return wrap;
-		}
+		/* 开关统一走 Ui.switch（带回滚约定，Codex P2），实现与单测在 ui.js 中 */
 
 		function atText(res) {
 			if (!res) return '';
@@ -362,7 +333,7 @@ return L.view.extend({
 		});
 		simCard._body.appendChild(Mt5700.formGroup('SIM 槽位切换', simSlotSel, '切换卡槽将自动重置模组射频'));
 
-		var hpSwitch = makeSwitch(function (checked) { return handleSimHotPlug(checked); });
+		var hpSwitch = Ui.switch(function (checked) { return handleSimHotPlug(checked); });
 		var hpChk = hpSwitch.querySelector('input');
 		simCard._body.appendChild(Mt5700.formGroup('SIM 卡热插拔', hpSwitch, '开启后模组支持不关机插拔 SIM 卡即时识别'));
 
@@ -465,7 +436,7 @@ return L.view.extend({
 		var rfCard = Mt5700.card('射频控制与 5G 增强', '飞行模式、载波聚合 (CA)、动态频谱共享与 VoNR');
 		rowSimRf.appendChild(rfCard);
 
-		var airplaneSwitch = makeSwitch(function (checked) {
+		var airplaneSwitch = Ui.switch(function (checked) {
 			return send('AT+CFUN=' + (checked ? '0' : '1')).then(function (res) {
 				if (res.success) {
 					Mt5700.success((checked ? '开启' : '关闭') + '飞行模式成功');
@@ -481,7 +452,7 @@ return L.view.extend({
 		var airplaneChk = airplaneSwitch.querySelector('input');
 		rfCard._body.appendChild(Mt5700.formGroup('飞行模式 (CFUN)', airplaneSwitch, '开启后彻底关断射频，适合应急断网排障或重连基站'));
 
-		var caSwitch = makeSwitch(function (checked) {
+		var caSwitch = Ui.switch(function (checked) {
 			return send('AT^NRRCCAPCFG=3,' + (checked ? 1 : 0)).then(function (res) {
 				if (res.success) {
 					Mt5700.success((checked ? '开启' : '关闭') + '载波聚合成功');
@@ -497,7 +468,7 @@ return L.view.extend({
 		var caChk = caSwitch.querySelector('input');
 		rfCard._body.appendChild(Mt5700.formGroup('NR 载波聚合 (CA)', caSwitch, '开启后允许多个 5G 载波聚合成倍提升吞吐'));
 
-		var dssSwitch = makeSwitch(function (checked) {
+		var dssSwitch = Ui.switch(function (checked) {
 			return send('AT^NRRCCAPCFG=5,' + (checked ? 1 : 0) + ',0').then(function (res) {
 				if (res.success) {
 					Mt5700.success('DSS 配置成功');
@@ -573,7 +544,7 @@ return L.view.extend({
 		 * 板载网口随之不可用）。其余三位手册明确是保留位，恒填 0。
 		 * 早先这里只发 AT^TDPMCFG=1，参数不足会报错；文案也把它说成
 		 * 「无业务时自动进入低功耗待机」，与手册语义正好相反。 */
-		var pwrSwitch = makeSwitch(function (checked) {
+		var pwrSwitch = Ui.switch(function (checked) {
 			return send('AT^TDPMCFG=' + (checked ? '1' : '0') + ',0,0,0').then(function (res) {
 				if (res.success) {
 					Mt5700.success((checked ? '打开' : '关闭') + ' PCIe 控制器成功');
@@ -928,7 +899,7 @@ return L.view.extend({
 			});
 		}
 
-		var thermSwitch = makeSwitch(function (checked) {
+		var thermSwitch = Ui.switch(function (checked) {
 			return applyThermConfig(
 				(checked ? '开启' : '关闭') + '温度保护功能成功',
 				(checked ? '开启' : '关闭') + '温度保护功能失败'
@@ -937,7 +908,7 @@ return L.view.extend({
 		var thermChk = thermSwitch.querySelector('input');
 		thermBody.appendChild(Mt5700.formGroup('自动温度保护开关', thermSwitch, '芯片过热时自动采取阶梯降频与功率保护'));
 
-		var thermCaSwitch = makeSwitch(function () {
+		var thermCaSwitch = Ui.switch(function () {
 			return applyThermConfig('高温策略已更新', '高温策略更新失败');
 		});
 		var thermCaChk = thermCaSwitch.querySelector('input');

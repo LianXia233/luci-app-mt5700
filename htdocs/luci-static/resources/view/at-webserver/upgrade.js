@@ -549,7 +549,8 @@ return L.view.extend({
 			if (!agreed) showDisclaimer();
 		});
 
-		self._dispose = function () { stopTimer(); };
+		/* 离开本页（hash 路由切换）时停掉进度轮询；LuCI view 无 dispose 钩子，_dispose 从不执行 */
+		Ui.onLeave(stopTimer);
 
 		return page;
 	}

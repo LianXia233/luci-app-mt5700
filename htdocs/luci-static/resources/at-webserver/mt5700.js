@@ -13,17 +13,7 @@
 var MT5700_CSS_VERSION = '2.43.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
-(function () {
-	var cssPath = '/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION;
-	var links = document.querySelectorAll('link[rel="stylesheet"]');
-	for (var i = 0; i < links.length; i++) {
-		if (links[i].getAttribute('href') === cssPath) return;
-	}
-	var link = document.createElement('link');
-	link.rel = 'stylesheet';
-	link.href = cssPath;
-	document.head.appendChild(link);
-})();
+if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION);
 
 /*
  * 插件全局背景：三角网格铺底（网格明暗由 CSS html.at-dark 切换），两个角色每次
@@ -456,49 +446,13 @@ var Mt5700 = (function () {
 	api.page = function (title, subtitle, pageKey, badgeText) {
 		var node = E('div', { 'class': 'mt5700-page' });
 
-		// 自动匹配 pageKey（如果没传）
-		if (!pageKey) {
-			var t = String(title || '');
-			if (/状态|status/i.test(t)) pageKey = 'network_status';
-			else if (/网络设置|settings/i.test(t)) pageKey = 'network_settings';
-			else if (/拨号|dial/i.test(t)) pageKey = 'dial';
-			else if (/扫频|scan/i.test(t)) pageKey = 'scan';
-			else if (/定时|schedule/i.test(t)) pageKey = 'schedule';
-			else if (/模组设置|modem/i.test(t)) pageKey = 'modem_settings';
-			else if (/升级|upgrade/i.test(t)) pageKey = 'upgrade';
-			else if (/短信中心|sms_center/i.test(t)) pageKey = 'sms_center';
-			else if (/短信设置|sms_settings/i.test(t)) pageKey = 'sms_settings';
-			else if (/终端|terminal/i.test(t)) pageKey = 'terminal';
-			else if (/日志|log/i.test(t)) pageKey = 'logs';
-			else if (/服务|service|config/i.test(t)) pageKey = 'service';
-			else pageKey = 'default';
-		}
-
-		if (!badgeText) {
-			var badgeMap = {
-				network_status: '实时遥测 · 5G NR/LTE',
-				network_settings: '射频频段 · 锁频策略',
-				dial: '数据链路 · APN 拨号',
-				scan: '基站探测 · 载波扫描',
-				schedule: '时段调度 · 智能倒换',
-				modem_settings: '模组核心 · 硬件控制',
-				upgrade: '固件更新 · FOTA 在线',
-				sms_center: '即时消息 · 会话管理',
-				sms_settings: '短信配置 · 存储/USSD',
-				terminal: 'AT 控制台 · 交互调试',
-				logs: '事件审计 · 运行日志',
-				service: '守护进程 · 后台服务',
-				'default': 'MT5700 5G 模组'
-			};
-			badgeText = badgeMap[pageKey] || 'MT5700 5G 模组';
-		}
-
+		/* pageKey/badgeText 由各视图显式传入（路由映射见 menu.d） */
 		var hero = E('div', { 'class': 'mt5700-hero-card' });
 		var content = E('div', { 'class': 'mt5700-hero-content' });
 
 		var badge = E('div', { 'class': 'mt5700-hero-badge' }, [
 			E('span', { 'class': 'mt5700-hero-badge-dot' }),
-			E('span', {}, badgeText)
+			E('span', {}, badgeText || 'MT5700 5G 模组')
 		]);
 		content.appendChild(badge);
 
@@ -510,11 +464,10 @@ var Mt5700 = (function () {
 
 		var art = E('div', { 'class': 'mt5700-hero-art' });
 
-		/* 看板娘完整保留（含图片、气泡、点击换台词与动画） */
+		/* 看板娘头像（图片 + 悬浮动效）；对话气泡已按需求移除，见 api.mascot 注释 */
 		var mascot = api.mascot();
 		art.appendChild(mascot.el);
 		hero.appendChild(art);
-		node._mascot = mascot;
 
 		node.appendChild(hero);
 
@@ -524,9 +477,6 @@ var Mt5700 = (function () {
 		node._hero = hero;
 		return node;
 	};
-
-	/* ================= 骨架屏加载态 (Responsive Skeleton) ================= */
-
 
 	/* ================= 卡片 ================= */
 
@@ -600,18 +550,6 @@ var Mt5700 = (function () {
 		return m;
 	};
 
-
-
-	/* ================= 环形仪表 (Circular Gauge) ================= */
-
-
-
-
-
-
-
-
-
 	/*
 	 * 制式代际档位。代际决定的是「理论峰值与调度效率」的量级差异，
 	 * 与当前信号强弱无关。
@@ -625,9 +563,6 @@ var Mt5700 = (function () {
 		'WCDMA': { level: 'poor', label: '3G', note: '3G 制式，仅够轻量上网' },
 		'GSM': { level: 'bad', label: '2G', note: '2G 制式，无法承载数据业务' }
 	};
-
-
-
 
 	/* 制式名归一：^HFREQINFO 返回 6/7，^MONSC 返回 LTE/NR，页面 state 可能给任意形式 */
 	function normRat(v) {
@@ -644,19 +579,6 @@ var Mt5700 = (function () {
 		var r = normRat(v);
 		return r && RAT_CAP[r] ? RAT_CAP[r].label : (v ? String(v) : '—');
 	};
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 	/* ================= 按钮 ================= */
 
@@ -2159,26 +2081,6 @@ var Mt5700 = (function () {
 		el.appendChild(E('div', { 'class': 'mt5700-empty-text' }, text || '暂无数据喵~'));
 		return el;
 	};
-
-
-	/* ================= 自动刷新 ================= */
-
-
-	/* ================= 定时器管理 ================= */
-
-	var _timers = [];
-
-	api.interval = function (ms, fn) {
-		var id = setInterval(fn, ms);
-		_timers.push(function () { clearInterval(id); });
-		return id;
-	};
-
-
-	/* ================= 图表 ================= */
-
-
-
 
 	/* ================= 表格 ================= */
 

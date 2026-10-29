@@ -302,12 +302,14 @@ return L.view.extend({
 			});
 		});
 
-		self._dispose = function () {
+		/* 离开本页（hash 路由切换）时停轮询、退订推送并主动收掉本页发起的扫频。
+		 * LuCI view 无 dispose 钩子，原先的 _dispose 从不执行，扫频会一直空转 */
+		Ui.onLeave(function () {
 			clearInterval(pollTimer);
 			AtWs.client.unsubscribe(handler);
 			// 离开页面时主动收掉本页发起的扫频
 			if (startedRef) AtWs.client.sendCommand(Parse.SCAN_ABORT_COMMAND).catch(function () {});
-		};
+		});
 
 		/* ---------- 初始化 ---------- */
 		render();

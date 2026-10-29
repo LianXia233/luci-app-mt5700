@@ -95,14 +95,6 @@ return L.view.extend({
 			Mt5700.info('更改已暂存，点击页面下方「保存并应用」后生效');
 		}
 
-		function makeSwitch(onChange) {
-			var wrap = E('div', { 'class': 'mt5700-switch' });
-			var input = E('input', { type: 'checkbox' });
-			input.addEventListener('change', function () { onChange(input.checked, input); });
-			wrap.appendChild(input);
-			return wrap;
-		}
-
 		/* ---------- 常量 ---------- */
 		var DIAL_MODE_OPTIONS = [
 			{ label: 'USB网络接口', value: 1 }, { label: '转网口模式', value: 2 }
@@ -201,9 +193,10 @@ return L.view.extend({
 			return '未配置';
 		}
 		function getAuthTypeText(type) {
-			if (type === 0) return '无鉴权';
-			if (type === 1) return 'PAP鉴权';
-			if (type === 2) return 'CHAP鉴权';
+			/* 与 AUTH_OPTIONS 同源派生，避免下拉「无认证」、徽章「无鉴权」各说各话 */
+			for (var i = 0; i < AUTH_OPTIONS.length; i++) {
+				if (AUTH_OPTIONS[i].value === type) return AUTH_OPTIONS[i].label;
+			}
 			return '未知';
 		}
 		function getPdpTypeText(type) {
@@ -271,7 +264,7 @@ return L.view.extend({
 		switchInfo.appendChild(E('span', { 'class': 'mt-switch-desc' }, '开启后模组自动保持网络常驻连接，断线自愈重拨；建议始终保持开启'));
 		switchRow.appendChild(switchInfo);
 
-		var dialSwitch = makeSwitch(function (checked) {
+		var dialSwitch = Ui.switch(function (checked) {
 			handleAutoDialChange(checked);
 		});
 		var dialSwitchInput = dialSwitch.querySelector('input');
@@ -353,7 +346,7 @@ return L.view.extend({
 		dialGrid.appendChild(Mt5700.formGroup('用户名 (可选)', userInput));
 		dialGrid.appendChild(Mt5700.formGroup('密码 (可选)', passInput));
 
-		var authCurrent = E('span', { 'class': 'mt5700-hint', style: 'margin-left:8px;' }, '当前认证：无鉴权');
+		var authCurrent = E('span', { 'class': 'mt5700-hint', style: 'margin-left:8px;' }, '当前认证：' + getAuthTypeText(0));
 		dialCard._body.appendChild(Mt5700.panelActions(
 			Mt5700.primaryButton('暂存 APN 更改', function () { handleApnSettingChange(); }),
 			authCurrent
@@ -647,32 +640,22 @@ return L.view.extend({
 					if (parsed.password != null) apnForm.password = parsed.password;
 					if (parsed.authType != null) apnForm.authType = parsed.authType;
 					dialSwitchInput.checked = parsed.enable === 1;
-					syncAutodialDefault(parsed.enable === 1, parsed.dialMode);
+					syncAutodialDefault(parsed.enable === 1);
 				}
 				renderDialStatus();
 			}).catch(function () { Mt5700.error('获取拨号配置失败'); });
 		}
 
-		function syncAutodialDefault(enabled, mode) {
+		function syncAutodialDefault(enabled) {
+			/* 出厂 UCI 已带 autodial_enable/autodial_mode 默认值（缺省时后端也按
+			 * 开启/模式1 处理），无需前端播种。这里只做「配置期望 vs 模组实况」
+			 * 的不一致提示。 */
 			var curEnable = L.uci.get('at-webserver', 'config', 'autodial_enable');
-			var curMode = L.uci.get('at-webserver', 'config', 'autodial_mode');
-
-			if (curEnable != null || curMode != null) {
-				var cfgOn = String(curEnable) === '1';
-				if (curEnable != null && enabled !== cfgOn) {
-					Mt5700.warning('模组当前自动拨号状态与配置期望不一致：配置=' +
-						(cfgOn ? '开启' : '关闭') + '，模组=' + (enabled ? '开启' : '关闭') +
-						'。后端会按配置继续对齐；如需以模组状态为准，请点击页面下方「保存并应用」。');
-				}
-				return;
+			if (curEnable != null && enabled !== (String(curEnable) === '1')) {
+				Mt5700.warning('模组当前自动拨号状态与配置期望不一致：配置=' +
+					(String(curEnable) === '1' ? '开启' : '关闭') + '，模组=' + (enabled ? '开启' : '关闭') +
+					'。后端会按配置继续对齐；如需以模组状态为准，请点击页面下方「保存并应用」。');
 			}
-
-			// 首次安装：写入一次初值，标记为「未保存更改」，由用户确认
-			var wantMode = String(mode != null ? mode : 1);
-			if (wantMode !== '1' && wantMode !== '2') wantMode = '1';
-			L.uci.set('at-webserver', 'config', 'autodial_enable', enabled ? '1' : '0');
-			L.uci.set('at-webserver', 'config', 'autodial_mode', wantMode);
-			AtWs.uci.markDirty();
 		}
 
 		function handleAutoDialChange(checked) {
