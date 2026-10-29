@@ -323,11 +323,23 @@ var Ui = (function () {
 		if (_installHashHook._done) return;
 		_installHashHook._done = true;
 		window.addEventListener('hashchange', function () {
-			// 延后一拍，避免同 tick 内先注册又被立刻清掉
+			/*
+			 * 同步快照，延后执行。
+			 *
+			 * 快照必须在本 tick 内取：此刻路由派发刚起步、目标视图尚未 load/render，
+			 * _hooks 里只可能是离场视图的钩子。若连快照一起推迟到回调里，凡是
+			 * load() 能纯微任务走完的视图（无网络边界，例如命中本地缓存）会抢先
+			 * 注册完毕，新页的钩子就会被 old 一并捕获并立刻执行 —— 后果是刚进页面
+			 * 就把本页的轮询/监听摘掉，以及误调 closeSession() 之类的离场清理。
+			 *
+			 * 执行仍延后一拍，保留「等路由派发完成再清理」的原有意图：
+			 * 清理回调里常要摘 document/window 监听器、释放会话租约，晚一点跑可以
+			 * 避开与 LuCI 自身 DOM 更新的竞争。
+			 */
+			var leaving = _hooks;
+			_hooks = [];
 			setTimeout(function () {
-				var old = _hooks;
-				_hooks = [];
-				old.forEach(function (fn) { try { fn(); } catch (e) { /* ignore */ } });
+				leaving.forEach(function (fn) { try { fn(); } catch (e) { /* ignore */ } });
 			}, 0);
 		});
 	}
