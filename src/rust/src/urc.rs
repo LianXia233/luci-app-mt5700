@@ -1,8 +1,11 @@
 //! 主动上报分发：raw_data 广播、来电、新短信、存储满、信号变化、PDCP 统计。
 
-use crate::{log_info, log_warn};
+use crate::{log_debug, log_info, log_warn};
 use crate::atclient::{AtClient, AtResponse, Unsolicited};
-use crate::notify::{normalize_phone_number, Notification, NotifyKind, Notifier, SENDER_CALL, SENDER_SIGNAL};
+use crate::notify::{
+    min_interval_hold, normalize_phone_number, Notification, NotifyKind, Notifier, SENDER_CALL,
+    SENDER_SIGNAL,
+};
 use crate::pdu::{Sms, decode_incoming_pdu};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,6 +39,8 @@ pub struct Dispatcher {
     last_rsrp: f64,
     have_rsrp: bool,
     last_sys_mode: String,
+    /// 上一次信号类通知**实际推送**的时刻（最小间隔门控，见 `notify_signal_min_interval`）。
+    last_signal_push: Option<Instant>,
 
     memory_full_notified: bool,
 
@@ -66,6 +71,7 @@ impl Dispatcher {
             last_rsrp: 0.0,
             have_rsrp: false,
             last_sys_mode: String::new(),
+            last_signal_push: None,
             memory_full_notified: false,
             sms_mem: String::new(),
             partials: HashMap::new(),
@@ -455,9 +461,31 @@ impl Dispatcher {
         }
 
         let mode_switched = sys_mode != self.last_sys_mode;
+        /*
+         * 最小间隔门控（`notify_signal_min_interval`，默认一小时一条）：与巡检走
+         * 同一套规则，两条信号路径各限各的迟早会口径不一致。制式横跳时这里同样
+         * 会每一轮都判定为「变了」，不限频就是一分钟一堆「网络切换提醒」。
+         *
+         * 抑制时**不动基线**（last_rsrp / last_sys_mode 保持原值）：下一次上报仍与
+         * 上次推送时的读数比较，间隔一到累计变化立刻判得出来，不会把限频变成漏报。
+         */
+        if let Some(rest) = min_interval_hold(
+            self.last_signal_push,
+            Instant::now(),
+            self.notifier.signal_min_interval(),
+        ) {
+            log_debug!(
+                "信号上报变化已达阈值（RSRP {:.0} dBm，制式{}），但距上次推送不足最小间隔（还需 {:.0} 分钟），不推送",
+                rsrp,
+                if mode_switched { "已切换" } else { "未变" },
+                rest.as_secs_f64() / 60.0
+            );
+            return;
+        }
         self.last_rsrp = rsrp;
         self.have_rsrp = true;
         self.last_sys_mode = sys_mode;
+        self.last_signal_push = Some(Instant::now());
         self.notify_signal(rsrp, mode_switched).await;
     }
 

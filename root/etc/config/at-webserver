@@ -70,6 +70,11 @@ option dns_exclusive '1'
 	option qq_keyboard_enabled '0'        # 1=富文本消息附带「打开管理页」跳转按钮（点击直达本机管理页）
 	option qq_keyboard_url ''             # 按钮跳转地址（http/https）；留空按局域网 IP 自动推导
 	option qq_menu_enabled '0'            # 1=启动时自动配置 QQ 自定义菜单（仅单聊场景生效，也可用 qq_menu RPC 手动配置）
+	# QQ 主动消息节流（条/分钟）。官方频控是群 30~60 条/分钟、单聊 20 条/分钟，
+	# 超限后会被平台丢弃并可能触发封禁，因此这里默认压到 10 条/分钟：
+	# 每条消息按间隔排队发送（延后，不丢弃），实时通知仍会送达，只是不再挤成一坨。
+	# 0=不节流（交给平台频控，不建议）。范围 0-60。
+	option qq_max_per_minute '10'
 	option log_file '/tmp/at-notifications.log'
 	# 通知日志文件的大小上限（字节，默认 256 KiB）。/tmp 是 tmpfs（占内存），
 	# 不加限制时长期运行会把内存吃满；达到上限后按行边界裁掉最旧的一半再继续写。
@@ -113,6 +118,15 @@ option dns_exclusive '1'
 	option notify_poll_interval '300'     # 轮询间隔（秒），范围 30-3600
 	option notify_poll_all '0'            # 0=仅信号变化时推送 / 1=每次轮询都推送当前状态
 	option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅 notify_poll_all=0 时生效
+
+	# 「网络切换提醒 / 信号变化」推送的最小间隔（分钟），默认 60，即同一类通知一小时内最多一条。
+	# 为什么需要：模组在 LTE↔NR 边缘来回切换时，巡检每轮都判定为「有变化」，
+	# 默认 300 秒轮询下能一分钟推好几条，把 QQ 刷屏。这里在「该不该推」之上再加一层时间闸门。
+	# 仅作用于信号类巡检与 URC 上报；短信、来电不受影响（始终实时直发），
+	# 上面的 notify_timer_interval 定时推送也不受限制（那是用户自己定的固定节奏）。
+	# 被这一层压住的那轮不会刷新基线：累计变化在间隔到点后立刻补推，不会永远漏掉。
+	# 0=不限频（恢复旧行为）。范围 0-10080（最长 7 天）。
+	option notify_signal_min_interval '60'
 
 	# 自定义推送文案。留空 = 使用内置默认文案（升级后未被改动的项仍跟随版本更新）。
 	# UCI 的 option 值是单行的，多行文案统一写成 \n 转义，LuCI 页面会自动转换；

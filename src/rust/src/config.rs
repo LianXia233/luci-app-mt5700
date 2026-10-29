@@ -121,6 +121,35 @@ pub const DEFAULT_SIGNAL_DELTA_DB: f64 = 3.0;
 pub const MIN_NOTIFY_POLL_DELTA_DB: i64 = 1;
 pub const MAX_NOTIFY_POLL_DELTA_DB: i64 = 30;
 
+// ---------------------------------------------------------------------------
+// 推送频率限制（防刷屏）
+//
+// 为什么需要它：信号类通知（网络切换提醒 / 信号变动 / 巡检报告）靠「制式变了、
+// 或 RSRP 变化够大」触发，而驻网制式在临界位置会**反复横跳** —— LTE ↔ NR 来回
+// 切，每一轮巡检都判定为「变了」，于是巡检间隔有多短就推多密（把间隔调到分钟级
+// 时，实测一分钟内能堆出好几条）。这类通知的价值在于「变化发生了」这件事本身，
+// 同一小时内重复推第 N 条不带新信息，只是把 QQ 频道刷爆、把配额吃掉。
+//
+// 因此这里给同类通知两次推送之间加一个**最小间隔**：间隔内的重复通知不发，
+// 且**不刷新基线** —— 上次推送时的 RSRP/制式一直是比较基准，所以间隔一到，
+// 累计变化仍会立刻被判定出来，限频不会把真正的持续劣化压没了。
+// ---------------------------------------------------------------------------
+
+/// 信号类通知最小间隔的默认值（**分钟**）：默认一小时内最多一条。
+pub const DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN: u64 = 60;
+/// 信号类通知最小间隔的上限（10080 分钟 = 7 天）：留出「一周一条」的余量，
+/// 再大就只能是误填（例如把「小时」当成了分钟），按上限夹住而不是照收。
+pub const MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN: u64 = 10080;
+
+/// QQ 通道节流的默认条数（**条/分钟**）：换算成「每条至少间隔 6 秒」。
+///
+/// 官方主动消息频控是群 30~60 条/分钟、单关系 20 条/分钟，撞线后平台直接拒收，
+/// 用户看到的是「莫名少了若干条推送」。10 条/分钟把节奏压到平台线以下，
+/// 又留出了「多条短信同时到达」的空间 —— 这里是**顺延发送**，不是丢弃。
+pub const DEFAULT_QQ_MAX_PER_MIN: u64 = 10;
+/// QQ 通道节流的条数上限（60 条/分钟 = 每条至少间隔 1 秒）。
+pub const MAX_QQ_MAX_PER_MIN: u64 = 60;
+
 /// 定时轮询推送配置。
 #[derive(Debug, Clone)]
 pub struct PollConfig {
@@ -309,6 +338,13 @@ pub struct NotificationConfig {
     pub timer_interval: Duration,
     /// 定时轮询推送（信号采样）。
     pub poll: PollConfig,
+    /// 信号类通知（网络切换提醒 / 信号变动 / 巡检报告）两次推送之间的最小间隔。
+    /// [`Duration::ZERO`] 表示不限频（用户显式关掉这层保护）。
+    ///
+    /// 只管**事件驱动**的信号通知：短信与来电不受影响（始终实时直发），
+    /// 「定时推送」（[`NotificationConfig::timer_interval`]）也不受影响 ——
+    /// 那条节奏是用户自己定的，再被这一层夹一道就变成两个开关互相遮蔽。
+    pub signal_min_interval: Duration,
     /// 自定义推送文案模板。
     pub templates: NotifyTemplates,
 }
@@ -333,6 +369,9 @@ pub struct QqNotifyConfig {
     pub keyboard_url: String,
     /// 是否在启动时自动配置 QQ 自定义菜单（C2C 场景）。
     pub menu_enabled: bool,
+    /// 通道级节流：每分钟最多投递这么多条，超出的**顺延**发送而不是丢弃。
+    /// 0 = 不节流。默认值与依据见 [`DEFAULT_QQ_MAX_PER_MIN`]。
+    pub max_per_minute: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -435,9 +474,11 @@ pub fn default_config() -> Config {
                 keyboard_enabled: false,
                 keyboard_url: String::new(),
                 menu_enabled: false,
+                max_per_minute: DEFAULT_QQ_MAX_PER_MIN,
             },
             timer_interval: Duration::from_secs(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN * 60),
             poll: PollConfig::default(),
+            signal_min_interval: Duration::from_secs(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60),
             templates: NotifyTemplates::default(),
         },
         websocket: WebSocketConfig {
@@ -614,6 +655,35 @@ fn timer_interval_from(values: &UciReader) -> Duration {
     Duration::from_secs(minutes.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN) * 60)
 }
 
+/// 解析「信号类通知最小间隔」：UCI `notify_signal_min_interval`（**分钟**）→ [`Duration`]。
+///
+/// 与 `timer_interval_from` 同构，但**没有**「0 → 夹到下限」这一步：这里的 0 是
+/// 用户在界面上显式选择的「不限频」，把它当成没填而回落 60 分钟，等于用户的开关
+/// 白点了。因此要区分三种来源：键缺失/空值 → 默认 60；`0` → 不限频；其余 → 夹取。
+fn signal_min_interval_from(values: &UciReader) -> Duration {
+    let raw = values.str("notify_signal_min_interval", "").trim().to_string();
+    let minutes = if raw.is_empty() {
+        DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN
+    } else {
+        match raw.parse::<i64>() {
+            Ok(n) if n < 0 => {
+                log_warn!(
+                    "notify_signal_min_interval 是负数（{raw}），已回落默认 {DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN} 分钟"
+                );
+                DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN
+            }
+            Ok(n) => n as u64,
+            Err(_) => {
+                log_warn!(
+                    "notify_signal_min_interval 不是数字（{raw}），已回落默认 {DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN} 分钟"
+                );
+                DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN
+            }
+        }
+    };
+    Duration::from_secs(minutes.min(MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN) * 60)
+}
+
 /// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
 pub async fn load_config() -> Config {
     let mut cfg = default_config();
@@ -701,10 +771,17 @@ pub async fn load_config() -> Config {
         // 键盘跳转地址：留空时由 qqpush 从 network.lan.ipaddr 推导
         keyboard_url: values.str("qq_keyboard_url", ""),
         menu_enabled: values.bool("qq_menu_enabled", false),
+        // 通道节流（条/分钟）：0 = 不节流；负数与超限都夹进合法范围
+        max_per_minute: values
+            .int("qq_max_per_minute", DEFAULT_QQ_MAX_PER_MIN as i64)
+            .clamp(0, MAX_QQ_MAX_PER_MIN as i64) as u64,
     };
 
     // 定时推送间隔（分钟）：到点主动推一次当前实际情况。
     cfg.notification.timer_interval = timer_interval_from(&values);
+
+    // 信号类通知（网络切换提醒 / 信号变动 / 巡检报告）的最小间隔：防刷屏。
+    cfg.notification.signal_min_interval = signal_min_interval_from(&values);
 
     // 自定义推送文案：UCI 存单行转义文本，空值回落内置默认，保证升级后行为不变。
     let tpl = |key: &str, def: &str| -> String {
@@ -922,6 +999,78 @@ mod tests {
         );
         // 非数字：回落默认，而不是解析成 0
         assert_eq!(timer_interval_from(&mk(&[("notify_timer_interval", "abc")])).as_secs(), 10 * 60);
+    }
+
+    /// `mk` 同款夹具：单测无法注入 `uci show`，所以逐条钉住最小间隔的取值规则。
+    fn uci_of(pairs: &[(&str, &str)]) -> UciReader {
+        let mut m = HashMap::new();
+        for (k, v) in pairs {
+            m.insert(k.to_string(), v.to_string());
+        }
+        UciReader(m)
+    }
+
+    #[test]
+    fn signal_min_interval_defaults_to_one_hour() {
+        // 没配过这个键的老设备：升级后直接获得「一小时内最多一条」，
+        // 而不是继续按巡检间隔刷屏 —— 这一版的修复目标本身。
+        assert_eq!(signal_min_interval_from(&uci_of(&[])).as_secs(), 60 * 60);
+        assert_eq!(
+            signal_min_interval_from(&uci_of(&[("notify_signal_min_interval", "")])).as_secs(),
+            60 * 60,
+            "空值等同于未配置"
+        );
+        // 正常值按分钟换算
+        assert_eq!(signal_min_interval_from(&uci_of(&[("notify_signal_min_interval", "10")])).as_secs(), 10 * 60);
+        assert_eq!(signal_min_interval_from(&uci_of(&[("notify_signal_min_interval", " 30 ")])).as_secs(), 30 * 60);
+    }
+
+    #[test]
+    fn signal_min_interval_zero_means_explicitly_unlimited() {
+        // 关键区别：0 在这里是**合法的选择**（界面上的「不限频」），
+        // 不像 timer_interval 那样被夹到下限。回落默认等于把用户的开关白点了。
+        let d = signal_min_interval_from(&uci_of(&[("notify_signal_min_interval", "0")]));
+        assert!(d.is_zero(), "0 应解析为不限频，实际 {d:?}");
+    }
+
+    #[test]
+    fn signal_min_interval_clamps_and_rejects_garbage() {
+        // 超上限：夹到 7 天，而不是「填成 999999 就永远不推」
+        assert_eq!(
+            signal_min_interval_from(&uci_of(&[("notify_signal_min_interval", "999999")])).as_secs(),
+            MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60
+        );
+        // 负数与非数字：回落默认。把「-5」解析成 0 等于误关限频，把「abc」解析成 0 同理。
+        for bad in ["-5", "abc", "1小时"] {
+            assert_eq!(
+                signal_min_interval_from(&uci_of(&[("notify_signal_min_interval", bad)])).as_secs(),
+                DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60,
+                "非法值 {bad} 应回落默认"
+            );
+        }
+    }
+
+    #[test]
+    fn push_rate_defaults_are_sane_against_qq_platform_limits() {
+        // 默认值必须真的能防刷屏：一小时一条
+        assert_eq!(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN, 60);
+        assert!(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN <= MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN);
+        // QQ 节流默认值必须压在平台频控（单关系 20 条/分钟、群 30~60 条/分钟）以下，
+        // 否则「防拒收」这个目的达不到。
+        assert!(DEFAULT_QQ_MAX_PER_MIN > 0 && DEFAULT_QQ_MAX_PER_MIN < 20);
+        assert!(DEFAULT_QQ_MAX_PER_MIN <= MAX_QQ_MAX_PER_MIN);
+        // 换算成最小发送间隔：10 条/分钟 = 每条至少 6 秒（整数除法，宁可更保守）
+        assert_eq!(60 / DEFAULT_QQ_MAX_PER_MIN, 6);
+    }
+
+    #[test]
+    fn default_config_carries_the_new_rate_limits() {
+        let cfg = default_config();
+        assert_eq!(
+            cfg.notification.signal_min_interval.as_secs(),
+            DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60
+        );
+        assert_eq!(cfg.notification.qq.max_per_minute, DEFAULT_QQ_MAX_PER_MIN);
     }
 
     #[test]

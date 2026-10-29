@@ -18,7 +18,7 @@
 use crate::qqpush::{QqMessage, QqMsgFormat, QqSender};
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::{NotificationConfig, NotifyTemplates};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 const NOTIFY_QUEUE_SIZE: usize = 256;
@@ -360,6 +360,17 @@ impl Notifier {
         self.cfg.enabled
     }
 
+    /// 信号类通知的最小推送间隔（UCI `notify_signal_min_interval`，分钟；ZERO=不限频）。
+    ///
+    /// 门控由**事件生产者**执行（[`crate::signalwatch`] 巡检、[`crate::urc`] 的
+    /// 信号上报），不在这里拦：Notifier 收到的「信号事件」既包括巡检推来的突变
+    /// 通知，也包括 [`crate::timerpush`] 到点推的状态快照，两者同为
+    /// [`NotifyKind::Signal`]，在枢纽处一刀切会把用户自己设定的定时推送节奏也夹掉。
+    /// 配置挂在 Notifier 上，只是让两个生产者共用同一份取值而不各读一次 UCI。
+    pub fn signal_min_interval(&self) -> Duration {
+        self.cfg.signal_min_interval
+    }
+
     /// 测试指定推送通道（LuCI「发送测试通知」按钮）。绕过事件链路直接发送。
     /// 测试消息不携带任何插件名字样，同样套用全局前缀，便于一次性验证前缀配置是否生效。
     pub async fn notify_test(&self, channel: &str) -> Result<(), String> {
@@ -591,6 +602,29 @@ fn post_webhook(hook: &str, body: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 最小推送间隔门控（防刷屏）：返回 `Some(还需等待)` 表示这一条**不该**发。
+///
+/// 做成纯函数（两个时刻都由调用方传入）是为了能把「从未发过」「差一秒」「刚好
+/// 到点」这三种边界直接钉进单测 —— 用 `Instant::now()` 的实现测不到，而这三点
+/// 恰恰是「限频到底生没生效」的全部争议处。
+///
+/// - `min` 为 `ZERO`：不限频，恒 `None`（用户在界面上选了「不限制」）；
+/// - `last` 为 `None`：进程内该类第一次推送，必放 —— 否则服务每次重启都要先
+///   干等一小时，功能看起来像坏了；
+/// - 恰好等于最小间隔：放行。语义是「达到即推」，与巡检变化阈值同口径。
+pub fn min_interval_hold(last: Option<Instant>, now: Instant, min: Duration) -> Option<Duration> {
+    if min.is_zero() {
+        return None;
+    }
+    let last = last?;
+    let elapsed = now.saturating_duration_since(last);
+    if elapsed >= min {
+        None
+    } else {
+        Some(min - elapsed)
+    }
+}
+
 /// 本机当前时刻字符串（`%Y-%m-%d %H:%M:%S`，系统时区）。事件产生侧用它填充
 /// [`Notification::time`]，保证推送文案里的 `{time}` 是事件时刻而非推送时刻。
 ///
@@ -789,6 +823,56 @@ mod tests {
         assert_eq!(normalize_phone_number("+8610"), "10");
     }
 
+    // ---------- 最小推送间隔门控 ----------
+
+    /// 限频门控的三种边界。这三条直接决定「网络切换提醒会不会一小时刷屏」，
+    /// 也决定「限频会不会把第一条也吞掉」。
+    #[test]
+    fn min_interval_hold_gates_repeats() {
+        let base = Instant::now();
+        let one_hour = Duration::from_secs(3600);
+
+        // 从未推过 → 必放（服务重启后不能先干等一小时）
+        assert_eq!(min_interval_hold(None, base, one_hour), None);
+
+        // 刚推过 → 抑制，且剩余时间正确
+        let hold = min_interval_hold(Some(base), base + Duration::from_secs(10), one_hour)
+            .expect("10 秒后重复推送应被抑制");
+        assert_eq!(hold, one_hour - Duration::from_secs(10));
+
+        // 差一秒 → 仍抑制
+        assert!(min_interval_hold(Some(base), base + one_hour - Duration::from_secs(1), one_hour).is_some());
+
+        // 刚好到点 → 放行（「达到即推」，与巡检阈值同口径）
+        assert_eq!(min_interval_hold(Some(base), base + one_hour, one_hour), None);
+
+        // 超过间隔 → 放行
+        assert_eq!(min_interval_hold(Some(base), base + one_hour * 3, one_hour), None);
+
+        // 时钟回拨（last 在未来）：saturating 减法得 0，仍是抑制而不是panic
+        assert!(min_interval_hold(Some(base + one_hour), base, one_hour).is_some());
+    }
+
+    #[test]
+    fn min_interval_zero_disables_the_gate() {
+        // 用户在界面上选「不限制」→ 任何重复都放行
+        let base = Instant::now();
+        assert_eq!(min_interval_hold(Some(base), base, Duration::ZERO), None);
+        assert_eq!(min_interval_hold(None, base, Duration::ZERO), None);
+    }
+
+    #[test]
+    fn notifier_exposes_signal_min_interval() {
+        let mut cfg = crate::config::default_config().notification;
+        cfg.log_file = String::new();
+        let (notifier, _rx) = Notifier::new(cfg.clone());
+        assert_eq!(notifier.signal_min_interval(), Duration::from_secs(3600));
+
+        cfg.signal_min_interval = Duration::ZERO;
+        let (relaxed, _rx2) = Notifier::new(cfg);
+        assert!(relaxed.signal_min_interval().is_zero());
+    }
+
     // ---------- 文案模板渲染 ----------
 
     #[test]
@@ -959,6 +1043,7 @@ mod tests {
             keyboard_enabled: false,
             keyboard_url: String::new(),
             menu_enabled: false,
+            max_per_minute: crate::config::DEFAULT_QQ_MAX_PER_MIN,
         };
         // 模板换成可精确断言的固定格式；事件走实时直发，测试不必等任何攒批窗口
         cfg.templates.prefix = "[测试]".into();
@@ -1061,6 +1146,7 @@ mod tests {
             keyboard_enabled: false,
             keyboard_url: String::new(),
             menu_enabled: false,
+            max_per_minute: crate::config::DEFAULT_QQ_MAX_PER_MIN,
         };
         cfg
     }

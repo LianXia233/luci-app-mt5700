@@ -360,6 +360,8 @@ async fn run_qq_bind(
                 keyboard_enabled: q.keyboard_enabled,
                 keyboard_url: q.keyboard_url,
                 menu_enabled: q.menu_enabled,
+                // 节流配置随绑定一起带过来：绑定前后是同一个通道，节奏不该变
+                max_per_minute: q.max_per_minute,
             });
             if let Some(sender) = sender {
                 // 绑定成功后立即回一条确认消息，让用户知道后续通知会发到这里。
