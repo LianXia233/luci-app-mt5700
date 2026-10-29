@@ -47,7 +47,7 @@ return L.view.extend({
 		var state = {
 			cell: {
 				mcc: '', mnc: '', lac: '', cid: '', channel: '', pci: '',
-				rsrp: null, rsrq: null, sinr: null, sysMode: '', signalPercent: ''
+				rsrp: null, rsrq: null, sinr: null, sysMode: ''
 			},
 			diag: { reg: null, tx: null, nrTx: [], endc: null, addrs: [] },
 			secondaryNR: [],
@@ -55,7 +55,6 @@ return L.view.extend({
 			rawHfreq: [],
 			hfreqSuccess: null,
 			secondarySuccess: null,
-			telemetryError: false,
 			caStatus: {
 				state: 'pending', // 'pending' | 'single' | 'ca' | 'none' | 'error' | 'expired'
 				lastSuccessTime: 0
@@ -65,7 +64,7 @@ return L.view.extend({
 				ok: false,          // 命令是否成功且解析出结构
 				queried: false,     // 是否至少查询过一次
 				lastSuccessTime: 0,
-				arfcn: null, pci: null, rsrp: null, sinr: null,
+				pci: null,
 				beams: [null, null, null, null, null, null, null, null]
 			},
 			carriers: [],
@@ -80,22 +79,14 @@ return L.view.extend({
 			apn: '',
 			pdpType: '',
 			apnCid: '',
-			imsApn: '',
 			simStatus: '检测中...',
 			deviceInterface: '',
-			qci: '',
 			flow: {
-				currentConnectTime: '',
-				currentDownloadFlow: '',
-				currentUploadFlow: '',
-				totalDownloadFlow: '',
-				totalUploadFlow: '',
-				totalConnectTime: ''
+				currentConnectTime: ''
 			},
 			temps: null,
-			dhcpv4: { ipv4Address: '', subnetMask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
-			dhcpv6: { ipv6Address: '', netmask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
-			ipv6Cap: { capValue: 0, description: '' },
+			dhcpv4: { ipv4Address: '', gateway: '', primaryDNS: '', secondaryDNS: '' },
+			dhcpv6: { ipv6Address: '' },
 			mcs: { dlMod: '', ulMod: '', dlMcs: null, ulMcs: null, dlCw: null, ulCw: null, tm: '' },
 			modemInfo: { manufacturer: '', model: '', fw: '', imei: '', imsi: '', iccid: '' },
 			// 签约速率（Session-AMBR，来自 AT+C5GQOSRDP=1）
@@ -424,11 +415,15 @@ return L.view.extend({
 		]);
 		midGrid.appendChild(chartCard);
 
-		/* 点击/触摸图表以外的区域时收起趋势悬浮卡（整页仅注册一次） */
-		document.addEventListener('pointerdown', function (ev) {
+		/* 点击/触摸图表以外的区域时收起趋势悬浮卡；离开本页时摘除，避免反复进出累积 */
+		var onDocPointerDown = function (ev) {
 			var b = document.getElementById('sig-trend-chart-box');
 			if (b && !b.contains(ev.target)) hideTrendHover();
-		}, true);
+		};
+		document.addEventListener('pointerdown', onDocPointerDown, true);
+		Ui.onLeave(function () {
+			document.removeEventListener('pointerdown', onDocPointerDown, true);
+		});
 
 		/* ==========================================================================
 		   3. 底部折叠面板: 高级遥测与硬件诊断 (保留原有全量数据)
@@ -787,14 +782,9 @@ return L.view.extend({
 				var prefix = isNr ? 'N' : 'B';
 				var bandNum = c.band || '';
 				if (!bandNum) {
-					var ch = parseInt(c.channel, 10);
-					if (ch >= 500000 && ch <= 540000) bandNum = '41';
-					else if (ch >= 620000 && ch <= 680000) bandNum = '78';
-					else if (ch >= 690000 && ch <= 730000) bandNum = '79';
-					else if (ch >= 150000 && ch <= 170000) bandNum = '28';
-					else if (ch >= 420000 && ch <= 440000) bandNum = '1';
-					else if (ch >= 360000 && ch <= 380000) bandNum = '3';
-					else bandNum = 'CH ' + c.channel;
+					/* 与载波聚合卡片用同一套映射（Parse.bandFromArfcn），不再维护内联区间 */
+					var mapped = isNr ? getBandFromNrArfcn(c.channel) : getBandFromLteArfcn(c.channel);
+					bandNum = mapped || ('CH ' + c.channel);
 				}
 				var resTag = prefix + bandNum;
 				if (c.channel && bandNum !== 'CH ' + c.channel) {
@@ -1241,10 +1231,9 @@ return L.view.extend({
 			}
 
 			/* ---- 时间横轴（一律保留到秒：同一分钟内多点时只写 时:分 会出现三条重复标签） ---- */
-			function fmtTime(ts) { return ts; }
-			var firstTime = fmtTime(view[0].time);
-			var midTime = fmtTime(view[Math.floor(n / 2)].time);
-			var lastTime = fmtTime(view[n - 1].time);
+			var firstTime = view[0].time;
+			var midTime = view[Math.floor(n / 2)].time;
+			var lastTime = view[n - 1].time;
 
 			/* ---- 悬浮卡：只列出当前可见序列，高度随可见数量自适应 ---- */
 			var tipW = narrow ? 170 : 188;
@@ -1399,15 +1388,6 @@ return L.view.extend({
 
 		/* 字节量格式化，用于累计使用量。注意与 formatSpeedNumber 区别：
 		   这里的换算单位是 B / KB / MB / GB（已是字节，不再乘 8）。 */
-		function formatBytes(bytes) {
-			var b = Number(bytes);
-			if (!isFinite(b) || b < 0) b = 0;
-			if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
-			if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
-			if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
-			return Math.round(b) + ' B';
-		}
-
 		/* 秒 → HH:MM:SS（用于采样时长；起止时间戳均来自设备侧，无浏览器时钟偏差） */
 		function formatUsageDuration(sec) {
 			var s = Math.floor(isFinite(sec) && sec > 0 ? sec : 0);
@@ -1509,11 +1489,11 @@ return L.view.extend({
 			/* 本次使用量（设备侧累计，来自 netrate 返回的 usage） */
 			var u = state.usage;
 			var uDl = document.getElementById('usage-dl');
-			if (uDl) uDl.textContent = u ? formatBytes(u.total_rx) : '0 B';
+			if (uDl) uDl.textContent = u ? AtWs.formatFlow(u.total_rx) : '0 B';
 			var uUl = document.getElementById('usage-ul');
-			if (uUl) uUl.textContent = u ? formatBytes(u.total_tx) : '0 B';
+			if (uUl) uUl.textContent = u ? AtWs.formatFlow(u.total_tx) : '0 B';
 			var uTot = document.getElementById('usage-total');
-			if (uTot) uTot.textContent = u ? formatBytes(u.total_rx + u.total_tx) : '0 B';
+			if (uTot) uTot.textContent = u ? AtWs.formatFlow(u.total_rx + u.total_tx) : '0 B';
 			var uPeak = document.getElementById('usage-peak');
 			if (uPeak) uPeak.textContent = u
 				? '↓' + formatSpeedNumber(u.peak_rx) + ' · ↑' + formatSpeedNumber(u.peak_tx)
@@ -2068,35 +2048,14 @@ return L.view.extend({
 		   6. 周期轮询与数据刷新 (完全保持原有后端 RPC 接口不变)
 		   ========================================================================== */
 
+		/* 频点反推频段：映射表统一收敛在 Parse.bandFromArfcn（单一来源），
+		 * 保留函数名与返回字符串的契约，供 syncCarriers 与下方测试切片使用 */
 		function getBandFromNrArfcn(arfcn) {
-			if (!arfcn) return '';
-			var ch = parseInt(arfcn, 10);
-			if (isNaN(ch)) return '';
-			if (ch >= 499200 && ch <= 537999) return '41';
-			if (ch >= 620000 && ch <= 680000) return '78';
-			if (ch >= 693334 && ch <= 733333) return '79';
-			if (ch >= 151600 && ch <= 160600) return '28';
-			if (ch >= 422000 && ch <= 434000) return '1';
-			if (ch >= 376000 && ch <= 396000) return '3';
-			if (ch >= 173800 && ch <= 175000) return '5';
-			if (ch >= 185000 && ch <= 192000) return '8';
-			return '';
+			return Parse.bandFromArfcn('NR', arfcn);
 		}
 
 		function getBandFromLteArfcn(arfcn) {
-			if (!arfcn) return '';
-			var ch = parseInt(arfcn, 10);
-			if (isNaN(ch)) return '';
-			if (ch >= 0 && ch <= 599) return '1';
-			if (ch >= 1200 && ch <= 1949) return '3';
-			if (ch >= 2400 && ch <= 2649) return '5';
-			if (ch >= 3450 && ch <= 3799) return '8';
-			if (ch >= 36200 && ch <= 36349) return '34';
-			if (ch >= 37750 && ch <= 38249) return '38';
-			if (ch >= 38250 && ch <= 38649) return '39';
-			if (ch >= 38650 && ch <= 39649) return '40';
-			if (ch >= 39650 && ch <= 41589) return '41';
-			return '';
+			return Parse.bandFromArfcn('LTE', arfcn);
 		}
 
 		function syncCarriers() {
@@ -2259,7 +2218,6 @@ return L.view.extend({
 					if (serving.rsrq != null) state.cell.rsrq = serving.rsrq;
 					if (serving.sinr != null) state.cell.sinr = serving.sinr;
 					if (serving.sysMode) state.cell.sysMode = serving.sysMode;
-					if (serving.signalPercent) state.cell.signalPercent = serving.signalPercent;
 				}
 				var needHcsq = state.cell.rsrp == null || state.cell.rsrq == null || state.cell.sinr == null;
 				if (!needHcsq) return null;
@@ -2276,7 +2234,6 @@ return L.view.extend({
 					return null;
 				});
 			}).then(function () {
-				state.telemetryError = false;
 				syncCarriers();
 				renderSignalUI();
 				renderTabsUI();
@@ -2288,7 +2245,6 @@ return L.view.extend({
 				 * 只是辅助遥测偶发失败」的情况被误判成信号读取异常。
 				 * HFREQINFO 自身的成败已在上一级 then 中如实记录。
 				 */
-				state.telemetryError = true;
 				syncCarriers();
 				renderCarriersAdv();
 				renderTabsUI();
@@ -2357,10 +2313,7 @@ return L.view.extend({
 				if (parsed && parsed.beams) {
 					state.ssb.ok = true;
 					state.ssb.lastSuccessTime = Date.now();
-					state.ssb.arfcn = parsed.arfcn;
 					state.ssb.pci = parsed.pci;
-					state.ssb.rsrp = parsed.rsrp;
-					state.ssb.sinr = parsed.sinr;
 					state.ssb.beams = parsed.beams;
 				} else {
 					/* 命令通了但解析不出结构：本次视为无有效上报 */
@@ -2404,9 +2357,10 @@ return L.view.extend({
 					if (str) {
 						var d = str.split(',');
 						if (d.length >= 6) {
+							/* subnetMask/dhcpServer 模组有上报但页面不展示，不进 state */
 							state.dhcpv4 = {
-								ipv4Address: AtWs.hexToIP(d[0].trim()), subnetMask: AtWs.hexToIP(d[1].trim()),
-								gateway: AtWs.hexToIP(d[2].trim()), dhcpServer: AtWs.hexToIP(d[3].trim()),
+								ipv4Address: AtWs.hexToIP(d[0].trim()),
+								gateway: AtWs.hexToIP(d[2].trim()),
 								primaryDNS: AtWs.hexToIP(d[4].trim()), secondaryDNS: AtWs.hexToIP(d[5].trim())
 							};
 						}
@@ -2423,13 +2377,10 @@ return L.view.extend({
 					if (str) {
 						var d = str.split(',');
 						if (d.length >= 6) {
+							/* ^DSFLOWQRY 共 6 项，页面只展示连续连接时长；
+							 * 其余累计流量由接口计数器(netrate)与后端 usage 负责，不在此重复 */
 							state.flow = {
-								currentConnectTime: AtWs.formatDuration(parseInt(d[0].trim(), 16)),
-								currentDownloadFlow: AtWs.formatFlow(parseInt(d[1].trim(), 16)),
-								currentUploadFlow: AtWs.formatFlow(parseInt(d[2].trim(), 16)),
-								totalConnectTime: AtWs.formatDuration(parseInt(d[3].trim(), 16)),
-								totalDownloadFlow: AtWs.formatFlow(parseInt(d[4].trim(), 16)),
-								totalUploadFlow: AtWs.formatFlow(parseInt(d[5].trim(), 16))
+								currentConnectTime: AtWs.formatDuration(parseInt(d[0].trim(), 16))
 							};
 						}
 					}
@@ -2609,7 +2560,6 @@ return L.view.extend({
 				if (res && res.success && res.data) {
 					/* 只认数据通道：详见 pickDataContext 的说明 */
 					var ctx = pickDataContext(res.data);
-					if (ctx.imsApn) state.imsApn = ctx.imsApn;
 					if (ctx.data) {
 						state.pdpType = ctx.data.ptype;
 						state.apn = ctx.data.apn;
@@ -2661,7 +2611,6 @@ return L.view.extend({
 
 		// 实时网络速率采样 (每 1000ms 采样一次接口统计)
 		var rateSample = null;
-		var rateTimer = null;
 
 		/* 本次使用量由 Rust 后端常驻统计（见 src/rust/src/usage.rs），
 		 * 前端关闭 / 刷新都不影响累计；这里只负责拉取快照展示。 */
@@ -2704,11 +2653,14 @@ return L.view.extend({
 			}).catch(function () {});
 		}
 
-		rateTimer = setInterval(sampleRate, 1000);
+		/* 速率与使用量各一条轮询线：与全量刷新解耦，互不阻塞。
+		 * 统一走 Ui.interval：离开本页（hashchange）时自动 clear，
+		 * 不再依赖 beforeunload（LuCI 是 hash SPA，切页不触发它）。 */
+		Ui.interval(1000, sampleRate);
 		sampleRate();
 		/* 使用量单独一条轮询线：与速率解耦，互不阻塞。
 		 * 累计由后端常驻做，这里拉不到只影响展示，不影响统计本身。 */
-		setInterval(sampleUsage, 1000);
+		Ui.interval(1000, sampleUsage);
 		sampleUsage();
 
 		// 全量状态轮询刷新：纯串行执行，避免单通道 AT 串口并发阻塞冲突
@@ -2752,22 +2704,12 @@ return L.view.extend({
 		refreshAll();
 
 		// 定时自动刷新 (每 5 秒刷新一次遥测数据)
-		/* Mt5700.interval 的签名是 (ms, fn)：参数顺序写反会让 setInterval 把 5000
+		/* Ui.interval 的签名是 (ms, fn)：参数顺序写反会让 setInterval 把 5000
 		 * 当回调、抛 TypeError，整个状态页在 render() 阶段就挂掉。 */
-		var pollInterval = Mt5700.interval(5000, function () {
+		Ui.interval(5000, function () {
 			return refreshAll();
 		});
 
-		// 页面卸载时清理定时器
-		window.addEventListener('beforeunload', function () {
-			if (rateTimer) clearInterval(rateTimer);
-			if (pollInterval) clearInterval(pollInterval);
-		});
-
 		return page;
-	},
-
-	handleSaveApply: null,
-	handleSave: null,
-	handleReset: null
+	}
 });

@@ -114,9 +114,6 @@ function withTimeout(p, ms, msg) {
 
 function ATClient() {
 	this.connected = false;
-	this.authenticated = true;       // RPC 模式：登录态由 LuCI/rpcd 会话保证
-	this.requireAuth = false;
-	this.authKey = '';
 	this.commandTimeout = 14000;
 	/* 探活超时：略大于 ucode 的 12s 硬超时，避免提前掐断后端结论 */
 	this.healthTimeout = 13000;
@@ -129,8 +126,6 @@ function ATClient() {
 	this.pollInterval = 1500;         // 事件轮询间隔（毫秒）
 	this.eventSeq = 0;
 	this.firstPoll = true;
-	this.host = '127.0.0.1';
-	this.port = 8765;
 	/* 降级自动重连定时器与尝试次数（由 scheduleReconnect 维护，必须初始化，
 	 * 否则 clearTimeout(undefined) 虽然无害，但 reconnectAttempts 累加会 NaN） */
 	this.reconnectTimer = null;
@@ -160,30 +155,13 @@ ATClient.prototype.isReady = function () {
 	return this.connected;
 };
 
-/* ---------- 配置加载（保留 UCI 键语义；host 仅记录不再用于直连） ---------- */
+/* ---------- 配置加载 ----------
+ * 保留其副作用：确认 at-webserver 的 UCI 可读，作为 connect() 的 configReady 门闸。
+ * 连接参数（端口/绑定地址/认证密钥）由 rpcd 与 ucode 代理侧消费，前端不再读取。 */
 
 ATClient.prototype.loadConfig = function () {
-	var self = this;
-	return L.uci.load('at-webserver').then(function () {
-		var port = parseInt(L.uci.get('at-webserver', 'config', 'websocket_port') || '8765', 10) || 8765;
-		var authKey = L.uci.get('at-webserver', 'config', 'websocket_auth_key') || '';
-		var bind = L.uci.get('at-webserver', 'config', 'websocket_bind') || '';
-		var allowWan = L.uci.get('at-webserver', 'config', 'websocket_allow_wan') === '1';
-		if (!bind) {
-			bind = allowWan ? '0.0.0.0' : '127.0.0.1';
-		}
-		self.port = port;
-		self.bind = bind;
-		self.host = bind;
-		self.requireAuth = !!authKey;
-		self.authKey = authKey;
-		return self.port;
-	}).catch(function (err) {
-		console.warn('加载 UCI 配置失败，使用默认值', err);
-		self.port = 8765;
-		self.bind = '127.0.0.1';
-		self.host = '127.0.0.1';
-		return self.port;
+	return L.uci.load('at-webserver').catch(function (err) {
+		console.warn('加载 UCI 配置失败', err);
 	});
 };
 
@@ -302,7 +280,6 @@ ATClient.prototype.connect = function () {
 		 */
 		if (!wasDegraded) {
 			self.connected = true;
-			self.authenticated = true;
 			self.firstPoll = true;
 			self.reconnectAttempts = 0;
 			if (self.reconnectTimer) {
@@ -325,7 +302,6 @@ ATClient.prototype.connect = function () {
 			} else if (wasDegraded) {
 				/* 重连成功：清熔断、恢复状态 */
 				self.connected = true;
-				self.authenticated = true;
 				self.firstPoll = true;
 				self.reconnectAttempts = 0;
 				self.failStreak = 0;
@@ -381,26 +357,7 @@ ATClient.prototype.scheduleReconnect = function () {
 	}, delay);
 };
 
-ATClient.prototype.disconnect = function () {
-	this.clearPendingCommands('连接已手动断开');
-	this.stopPolling();
-	if (this.reconnectTimer) {
-		clearTimeout(this.reconnectTimer);
-		this.reconnectTimer = null;
-	}
-	this.connected = false;
-	this.authenticated = false;
-	this.setConnectionState('disconnected');
-	return Promise.resolve();
-};
-
-ATClient.prototype.reconnect = function () {
-	if (this.connected) return Promise.resolve();
-	this.setConnectionState('reconnecting');
-	return this.connect().catch(function () {});
-};
 /* ---------- 事件轮询 ---------- */
-
 ATClient.prototype.startPolling = function () {
 	var self = this;
 	if (this.pollTimer) return;
@@ -707,63 +664,6 @@ ATClient.prototype.noteCommandSuccess = function () {
 	this.circuitOpenUntil = 0;
 };
 
-/*
- * 批量发送（并发分组）：用于页面初始化 / 定时刷新这类「一批命令一起要」的场景。
- *
- * 与 sendCommand 的区别：sendCommand 走全局 FIFO，保证单条命令的先后次序；
- * sendBatch 把一批命令分成若干组，**组内串行、组间并发**，在不违反
- * 「同一 AT 通道同一时刻只跑一条命令」的前提下，把往返延迟重叠起来。
- *
- * 为什么不是全并发：Rust 后端有优先级门闸（at_queue::PriLock），
- * 全并发只会让请求在门闸里排队，前端侧看到的延迟不变，却放大了
- * rpcd 与 ucode 的并发压力。分组（默认 3 组）是实测比较平衡的取值。
- *
- * 返回与入参等长的结果数组，顺序与入参一致；任一命令失败不影响其它命令，
- * 调用方按索引取用即可（这正是「单个接口失败不影响其他区块」的基础）。
- */
-ATClient.prototype.sendBatch = function (commands, groups) {
-	var self = this;
-	var list = Array.isArray(commands) ? commands : [];
-	if (!list.length) return Promise.resolve([]);
-
-	var n = parseInt(groups, 10) || 3;
-	if (n < 1) n = 1;
-	if (n > list.length) n = list.length;
-
-	var results = new Array(list.length);
-	var buckets = [];
-	for (var i = 0; i < n; i++) buckets.push([]);
-	/* 轮转分配：把耗时差异较大的命令均匀打散到各组，
-	 * 避免「一组长、一组空」导致整体被最慢组拖住 */
-	for (var j = 0; j < list.length; j++) {
-		buckets[j % n].push(j);
-	}
-
-	var runners = [];
-	for (var b = 0; b < buckets.length; b++) {
-		runners.push((function (idxList) {
-			var chain = Promise.resolve();
-			idxList.forEach(function (idx) {
-				chain = chain.then(function () {
-					return self.sendCommand(list[idx]).then(function (r) {
-						results[idx] = r;
-					}).catch(function (err) {
-						results[idx] = { success: false, error: (err && err.message) || '命令执行失败' };
-					});
-				});
-			});
-			return chain;
-		})(buckets[b]));
-	}
-
-	return Promise.all(runners).then(function () { return results; });
-};
-
-ATClient.prototype.clearPendingCommands = function (err) {
-	// RPC 模式下无挂起 FIFO；保留函数以兼容调用点
-	void err;
-};
-
 /* ---------- 订阅 ---------- */
 
 ATClient.prototype.subscribe = function (cb) {
@@ -796,17 +696,6 @@ ATClient.prototype.dispatchRawData = function (text) {
 	for (var i = 0; i < parsed.length; i++) {
 		self.emitPush({ success: true, type: 'urc_data', data: parsed[i] });
 	}
-};
-
-ATClient.prototype.setConnection = function (host, port) {
-	// RPC 模式下连接由 LuCI/rpcd 决定，仅记录参数保持兼容
-	this.host = String(host || '').replace(/^\[|\]$/g, '');
-	this.port = parseInt(port, 10) || this.port;
-	try {
-		localStorage.setItem('atHost', this.host);
-		localStorage.setItem('atPort', String(this.port));
-	} catch (e) { /* ignore */ }
-	return Promise.resolve();
 };
 
 /* ================= UCI 保存/应用编排 =================
@@ -959,12 +848,15 @@ function parseTemperature(v) {
 	return Parse.parseTemperature(v);
 }
 
+/* 字节数人话化（使用量/速率/归档占用共用；负数与非数值一律按 0 处理） */
 function formatFlow(bytes) {
-	if (bytes < 1024) return bytes + ' B';
-	if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
-	if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
-	if (bytes < 1099511627776) return (bytes / 1073741824).toFixed(2) + ' GB';
-	return (bytes / 1099511627776).toFixed(2) + ' TB';
+	var b = Number(bytes);
+	if (!isFinite(b) || b < 0) b = 0;
+	if (b >= 1099511627776) return (b / 1099511627776).toFixed(2) + ' TB';
+	if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+	if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+	if (b >= 1024) return (b / 1024).toFixed(2) + ' KB';
+	return Math.round(b) + ' B';
 }
 
 function formatDuration(seconds, showDays) {

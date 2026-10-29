@@ -16,18 +16,7 @@
 var AT_CSS_VERSION = '1.12.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
-
-(function () {
-	var cssPath = '/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION;
-	var links = document.querySelectorAll('link[rel="stylesheet"]');
-	for (var i = 0; i < links.length; i++) {
-		if (links[i].getAttribute('href') === cssPath) return;
-	}
-	var link = document.createElement('link');
-	link.rel = 'stylesheet';
-	link.href = cssPath;
-	document.head.appendChild(link);
-})();
+if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION);
 
 var Ui = (function () {
 	var api = {};
@@ -55,6 +44,37 @@ var Ui = (function () {
 
 
 
+
+	/**
+	 * 开关（checkbox 拨杆），带回滚约定（Codex P2：模组拒绝 AT 指令时必须还原勾选状态）。
+	 *
+	 * - onChange 返回 Promise 时，以 resolve 值判定成败：false 代表模组拒绝、
+	 *   超时或请求异常，此时统一把 checkbox 恢复到操作前的状态；
+	 * - handler 内部只负责「发指令 + 提示」，不再各自写回滚，避免漏写；
+	 * - 返回 undefined 的老式 handler 不触发回滚，保持向后兼容。
+	 */
+	api.switch = function (onChange) {
+		var wrap = E('div', { 'class': 'mt5700-switch' });
+		var input = E('input', { type: 'checkbox' });
+		input.addEventListener('change', function () {
+			var checked = input.checked;
+			var result;
+			try {
+				result = onChange(checked, input);
+			} catch (e) {
+				input.checked = !checked;
+				return;
+			}
+			if (!result || typeof result.then !== 'function') return;
+			result.then(function (ok) {
+				if (ok === false) input.checked = !checked;
+			}).catch(function () {
+				input.checked = !checked;
+			});
+		});
+		wrap.appendChild(input);
+		return wrap;
+	};
 
 	api.promptModal = function (title, fields, onOk) {
 		var mask = E('div', { 'class': 'at-modal-mask' });
@@ -321,6 +341,16 @@ var Ui = (function () {
 		var id = setInterval(fn, ms);
 		_hooks.push(function () { clearInterval(id); });
 		return id;
+	};
+
+	/**
+	 * 注册「离开本页」回调：路由切换（hashchange）时执行。
+	 * LuCI view 没有 dispose 钩子；用于退订推送、释放会话/租约、
+	 * 摘除挂在 document/window 上的监听器等 interval 覆盖不到的清理。
+	 */
+	api.onLeave = function (fn) {
+		_installHashHook();
+		_hooks.push(fn);
 	};
 
 
