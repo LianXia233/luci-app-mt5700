@@ -10,10 +10,17 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.45.0';
+var MT5700_CSS_VERSION = '2.46.0';
+// 全局视觉修订层：弹窗文字可见性 + 后端未就绪提示条。
+// 这两项是**插件级组件**，不属于某个页面；本模块被 12 个视图全部 require，
+// 因此在这里注入即可一次覆盖所有页面（含只依赖 mt5700 的服务配置页）。
+// 独立版本号：以后只调这两块样式时不必连带刷新体积更大的 mt5700.css。
+var GLOBAL_CSS_VERSION = '1.0.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION);
+// 放在 mt5700.css 之后加载，作为最终修订层（同特异性时后者胜出）
+if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/global.css?v=' + GLOBAL_CSS_VERSION);
 
 /*
  * 插件全局背景：三角网格铺底（网格明暗由 CSS html.at-dark 切换），两个角色每次

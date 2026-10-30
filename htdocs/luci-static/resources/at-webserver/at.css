@@ -154,77 +154,8 @@ html.at-dark .at-field-control .cbi-input-text, html.at-dark .at-field-control .
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }html.at-dark .at-btn-action { background: rgba(38, 48, 78, 0.85); }html.at-dark .at-btn-neutral { background: rgba(30, 38, 62, 0.7); }
 
-/* ---------- 后端未就绪提示条（ui.js: Ui.degradedNotice）----------
- * 原来是往页面里插一个 LuCI 原生 .alert-message：它在文档流里，出现/消失会把
- * 整页内容整体上下推 —— 后端探活抖动一次页面就跳一次，填到一半的表单跟着移动。
- * 现在改成视口悬浮：fixed 脱离文档流，页面内容一像素都不动；消失时也不留空档。
- *
- * 层级压在插件弹窗（9400+）与 toast（10000）之下，只盖内容；
- * top 由 ui.js 按「主题头部是否吸顶」实测写入，主题的固定头部不会把它盖住。
- * 这里同时用 !important 压掉主题 .alert-message 的 margin / border / 背景。 */
-.mt5700-float-notice {
-	position: fixed !important;
-	top: 12px;
-	left: 50% !important;
-	right: auto !important;
-	margin: 0 !important;
-	box-sizing: border-box;
-	width: min(720px, calc(100vw - 24px)) !important;
-	max-width: calc(100vw - 24px) !important;
-	z-index: 9000;
-	padding: 10px 34px 10px 12px !important;
-	border: 1px solid rgba(245, 158, 11, 0.45) !important;
-	border-radius: 12px !important;
-	background: var(--at-bg-glass, rgba(255, 255, 255, 0.86)) !important;
-	color: var(--at-text, #14283e) !important;
-	font-size: 13px;
-	line-height: 1.55;
-	text-align: left;
-	box-shadow: var(--at-shadow-lg, 0 18px 48px rgba(18, 48, 86, 0.14));
-	backdrop-filter: blur(14px) saturate(180%);
-	-webkit-backdrop-filter: blur(14px) saturate(180%);
-	transform: translateX(-50%);
-	animation: mt5700-notice-drop 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
-.mt5700-float-notice > strong { color: #b45309; }
-.mt5700-float-notice-x {
-	position: absolute;
-	top: 6px;
-	right: 6px;
-	width: 22px;
-	height: 22px;
-	padding: 0;
-	border: 0;
-	border-radius: 6px;
-	background: transparent;
-	color: inherit;
-	opacity: 0.55;
-	font-size: 16px;
-	line-height: 1;
-	cursor: pointer;
-}
-.mt5700-float-notice-x:hover { opacity: 1; background: rgba(127, 127, 127, 0.14); }
-@keyframes mt5700-notice-drop {
-	from { opacity: 0; transform: translate(-50%, -8px); }
-	to { opacity: 1; transform: translate(-50%, 0); }
-}
-html.at-dark .mt5700-float-notice {
-	background: rgba(24, 33, 51, 0.92) !important;
-	border-color: rgba(245, 158, 11, 0.5) !important;
-	color: #eef2f8 !important;
-	box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
-}
-html.at-dark .mt5700-float-notice > strong { color: #fbbf24; }
-@media (max-width: 640px) {
-	.mt5700-float-notice {
-		width: calc(100vw - 16px) !important;
-		max-width: calc(100vw - 16px) !important;
-		padding: 9px 30px 9px 10px !important;
-		border-radius: 10px !important;
-		font-size: 12.5px;
-	}
-	.mt5700-float-notice-x { top: 4px; right: 4px; }
-}
-@media (prefers-reduced-motion: reduce) {
-	.mt5700-float-notice { animation: none; }
-}
+/* ---------- 全局提示条 ----------
+ * 后端未就绪提示条（.mt5700-float-notice）与弹窗可读性修订已统一移至
+ * at-webserver/global.css —— 那份由 mt5700.js 注入，覆盖插件全部页面；
+ * 只 require ui.js 的页面拿不到它，所以不再放在本文件里。
+ */
