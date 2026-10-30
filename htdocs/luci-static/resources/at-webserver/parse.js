@@ -962,6 +962,22 @@ var Parse = (function () {
 
 	api.modeText = function (mode) { return mode === '' ? '当前时段不锁频' : mode; };
 
+	/*
+	 * `^NDISSTATQRY?` 回包：`^NDISSTATQRY: <cid>,<stat>,…`
+	 *
+	 * 手册 16.4.1/16.4.5：首字段是 CID、第二字段才是状态（1=已连接）。
+	 * 按首字段判「已激活」的话，只要模组带 CID 1 这一行就永远认为是激活态。
+	 *
+	 * 拨号页（判断是否已拨上）与扫频页（扫频会断网，需二次确认）原先各写了一份
+	 * 同一条正则，这里统一收口，避免两边对「第几个字段才是状态」再产生分歧。
+	 * 返回第二字段的字符串；无回包或格式不符时返回 null（调用方按「未激活」处理）。
+	 */
+	api.parseNdisStat = function (text) {
+		var m = String(text == null ? '' : text).replace(/\r/g, '')
+			.match(/\^NDISSTATQRY:\s*1\s*,\s*(\d+)/i);
+		return m ? m[1] : null;
+	};
+
 	/* ================= 辅载波/辅站小区 ================= */
 	// 手册 13.27 AT^MONSSC — NSA 下 5G 辅连接服务小区（最多 8CC）
 	// 手册 13.18 AT^CASCELLINFO? — LTE CA 的辅小区（最多 4 个 SCELL）

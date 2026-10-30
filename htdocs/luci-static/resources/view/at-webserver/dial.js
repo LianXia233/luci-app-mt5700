@@ -243,10 +243,10 @@ return L.view.extend({
 		/* 手册 16.4.1/16.4.5：应答形如 "^NDISSTATQRY: 1,1,,,\"IPV4\",0,,,\"IPV6\""，
 		 * 结构是 <cid>,<stat>,… —— 首字段是 CID，第二字段才是连接状态（1=已连接）。
 		 * 本插件的数据通道固定 CID 1，所以只认 CID 1 那一行；早先按「首字段是 1」判连接，
-		 * 模组回 1,0（CID 1 已断开）时界面同样显示已连接。 */
+		 * 模组回 1,0（CID 1 已断开）时界面同样显示已连接。
+		 * 解析口径统一在 Parse.parseNdisStat（与扫频页共用同一条正则）。 */
 		function ndisIsActive(raw) {
-			var m = String(raw).replace(/\r/g, '').match(/\^NDISSTATQRY:\s*1\s*,\s*(\d+)/i);
-			return !!m && m[1] === '1';
+			return Parse.parseNdisStat(raw) === '1';
 		}
 
 		/* ---------- 卡片 1：自动拨号与 APN 设置 ---------- */
