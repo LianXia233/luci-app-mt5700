@@ -56,16 +56,7 @@
 	border-color: var(--at-accent);
 	box-shadow: 0 0 0 3px rgba(41, 169, 225, 0.22);
 	outline: none;
-}.at-panel .cbi-input-checkbox {
-	width: 16px;
-	height: 16px;
-	accent-color: var(--at-accent);
-	cursor: pointer;
-}.at-field-hint { color: var(--at-text-secondary); font-size: 12px; margin-top: 4px; }.at-panel .at-table .at-btn, .at-panel .at-table .cbi-button {
-	padding: 4px 10px;
-	font-size: 12px;
-	line-height: 18px;
-}/* ---------- 按钮 ---------- */
+}.at-field-hint { color: var(--at-text-secondary); font-size: 12px; margin-top: 4px; }/* ---------- 按钮 ---------- */
 .at-btn {
 	display: inline-flex;
 	align-items: center;
@@ -132,10 +123,10 @@
 	padding: 22px 24px;
 	box-shadow: var(--at-shadow-lg), var(--at-shadow-inset);
 	animation: at-scale-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}.at-modal-wide { max-width: 660px; }.at-modal-title { margin: 0 0 14px; font-size: 17px; font-weight: 700; color: var(--at-text); }.at-modal-body { }.at-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }.at-modal .at-field { margin-bottom: 12px; }@keyframes at-fade-in {from { opacity: 0; }to { opacity: 1; } }@keyframes at-scale-up {from { opacity: 0; transform: scale(0.95); }to { opacity: 1; transform: scale(1); } }.at-sms-left > .at-btn { margin: 10px; }.at-terminal-input .cbi-input-text { flex: 1 1 260px; }.at-lock-item .cbi-input-text { width: 100px; }/* ---------- 自动刷新 ---------- */
+}.at-modal-wide { max-width: 660px; }.at-modal-title { margin: 0 0 14px; font-size: 17px; font-weight: 700; color: var(--at-text); }.at-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }.at-modal .at-field { margin-bottom: 12px; }@keyframes at-fade-in {from { opacity: 0; }to { opacity: 1; } }@keyframes at-scale-up {from { opacity: 0; transform: scale(0.95); }to { opacity: 1; transform: scale(1); } }/* ---------- 自动刷新 ---------- */
 .at-autorefresh { display: flex; align-items: center; gap: 8px; margin: 8px 0 12px; font-size: 13px; color: var(--at-text-secondary); }.at-autorefresh-label { color: var(--at-text-secondary); font-weight: 500; }/* ---------- 响应式 (PC & PE 移动端) ---------- */
 @media (max-width: 768px) {.at-field { flex-direction: column; gap: 4px; }.at-field-label { flex: none; padding-top: 0; width: 100%; }/* 标签改为上下排列后，控件仍按内容宽度收缩，输入框只剩两百来像素 */
-	.at-field-control { width: 100%; }.at-field-control .cbi-input-text, .at-field-control .cbi-input-select, .at-field-control input[type="text"], .at-field-control input[type="number"], .at-field-control input[type="password"], .at-field-control select { max-width: 100%; }.at-btn { min-height: 38px; }.at-panel-actions .at-btn { flex: 1 1 auto; }.at-modal-actions { flex-direction: column-reverse; gap: 8px; }.at-modal-actions .at-btn { width: 100%; }
+	.at-field-control { width: 100%; }.at-field-control .cbi-input-text, .at-field-control .cbi-input-select, .at-field-control input[type="text"], .at-field-control input[type="number"], .at-field-control input[type="password"], .at-field-control select { max-width: 100%; }.at-btn { min-height: 38px; }.at-modal-actions { flex-direction: column-reverse; gap: 8px; }.at-modal-actions .at-btn { width: 100%; }
 }/* ---------- 夜间模式兼容（issue #26）----------
  * 输入框 / 普通按钮此前写死白色底，暗色主题（html.at-dark，
  * 由 at-webserver/theme.js 判定写入）下白底刺眼、浅字不可读。 */

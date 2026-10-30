@@ -80,7 +80,7 @@
     --mt5700-pink-pale: rgba(236, 72, 153, 0.18);
     --mt5700-green-pale: rgba(16, 185, 129, 0.18);
   }/* ================== 通用容器与页面框架 ================== */
-.mt5700-page, .mt-root-wrap, .mt-anime-container {
+.mt5700-page, .mt-anime-container {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -90,7 +90,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   color: var(--mt5700-text);
 }/* ================== Hero 头部横幅 (支持软萌二次元形象与气泡) ================== */
-.mt5700-hero-card, .mt-hero-card {
+.mt5700-hero-card {
   background: var(--mt5700-card-bg);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -104,12 +104,12 @@
   position: relative;
   overflow: visible;
   transition: transform 0.25s ease, box-shadow 0.25s ease;
-}.mt5700-hero-content, .mt-hero-left {
+}.mt5700-hero-content {
   display: flex;
   flex-direction: column;
   gap: 8px;
   z-index: 2;
-}.mt5700-hero-badge, .mt-badge-online {
+}.mt5700-hero-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -142,7 +142,7 @@
   transform-origin: center;
   animation: mt-beacon-pulse 1.8s infinite ease-in-out;
 }@keyframes mt-beacon-pulse {0% { transform: scale(0.85); opacity: 0.55; }50% { transform: scale(1.05); opacity: 1; }100% { transform: scale(0.85); opacity: 0.55; }
-}.mt5700-hero-title, .mt-hero-title {
+}.mt5700-hero-title {
   margin: 0;
   font-size: 24px;
   font-weight: 800;
@@ -152,7 +152,7 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-}.mt5700-hero-desc, .mt-hero-sub {
+}.mt5700-hero-desc {
   margin: 0;
   font-size: 13.5px;
   color: var(--mt5700-text-secondary);
@@ -162,7 +162,7 @@
   gap: 8px;
   flex-wrap: wrap;
 }/* Mascot + Bubble + Theme Toggle */
-.mt5700-hero-art, .mt-hero-right {
+.mt5700-hero-art {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -743,7 +743,7 @@
 }.mt-usage-val.total {
   color: var(--mt5700-accent);
 }/* ================== 中部 2 列布局 (Tab 卡片 + 实时信号趋势) ================== */
-.mt-mid-grid, .mt-row-2col {
+.mt-mid-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
@@ -963,41 +963,17 @@
   grid-template-columns: 320px 1fr;
   gap: 18px;
   align-items: stretch;
-}.mt5700-sms-list {
-  background: var(--mt5700-card-bg);
-  border: 1px solid var(--mt5700-border);
-  border-radius: var(--mt5700-radius-lg);
-  box-shadow: var(--mt5700-shadow-md);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 480px;
-}.mt5700-sms-detail {
-  background: var(--mt5700-card-bg);
-  border: 1px solid var(--mt5700-border);
-  border-radius: var(--mt5700-radius-lg);
-  box-shadow: var(--mt5700-shadow-md);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-height: 480px;
-}.mt-sms-item-card:hover, .mt-sms-item-card.active {
-  background: var(--mt5700-accent-pale);
-  border-color: var(--mt5700-accent-light);
-  transform: translateX(2px);
-}.mt-sms-avatar.sys { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }.mt-sms-avatar.op { background: linear-gradient(135deg, #ec4899, #f472b6); }/* ================== 响应式适配 (Responsive) ================== */
+}/* ================== 响应式适配 (Responsive) ================== */
 @media (max-width: 960px) {.mt-stat-grid {
     grid-template-columns: 1fr;
-  }.mt-mid-grid, .mt-row-2col {
+  }.mt-mid-grid {
     grid-template-columns: 1fr;
-  }.mt5700-hero-card, .mt-hero-card {
+  }.mt5700-hero-card {
     flex-direction: column;
     align-items: flex-start;
     gap: 16px;
     padding: 18px 20px;
-  }.mt5700-hero-art, .mt-hero-right {
+  }.mt5700-hero-art {
     width: 100%;
     justify-content: space-between;
   }.mt5700-sms-layout {
@@ -1218,10 +1194,10 @@
   display: grid;
   gap: var(--mt5700-space-md);
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-}.mt5700-grid-2 { grid-template-columns: repeat(2, 1fr); }@media (max-width: 1024px) {.mt5700-grid-2, .mt5700-grid-3, .mt5700-grid-4 {
+}.mt5700-grid-2 { grid-template-columns: repeat(2, 1fr); }@media (max-width: 1024px) {.mt5700-grid-2 {
     grid-template-columns: repeat(2, 1fr);
   }
-}@media (max-width: 640px) {.mt5700-grid, .mt5700-grid-2, .mt5700-grid-3, .mt5700-grid-4 {
+}@media (max-width: 640px) {.mt5700-grid, .mt5700-grid-2 {
     grid-template-columns: 1fr;
   }
 }/* ==========================================================================
@@ -1308,15 +1284,11 @@
  * 其余项数一律交给 auto-fit，让列数随容器宽度自然增减。
  */
 @media (min-width: 720px) {.mt5700-metrics[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }.mt5700-metrics[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}@media (max-width: 900px) {
-  
-}@media (max-width: 520px) {
-  
-}.mt5700-gauge-caption.exc { background: rgba(15, 157, 99, 0.14); color: #0d9e6e; }.mt5700-gauge-caption.good { background: rgba(6, 182, 212, 0.14); color: #0891b2; }.mt5700-gauge-caption.poor { background: rgba(249, 115, 22, 0.16); color: #c2410c; }.mt5700-gauge-caption.bad { background: rgba(200, 61, 85, 0.14); color: #b02b45; }html.at-dark .mt5700-gauge-caption.exc { color: #34d399; }html.at-dark .mt5700-gauge-caption.good { color: #22d3ee; }html.at-dark .mt5700-gauge-caption.poor { color: #fb923c; }html.at-dark .mt5700-gauge-caption.bad { color: #f87171; }/* ==========================================================================
+}/* ==========================================================================
    L4 - 实时速率图表 (折线 + 悬浮提示 + 图例)
    ========================================================================== */
 
-.mt5700-chart-tip.show { opacity: 1; }/* ==========================================================================
+/* ==========================================================================
    按钮 (L4)
    ========================================================================== */
 .mt5700-btn {
@@ -1597,7 +1569,7 @@
 
   html.at-dark .mt5700-radio-card-badge {
     background: rgba(97, 201, 244, 0.14);
-  }html.at-dark .mt5700-radio-card-code, html.at-dark .mt5700-raw-panel, html.at-dark .mt5700-readonly {
+  }html.at-dark .mt5700-radio-card-code {
     background: rgba(224, 237, 247, 0.06);
   }html.at-dark .mt5700-field-note {
     background: rgba(97, 201, 244, 0.07);
@@ -1779,9 +1751,6 @@
   margin-left: auto;
   display: flex;
   gap: var(--mt5700-space-sm);
-}.mt5700-tab.active {
-  color: var(--mt5700-accent);
-  border-bottom-color: var(--mt5700-accent);
 }.mt5700-terminal-header {
   padding: var(--mt5700-space-sm) var(--mt5700-space-md);
   background: rgba(0, 0, 0, 0.3);
@@ -1944,7 +1913,7 @@
 @media (max-width: 768px) {.mt5700-app { padding: var(--mt5700-space-md); }.mt5700-grid { gap: var(--mt5700-space-md); }.mt5700-metric-value { font-size: var(--mt5700-font-size-xl); }.mt5700-btn-group { width: 100%; }.mt5700-btn-group .mt5700-btn { flex: 1; }.mt5700-modal { max-width: 100%; }
 }/* ---------- 无障碍：跟随系统「减弱动态效果」 ---------- */
 
-@media (prefers-reduced-motion: reduce) {.mt5700-card, .mt5700-metric, .mt5700-gauge, .mt5700-speed-box, .mt5700-btn {
+@media (prefers-reduced-motion: reduce) {.mt5700-card, .mt5700-metric, .mt5700-btn {
     transition: none;
   }
 }/* ==========================================================================
@@ -1969,9 +1938,7 @@
 }/* 320px 极窄屏：圆环再收一档，防止两列挤压 */
 @media (max-width: 419px) {.mt5700-metrics { gap: 7px; }
 }/* ---------- 2) 网络能力横幅：字号提到可读下限 ---------- */
-@media (max-width: 768px) {
-  
-}/* ---------- 3) 表格：窄屏改为「卡片式堆叠」，不再横向拖动 ---------- */
+/* ---------- 3) 表格：窄屏改为「卡片式堆叠」，不再横向拖动 ---------- */
 @media (max-width: 600px) {.mt5700-table-wrapper {
     overflow-x: visible;
     border: none;
@@ -2020,9 +1987,7 @@
     margin-bottom: 10px;
   }.mt5700-card-title { font-size: 14px; }
 }/* ---------- 5) 折线图与网格：降低固定高度 ---------- */
-@media (max-width: 768px) {
-  
-}/* ---------- 6) 触屏可用性：点击目标不低于 32px ---------- */
+/* ---------- 6) 触屏可用性：点击目标不低于 32px ---------- */
 @media (max-width: 768px) {.mt5700-btn, .mt5700-btn-sm {
     min-height: 32px;
     padding-top: 6px;
@@ -2623,7 +2588,7 @@
 .mt-anim-pulse { animation: mt-pulse-glow 2.5s ease-in-out infinite; transform-origin: center; }.mt-anim-spin { animation: mt-spin-slow 12s linear infinite; transform-origin: center; }.mt-anim-stream {
   stroke-dasharray: 8 4;
   animation: mt-data-stream 2s linear infinite;
-}.mt-anim-float { animation: mt-float-slow 4s ease-in-out infinite alternate; }/* 暗黑模式下的毛玻璃 Hero */
+}/* 暗黑模式下的毛玻璃 Hero */
 
   html.at-dark .mt5700-hero-card {
     background: linear-gradient(135deg, rgba(20, 38, 60, 0.82) 0%, rgba(14, 26, 42, 0.88) 100%);
@@ -3000,19 +2965,19 @@ select.mt5700-select {
   font-size: 11.5px !important;
   font-weight: 600 !important;
   line-height: 1.4 !important;
-}.mt5700-badge-success, .mt-badge-success {
+}.mt5700-badge-success {
   background: rgba(16, 185, 129, 0.15) !important;
   color: #059669 !important;
   border: 1px solid rgba(16, 185, 129, 0.3) !important;
-}.mt5700-badge-info, .mt-badge-info {
+}.mt5700-badge-info {
   background: rgba(14, 165, 233, 0.15) !important;
   color: #0284c7 !important;
   border: 1px solid rgba(14, 165, 233, 0.3) !important;
-}.mt5700-badge-warning, .mt-badge-warning {
+}.mt5700-badge-warning {
   background: rgba(245, 158, 11, 0.15) !important;
   color: #d97706 !important;
   border: 1px solid rgba(245, 158, 11, 0.3) !important;
-}.mt5700-badge-danger, .mt-badge-danger {
+}.mt5700-badge-danger {
   background: rgba(244, 63, 94, 0.15) !important;
   color: #e11d48 !important;
   border: 1px solid rgba(244, 63, 94, 0.3) !important;
@@ -3300,8 +3265,6 @@ select.mt5700-select {
   color: #f8fafc !important;
 }.at-dark .mt5700-modal-body, .at-dark .cbi-modal-body {
   color: #cbd5e1 !important;
-}@media (max-width: 768px) {
-  
 }/* ==========================================================================
    移动端深度自适应响应式系统 (全面消除手机屏幕横向溢出与拥挤)
    ========================================================================== */
@@ -3320,7 +3283,7 @@ select.mt5700-select {
   }.mt-stat-grid {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
-  }.mt-mid-grid, .mt-row-2col, .mt-2col, .mt-form-row {
+  }.mt-mid-grid {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
   }.mt-card {
@@ -3330,10 +3293,10 @@ select.mt5700-select {
     width: 100% !important;
     max-width: 100% !important;
     overflow: hidden !important;
-  }.mt-hero-card, .mt5700-hero-card {
+  }.mt5700-hero-card {
     padding: 14px !important;
     border-radius: 18px !important;
-  }.mt-hero-right, .mt5700-hero-art {
+  }.mt5700-hero-art {
     width: 100% !important;
     flex-wrap: wrap !important;
     justify-content: flex-end !important;
@@ -3923,7 +3886,6 @@ select.mt5700-select {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   padding: 0 10px 10px;
-  scrollbar-width: thin;
   scrollbar-width: thin;
   scrollbar-color: rgba(146, 166, 196, .38) transparent;
 }.mt5700-sms-conv {
