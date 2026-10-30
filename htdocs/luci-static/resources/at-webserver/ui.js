@@ -13,7 +13,7 @@
 // uhttpd 给静态资源的 Last-Modified 为 1970，浏览器会长期复用缓存；LuCI 主题同样
 // 采用「css?v=版本」的做法（aurora: main.css?v=1.3.1）。样式版本随包版本递增，
 // 保证升级/修复样式后用户刷新即可生效。
-var AT_CSS_VERSION = '1.13.0';
+var AT_CSS_VERSION = '1.14.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION);
@@ -140,6 +140,37 @@ var Ui = (function () {
 	/* ---------- 后端降级提示（统一入口） ---------- */
 
 	/**
+	 * 把悬浮提示条挪到「吸顶头部」下方。
+	 *
+	 * 提示条挂在 #maincontent 里，而 #maincontent 只有 z-index:1；Argon 一类主题
+	 * 把头部做成 position:fixed 且层级更高，提示条自己的 z-index 再大也压不过
+	 * 头部，会被整个盖在下面（用户看到的就是「提示条没出现」）。
+	 * 所以这里实测一次头部高度，把结果写进 style.top；窗口变化时再量。
+	 *
+	 * 只认「贴顶 + 够宽 + 不占半屏」的头部：侧边栏（#mainmenu）同样是 fixed，
+	 * 但它贴左不满宽，三条里「够宽」这条会把它筛掉。
+	 */
+	function placeNotice(el) {
+		if (!el) return;
+		var top = 12;
+		var vw = window.innerWidth || 0;
+		var vh = window.innerHeight || 0;
+		var heads = document.querySelectorAll('header, .main-header, .main-header-inner, #topbar, .navbar');
+
+		for (var i = 0; i < heads.length; i++) {
+			var cs = window.getComputedStyle(heads[i]);
+			if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+			var r = heads[i].getBoundingClientRect();
+			if (r.top > 4 || r.height < 16 || r.height > vh * 0.4) continue;
+			if (r.width < vw * 0.55) continue;
+			top = Math.max(top, Math.round(r.bottom) + 12);
+			break;
+		}
+
+		el.style.top = top + 'px';
+	}
+
+	/**
 	 * 在页面顶部插入「后端未就绪」提示条，并在真正恢复后自动移除 + 重新加载数据。
 	 *
 	 * 背景：connect() 现在「乐观放行 + 后台探活」，后端不可用时会在稍后
@@ -153,7 +184,11 @@ var Ui = (function () {
 	 * 而重连只要还失败就会反复出现这个闪烁。因此这里的移除条件是
 	 * 「恢复到 connected 且后端已知可用（未处于熔断/已知不可用状态）」。
 	 *
-	 * @param {HTMLElement} body   页面根节点（提示条插到最前）
+	 * 视觉上是一条**视口悬浮**的提示条（`position: fixed`），不占文档流：
+	 * 原来插的是 LuCI 原生 `.alert-message`，在流里会把整页内容整体推下去，
+	 * 探活抖动一次页面就上下跳一次，正在填表时尤其难受。
+	 *
+	 * @param {HTMLElement} body   页面根节点（提示条挂在它里面，随页面一起销毁）
 	 * @param {Function}    onReady 后端恢复后要执行的数据加载函数
 	 * @returns {HTMLElement|null} 提示条元素
 	 */
@@ -167,12 +202,42 @@ var Ui = (function () {
 
 		var err = AtWs.client.error || AtWs.client.backendDownError
 			|| '正在等待 at-webserver 服务启动，页面会在恢复后自动刷新。';
-		var banner = E('div', { 'class': 'alert-message warning' }, [
+		var banner = E('div', {
+			'class': 'alert-message warning mt5700-float-notice',
+			'role': 'status',
+			'aria-live': 'polite'
+		}, [
 			E('strong', {}, '模组后端未就绪：'),
 			E('span', {}, err)
 		]);
+
+		/* 悬浮条一直挂在视野里，给一个「知道了」的出口：
+		 * 只是收起本次提示，后端再降级时会按下面的状态回调重新出现。 */
+		var dismiss = E('button', {
+			'class': 'mt5700-float-notice-x',
+			'type': 'button',
+			'aria-label': '关闭提示',
+			'title': '关闭提示'
+		}, '×');
+		dismiss.addEventListener('click', function () {
+			if (banner.parentNode) banner.parentNode.removeChild(banner);
+			if (body.__atwsDegradedBanner === banner) body.__atwsDegradedBanner = null;
+		});
+		banner.appendChild(dismiss);
+
 		body.insertBefore(banner, body.firstChild);
 		body.__atwsDegradedBanner = banner;
+		placeNotice(banner);
+
+		/* 窗口尺寸变化后头部高度会变（移动端横竖屏切换、侧栏折叠），重新量一次 */
+		var onResize = function () {
+			if (!banner.parentNode) {
+				window.removeEventListener('resize', onResize);
+				return;
+			}
+			placeNotice(banner);
+		};
+		window.addEventListener('resize', onResize);
 
 		/* 一次注册、长期生效：依据「后端是否真的可用」决定去留 */
 		AtWs.client.onConnectionStateChange(function (state) {
@@ -184,8 +249,9 @@ var Ui = (function () {
 				if (typeof onReady === 'function') onReady();
 			} else if ((state === 'degraded' || state === 'error')
 				&& !banner.parentNode) {
-				/* 又降级了：提示条若已被移除则重新插回 */
+				/* 又降级了：提示条若已被移除则重新插回（重新量一次头部高度） */
 				body.insertBefore(banner, body.firstChild);
+				placeNotice(banner);
 			}
 		});
 
