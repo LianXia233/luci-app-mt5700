@@ -71,6 +71,15 @@
 - **chore(css) 版本**：`MT5700_CSS_VERSION` 2.46.0 → **2.46.2**（跳过 2.46.1 —— 那个号被同批的前端审查整理占用了；uhttpd 静态资源的 `Last-Modified` 恒为 1970，版本号不涨浏览器不会重新取）
 - **test** 无头 Chromium 探针：两个元素的 `getAnimations()` 均返回 `mt-anim-float:running`；手动 seek 到 0/25/50/75/100% 读到 `0 -3 -6 -3 0`，峰值 -6.00px 且 duration 分别为 4000/4600ms；`.mt5700-empty` 高度在「有动画 / `cancel()` 后 / reduce 模式」三种状态下均为 254.25px（`transform` 不进文档流）；`--force-prefers-reduced-motion` 下 `getAnimations()` 返回空数组
 
+### docs(README) 补 OpenWrt 版本兼容性说明：下限 22.03、实测 24.10 / 25.12
+
+> 原文只在徽章上写了「24.10 | 25.x」，正文却说「OpenWrt 24.10 及更早版本（opkg）」——这句话很容易被读成「24.10 以前的都支持」。实际上 21.02 及更早既没有 ucode 解释器，rpcd 也不支持 ucode 插件，装上去的表现是页面能打开、每个操作都报 `Method not found`。
+
+- **docs** 新增「OpenWrt 版本兼容性」章节：版本矩阵（25.12 / 24.10 / 23.05 / 22.03 / ≤21.02）、下限为什么是 22.03（`rpcd-mod-ucode` 首发于 22.03.0，ucode 自该版起随系统预装）、前后端各自的版本敏感度、架构覆盖范围、装前三条自查命令
+- **docs** 记录两条实测事实：包元数据 `Depends` 只有 `libc`（`LUCI_DEPENDS` 留空、不钉 `luci-base` 版本，故不会因 LuCI 版本互斥装不上）；后端二进制 `file` 输出 `statically linked`，与目标系统 libc / ABI 无关，只与 CPU 架构有关
+- **docs** 补充「与本插件无关但同样装不上」的三项：模组驱动（本包不带内核驱动）、串口独占（QModem）、busybox 的 `nc` applet 被裁剪
+- **chore(docs)** 版本徽章 v1.29.0 → v1.30.9；安装示例的文件名改为通配（原为钉死的 `1.29.0-r8`，每发一版就得改一次）；目录表同步补上本节锚点
+
 ## v1.30.8（2026-10-30）
 
 ### refactor 冗余代码清理：死代码删除、生命周期收敛、重复逻辑合并
