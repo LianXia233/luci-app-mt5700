@@ -6,13 +6,21 @@ use crate::{log_info, log_warn};
 use crate::atclient::AtClient;
 use crate::config::{BandLock, ScheduleConfig};
 use crate::notify::{Notification, NotifyKind, Notifier, SENDER_SIGNAL};
-use crate::schedconfig::{SchedStatusDto, next_switch_at, parse_hhmm, split_list};
+use crate::schedconfig::{SchedStatusDto, next_switch_at, next_switch_time, parse_hhmm, seconds_to_next_switch, split_list};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// 扫频结束后留给模组重新驻留的时间，这段时间内不做无服务判定。
 const SCAN_RECOVERY_GRACE: Duration = Duration::from_secs(60);
+
+/// 重连后补下发锁频的静默期。
+///
+/// USB 重新枚举 / 模组自重启会把锁频清掉，此时必须重新下发一次，否则「夜里锁了
+/// B8、模组重启后就一直不锁」——用户不在页面跟前根本发现不了。
+/// 但链路抖动会让 connected 反复跳变，每次跳变都补一次 `CFUN=0/1` + 锁频
+/// 会把模组拖进复位循环，所以刚下发过（默认 2 分钟内）就不再重复。
+const REAPPLY_AFTER_RECONNECT_QUIET: Duration = Duration::from_secs(120);
 
 /// SSB 默认按 30kHz 子载波间隔的频段（sub-6 的 TDD 中高频段）。
 const NR_30KHZ_BANDS: &[i64] = &[41, 48, 77, 78, 79];
@@ -41,6 +49,10 @@ pub struct SchedState {
     pub last_applied: LockPair,
     pub applied: bool,
     pub announced: bool,
+    /// 最近一次成功下发锁频的时刻（用于重连补下发的静默期判断）。
+    pub applied_at: Instant,
+    /// 已处理过的 AT 连接代次：模组重连后锁频会失效，靠它识别「需要补下发」。
+    pub connect_epoch: u64,
 }
 
 impl Scheduler {
@@ -62,6 +74,8 @@ impl Scheduler {
                 last_applied: LockPair { lte: BandLock { type_: -1, ..Default::default() }, nr: BandLock { type_: -1, ..Default::default() } },
                 applied: false,
                 announced: false,
+                applied_at: Instant::now(),
+                connect_epoch: 0,
             })),
         })
     }
@@ -79,26 +93,56 @@ impl Scheduler {
 
     pub async fn status(&self) -> SchedStatusDto {
         let s = self.state.read().await;
+        // 三个时间字段取同一个 now：分别取会让「插件时间 / 下次切换 / 倒计时」
+        // 相差几秒，用户拿它们互相校对就会觉得对不上。
+        let now = crate::nettime::now();
         SchedStatusDto {
             current_mode: s.current_mode.clone(),
-            next_switch: next_switch_at(&s.cfg, crate::nettime::now()),
+            next_switch: next_switch_at(&s.cfg, now),
             switch_count: s.switch_count,
             applied: s.applied,
+            next_switch_time: next_switch_time(&s.cfg, now),
+            next_switch_in: seconds_to_next_switch(&s.cfg, now).unwrap_or(-1),
+            server_time: now.format("%Y-%m-%d %H:%M:%S").to_string(),
         }
     }
 
     /// 即使当前未启用也要保持轮询：用户可能在 WebUI 里随时打开开关。
+    ///
+    /// 这个循环是**唯一**的调度入口，与浏览器、LuCI 页面完全无关：页面关掉、
+    /// 手机断网、没人登录，只要守护进程在跑，到点就切。
     pub async fn run(self: Arc<Self>) {
         loop {
-            let interval = {
+            /*
+             * 睡多久：取「检测间隔」与「距下一个切换点」的较小值。
+             *
+             * 只按检测间隔睡的话，间隔设成 1 小时就等于切换点最多晚 1 小时生效 ——
+             * 22:00 的配置 22:59 才下发，用户会认为「定时根本没生效」。
+             * 按切换点醒则保证到点后 1 秒内判定一次；期间仍按检测间隔做无服务巡检。
+             */
+            let wait = {
                 let s = self.state.read().await;
-                s.cfg.check_interval
+                let mut wait = s.cfg.check_interval;
+                if let Some(secs) = seconds_to_next_switch(&s.cfg, crate::nettime::now()) {
+                    // +1 秒跨过端点：正好落在 22:00:00 时 is_night 已按夜间算
+                    let to_boundary = Duration::from_secs(secs.max(0) as u64 + 1);
+                    if to_boundary < wait {
+                        wait = to_boundary;
+                    }
+                }
+                // 兜底下限：时钟回拨 / 端点刚过去时不要空转
+                wait.max(Duration::from_secs(1))
             };
-            if !sleep_ctx(&self.ctx, interval).await {
+            if !sleep_ctx(&self.ctx, wait).await {
                 return;
             }
 
             self.announce().await;
+
+            // 模组重连（USB 重枚举 / 模组复位）后锁频已丢，标记成「待下发」，
+            // 交给本轮 tick 重新走一遍；静默期内不重复，避免抖动引发 CFUN 反复切换。
+            self.note_reconnect().await;
+
             let (enabled, connected) = {
                 let s = self.state.read().await;
                 (s.cfg.enabled, self.client.connected())
@@ -114,6 +158,20 @@ impl Scheduler {
             }
 
             self.tick().await;
+        }
+    }
+
+    /// 记录 AT 连接代次；代次变化说明模组重连过，模组侧的锁频已被清空。
+    async fn note_reconnect(&self) {
+        let epoch = self.client.connect_epoch();
+        let mut s = self.state.write().await;
+        if epoch == s.connect_epoch {
+            return;
+        }
+        s.connect_epoch = epoch;
+        if s.applied && s.applied_at.elapsed() >= REAPPLY_AFTER_RECONNECT_QUIET {
+            log_info!("模组重连，按当前时段重新下发锁频");
+            s.applied = false;
         }
     }
 
@@ -167,6 +225,7 @@ impl Scheduler {
                 s.current_mode = target.clone();
                 s.last_applied = want.clone();
                 s.applied = true;
+                s.applied_at = Instant::now();
             } else {
                 log_warn!("锁频下发失败，保持 applied=false 以便下周期重试");
             }

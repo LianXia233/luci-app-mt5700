@@ -5760,3 +5760,172 @@ html.at-dark .mt5700-switch input[type="checkbox"] {
     line-height: 1.5;
   }
 }
+
+/* ==========================================================================
+   定时锁频编排页（schedule.js）
+   --------------------------------------------------------------------------
+   这一类命名全部以 .mt5700-sched-* / .mt5700-lock-* / .mt5700-switch-row 开头，
+   只服务编排页：本插件共用同一份样式表，改通用类（.mt5700-input 等）会波及
+   另外十余个页面，因此这里一律新增专用类，不改动既有选择器。
+
+   目标：把「一行一个字段」的长表单压成可读的多列结构 —— 夜间/日间各自成卡，
+   卡内按「启用开关 → 时段 → 4G/5G 锁频」分段，锁频条目每行带序号与字段标签。
+   ========================================================================== */
+
+/* ---------- 开关行：拨杆 + 状态文字 ---------- */
+.mt5700-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mt5700-switch-state {
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.mt5700-switch-state.is-on {
+  color: var(--mt5700-success, #0f9d63);
+}
+.mt5700-switch-state.is-off {
+  color: var(--mt5700-text-muted, #64748b);
+}
+
+/* ---------- 时段内的起止时间输入行 ---------- */
+.mt5700-sched-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mt5700-sched-time .mt5700-input {
+  width: 118px;
+  min-width: 0;
+  flex: 0 0 118px;
+}
+.mt5700-sched-time-sep {
+  font-size: 12px;
+  color: var(--mt5700-text-muted, #64748b);
+}
+
+/* ---------- 时段卡内的分段标题（4G / 5G 锁频） ---------- */
+.mt5700-sched-sub {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--mt5700-border-subtle, rgba(203, 213, 225, 0.45));
+}
+.mt5700-sched-sub:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.mt5700-sched-sub-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--mt5700-text-secondary, #475569);
+}
+.mt5700-sched-sub-title::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--mt5700-accent, #087cba);
+}
+
+/* ---------- 单条锁频：序号 + 字段网格 + 删除 ---------- */
+.mt5700-lock-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.07);
+}
+.mt5700-lock-row-index {
+  padding-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--mt5700-text-muted, #64748b);
+}
+.mt5700-lock-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
+}
+/* 条目内部的字段组不再叠加外边距，行距统一由 grid 的 gap 决定 */
+.mt5700-lock-fields > .mt5700-form-group {
+  margin-bottom: 0 !important;
+}
+/* 只有一个字段的条目（类型 3 锁 Band）占满整行 */
+.mt5700-lock-fields > .mt5700-form-group.is-wide {
+  grid-column: 1 / -1;
+}
+/* 「+ 添加一组」不跟随 flex 列拉伸，保持按钮自身宽度 */
+.mt5700-lock-items > .mt5700-btn {
+  align-self: flex-start;
+}
+/* 删除按钮与序号行不对齐：显式钉在行顶，避免 grid 默认 stretch 把它拉长 */
+.mt5700-lock-row > .mt5700-btn-danger {
+  align-self: start;
+  padding: 5px 11px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+/* ---------- 提示行 / 预览行 ---------- */
+.mt5700-sched-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--mt5700-text-muted, #64748b);
+}
+.mt5700-sched-preview {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  word-break: break-all;
+  background: rgba(127, 127, 127, 0.07);
+  color: var(--mt5700-text-secondary, #475569);
+}
+.mt5700-sched-preview.is-pending {
+  color: var(--mt5700-warning, #b45309);
+}
+
+/* ---------- 时段停用态：开关仍可点，内容整体压暗 ---------- */
+.mt5700-sched-detail {
+  transition: opacity var(--mt5700-transition-base, 0.2s ease);
+}
+.mt5700-sched-detail.is-off {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* ---------- 窄屏回落：单列，避免 select 被挤出卡片 ---------- */
+@media (max-width: 900px) {
+  .mt5700-lock-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .mt5700-lock-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+  .mt5700-lock-row > .mt5700-btn-danger {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .mt5700-sched-time .mt5700-input {
+    width: 100%;
+    flex: 1 1 120px;
+  }
+}

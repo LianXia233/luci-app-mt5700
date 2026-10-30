@@ -1,7 +1,11 @@
 'use strict';
 'require at-webserver/rpc';
 'require at-webserver/mt5700';
-/* global L, AtWs, Mt5700 */
+/* 本页是插件里唯一不依赖 ui.js 的视图（配置全走 ubus/rpcd），但「后端未就绪」
+ * 提示条这个**插件级组件**必须每页都有 —— 保存与重载都要 at-webserver 起来才
+ * 有效，连不上时正是最需要提示的场景。样式见 global.css，注入见 mt5700.js。 */
+'require at-webserver/ui';
+/* global L, AtWs, Mt5700, Ui */
 
 /**
  * 服务配置页面，覆盖以下配置项：
@@ -1475,6 +1479,12 @@ return L.view.extend({
 				});
 			});
 		}
+
+		/* 探活 + 降级提示：与其他页使用同一入口，保证「后端未就绪」在这里也是
+		 * 同一条悬浮提示条（固定定位、可关闭、恢复后自动消失），而不是本页
+		 * 独有的「已停止」文字。onReady 传 null —— 本页数据全走 ubus，
+		 * 不依赖 AT 通道，无需在恢复时重新拉取。 */
+		Ui.startup(page, null);
 
 		return page;
 	}

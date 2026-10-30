@@ -35,9 +35,22 @@ pub struct SchedPeriodDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchedStatusDto {
     pub current_mode: String,
+    /// 下一次切换的钟点（HH:MM），沿用历史字段名，LuCI 旧版本仍能解析。
     pub next_switch: String,
     pub switch_count: i64,
     pub applied: bool,
+    /// 下一次切换的完整本地时刻（YYYY-MM-DD HH:MM，时间取插件自己的时间源）。
+    ///
+    /// 只给 HH:MM 时，22:00 与「明天 06:00」在页面上长得一样，用户没法判断
+    /// 这一次到底是今天还是明天。多给一个带日期的串，前端直接回显即可。
+    #[serde(default)]
+    pub next_switch_time: String,
+    /// 距下一次切换还有多少秒（0 表示当前正好是切换点，-1 表示没有可用的时段端点）。
+    #[serde(default)]
+    pub next_switch_in: i64,
+    /// 插件当前时间（YYYY-MM-DD HH:MM:SS），与上面两个字段同一时间源同一时刻。
+    #[serde(default)]
+    pub server_time: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,28 +334,115 @@ pub async fn write_schedule_uci(d: &SchedConfigDto) -> Result<(), String> {
     Ok(())
 }
 
+/// 下一次时段切换距现在多少秒（1..=86400）。
+///
+/// 只认夜间时段的两个端点 —— 它们就是「模式切换时刻」的全部来源。
+/// 返回值用于两件事：
+///   1. 调度循环据此**提前醒来**，保证到点就切（见 `Scheduler::run`）；
+///   2. 前端「下次切换」的倒计时文案。
+pub fn seconds_to_next_switch(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> Option<i64> {
+    let cur = now.hour() as i64 * 3600 + now.minute() as i64 * 60 + now.second() as i64;
+    [&cfg.night_start, &cfg.night_end]
+        .iter()
+        .filter_map(|v| parse_hhmm(v))
+        .map(|m| {
+            let mut d = m * 60 - cur;
+            if d <= 0 {
+                d += 86_400;
+            }
+            d
+        })
+        .min()
+}
+
+/// 下一次时段切换的完整本地时刻（`YYYY-MM-DD HH:MM`）。
+///
+/// 时刻一律由调用方传入的 `now` 推导（业务侧统一取 `nettime::now()`），
+/// 本函数不自己去问时钟，便于单测固定时间。
+pub fn next_switch_time(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> String {
+    match seconds_to_next_switch(cfg, now) {
+        Some(secs) => (now + chrono::Duration::seconds(secs)).format("%Y-%m-%d %H:%M").to_string(),
+        None => String::new(),
+    }
+}
+
 /// 下一次时段切换的时刻（HH:MM），夜间时段的两个端点就是切换点。
 pub fn next_switch_at(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> String {
-    let cur = now.hour() as i64 * 60 + now.minute() as i64;
-    let mut best: i64 = -1;
-    for v in [&cfg.night_start, &cfg.night_end] {
-        if let Some(m) = parse_hhmm(v) {
-            if m > cur && (best < 0 || m < best) {
-                best = m;
-            }
+    match seconds_to_next_switch(cfg, now) {
+        Some(secs) => (now + chrono::Duration::seconds(secs)).format("%H:%M").to_string(),
+        None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{BandLock, ScheduleConfig};
+    use chrono::DateTime;
+    use std::time::Duration;
+
+    fn cfg(start: &str, end: &str) -> ScheduleConfig {
+        ScheduleConfig {
+            enabled: true,
+            check_interval: Duration::from_secs(60),
+            no_service_limit: Duration::from_secs(300),
+            unlock_lte: true,
+            unlock_nr: true,
+            toggle_airplane: false,
+            night_enabled: true,
+            night_start: start.into(),
+            night_end: end.into(),
+            night_lte: BandLock::default(),
+            night_nr: BandLock::default(),
+            day_enabled: true,
+            day_lte: BandLock::default(),
+            day_nr: BandLock::default(),
         }
     }
-    if best < 0 {
-        for v in [&cfg.night_start, &cfg.night_end] {
-            if let Some(m) = parse_hhmm(v) {
-                if best < 0 || m < best {
-                    best = m;
-                }
-            }
+
+    /// 固定一个本地时刻（2026-10-31），避免测试依赖运行机器的当前时间。
+    fn at(h: u32, m: u32, s: u32) -> DateTime<crate::localtime::Tz> {
+        crate::localtime::from_ymdhms(2026, 10, 31, h, m, s).expect("构造合法时刻")
+    }
+
+    #[test]
+    fn next_switch_points_to_night_start_before_it() {
+        let c = cfg("22:00", "06:00");
+        assert_eq!(next_switch_at(&c, at(21, 30, 0)), "22:00");
+        assert_eq!(seconds_to_next_switch(&c, at(21, 30, 0)), Some(30 * 60));
+    }
+
+    #[test]
+    fn next_switch_rolls_to_tomorrow_across_midnight() {
+        let c = cfg("22:00", "06:00");
+        // 23:00 之后的下一个端点是次日 06:00，不是「今天 22:00」
+        assert_eq!(next_switch_at(&c, at(23, 0, 0)), "06:00");
+        assert_eq!(seconds_to_next_switch(&c, at(23, 0, 0)), Some(7 * 3600));
+        assert_eq!(next_switch_time(&c, at(23, 0, 0)), "2026-11-01 06:00");
+    }
+
+    #[test]
+    fn next_switch_skips_exact_boundary_minute() {
+        let c = cfg("22:00", "06:00");
+        // 正好在切换点上时，报的是**下一个**端点，避免「还有 0 秒」被当成没切换
+        assert_eq!(next_switch_at(&c, at(22, 0, 0)), "06:00");
+        assert_eq!(seconds_to_next_switch(&c, at(22, 0, 1)), Some(8 * 3600 - 1));
+    }
+
+    #[test]
+    fn next_switch_empty_when_endpoints_invalid() {
+        let c = cfg("", "oops");
+        assert_eq!(next_switch_at(&c, at(12, 0, 0)), "");
+        assert_eq!(seconds_to_next_switch(&c, at(12, 0, 0)), None);
+        assert_eq!(next_switch_time(&c, at(12, 0, 0)), "");
+    }
+
+    #[test]
+    fn next_switch_never_exceeds_a_day() {
+        let c = cfg("08:00", "20:00");
+        for h in 0..24 {
+            let secs = seconds_to_next_switch(&c, at(h, 0, 0)).expect("端点合法");
+            assert!((1..=86_400).contains(&secs), "{h} 点算出的间隔异常: {secs}");
         }
     }
-    if best < 0 {
-        return String::new();
-    }
-    format!("{:02}:{:02}", best / 60, best % 60)
 }

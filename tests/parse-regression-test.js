@@ -226,6 +226,20 @@ try {
 		check('DSAMBR 无匹配行返回 null', Parse.parseDsambr('ERROR') === null, 'not null');
 	}
 
+	/* ---------- 9. 定时锁频：ARFCN / PCI 取 0 时不能被当成空值（PR #29 Codex P2） ---------- */
+	{
+		// LTE band 1 的最低 EARFCN 就是 0，PCI 0 也是真实小区；
+		// 旧实现写的是 `i.arfcn || ''`，0 被 falsy 判成空 → 提示「必须为整数」保存不了。
+		const lte = Parse.toLockLists('lte', 1, [{ band: 1, arfcn: 0 }]);
+		check('锁频点 ARFCN=0 原样保留', lte.arfcns === '0', JSON.stringify(lte));
+		const nr = Parse.toLockLists('nr', 2, [{ band: 78, arfcn: 0, scs: 0, pci: 0 }]);
+		check('锁小区 ARFCN/SCS/PCI 取 0 均原样保留',
+			nr.arfcns === '0' && nr.scs_types === '0' && nr.pcis === '0', JSON.stringify(nr));
+		let threw = false;
+		try { Parse.toLockLists('lte', 1, [{ band: 1, arfcn: '' }]); } catch (e) { threw = true; }
+		check('ARFCN 真的留空时仍然报错', threw);
+	}
+
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));
 }
