@@ -315,7 +315,13 @@ function loadView(Parse, ls, opts) {
 			if (typeof onOk === 'function') onOk(true);
 		},
 		/* 真机上 Ui.startup 会等页面挂载完再回调；这里立即回调，让 refresh 跑起来 */
-		startup: (body, cb) => { cb(); }
+		startup: (body, cb) => { cb(); },
+		/*
+		 * 离场钩子。sms_center.js 在 render 末尾注册定时器/监听的清理回调，
+		 * 真机上由 ui.js 的 hashchange 统一触发。本测试只钉渲染结果、不模拟离场，
+		 * 因此收下回调即可 —— 缺失会让页面渲染在第一步就抛 TypeError。
+		 */
+		onLeave: () => {}
 	};
 
 	/*
