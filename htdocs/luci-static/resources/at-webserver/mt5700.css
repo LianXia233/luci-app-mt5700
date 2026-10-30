@@ -2582,6 +2582,9 @@
     filter: drop-shadow(0 0 10px rgba(41, 169, 225, 0.8));
   }
 }@keyframes mt-float-slow {0% { transform: translateY(0px) rotate(0deg); }50% { transform: translateY(-8px) rotate(1.5deg); }100% { transform: translateY(0px) rotate(0deg); }
+}/* 空态立绘的漂浮：纯位移、不旋转 —— 旋转已由外层 .mt-anime-pos-shell 承担，
+   两者叠加会放大摆幅，所以这里只给上下浮动。 */
+@keyframes mt-anim-float {0%, 100% { transform: translateY(0); }50% { transform: translateY(-6px); }
 }@keyframes mt-data-stream {0% { stroke-dashoffset: 60; }100% { stroke-dashoffset: 0; }
 }@keyframes mt-spin-slow {0% { transform: rotate(0deg); }100% { transform: rotate(360deg); }
 }/* SVG 元素动画绑定类 */
@@ -5240,6 +5243,10 @@ select.mt5700-select {
   }
 }@media (prefers-reduced-motion: reduce) {/* 悬浮动效每帧位移，低帧率/截图下看起来像「被切在边缘」 */
   .mt5700-page:not(.mt5700-sms-shell) .mt-mascot-avatar.mt-mascot-avatar {
+    animation: none !important;
+  }/* 重复类名抬特异性：.mt-anime-mint-svg 的 animation 带 !important 且声明在本块之后 */
+  .mt-anime-empty-svg.mt-anime-empty-svg,
+  .mt-anime-mint-svg.mt-anime-mint-svg {
     animation: none !important;
   }
 }.at-dark .mt5700-page:not(.mt5700-sms-shell) .mt-mascot-img.mt-mascot-img {
