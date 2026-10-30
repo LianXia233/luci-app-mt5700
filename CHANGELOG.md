@@ -33,6 +33,7 @@
 - **feat(schedule) 状态带插件时间**：`status` 新增 `next_switch_time`（`YYYY-MM-DD HH:MM`）、`next_switch_in`（秒）、`server_time`，三个字段取同一个 `nettime::now()`；页面只回显后端时间与倒计时，不用浏览器时钟推算，并标「今天 / 明天」
 - **fix(parse) ARFCN / PCI 取 0 不再被当成空值**（Codex PR #29 P2）：`i.arfcn || ''` 会把合法的 0 判成空，导致「填了 0 保存不了」；改为只认 `null` / `undefined`，并补 3 条回归用例
 - **style(modal) 全局弹窗文字可见性**：只覆盖颜色不改版式 —— 正文 `#333c4b`（5.27:1）、说明小字 `#3b4350`（4.73:1）、取消键 `#3730a3`（4.71:1），暗色另给一组；覆盖 `.mt5700-modal` / `.at-modal` / `.cbi-modal` / `.modal` 四套结构。无头浏览器实测改动前后宽高、内边距、圆角、字号、行高、字重完全一致
+- **style(ui) 「后端未就绪」提示条改为视口悬浮**：原来插的是 LuCI 原生 `.alert-message`，在文档流里会把整页内容整体推下去（实测英雄区从 72px 被推到 150px），探活抖动一次页面就上下跳一次。改为 `position: fixed` 脱离文档流后，插入与移除时页面零位移；`top` 由 `placeNotice()` 实测主题头部是否吸顶后写入，避免被 Argon 一类固定头部盖住；补「关闭」按钮（只收起本次提示，再次降级时重新出现）；`AT_CSS_VERSION` 1.13.0 → 1.14.0
 
 ## v1.30.8（2026-10-30）
 
