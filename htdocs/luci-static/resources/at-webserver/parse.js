@@ -880,21 +880,31 @@ var Parse = (function () {
 		return raw;
 	};
 
-	api.toLockLists = function (kind, type, items) {
-		var empty = { type: type, bands: '', arfcns: '', scs_types: '', pcis: '' };
-		if (type === 0) return empty;
-		var label = kind === 'lte' ? 'LTE' : 'NR';
-		var valid = items.filter(function (i) { return i.band != null; });
-		if (!valid.length) throw new Error('请至少输入一个有效的 ' + label + ' 频段');
-		if (valid.length > api.MAX_LOCK_ITEMS) throw new Error(label + ' 最多只能锁 ' + api.MAX_LOCK_ITEMS + ' 组');
-		var bands = valid.map(function (i) { return String(i.band); }).join(',');
-		if (type === 3) return { type: type, bands: bands, arfcns: '', scs_types: '', pcis: '' };
-		var arfcns = valid.map(function (i) { return checkArfcn(label, String(i.arfcn || '').trim()); }).join(',');
-		var scs_types = kind === 'nr' ? valid.map(function (i) { return String(i.scs != null ? i.scs : api.getDefaultScsType(i.band)); }).join(',') : '';
-		if (type === 1) return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: '' };
-		var pcis = valid.map(function (i) { return checkPci(kind, String(i.pci || '').trim()); }).join(',');
-		return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: pcis };
-	};
+		/*
+		 * 取值转字符串：**只有 null / undefined 才算空**。
+		 *
+		 * 原来写的是 `String(i.arfcn || '')`，`0` 是合法 EARFCN/PCI（LTE band 1 的
+		 * 最低频点就是 0，PCI 0 也是真实小区），却被 `||` 判成空值，导致用户
+		 * 明明填了 0 却提示「频点必须为 0-4294967295 的整数」，保存不了。
+		 * Codex 在 PR #29 上标了 P2，这里按「空值只认 null」修掉。
+		 */
+		var cellText = function (v) { return v == null ? '' : String(v).trim(); };
+
+		api.toLockLists = function (kind, type, items) {
+			var empty = { type: type, bands: '', arfcns: '', scs_types: '', pcis: '' };
+			if (type === 0) return empty;
+			var label = kind === 'lte' ? 'LTE' : 'NR';
+			var valid = items.filter(function (i) { return i.band != null; });
+			if (!valid.length) throw new Error('请至少输入一个有效的 ' + label + ' 频段');
+			if (valid.length > api.MAX_LOCK_ITEMS) throw new Error(label + ' 最多只能锁 ' + api.MAX_LOCK_ITEMS + ' 组');
+			var bands = valid.map(function (i) { return String(i.band); }).join(',');
+			if (type === 3) return { type: type, bands: bands, arfcns: '', scs_types: '', pcis: '' };
+			var arfcns = valid.map(function (i) { return checkArfcn(label, cellText(i.arfcn)); }).join(',');
+			var scs_types = kind === 'nr' ? valid.map(function (i) { return String(i.scs != null ? i.scs : api.getDefaultScsType(i.band)); }).join(',') : '';
+			if (type === 1) return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: '' };
+			var pcis = valid.map(function (i) { return checkPci(kind, cellText(i.pci)); }).join(',');
+			return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: pcis };
+		};
 
 	// 拼接锁频命令（即时生效场景，如扫频结果一键锁定）
 	/*

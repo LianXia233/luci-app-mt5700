@@ -153,3 +153,9 @@ html.at-dark .at-field-control .cbi-input-text, html.at-dark .at-field-control .
 	border-color: rgba(41, 169, 225, 0.45);
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }html.at-dark .at-btn-action { background: rgba(38, 48, 78, 0.85); }html.at-dark .at-btn-neutral { background: rgba(30, 38, 62, 0.7); }
+
+/* ---------- 全局提示条 ----------
+ * 后端未就绪提示条（.mt5700-float-notice）与弹窗可读性修订已统一移至
+ * at-webserver/global.css —— 那份由 mt5700.js 注入，覆盖插件全部页面；
+ * 只 require ui.js 的页面拿不到它，所以不再放在本文件里。
+ */

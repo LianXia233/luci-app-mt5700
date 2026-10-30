@@ -243,6 +243,12 @@ pub struct AtClient {
     conn: Arc<Mutex<Option<Connection>>>,
     /// 连接标志（原子，供 Scheduler 等异步任务安全读取，替代阻塞式取锁）。
     connected_flag: Arc<AtomicBool>,
+    /// 连接代次：每成功建立一次链路 +1。
+    ///
+    /// 定时锁频靠它识别「模组重连过」——USB 重枚举或模组自复位会把已下发的
+    /// 锁频清掉，而 `connected_flag` 只是 true/false 两态，抖动一次再回来
+    /// 看不出区别。代次是单调递增的，重连一次就变一次，判断不会被时序吃掉。
+    connect_epoch: Arc<AtomicU64>,
     /// 扫频进行中标志：扫频期间数据面会被临时断开，autodial_watchdog 据此跳过对账，
     /// 避免把「扫频导致的未就绪」误判为拨号故障而抢先重拨（会与扫频恢复逻辑抢 CID）。
     scan_active: Arc<AtomicBool>,
@@ -300,6 +306,7 @@ impl AtClient {
             cfg,
             conn: Arc::new(Mutex::new(None)),
             connected_flag: Arc::new(AtomicBool::new(false)),
+            connect_epoch: Arc::new(AtomicU64::new(0)),
             scan_active: Arc::new(AtomicBool::new(false)),
             urc_tx,
             gate: PriLock::new(),
@@ -328,6 +335,11 @@ impl AtClient {
     pub fn connected(&self) -> bool {
         // 纯原子读取：绝不能在这里取锁阻塞（Scheduler 在异步循环中调用）。
         self.connected_flag.load(Ordering::Relaxed)
+    }
+
+    /// 当前连接代次（每次成功建链 +1）。同样只做原子读取，不加锁。
+    pub fn connect_epoch(&self) -> u64 {
+        self.connect_epoch.load(Ordering::Relaxed)
     }
 
     /// 标记扫频进行中。true 时 autodial_watchdog 暂停对账，避免与扫频恢复逻辑抢 CID。
@@ -387,6 +399,7 @@ impl AtClient {
             };
             *self.conn.lock().await = Some(conn);
             self.connected_flag.store(true, Ordering::Relaxed);
+            self.connect_epoch.fetch_add(1, Ordering::Relaxed);
 
             // 初始化命令要在读循环起来之后发，否则等不到应答。
             let read_ctx = ctx.clone();
