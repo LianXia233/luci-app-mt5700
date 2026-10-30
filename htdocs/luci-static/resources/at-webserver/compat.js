@@ -59,7 +59,7 @@
 
 /* 插件 UI 整体版本：与 Makefile 的 PKG_VERSION 同步 bump，
  * 作为 resource_version 的插件分量驱动所有 JS 模块的缓存失效。 */
-var MT5700_UI_VERSION = '1.30.0';
+var MT5700_UI_VERSION = '1.30.9';
 
 var AtCompat = (function () {
 	var api = {};
