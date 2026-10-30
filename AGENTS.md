@@ -27,6 +27,21 @@
 - 新增视图必须 `require at-webserver/mt5700`（否则拿不到全局样式），建议同时 `require at-webserver/ui` 以复用公共组件。
 - 改动这两块后执行 `node tests/global-css-test.js`：校验 12 个视图的依赖可达性、`global.css` 的注入顺序（必须晚于 `mt5700.css`）、提示条与四套弹窗结构的选择器是否仍在，以及旧文件里有没有重复定义。
 
+### 样式与模块的缓存版本戳
+
+`uhttpd` 对停放在同一路径下的静态资源恒给 `Last-Modified: 1970`，浏览器会长期复用缓存 —— 因此三张样式表与全部 JS 模块的失效都只能靠 URL 上的 `?v=`：
+
+| 常量 | 位置 | 何时递增 |
+| --- | --- | --- |
+| `MT5700_CSS_VERSION` | `mt5700.js` 文件头 | 改 `mt5700.css` 时 |
+| `AT_CSS_VERSION` | `ui.js` 文件头 | 改 `at.css` 时 |
+| `GLOBAL_CSS_VERSION` | `mt5700.js` 文件头 | 改 `global.css` 时 |
+| `MT5700_UI_VERSION` | `compat.js` 文件头 | 发版时与 `Makefile` 的 `PKG_VERSION` 同步 |
+
+- 不递增的后果是「代码已改、界面未变」：清理或调样式会被浏览器缓存整段吞掉，甚至与旧缓存拼出不存在的组合。
+- `MT5700_UI_VERSION` 会并入 `L.env.resource_version`，是**所有** `require` 的版本分量；它与 `PKG_VERSION` 脱节时，升级后用户仍会加载旧模块（曾落后 9 个版本）。
+- `MT5700_CSS_VERSION` 同时用于 `mascot.png?v=`，递增会让看板娘图片重新拉取一次，属预期副作用。
+
 ## 二、作者署名保护规则
 
 - `LianXia233` 是本项目指定的作者署名标识。
