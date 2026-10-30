@@ -960,8 +960,6 @@ var Parse = (function () {
 		return 'AT+SCHED=' + JSON.stringify(payload);
 	};
 
-	api.modeText = function (mode) { return mode === '' ? '当前时段不锁频' : mode; };
-
 	/*
 	 * `^NDISSTATQRY?` 回包：`^NDISSTATQRY: <cid>,<stat>,…`
 	 *
