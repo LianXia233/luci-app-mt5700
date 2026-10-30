@@ -33,7 +33,19 @@
 - **feat(schedule) 状态带插件时间**：`status` 新增 `next_switch_time`（`YYYY-MM-DD HH:MM`）、`next_switch_in`（秒）、`server_time`，三个字段取同一个 `nettime::now()`；页面只回显后端时间与倒计时，不用浏览器时钟推算，并标「今天 / 明天」
 - **fix(parse) ARFCN / PCI 取 0 不再被当成空值**（Codex PR #29 P2）：`i.arfcn || ''` 会把合法的 0 判成空，导致「填了 0 保存不了」；改为只认 `null` / `undefined`，并补 3 条回归用例
 - **style(modal) 全局弹窗文字可见性**：只覆盖颜色不改版式 —— 正文 `#333c4b`（5.27:1）、说明小字 `#3b4350`（4.73:1）、取消键 `#3730a3`（4.71:1），暗色另给一组；覆盖 `.mt5700-modal` / `.at-modal` / `.cbi-modal` / `.modal` 四套结构。无头浏览器实测改动前后宽高、内边距、圆角、字号、行高、字重完全一致
-- **style(ui) 「后端未就绪」提示条改为视口悬浮**：原来插的是 LuCI 原生 `.alert-message`，在文档流里会把整页内容整体推下去（实测英雄区从 72px 被推到 150px），探活抖动一次页面就上下跳一次。改为 `position: fixed` 脱离文档流后，插入与移除时页面零位移；`top` 由 `placeNotice()` 实测主题头部是否吸顶后写入，避免被 Argon 一类固定头部盖住；补「关闭」按钮（只收起本次提示，再次降级时重新出现）；`AT_CSS_VERSION` 1.13.0 → 1.14.0
+- **style(ui) 「后端未就绪」提示条改为视口悬浮**：原来插的是 LuCI 原生 `.alert-message`，在文档流里会把整页内容整体推下去（实测英雄区从 72px 被推到 150px），探活抖动一次页面就上下跳一次。改为 `position: fixed` 脱离文档流后，插入与移除时页面零位移；`top` 由 `placeNotice()` 实测主题头部是否吸顶后写入，避免被 Argon 一类固定头部盖住；补「关闭」按钮（只收起本次提示，再次降级时重新出现）
+
+### refactor(css) 弹窗与提示条抽成 global.css：一次覆盖全部 12 个页面
+
+> 上面两项都是**插件级组件**，却分别写在两个不同的样式文件里：弹窗段在 `mt5700.css`（恰好每个页面都加载，能生效），提示条段在 `at.css`（只有 `require ui.js` 的页面加载）。改动前 `service.js` 是唯一只 `require mt5700` 的视图，于是同一个提示条在它那里退回 LuCI 原生横条 —— 实测 `position: static`、宽 1244px、圆角 3px、无阴影，出现时把整页内容推下去 44px。样式散落两处也意味着以后调其中一项很容易只改到一半页面。
+
+- **refactor(css) 新增 `global.css`**：把「弹窗文字可见性」与「后端未就绪提示条」两段整体迁入，由 `mt5700.js` 注入 —— 该模块被 12 个视图**全部** require（`static-check` 的菜单路由校验同时兜底：12 条路由的视图都必须存在），因此注入一次即全站生效，页面无需各自引入
+- **refactor(css) 加载顺序即层级**：`mt5700.css` 先注入、`global.css` 后注入，后者作为「最终修订层」在同特异性规则上胜出；`at.css` 相应把提示条段移除，只留一行指路注释，避免同一选择器在两份文件里各自演化
+- **refactor(css) 变量链按页面可用性回落**：提示条底色写成 `var(--at-bg-glass, var(--mt5700-glass-bg, rgba(255,255,255,.86)))`，常规页取到 `.78` 的 at 玻璃色（视觉与此前完全一致），只加载 mt5700 的页面回落到 `.70` 的插件玻璃色，两边都不会掉成透明
+- **chore(css) 版本各自独立**：`MT5700_CSS_VERSION` 2.45.0 → 2.46.0（mt5700.css 变短）、`AT_CSS_VERSION` 1.14.0 → 1.15.0（at.css 移除提示条段）、新增 `GLOBAL_CSS_VERSION` 1.0.0（以后只调这两块不必连带刷新 5900 行的 mt5700.css）
+- **feat(ui) 服务配置页接入统一启动入口**：`service.js` 补 `require at-webserver/ui` 并在 `render` 末尾调 `Ui.startup(page, null)` —— 保存与重载都要 at-webserver 起来才有效，连不上时正是最需要提示的场景；`onReady` 传 `null`，因为本页数据全走 ubus，不依赖 AT 通道。至此 12 个页面共用同一条提示条，没有例外
+- **test** 新增 `tests/global-css-test.js`（29 项）：12 个视图的依赖可达性、注入顺序（`global.css` 必须后于 `mt5700.css`）、提示条与四套弹窗结构选择器存在性、弹窗段「只改颜色」约束、`at.css` / `mt5700.css` 不再重复定义（防止样式再散回两处）
+- **test** 无头浏览器实测三场景（service 改动前 / service 改动后 / 常规页改动后）：提示条 `static`→`fixed`、1244px→720px、圆角 3px→12px、出现阴影；弹窗正文对比度 3.95:1→11.12:1；三场景 `scrollWidth - clientWidth = 0`，无横向溢出
 
 ## v1.30.8（2026-10-30）
 
