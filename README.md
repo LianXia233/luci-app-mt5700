@@ -4,7 +4,7 @@
 
 OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守护套件
 
-[![Version](https://img.shields.io/badge/Version-v1.29.0-blue.svg?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v1.30.9-blue.svg?style=flat-square)](CHANGELOG.md)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.x-00C49F.svg?style=flat-square&logo=openwrt)](https://openwrt.org/)
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-Compatible-orange.svg?style=flat-square)](https://immortalwrt.org/)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%7C%20Tokio-DEA584.svg?style=flat-square&logo=rust)](src/rust/)
@@ -53,12 +53,13 @@ OpenWrt / ImmortalWrt 平台下 MT5700M 5G 模组的全功能控制中心与守�
 | [界面预览](#界面预览) | [系统拓扑与数据链路](#系统拓扑与数据链路) |
 | [短信功能使用文档](docs/sms-usage.md) | [短信链路协议与命令参考](docs/sms-at-protocol.md) |
 | [功能矩阵](#功能矩阵) | [数据可信度与取数来源](#数据可信度与取数来源) |
-| [架构选型决策流](#架构选型决策流) | [安装与快速启动](#安装与快速启动) |
-| [自动拨号与全链路协同机制](#自动拨号与全链路协同机制) | [开机自启与自愈机制](#开机自启与自愈机制) |
-| [UCI 配置参考](#uci-配置参考-etcconfigat-webserver) | [事件通知配置](#事件通知配置) |
-| [本地测试](#本地测试) | [云编译与发布](#云编译与发布) |
-| [更新日志](#更新日志) | [问题反馈](#问题反馈) |
-| [源码目录结构](#源码目录结构) | [许可证与版权声明](#许可证与版权声明) |
+| [OpenWrt 版本兼容性](#openwrt-版本兼容性) | [架构选型决策流](#架构选型决策流) |
+| [安装与快速启动](#安装与快速启动) | [自动拨号与全链路协同机制](#自动拨号与全链路协同机制) |
+| [开机自启与自愈机制](#开机自启与自愈机制) | [UCI 配置参考](#uci-配置参考-etcconfigat-webserver) |
+| [事件通知配置](#事件通知配置) | [本地测试](#本地测试) |
+| [云编译与发布](#云编译与发布) | [更新日志](#更新日志) |
+| [问题反馈](#问题反馈) | [源码目录结构](#源码目录结构) |
+| [许可证与版权声明](#许可证与版权声明) | [各版本发布说明](docs/release-notes/) |
 
 > 独立文档：**[短信链路协议与命令参考](docs/sms-at-protocol.md)**（发送/接收/读取三条链路的 AT 序列与取值理由、PDU 字段与编码表、删除语义、三层超时预算、命令速查与已核对报文）· [更新日志](CHANGELOG.md) · [各版本发布说明](docs/release-notes/)
 >
@@ -258,6 +259,72 @@ grep OPENWRT_ARCH /etc/openwrt_release
 
 ---
 
+## OpenWrt 版本兼容性
+
+> **一句话结论**：能装的最低版本是 **OpenWrt 22.03**（受限于 rpcd 的 ucode 插件支持），但**实测与 CI 覆盖的只有 24.10 与 25.12 两代**。22.03 / 23.05 属于「依赖齐全、可以一试、未做验证」，21.02 及更早明确不支持。
+
+### 版本支持矩阵
+
+| OpenWrt | ImmortalWrt 对应分支 | 包管理器 | 包格式 | 状态 | 说明 |
+|:--|:--|:--|:--|:--|:--|
+| **25.12.x** | SNAPSHOT（25.x） | `apk` | `.apk` | ✅ **CI 构建 + 发布** | 三档架构全覆盖；iStoreOS 25.x 同属此列 |
+| **24.10.x** | `openwrt-24.10` | `opkg` | `.ipk` | ✅ **CI 构建 + 发布** | 长期支持版，当前主力 |
+| 23.05.x | `openwrt-23.05` | `opkg` | `.ipk` | ⚠️ 依赖满足，未验证 | 未在真机跑过；如遇 LuCI 渲染问题请反馈 |
+| 22.03.x | `openwrt-22.03` | `opkg` | `.ipk` | ⚠️ **理论下限**，未验证 | ucode 自本代起随系统预装，是硬门槛所在 |
+| ≤ 21.02 | — | `opkg` | — | ❌ 不支持 | 系统无 ucode，`mt5700.uc` 无法注册任何 RPC |
+
+### 下限为什么是 22.03
+
+插件的 RPC 并不走私有进程间协议，而是由 **rpcd 加载一个 ucode 脚本**（`/usr/share/rpcd/ucode/mt5700.uc`）对外发布 `luci.mt5700.*` 方法，前端再通过 `rpc.declare` 调用它：
+
+- **ucode 解释器自 OpenWrt 22.03 起随系统预装**，`rpcd-mod-ucode` 也首次出现在 22.03.0 的官方仓库中；
+- 21.02 及更早的系统既没有 ucode 解释器，rpcd 版本也不支持 `ucode` 插件类型 —— 把包装上去，`/usr/share/rpcd/ucode/*.uc` 会被完全忽略；
+- 典型症状：**页面能正常打开（HTML/JS 都在），但每个操作都报 `Method not found` 或 `Access denied`**，且「服务配置」页永远显示后端未就绪。
+
+### 前后端各自的版本敏感度
+
+| 组件 | 依赖 | 与 OpenWrt 版本的关系 |
+|:--|:--|:--|
+| 后端二进制 `at-webserver-rust` | 交叉编译到 `*-unknown-linux-musl`，**静态链接** | 与目标系统的 libc / ABI 无关，只与 **CPU 架构**有关 |
+| LuCI 12 个视图 | `baseclass` + `uci` / `rpc` / `fs` | 21.02 起均已提供，不依赖 `luci-compat` |
+| RPC 桥 | `rpcd` + `ucode` | **22.03+**，硬门槛 |
+| 打包 | `luci.mk` + `apk` / `opkg` | 24.10 及更早产 `ipk`，25.x 产 `apk` |
+| 样式 | 插件自带 `mt5700.css` / `global.css` | 不依赖主题变量；但深色模式观感取决于所用主题 |
+
+包元数据里 `Depends` 只有 `libc` 一项（`LUCI_DEPENDS` 留空），**不钉 `luci-base` 的版本号**，因此不会出现「LuCI 版本对不上，包直接被拒装」这类互斥；代价是系统里本来就要有 LuCI（JS 版，21.02 起），否则包能装上但没有入口。实测 1.30.9 的 `ipk`：`Depends: libc`、`Provides: at-webserver-rust`，解包后 `file usr/bin/at-webserver-rust` 输出 `ELF 64-bit LSB executable … statically linked`。
+
+### 架构覆盖
+
+| 架构 | Release 是否提供 | 常见来源 |
+|:--|:--|:--|
+| `x86_64` | ✅ | 软路由 / 虚拟机 |
+| `aarch64_cortex-a53` | ✅ | `mediatek/filogic`（MT798x）等 |
+| `aarch64_generic` | ✅ | `armsr/armv8`、iStoreOS 25.x 等 |
+| `mipsel` / `mips` / `riscv64` / `arm*` | ❌ 需自行编译 | `src/Makefile` 有映射表，但未出包 |
+
+> 架构不匹配的报错与处置见上一节「常见包校验报错速查」。`apk` 对 `<base>_<variant>` 做严格匹配，`aarch64_cortex-a53` 与 `aarch64_generic` **不可互换**。
+
+### 装之前自查
+
+```sh
+# 1. 系统版本
+. /etc/openwrt_release && echo "$DISTRIB_ID $DISTRIB_RELEASE"
+
+# 2. 包管理器（有 apk 即 25.x 及以后）
+command -v apk >/dev/null && echo "apk（下 .apk）" || echo "opkg（下 .ipk）"
+
+# 3. ucode 是否就位（22.03+；没有就别装）
+command -v ucode >/dev/null && echo "ucode OK" || echo "无 ucode，本插件无法工作"
+```
+
+### 与本插件无关但同样会「装不上 / 用不了」的因素
+
+- **模组驱动**：本包不带内核驱动。设备侧需要有 USB 串口（`option` / `usbserial`）与网卡驱动（`cdc_ncm` / `rndis` / `mbim` 之一，视固件而定），否则页面能开但没有串口可选；
+- **串口独占**：与 QModem 等直接占用同一模组的插件不能共存（详见下一节）；
+- **`nc` 是否可用**：前端到后端的 RPC 由 `nc 127.0.0.1 <port>` 打通，`nc` 由 busybox 提供。部分精简固件裁剪了它，届时「服务配置」页会给出明确提示，需要在固件里补回 busybox 的 `nc` applet。
+
+---
+
 ## 安装与快速启动
 
 > ⚠️ **兼容性提醒**：本插件会独占模组串口并直接发送 AT 指令，与 QModem 等同样占用模组串口的插件**不兼容**（完整说明见下方「本插件与 QModem 的关系」）。安装前请先卸载或停用其他占用同一模组串口的插件——拨号交给本插件即可，无需再装 QModem。
@@ -279,11 +346,11 @@ grep OPENWRT_ARCH /etc/openwrt_release
 ```sh
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT (apk)】
 apk add --allow-untrusted \
-   ./<ARCH>-luci-app-mt5700-1.29.0-r8.apk \
+  ./<ARCH>-luci-app-mt5700-*.apk \
   ./<ARCH>-luci-i18n-mt5700-zh-cn-*.apk
 
 # 【OpenWrt 24.10 及更早版本 (opkg)】
-opkg install ./<ARCH>-luci-app-mt5700_1.29.0-r8_<ARCH>.ipk
+opkg install ./<ARCH>-luci-app-mt5700_*_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
 
@@ -626,7 +693,7 @@ v1.28.0 起 QQ 推送不再只有纯文本。所有 QQ 机器人能力（鉴权�
 
 ```
 luci-app-mt5700/
-├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.29.0)
+├── Makefile                                # 顶层软件包构建定义 (PKG_VERSION=1.30.9)
 ├── htdocs/luci-static/resources/
 │   ├── view/at-webserver/                  # 12 个 LuCI 页面前端视图脚本（见上方功能矩阵）
 │   └── at-webserver/                       # 前端支撑库 (rpc.js / parse.js / mt5700.js / ui.js / mt5700.css / tabmenu.js)
