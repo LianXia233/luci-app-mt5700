@@ -13,7 +13,7 @@
 // uhttpd 给静态资源的 Last-Modified 为 1970，浏览器会长期复用缓存；LuCI 主题同样
 // 采用「css?v=版本」的做法（aurora: main.css?v=1.3.1）。样式版本随包版本递增，
 // 保证升级/修复样式后用户刷新即可生效。
-var AT_CSS_VERSION = '1.12.0';
+var AT_CSS_VERSION = '1.13.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION);

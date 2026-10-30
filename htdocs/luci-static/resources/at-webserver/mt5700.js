@@ -10,7 +10,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.44.0';
+var MT5700_CSS_VERSION = '2.45.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION);

@@ -60,10 +60,12 @@ return L.view.extend({
 
 		/* ---------- 运行状态 ---------- */
 
-		var statusCard = Mt5700.card('运行状态', '来自 AT+SCHED? 的 status 段，每 15 秒刷新一次');
+		var statusCard = Mt5700.card('运行状态', '由后端常驻调度维护，页面关掉也照常执行；时间以插件时间源为准');
 		var statusGrid = E('div', { 'class': 'mt5700-metrics' });
+		var statusClock = E('div', { 'class': 'mt5700-hint' });
 		var statusNote = E('div', { 'class': 'mt5700-hint' });
 		statusCard._body.appendChild(statusGrid);
+		statusCard._body.appendChild(statusClock);
 		statusCard._body.appendChild(statusNote);
 		body.appendChild(statusCard);
 
@@ -479,7 +481,7 @@ return L.view.extend({
 				setBusy(true);
 				AtWs.client.sendCommand(cmd).then(function (res) {
 					if (!res.success) throw new Error(String(res.error || '保存定时锁频配置失败'));
-					Mt5700.success('定时锁频配置已保存，下个检测周期生效');
+					Mt5700.success('已保存到后台调度，页面可以关掉，到点自动切换');
 					return reload();
 				}).catch(function (err) {
 					Mt5700.error((err && err.message) || '保存失败');
@@ -507,6 +509,34 @@ return L.view.extend({
 			return String(mode);
 		}
 
+		/*
+		 * 秒数 → 人话。只用于「距下次切换」这种最长一天的间隔，
+		 * 因此不处理月/年，超过一小时也只说「N 小时 M 分」。
+		 */
+		function humanSpan(sec) {
+			var s = Number(sec);
+			if (!isFinite(s) || s < 0) return '';
+			if (s < 60) return s + ' 秒';
+			var m = Math.floor(s / 60);
+			if (m < 60) return m + ' 分钟';
+			var h = Math.floor(m / 60);
+			return h + ' 小时' + (m % 60 ? ' ' + (m % 60) + ' 分' : '');
+		}
+
+		/* "2026-10-31 22:00" → "10-31 22:00"，指标卡里不需要年份 */
+		function shortStamp(v) {
+			var s = String(v == null ? '' : v);
+			return s.length >= 16 ? s.slice(5, 16) : s;
+		}
+
+		/* 时段端点跨零点时下一次切换在明天，只显示 HH:MM 会被误读成今天 */
+		function dayWord(serverTime, nextTime) {
+			var a = String(serverTime || '').slice(0, 10);
+			var b = String(nextTime || '').slice(0, 10);
+			if (!a || !b) return '';
+			return a === b ? '今天' : '明天';
+		}
+
 		function renderStatus() {
 			var st = (cfg && cfg.status) ? cfg.status : null;
 
@@ -517,10 +547,26 @@ return L.view.extend({
 			statusGrid.appendChild(metric('下次切换', st ? (st.next_switch || '—') : '—'));
 			statusGrid.appendChild(metric('已切换次数', st && st.switch_count != null ? String(st.switch_count) : '0'));
 
+			/*
+			 * 时间口径全部来自后端（插件自己的时间源，NTP 优先），
+			 * 不用浏览器时钟：手机时区设错、系统时间偏了都会让「下次切换」
+			 * 显示成一段毫无意义的相对时间。
+			 */
+			var clock = [];
+			if (st && st.server_time) clock.push('插件时间 ' + st.server_time);
+			if (st && st.next_switch_time) {
+				var span = humanSpan(st.next_switch_in);
+				clock.push('下次切换 ' + shortStamp(st.next_switch_time) +
+					'（' + dayWord(st.server_time, st.next_switch_time) +
+					(span ? '，还有 ' + span : '') + '）');
+			}
+			statusClock.textContent = clock.join(' · ');
+			statusClock.hidden = !clock.length;
+
 			if (cfg && !st) {
 				statusNote.textContent = '后端暂未返回 status 段（多为刚起步或后端未实现该字段）。';
 			} else if (st && st.applied === false) {
-				statusNote.textContent = '编排已保存，等待下个检测周期下发到模组。';
+				statusNote.textContent = '编排已保存，等待后台调度按当前时段下发到模组。';
 			} else {
 				statusNote.textContent = '';
 			}
