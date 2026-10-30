@@ -690,6 +690,21 @@ ATClient.prototype.onConnectionStateChange = function (cb) {
 	cb(this.state, this.error);
 };
 
+/*
+ * 注销连接状态回调。
+ *
+ * 这个数组只增不减会带来真实的泄漏：ATClient 是**全页面单例**，
+ * 而 ui.js 每次 Ui.startup() 都会注册一个闭包（捕获本页的 body 与 onReady），
+ * SPA 内每切一次页面就多一个。旧回调虽然只是往已经脱离文档的 body 里插提示条、
+ * 用户看不见，但它把整页 DOM 和页面数据一直吊在内存里，切得越多留得越多；
+ * 每次状态变化还要把这些死页面的回调全部跑一遍。
+ * 因此页面离场（Ui.onLeave）时按同一函数引用注销。
+ */
+ATClient.prototype.offConnectionStateChange = function (cb) {
+	var i = this.stateCallbacks.indexOf(cb);
+	if (i >= 0) this.stateCallbacks.splice(i, 1);
+};
+
 ATClient.prototype.dispatchRawData = function (text) {
 	var self = this;
 	var parsed = parseRawData(text);

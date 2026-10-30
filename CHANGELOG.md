@@ -10,6 +10,20 @@
 
 ## v1.30.9（2026-10-31）
 
+### refactor 前端审查整理：修掉回调累积、收敛重复解析、清掉不可达样式
+
+> 对照三份独立审查的结论逐条复核后落地。核心不是「删得多」，而是先证明「删了不改变任何计算样式」—— 全部 CSS 改动都用无头浏览器在同一 DOM 上做过改动前后 `getComputedStyle` 全属性 + 像素比对（5 个视口 × 31 个真实嵌套元素：**差异 0 项、差异像素 0**）。审查里被列为「可删」的 15 个类名经实测其实仍在用（`mt-mid-grid`、`mt-anime-empty-svg`、`mt-anime-mint-svg`、`mt-constellation-svg`、`mt-mimo-svg`、`mt-mcs-visual-grid` 各有实际产出点），一律保留。
+
+- **fix(ui) 连接状态回调在离场时注销**：`ATClient` 是全页面单例，`stateCallbacks` 只增不减，而 `Ui.startup()` 每次进页面都注册一个捕获本页 `body` 与 `onReady` 的闭包 —— 切入一次留一个，切得越多留得越多，每次状态变化还要把这些死页面的回调跑一遍。新增 `ATClient.offConnectionStateChange(cb)`（与既有 `subscribe/unsubscribe` 对称），`startup` 与 `degradedNotice` 都在 `Ui.onLeave` 里按同一函数引用注销，并顺带摘掉 `resize` 监听与提示条 DOM
+- **refactor(parse) NDISSTAT 解析收口**：拨号页判「是否已拨上」与扫频页判「扫频会断网，需二次确认」各写了一份 `^NDISSTATQRY:\s*1\s*,\s*(\d+)`。同一条口径两处维护，改一处漏一处就是「拨号页说已连、扫频页说没连」。新增 `Parse.parseNdisStat(text)`（返回第二字段，无回包返回 `null`），两个视图改为调用它，正则只剩一份
+- **refactor(parse) 移除零引用的 `modeText` 导出**：`schedule.js` 另有一份语义更完整的本地 `modeText`，`Parse.modeText` 全仓零调用
+- **chore(css) 删除不可达规则与空媒体查询**：`mt5700.css` 删 8 条 `.mt5700-gauge-caption.*`、`.mt5700-chart-tip.show`、`.mt5700-tab.active`（注意区分仍在用的 `.mt5700-table`）与 5 个空 `@media`；`at.css` 删空规则 `.at-modal-body`。空块与空规则在规范层面即为 no-op
+- **chore(css) 从选择器列表摘除旧类名别名**：早期短前缀改名时，`mt-*` 旧名以逗号别名形式与 `mt5700-*` 并列留了下来（`mt-hero-*`、`mt-badge-*`、`mt-row-2col`/`mt-2col`/`mt-form-row`、`mt-root-wrap`），`mt5700-grid-3/4`、`mt5700-gauge`、`mt5700-speed-box`、`mt5700-readonly`/`mt5700-raw-panel` 同样只在选择器列表里挂名。**只摘 token，规则本体与其余选择器的行为一字不动**
+- **chore(cache) 两处版本戳**：`MT5700_UI_VERSION` 1.30.0 → **1.30.9**（注释写明须与 `PKG_VERSION` 同步，实际落后 9 个版本，`?v=` 换不掉旧模块）；`MT5700_CSS_VERSION` 2.46.0 → **2.46.1**、`AT_CSS_VERSION` 1.15.0 → **1.15.1**（uhttpd 对静态资源恒给 1970 的 `Last-Modified`，不换版本号用户刷新也拿不到新样式）
+- **test(ui) 新增 `tests/ui-lifecycle-test.js`（10 项）**：用 DOM 桩跑真实 `ui.js`，断言「切页 5 次后回调数不增长」与「离场钩子执行后回调归零」；并逐例比对 `parseNdisStat` 与原正则的 13 组输入结果一致
+- **test(sms) 补齐渲染测试的 `Ui.onLeave` 桩**：`sms-center-render.js` 的 `Ui` 桩缺 `onLeave`（`ui.js` 有），页面 render 第一步就抛 `TypeError`，导致这个 1788 行的页面**一直没有渲染回归**。补上空实现后 61 项断言全部通过 —— 未改动任何既有断言预期
+- **retain 明确不动的部分**：`mt5700-btn-*` / `mt5700-badge-*` / `mt5700-banner-*` 等变体是公共组件 `button(label, fn, variant)` / `badge(text, variant)` 的完整变体表（`banner` 的 `success`/`info`/`danger` 由 `bannerOf()` 的对象字面量传入，实际可达），删了会让将来传入该变体变成无样式按钮；56 组「同选择器多段定义」是基础 → 强化 → 主题兼容的分层覆盖，逐条做过遮蔽分析（含 shorthand 展开），**0 条**被后续规则完全覆盖；29 个未被 `var()` 引用的自定义属性是主题覆写入口。另记录一项**未修**的既存缺陷：`mt5700.css` 两处 `animation: mt-anim-float` 指向不存在的 `@keyframes`，动画当前静默失效 —— 补关键帧等于新增用户此前看不到的动画，超出「视觉零变化」边界
+
 ### style(schedule) 定时锁频编排页重排：状态指标化、参数双列、时段分卡、输入框不再预填
 
 > 该页原先把所有内容塞进一张卡片、一行一个字段，四项运行状态挤成一条 hint 串，锁频条目只有 placeholder 没有字段标签；`Mt5700.input('number', '10', String(draft.check_interval))` 在后端未返回数值时会把字面量 `undefined` 填进输入框，「看到的值」与「已保存的配置」对不上。本次按纯表单页的既有规范重排，并把输入框的预填策略统一改为「后端没给就留空」。详见 [`docs/release-notes/v1.30.9.md`](docs/release-notes/v1.30.9.md)。

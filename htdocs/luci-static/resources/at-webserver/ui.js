@@ -13,7 +13,7 @@
 // uhttpd 给静态资源的 Last-Modified 为 1970，浏览器会长期复用缓存；LuCI 主题同样
 // 采用「css?v=版本」的做法（aurora: main.css?v=1.3.1）。样式版本随包版本递增，
 // 保证升级/修复样式后用户刷新即可生效。
-var AT_CSS_VERSION = '1.15.0';
+var AT_CSS_VERSION = '1.15.1';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/at.css?v=' + AT_CSS_VERSION);
@@ -242,7 +242,7 @@ var Ui = (function () {
 		window.addEventListener('resize', onResize);
 
 		/* 一次注册、长期生效：依据「后端是否真的可用」决定去留 */
-		AtWs.client.onConnectionStateChange(function (state) {
+		var onState = function (state) {
 			var genuinelyUp = (state === 'connected' && !AtWs.client.backendKnownDown
 				&& AtWs.client.circuitOpenUntil <= Date.now());
 			if (genuinelyUp) {
@@ -255,6 +255,16 @@ var Ui = (function () {
 				body.insertBefore(banner, body.firstChild);
 				placeNotice(banner);
 			}
+		};
+		AtWs.client.onConnectionStateChange(onState);
+
+		/* 离开本页时把这一条也摘掉：ATClient 是单例，回调数组不清理的话
+		 * 每进一次页面就多一个闭包（连同本页 body 一起留在内存里）。 */
+		api.onLeave(function () {
+			window.removeEventListener('resize', onResize);
+			AtWs.client.offConnectionStateChange(onState);
+			if (banner.parentNode) banner.parentNode.removeChild(banner);
+			if (body.__atwsDegradedBanner === banner) body.__atwsDegradedBanner = null;
 		});
 
 		return banner;
@@ -281,11 +291,16 @@ var Ui = (function () {
 		/* 先挂监听，再启动：保证任何时刻进入 degraded 都能被捕获。
 		 * onConnectionStateChange 注册时会立刻回调一次当前状态，
 		 * 因此场景 a 无需额外分支。 */
-		AtWs.client.onConnectionStateChange(function (state) {
+		var onState = function (state) {
 			if (state === 'degraded' || state === 'error') {
 				api.degradedNotice(body, onReady);
 			}
-		});
+		};
+		AtWs.client.onConnectionStateChange(onState);
+
+		/* 页面离场注销：ATClient 是单例，不摘的话每进一次页面就多一个
+		 * 捕获 body/onReady 的闭包，切页次数多了会一直积累。 */
+		api.onLeave(function () { AtWs.client.offConnectionStateChange(onState); });
 
 		return AtWs.client.connect().then(function () {
 			if (AtWs.client.state === 'degraded') {
