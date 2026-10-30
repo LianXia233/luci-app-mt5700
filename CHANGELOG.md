@@ -61,6 +61,16 @@
 - **test** 新增 `tests/global-css-test.js`（29 项）：12 个视图的依赖可达性、注入顺序（`global.css` 必须后于 `mt5700.css`）、提示条与四套弹窗结构选择器存在性、弹窗段「只改颜色」约束、`at.css` / `mt5700.css` 不再重复定义（防止样式再散回两处）
 - **test** 无头浏览器实测三场景（service 改动前 / service 改动后 / 常规页改动后）：提示条 `static`→`fixed`、1244px→720px、圆角 3px→12px、出现阴影；弹窗正文对比度 3.95:1→11.12:1；三场景 `scrollWidth - clientWidth = 0`，无横向溢出
 
+### style(css) 空态立绘恢复漂浮：补上一直缺失的 `@keyframes mt-anim-float`
+
+> `mt5700.js` 的 `api.empty` 注释里写着「旋转加在定位壳上，不覆盖 svg 自身的漂浮动画」，但 `mt-anim-float` 这个关键帧**从未定义过**：`.mt-anime-empty-svg`（4s）和 `.mt-anime-mint-svg`（4.6s，带 `!important`）两处 `animation` 指向的都是一个不存在的名字，浏览器静默忽略，两个角色其实一直静止。上一轮前端审查时把它列为「仅记录、未修」——补上等于新增一个用户此前看不到的动画，超出那次「视觉基线 = 当前实际效果」的边界。
+
+- **style(css) 补关键帧**：`translateY` 0 → -6px → 0，**只给位移不给旋转**。外层 `.mt-anime-pos-shell` 已经用内联 `rotate()` 随机了 -10°~+10° / -16°~+16°，再叠一层旋转会让摆幅翻倍、看起来像在「晃」而不是「浮」
+- **style(css) 节奏沿用引用处声明**：4s / 4.6s + `alternate` + `ease-in-out`，实际呼吸周期分别是 8s / 9.2s——与既有 `mt-float-slow`（8s）同档但刻意不同拍，避免大小两个角色整齐划一地上下起伏
+- **style(css) 无障碍降级**：`prefers-reduced-motion: reduce` 下关闭这两个动画。选择器写成 `.mt-anime-empty-svg.mt-anime-empty-svg` 这类重复类名抬特异性，因为 `.mt-anime-mint-svg` 那条 `animation` 带 `!important` 且声明在降级块**之后**，普通同类名选择器压不住
+- **chore(css) 版本**：`MT5700_CSS_VERSION` 2.46.0 → **2.46.2**（跳过 2.46.1 —— 那个号被同批的前端审查整理占用了；uhttpd 静态资源的 `Last-Modified` 恒为 1970，版本号不涨浏览器不会重新取）
+- **test** 无头 Chromium 探针：两个元素的 `getAnimations()` 均返回 `mt-anim-float:running`；手动 seek 到 0/25/50/75/100% 读到 `0 -3 -6 -3 0`，峰值 -6.00px 且 duration 分别为 4000/4600ms；`.mt5700-empty` 高度在「有动画 / `cancel()` 后 / reduce 模式」三种状态下均为 254.25px（`transform` 不进文档流）；`--force-prefers-reduced-motion` 下 `getAnimations()` 返回空数组
+
 ## v1.30.8（2026-10-30）
 
 ### refactor 冗余代码清理：死代码删除、生命周期收敛、重复逻辑合并
