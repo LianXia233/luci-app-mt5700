@@ -1112,7 +1112,7 @@ OK</div>
               2
             </div>
             <div class="font-bold text-slate-900 text-sm">rpcd / ucode 桥</div>
-            <p class="text-[11px] text-slate-500 leading-snug">OpenWrt 22.03+ ucode RPC 声明与 ACL 鉴权</p>
+            <p class="text-[11px] text-slate-500 leading-snug">OpenWrt 23.05+ ucode RPC 声明与 ACL 鉴权</p>
           </div>
 
           <div class="hidden md:flex justify-center text-cyan-500 font-bold text-xl">&rarr;</div>
@@ -1367,10 +1367,10 @@ OK</div>
           <!-- FAQ 2 -->
           <div class="p-5 rounded-2xl bg-white/90 border border-slate-200/80 shadow-sm space-y-2">
             <h4 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
-              <span class="text-brand-500 font-mono">Q2:</span> 为什么 OpenWrt 21.02 及更早版本无法运行？
+              <span class="text-brand-500 font-mono">Q2:</span> 为什么 OpenWrt 22.03 及更早版本无法开箱运行？
             </h4>
             <p class="text-xs text-slate-600 leading-relaxed">
-              答：插件的前端 RPC 桥接基于 <code class="font-mono text-slate-800">rpcd-mod-ucode</code>，该组件自 OpenWrt 22.03 起随系统正式预装。老版本系统缺失 ucode 解释器，装上后会出现“能开页面但所有操作均报 Method not found”。请升级至 OpenWrt 24.10 或 25.x。
+              答：插件的 RPC 桥接依赖 <code class="font-mono text-slate-800">rpcd-mod-ucode</code>（负责加载 <code class="font-mono text-slate-800">/usr/share/rpcd/ucode/*.uc</code>），而它被 <code class="font-mono text-slate-800">luci-base</code> 带入系统是 OpenWrt 23.05 起。21.02 及更早连 ucode 解释器都没有；22.03 虽有 ucode，但默认固件不带 <code class="font-mono text-slate-800">rpcd-mod-ucode</code>，装上后同样会出现“能开页面但所有操作均报 Method not found”。请升级至 OpenWrt 24.10 或 25.x。
             </p>
           </div>
 
