@@ -8,6 +8,18 @@
 
 ---
 
+## Unreleased
+
+### docs(README) 勘误：开箱下限由 22.03 修正为 23.05
+
+> 对照上游 `openwrt/openwrt` 与 `openwrt/luci` 各分支源码逐项核实后修正，仅动文档，不涉及任何代码。
+
+- **docs(README) 版本矩阵**：22.03 由「⚠️ 理论下限」改为「❌ 开箱不可用」—— 22.03 官方仓库虽有 `ucode` / `rpcd-mod-ucode` 包，但该代 `luci-base` 是纯 Lua 依赖、默认固件不带 `rpcd-mod-ucode`，`/usr/share/rpcd/ucode/mt5700.uc` 加载不了；23.05 行补注依赖来源
+- **docs(README) 论证与自查**：「下限为什么是 22.03」改写为「下限为什么是 23.05」（附各分支 `luci-base` 的 `LUCI_DEPENDS` 证据）；「装之前自查」补 `/usr/lib/rpcd/ucode.so` 在场检查 —— 只查 `command -v ucode` 会漏掉「解释器在、rpcd 插件不在」的场景
+- **note(CHANGELOG) v1.30.9 条目勘误**：其中「`rpcd-mod-ucode` 首发于 22.03.0、ucode 自该版起随系统预装」的表述以本节为准 —— 包确实存在于 22.03 官方仓库，但被 `luci-base` 带入系统是 23.05 起；「随系统预装」仅对 ucode 解释器本体成立（firewall4 依赖）
+
+---
+
 ## v1.30.9（2026-10-31）
 
 ### refactor 前端审查整理：修掉回调累积、收敛重复解析、清掉不可达样式

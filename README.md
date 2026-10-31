@@ -261,7 +261,7 @@ grep OPENWRT_ARCH /etc/openwrt_release
 
 ## OpenWrt 版本兼容性
 
-> **一句话结论**：能装的最低版本是 **OpenWrt 22.03**（受限于 rpcd 的 ucode 插件支持），但**实测与 CI 覆盖的只有 24.10 与 25.12 两代**。22.03 / 23.05 属于「依赖齐全、可以一试、未做验证」，21.02 及更早明确不支持。
+> **一句话结论**：开箱即用的最低版本是 **OpenWrt 23.05** —— `luci-base` 自这一代起才依赖 `rpcd-mod-ucode` + ucode 运行时，RPC 桥才有加载的前提；但**实测与 CI 覆盖的只有 24.10 与 25.12 两代**，23.05 属于「依赖齐全、可以一试、未做验证」。**22.03 开箱不可用**（默认固件不带 `rpcd-mod-ucode`，详见下文），21.02 及更早明确不支持。
 
 ### 版本支持矩阵
 
@@ -269,17 +269,18 @@ grep OPENWRT_ARCH /etc/openwrt_release
 |:--|:--|:--|:--|:--|:--|
 | **25.12.x** | SNAPSHOT（25.x） | `apk` | `.apk` | ✅ **CI 构建 + 发布** | 三档架构全覆盖；iStoreOS 25.x 同属此列 |
 | **24.10.x** | `openwrt-24.10` | `opkg` | `.ipk` | ✅ **CI 构建 + 发布** | 长期支持版，当前主力 |
-| 23.05.x | `openwrt-23.05` | `opkg` | `.ipk` | ⚠️ 依赖满足，未验证 | 未在真机跑过；如遇 LuCI 渲染问题请反馈 |
-| 22.03.x | `openwrt-22.03` | `opkg` | `.ipk` | ⚠️ **理论下限**，未验证 | ucode 自本代起随系统预装，是硬门槛所在 |
+| 23.05.x | `openwrt-23.05` | `opkg` | `.ipk` | ⚠️ 依赖满足，未验证 | `luci-base` 自本代起依赖 `rpcd-mod-ucode` + ucode，开箱依赖齐全；未在真机跑过，如遇 LuCI 渲染问题请反馈 |
+| 22.03.x | `openwrt-22.03` | `opkg` | `.ipk` | ❌ **开箱不可用** | 仓库里有 `rpcd-mod-ucode` 包，但本代 `luci-base` 仍是纯 Lua 依赖，默认固件不装它，RPC 桥加载不了；手动补装 `ucode` + `rpcd-mod-ucode` 理论可行，未验证 |
 | ≤ 21.02 | — | `opkg` | — | ❌ 不支持 | 系统无 ucode，`mt5700.uc` 无法注册任何 RPC |
 
-### 下限为什么是 22.03
+### 下限为什么是 23.05
 
-插件的 RPC 并不走私有进程间协议，而是由 **rpcd 加载一个 ucode 脚本**（`/usr/share/rpcd/ucode/mt5700.uc`）对外发布 `luci.mt5700.*` 方法，前端再通过 `rpc.declare` 调用它：
+插件的 RPC 并不走私有进程间协议，而是由 **rpcd 加载一个 ucode 脚本**（`/usr/share/rpcd/ucode/mt5700.uc`）对外发布 `luci.mt5700.*` 方法，前端再通过 `rpc.declare` 调用它。加载前提是系统里同时有 ucode 解释器与 `rpcd-mod-ucode`（安装为 `/usr/lib/rpcd/ucode.so`），逐代核实如下：
 
-- **ucode 解释器自 OpenWrt 22.03 起随系统预装**，`rpcd-mod-ucode` 也首次出现在 22.03.0 的官方仓库中；
-- 21.02 及更早的系统既没有 ucode 解释器，rpcd 版本也不支持 `ucode` 插件类型 —— 把包装上去，`/usr/share/rpcd/ucode/*.uc` 会被完全忽略；
-- 典型症状：**页面能正常打开（HTML/JS 都在），但每个操作都报 `Method not found` 或 `Access denied`**，且「服务配置」页永远显示后端未就绪。
+- **23.05 起 `luci-base` 自带全套依赖**：openwrt/luci `openwrt-23.05` 分支的 `modules/luci-base/Makefile` 中 `LUCI_DEPENDS` 明确包含 `+rpcd-mod-ucode +ucode +ucode-mod-fs/uci/ubus` —— 装着 LuCI 的默认固件从这一代起才具备加载条件；
+- **22.03 的坑**：22.03.0 官方仓库虽有 `ucode` 与 `rpcd-mod-ucode` 包，但该代 `luci-base` 仍是纯 Lua 依赖（`+lua +rpcd-mod-luci +liblucihttp-lua …`），默认固件只经 firewall4 带上 ucode 解释器本体；本包 `LUCI_DEPENDS` 留空也不会拉 `rpcd-mod-ucode` —— RPC 桥因此加载不了；
+- 21.02 及更早的系统连 ucode 都没有（上游 `package/utils/ucode` 不存在），rpcd 也不支持 `ucode` 插件类型 —— 把包装上去，`/usr/share/rpcd/ucode/*.uc` 会被完全忽略；
+- 典型症状：**页面能正常打开（HTML/JS 都在），但每个操作都报 `Method not found` 或 `Access denied`**，且「服务配置」页永远显示后端未就绪。22.03 上装完即此症状；23.05+ 出现同症状则先查 `rpcd-mod-ucode` 是否在场。
 
 ### 前后端各自的版本敏感度
 
@@ -287,7 +288,7 @@ grep OPENWRT_ARCH /etc/openwrt_release
 |:--|:--|:--|
 | 后端二进制 `at-webserver-rust` | 交叉编译到 `*-unknown-linux-musl`，**静态链接** | 与目标系统的 libc / ABI 无关，只与 **CPU 架构**有关 |
 | LuCI 12 个视图 | `baseclass` + `uci` / `rpc` / `fs` | 21.02 起均已提供，不依赖 `luci-compat` |
-| RPC 桥 | `rpcd` + `ucode` | **22.03+**，硬门槛 |
+| RPC 桥 | `rpcd` + `rpcd-mod-ucode` + `ucode` | **23.05+**（`luci-base` 自带），硬门槛；22.03 需手动补装，未验证 |
 | 打包 | `luci.mk` + `apk` / `opkg` | 24.10 及更早产 `ipk`，25.x 产 `apk` |
 | 样式 | 插件自带 `mt5700.css` / `global.css` | 不依赖主题变量；但深色模式观感取决于所用主题 |
 
@@ -313,8 +314,9 @@ grep OPENWRT_ARCH /etc/openwrt_release
 # 2. 包管理器（有 apk 即 25.x 及以后）
 command -v apk >/dev/null && echo "apk（下 .apk）" || echo "opkg（下 .ipk）"
 
-# 3. ucode 是否就位（22.03+；没有就别装）
-command -v ucode >/dev/null && echo "ucode OK" || echo "无 ucode，本插件无法工作"
+# 3. ucode 运行时是否就位（23.05+ 由 luci-base 自带；22.03 及更早开箱没有，别装）
+command -v ucode >/dev/null && echo "ucode 解释器 OK" || echo "无 ucode，本插件无法工作"
+[ -e /usr/lib/rpcd/ucode.so ] && echo "rpcd-mod-ucode OK" || echo "缺 rpcd-mod-ucode，RPC 桥无法加载"
 ```
 
 ### 与本插件无关但同样会「装不上 / 用不了」的因素
