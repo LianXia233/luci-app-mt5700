@@ -508,26 +508,39 @@
           </div>
         </div>
 
-        <!-- Tab 标签页选择导航 (支持移动端平滑水平横滑) -->
-        <div class="bg-white/80 border-b border-slate-200/80 px-2 sm:px-6 flex overflow-x-auto gap-1 sm:gap-2 text-xs sm:text-sm font-semibold text-slate-600 custom-scrollbar py-2">
-          <button class="demo-tab-btn active px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-brand-700 bg-brand-100/80 border border-brand-200 flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 transition-all" data-tab="status">
-            <span>📡</span> 射频信号
-          </button>
-          <button class="demo-tab-btn px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 transition-all" data-tab="speed">
-            <span>📈</span> 实时速率
-          </button>
-          <button class="demo-tab-btn px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 transition-all" data-tab="temp">
-            <span>🌡️</span> 7通道结温
-          </button>
-          <button class="demo-tab-btn px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 transition-all" data-tab="scan">
-            <span>🔍</span> 全网扫频
-          </button>
-          <button class="demo-tab-btn px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 transition-all" data-tab="sms">
-            <span>✉️</span> 原生短信
-          </button>
-          <button class="demo-tab-btn px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 transition-all" data-tab="terminal">
-            <span>💻</span> AT 终端
-          </button>
+        <!-- Tab 标签页选择导航 (PC端 6 列等宽对齐，移动端平滑横滑+可感知微提示) -->
+        <div class="relative bg-slate-100/90 border-b border-slate-200/80 p-1.5 sm:p-2">
+          <div class="demo-tab-list flex md:grid md:grid-cols-6 gap-1.5 sm:gap-2 overflow-x-auto custom-scrollbar px-1 py-0.5" style="-webkit-overflow-scrolling: touch; scroll-behavior: smooth;">
+            <button class="demo-tab-btn active flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 md:shrink select-none cursor-pointer min-h-[40px] bg-white text-brand-600 shadow-md shadow-brand-500/10 border border-brand-200/80 ring-1 ring-slate-900/5 font-bold" data-tab="status">
+              <span class="text-base sm:text-lg">📡</span>
+              <span>射频信号</span>
+            </button>
+            <button class="demo-tab-btn flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 md:shrink select-none cursor-pointer min-h-[40px] text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent" data-tab="speed">
+              <span class="text-base sm:text-lg">📈</span>
+              <span>实时速率</span>
+            </button>
+            <button class="demo-tab-btn flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 md:shrink select-none cursor-pointer min-h-[40px] text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent" data-tab="temp">
+              <span class="text-base sm:text-lg">🌡️</span>
+              <span>7通道结温</span>
+            </button>
+            <button class="demo-tab-btn flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 md:shrink select-none cursor-pointer min-h-[40px] text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent" data-tab="scan">
+              <span class="text-base sm:text-lg">🔍</span>
+              <span>全网扫频</span>
+            </button>
+            <button class="demo-tab-btn flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 md:shrink select-none cursor-pointer min-h-[40px] text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent" data-tab="sms">
+              <span class="text-base sm:text-lg">✉️</span>
+              <span>原生短信</span>
+            </button>
+            <button class="demo-tab-btn flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-200 shrink-0 md:shrink select-none cursor-pointer min-h-[40px] text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent" data-tab="terminal">
+              <span class="text-base sm:text-lg">💻</span>
+              <span>AT 终端</span>
+            </button>
+          </div>
+          <!-- 移动端横滑微提示（平板和桌面端自动隐藏） -->
+          <div class="flex md:hidden items-center justify-between px-2 pt-1.5 text-[10px] text-slate-400">
+            <span class="flex items-center gap-1">👈 左右滑动查看 6 大模组控制视图 👉</span>
+            <span class="font-mono text-[9px] bg-slate-200/80 px-1.5 py-0.5 rounded text-slate-500 font-medium">6 Tabs</span>
+          </div>
         </div>
 
         <!-- Tab 视图区域 -->
@@ -1146,11 +1159,17 @@ OK</div>
             <h2 class="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900">安装与快速上手指南</h2>
           </div>
 
-          <!-- 系统选择 Tab (手机端横滑) -->
-          <div class="flex overflow-x-auto p-1 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 custom-scrollbar">
-            <button class="install-tab-btn active px-3 py-1.5 rounded-lg bg-white text-brand-600 shadow-sm whitespace-nowrap" onclick="switchInstallTab('openwrt')">OpenWrt (ipk/apk)</button>
-            <button class="install-tab-btn px-3 py-1.5 rounded-lg hover:text-slate-900 whitespace-nowrap" onclick="switchInstallTab('debian')">Debian / Ubuntu</button>
-            <button class="install-tab-btn px-3 py-1.5 rounded-lg hover:text-slate-900 whitespace-nowrap" onclick="switchInstallTab('source')">源码构建</button>
+          <!-- 系统选择 Tab (PC 优雅居右分段控件，手机自适应触控) -->
+          <div class="w-full sm:w-auto p-1 bg-slate-200/70 rounded-xl flex items-center gap-1 text-xs font-bold text-slate-600 overflow-x-auto custom-scrollbar">
+            <button class="install-tab-btn active flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-lg bg-white text-brand-600 shadow-sm whitespace-nowrap transition-all flex items-center justify-center gap-1.5" onclick="switchInstallTab('openwrt')">
+              <span>📦</span> OpenWrt (ipk/apk)
+            </button>
+            <button class="install-tab-btn flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white/40 whitespace-nowrap transition-all flex items-center justify-center gap-1.5" onclick="switchInstallTab('debian')">
+              <span>🐧</span> Debian / Ubuntu
+            </button>
+            <button class="install-tab-btn flex-1 sm:flex-initial px-3 sm:px-4 py-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white/40 whitespace-nowrap transition-all flex items-center justify-center gap-1.5" onclick="switchInstallTab('source')">
+              <span>⚙️</span> 源码构建
+            </button>
           </div>
         </div>
 
@@ -1477,11 +1496,14 @@ OK</div>
         const tabId = btn.getAttribute('data-tab');
 
         demoTabBtns.forEach(b => {
-          b.classList.remove('active', 'text-brand-700', 'bg-brand-100/80', 'border-brand-200');
-          b.classList.add('border-transparent');
+          b.classList.remove('active', 'bg-white', 'text-brand-600', 'shadow-md', 'shadow-brand-500/10', 'border-brand-200/80', 'ring-1', 'ring-slate-900/5', 'font-bold');
+          b.classList.add('text-slate-600', 'hover:text-slate-900', 'hover:bg-white/60', 'border-transparent');
         });
-        btn.classList.add('active', 'text-brand-700', 'bg-brand-100/80', 'border-brand-200');
-        btn.classList.remove('border-transparent');
+        btn.classList.add('active', 'bg-white', 'text-brand-600', 'shadow-md', 'shadow-brand-500/10', 'border-brand-200/80', 'ring-1', 'ring-slate-900/5', 'font-bold');
+        btn.classList.remove('text-slate-600', 'hover:text-slate-900', 'hover:bg-white/60', 'border-transparent');
+
+        // 移动端点击 Tab 自动平滑居中滚动
+        btn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
 
         demoTabContents.forEach(content => {
           content.classList.add('hidden');
@@ -1682,8 +1704,12 @@ OK</div>
     function switchInstallTab(tab) {
       document.querySelectorAll('.install-tab-btn').forEach(btn => {
         btn.classList.remove('active', 'bg-white', 'text-brand-600', 'shadow-sm');
+        btn.classList.add('text-slate-600', 'hover:text-slate-900', 'hover:bg-white/40');
       });
-      event.target.classList.add('active', 'bg-white', 'text-brand-600', 'shadow-sm');
+      if (event && event.currentTarget) {
+        event.currentTarget.classList.add('active', 'bg-white', 'text-brand-600', 'shadow-sm');
+        event.currentTarget.classList.remove('text-slate-600', 'hover:text-slate-900', 'hover:bg-white/40');
+      }
 
       document.querySelectorAll('.install-content').forEach(c => c.classList.add('hidden'));
       const target = document.getElementById(`install-${tab}`);
