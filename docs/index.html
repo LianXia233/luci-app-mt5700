@@ -1,0 +1,1748 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>luci-app-mt5700 · MT5700M 5G 模组 OpenWrt / ImmortalWrt 全功能管理套件</title>
+  <meta name="description" content="MT5700M 5G 模组的 OpenWrt / ImmortalWrt 全功能管理套件：12 个原生 LuCI 现代化页面 + Rust/Tokio 常驻后端，单包融合交付。覆盖信号趋势与流量统计、自动拨号对账、全网扫频、定时锁频编排、短信收发与交互式 AT 终端。">
+  <meta name="keywords" content="OpenWrt, ImmortalWrt, MT5700, MT5700M, 5G Modem, LuCI, Rust, Tokio, AT指令, 锁频, 5G CPE, 自动拨号">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="luci-app-mt5700 · MT5700M 5G 模组全功能管理套件">
+  <meta property="og:description" content="12 个原生 LuCI 现代化页面 + Rust/Tokio 异步常驻后端，单包融合交付。">
+  <meta property="og:image" content="https://files.seeusercontent.com/2026/10/31/aE1a/145952531_p1.jpg">
+  <meta property="og:type" content="website">
+
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              100: '#ede9fe',
+              200: '#ddd6fe',
+              300: '#c4b5fd',
+              400: '#a78bfa',
+              500: '#8b5cf6',
+              600: '#7c3aed',
+              700: '#6d28d9',
+              800: '#5b21b6',
+              900: '#4c1d95',
+            },
+            cyan: {
+              500: '#06b6d4',
+              600: '#0891b2',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"PingFang SC"', '"Hiragino Sans GB"', '"Microsoft YaHei"', 'Roboto', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --card-opacity: 0.85;
+      --card-blur: 16px;
+      --wallpaper-blur: 0px;
+    }
+
+    /* 全局背景壁纸：固定全屏，高清显示 */
+    body {
+      background-color: #f1f5f9;
+      background-image: url('https://files.seeusercontent.com/2026/10/31/aE1a/145952531_p1.jpg');
+      background-size: cover;
+      background-position: center top;
+      background-attachment: fixed;
+      background-repeat: no-repeat;
+      min-height: 100vh;
+      color: #0f172a;
+      -webkit-font-smoothing: antialiased;
+      position: relative;
+    }
+
+    /* 保证壁纸透亮可见的轻柔氛围渐变蒙层 */
+    .wallpaper-tint-overlay {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at 50% 15%, rgba(255, 255, 255, 0.38) 0%, rgba(248, 250, 252, 0.60) 65%, rgba(241, 245, 249, 0.70) 100%);
+      backdrop-filter: blur(var(--wallpaper-blur));
+      -webkit-backdrop-filter: blur(var(--wallpaper-blur));
+      pointer-events: none;
+      z-index: 0;
+      transition: backdrop-filter 0.3s ease, background 0.3s ease;
+    }
+
+    /* 现代纯白毛玻璃卡片（保持高对比度与通透感并重） */
+    .glass-card {
+      background: rgba(255, 255, 255, var(--card-opacity));
+      backdrop-filter: blur(var(--card-blur)) saturate(170%);
+      -webkit-backdrop-filter: blur(var(--card-blur)) saturate(170%);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 10px 30px -5px rgba(99, 102, 241, 0.06), 0 4px 12px rgba(15, 23, 42, 0.03);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
+    }
+
+    .glass-card-hover:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 16px 36px -6px rgba(124, 58, 237, 0.12), 0 6px 16px rgba(15, 23, 42, 0.04);
+      border-color: rgba(139, 92, 246, 0.4);
+    }
+
+    /* 顶部导航栏毛玻璃 */
+    .glass-nav {
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+      box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
+    }
+
+    /* 渐变标题字体 */
+    .gradient-title {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 45%, #06b6d4 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* 终端打字机与滚动条样式 */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(241, 245, 249, 0.5);
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.6);
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(100, 116, 139, 0.8);
+    }
+
+    /* 纯享壁纸模式全屏隐藏 */
+    body.zen-mode .main-content-wrapper {
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(0.98);
+      transition: opacity 0.35s ease, transform 0.35s ease;
+    }
+    body.zen-mode .wallpaper-tint-overlay {
+      background: rgba(0, 0, 0, 0.02);
+    }
+    body.zen-mode #zenExitHint {
+      display: flex;
+    }
+
+    /* 对话气泡微动画 */
+    @keyframes float-bubble {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+    .animate-float-bubble {
+      animation: float-bubble 3.2s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="relative min-h-screen text-slate-800 selection:bg-brand-500 selection:text-white">
+
+  <!-- 背景轻柔氛围蒙版（保证壁纸高清可见，同时确保卡片内文字极度舒适可读） -->
+  <div class="wallpaper-tint-overlay" id="wallpaperOverlay"></div>
+
+  <!-- 纯享壁纸退出提示 (仅在 Zen Mode 时浮现) -->
+  <div id="zenExitHint" class="hidden fixed inset-0 z-50 flex items-center justify-center cursor-pointer bg-black/10 transition-opacity">
+    <div class="glass-card px-6 py-3 rounded-full flex items-center gap-3 text-sm font-medium text-slate-700 shadow-2xl animate-bounce">
+      <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+      🖼️ 正在纯享高清壁纸 · 单击屏幕任意处或按 ESC 恢复
+    </div>
+  </div>
+
+  <!-- 页面主体容器 -->
+  <div class="main-content-wrapper relative z-10 transition-all duration-300">
+
+    <!-- 1. 顶部悬浮导航栏 -->
+    <header class="glass-nav sticky top-0 z-40 transition-all duration-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <!-- Logo & Title -->
+        <a href="#hero" class="flex items-center gap-3 group">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform">
+            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+            </svg>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-extrabold text-lg tracking-tight text-slate-900 group-hover:text-brand-600 transition-colors">luci-app-mt5700</span>
+              <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-brand-100 text-brand-700 border border-brand-200" id="navVersionBadge">v1.30.9</span>
+            </div>
+            <p class="text-[11px] text-slate-500 leading-tight">MT5700M 5G 模组管理套件</p>
+          </div>
+        </a>
+
+        <!-- Desktop Navigation Links -->
+        <nav class="hidden md:flex items-center space-x-1 lg:space-x-2 text-sm font-medium text-slate-600">
+          <a href="#features" class="px-3 py-1.5 rounded-lg hover:text-brand-600 hover:bg-slate-100/70 transition-colors">核心特性</a>
+          <a href="#live-demo" class="px-3 py-1.5 rounded-lg hover:text-brand-600 hover:bg-slate-100/70 transition-colors">在线体验</a>
+          <a href="#gallery" class="px-3 py-1.5 rounded-lg hover:text-brand-600 hover:bg-slate-100/70 transition-colors">实机图赏</a>
+          <a href="#architecture" class="px-3 py-1.5 rounded-lg hover:text-brand-600 hover:bg-slate-100/70 transition-colors">系统架构</a>
+          <a href="#install" class="px-3 py-1.5 rounded-lg hover:text-brand-600 hover:bg-slate-100/70 transition-colors">安装指南</a>
+          <a href="#releases" class="px-3 py-1.5 rounded-lg hover:text-brand-600 hover:bg-slate-100/70 transition-colors">固件下载</a>
+          <a href="#faq" class="px-3 py-1.5 rounded-lg hover:text-brand-600 hover:bg-slate-100/70 transition-colors">常见问答</a>
+        </nav>
+
+        <!-- Right Quick Actions -->
+        <div class="flex items-center gap-2.5">
+          <!-- 壁纸控制抽屉开关 -->
+          <button id="toggleWallpaperMenu" title="调节壁纸氛围与毛玻璃透度" class="p-2 rounded-xl text-slate-600 hover:text-brand-600 hover:bg-slate-100/80 transition-colors flex items-center gap-1.5 text-xs font-medium border border-slate-200/80 bg-white/70 shadow-sm">
+            <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+            </svg>
+            <span class="hidden sm:inline">壁纸透视</span>
+          </button>
+
+          <!-- 一键纯享壁纸 -->
+          <button id="btnZenMode" title="一键纯享壁纸" class="p-2 rounded-xl text-slate-600 hover:text-pink-600 hover:bg-slate-100/80 transition-colors border border-slate-200/80 bg-white/70 shadow-sm" onclick="toggleZenMode()">
+            <svg class="w-4 h-4 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          </button>
+
+          <!-- GitHub Repo Link with dynamic Star Badge -->
+          <a href="https://github.com/LianXia233/luci-app-mt5700" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-brand-700 text-white text-xs font-semibold shadow-sm transition-all duration-200 hover:shadow-md">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+            </svg>
+            <span class="hidden sm:inline">Star</span>
+            <span id="githubStarCount" class="px-1.5 py-0.5 rounded-md bg-white/20 text-[11px] font-mono">11</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <!-- 壁纸氛围控制浮动弹层 -->
+    <div id="wallpaperControlPanel" class="hidden fixed top-16 right-4 sm:right-8 z-40 w-80 glass-card p-5 rounded-2xl shadow-2xl border border-white">
+      <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-200/80">
+        <div class="flex items-center gap-2">
+          <span class="text-base">🎛️</span>
+          <h4 class="font-bold text-sm text-slate-800">壁纸透视与毛玻璃调节</h4>
+        </div>
+        <button id="closeWallpaperPanel" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+      </div>
+
+      <!-- 卡片透明度调节 -->
+      <div class="space-y-4">
+        <div>
+          <div class="flex justify-between text-xs font-medium text-slate-600 mb-1.5">
+            <span>卡片透光度 (壁纸可见度)</span>
+            <span id="opacityValLabel" class="font-mono text-brand-600">85%</span>
+          </div>
+          <input type="range" id="opacitySlider" min="40" max="96" value="85" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600">
+          <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+            <span>超通透 (40%)</span>
+            <span>平衡 (85%)</span>
+            <span>实白 (96%)</span>
+          </div>
+        </div>
+
+        <!-- 壁纸虚化调节 -->
+        <div>
+          <div class="flex justify-between text-xs font-medium text-slate-600 mb-1.5">
+            <span>背景微虚化 (景深感)</span>
+            <span id="blurValLabel" class="font-mono text-brand-600">0 px</span>
+          </div>
+          <input type="range" id="blurSlider" min="0" max="10" value="0" step="1" class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600">
+        </div>
+
+        <!-- 纯享壁纸按钮 -->
+        <button onclick="toggleZenMode()" class="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-500 hover:opacity-95 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          </svg>
+          一键纯享全屏壁纸
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. Hero 头部横幅区 (集成看板娘薄荷互动) -->
+    <section id="hero" class="pt-8 pb-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="glass-card rounded-3xl p-6 sm:p-10 lg:p-12 relative overflow-hidden border border-white">
+        <!-- 背景流光装饰 -->
+        <div class="absolute -top-24 -right-24 w-96 h-96 bg-gradient-to-br from-brand-400/20 to-cyan-400/20 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -bottom-24 -left-24 w-96 h-96 bg-gradient-to-tr from-pink-400/15 to-purple-400/15 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+          <!-- Left Text Content -->
+          <div class="lg:col-span-7 space-y-6">
+            <!-- Badges Bar -->
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                OpenWrt 24.10 | 25.x 官方适配
+              </span>
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200">
+                Rust / Tokio 异步事件驱动
+              </span>
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-50 text-cyan-700 border border-cyan-200">
+                ImmortalWrt 100% 兼容
+              </span>
+            </div>
+
+            <!-- Headline -->
+            <div class="space-y-3">
+              <h1 class="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.15]">
+                新一代 MT5700M 5G 模组<br>
+                <span class="gradient-title">全功能现代化管理套件</span>
+              </h1>
+              <p class="text-base sm:text-lg text-slate-600 leading-relaxed font-normal">
+                单包融合交付：集成 <strong>12 个原生 LuCI 现代化管理页面</strong> 与高性能常驻后端 <code class="px-2 py-0.5 rounded bg-slate-100 text-brand-700 font-mono text-xs">at-webserver-rust</code>。覆盖全自动拨号对账、网络状态实时看板、全网扫频、智能锁频、短信中心与交互式 AT 终端。
+              </p>
+            </div>
+
+            <!-- Action CTAs -->
+            <div class="flex flex-wrap items-center gap-3 pt-2">
+              <a href="#releases" class="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-brand-600 via-indigo-600 to-cyan-500 hover:from-brand-700 hover:to-cyan-600 text-white font-bold text-sm sm:text-base shadow-lg shadow-brand-500/25 flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                下载安装包 (.ipk / .apk)
+              </a>
+              <a href="#live-demo" class="px-5 py-3.5 rounded-2xl bg-white/90 hover:bg-white text-slate-800 font-bold text-sm sm:text-base border border-slate-200/90 shadow-sm hover:border-brand-300 hover:text-brand-600 flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                <svg class="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                在线沉浸式体验
+              </a>
+              <a href="https://github.com/LianXia233/luci-app-mt5700" target="_blank" rel="noopener" class="px-4 py-3.5 rounded-2xl bg-slate-100/80 hover:bg-slate-200/80 text-slate-700 font-semibold text-sm flex items-center gap-1.5 transition-all">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                源码与 Issue
+              </a>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-200/80">
+              <div class="space-y-0.5">
+                <div class="text-2xl font-black text-brand-600 font-mono">12+</div>
+                <div class="text-xs text-slate-500 font-medium">原生 LuCI 页面</div>
+              </div>
+              <div class="space-y-0.5">
+                <div class="text-2xl font-black text-cyan-600 font-mono">&lt; 3 MB</div>
+                <div class="text-xs text-slate-500 font-medium">单包融合体积</div>
+              </div>
+              <div class="space-y-0.5">
+                <div class="text-2xl font-black text-emerald-600 font-mono">&lt; 0.1%</div>
+                <div class="text-xs text-slate-500 font-medium">常驻 CPU 占用</div>
+              </div>
+              <div class="space-y-0.5">
+                <div class="text-2xl font-black text-purple-600 font-mono">100%</div>
+                <div class="text-xs text-slate-500 font-medium">串口防冲突对账</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Showcase Card: 看板娘薄荷与实时状态卡片 -->
+          <div class="lg:col-span-5 space-y-4">
+            <!-- 看板娘薄荷互动卡片 -->
+            <div class="glass-card rounded-2xl p-4 border border-white shadow-lg flex items-center gap-4 relative overflow-hidden group">
+              <div class="relative flex-shrink-0 cursor-pointer" onclick="pokeMascot()">
+                <img src="images/mascot.png" alt="看板娘薄荷" class="w-16 h-16 rounded-2xl object-cover border-2 border-brand-300 shadow-md group-hover:scale-105 transition-transform" onerror="this.src='https://avatars.githubusercontent.com/u/49828512?v=4'">
+                <span class="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-white rounded-full"></span>
+              </div>
+              <div class="flex-1 space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-900">看板娘「薄荷」(Mint)</span>
+                  <span class="text-[10px] text-brand-600 font-semibold bg-brand-50 px-2 py-0.5 rounded-full">点击互动</span>
+                </div>
+                <p id="mascotSpeech" class="text-xs text-slate-600 leading-snug animate-float-bubble">
+                  “薄荷正在守护您的 5G 链路哦，当前 RSRP -85dBm，网络超顺畅~”
+                </p>
+              </div>
+            </div>
+
+            <!-- 5G 实时数据快速预览看板 -->
+            <div class="glass-card rounded-2xl p-5 border border-white shadow-xl space-y-4">
+              <!-- Header inside mock -->
+              <div class="flex items-center justify-between pb-3 border-b border-slate-200/80">
+                <div class="flex items-center gap-2.5">
+                  <span class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  </span>
+                  <span class="text-sm font-bold text-slate-800">5G NR-SA 联机就绪</span>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-emerald-100 text-emerald-800">
+                  CDC_NCM / 10.0.0.2
+                </span>
+              </div>
+
+              <!-- Metrics 2x2 Grid -->
+              <div class="grid grid-cols-2 gap-3 text-left">
+                <div class="p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
+                  <div class="text-[11px] text-slate-500">RSRP 参考信号功率</div>
+                  <div class="text-xl font-bold font-mono text-slate-900 mt-1 flex items-baseline gap-1">
+                    -85 <span class="text-xs font-normal text-slate-500">dBm</span>
+                  </div>
+                  <div class="w-full bg-slate-200 h-1.5 rounded-full mt-2 overflow-hidden">
+                    <div class="bg-emerald-500 h-full rounded-full" style="width: 88%"></div>
+                  </div>
+                </div>
+
+                <div class="p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
+                  <div class="text-[11px] text-slate-500">SINR 信噪比</div>
+                  <div class="text-xl font-bold font-mono text-slate-900 mt-1 flex items-baseline gap-1">
+                    24.5 <span class="text-xs font-normal text-slate-500">dB</span>
+                  </div>
+                  <div class="w-full bg-slate-200 h-1.5 rounded-full mt-2 overflow-hidden">
+                    <div class="bg-cyan-500 h-full rounded-full" style="width: 92%"></div>
+                  </div>
+                </div>
+
+                <div class="p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
+                  <div class="text-[11px] text-slate-500">当前主频段 (Band)</div>
+                  <div class="text-base font-bold font-mono text-brand-700 mt-1">
+                    5G n78 <span class="text-xs text-slate-500 font-normal">100MHz</span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 mt-1">256QAM · 4x4 MIMO</div>
+                </div>
+
+                <div class="p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
+                  <div class="text-[11px] text-slate-500">模组综合均温</div>
+                  <div class="text-base font-bold font-mono text-amber-600 mt-1 flex items-baseline gap-1">
+                    48.5 <span class="text-xs font-normal text-slate-500">℃ (良好)</span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 mt-1">7 通道结温拓扑监控</div>
+                </div>
+              </div>
+
+              <!-- 速率曲线微缩条 -->
+              <div class="p-3 rounded-xl bg-slate-50/80 border border-slate-200/60 space-y-2">
+                <div class="flex justify-between items-center text-xs">
+                  <span class="text-slate-600 font-medium">实时物理吞吐</span>
+                  <div class="flex items-center gap-3 font-mono text-[11px]">
+                    <span class="text-cyan-600">↓ 328.4 Mbps</span>
+                    <span class="text-brand-600">↑ 52.1 Mbps</span>
+                  </div>
+                </div>
+                <!-- Mini SVG Waveform -->
+                <div class="h-14 w-full">
+                  <svg viewBox="0 0 300 60" class="w-full h-full" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="miniFlowGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.3"/>
+                        <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.0"/>
+                      </linearGradient>
+                    </defs>
+                    <path d="M0,45 Q30,20 60,35 T120,18 T180,28 T240,12 T300,22 L300,60 L0,60 Z" fill="url(#miniFlowGrad)"/>
+                    <path d="M0,45 Q30,20 60,35 T120,18 T180,28 T240,12 T300,22" fill="none" stroke="#06b6d4" stroke-width="2"/>
+                    <path d="M0,52 Q40,40 80,48 T160,36 T240,44 T300,38" fill="none" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="3,3"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 在线沉浸式控制台体验 (Interactive Live LuCI Demo) -->
+    <section id="live-demo" class="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-10 space-y-3">
+        <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-brand-100 text-brand-700">
+          <span>✨</span> 在线沉浸式体验
+        </div>
+        <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          免部署 · 直接在浏览器体验原生 LuCI
+        </h2>
+        <p class="text-slate-600 text-sm sm:text-base">
+          真实呈现软萌二次元玻璃拟物设计系统（Soft Anime Design System），可直接切换各管理视图或向虚拟 AT 终端输入真实指令！
+        </p>
+      </div>
+
+      <!-- 控制台外壳 -->
+      <div class="glass-card rounded-3xl overflow-hidden border border-white shadow-2xl">
+        <!-- LuCI 风格顶栏与 Tab 切换 -->
+        <div class="bg-slate-900 text-white px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full bg-rose-500"></span>
+            <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+            <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+            <span class="font-mono text-xs text-slate-400 ml-2">OpenWrt LuCI &middot; admin/modem/5g</span>
+          </div>
+
+          <!-- 模拟运行状态指示 -->
+          <div class="flex items-center gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono">
+              at-webserver-rust : ACTIVE
+            </span>
+            <span class="px-2 py-0.5 rounded bg-brand-500/20 text-brand-300 font-mono">
+              /dev/ttyUSB2
+            </span>
+          </div>
+        </div>
+
+        <!-- Tab 标签页选择导航 -->
+        <div class="bg-white/80 border-b border-slate-200/80 px-4 sm:px-6 flex overflow-x-auto gap-2 text-sm font-semibold text-slate-600 custom-scrollbar py-2">
+          <button class="demo-tab-btn active px-4 py-2 rounded-xl text-brand-700 bg-brand-100/80 border border-brand-200 flex items-center gap-2 whitespace-nowrap transition-all" data-tab="status">
+            <span>📡</span> 射频信号与网络状态
+          </button>
+          <button class="demo-tab-btn px-4 py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-2 whitespace-nowrap transition-all" data-tab="speed">
+            <span>📈</span> 实时速率曲线
+          </button>
+          <button class="demo-tab-btn px-4 py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-2 whitespace-nowrap transition-all" data-tab="temp">
+            <span>🌡️</span> 7 通道芯片结温拓扑
+          </button>
+          <button class="demo-tab-btn px-4 py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-2 whitespace-nowrap transition-all" data-tab="scan">
+            <span>🔍</span> 全网扫频与锁频
+          </button>
+          <button class="demo-tab-btn px-4 py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-2 whitespace-nowrap transition-all" data-tab="sms">
+            <span>✉️</span> 原生短信中心
+          </button>
+          <button class="demo-tab-btn px-4 py-2 rounded-xl hover:text-slate-900 hover:bg-slate-100/70 border border-transparent flex items-center gap-2 whitespace-nowrap transition-all" data-tab="terminal">
+            <span>💻</span> 交互式 AT 终端
+          </button>
+        </div>
+
+        <!-- Tab 视图区域 -->
+        <div class="p-5 sm:p-8 bg-slate-50/50 min-h-[460px]">
+
+          <!-- Tab 1: 射频信号与状态 -->
+          <div id="demo-tab-status" class="demo-tab-content space-y-6">
+            <!-- 信号四项大卡片 -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div class="glass-card p-4 rounded-2xl border border-white">
+                <div class="text-xs text-slate-500 font-medium">RSRP 参考信号接收功率</div>
+                <div class="text-2xl font-black font-mono text-emerald-600 mt-1">-85 dBm</div>
+                <div class="mt-2 text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md inline-block">信号极强 (Excellent)</div>
+              </div>
+
+              <div class="glass-card p-4 rounded-2xl border border-white">
+                <div class="text-xs text-slate-500 font-medium">RSRQ 参考信号接收质量</div>
+                <div class="text-2xl font-black font-mono text-blue-600 mt-1">-10.5 dB</div>
+                <div class="mt-2 text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md inline-block">信道干净 (Clear)</div>
+              </div>
+
+              <div class="glass-card p-4 rounded-2xl border border-white">
+                <div class="text-xs text-slate-500 font-medium">SINR 信噪比</div>
+                <div class="text-2xl font-black font-mono text-cyan-600 mt-1">24.5 dB</div>
+                <div class="mt-2 text-xs text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-md inline-block">极高信噪比 (High Quality)</div>
+              </div>
+
+              <div class="glass-card p-4 rounded-2xl border border-white">
+                <div class="text-xs text-slate-500 font-medium">综合健康度评分</div>
+                <div class="text-2xl font-black font-mono text-brand-600 mt-1">94%</div>
+                <div class="mt-2 text-xs text-brand-700 bg-brand-50 px-2 py-0.5 rounded-md inline-block">空口满载状态</div>
+              </div>
+            </div>
+
+            <!-- 载波聚合 CA 与小区详情 -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div class="glass-card p-5 rounded-2xl border border-white space-y-3">
+                <h4 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-brand-500"></span>
+                  主服务小区 (Pcell) & 载波聚合 (CA)
+                </h4>
+                <div class="space-y-2.5 text-xs">
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">网络制式与频段</span>
+                    <span class="font-bold text-slate-800 font-mono">5G-NR SA &middot; Band n78 (3500 MHz)</span>
+                  </div>
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">信道带宽 & 调制方式</span>
+                    <span class="font-bold text-slate-800 font-mono">100 MHz &middot; 256QAM / 4x4 MIMO</span>
+                  </div>
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">物理小区 ID (PCI) / 频点 (ARFCN)</span>
+                    <span class="font-bold text-slate-800 font-mono">PCI: 312 &middot; ARFCN: 627264</span>
+                  </div>
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">辅载波 (Scell-1 CA)</span>
+                    <span class="font-bold text-emerald-600 font-mono">LTE Band 3 (20MHz) 已聚合</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="glass-card p-5 rounded-2xl border border-white space-y-3">
+                <h4 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+                  网络寻址与守护后端对账状态
+                </h4>
+                <div class="space-y-2.5 text-xs">
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">物理网卡设备</span>
+                    <span class="font-bold text-slate-800 font-mono">wwan0 (CDC_NCM / 1500 MTU)</span>
+                  </div>
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">局域网 / 模组 IP</span>
+                    <span class="font-bold text-slate-800 font-mono">10.0.0.2 / 网关 10.0.0.1</span>
+                  </div>
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">主选运营商 / 归属省份</span>
+                    <span class="font-bold text-slate-800 font-mono">中国移动 (China Mobile 46000)</span>
+                  </div>
+                  <div class="flex justify-between py-1.5 border-b border-slate-100">
+                    <span class="text-slate-500">链路对账自愈轮询</span>
+                    <span class="font-bold text-emerald-600 font-mono">&check; 正常 (每 5s 对账，0 异常重连)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 2: 实时速率曲线 -->
+          <div id="demo-tab-speed" class="demo-tab-content hidden space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="glass-card p-5 rounded-2xl border border-white">
+                <div class="text-xs text-slate-500 font-medium">当前下行速率 (Downlink)</div>
+                <div class="text-3xl font-black font-mono text-cyan-600 mt-1 flex items-baseline gap-2">
+                  <span id="demoDlSpeed">342.8</span> <span class="text-sm font-bold text-slate-500">Mbps</span>
+                </div>
+                <div class="text-xs text-slate-400 mt-1">最高峰值: 890.2 Mbps</div>
+              </div>
+
+              <div class="glass-card p-5 rounded-2xl border border-white">
+                <div class="text-xs text-slate-500 font-medium">当前上行速率 (Uplink)</div>
+                <div class="text-3xl font-black font-mono text-brand-600 mt-1 flex items-baseline gap-2">
+                  <span id="demoUlSpeed">56.4</span> <span class="text-sm font-bold text-slate-500">Mbps</span>
+                </div>
+                <div class="text-xs text-slate-400 mt-1">最高峰值: 125.0 Mbps</div>
+              </div>
+            </div>
+
+            <!-- 动态动态波形画布 -->
+            <div class="glass-card p-5 rounded-2xl border border-white space-y-3">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-slate-700">最近 60 秒双轨平滑吞吐波形 (1000ms 采样率)</span>
+                <div class="flex items-center gap-4">
+                  <span class="flex items-center gap-1.5 text-cyan-600 font-mono"><span class="w-3 h-0.5 bg-cyan-500"></span> 下行吞吐</span>
+                  <span class="flex items-center gap-1.5 text-brand-600 font-mono"><span class="w-3 h-0.5 bg-brand-500 border-dashed"></span> 上行吞吐</span>
+                </div>
+              </div>
+
+              <div class="relative w-full h-56 bg-slate-900/5 rounded-xl overflow-hidden p-2">
+                <canvas id="speedChartCanvas" class="w-full h-full"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 3: 7通道芯片结温拓扑 -->
+          <div id="demo-tab-temp" class="demo-tab-content hidden space-y-6">
+            <div class="glass-card p-5 rounded-2xl border border-white">
+              <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+                <div>
+                  <h4 class="font-bold text-slate-800 text-sm">MT5700M 模组 7 通道芯片结温物理分布拓扑</h4>
+                  <p class="text-xs text-slate-500">通过底层专用 AT 指令精确采集主控、基带、射频功放（PA）结温</p>
+                </div>
+                <span class="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold font-mono">
+                  综合均温: 51.9 ℃ (良好)
+                </span>
+              </div>
+
+              <!-- SVG 芯片物理布局示意图 -->
+              <div class="w-full max-w-2xl mx-auto my-4 p-4 rounded-2xl bg-slate-100/70 border border-slate-200">
+                <svg viewBox="0 0 600 200" class="w-full h-auto">
+                  <!-- PCB 底板 -->
+                  <rect x="10" y="10" width="580" height="180" rx="12" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+                  <!-- 金手指 -->
+                  <line x1="20" y1="185" x2="580" y2="185" stroke="#fbbf24" stroke-width="4" stroke-dasharray="8 4"/>
+
+                  <!-- Modem1 基带 -->
+                  <g class="cursor-pointer hover:opacity-90">
+                    <rect x="40" y="35" width="150" height="85" rx="6" fill="#0369a1" stroke="#38bdf8" stroke-width="1.5"/>
+                    <text x="115" y="70" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">Modem1 基带</text>
+                    <text x="115" y="95" fill="#bae6fd" font-size="14" font-family="monospace" font-weight="bold" text-anchor="middle">51.2 ℃</text>
+                  </g>
+
+                  <!-- AP1 主控 & AP2 核心 -->
+                  <g class="cursor-pointer hover:opacity-90">
+                    <rect x="220" y="35" width="160" height="85" rx="6" fill="#0f766e" stroke="#2dd4bf" stroke-width="1.5"/>
+                    <text x="300" y="70" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">AP1 主控 / AP2 核心</text>
+                    <text x="300" y="95" fill="#ccfbf1" font-size="14" font-family="monospace" font-weight="bold" text-anchor="middle">47.5 ℃ / 46.8 ℃</text>
+                  </g>
+
+                  <!-- 射频 PA 区域 -->
+                  <g class="cursor-pointer hover:opacity-90">
+                    <rect x="410" y="35" width="150" height="85" rx="6" fill="#92400e" stroke="#fbbf24" stroke-width="1.5"/>
+                    <text x="485" y="70" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">Sub6G PA 功放</text>
+                    <text x="485" y="95" fill="#fef08a" font-size="14" font-family="monospace" font-weight="bold" text-anchor="middle">58.3 ℃ (负载中)</text>
+                  </g>
+
+                  <!-- 晶振与辅助测温 -->
+                  <rect x="180" y="135" width="240" height="35" rx="4" fill="#334155"/>
+                  <text x="300" y="157" fill="#cbd5e1" font-size="11" text-anchor="middle">TCXO 晶振 44.2 ℃ &middot; Sub3G PA 55.1 ℃ &middot; MIMO PA 54.0 ℃</text>
+                </svg>
+              </div>
+
+              <!-- 8个测温通道表格 -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-xs font-mono">
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">1. Modem1 基带</div>
+                  <div class="text-base font-bold text-sky-600 mt-1">51.2 ℃</div>
+                </div>
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">2. AP1 主控</div>
+                  <div class="text-base font-bold text-teal-600 mt-1">47.5 ℃</div>
+                </div>
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">3. AP2 核心</div>
+                  <div class="text-base font-bold text-teal-600 mt-1">46.8 ℃</div>
+                </div>
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">4. Sub6G PA 功放</div>
+                  <div class="text-base font-bold text-amber-600 mt-1">58.3 ℃</div>
+                </div>
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">5. Sub3G PA</div>
+                  <div class="text-base font-bold text-amber-600 mt-1">55.1 ℃</div>
+                </div>
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">6. MIMO PA</div>
+                  <div class="text-base font-bold text-amber-600 mt-1">54.0 ℃</div>
+                </div>
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">7. TCXO 晶振</div>
+                  <div class="text-base font-bold text-emerald-600 mt-1">44.2 ℃</div>
+                </div>
+                <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div class="text-slate-500">8. 芯片综合均温</div>
+                  <div class="text-base font-bold text-blue-600 mt-1">51.9 ℃</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 4: 全网扫频与锁频 -->
+          <div id="demo-tab-scan" class="demo-tab-content hidden space-y-6">
+            <div class="glass-card p-5 rounded-2xl border border-white space-y-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 class="font-bold text-slate-800 text-sm">周边 4G/5G 蜂窝基站小区扫频结果</h4>
+                  <p class="text-xs text-slate-500">支持一键全网空口快速扫描，精确提取 PCI、频点、RSRP 信号质量</p>
+                </div>
+                <button class="px-4 py-2 rounded-xl bg-brand-600 text-white font-semibold text-xs shadow hover:bg-brand-700 flex items-center gap-1.5" onclick="simulateScan()">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                  重新快速扫频
+                </button>
+              </div>
+
+              <!-- 小区结果列表 -->
+              <div class="overflow-x-auto rounded-xl border border-slate-200">
+                <table class="w-full text-xs text-left">
+                  <thead class="bg-slate-100/80 text-slate-600 uppercase font-bold font-mono">
+                    <tr>
+                      <th class="px-4 py-3">状态</th>
+                      <th class="px-4 py-3">网络类型</th>
+                      <th class="px-4 py-3">Band (频段)</th>
+                      <th class="px-4 py-3">PCI</th>
+                      <th class="px-4 py-3">频点 (ARFCN)</th>
+                      <th class="px-4 py-3">RSRP</th>
+                      <th class="px-4 py-3">带宽</th>
+                      <th class="px-4 py-3 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 font-mono">
+                    <tr class="bg-emerald-50/50">
+                      <td class="px-4 py-3 font-sans"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">当前主服</span></td>
+                      <td class="px-4 py-3 font-bold text-slate-800">5G NR-SA</td>
+                      <td class="px-4 py-3 text-brand-600 font-bold">n78</td>
+                      <td class="px-4 py-3">312</td>
+                      <td class="px-4 py-3">627264</td>
+                      <td class="px-4 py-3 font-bold text-emerald-600">-85 dBm</td>
+                      <td class="px-4 py-3">100 MHz</td>
+                      <td class="px-4 py-3 text-right font-sans"><span class="text-slate-400">已连接</span></td>
+                    </tr>
+                    <tr class="hover:bg-slate-50">
+                      <td class="px-4 py-3 font-sans"><span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">候选小区</span></td>
+                      <td class="px-4 py-3 text-slate-700">5G NR-SA</td>
+                      <td class="px-4 py-3 text-brand-600 font-bold">n78</td>
+                      <td class="px-4 py-3">118</td>
+                      <td class="px-4 py-3">627264</td>
+                      <td class="px-4 py-3 text-blue-600">-91 dBm</td>
+                      <td class="px-4 py-3">100 MHz</td>
+                      <td class="px-4 py-3 text-right font-sans">
+                        <button class="px-2.5 py-1 rounded bg-slate-100 hover:bg-brand-50 hover:text-brand-600 text-slate-700 font-medium" onclick="alert('已模拟向模组发送 AT 锁频指令锁定 PCI 118')">锁此 PCI</button>
+                      </td>
+                    </tr>
+                    <tr class="hover:bg-slate-50">
+                      <td class="px-4 py-3 font-sans"><span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">邻区</span></td>
+                      <td class="px-4 py-3 text-slate-700">LTE 4G</td>
+                      <td class="px-4 py-3 text-indigo-600 font-bold">Band 3</td>
+                      <td class="px-4 py-3">45</td>
+                      <td class="px-4 py-3">1650</td>
+                      <td class="px-4 py-3 text-amber-600">-97 dBm</td>
+                      <td class="px-4 py-3">20 MHz</td>
+                      <td class="px-4 py-3 text-right font-sans">
+                        <button class="px-2.5 py-1 rounded bg-slate-100 hover:bg-brand-50 hover:text-brand-600 text-slate-700 font-medium" onclick="alert('已模拟向模组发送 AT 锁频指令锁定 Band 3 / PCI 45')">锁此小区</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- 定时策略提示 -->
+              <div class="p-3.5 rounded-xl bg-brand-50/60 border border-brand-200/60 text-xs text-brand-900 flex items-start gap-3">
+                <span class="text-base">⏰</span>
+                <div>
+                  <strong>定时锁频编排机制</strong>：插件独家支持「日间高速 / 夜间低功耗基站」策略定时自动化切换，避免凌晨基站休眠导致断网。
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 5: 原生短信中心 -->
+          <div id="demo-tab-sms" class="demo-tab-content hidden space-y-6">
+            <div class="glass-card p-5 rounded-2xl border border-white space-y-4">
+              <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div>
+                  <h4 class="font-bold text-slate-800 text-sm">原生 SMS 短信管理中心</h4>
+                  <p class="text-xs text-slate-500">基于 Rust 本地纯算法 UCS2/7-bit PDU 编解码，长短信自动无缝拼接</p>
+                </div>
+                <button class="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-500 text-white font-semibold text-xs shadow hover:opacity-95" onclick="showNewSmsModal()">
+                  &plus; 发送新短信
+                </button>
+              </div>
+
+              <!-- 模拟收件箱列表 -->
+              <div class="space-y-3">
+                <div class="p-4 rounded-xl bg-white border border-slate-200 shadow-sm space-y-1.5">
+                  <div class="flex justify-between items-center text-xs">
+                    <span class="font-bold text-slate-800 font-mono">10086 (中国移动)</span>
+                    <span class="text-slate-400 font-mono">2026-10-31 18:30:15</span>
+                  </div>
+                  <p class="text-xs text-slate-600 leading-relaxed">
+                    【流量提醒】尊敬的客户，截至 10 月 31 日 18 时，您本月套餐内 5G 高速流量已使用 42.6 GB，剩余 157.4 GB。当前速率保障良好。
+                  </p>
+                  <div class="text-[10px] text-slate-400 font-mono pt-1">PDU 报文已在 Rust 后端纯本地解算 &middot; 索引 ID: 1 &middot; 状态: 已读</div>
+                </div>
+
+                <div class="p-4 rounded-xl bg-white border border-slate-200 shadow-sm space-y-1.5">
+                  <div class="flex justify-between items-center text-xs">
+                    <span class="font-bold text-slate-800 font-mono">95555 (招商银行)</span>
+                    <span class="text-slate-400 font-mono">2026-10-30 09:12:00</span>
+                  </div>
+                  <p class="text-xs text-slate-600 leading-relaxed">
+                    【验证码】您正在登录在线服务，验证码为 <span class="font-bold text-brand-600 font-mono">839215</span>，有效时间 5 分钟。切勿向任何人泄露。
+                  </p>
+                  <div class="text-[10px] text-slate-400 font-mono pt-1">PDU 报文已在 Rust 后端纯本地解算 &middot; 索引 ID: 2 &middot; 状态: 已读</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 6: 交互式 AT 终端 -->
+          <div id="demo-tab-terminal" class="demo-tab-content hidden space-y-4">
+            <!-- 终端显示框 -->
+            <div class="bg-slate-900 rounded-2xl p-4 sm:p-5 font-mono text-xs text-slate-200 shadow-inner border border-slate-800 space-y-3">
+              <div class="flex justify-between items-center pb-2 border-b border-slate-800 text-[11px] text-slate-400">
+                <span>串口终端会话 &middot; /dev/ttyUSB2 &middot; 115200 8N1</span>
+                <span>独占排队机制保障 &middot; 防冲突熔断</span>
+              </div>
+
+              <!-- 终端输出日志 -->
+              <div id="terminalOutput" class="h-64 overflow-y-auto space-y-2 pr-2 custom-scrollbar text-[12px] leading-relaxed">
+                <div class="text-emerald-400">[SYSTEM] AT 终端已就绪，已连接 MT5700M 模组。输入指令按 Enter 发送。</div>
+                <div class="text-slate-400">[20:20:01] <span class="text-yellow-300">ATI</span></div>
+                <div class="text-slate-300 whitespace-pre-wrap pl-3">Manufacturer: MediaTek
+Model: MT5700M
+Revision: MT5700M_V1.30.9_202610
+IMEI: 869382049182371
++GCAP: +CGSM,+DS
+
+OK</div>
+                <div class="text-slate-400">[20:20:05] <span class="text-yellow-300">AT+CSQ</span></div>
+                <div class="text-slate-300 whitespace-pre-wrap pl-3">+CSQ: 31, 99
+
+OK</div>
+              </div>
+
+              <!-- 交互输入行 -->
+              <div class="flex items-center gap-2 pt-2 border-t border-slate-800">
+                <span class="text-yellow-400 font-bold">&gt;</span>
+                <input type="text" id="terminalInput" placeholder="输入 AT 指令（例如: ATI, AT+CSQ, AT+CGMR）后按 Enter..." class="flex-1 bg-transparent border-none text-white focus:outline-none font-mono text-xs">
+                <button onclick="sendTerminalCommand()" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs transition-colors">
+                  发送
+                </button>
+              </div>
+            </div>
+
+            <!-- 快捷预置指令按钮群 -->
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <span class="text-slate-500 font-medium">快速测试常用指令:</span>
+              <button class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-brand-500 hover:text-brand-600 font-mono shadow-sm transition-all" onclick="runQuickAt('ATI')">ATI (模组信息)</button>
+              <button class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-brand-500 hover:text-brand-600 font-mono shadow-sm transition-all" onclick="runQuickAt('AT+CSQ')">AT+CSQ (信号质量)</button>
+              <button class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-brand-500 hover:text-brand-600 font-mono shadow-sm transition-all" onclick="runQuickAt('AT+CGMR')">AT+CGMR (固件版本)</button>
+              <button class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-brand-500 hover:text-brand-600 font-mono shadow-sm transition-all" onclick="runQuickAt('AT+CBC')">AT+CBC (供电状态)</button>
+              <button class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-brand-500 hover:text-brand-600 font-mono shadow-sm transition-all" onclick="runQuickAt('AT+QENG=&quot;servingcell&quot;')">AT+QENG="servingcell" (服务小区)</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 实机界面图赏与拓扑 (Screenshots & Topology Gallery) -->
+    <section id="gallery" class="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-10 space-y-3">
+        <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-pink-700">
+          <span>🖼️</span> 真实界面一览
+        </div>
+        <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          原生 LuCI 界面实机截图展示
+        </h2>
+        <p class="text-slate-600 text-sm sm:text-base">
+          点击任意图片即可全屏大图预览，见证软萌二次元玻璃拟物设计系统与 OpenWrt 主题的优雅融合。
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Screenshot 1 -->
+        <div class="glass-card rounded-2xl overflow-hidden border border-white group cursor-pointer" onclick="openLightbox('images/network-status.png', '网络状态控制台 · 信号场强、实时速率与结温分布')">
+          <div class="aspect-video w-full overflow-hidden bg-slate-100">
+            <img src="images/network-status.png" alt="网络状态控制台" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+          </div>
+          <div class="p-4 bg-white/70 flex items-center justify-between">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm">网络状态总控制台</h4>
+              <p class="text-xs text-slate-500">信号场强、双轨速率、载波聚合与芯片结温</p>
+            </div>
+            <span class="text-xs font-semibold text-brand-600 group-hover:translate-x-1 transition-transform">放大预览 &rarr;</span>
+          </div>
+        </div>
+
+        <!-- Screenshot 2 -->
+        <div class="glass-card rounded-2xl overflow-hidden border border-white group cursor-pointer" onclick="openLightbox('images/schedule-layout-desktop.png', '定时锁频策略编排 · 日间与夜间自动切换')">
+          <div class="aspect-video w-full overflow-hidden bg-slate-100">
+            <img src="images/schedule-layout-desktop.png" alt="定时锁频策略编排" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+          </div>
+          <div class="p-4 bg-white/70 flex items-center justify-between">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm">定时锁频策略编排</h4>
+              <p class="text-xs text-slate-500">多时段 4G/5G 频段与 PCI 自动防休眠切换</p>
+            </div>
+            <span class="text-xs font-semibold text-brand-600 group-hover:translate-x-1 transition-transform">放大预览 &rarr;</span>
+          </div>
+        </div>
+
+        <!-- Screenshot 3: Auto dial sequence -->
+        <div class="glass-card rounded-2xl overflow-hidden border border-white group cursor-pointer" onclick="openLightbox('auto-dial-sequence.png', '自动拨号与全链路自愈状态机时序')">
+          <div class="aspect-video w-full overflow-hidden bg-slate-100">
+            <img src="auto-dial-sequence.png" alt="自动拨号时序图" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+          </div>
+          <div class="p-4 bg-white/70 flex items-center justify-between">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm">全链路对账与自愈时序</h4>
+              <p class="text-xs text-slate-500">串口独占、NCM 接口对账与主动重拨逻辑</p>
+            </div>
+            <span class="text-xs font-semibold text-brand-600 group-hover:translate-x-1 transition-transform">放大预览 &rarr;</span>
+          </div>
+        </div>
+
+        <!-- Screenshot 4: Topology -->
+        <div class="glass-card rounded-2xl overflow-hidden border border-white group cursor-pointer" onclick="openLightbox('topology.png', '系统拓扑与前后端协同数据流图')">
+          <div class="aspect-video w-full overflow-hidden bg-slate-100">
+            <img src="topology.png" alt="系统拓扑架构" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+          </div>
+          <div class="p-4 bg-white/70 flex items-center justify-between">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm">系统拓扑架构图</h4>
+              <p class="text-xs text-slate-500">从 LuCI 视图到硬件模组的全栈调用拓扑</p>
+            </div>
+            <span class="text-xs font-semibold text-brand-600 group-hover:translate-x-1 transition-transform">放大预览 &rarr;</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Lightbox 全屏预览 Modal -->
+    <div id="lightboxModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer" onclick="closeLightbox()">
+      <div class="relative max-w-5xl w-full bg-slate-900 rounded-2xl overflow-hidden shadow-2xl p-2 cursor-default" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between px-4 py-2 text-white text-xs">
+          <span id="lightboxCaption" class="font-semibold text-sm">图片预览</span>
+          <button onclick="closeLightbox()" class="text-slate-400 hover:text-white text-xl font-bold">&times;</button>
+        </div>
+        <img id="lightboxImg" src="" alt="预览图" class="w-full h-auto max-h-[80vh] object-contain rounded-lg">
+      </div>
+    </div>
+
+    <!-- 5. 核心功能矩阵 (Feature Cards) -->
+    <section id="features" class="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="text-center max-w-3xl mx-auto mb-12 space-y-3">
+        <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-cyan-100 text-cyan-800">
+          <span>⚡</span> 极致工艺与全栈自研
+        </div>
+        <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          为 MT5700M 5G 模组量身打造的八大核心能力
+        </h2>
+        <p class="text-slate-600 text-sm sm:text-base">
+          拒绝拼凑与外部庞大依赖，从底层驱动、串口调度到前端 12 原生视图一气呵成。
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- Feature 1 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-brand-600 to-indigo-500 text-white flex items-center justify-center text-xl shadow-md">
+            🚀
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">单包融合交付</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            内置 Rust / Tokio 高性能异步事件常驻守护后端，单个 <code class="text-brand-700 font-mono">.ipk</code> 或 <code class="text-brand-700 font-mono">.apk</code> 开箱即装，无额外 Python / Node 笨重依赖。
+          </p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-500 text-white flex items-center justify-center text-xl shadow-md">
+            📡
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">全维度 5G 射频监控</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            精准展示 3GPP 空口场强、RSRP、RSRQ、SINR、下行 256QAM 与 4x4 MIMO 空间流，多载波 CA 聚合看板一目了然。
+          </p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 text-white flex items-center justify-center text-xl shadow-md">
+            🔄
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">全链路自动拨号对账</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            独占式串口防冲突调度，网卡与模组双状态机联动，断网毫秒级主动重拨与自愈对账，彻底告别“假连接”断流。
+          </p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 text-white flex items-center justify-center text-xl shadow-md">
+            🔍
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">全网扫频与定时编排</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            一键遍历周边 NR / LTE 小区 PCI 与频点，独家支持日间高速与夜间基站休眠策略定时自动化编排，网络始终稳定。
+          </p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 text-white flex items-center justify-center text-xl shadow-md">
+            🌡️
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">7 通道结温物理透视</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            芯片级硬件温度感知拓扑，基带、主控、PA 功率放大器分段阶梯预警，高温主动调频防护，保障模组长年无故障运转。
+          </p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-rose-600 to-red-500 text-white flex items-center justify-center text-xl shadow-md">
+            💬
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">原生短信与本地 PDU</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            纯 Rust 本地 UCS2 与 7-bit 算法编解码，超长短信自动拆分合并拼接，支持中文短信收发、状态回执与安全脱敏。
+          </p>
+        </div>
+
+        <!-- Feature 7 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-slate-800 to-slate-900 text-white flex items-center justify-center text-xl shadow-md">
+            ⌨️
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">交互式 Web AT 终端</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            网页端直接发送 AT 指令，提供指令历史回溯、快捷命令库、防并发撞击锁与超时熔断，调试排障随心所欲。
+          </p>
+        </div>
+
+        <!-- Feature 8 -->
+        <div class="glass-card glass-card-hover p-6 rounded-3xl border border-white space-y-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-700 text-white flex items-center justify-center text-xl shadow-md">
+            🔔
+          </div>
+          <h3 class="font-extrabold text-slate-900 text-base">事件通知与多端告警</h3>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            断网重拨、IP 变更、SIM 卡异常状态第一时间通过 Telegram Bot、Bark、Server酱、钉钉机器人直达手机。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. 系统架构与数据链路 (Architecture) -->
+    <section id="architecture" class="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="glass-card p-6 sm:p-10 rounded-3xl border border-white space-y-8">
+        <div class="text-center max-w-3xl mx-auto space-y-2">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-brand-100 text-brand-700">
+            <span>🏛️</span> 严谨架构
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900">系统拓扑与数据链路</h2>
+          <p class="text-xs sm:text-sm text-slate-500">
+            清晰的三层分工：前端 LuCI 负责展示交互，Rust/Tokio 独占串口调度，Linux 内核网络协议栈负责高速数据通道。
+          </p>
+        </div>
+
+        <!-- 流程图示卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
+          <!-- Node 1 -->
+          <div class="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-sm text-center space-y-2">
+            <div class="w-10 h-10 mx-auto rounded-xl bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-lg">
+              1
+            </div>
+            <div class="font-bold text-slate-900 text-sm">LuCI Web 前端</div>
+            <p class="text-[11px] text-slate-500 leading-snug">12 个原生现代化页面 (JS / CSS 渲染)</p>
+          </div>
+
+          <div class="hidden md:flex justify-center text-brand-500 font-bold text-xl">&rarr;</div>
+
+          <!-- Node 2 -->
+          <div class="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-sm text-center space-y-2">
+            <div class="w-10 h-10 mx-auto rounded-xl bg-cyan-100 text-cyan-600 flex items-center justify-center font-bold text-lg">
+              2
+            </div>
+            <div class="font-bold text-slate-900 text-sm">rpcd / ucode 桥</div>
+            <p class="text-[11px] text-slate-500 leading-snug">OpenWrt 22.03+ ucode RPC 声明与 ACL 鉴权</p>
+          </div>
+
+          <div class="hidden md:flex justify-center text-cyan-500 font-bold text-xl">&rarr;</div>
+
+          <!-- Node 3 -->
+          <div class="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-sm text-center space-y-2">
+            <div class="w-10 h-10 mx-auto rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-lg">
+              3
+            </div>
+            <div class="font-bold text-slate-900 text-sm">at-webserver-rust</div>
+            <p class="text-[11px] text-slate-500 leading-snug">Tokio 常驻守护 &middot; 串口独占调度 &middot; PDU 解码</p>
+          </div>
+        </div>
+
+        <!-- 下层模组与硬件 -->
+        <div class="p-5 rounded-2xl bg-slate-900 text-white flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">📡</span>
+            <div>
+              <div class="font-bold text-sm">硬件交互：MT5700M 5G 模组 (/dev/ttyUSB2 & wwan0)</div>
+              <div class="text-xs text-slate-400">AT 指令串口独占防撞排队 + CDC_NCM 物理网卡高速千兆转发</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="px-3 py-1 rounded-lg bg-slate-800 text-xs font-mono text-emerald-400 border border-slate-700">
+              UCI 配置: /etc/config/at-webserver
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. 安装与快速启动 (Install Guide) -->
+    <section id="install" class="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="glass-card p-6 sm:p-10 rounded-3xl border border-white space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
+          <div>
+            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 mb-2">
+              <span>📦</span> 快速部署
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900">安装与快速上手指南</h2>
+          </div>
+
+          <!-- 系统选择 Tab -->
+          <div class="flex p-1 bg-slate-100 rounded-xl text-xs font-bold text-slate-600">
+            <button class="install-tab-btn active px-3.5 py-1.5 rounded-lg bg-white text-brand-600 shadow-sm" onclick="switchInstallTab('openwrt')">OpenWrt (ipk/apk)</button>
+            <button class="install-tab-btn px-3.5 py-1.5 rounded-lg hover:text-slate-900" onclick="switchInstallTab('debian')">Debian / Ubuntu (.deb)</button>
+            <button class="install-tab-btn px-3.5 py-1.5 rounded-lg hover:text-slate-900" onclick="switchInstallTab('source')">源码构建</button>
+          </div>
+        </div>
+
+        <!-- 兼容性重点提醒 Warning Alert -->
+        <div class="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-amber-900 text-xs sm:text-sm flex items-start gap-3">
+          <span class="text-xl">⚠️</span>
+          <div class="space-y-1">
+            <div class="font-bold">独占模组串口说明（与 QModem 互斥）</div>
+            <p class="text-xs leading-relaxed text-amber-800">
+              本插件为 MT5700M 专用拨号套件，直接接管并独占模组串口。<strong>使用本插件即可全自动完成拨号，无需安装或运行 QModem</strong>。请在安装前卸载或停用其他会占用同一串口的插件。
+            </p>
+          </div>
+        </div>
+
+        <!-- Install Tab: OpenWrt -->
+        <div id="install-openwrt" class="install-content space-y-4">
+          <p class="text-xs sm:text-sm text-slate-600">
+            支持 <strong>OpenWrt 24.10</strong> 及更早版本（使用 <code class="text-brand-700 font-mono">opkg</code> 安装 <code class="text-brand-700 font-mono">.ipk</code>），以及 <strong>OpenWrt 25.x / ImmortalWrt SNAPSHOT</strong>（使用 <code class="text-brand-700 font-mono">apk</code> 安装 <code class="text-brand-700 font-mono">.apk</code>）。
+          </p>
+
+          <!-- 方式 A: 一键自查架构 -->
+          <div class="space-y-2">
+            <div class="flex justify-between items-center text-xs font-semibold text-slate-700">
+              <span>第 1 步：SSH 登录路由器，确认 CPU 架构</span>
+              <button class="text-brand-600 hover:underline copy-btn" data-clipboard="grep OPENWRT_ARCH /etc/openwrt_release">复制命令</button>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs flex justify-between items-center">
+              <code>grep OPENWRT_ARCH /etc/openwrt_release</code>
+              <span class="text-slate-500 text-[11px]"># 如 aarch64_cortex-a53 或 x86_64</span>
+            </div>
+          </div>
+
+          <!-- 方式 B: 命令安装 -->
+          <div class="space-y-2">
+            <div class="flex justify-between items-center text-xs font-semibold text-slate-700">
+              <span>第 2 步：下载对应架构包并安装 (以 OpenWrt 24.10 opkg 为例)</span>
+              <button class="text-brand-600 hover:underline copy-btn" data-clipboard="opkg install ./<ARCH>-luci-app-mt5700_*.ipk ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk">复制命令</button>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs overflow-x-auto custom-scrollbar">
+              <span class="text-slate-500"># OpenWrt 24.10 / ImmortalWrt (opkg)</span><br>
+              <code>opkg install ./&lt;ARCH&gt;-luci-app-mt5700_*.ipk ./&lt;ARCH&gt;-luci-i18n-mt5700-zh-cn_*.ipk</code><br><br>
+              <span class="text-slate-500"># OpenWrt 25.x (apk)</span><br>
+              <code>apk add --allow-untrusted ./&lt;ARCH&gt;-luci-app-mt5700-*.apk ./&lt;ARCH&gt;-luci-i18n-mt5700-zh-cn-*.apk</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- Install Tab: Debian -->
+        <div id="install-debian" class="install-content hidden space-y-4">
+          <p class="text-xs sm:text-sm text-slate-600">
+            支持作为独立服务部署在 Debian 11/12、Ubuntu 22.04/24.04、Armbian 等 Linux 主机或工控机，提供 systemd 守护进程与独立 WebUI。
+          </p>
+          <div class="space-y-2">
+            <div class="flex justify-between items-center text-xs font-semibold text-slate-700">
+              <span>Debian / Ubuntu 安装命令</span>
+              <button class="text-brand-600 hover:underline copy-btn" data-clipboard="sudo apt install ./at-webserver_*_amd64.deb">复制命令</button>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs">
+              <span class="text-slate-500"># 64 位 x86_64 设备</span><br>
+              <code>sudo apt install ./at-webserver_*_amd64.deb</code><br><br>
+              <span class="text-slate-500"># 树莓派 / ARM64 设备</span><br>
+              <code>sudo apt install ./at-webserver_*_arm64.deb</code>
+            </div>
+          </div>
+          <p class="text-xs text-slate-500">
+            安装完成后由 systemd 自动开机自启，浏览器直接访问 <code class="text-brand-700 font-mono">http://&lt;设备IP&gt;:9000</code>。
+          </p>
+        </div>
+
+        <!-- Install Tab: Source -->
+        <div id="install-source" class="install-content hidden space-y-4">
+          <p class="text-xs sm:text-sm text-slate-600">
+            将插件直接集成进 OpenWrt / ImmortalWrt 固件源码编译：
+          </p>
+          <div class="p-3.5 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs overflow-x-auto custom-scrollbar">
+            <span class="text-slate-500"># 1. 在 feeds.conf.default 末尾追加</span><br>
+            <code>src-git mt5700 https://github.com/LianXia233/luci-app-mt5700.git</code><br><br>
+            <span class="text-slate-500"># 2. 更新与安装 feeds</span><br>
+            <code>./scripts/feeds update mt5700 && ./scripts/feeds install -a -p mt5700</code><br><br>
+            <span class="text-slate-500"># 3. 在 make menuconfig 中勾选</span><br>
+            <code>LuCI &gt; 3. Applications &gt; [*] luci-app-mt5700</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. 产物与版本下载 (Releases) -->
+    <section id="releases" class="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="glass-card p-6 sm:p-10 rounded-3xl border border-white space-y-8">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
+          <div>
+            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-brand-100 text-brand-700 mb-2">
+              <span>🚀</span> 官方二进制包
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900">最新版本下载与产物发布</h2>
+            <p class="text-xs sm:text-sm text-slate-500 mt-1">
+              当前版本: <span id="latestReleaseTag" class="font-mono font-bold text-brand-600">preview-v1.30.9-r1</span> (发布于 GitHub Releases)
+            </p>
+          </div>
+
+          <a href="https://github.com/LianXia233/luci-app-mt5700/releases" target="_blank" rel="noopener" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs flex items-center gap-1.5 self-start sm:self-auto transition-colors">
+            <span>查看全部历史版本</span> &rarr;
+          </a>
+        </div>
+
+        <!-- 架构产物下载卡片矩阵 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <!-- Card 1: aarch64_cortex-a53 -->
+          <div class="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-3 flex flex-col justify-between">
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-brand-100 text-brand-700">Filogic MT798x / H5000M</span>
+                <span class="text-xs text-slate-400 font-mono">OpenWrt</span>
+              </div>
+              <h4 class="font-extrabold text-slate-900 text-base">aarch64_cortex-a53</h4>
+              <p class="text-xs text-slate-500">适用于 Hiveton H5000M、红米 AX6000、360T7 等 MT798x 架构设备</p>
+            </div>
+            <div class="pt-2 flex flex-col gap-2">
+              <a href="https://github.com/LianXia233/luci-app-mt5700/releases/download/preview-v1.30.9-r1/aarch64_cortex-a53-luci-app-mt5700_1.30.9-r1_aarch64_cortex-a53.ipk" class="w-full py-2 px-3 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-semibold text-center transition-colors">
+                下载 .ipk (OpenWrt 24.10 及更早)
+              </a>
+              <a href="https://github.com/LianXia233/luci-app-mt5700/releases/download/preview-v1.30.9-r1/aarch64_cortex-a53-luci-app-mt5700-1.30.9-r1.apk" class="w-full py-2 px-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-700 text-xs font-semibold text-center transition-colors">
+                下载 .apk (OpenWrt 25.x)
+              </a>
+            </div>
+          </div>
+
+          <!-- Card 2: x86_64 -->
+          <div class="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-3 flex flex-col justify-between">
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-700">软路由 / 工控机 / 虚拟机</span>
+                <span class="text-xs text-slate-400 font-mono">OpenWrt</span>
+              </div>
+              <h4 class="font-extrabold text-slate-900 text-base">x86_64 (amd64)</h4>
+              <p class="text-xs text-slate-500">适用于主流 Intel / AMD 架构软路由、PVE 虚拟机及工控主机</p>
+            </div>
+            <div class="pt-2 flex flex-col gap-2">
+              <a href="https://github.com/LianXia233/luci-app-mt5700/releases/download/preview-v1.30.9-r1/x86_64-luci-app-mt5700_1.30.9-r1_x86_64.ipk" class="w-full py-2 px-3 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-semibold text-center transition-colors">
+                下载 .ipk (OpenWrt 24.10 及更早)
+              </a>
+              <a href="https://github.com/LianXia233/luci-app-mt5700/releases/download/preview-v1.30.9-r1/x86_64-luci-app-mt5700-1.30.9-r1.apk" class="w-full py-2 px-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-700 text-xs font-semibold text-center transition-colors">
+                下载 .apk (OpenWrt 25.x)
+              </a>
+            </div>
+          </div>
+
+          <!-- Card 3: Debian / Ubuntu deb -->
+          <div class="p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm space-y-3 flex flex-col justify-between">
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-100 text-purple-700">Linux 宿主机 / SBC</span>
+                <span class="text-xs text-slate-400 font-mono">Debian/Ubuntu</span>
+              </div>
+              <h4 class="font-extrabold text-slate-900 text-base">at-webserver Debian 版</h4>
+              <p class="text-xs text-slate-500">systemd 独立托管，自带 9000 端口 WebUI 与完整 HTTP API</p>
+            </div>
+            <div class="pt-2 flex flex-col gap-2">
+              <a href="https://github.com/LianXia233/luci-app-mt5700/releases/download/debian-v2.2.0/at-webserver_2.2.0-1_amd64.deb" class="w-full py-2 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold text-center transition-colors">
+                下载 amd64.deb (x86_64)
+              </a>
+              <a href="https://github.com/LianXia233/luci-app-mt5700/releases/download/debian-v2.2.0/at-webserver_2.2.0-1_arm64.deb" class="w-full py-2 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold text-center transition-colors">
+                下载 arm64.deb (ARM 64位)
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- 语言包与校验提醒 -->
+        <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <span>🇨🇳</span>
+            <span>中文语言包: <code class="font-mono text-slate-800">luci-i18n-mt5700-zh-cn</code> 已包含在 Release 产物中，推荐同时安装。</span>
+          </div>
+          <a href="https://cnb.cool/LianXia233/luci-app-mt5700" target="_blank" rel="noopener" class="text-brand-600 hover:underline flex items-center gap-1 font-semibold">
+            国内加速下载: CNB 镜像仓库 &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. 常见问题 FAQ -->
+    <section id="faq" class="py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <div class="glass-card p-6 sm:p-10 rounded-3xl border border-white space-y-6">
+        <div class="text-center max-w-3xl mx-auto space-y-2 mb-8">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+            <span>💡</span> 解惑答疑
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900">常见问题与排坑速查</h2>
+          <p class="text-xs sm:text-sm text-slate-500">汇总用户常见使用疑问、驱动配置与版本门槛说明</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- FAQ 1 -->
+          <div class="p-5 rounded-2xl bg-white/90 border border-slate-200/80 shadow-sm space-y-2">
+            <h4 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+              <span class="text-brand-500 font-mono">Q1:</span> 为什么不能与 QModem 共存？
+            </h4>
+            <p class="text-xs text-slate-600 leading-relaxed">
+              答：MT5700M 模组在固件中通常仅提供一个 AT 指令主串口（如 <code class="font-mono text-slate-800">/dev/ttyUSB2</code>）。本插件为了确保信号轮询、温度采集与短信编解码的绝对稳定，会对串口实施严格的独占互斥调度锁。若同时运行 QModem 会引起串口争抢与报文错乱。本插件内置完备的自动拨号机制，无需再安装 QModem。
+            </p>
+          </div>
+
+          <!-- FAQ 2 -->
+          <div class="p-5 rounded-2xl bg-white/90 border border-slate-200/80 shadow-sm space-y-2">
+            <h4 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+              <span class="text-brand-500 font-mono">Q2:</span> 为什么 OpenWrt 21.02 及更早版本无法运行？
+            </h4>
+            <p class="text-xs text-slate-600 leading-relaxed">
+              答：插件的前端 RPC 桥接基于 <code class="font-mono text-slate-800">rpcd-mod-ucode</code>，该组件自 OpenWrt 22.03 起随系统正式预装。老版本系统缺失 ucode 解释器，装上后会出现“能开页面但所有操作均报 Method not found”。请升级至 OpenWrt 24.10 或 25.x。
+            </p>
+          </div>
+
+          <!-- FAQ 3 -->
+          <div class="p-5 rounded-2xl bg-white/90 border border-slate-200/80 shadow-sm space-y-2">
+            <h4 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+              <span class="text-brand-500 font-mono">Q3:</span> 安装后在串口列表找不到 ttyUSB2？
+            </h4>
+            <p class="text-xs text-slate-600 leading-relaxed">
+              答：本插件为管理服务，不含底层 Linux 内核驱动。您的路由器固件需要包含 USB 串口驱动（<code class="font-mono text-slate-800">kmod-usb-serial-option</code>）以及网卡驱动（<code class="font-mono text-slate-800">kmod-usb-net-cdc-ncm</code>）。若设备树未识别，模组硬件可能未正常通电。
+            </p>
+          </div>
+
+          <!-- FAQ 4 -->
+          <div class="p-5 rounded-2xl bg-white/90 border border-slate-200/80 shadow-sm space-y-2">
+            <h4 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+              <span class="text-brand-500 font-mono">Q4:</span> 短信发送失败，提示时延超预算？
+            </h4>
+            <p class="text-xs text-slate-600 leading-relaxed">
+              答：请先检查 SIM 卡是否支持短信收发功能（部分纯物联网流量卡默认被运营商关闭短信功能）。其次检查是否已在“短信设置”中正确配置该 SIM 卡归属运营商的短信中心号码（SMSC），格式需为国际格式（如 +8613800...）。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 10. 底部页脚与版权声明 (Footer) -->
+    <footer class="glass-nav mt-12 py-10 px-4 sm:px-6 lg:px-8 border-t border-slate-200/80 text-xs text-slate-600">
+      <div class="max-w-7xl mx-auto space-y-6">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center font-bold">
+              5G
+            </div>
+            <div>
+              <span class="font-bold text-slate-900 text-sm">luci-app-mt5700</span>
+              <span class="text-slate-400 ml-2">OpenWrt / ImmortalWrt 5G 模组管理套件</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-6 font-medium">
+            <a href="https://github.com/LianXia233/luci-app-mt5700" target="_blank" rel="noopener" class="hover:text-brand-600 transition-colors">GitHub 主仓库</a>
+            <a href="https://cnb.cool/LianXia233/luci-app-mt5700" target="_blank" rel="noopener" class="hover:text-brand-600 transition-colors">CNB 镜像仓库</a>
+            <a href="https://github.com/LianXia233/luci-app-mt5700/issues" target="_blank" rel="noopener" class="hover:text-brand-600 transition-colors">反馈 Issue</a>
+            <a href="https://github.com/LianXia233/luci-app-mt5700/blob/main/LICENSE" target="_blank" rel="noopener" class="hover:text-brand-600 transition-colors">GPL-3.0 许可证</a>
+          </div>
+        </div>
+
+        <!-- 详细知识产权与看板娘说明声明 -->
+        <div class="pt-6 border-t border-slate-200/60 text-[11px] text-slate-500 leading-relaxed space-y-2">
+          <p>
+            开源协议：本项目以 <strong>GNU General Public License v3.0 (GPL-3.0)</strong> 发布。Copyright &copy; 2026 LianXia233. 保留所有权利。
+          </p>
+          <p>
+            看板娘角色素材声明：界面中引用的看板娘「薄荷」（Mint）为游戏《异环》（Neverness to Everness）登场角色，著作权归属于苏州幻塔网络科技有限公司（Hotta Studio / 完美世界旗下工作室）。本项目仅作界面展示与爱好者交互使用，不主张任何权利，未获得亦不用于任何商业化行为。
+          </p>
+          <p>
+            商标声明：OpenWrt、ImmortalWrt、LuCI、MediaTek、MT5700M 等名称及商标归各自权利人所有，本项目仅作指示性兼容描述。
+          </p>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- JavaScript 交互逻辑 -->
+  <script>
+    // 1. 壁纸与毛玻璃透度控制
+    const toggleWallpaperMenu = document.getElementById('toggleWallpaperMenu');
+    const wallpaperControlPanel = document.getElementById('wallpaperControlPanel');
+    const closeWallpaperPanel = document.getElementById('closeWallpaperPanel');
+    const opacitySlider = document.getElementById('opacitySlider');
+    const opacityValLabel = document.getElementById('opacityValLabel');
+    const blurSlider = document.getElementById('blurSlider');
+    const blurValLabel = document.getElementById('blurValLabel');
+
+    if (toggleWallpaperMenu && wallpaperControlPanel) {
+      toggleWallpaperMenu.addEventListener('click', () => {
+        wallpaperControlPanel.classList.toggle('hidden');
+      });
+      closeWallpaperPanel.addEventListener('click', () => {
+        wallpaperControlPanel.classList.add('hidden');
+      });
+    }
+
+    if (opacitySlider) {
+      opacitySlider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        const opacityDec = (val / 100).toFixed(2);
+        document.documentElement.style.setProperty('--card-opacity', opacityDec);
+        opacityValLabel.textContent = `${val}%`;
+      });
+    }
+
+    if (blurSlider) {
+      blurSlider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        document.documentElement.style.setProperty('--wallpaper-blur', `${val}px`);
+        blurValLabel.textContent = `${val} px`;
+      });
+    }
+
+    // 2. 纯享全屏壁纸模式 (Zen Mode)
+    function toggleZenMode() {
+      document.body.classList.toggle('zen-mode');
+      if (wallpaperControlPanel) wallpaperControlPanel.classList.add('hidden');
+    }
+
+    const zenExitHint = document.getElementById('zenExitHint');
+    if (zenExitHint) {
+      zenExitHint.addEventListener('click', () => {
+        document.body.classList.remove('zen-mode');
+      });
+    }
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.body.classList.contains('zen-mode')) {
+        document.body.classList.remove('zen-mode');
+      }
+    });
+
+    // 3. 在线体验 Tab 切换
+    const demoTabBtns = document.querySelectorAll('.demo-tab-btn');
+    const demoTabContents = document.querySelectorAll('.demo-tab-content');
+
+    demoTabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tabId = btn.getAttribute('data-tab');
+
+        demoTabBtns.forEach(b => {
+          b.classList.remove('active', 'text-brand-700', 'bg-brand-100/80', 'border-brand-200');
+          b.classList.add('border-transparent');
+        });
+        btn.classList.add('active', 'text-brand-700', 'bg-brand-100/80', 'border-brand-200');
+        btn.classList.remove('border-transparent');
+
+        demoTabContents.forEach(content => {
+          content.classList.add('hidden');
+        });
+        const target = document.getElementById(`demo-tab-${tabId}`);
+        if (target) {
+          target.classList.remove('hidden');
+          if (tabId === 'speed' && !window.speedChartInitialized) {
+            initSpeedChart();
+          }
+        }
+      });
+    });
+
+    // 4. 模拟动态速率波形 Canvas 图表
+    function initSpeedChart() {
+      window.speedChartInitialized = true;
+      const canvas = document.getElementById('speedChartCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      function resize() {
+        canvas.width = canvas.parentElement.clientWidth;
+        canvas.height = canvas.parentElement.clientHeight;
+      }
+      resize();
+      window.addEventListener('resize', resize);
+
+      const points = 40;
+      const dlData = Array.from({length: points}, () => 280 + Math.random() * 80);
+      const ulData = Array.from({length: points}, () => 40 + Math.random() * 25);
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const w = canvas.width;
+        const h = canvas.height;
+        const step = w / (points - 1);
+
+        // 下行填充与线条 (Cyan)
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        for (let i = 0; i < points; i++) {
+          const y = h - (dlData[i] / 400) * (h * 0.85);
+          if (i === 0) ctx.lineTo(0, y);
+          else ctx.lineTo(i * step, y);
+        }
+        ctx.lineTo(w, h);
+        ctx.fillStyle = 'rgba(6, 182, 212, 0.15)';
+        ctx.fill();
+
+        ctx.beginPath();
+        for (let i = 0; i < points; i++) {
+          const y = h - (dlData[i] / 400) * (h * 0.85);
+          if (i === 0) ctx.moveTo(0, y);
+          else ctx.lineTo(i * step, y);
+        }
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        // 上行线条 (Brand Purple)
+        ctx.beginPath();
+        for (let i = 0; i < points; i++) {
+          const y = h - (ulData[i] / 400) * (h * 0.85);
+          if (i === 0) ctx.moveTo(0, y);
+          else ctx.lineTo(i * step, y);
+        }
+        ctx.strokeStyle = '#8b5cf6';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      setInterval(() => {
+        dlData.shift();
+        dlData.push(290 + Math.random() * 70);
+        ulData.shift();
+        ulData.push(45 + Math.random() * 20);
+
+        const dlEl = document.getElementById('demoDlSpeed');
+        const ulEl = document.getElementById('demoUlSpeed');
+        if (dlEl) dlEl.textContent = dlData[dlData.length - 1].toFixed(1);
+        if (ulEl) ulEl.textContent = ulData[ulData.length - 1].toFixed(1);
+
+        draw();
+      }, 1000);
+      draw();
+    }
+
+    // 5. 看板娘戳一戳交互彩蛋
+    const mascotLines = [
+      "“薄荷正在守护您的 5G 链路哦，当前 RSRP -85dBm，网络超顺畅~”",
+      "“哇！检测到 100MHz 宽带载波已聚合，下行 256QAM 已激活！”",
+      "“芯片温度 51.9℃，各项指标均在舒适绿区运行，请放心使用~”",
+      "“需要薄荷帮您扫描周边可用的 5G 基站吗？快去【全网扫频】看看吧！”",
+      "“收到一条新短信！薄荷已经纯本地帮您解开 PDU 报文啦~”",
+      "“夜间锁频策略已编排就绪，今晚也会按时帮您平稳换频防掉线哒！”"
+    ];
+    let mascotLineIndex = 0;
+    function pokeMascot() {
+      mascotLineIndex = (mascotLineIndex + 1) % mascotLines.length;
+      const speech = document.getElementById('mascotSpeech');
+      if (speech) {
+        speech.textContent = mascotLines[mascotLineIndex];
+      }
+    }
+
+    // 6. 交互式 AT 终端逻辑
+    function runQuickAt(cmd) {
+      const input = document.getElementById('terminalInput');
+      if (input) {
+        input.value = cmd;
+        sendTerminalCommand();
+      }
+    }
+
+    function sendTerminalCommand() {
+      const input = document.getElementById('terminalInput');
+      const output = document.getElementById('terminalOutput');
+      if (!input || !output) return;
+      const cmd = input.value.trim();
+      if (!cmd) return;
+
+      const time = new Date().toTimeString().split(' ')[0];
+      const cmdLine = document.createElement('div');
+      cmdLine.className = 'text-slate-400 mt-2';
+      cmdLine.innerHTML = `[${time}] <span class="text-yellow-300">${escapeHtml(cmd)}</span>`;
+      output.appendChild(cmdLine);
+
+      input.value = '';
+
+      // 模拟 MT5700M 回应
+      setTimeout(() => {
+        const respLine = document.createElement('div');
+        respLine.className = 'text-slate-300 whitespace-pre-wrap pl-3';
+
+        const upper = cmd.toUpperCase();
+        if (upper === 'ATI') {
+          respLine.textContent = `Manufacturer: MediaTek\nModel: MT5700M\nRevision: MT5700M_V1.30.9_202610\nIMEI: 869382049182371\n+GCAP: +CGSM,+DS\n\nOK`;
+        } else if (upper.includes('+CSQ')) {
+          respLine.textContent = `+CSQ: 31, 99\n\nOK`;
+        } else if (upper.includes('+CGMR')) {
+          respLine.textContent = `MT5700M_V1.30.9_BUILD20261030\n\nOK`;
+        } else if (upper.includes('+CBC')) {
+          respLine.textContent = `+CBC: 0, 100, 4120 mV\n\nOK`;
+        } else if (upper.includes('SERVINGCELL')) {
+          respLine.textContent = `+QENG: "servingcell","NOCONN","NR5G-SA","TDD",460,00,627264,312,100,3500,-85,-11,24,256QAM,4\n\nOK`;
+        } else if (upper === 'AT') {
+          respLine.textContent = `OK`;
+        } else {
+          respLine.textContent = `OK`;
+        }
+
+        output.appendChild(respLine);
+        output.scrollTop = output.scrollHeight;
+      }, 250);
+    }
+
+    const terminalInput = document.getElementById('terminalInput');
+    if (terminalInput) {
+      terminalInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendTerminalCommand();
+      });
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // 7. 扫频与短信弹窗测试
+    function simulateScan() {
+      alert('已触发后台扫描进程，正在监听 5G NR n78 / n41 / n28 及 LTE 频段... 扫描完成，共捕获 3 个有效蜂窝基站。');
+    }
+
+    function showNewSmsModal() {
+      const recipient = prompt('请输入收件人号码 (例如 10086 或手机号):', '10086');
+      if (!recipient) return;
+      const content = prompt('请输入短信内容:', 'CXLL');
+      if (content) {
+        alert(`已模拟将短信交付 Rust 后端，以 UCS2 格式打包为 PDU 发送至 ${recipient}！`);
+      }
+    }
+
+    // 8. 图赏全屏 Lightbox
+    function openLightbox(src, caption) {
+      const modal = document.getElementById('lightboxModal');
+      const img = document.getElementById('lightboxImg');
+      const cap = document.getElementById('lightboxCaption');
+      if (modal && img && cap) {
+        img.src = src;
+        cap.textContent = caption;
+        modal.classList.remove('hidden');
+      }
+    }
+
+    function closeLightbox() {
+      const modal = document.getElementById('lightboxModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    // 9. 安装方式 Tab 切换
+    function switchInstallTab(tab) {
+      document.querySelectorAll('.install-tab-btn').forEach(btn => {
+        btn.classList.remove('active', 'bg-white', 'text-brand-600', 'shadow-sm');
+      });
+      event.target.classList.add('active', 'bg-white', 'text-brand-600', 'shadow-sm');
+
+      document.querySelectorAll('.install-content').forEach(c => c.classList.add('hidden'));
+      const target = document.getElementById(`install-${tab}`);
+      if (target) target.classList.remove('hidden');
+    }
+
+    // 10. 复制按钮
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const text = btn.getAttribute('data-clipboard');
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+          const original = btn.textContent;
+          btn.textContent = '已复制！';
+          btn.classList.add('text-emerald-600');
+          setTimeout(() => {
+            btn.textContent = original;
+            btn.classList.remove('text-emerald-600');
+          }, 1800);
+        });
+      });
+    });
+
+    // 11. 动态从 GitHub API 获取实时 Release 与 Stars
+    fetch('https://api.github.com/repos/LianXia233/luci-app-mt5700')
+      .then(res => res.json())
+      .then(data => {
+        if (data.stargazers_count !== undefined) {
+          const starCount = document.getElementById('githubStarCount');
+          if (starCount) starCount.textContent = data.stargazers_count;
+        }
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>
