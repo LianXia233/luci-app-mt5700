@@ -434,49 +434,181 @@ function detectUsbNetdev() {
 	return trim(substr(line, 7));
 }
 
-/* 接口的网卡名（device，其次旧式 ifname）；'@别名' 不是网卡名，视为取不到 */
-function ifaceNetdev(cursor, name) {
-	let dev = cursor.get('network', name, 'device');
-	if (dev == null || dev == '') {
-		dev = cursor.get('network', name, 'ifname');
-	}
-	if (dev == null || dev == '' || substr(dev, 0, 1) == '@') {
+/* 读取单个字节计数器；失败返回 null（不做静默补 0，避免算出假速率） */
+function readCounter(path) {
+	let f;
+	try {
+		f = fs.open(path, 'r');
+	} catch (e) {
 		return null;
 	}
-	return dev;
+	if (!f) {
+		return null;
+	}
+	/* 计数最大 20 位（u64 上限约 1.8e19），多读几个字符不影响 int() 解析，
+	 * 但能防止读到一个非计数器文件（例如误配成 fifo/块设备）时无限读取。 */
+	let s = f.read(24);
+	f.close();
+	if (s == null) {
+		return null;
+	}
+	let v = int(s);
+	if (v == null) {
+		return null;
+	}
+	return v;
+}
+
+/* 网卡计数器是否可读；不可用的物理绑定不能直接用于流量采样。
+ * 注意顺序：ucode 不做函数声明提升（先声明后使用，与 JS 不同），
+ * readCounter 必须写在本题之上，否则 netrate 运行时报
+ * “access to undeclared variable readCounter”，整条 RPC 直接失败。 */
+function netdevUsable(dev) {
+	if (dev == null || dev == '') {
+		return false;
+	}
+	return readCounter('/sys/class/net/' + dev + '/statistics/rx_bytes') != null;
+}
+
+/* 接口绑定的网卡名：先 device，其次旧式 ifname；每级都要求计数器可读。
+ * list 写法（ifname: ['eth2','eth3']）取首项，与 usage.rs 的 first_netdev 同口径：
+ * uci get 对列表返回数组，直接当字符串用会被 substr() 报错，也会把整串当网卡名。
+ * '@别名' 不是物理网卡名，视为取不到。 */
+function ifaceNetdev(cursor, name) {
+	const options = ['device', 'ifname'];
+	for (let i = 0; i < length(options); i++) {
+		let raw = null;
+		try {
+			raw = cursor.get('network', name, options[i]);
+		} catch (e) {
+			raw = null;
+		}
+		if (type(raw) == 'array') {
+			raw = length(raw) > 0 ? raw[0] : null;
+		}
+		if (raw == null || raw == '') {
+			continue;
+		}
+		let tokens = split(trim(raw));
+		if (length(tokens) == 0) {
+			continue;
+		}
+		let dev = tokens[0];
+		if (substr(dev, 0, 1) == '@' || !netdevUsable(dev)) {
+			continue;
+		}
+		return dev;
+	}
+	return null;
+}
+
+/* 是否有 network 接口显式绑定了该物理网卡（device，其次旧式 ifname）。
+ * 与 usage.rs 的 iface_bound_to 同口径：一次 uci show network，逐行取
+ * network.<section>.device|ifname 的取值，按引号切开后比对网卡名，
+ * 这样 list 写法（'eth2' 'eth3'）也能命中。 */
+function netdevBoundByIface(netdev) {
+	let p;
+	try {
+		p = fs.popen('uci -q show network', 'r');
+	} catch (e) {
+		return false;
+	}
+	if (!p) {
+		return false;
+	}
+	let hit = false;
+	while (true) {
+		let line = p.read('line');
+		if (line == null) {
+			break;
+		}
+		let kv = split(trim(line), '=');
+		if (length(kv) != 2) {
+			continue;
+		}
+		let kp = split(kv[0], '.');
+		if (length(kp) != 3 || kp[0] != 'network'
+			|| (kp[2] != 'device' && kp[2] != 'ifname')) {
+			continue;
+		}
+		let parts = split(kv[1], "'");
+		for (let i = 0; i < length(parts); i++) {
+			if (trim(parts[i]) == netdev) {
+				hit = true;
+				break;
+			}
+		}
+		if (hit) {
+			break;
+		}
+	}
+	p.close();
+	return hit;
+}
+
+/* 固件里显式绑定模组网口的其它接口（例如 wan 直接 option device 'eth2'）。
+ * 网口自动模式下 init.d 会复用既有接口而不创建 MT5700M，
+ * 「MT5700M 不存在」并不等于「没有模组绑定」，必须先确认绑定关系，
+ * 确认不到才允许退回 LAN。 */
+function boundModemNetdev() {
+	let usb;
+	try {
+		usb = detectUsbNetdev();
+	} catch (e) {
+		usb = null;
+	}
+	if (!netdevUsable(usb)) {
+		return null;
+	}
+	let bound = false;
+	try {
+		bound = netdevBoundByIface(usb);
+	} catch (e) {
+		bound = false;
+	}
+	return bound ? usb : null;
 }
 
 /*
- * 解析承载 5G 流量的网络设备名，与 init.d 的承载接口选择同口径：
- *   1) at-webserver.config.iface_v4 手动指定了接口 → 用该接口的网卡；
- *   2) 自动扫描（默认）→ 按 sysfs 找挂在 USB 总线上的网卡（承载的可能是固件自带的 wan）；
- *   3) 退回 MT5700M 接口的网卡，最后才是 eth2。
- * 不硬编码单一设备名，避免不同机型/接口命名下取不到计数。
+ * 解析流量统计使用的网络设备名（与 src/rust/src/usage.rs 的 detect_netdev 同语义）：
+ *   1) 模组自建接口 MT5700M 的物理绑定；用户修改 device/ifname 后，
+ *      下一次采样会直接使用修改后的网卡；
+ *   2) MT5700M 不存在或绑定不可用时，取固件中显式绑定模组网口的其它接口
+ *      （网口自动模式下 init.d 会生成这种复用配置，例如 wan 绑 eth2）；
+ *   3) 前两级都取不到时才退回 LAN；LAN 也未配置时用默认网桥名 br-lan。
+ * USB 扫描只作为第 2 步的定位手段，且必须确认确有接口绑定才采用，
+ * 不允许用它覆盖用户在网络接口页面设置的物理绑定。
  */
 function detectModemDevice() {
-	let dev = null;
-	let cursor = null;
+	let cursor;
 	try {
 		cursor = uci.cursor();
-		let name = cursor.get('at-webserver', 'config', 'iface_v4');
-		if (name != null && name != '' && name != 'auto' && match(name, /^[A-Za-z0-9_]+$/)) {
-			dev = ifaceNetdev(cursor, name);
-		}
+	} catch (e) {
+		return 'br-lan';
+	}
+
+	let dev = null;
+	try {
+		dev = ifaceNetdev(cursor, 'MT5700M');
 	} catch (e) {
 		dev = null;
 	}
-	if (dev == null || dev == '') {
-		dev = detectUsbNetdev();
-	}
-	if ((dev == null || dev == '') && cursor != null) {
+	if (dev == null) {
 		try {
-			dev = ifaceNetdev(cursor, 'MT5700M');
+			dev = boundModemNetdev();
 		} catch (e) {
 			dev = null;
 		}
 	}
-	if (dev == null || dev == '') {
-		dev = 'eth2';
+	if (dev == null) {
+		try {
+			dev = ifaceNetdev(cursor, 'lan');
+		} catch (e) {
+			dev = null;
+		}
+	}
+	if (dev == null) {
+		dev = 'br-lan';
 	}
 	return dev;
 }
@@ -532,33 +664,7 @@ function tcpHasListen(tcpContent, port) {
 	return false;
 }
 
-/* 读取单个字节计数器；失败返回 null（不做静默补 0，避免算出假速率） */
-function readCounter(path) {
-	let f;
-	try {
-		f = fs.open(path, 'r');
-	} catch (e) {
-		return null;
-	}
-	if (!f) {
-		return null;
-	}
-	/* 计数最大 20 位（u64 上限约 1.8e19），多读几个字符不影响 int() 解析，
-	 * 但能防止读到一个非计数器文件（例如误配成 fifo/块设备）时无限读取。 */
-	let s = f.read(24);
-	f.close();
-	if (s == null) {
-		return null;
-	}
-	let v = int(s);
-	if (v == null) {
-		return null;
-	}
-	return v;
-}
-
-/*
- * 取网络接口累计字节数（只读，不累加任何东西）。
+/* 取网络接口累计字节数（只读，不累加任何东西）。
  *
  * 实时速率由前端按「两次采样差 / 时间差」计算；累计使用量改由 Rust 后端
  * 常驻采样统计（见 src/rust/src/usage.rs），与本方法无关 —— 那样才能做到
@@ -675,6 +781,38 @@ function usbCall(req) {
 	}
 	let mbps = int(speed) || 0;
 	return { success: true, speed_mbps: mbps, product: product, version: version };
+}
+
+/*
+ * 后端的 { id, error:{ message, ... } } 应答 → ucode 插件交给前端的扁平错误对象。
+ *
+ * 为什么要单独成函数：错误对象里的 cause 等字段是「分层预算」这套设计的判据
+ * （前端据它区分超时 / 端口未监听 / 熔断，见 rpc.js 的 noteCommandFailure），
+ * 而旧实现只把 message 搬出来，其余字段全丢，前端只能一律按「模组 ERROR」处理。
+ * 这里把它们平移到顶层，与业务结果形态（resp.cause / resp.error）保持同一套读法。
+ *
+ * 只搬标量：嵌套对象/数组不进错误对象，避免前端拿到形状不确定的字段。
+ *
+ * 注意顺序：ucode 不做函数声明提升，本函数必须写在 rpcCall 之上 ——
+ * 它只会在后端出错时被调用，一旦顺序反了，故障态下这条 catch 分支自己先抛
+ * ReferenceError，前端看到的就不是结构化错误而是 “Unknown error”。
+ */
+function backendErrorShape(err, msg) {
+	let out = { success: false, cause: 'backend-error' };
+	let ks = keys(err);
+	for (let i = 0; i < length(ks); i++) {
+		let k = ks[i];
+		if (k == 'message') {
+			continue;
+		}
+		let v = err[k];
+		if (v == null || type(v) == 'object' || type(v) == 'array') {
+			continue;
+		}
+		out[k] = v;
+	}
+	out.error = msg;
+	return out;
 }
 
 /*
@@ -896,34 +1034,6 @@ function rpcCall(method, params, timeoutSec) {
 	} catch (e) {
 		return { success: false, error: '解析应答失败: ' + e.message, cause: 'parse-failed' };
 	}
-}
-
-/*
- * 后端的 { id, error:{ message, ... } } 应答 → ucode 插件交给前端的扁平错误对象。
- *
- * 为什么要单独成函数：错误对象里的 cause 等字段是「分层预算」这套设计的判据
- * （前端据它区分超时 / 端口未监听 / 熔断，见 rpc.js 的 noteCommandFailure），
- * 而旧实现只把 message 搬出来，其余字段全丢，前端只能一律按「模组 ERROR」处理。
- * 这里把它们平移到顶层，与业务结果形态（resp.cause / resp.error）保持同一套读法。
- *
- * 只搬标量：嵌套对象/数组不进错误对象，避免前端拿到形状不确定的字段。
- */
-function backendErrorShape(err, msg) {
-	let out = { success: false, cause: 'backend-error' };
-	let ks = keys(err);
-	for (let i = 0; i < length(ks); i++) {
-		let k = ks[i];
-		if (k == 'message') {
-			continue;
-		}
-		let v = err[k];
-		if (v == null || type(v) == 'object' || type(v) == 'array') {
-			continue;
-		}
-		out[k] = v;
-	}
-	out.error = msg;
-	return out;
 }
 
 return {

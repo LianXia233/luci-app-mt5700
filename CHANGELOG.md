@@ -8,7 +8,23 @@
 
 ---
 
-## Unreleased
+## v1.30.10（2026-11-03）
+
+### fix(usage) 流量统计改用模组物理绑定选网卡，不再被 USB 扫描与逻辑接口配置带偏
+
+> 原探测链是四段依次尝试：`at-webserver.iface_v4` → sysfs 扫 USB 网卡 → `network.MT5700M.device` → 硬编码 `eth2`。它回答的是「哪个接口在承载」而不是「用户指定的物理口是哪个」，两处都会取错：USB 扫描按目录序命中第一个挂在 USB 总线上的网卡，模组换口或存在多个 USB 网卡时可能采到非承载口；`eth2` 兜底在多网口机型上更是直接采错设备。探测结果还被缓存，用户改完物理绑定要等计数器读失败才会重新探测。
+
+- **fix(usage) 选网卡口径收敛为「模组自建接口 → 固件绑定的模组网口 → LAN → `br-lan`」**：`usage.rs` 与 `mt5700.uc` 同改为读 `network.MT5700M` 的 `device` / `ifname`，取不到再回落固件里显式绑定模组网口的其它接口，最后才退 `network.lan`，都没有才用 `br-lan`。用户在网络接口页面把模组口的物理设备改成 `usb0` / `eth3`，统计立刻跟着走
+- **fix(usage) 不再让 USB 扫描覆盖手动绑定**：`detectUsbNetdev()` / `detect_usb_netdev()` 退出优先级判定，只在模组自建接口缺失时作为第 2 级定位手段，且必须先用 `uci show network` 确认确有接口绑定该网卡才采用；`iface_v4` 也退出这条选网卡链路（该选项仍用于 init.d 拉起承载接口，语义不变）
+- **fix(usage) 修掉本次改动引入的回归：`MT5700M` 不存在时会误把 LAN 当模组口**：`iface_v4=auto` 且固件已有接口（如 `wan`）直接绑定模组网口时，init.d 会复用该接口而不创建 `network.MT5700M`，旧实现只看 `MT5700M` → `lan`，统计因此整段变成 LAN 流量。选网卡改为三阶段：① `network.MT5700M` 的 `device` / `ifname` → ② 固件中显式绑定模组网口的其它接口（USB 扫描定位网卡 + `uci show network` 确认绑定）→ ③ `network.lan` → ④ `br-lan`，**第 3 步只在前两步都取不到时生效**。`usage.rs` 与 `mt5700.uc` 同语义，两边都按此顺序实现
+- **fix(usage) list 形式绑定取首项**：`list ifname ['eth2','eth3']` 这类写法此前在 `.uc` 侧直接进 `substr()`，被判为不可用而回落 `br-lan`，`usage.rs` 侧则把整串 `eth2 eth3` 当成一个网卡名；两边统一为「数组取首项 / 空白分隔取第一个」
+- **fix(usage) 去掉网卡缓存**：`UsageTracker.device` 与其 `Mutex` 一并移除，每轮采样重新解析绑定。改动前必须先读到一次失败才会重探测，改动后下一轮 1 秒采样即生效
+- **chore(usage) 兜底名 `eth2` → `br-lan`**：`FALLBACK_NETDEV` 改为 LAN 网桥名，读不到计数时宁可统计 LAN 也不去猜一个不存在的设备名
+- **test(usage)** 新增 `tests/netrate-interface-test.js`（用 `vm` 抽取 `.uc` 里的接口选择函数，**10/10 通过**），覆盖 MT5700M 优先、改绑生效、计数器不可读退 LAN、未配置退 LAN、旧式 `ifname`、全空退 `br-lan`，以及本轮补的「无 MT5700M 但 `wan` 直绑 / `ifname` 绑 `eth2` 取 `eth2`」「只扫到 USB 网卡但无接口绑定不得覆盖 LAN」「`ifname` 为数组时取首项」；另断言抽取出的代码段中 `detectUsbNetdev()` 只能出现在第 2 级兜底函数内、`iface_v4` 不得出现、`readCounter` / `netdevUsable` 的声明顺序符合 ucode 无提升的约束；`cargo test` 补 `select_netdev` 四条单测（模组自建接口优先且不触发后两级、无 MT5700M 但固件已绑 `eth2` 时取 `eth2`、前两级都取不到才退 LAN、`uci` 列表取值取第一个）
+- **fix(rpc) 实机验证发现并修掉 `netrate` 整体失效：ucode 没有函数声明提升**：`netdevUsable()` 新调的 `readCounter()` 写在几百行之后。ucode 与 JS 不同，**不做声明提升**，加载期不报错、`ucode -c` 也查不出来，直到第一次调用 `netrate` 才抛 `access to undeclared variable readCounter`，rpcd 侧表现是整条 ubus 方法返回 `Unknown error`（实测 `ubus call mt5700 netrate` 退出码 247，`usage` / `usb` 不受影响，因此本地 Node 测试全绿也看不出来）。修法是把 `readCounter()` 连同注释移到 `netdevUsable()` 之上，并在两处函数上写明「ucode 无提升、被调函数必须文本在先」
+- **fix(rpc) 顺手修掉同族的既存前置引用 `rpcCall() → backendErrorShape()`**：该函数只在后端返回错误对象时被调用，顺序反了意味着**故障态下 catch 分支自己先抛 ReferenceError**，前端看到的不是结构化错误而是 `Unknown error`。属本次之前就存在的隐患，随同一改动一并把 `backendErrorShape()` 移到 `rpcCall()` 之前
+- **test(ucode) 新增 `tests/ucode-decl-order-test.js`（守卫，CI 自动纳入）**：对仓库内所有 `.uc` 做静态顺序检查 —— 去掉注释与字符串后，任何顶层函数都不得调用文本上更晚声明的顶层函数。已验证其拦截能力：把 `.uc` 回退到改动前状态，该测试立刻报出上述两处前置引用并非零退出；`tests/netrate-interface-test.js` 另加一条顺序断言（`readCounter` 必须声明在 `netdevUsable` 之前），并改为通过 `fs` 桩跑**真实** `readCounter`，而不是把它整个替换掉
+- **note(verify) Rust 侧实机验证记录**（同一台设备，仅动 `/usr/bin/at-webserver-rust`，未触碰任何 IMEI / 串号相关命令，只跑了 `AT+CGMM` 取机型名）：用 WSL（Debian）+ `aarch64-unknown-linux-musl` 目标 + musl.cc 交叉 gcc（编译 `ring` 的 C/asm）+ zig 作链接器（rustc 传的 `-lunwind` 在该工具链不存在，与 CI 同理由 zig 负责 crt 与 libunwind）编出 `ELF aarch64, statically linked, stripped` 2,666,280 B（现装包产物 2,668,993 B，量级一致）。部署前核对 `git diff v1.30.9 HEAD -- src/rust` 仅 `usage.rs` + `Cargo.lock`，确认带上去的只有本次修复。实测：① 重启后累计值连续不归零（`total_rx` 75,043,017,637 → 75,076,898,728，`start_ts` 不变）；② 30.1 s 窗口内 `usage` 增量 5,716,065 B 对 `eth2` sysfs 增量 5,723,271 B，**偏差 0.13%**，确认采样源就是模组物理口；③ **改绑即时生效**——未提交 UCI 把 `network.MT5700M.device` 改成 `eth9`（计数器不可读）后 3 秒内 `usage.device` 变为 `br-lan`，改回 `eth2` 立即恢复，`uci revert` 后仍为 `eth2`，累计值全程连续（这正是新旧实现的分水岭：旧二进制缓存网卡名，会继续报 `eth2`）；④ `netrate` / `usb` / `at` 方法与 LuCI 页面均正常，`logread` 无 panic 与报错。验证后已还原原二进制并重启，md5 复核一致、UCI 无遗留改动
 
 ### docs(README) 勘误：开箱下限由 22.03 修正为 23.05
 
