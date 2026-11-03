@@ -114,6 +114,15 @@ fn netdev_usable(dev: &str) -> bool {
         && std::path::Path::new(&format!("/sys/class/net/{dev}/statistics/rx_bytes")).exists()
 }
 
+/// 取 UCI 取值里的第一个网卡名。
+///
+/// `uci get` 对列表型取值输出的是空格分隔的多个值（如 `eth0 eth1`），
+/// 旧固件把 `device` / `ifname` 写成 list 时只能取首项，否则整串会被当成
+/// 一个不存在的网卡名而误判为不可用。
+fn first_netdev(raw: &str) -> &str {
+    raw.split_whitespace().next().unwrap_or("")
+}
+
 /// 读取逻辑接口当前绑定的物理网卡，并确认计数器可读。
 fn uci_netdev(iface: &str) -> Option<String> {
     for option in ["device", "ifname"] {
@@ -127,25 +136,102 @@ fn uci_netdev(iface: &str) -> Option<String> {
         if !out.status.success() {
             continue;
         }
-        let dev = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if dev.is_empty() || dev.starts_with('@') || !netdev_usable(&dev) {
+        let raw = String::from_utf8_lossy(&out.stdout);
+        let dev = first_netdev(&raw);
+        if dev.is_empty() || dev.starts_with('@') || !netdev_usable(dev) {
             continue;
         }
-        return Some(dev);
+        return Some(dev.to_string());
     }
     None
 }
 
-/// 模组接口的物理绑定优先，LAN 兜底；仅在需要时读取 LAN。
-fn select_netdev(modem: Option<String>, lan: impl FnOnce() -> Option<String>) -> String {
+/// 挂在 USB 总线上的第一个网卡名，口径与 init.d 的 `detect_usb_netdev` 一致
+/// （跳过 `lo` 与 `br-*`，按网卡名排序后取首个命中）。
+///
+/// 只在「模组自建接口缺失」的兜底路径里用来定位模组网口，不参与
+/// `MT5700M` 绑定优先级，避免 USB 目录序反过来覆盖用户显式绑定。
+fn usb_netdev() -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir("/sys/class/net")
+        .ok()?
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "lo" && !name.starts_with("br-"))
+        .collect();
+    names.sort();
+    for name in names {
+        let Ok(link) = std::fs::canonicalize(format!("/sys/class/net/{name}/device")) else {
+            continue;
+        };
+        if link.to_string_lossy().contains("usb") {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// 是否有 network 接口显式绑定了该物理网卡（`device`，其次旧式 `ifname`）。
+///
+/// 用一次 `uci show network` 拿整份取值，避免逐个接口起子进程。
+fn iface_bound_to(netdev: &str) -> bool {
+    let Ok(out) = std::process::Command::new("uci")
+        .args(["-q", "show", "network"])
+        .output()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Some((key, raw)) = line.split_once('=') else {
+            continue;
+        };
+        let mut parts = key.split('.');
+        let (Some("network"), Some(_section), Some(option)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        if parts.next().is_some() || option != "device" && option != "ifname" {
+            continue;
+        }
+        // 取值形如 'eth2' 或 'eth0' 'eth1'，逐个比对引号内的网卡名。
+        if raw.split('\'').any(|token| token.trim() == netdev) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 固件里显式绑定模组网口的其它接口（例如 `wan` 直接带 `option device 'eth2'`）。
+///
+/// `iface_v4=auto` 时 init.d 会优先复用这种接口而不创建 `MT5700M`，因此
+/// 「`MT5700M` 不存在」并不等于「没有模组绑定」，这里必须先确认绑定关系，
+/// 确认不到才允许退回 LAN。
+fn modem_bound_netdev() -> Option<String> {
+    let usb = usb_netdev()?;
+    (netdev_usable(&usb) && iface_bound_to(&usb)).then_some(usb)
+}
+
+/// 解析顺序：模组自建接口的绑定 → 固件里绑定模组网口的其它接口 → LAN → `br-lan`。
+/// 后两级用闭包延迟求值，正常场景只做一次 `uci` 查询。
+fn select_netdev(
+    modem: Option<String>,
+    bound: impl FnOnce() -> Option<String>,
+    lan: impl FnOnce() -> Option<String>,
+) -> String {
     modem
+        .or_else(bound)
         .or_else(lan)
         .unwrap_or_else(|| FALLBACK_NETDEV.to_string())
 }
 
 /// 每次采样重新读取 UCI，使用户修改物理绑定后无需重启统计进程。
 fn detect_netdev() -> String {
-    select_netdev(uci_netdev("MT5700M"), || uci_netdev("lan"))
+    select_netdev(uci_netdev("MT5700M"), modem_bound_netdev, || {
+        uci_netdev("lan")
+    })
 }
 
 /// 从磁盘加载状态：优先内存文件（最新），缺失时回退持久化文件（重启后）。
@@ -508,20 +594,49 @@ mod tests {
     #[test]
     fn modem_physical_binding_has_priority() {
         assert_eq!(
-            select_netdev(Some("usb0".into()), || Some("br-lan".into())),
+            select_netdev(
+                Some("usb0".into()),
+                || panic!("已存在 MT5700M 时不应再扫描 USB 网卡"),
+                || panic!("已存在 MT5700M 时不应查询 LAN")
+            ),
             "usb0"
         );
         assert_eq!(
-            select_netdev(Some("eth3".into()), || Some("br-lan".into())),
+            select_netdev(
+                Some("eth3".into()),
+                || panic!("已存在 MT5700M 时不应再扫描 USB 网卡"),
+                || panic!("已存在 MT5700M 时不应查询 LAN")
+            ),
             "eth3",
             "用户修改后的模组物理绑定必须直接生效"
         );
     }
 
     #[test]
-    fn lan_is_used_when_modem_binding_is_unavailable() {
-        assert_eq!(select_netdev(None, || Some("br-lan".into())), "br-lan");
-        assert_eq!(select_netdev(None, || None), FALLBACK_NETDEV);
+    fn firmware_bound_modem_iface_is_used_without_mt5700m() {
+        // iface_v4=auto 且固件已有 wan 绑 eth2 时不会创建 MT5700M，
+        // 此时必须取 wan 的绑定，而不是回落 br-lan（否则统计变成 LAN 流量）。
+        assert_eq!(
+            select_netdev(None, || Some("eth2".into()), || Some("br-lan".into())),
+            "eth2"
+        );
+    }
+
+    #[test]
+    fn lan_is_used_only_when_both_modem_paths_are_unavailable() {
+        assert_eq!(
+            select_netdev(None, || None, || Some("br-lan".into())),
+            "br-lan"
+        );
+        assert_eq!(select_netdev(None, || None, || None), FALLBACK_NETDEV);
+    }
+
+    #[test]
+    fn first_netdev_takes_first_token_of_uci_list() {
+        // uci get 对 list 型取值输出空格分隔的多个值
+        assert_eq!(first_netdev("eth2\n"), "eth2");
+        assert_eq!(first_netdev("eth0 eth1"), "eth0");
+        assert_eq!(first_netdev(""), "");
     }
 
     #[test]
