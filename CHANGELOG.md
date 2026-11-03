@@ -19,6 +19,10 @@
 - **fix(usage) 去掉网卡缓存**：`UsageTracker.device` 与其 `Mutex` 一并移除，每轮采样重新解析绑定。改动前必须先读到一次失败才会重探测，改动后下一轮 1 秒采样即生效
 - **chore(usage) 兜底名 `eth2` → `br-lan`**：`FALLBACK_NETDEV` 改为 LAN 网桥名，读不到计数时宁可统计 LAN 也不去猜一个不存在的设备名
 - **test(usage)** 新增 `tests/netrate-interface-test.js`（用 `vm` 抽取 `.uc` 里的接口选择函数，**6/6 通过**），除断言六种配置下的取值外，另断言抽取出的代码段中不得再出现 `detectUsbNetdev()` 与 `iface_v4` —— 防止这两个入口日后被重新接回；`cargo test` 补 `select_netdev` 两条单测（物理绑定优先、模组不可用时退 LAN）
+- **fix(rpc) 实机验证发现并修掉 `netrate` 整体失效：ucode 没有函数声明提升**：`netdevUsable()` 新调的 `readCounter()` 写在几百行之后。ucode 与 JS 不同，**不做声明提升**，加载期不报错、`ucode -c` 也查不出来，直到第一次调用 `netrate` 才抛 `access to undeclared variable readCounter`，rpcd 侧表现是整条 ubus 方法返回 `Unknown error`（实测 `ubus call mt5700 netrate` 退出码 247，`usage` / `usb` 不受影响，因此本地 Node 测试全绿也看不出来）。修法是把 `readCounter()` 连同注释移到 `netdevUsable()` 之上，并在两处函数上写明「ucode 无提升、被调函数必须文本在先」
+- **fix(rpc) 顺手修掉同族的既存前置引用 `rpcCall() → backendErrorShape()`**：该函数只在后端返回错误对象时被调用，顺序反了意味着**故障态下 catch 分支自己先抛 ReferenceError**，前端看到的不是结构化错误而是 `Unknown error`。属本次之前就存在的隐患，随同一改动一并把 `backendErrorShape()` 移到 `rpcCall()` 之前
+- **test(ucode) 新增 `tests/ucode-decl-order-test.js`（守卫，CI 自动纳入）**：对仓库内所有 `.uc` 做静态顺序检查 —— 去掉注释与字符串后，任何顶层函数都不得调用文本上更晚声明的顶层函数。已验证其拦截能力：把 `.uc` 回退到改动前状态，该测试立刻报出上述两处前置引用并非零退出；`tests/netrate-interface-test.js` 另加一条顺序断言（`readCounter` 必须声明在 `netdevUsable` 之前），并改为通过 `fs` 桩跑**真实** `readCounter`，而不是把它整个替换掉
+- **note(verify) 实机验证记录**（ImmortalWRT mediatek/filogic aarch64，`luci-app-mt5700 1.30.9`，`network.MT5700M.device='eth2'`，`eth2` 即 `usb2/2-1/2-1:2.0`）：部署修复版后 `netrate` 恢复，`device=eth2` 且与 `/sys/class/net/eth2/statistics` 双读一致（差值在采样间隔内）；用**未提交**的 UCI 改动验证「改绑即时生效」——`network.MT5700M.device=eth9`（计数器不可读）时 `netrate` 立即回落到 `br-lan`，改回 `eth2` 立即恢复，`uci revert` 后仍为 `eth2`，全程未 commit、无残留改动；`usage` / `usb` 方法与 LuCI 页面 `admin/modem/5g/status`（HTTP 200，标题「网络状态」）均正常。验证后已还原设备原文件并重启 rpcd，md5 校验一致
 
 ### docs(README) 勘误：开箱下限由 22.03 修正为 23.05
 

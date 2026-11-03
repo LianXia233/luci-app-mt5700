@@ -446,7 +446,35 @@ function ifaceNetdev(cursor, name) {
 	return dev;
 }
 
-/* 网卡计数器是否可读；不可用的物理绑定不能直接用于流量采样 */
+/* 读取单个字节计数器；失败返回 null（不做静默补 0，避免算出假速率） */
+function readCounter(path) {
+	let f;
+	try {
+		f = fs.open(path, 'r');
+	} catch (e) {
+		return null;
+	}
+	if (!f) {
+		return null;
+	}
+	/* 计数最大 20 位（u64 上限约 1.8e19），多读几个字符不影响 int() 解析，
+	 * 但能防止读到一个非计数器文件（例如误配成 fifo/块设备）时无限读取。 */
+	let s = f.read(24);
+	f.close();
+	if (s == null) {
+		return null;
+	}
+	let v = int(s);
+	if (v == null) {
+		return null;
+	}
+	return v;
+}
+
+/* 网卡计数器是否可读；不可用的物理绑定不能直接用于流量采样。
+ * 注意顺序：ucode 不做函数声明提升（先声明后使用，与 JS 不同），
+ * readCounter 必须写在本题之上，否则 netrate 运行时报
+ * “access to undeclared variable readCounter”，整条 RPC 直接失败。 */
 function netdevUsable(dev) {
 	if (dev == null || dev == '') {
 		return false;
@@ -540,33 +568,7 @@ function tcpHasListen(tcpContent, port) {
 	return false;
 }
 
-/* 读取单个字节计数器；失败返回 null（不做静默补 0，避免算出假速率） */
-function readCounter(path) {
-	let f;
-	try {
-		f = fs.open(path, 'r');
-	} catch (e) {
-		return null;
-	}
-	if (!f) {
-		return null;
-	}
-	/* 计数最大 20 位（u64 上限约 1.8e19），多读几个字符不影响 int() 解析，
-	 * 但能防止读到一个非计数器文件（例如误配成 fifo/块设备）时无限读取。 */
-	let s = f.read(24);
-	f.close();
-	if (s == null) {
-		return null;
-	}
-	let v = int(s);
-	if (v == null) {
-		return null;
-	}
-	return v;
-}
-
-/*
- * 取网络接口累计字节数（只读，不累加任何东西）。
+/* 取网络接口累计字节数（只读，不累加任何东西）。
  *
  * 实时速率由前端按「两次采样差 / 时间差」计算；累计使用量改由 Rust 后端
  * 常驻采样统计（见 src/rust/src/usage.rs），与本方法无关 —— 那样才能做到
@@ -683,6 +685,38 @@ function usbCall(req) {
 	}
 	let mbps = int(speed) || 0;
 	return { success: true, speed_mbps: mbps, product: product, version: version };
+}
+
+/*
+ * 后端的 { id, error:{ message, ... } } 应答 → ucode 插件交给前端的扁平错误对象。
+ *
+ * 为什么要单独成函数：错误对象里的 cause 等字段是「分层预算」这套设计的判据
+ * （前端据它区分超时 / 端口未监听 / 熔断，见 rpc.js 的 noteCommandFailure），
+ * 而旧实现只把 message 搬出来，其余字段全丢，前端只能一律按「模组 ERROR」处理。
+ * 这里把它们平移到顶层，与业务结果形态（resp.cause / resp.error）保持同一套读法。
+ *
+ * 只搬标量：嵌套对象/数组不进错误对象，避免前端拿到形状不确定的字段。
+ *
+ * 注意顺序：ucode 不做函数声明提升，本函数必须写在 rpcCall 之上 ——
+ * 它只会在后端出错时被调用，一旦顺序反了，故障态下这条 catch 分支自己先抛
+ * ReferenceError，前端看到的就不是结构化错误而是 “Unknown error”。
+ */
+function backendErrorShape(err, msg) {
+	let out = { success: false, cause: 'backend-error' };
+	let ks = keys(err);
+	for (let i = 0; i < length(ks); i++) {
+		let k = ks[i];
+		if (k == 'message') {
+			continue;
+		}
+		let v = err[k];
+		if (v == null || type(v) == 'object' || type(v) == 'array') {
+			continue;
+		}
+		out[k] = v;
+	}
+	out.error = msg;
+	return out;
 }
 
 /*
@@ -904,34 +938,6 @@ function rpcCall(method, params, timeoutSec) {
 	} catch (e) {
 		return { success: false, error: '解析应答失败: ' + e.message, cause: 'parse-failed' };
 	}
-}
-
-/*
- * 后端的 { id, error:{ message, ... } } 应答 → ucode 插件交给前端的扁平错误对象。
- *
- * 为什么要单独成函数：错误对象里的 cause 等字段是「分层预算」这套设计的判据
- * （前端据它区分超时 / 端口未监听 / 熔断，见 rpc.js 的 noteCommandFailure），
- * 而旧实现只把 message 搬出来，其余字段全丢，前端只能一律按「模组 ERROR」处理。
- * 这里把它们平移到顶层，与业务结果形态（resp.cause / resp.error）保持同一套读法。
- *
- * 只搬标量：嵌套对象/数组不进错误对象，避免前端拿到形状不确定的字段。
- */
-function backendErrorShape(err, msg) {
-	let out = { success: false, cause: 'backend-error' };
-	let ks = keys(err);
-	for (let i = 0; i < length(ks); i++) {
-		let k = ks[i];
-		if (k == 'message') {
-			continue;
-		}
-		let v = err[k];
-		if (v == null || type(v) == 'object' || type(v) == 'array') {
-			continue;
-		}
-		out[k] = v;
-	}
-	out.error = msg;
-	return out;
 }
 
 return {
