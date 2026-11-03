@@ -10,6 +10,16 @@
 
 ## Unreleased
 
+### fix(usage) 流量统计改用模组物理绑定选网卡，不再被 USB 扫描与逻辑接口配置带偏
+
+> 原探测链是四段依次尝试：`at-webserver.iface_v4` → sysfs 扫 USB 网卡 → `network.MT5700M.device` → 硬编码 `eth2`。它回答的是「哪个接口在承载」而不是「用户指定的物理口是哪个」，两处都会取错：USB 扫描按目录序命中第一个挂在 USB 总线上的网卡，模组换口或存在多个 USB 网卡时可能采到非承载口；`eth2` 兜底在多网口机型上更是直接采错设备。探测结果还被缓存，用户改完物理绑定要等计数器读失败才会重新探测。
+
+- **fix(usage) 选网卡口径收敛为「模组物理绑定 → LAN → `br-lan`」**：`usage.rs` 与 `mt5700.uc` 同改为读 `network.MT5700M` 的 `device` / `ifname`，不可用再退 `network.lan` 的同名选项，都没有才用 `br-lan`。用户在网络接口页面把模组口的物理设备改成 `usb0` / `eth3`，统计立刻跟着走
+- **fix(usage) 不再让 USB 扫描覆盖手动绑定**：删掉 `detectUsbNetdev()` 与 `detect_usb_netdev()`，流量采样不再自行猜测承载网卡；`iface_v4` 也退出这条链路（该选项仍用于 init.d 拉起承载接口，语义不变）
+- **fix(usage) 去掉网卡缓存**：`UsageTracker.device` 与其 `Mutex` 一并移除，每轮采样重新解析绑定。改动前必须先读到一次失败才会重探测，改动后下一轮 1 秒采样即生效
+- **chore(usage) 兜底名 `eth2` → `br-lan`**：`FALLBACK_NETDEV` 改为 LAN 网桥名，读不到计数时宁可统计 LAN 也不去猜一个不存在的设备名
+- **test(usage)** 新增 `tests/netrate-interface-test.js`（用 `vm` 抽取 `.uc` 里的接口选择函数，**6/6 通过**），除断言六种配置下的取值外，另断言抽取出的代码段中不得再出现 `detectUsbNetdev()` 与 `iface_v4` —— 防止这两个入口日后被重新接回；`cargo test` 补 `select_netdev` 两条单测（物理绑定优先、模组不可用时退 LAN）
+
 ### docs(README) 勘误：开箱下限由 22.03 修正为 23.05
 
 > 对照上游 `openwrt/openwrt` 与 `openwrt/luci` 各分支源码逐项核实后修正，仅动文档，不涉及任何代码。
