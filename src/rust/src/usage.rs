@@ -33,7 +33,7 @@
 //!
 //! - 计数器归零（接口 flap / 重新拨号）表现为负增量：**只重置基线、不累加**，
 //!   避免把一次归零误记成一笔巨额流量。
-//! - 承载网卡变了（`iface_v4` 改动 / 模组换了网口）：同样只重置基线，累计值保留。
+//! - 承载网卡变了（模组接口的物理绑定改动 / 模组换了网口）：同样只重置基线，累计值保留。
 //! - 峰值只在正常采样节拍内计算；采样间隔异常拉长（进程被阻塞）时跳过，
 //!   免得把一段长时间的低均值当成峰值。
 
@@ -70,11 +70,8 @@ const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// 把闪存寿命影响压到最低；代价是重启后最多回退 10 分钟的用量。
 const FLASH_INTERVAL_SECS: i64 = 600;
 
-/// 承载网卡探测的兜底名。
-///
-/// 与 init.d / rpcd ucode 的探测链保持一致：UCI 指定接口 → sysfs 上挂在
-/// USB 总线上的网卡 → `network.MT5700M` 的 device → `eth2`。
-const FALLBACK_NETDEV: &str = "eth2";
+/// LAN 未配置物理设备时的兜底网桥名。
+const FALLBACK_NETDEV: &str = "br-lan";
 
 /// 使用量状态（落盘的 schema）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,69 +108,44 @@ fn read_counter(path: &str) -> Option<u64> {
     raw.trim().parse::<u64>().ok()
 }
 
-/// 在 `/sys/class/net` 里找第一个挂在 USB 总线上的网卡。
-///
-/// 与 ucode 的 `detectUsbNetdev` 同口径：跳过 `lo` 与 `br-*`，要求存在
-/// `device` 链接且其真实路径含 `usb`。
-fn detect_usb_netdev() -> Option<String> {
-    let entries = std::fs::read_dir("/sys/class/net").ok()?;
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == "lo" || name.starts_with("br-") {
-            continue;
-        }
-        let device = entry.path().join("device");
-        let Ok(real) = std::fs::canonicalize(&device) else { continue };
-        if real.to_string_lossy().contains("usb") {
-            return Some(name);
-        }
-    }
-    None
-}
-
 /// 网卡是否存在且计数器可读。
 fn netdev_usable(dev: &str) -> bool {
     !dev.is_empty()
         && std::path::Path::new(&format!("/sys/class/net/{dev}/statistics/rx_bytes")).exists()
 }
 
-/// 解析承载网卡名：UCI 指定接口 → USB 网卡 → `network.MT5700M` → `eth2`。
-///
-/// 只在启动时与「当前网卡读不到计数」时调用，不走热路径。
-fn detect_netdev() -> String {
-    // 1) UCI 显式指定了承载接口
-    if let Ok(iface) = std::env::var("AT_WEBSERVER_IFACE_V4") {
-        let iface = iface.trim().to_string();
-        if !iface.is_empty() && iface != "auto" {
-            if let Ok(dev) = std::process::Command::new("uci")
-                .args(["-q", "get", &format!("network.{iface}.device")])
-                .output()
-            {
-                let dev = String::from_utf8_lossy(&dev.stdout).trim().to_string();
-                if netdev_usable(&dev) {
-                    return dev;
-                }
-            }
+/// 读取逻辑接口当前绑定的物理网卡，并确认计数器可读。
+fn uci_netdev(iface: &str) -> Option<String> {
+    for option in ["device", "ifname"] {
+        let key = format!("network.{iface}.{option}");
+        let Ok(out) = std::process::Command::new("uci")
+            .args(["-q", "get", &key])
+            .output()
+        else {
+            continue;
+        };
+        if !out.status.success() {
+            continue;
         }
-    }
-    // 2) sysfs 上挂在 USB 总线上的网卡（承载的可能是固件自带的 wan）
-    if let Some(dev) = detect_usb_netdev() {
-        if netdev_usable(&dev) {
-            return dev;
-        }
-    }
-    // 3) MT5700M 接口的网卡
-    if let Ok(out) = std::process::Command::new("uci")
-        .args(["-q", "get", "network.MT5700M.device"])
-        .output()
-    {
         let dev = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if netdev_usable(&dev) {
-            return dev;
+        if dev.is_empty() || dev.starts_with('@') || !netdev_usable(&dev) {
+            continue;
         }
+        return Some(dev);
     }
-    // 4) 兜底
-    FALLBACK_NETDEV.to_string()
+    None
+}
+
+/// 模组接口的物理绑定优先，LAN 兜底；仅在需要时读取 LAN。
+fn select_netdev(modem: Option<String>, lan: impl FnOnce() -> Option<String>) -> String {
+    modem
+        .or_else(lan)
+        .unwrap_or_else(|| FALLBACK_NETDEV.to_string())
+}
+
+/// 每次采样重新读取 UCI，使用户修改物理绑定后无需重启统计进程。
+fn detect_netdev() -> String {
+    select_netdev(uci_netdev("MT5700M"), || uci_netdev("lan"))
 }
 
 /// 从磁盘加载状态：优先内存文件（最新），缺失时回退持久化文件（重启后）。
@@ -226,8 +198,6 @@ pub struct UsageTracker {
     state: Mutex<UsageState>,
     /// 自动清零日：每月几号（存 UCI，与使用量是否持久化解耦）。
     reset_day: AtomicU32,
-    /// 已解析的承载网卡；读不到计数时重新探测。
-    device: Mutex<Option<String>>,
 }
 
 impl UsageTracker {
@@ -238,7 +208,6 @@ impl UsageTracker {
         Arc::new(UsageTracker {
             state: Mutex::new(load_state()),
             reset_day: AtomicU32::new(crate::monthly::normalize_day(reset_day)),
-            device: Mutex::new(None),
         })
     }
 
@@ -272,28 +241,16 @@ impl UsageTracker {
         self.persist(&snapshot, false).await;
     }
 
-    /// 读计数器；网卡变更或读不到时重新探测。
+    /// 读计数器；每次重新解析物理绑定，用户修改后下一轮采样即生效。
     async fn read_counters(&self) -> Option<(String, u64, u64)> {
-        let mut cached = self.device.lock().await;
-        let mut dev = cached.clone().unwrap_or_default();
-        if !netdev_usable(&dev) {
-            dev = detect_netdev();
-            *cached = Some(dev.clone());
-            log_info!("使用量统计承载网卡: {dev}");
-        }
-        drop(cached);
-
+        let dev = detect_netdev();
         let base = format!("/sys/class/net/{dev}/statistics");
         let rx = read_counter(&format!("{base}/rx_bytes"));
         let tx = read_counter(&format!("{base}/tx_bytes"));
         match (rx, tx) {
             (Some(rx), Some(tx)) => Some((dev, rx, tx)),
             _ => {
-                // 网卡消失了（接口 down / 换了口）：清掉缓存让下一轮重新探测
-                let mut cached = self.device.lock().await;
-                *cached = None;
-                drop(cached);
-                log_debug!("读不到 {dev} 的计数器，下轮重新探测承载网卡");
+                log_debug!("读不到 {dev} 的计数器，下轮重新解析物理绑定");
                 None
             }
         }
@@ -546,6 +503,25 @@ mod tests {
             start_ts: 100,
             ..UsageState::default()
         }
+    }
+
+    #[test]
+    fn modem_physical_binding_has_priority() {
+        assert_eq!(
+            select_netdev(Some("usb0".into()), || Some("br-lan".into())),
+            "usb0"
+        );
+        assert_eq!(
+            select_netdev(Some("eth3".into()), || Some("br-lan".into())),
+            "eth3",
+            "用户修改后的模组物理绑定必须直接生效"
+        );
+    }
+
+    #[test]
+    fn lan_is_used_when_modem_binding_is_unavailable() {
+        assert_eq!(select_netdev(None, || Some("br-lan".into())), "br-lan");
+        assert_eq!(select_netdev(None, || None), FALLBACK_NETDEV);
     }
 
     #[test]
