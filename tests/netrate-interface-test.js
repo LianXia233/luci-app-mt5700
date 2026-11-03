@@ -15,6 +15,15 @@ assert(start >= 0 && end > start, '无法抽取流量统计接口选择函数');
 const selectionSource = source.slice(start, end);
 assert(!selectionSource.includes('detectUsbNetdev()'), 'USB 扫描不得覆盖模组物理绑定');
 assert(!selectionSource.includes("iface_v4"), '流量统计不应再受逻辑承载接口配置影响');
+/* ucode 不做函数声明提升：被调函数必须文本上先声明。
+ * readCounter 若被移到 netdevUsable 之后，设备上 netrate 会在运行时报
+ * “access to undeclared variable readCounter”，整条 RPC 直接失败 ——
+ * Node 的 vm 有提升语义，测不出来，只能靠这条顺序断言兜底。 */
+assert(
+	selectionSource.indexOf('function readCounter(') >= 0 &&
+		selectionSource.indexOf('function readCounter(') < selectionSource.indexOf('function netdevUsable('),
+	'readCounter 必须声明在 netdevUsable 之前'
+);
 
 function detect(config, counters) {
 	const context = {
@@ -31,9 +40,24 @@ function detect(config, counters) {
 		substr: function (value, start, length) {
 			return String(value).substr(start, length);
 		},
-		readCounter: function (counterPath) {
-			const match = /^\/sys\/class\/net\/([^/]+)\/statistics\/rx_bytes$/.exec(counterPath);
-			return match && counters[match[1]] != null ? counters[match[1]] : null;
+		/* 走真实 readCounter：用 fs 桩提供 sysfs 视图，而不是替换 readCounter 本身 */
+		int: function (value) {
+			const n = Number(String(value).trim());
+			return Number.isFinite(n) ? n : null;
+		},
+		fs: {
+			open: function (filePath) {
+				const match = /^\/sys\/class\/net\/([^/]+)\/statistics\/rx_bytes$/.exec(filePath);
+				if (!match || counters[match[1]] == null) {
+					return null;
+				}
+				return {
+					read: function () {
+						return String(counters[match[1]]) + '\n';
+					},
+					close: function () { }
+				};
+			}
 		}
 	};
 	vm.createContext(context);
