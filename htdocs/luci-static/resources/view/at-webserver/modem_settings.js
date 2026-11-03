@@ -9,7 +9,7 @@
  * 模组设置页面：
  * - 设备信息（ATI / IMEI / 连接模式 AT+CONNECT? / USB 速率）、修改 IMEI（AT^PHYNUM，5 次确认）
  * - SIM 卡：槽位切换（SCICHG + HVSST + CFUN 重启）、热插拔（TDSIMHP）、PIN 状态/操作
- * - 射频与 5G 增强：飞行模式（CFUN）、NR 载波聚合 / VoNR / DSS（NRRCCAPQRY/CFG）
+ * - 射频与 5G 增强：飞行模式（CFUN）、NR/LTE 载波聚合 / VoNR / DSS（NRRCCAPQRY/CFG + ERRCCAPQRY/CFG）
  * - 设备控制：网卡速率（TDPCIELANCFG）、电源管理（TDPMCFG）
  * - 网络系统配置（SYSCFGEX）
  * - 温度保护（THERMAUTOFUN / THERMLD*）
@@ -468,6 +468,22 @@ return L.view.extend({
 		var caChk = caSwitch.querySelector('input');
 		rfCard._body.appendChild(Mt5700.formGroup('NR 载波聚合 (CA)', caSwitch, '开启后允许多个 5G 载波聚合成倍提升吞吐'));
 
+		var lteCaSwitch = Ui.switch(function (checked) {
+			return send('AT^ERRCCAPCFG=0,' + (checked ? 1 : 0)).then(function (res) {
+				if (res.success) {
+					Mt5700.success((checked ? '开启' : '关闭') + 'LTE 载波聚合成功');
+					return true;
+				}
+				Mt5700.error((checked ? '开启' : '关闭') + 'LTE 载波聚合失败');
+				return false;
+			}).catch(function () {
+				Mt5700.error('LTE 载波聚合设置失败');
+				return false;
+			});
+		});
+		var lteCaChk = lteCaSwitch.querySelector('input');
+		rfCard._body.appendChild(Mt5700.formGroup('LTE 载波聚合 (CA)', lteCaSwitch, '开启后允许多个 4G LTE 载波聚合成倍提升吞吐'));
+
 		var dssSwitch = Ui.switch(function (checked) {
 			return send('AT^NRRCCAPCFG=5,' + (checked ? 1 : 0) + ',0').then(function (res) {
 				if (res.success) {
@@ -515,6 +531,12 @@ return L.view.extend({
 				if (res.success && res.data) {
 					var m = atText(res).match(/\^NRRCCAPQRY:\s*5,(\d+),(\d+)/);
 					if (m) dssChk.checked = m[1] === '1';
+				}
+				return send('AT^ERRCCAPQRY=0');
+			}).then(function (res) {
+				if (res.success && res.data) {
+					var m = atText(res).match(/\^ERRCCAPQRY:\s*0,(\d+)/);
+					if (m) lteCaChk.checked = m[1] === '1';
 				}
 			}).catch(function () {});
 		}

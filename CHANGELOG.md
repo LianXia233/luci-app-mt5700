@@ -8,6 +8,18 @@
 
 ---
 
+## v1.30.11（2026-11-03）
+
+### feat(modem) modem-settings 页面新增 LTE 载波聚合 (CA) 开关，NR/LTE CA 均可读写状态
+
+> 原页面只有 NR CA 开关（`AT^NRRCCAPQRY/CFG`），缺少 LTE CA 开关。LTE CA 能力配置开关（`AT^ERRCCAPQRY=0` / `AT^ERRCCAPCFG=0,<0/1>`）在模组侧查询正常，但前端无法读取和控制。
+
+- **feat(modem) 新增「LTE 载波聚合 (CA)」开关控件**：在射频控制卡片的 NR CA 开关下方新增 LTE CA 开关，与 NR CA 开关风格一致。开启时下发 `AT^ERRCCAPCFG=0,1`，关闭时下发 `AT^ERRCCAPCFG=0,0`
+- **feat(modem) `fetchNRCapability()` 增加 LTE CA 状态查询**：页面加载时追加 `AT^ERRCCAPQRY=0` 查询，正则 `\^ERRCCAPQRY:\s*0,(\d+)` 匹配 para1，`'1'` 时开关显示开启，与 NR CA 查询逻辑一致
+- **兼容当前后端**：前端通过 `send()` → `rpcAt()` → ucode `at` 方法（透传无白名单）→ 后端 → 模组，不依赖后端巡检命令列表，无需修改后端或 ucode
+
+---
+
 ## v1.30.10（2026-11-03）
 
 ### fix(usage) 流量统计改用模组物理绑定选网卡，不再被 USB 扫描与逻辑接口配置带偏
