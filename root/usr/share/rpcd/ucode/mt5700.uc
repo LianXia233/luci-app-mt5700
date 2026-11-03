@@ -446,37 +446,45 @@ function ifaceNetdev(cursor, name) {
 	return dev;
 }
 
+/* 网卡计数器是否可读；不可用的物理绑定不能直接用于流量采样 */
+function netdevUsable(dev) {
+	if (dev == null || dev == '') {
+		return false;
+	}
+	return readCounter('/sys/class/net/' + dev + '/statistics/rx_bytes') != null;
+}
+
 /*
- * 解析承载 5G 流量的网络设备名，与 init.d 的承载接口选择同口径：
- *   1) at-webserver.config.iface_v4 手动指定了接口 → 用该接口的网卡；
- *   2) 自动扫描（默认）→ 按 sysfs 找挂在 USB 总线上的网卡（承载的可能是固件自带的 wan）；
- *   3) 退回 MT5700M 接口的网卡，最后才是 eth2。
- * 不硬编码单一设备名，避免不同机型/接口命名下取不到计数。
+ * 解析流量统计使用的网络设备名：
+ *   1) 优先读取模组接口 MT5700M 的物理绑定；用户修改 device/ifname 后，
+ *      下一次采样会直接使用修改后的网卡；
+ *   2) 模组接口不存在或物理绑定不可用时，退回 LAN；
+ *   3) LAN 也未配置时使用 OpenWrt 默认网桥名 br-lan。
+ * 不使用 USB 网卡扫描结果覆盖用户在网络接口页面设置的物理绑定。
  */
 function detectModemDevice() {
-	let dev = null;
-	let cursor = null;
+	let cursor;
 	try {
 		cursor = uci.cursor();
-		let name = cursor.get('at-webserver', 'config', 'iface_v4');
-		if (name != null && name != '' && name != 'auto' && match(name, /^[A-Za-z0-9_]+$/)) {
-			dev = ifaceNetdev(cursor, name);
-		}
+	} catch (e) {
+		return 'br-lan';
+	}
+
+	let dev = null;
+	try {
+		dev = ifaceNetdev(cursor, 'MT5700M');
 	} catch (e) {
 		dev = null;
 	}
-	if (dev == null || dev == '') {
-		dev = detectUsbNetdev();
-	}
-	if ((dev == null || dev == '') && cursor != null) {
+	if (!netdevUsable(dev)) {
 		try {
-			dev = ifaceNetdev(cursor, 'MT5700M');
+			dev = ifaceNetdev(cursor, 'lan');
 		} catch (e) {
 			dev = null;
 		}
 	}
-	if (dev == null || dev == '') {
-		dev = 'eth2';
+	if (!netdevUsable(dev)) {
+		dev = 'br-lan';
 	}
 	return dev;
 }
