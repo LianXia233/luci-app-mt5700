@@ -434,18 +434,6 @@ function detectUsbNetdev() {
 	return trim(substr(line, 7));
 }
 
-/* 接口的网卡名（device，其次旧式 ifname）；'@别名' 不是网卡名，视为取不到 */
-function ifaceNetdev(cursor, name) {
-	let dev = cursor.get('network', name, 'device');
-	if (dev == null || dev == '') {
-		dev = cursor.get('network', name, 'ifname');
-	}
-	if (dev == null || dev == '' || substr(dev, 0, 1) == '@') {
-		return null;
-	}
-	return dev;
-}
-
 /* 读取单个字节计数器；失败返回 null（不做静默补 0，避免算出假速率） */
 function readCounter(path) {
 	let f;
@@ -482,13 +470,114 @@ function netdevUsable(dev) {
 	return readCounter('/sys/class/net/' + dev + '/statistics/rx_bytes') != null;
 }
 
+/* 接口绑定的网卡名：先 device，其次旧式 ifname；每级都要求计数器可读。
+ * list 写法（ifname: ['eth2','eth3']）取首项，与 usage.rs 的 first_netdev 同口径：
+ * uci get 对列表返回数组，直接当字符串用会被 substr() 报错，也会把整串当网卡名。
+ * '@别名' 不是物理网卡名，视为取不到。 */
+function ifaceNetdev(cursor, name) {
+	const options = ['device', 'ifname'];
+	for (let i = 0; i < length(options); i++) {
+		let raw = null;
+		try {
+			raw = cursor.get('network', name, options[i]);
+		} catch (e) {
+			raw = null;
+		}
+		if (type(raw) == 'array') {
+			raw = length(raw) > 0 ? raw[0] : null;
+		}
+		if (raw == null || raw == '') {
+			continue;
+		}
+		let tokens = split(trim(raw));
+		if (length(tokens) == 0) {
+			continue;
+		}
+		let dev = tokens[0];
+		if (substr(dev, 0, 1) == '@' || !netdevUsable(dev)) {
+			continue;
+		}
+		return dev;
+	}
+	return null;
+}
+
+/* 是否有 network 接口显式绑定了该物理网卡（device，其次旧式 ifname）。
+ * 与 usage.rs 的 iface_bound_to 同口径：一次 uci show network，逐行取
+ * network.<section>.device|ifname 的取值，按引号切开后比对网卡名，
+ * 这样 list 写法（'eth2' 'eth3'）也能命中。 */
+function netdevBoundByIface(netdev) {
+	let p;
+	try {
+		p = fs.popen('uci -q show network', 'r');
+	} catch (e) {
+		return false;
+	}
+	if (!p) {
+		return false;
+	}
+	let hit = false;
+	while (true) {
+		let line = p.read('line');
+		if (line == null) {
+			break;
+		}
+		let kv = split(trim(line), '=');
+		if (length(kv) != 2) {
+			continue;
+		}
+		let kp = split(kv[0], '.');
+		if (length(kp) != 3 || kp[0] != 'network'
+			|| (kp[2] != 'device' && kp[2] != 'ifname')) {
+			continue;
+		}
+		let parts = split(kv[1], "'");
+		for (let i = 0; i < length(parts); i++) {
+			if (trim(parts[i]) == netdev) {
+				hit = true;
+				break;
+			}
+		}
+		if (hit) {
+			break;
+		}
+	}
+	p.close();
+	return hit;
+}
+
+/* 固件里显式绑定模组网口的其它接口（例如 wan 直接 option device 'eth2'）。
+ * 网口自动模式下 init.d 会复用既有接口而不创建 MT5700M，
+ * 「MT5700M 不存在」并不等于「没有模组绑定」，必须先确认绑定关系，
+ * 确认不到才允许退回 LAN。 */
+function boundModemNetdev() {
+	let usb;
+	try {
+		usb = detectUsbNetdev();
+	} catch (e) {
+		usb = null;
+	}
+	if (!netdevUsable(usb)) {
+		return null;
+	}
+	let bound = false;
+	try {
+		bound = netdevBoundByIface(usb);
+	} catch (e) {
+		bound = false;
+	}
+	return bound ? usb : null;
+}
+
 /*
- * 解析流量统计使用的网络设备名：
- *   1) 优先读取模组接口 MT5700M 的物理绑定；用户修改 device/ifname 后，
+ * 解析流量统计使用的网络设备名（与 src/rust/src/usage.rs 的 detect_netdev 同语义）：
+ *   1) 模组自建接口 MT5700M 的物理绑定；用户修改 device/ifname 后，
  *      下一次采样会直接使用修改后的网卡；
- *   2) 模组接口不存在或物理绑定不可用时，退回 LAN；
- *   3) LAN 也未配置时使用 OpenWrt 默认网桥名 br-lan。
- * 不使用 USB 网卡扫描结果覆盖用户在网络接口页面设置的物理绑定。
+ *   2) MT5700M 不存在或绑定不可用时，取固件中显式绑定模组网口的其它接口
+ *      （网口自动模式下 init.d 会生成这种复用配置，例如 wan 绑 eth2）；
+ *   3) 前两级都取不到时才退回 LAN；LAN 也未配置时用默认网桥名 br-lan。
+ * USB 扫描只作为第 2 步的定位手段，且必须确认确有接口绑定才采用，
+ * 不允许用它覆盖用户在网络接口页面设置的物理绑定。
  */
 function detectModemDevice() {
 	let cursor;
@@ -504,14 +593,21 @@ function detectModemDevice() {
 	} catch (e) {
 		dev = null;
 	}
-	if (!netdevUsable(dev)) {
+	if (dev == null) {
+		try {
+			dev = boundModemNetdev();
+		} catch (e) {
+			dev = null;
+		}
+	}
+	if (dev == null) {
 		try {
 			dev = ifaceNetdev(cursor, 'lan');
 		} catch (e) {
 			dev = null;
 		}
 	}
-	if (!netdevUsable(dev)) {
+	if (dev == null) {
 		dev = 'br-lan';
 	}
 	return dev;
