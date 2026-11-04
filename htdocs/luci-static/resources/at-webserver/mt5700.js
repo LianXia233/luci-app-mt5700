@@ -20,7 +20,7 @@ var MT5700_CSS_VERSION = '2.46.4';
 var GLOBAL_CSS_VERSION = '1.0.0';
 // 极简模式（Material Design 3）视觉层：只在 data-ui-mode="minimal" 时命中，
 // 全部规则带 html[data-ui-mode="minimal"] 前缀，普通模式零影响。
-var MT5700_MD3_CSS_VERSION = '1.0.0';
+var MT5700_MD3_CSS_VERSION = '1.0.1';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION);
@@ -715,13 +715,14 @@ var Mt5700 = (function () {
 
 		var art = E('div', { 'class': 'mt5700-hero-art' });
 
-		/* 全局 UI 模式切换入口：12 个视图的页面骨架都由 Mt5700.page 生成，
-		 * 因此只需在这里挂一次，所有页面共享 AtUimode 的同一份状态。
-		 * 控件本身不注册监听器（由 AtUimode 的 document 单次委托统一处理）。 */
+		/* 全局界面设置入口（齿轮按钮 → 模式面板）：挂在 document.body 右下角。
+		 * 1) 12 个视图的骨架都由 Mt5700.page 生成，这里调一次即可全页可用；
+		 * 2) mountSettings() 幂等，切页 / 重渲染不会重复插入节点；
+		 * 3) 极简模式隐藏 hero 栏后，入口不在 hero 内，因此照常可用；
+		 * 4) 固定定位不参与文档流，普通模式的栅格与宽度完全不受影响。 */
 		if (typeof window !== 'undefined' && window.AtUimode
-			&& typeof window.AtUimode.createSwitch === 'function') {
-			var sw = window.AtUimode.createSwitch();
-			if (sw) art.appendChild(sw);
+			&& typeof window.AtUimode.mountSettings === 'function') {
+			try { window.AtUimode.mountSettings(); } catch (e) { /* 入口失败不影响页面 */ }
 		}
 		hero.appendChild(art);
 

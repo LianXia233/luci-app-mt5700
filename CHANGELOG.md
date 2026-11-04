@@ -18,6 +18,9 @@
 - **feat(icons) 独立重绘的极简 SVG 图标体系**：新增 `at-webserver/icons.js`（Icon Manager）+ `icons/normal/*.svg` / `icons/minimal/*.svg` 共 142 个规范 SVG 资源（71 语义 × 2 套，24×24 viewBox、currentColor、无障碍属性）。`normal` 逐字保留 `tabmenu.js` TAB_ICONS 与 `network_status.js` svgIcon 的原有内联图元；`minimal` 全部重新绘制为 MD3 几何造型，禁止复用/滤镜/换色冒充。`data-mt-icon` + `AtIcons.refresh()` 按模式重绘，不重建业务 DOM
 - **feat(dialogs) 弹窗完整复用 + MD3 视觉适配**：`Mt5700.confirm` / `Ui.promptModal` / `smsModal` / toast / loading / degradedNotice / LuCI `.cbi-modal` / `.modal` 四套结构的业务实现与调用接口一行未改，仅由 `AtUimode.decorate()` 打模式标记；MD3 Dialog 规范（28px 圆角、surface-container-high、24px 标题、无毛玻璃、标准按钮、移动端适配）由 `md3.css` 覆盖
 - **perf(ui) 极简模式真正减少视觉开销**：JS 层不创建全局角色立绘/三角网格层与看板娘 `img`（不是 CSS 假隐藏）；星座图/MIMO 图跳过 256 点光晕、渐变 defs 与 SMIL `animateMotion`；广播塔换轻量 MD3 图标；趋势图跳过渐变面积/分区背景/脉冲点；sparkline 去渐变；装饰动画统一停用。模式切换不重建轮询、不重复初始化组件、不触发任何 AT / 拨号 / USB / 网络配置重应用
+- **feat(ui) 界面设置入口**：模式切换从 hero 栏内的内联 pill 移到右下角固定「齿轮」按钮（`position:fixed`，不占文档流），点开为「界面设置」面板：界面模式分段控件 + 保存说明 + `aria-live` 状态行。入口挂在 `document.body`（`mountSettings()` 幂等，12 视图共用同一节点），因此极简模式隐藏 hero 栏后入口依旧可用；`document` 单次点击委托统一处理开合/切换/面板外点击/Esc，控件自身不注册监听器。保存成功才提示「已保存到设备」，失败明确提示「已恢复为…」，模式变更即清空过期状态行
+- **feat(ui) 极简模式不显示壁纸与 hero 栏**：壁纸层由 JS 在极简模式真实卸载 `#mt5700-global-bg`（webp 不再请求），hero 栏去掉底色/渐变/描边/阴影/装饰伪元素与右侧插画区、徽标，只保留一行紧凑标题；页面宽度、最大宽度、外边距、卡片栅格与断点全部沿用普通模式原规则（极简是换皮不是换布局）
+- **chore(ui) 缓存版本戳**：`MT5700_MD3_CSS_VERSION` 1.0.0→1.0.1
 - **refactor(ui) 接入点**：`mt5700.js`（注入 md3.css、按模式分支、弹窗 decorate、信号/加载/图表重绘）、`tabmenu.js`（导航图标走 Icon Manager）、`network_status.js`（卡片标题/广播塔/图表走 Icon Manager）；其余 10 个视图、`at.css` / `global.css` / `mt5700.css`、Ucode 后端、Rust 源码、ACL、menu.d 均未改动
 - **docs/test** 新增 `docs/dual-ui-mode-inventory.md`（真实源码清单）、`scripts/gen-dual-ui-icons.js`（图标资源生成与一致性校验）、`tests/dual-ui-mode-test.js`（双模式/图标/弹窗/性能/业务安全回归）
 

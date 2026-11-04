@@ -41,6 +41,7 @@ var AtUimode = (function () {
 	var booted = false;
 	var delegateBound = false;
 	var bootPromise = null;
+	var panelOpen = false;
 
 	/* ================= 纯函数（可单测） ================= */
 
@@ -138,6 +139,15 @@ var AtUimode = (function () {
 		writeHint(mode);
 		syncDecorated(mode);
 		syncSwitches(mode);
+		/* 模式已变，面板里的上一次操作结果随之失效，清空避免显示过期结论
+		 * （例如点了「普通」后又从别处切回极简，状态行仍写着「已保存：普通模式」）。 */
+		try {
+			var statusBox = document.getElementById(STATUS_ID);
+			if (statusBox) {
+				statusBox.className = 'mt-uimode-status';
+				statusBox.textContent = '';
+			}
+		} catch (e) { /* 面板未挂载时跳过 */ }
 		/* 图标按模式重绘：只替换 <svg> 内部图元 */
 		try {
 			if (typeof window !== 'undefined' && window.AtIcons
@@ -335,14 +345,34 @@ var AtUimode = (function () {
 	function bindDelegate() {
 		if (delegateBound || typeof document === 'undefined') return;
 		delegateBound = true;
+
+		/* 单次委托：模式按钮、设置入口开合、面板关闭、面板外点击收起全在这里处理。
+		 * 控件自身不注册监听器，因此切页 / 重复渲染都不会累积监听器或闭包。 */
 		document.addEventListener('click', function (ev) {
 			var t = ev.target;
 			if (!t || typeof t.closest !== 'function') return;
+
 			var btn = t.closest('[data-mt-uimode-value]');
-			if (!btn) return;
-			if (btn.disabled) return;
-			api.set(btn.getAttribute('data-mt-uimode-value'));
+			if (btn) {
+				if (btn.disabled) return;
+				api.set(btn.getAttribute('data-mt-uimode-value')).then(reportStatus);
+				return;
+			}
+			if (t.closest('[data-mt-uimode-toggle]')) {
+				api.togglePanel();
+				return;
+			}
+			if (t.closest('[data-mt-uimode-close]')) {
+				api.closePanel();
+				return;
+			}
+			/* 面板外点击只管收起，不阻断事件，不影响页面其它交互 */
+			if (panelOpen && !t.closest('.mt-uimode-panel')) api.closePanel();
 		}, true);
+
+		document.addEventListener('keydown', function (ev) {
+			if (ev && ev.key === 'Escape' && panelOpen) api.closePanel();
+		});
 	}
 
 	api.createSwitch = function () {
@@ -369,6 +399,188 @@ var AtUimode = (function () {
 		}, '极简'));
 		syncSwitches(current);
 		return wrap;
+	};
+
+	/* ================= 设置入口（齿轮按钮 + 模式面板） =================
+	 * 位置：右下角固定按钮，挂在 document.body。
+	 *   - 极简模式不显示 hero 栏，入口仍可用（不会被一起隐藏）；
+	 *   - 不占页面布局位置，普通模式的卡片栅格 / 宽度 / 间距完全不变；
+	 *   - mountSettings() 幂等，12 个视图共用同一个节点，视图重渲染不会重复插入。
+	 */
+
+	var SETTINGS_ID = 'mt-uimode-settings';
+	var PANEL_ID = 'mt-uimode-panel';
+	var STATUS_ID = 'mt-uimode-status';
+
+	/* 图标优先走 Icon Manager（普通/极简各一套）；未就绪时用内联 SVG 兜底，
+	 * 不用 Emoji 冒充功能图标。 */
+	function uiIcon(name, size) {
+		try {
+			if (typeof window !== 'undefined' && window.AtIcons
+				&& typeof window.AtIcons.build === 'function') {
+				var svg = window.AtIcons.build(name, { w: size, h: size });
+				if (svg) return svg;
+			}
+		} catch (e) { /* 降级到内联图元 */ }
+		try {
+			var ns = 'http://www.w3.org/2000/svg';
+			var fb = document.createElementNS(ns, 'svg');
+			fb.setAttribute('viewBox', '0 0 24 24');
+			fb.setAttribute('width', String(size || 24));
+			fb.setAttribute('height', String(size || 24));
+			fb.setAttribute('fill', 'none');
+			fb.setAttribute('stroke', 'currentColor');
+			fb.setAttribute('stroke-width', '2');
+			fb.setAttribute('stroke-linecap', 'round');
+			fb.setAttribute('stroke-linejoin', 'round');
+			fb.setAttribute('aria-hidden', 'true');
+			fb.innerHTML = (name === 'op-close')
+				? '<path d="M6 6l12 12M18 6 6 18"/>'
+				: '<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M6 6l1.6 1.6M16.4 16.4 18 18M18 6l-1.6 1.6M7.6 16.4 6 18"/>';
+			return fb;
+		} catch (e) { return null; }
+	}
+
+	function byId(id) {
+		try { return document.getElementById(id); } catch (e) { return null; }
+	}
+
+	api.isPanelOpen = function () { return panelOpen; };
+
+	api.openPanel = function () {
+		var p = byId(PANEL_ID);
+		if (!p) return false;
+		panelOpen = true;
+		try {
+			p.classList.add('is-open');
+			p.removeAttribute('aria-hidden');
+		} catch (e) { /* ignore */ }
+		var fab = document.querySelector('[data-mt-uimode-toggle]');
+		if (fab) fab.setAttribute('aria-expanded', 'true');
+		return true;
+	};
+
+	api.closePanel = function () {
+		var p = byId(PANEL_ID);
+		panelOpen = false;
+		if (p) {
+			try {
+				p.classList.remove('is-open');
+				p.setAttribute('aria-hidden', 'true');
+			} catch (e) { /* ignore */ }
+		}
+		var fab = document.querySelector('[data-mt-uimode-toggle]');
+		if (fab) fab.setAttribute('aria-expanded', 'false');
+	};
+
+	api.togglePanel = function () {
+		return panelOpen ? api.closePanel() : api.openPanel();
+	};
+
+	/* 面板内的保存结果反馈：成功才说「已保存到设备」，失败明确说已恢复原模式 */
+	function reportStatus(res) {
+		var box = byId(STATUS_ID);
+		if (!box) return;
+		var ok = !!(res && res.ok);
+		var persisted = !!(res && res.persisted);
+		var cls = 'mt-uimode-status';
+		var text;
+		if (!ok) {
+			cls += ' is-error';
+			text = '保存失败，已恢复为' + api.label(current);
+		} else if (!persisted) {
+			cls += ' is-ok';
+			text = '已切换为' + api.label(current) + '（本次未写入设备）';
+		} else {
+			cls += ' is-ok';
+			text = '已保存到设备：' + api.label(current) + '；刷新或重新登录后保持';
+		}
+		try {
+			box.className = cls;
+			box.textContent = text;
+		} catch (e) { /* ignore */ }
+	}
+	api.reportStatus = reportStatus;
+
+	api.createSettings = function () {
+		if (typeof document === 'undefined' || !document.createElement) return null;
+
+		var root = E('div', { 'id': SETTINGS_ID, 'class': 'mt-uimode-settings' });
+
+		var fab = E('button', {
+			'type': 'button',
+			'class': 'mt-uimode-fab',
+			'data-mt-uimode-toggle': '1',
+			'aria-expanded': 'false',
+			'aria-controls': PANEL_ID,
+			'aria-label': '界面设置',
+			'title': '界面设置（界面模式切换）'
+		});
+		var gear = uiIcon('op-settings', 22);
+		if (gear) fab.appendChild(gear);
+
+		var panel = E('div', {
+			'id': PANEL_ID,
+			'class': 'mt-uimode-panel',
+			'role': 'dialog',
+			'aria-label': '界面设置',
+			'aria-hidden': 'true'
+		});
+
+		var head = E('div', { 'class': 'mt-uimode-panel-head' });
+		head.appendChild(E('span', { 'class': 'mt-uimode-panel-title' }, '界面设置'));
+		var close = E('button', {
+			'type': 'button',
+			'class': 'mt-uimode-close',
+			'data-mt-uimode-close': '1',
+			'aria-label': '关闭设置'
+		});
+		var closeIcon = uiIcon('op-close', 18);
+		if (closeIcon) close.appendChild(closeIcon);
+		head.appendChild(close);
+		panel.appendChild(head);
+
+		var field = E('div', { 'class': 'mt-uimode-field' });
+		field.appendChild(E('div', { 'class': 'mt-uimode-field-label' }, '界面模式'));
+		var sw = api.createSwitch();
+		if (sw) field.appendChild(sw);
+		panel.appendChild(field);
+
+		panel.appendChild(E('p', { 'class': 'mt-uimode-hint' },
+			'切换立即生效，并保存到设备（at-webserver · ui_mode）；刷新页面或重新登录后保持。'));
+
+		panel.appendChild(E('div', {
+			'id': STATUS_ID,
+			'class': 'mt-uimode-status',
+			'aria-live': 'polite'
+		}));
+
+		root.appendChild(panel);
+		root.appendChild(fab);
+		return root;
+	};
+
+	api.mountSettings = function () {
+		if (typeof document === 'undefined' || !document.body) return null;
+		var exist = byId(SETTINGS_ID);
+		if (exist) {
+			syncSwitches(current);
+			return exist;
+		}
+		var root = api.createSettings();
+		if (!root) return null;
+		try {
+			document.body.appendChild(root);
+		} catch (e) {
+			return null;
+		}
+		syncSwitches(current);
+		return root;
+	};
+	api.unmountSettings = function () {
+		var root = byId(SETTINGS_ID);
+		if (root && root.parentNode) root.parentNode.removeChild(root);
+		panelOpen = false;
 	};
 
 	/* ================= 模块求值即启动 =================
