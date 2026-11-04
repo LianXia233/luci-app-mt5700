@@ -1,0 +1,918 @@
+/* ==========================================================================
+   at-webserver/md3.css —— 极简模式视觉层（Google Material Design 3）
+   --------------------------------------------------------------------------
+   注入方：at-webserver/mt5700.js（在 mt5700.css 与 global.css 之后加载）。
+   12 个视图全部 require mt5700，因此一份样式覆盖全部页面。
+
+   ★ 隔离原则：除「模式切换控件」这个新增元素外，本文件**每一条规则**都以
+     html[data-ui-mode="minimal"] 为前缀。普通模式（data-ui-mode="normal"）
+     不会命中任何一条，mt5700.css / at.css / global.css 原样生效，
+     玻璃拟态、仪表盘、原有 SVG、动画与弹窗视觉完整保留。
+
+   ★ 架构原则：极简模式不复制页面、不复制业务 JS。它只做两件事：
+     1) 把现有 --mt5700-* / --at-* 变量重映射到 MD3 design tokens；
+     2) 覆盖纯视觉属性（玻璃、阴影、渐变、装饰动画、圆角、间距）。
+     数据请求、Ucode 后端、RPC/ubus、UCI、轮询、事件处理全部共用。
+
+   ★ 性能：极简模式的装饰性视觉资源（角色立绘 webp、三角网格、看板娘
+     png）由 mt5700.js 在 JS 层**不创建 DOM / 不发起加载**，不是靠 CSS 隐藏；
+     星座图/MIMO 图跳过 256 点光晕与 SMIL 动画；装饰动画统一停用。
+
+   ★ 无障碍：不隐藏作者署名（.mt5700-author），不降低正文对比度。
+   ========================================================================== */
+
+/* ==========================================================================
+   1. MD3 Design Tokens
+   --------------------------------------------------------------------------
+   Material 3 baseline 色板 + 项目状态语义色（success/warning/error）。
+   明暗由 theme.js 写入的 html.at-dark / html.at-light 驱动，跟随当前 LuCI 主题，
+   不额外增加夜间模式开关。
+   ========================================================================== */
+html[data-ui-mode="minimal"] {
+  --md-sys-color-primary: #6750a4;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #eaddff;
+  --md-sys-color-on-primary-container: #21005d;
+  --md-sys-color-secondary: #625b71;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #e8def8;
+  --md-sys-color-on-secondary-container: #1d192b;
+  --md-sys-color-tertiary: #7d5260;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #ffd8e4;
+  --md-sys-color-on-tertiary-container: #31111d;
+  --md-sys-color-surface: #fffbfd;
+  --md-sys-color-surface-dim: #ded8e0;
+  --md-sys-color-surface-bright: #fffbfd;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f7f2f7;
+  --md-sys-color-surface-container: #f3edf7;
+  --md-sys-color-surface-container-high: #ece6f0;
+  --md-sys-color-surface-container-highest: #e6e0e9;
+  --md-sys-color-surface-variant: #e7e0ec;
+  --md-sys-color-on-surface: #1d1b20;
+  --md-sys-color-on-surface-variant: #49454f;
+  --md-sys-color-inverse-surface: #322f35;
+  --md-sys-color-inverse-on-surface: #f5eff7;
+  --md-sys-color-inverse-primary: #d0bcff;
+  --md-sys-color-outline: #79747e;
+  --md-sys-color-outline-variant: #cac4d0;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-error: #b3261e;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #f9dedc;
+  --md-sys-color-on-error-container: #410e0b;
+  --md-sys-color-success: #146c2e;
+  --md-sys-color-on-success: #ffffff;
+  --md-sys-color-success-container: #c8f0cf;
+  --md-sys-color-warning: #8a5100;
+  --md-sys-color-warning-container: #ffdfa6;
+
+  /* MD3 shape / spacing / type / motion tokens */
+  --md-sys-shape-corner-none: 0px;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 9999px;
+  --md-sys-space-1: 4px;
+  --md-sys-space-2: 8px;
+  --md-sys-space-3: 12px;
+  --md-sys-space-4: 16px;
+  --md-sys-space-6: 24px;
+  --md-sys-space-8: 32px;
+  --md-sys-elevation-0: none;
+  --md-sys-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.10);
+  --md-sys-state-hover-opacity: 0.08;
+  --md-sys-state-focus-opacity: 0.10;
+  --md-sys-motion-duration-short: 120ms;
+  --md-sys-motion-duration-medium: 200ms;
+  --md-sys-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- 现有变量重映射：一处改动，全组件统一进入 MD3 色系 ---- */
+  --mt5700-anime-bg: var(--md-sys-color-surface);
+  --mt5700-bg: var(--md-sys-color-surface);
+  --mt5700-card-bg: var(--md-sys-color-surface-container-low);
+  --mt5700-card-bg-hover: var(--md-sys-color-surface-container);
+  --mt5700-glass-bg: var(--md-sys-color-surface-container);
+  --mt5700-float-bg: var(--md-sys-color-surface-container-high);
+  --mt5700-subtle-bg: var(--md-sys-color-surface-container-low);
+  --mt5700-text: var(--md-sys-color-on-surface);
+  --mt5700-text-secondary: var(--md-sys-color-on-surface-variant);
+  --mt5700-text-muted: var(--md-sys-color-outline);
+  --mt5700-border: var(--md-sys-color-outline-variant);
+  --mt5700-border-subtle: var(--md-sys-color-outline-variant);
+  --mt5700-border-focus: var(--md-sys-color-primary);
+  --mt5700-divider: var(--md-sys-color-outline-variant);
+  --mt5700-accent: var(--md-sys-color-primary);
+  --mt5700-accent-light: var(--md-sys-color-primary);
+  --mt5700-accent-pale: var(--md-sys-color-primary-container);
+  --mt5700-cyan: var(--md-sys-color-secondary);
+  --mt5700-cyan-light: var(--md-sys-color-secondary);
+  --mt5700-cyan-pale: var(--md-sys-color-secondary-container);
+  --mt5700-pink: var(--md-sys-color-tertiary);
+  --mt5700-pink-light: var(--md-sys-color-tertiary);
+  --mt5700-pink-pale: var(--md-sys-color-tertiary-container);
+  --mt5700-green: var(--md-sys-color-success);
+  --mt5700-green-light: var(--md-sys-color-success);
+  --mt5700-green-pale: var(--md-sys-color-success-container);
+  --mt5700-amber: var(--md-sys-color-warning);
+  --mt5700-danger: var(--md-sys-color-error);
+  --mt5700-success: var(--md-sys-color-success);
+  --mt5700-warning: var(--md-sys-color-warning);
+  --mt5700-sh-1: var(--md-sys-elevation-0);
+  --mt5700-sh-2: var(--md-sys-elevation-0);
+  --mt5700-sh-3: var(--md-sys-elevation-0);
+  --mt5700-sh-float: var(--md-sys-elevation-0);
+  --mt5700-shadow-sm: var(--md-sys-elevation-0);
+  --mt5700-shadow-md: var(--md-sys-elevation-0);
+  --mt5700-shadow-lg: var(--md-sys-elevation-0);
+  --mt5700-shadow-xl: var(--md-sys-elevation-0);
+  --mt5700-radius-sm: var(--md-sys-shape-corner-extra-small);
+  --mt5700-radius-md: var(--md-sys-shape-corner-small);
+  --mt5700-radius-lg: var(--md-sys-shape-corner-medium);
+  --mt5700-radius-xl: var(--md-sys-shape-corner-large);
+  --mt5700-radius-full: var(--md-sys-shape-corner-full);
+  --mt5700-blur: 0px;
+  --mt5700-saturate: 100%;
+  --mt5700-glass: none;
+  --mt5700-space-sm: var(--md-sys-space-2);
+  --mt5700-space-md: var(--md-sys-space-4);
+  --mt5700-space-lg: var(--md-sys-space-6);
+  --mt5700-space-xl: var(--md-sys-space-8);
+
+  /* at.css 变量同步重映射（ui.js 注入的公共组件库） */
+  --at-bg-glass: var(--md-sys-color-surface-container-low);
+  --at-bg-glass-hover: var(--md-sys-color-surface-container);
+  --at-bg-subtle: var(--md-sys-color-surface-container-low);
+  --at-border-glass: var(--md-sys-color-outline-variant);
+  --at-border-subtle: var(--md-sys-color-outline-variant);
+  --at-shadow-sm: var(--md-sys-elevation-0);
+  --at-shadow-md: var(--md-sys-elevation-0);
+  --at-shadow-lg: var(--md-sys-elevation-0);
+  --at-shadow-inset: none;
+  --at-blur: 0px;
+  --at-saturate: 100%;
+  --at-accent: var(--md-sys-color-primary);
+  --at-accent-hover: var(--md-sys-color-primary);
+  --at-text: var(--md-sys-color-on-surface);
+  --at-text-secondary: var(--md-sys-color-on-surface-variant);
+  --at-radius: var(--md-sys-shape-corner-medium);
+
+  /* global.css 弹窗墨色变量 → MD3 语义色 */
+  --mt5700-modal-ink: var(--md-sys-color-on-surface);
+  --mt5700-modal-ink-soft: var(--md-sys-color-on-surface-variant);
+  --mt5700-modal-ink-hint: var(--md-sys-color-on-surface-variant);
+  --mt5700-modal-ghost-ink: var(--md-sys-color-primary);
+  --mt5700-modal-link-ink: var(--md-sys-color-primary);
+  --mt5700-modal-placeholder: var(--md-sys-color-outline);
+}
+
+/* 明暗主题适配：沿用 theme.js 的 html.at-dark / html.at-light 结论 */
+html[data-ui-mode="minimal"].at-dark {
+  --md-sys-color-primary: #d0bcff;
+  --md-sys-color-on-primary: #381e72;
+  --md-sys-color-primary-container: #4f378b;
+  --md-sys-color-on-primary-container: #eaddff;
+  --md-sys-color-secondary: #ccc2dc;
+  --md-sys-color-on-secondary: #332d41;
+  --md-sys-color-secondary-container: #4a4458;
+  --md-sys-color-on-secondary-container: #e8def8;
+  --md-sys-color-tertiary: #efb8c8;
+  --md-sys-color-on-tertiary: #492532;
+  --md-sys-color-tertiary-container: #633b48;
+  --md-sys-color-on-tertiary-container: #ffd8e4;
+  --md-sys-color-surface: #141218;
+  --md-sys-color-surface-dim: #141218;
+  --md-sys-color-surface-bright: #3b383e;
+  --md-sys-color-surface-container-lowest: #0f0d13;
+  --md-sys-color-surface-container-low: #1d1b20;
+  --md-sys-color-surface-container: #211f26;
+  --md-sys-color-surface-container-high: #2b2930;
+  --md-sys-color-surface-container-highest: #36343b;
+  --md-sys-color-surface-variant: #49454f;
+  --md-sys-color-on-surface: #e6e0e9;
+  --md-sys-color-on-surface-variant: #cac4d0;
+  --md-sys-color-inverse-surface: #e6e0e9;
+  --md-sys-color-inverse-on-surface: #322f35;
+  --md-sys-color-inverse-primary: #6750a4;
+  --md-sys-color-outline: #938f99;
+  --md-sys-color-outline-variant: #49454f;
+  --md-sys-color-error: #f2b8b5;
+  --md-sys-color-on-error: #601410;
+  --md-sys-color-error-container: #8c1d18;
+  --md-sys-color-on-error-container: #f9dedc;
+  --md-sys-color-success: #7bd88f;
+  --md-sys-color-on-success: #0a3818;
+  --md-sys-color-success-container: #1f5130;
+  --md-sys-color-warning: #ffb951;
+  --md-sys-color-warning-container: #5c3c00;
+
+  --mt5700-text: var(--md-sys-color-on-surface);
+  --mt5700-text-secondary: var(--md-sys-color-on-surface-variant);
+  --mt5700-text-muted: var(--md-sys-color-outline);
+  --mt5700-border: var(--md-sys-color-outline-variant);
+  --mt5700-border-subtle: var(--md-sys-color-outline-variant);
+  --mt5700-accent: var(--md-sys-color-primary);
+  --mt5700-accent-light: var(--md-sys-color-primary);
+  --mt5700-accent-pale: var(--md-sys-color-primary-container);
+  --mt5700-card-bg: var(--md-sys-color-surface-container-low);
+  --mt5700-glass-bg: var(--md-sys-color-surface-container);
+  --mt5700-float-bg: var(--md-sys-color-surface-container-high);
+  --mt5700-glass: none;
+  --at-bg-glass: var(--md-sys-color-surface-container-low);
+  --at-bg-glass-hover: var(--md-sys-color-surface-container);
+  --at-text: var(--md-sys-color-on-surface);
+  --at-text-secondary: var(--md-sys-color-on-surface-variant);
+  --at-border-glass: var(--md-sys-color-outline-variant);
+  --at-border-subtle: var(--md-sys-color-outline-variant);
+}
+
+/* ==========================================================================
+   2. 页面骨架 / 去除装饰性视觉
+   ========================================================================== */
+html[data-ui-mode="minimal"] .mt5700-page,
+html[data-ui-mode="minimal"] .mt-anime-container {
+  font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  gap: var(--md-sys-space-4);
+  max-width: 1280px;
+  margin: var(--md-sys-space-4) auto;
+  color: var(--md-sys-color-on-surface);
+}
+
+/* 这些资源由 JS 在极简模式下不创建；CSS 仅作旧 DOM 残留的兜底 */
+html[data-ui-mode="minimal"] #mt5700-global-bg,
+html[data-ui-mode="minimal"] .mt-bg-char,
+html[data-ui-mode="minimal"] .mt-mascot-speech-wrap,
+html[data-ui-mode="minimal"] .mt-mascot-avatar,
+html[data-ui-mode="minimal"] .mt-anime-empty-svg,
+html[data-ui-mode="minimal"] .mt-anime-pos-shell {
+  display: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-hero-card,
+html[data-ui-mode="minimal"] .mt5700-card,
+html[data-ui-mode="minimal"] .mt-card,
+html[data-ui-mode="minimal"] .mt5700-modal,
+html[data-ui-mode="minimal"] .at-modal,
+html[data-ui-mode="minimal"] .mt5700-float-notice {
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-hero-card {
+  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-large) !important;
+  background: var(--md-sys-color-primary-container) !important;
+  padding: var(--md-sys-space-6) !important;
+  transform: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-hero-title {
+  font-size: 22px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
+  color: var(--md-sys-color-on-primary-container) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-hero-desc {
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  color: var(--md-sys-color-on-primary-container) !important;
+  opacity: 0.82;
+}
+
+html[data-ui-mode="minimal"] .mt5700-hero-badge,
+html[data-ui-mode="minimal"] .mt-pill-tag {
+  background: var(--md-sys-color-secondary-container) !important;
+  color: var(--md-sys-color-on-secondary-container) !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--md-sys-shape-corner-small) !important;
+  box-shadow: none !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.1px;
+}
+
+/* 状态圆点：去掉脉冲发光，保留静态指示 */
+html[data-ui-mode="minimal"] .mt5700-hero-badge-dot,
+html[data-ui-mode="minimal"] .mt-beacon-dot,
+html[data-ui-mode="minimal"] .mt5700-badge-dot {
+  animation: none !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* ==========================================================================
+   3. Cards / Lists / Tables（MD3 Contained Card + List）
+   ========================================================================== */
+html[data-ui-mode="minimal"] .mt5700-card,
+html[data-ui-mode="minimal"] .mt-card {
+  background: var(--md-sys-color-surface-container-low) !important;
+  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-medium) !important;
+  padding: var(--md-sys-space-4) !important;
+  transform: none !important;
+  transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-card:hover,
+html[data-ui-mode="minimal"] .mt-card:hover {
+  background: var(--md-sys-color-surface-container) !important;
+  border-color: var(--md-sys-color-outline) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-card-title,
+html[data-ui-mode="minimal"] .mt-card-title {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.1px;
+  color: var(--md-sys-color-on-surface) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-card-subtitle {
+  font-size: 12px !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-metric {
+  background: var(--md-sys-color-surface-container) !important;
+  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-medium) !important;
+  box-shadow: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-metric-value {
+  font-weight: 400 !important;
+  letter-spacing: -0.25px;
+}
+
+html[data-ui-mode="minimal"] .mt5700-table-wrapper {
+  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-medium) !important;
+  box-shadow: none !important;
+  background: var(--md-sys-color-surface-container-low) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-table th {
+  background: var(--md-sys-color-surface-container) !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.1px;
+}
+
+html[data-ui-mode="minimal"] .mt5700-table td {
+  border-color: var(--md-sys-color-outline-variant) !important;
+  color: var(--md-sys-color-on-surface) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-badge,
+html[data-ui-mode="minimal"] .mt5700-badge-success,
+html[data-ui-mode="minimal"] .mt5700-badge-warning,
+html[data-ui-mode="minimal"] .mt5700-badge-danger,
+html[data-ui-mode="minimal"] .mt5700-badge-info,
+html[data-ui-mode="minimal"] .mt5700-badge-neutral {
+  border-radius: var(--md-sys-shape-corner-small) !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.1px;
+  padding: 4px 10px !important;
+}
+html[data-ui-mode="minimal"] .mt5700-badge-success { background: var(--md-sys-color-success-container) !important; color: var(--md-sys-color-success) !important; }
+html[data-ui-mode="minimal"] .mt5700-badge-warning { background: var(--md-sys-color-warning-container) !important; color: var(--md-sys-color-warning) !important; }
+html[data-ui-mode="minimal"] .mt5700-badge-danger  { background: var(--md-sys-color-error-container) !important; color: var(--md-sys-color-error) !important; }
+html[data-ui-mode="minimal"] .mt5700-badge-info    { background: var(--md-sys-color-primary-container) !important; color: var(--md-sys-color-on-primary-container) !important; }
+html[data-ui-mode="minimal"] .mt5700-badge-neutral { background: var(--md-sys-color-surface-variant) !important; color: var(--md-sys-color-on-surface-variant) !important; }
+
+/* Chips / 提示条 / 分组块统一去玻璃 */
+html[data-ui-mode="minimal"] .mt5700-field-note,
+html[data-ui-mode="minimal"] .mt5700-radio-card,
+html[data-ui-mode="minimal"] .mt5700-agree-list,
+html[data-ui-mode="minimal"] .mt5700-hint,
+html[data-ui-mode="minimal"] .mt5700-banner {
+  background: var(--md-sys-color-surface-container) !important;
+  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-small) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ==========================================================================
+   4. Buttons（MD3 filled / tonal / text / error）
+   ========================================================================== */
+html[data-ui-mode="minimal"] .mt5700-btn,
+html[data-ui-mode="minimal"] .at-btn {
+  min-height: 40px;
+  padding: 0 24px !important;
+  border-radius: var(--md-sys-shape-corner-full) !important;
+  border: 1px solid transparent !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.1px;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--md-sys-color-surface-container) !important;
+  color: var(--md-sys-color-primary) !important;
+  transform: none !important;
+  transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-btn:hover,
+html[data-ui-mode="minimal"] .at-btn:hover {
+  background: var(--md-sys-color-secondary-container) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-btn:active,
+html[data-ui-mode="minimal"] .at-btn:active { transform: none !important; box-shadow: none !important; }
+html[data-ui-mode="minimal"] .mt5700-btn:disabled,
+html[data-ui-mode="minimal"] .at-btn:disabled { opacity: 0.38 !important; }
+
+html[data-ui-mode="minimal"] .mt5700-btn-primary,
+html[data-ui-mode="minimal"] .at-btn-primary {
+  background: var(--md-sys-color-primary) !important;
+  color: var(--md-sys-color-on-primary) !important;
+  border-color: transparent !important;
+}
+html[data-ui-mode="minimal"] .mt5700-btn-primary:hover,
+html[data-ui-mode="minimal"] .at-btn-primary:hover { background: var(--md-sys-color-primary) !important; }
+
+html[data-ui-mode="minimal"] .mt5700-btn-danger,
+html[data-ui-mode="minimal"] .at-btn-danger {
+  background: var(--md-sys-color-error) !important;
+  color: var(--md-sys-color-on-error) !important;
+  border-color: transparent !important;
+}
+html[data-ui-mode="minimal"] .mt5700-btn-danger:hover,
+html[data-ui-mode="minimal"] .at-btn-danger:hover { background: var(--md-sys-color-error) !important; }
+
+html[data-ui-mode="minimal"] .mt5700-btn-ghost,
+html[data-ui-mode="minimal"] .at-btn-neutral {
+  background: transparent !important;
+  color: var(--md-sys-color-primary) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-btn-secondary,
+html[data-ui-mode="minimal"] .at-btn-action {
+  background: var(--md-sys-color-secondary-container) !important;
+  color: var(--md-sys-color-on-secondary-container) !important;
+}
+
+/* ==========================================================================
+   5. Inputs / Selects / Switches（MD3 outlined field + MD3 switch）
+   ========================================================================== */
+html[data-ui-mode="minimal"] .mt5700-input,
+html[data-ui-mode="minimal"] .mt5700-select,
+html[data-ui-mode="minimal"] .cbi-input-text,
+html[data-ui-mode="minimal"] .cbi-input-select,
+html[data-ui-mode="minimal"] .at-field-control input,
+html[data-ui-mode="minimal"] .at-field-control select,
+html[data-ui-mode="minimal"] input[type="text"],
+html[data-ui-mode="minimal"] input[type="password"],
+html[data-ui-mode="minimal"] input[type="number"],
+html[data-ui-mode="minimal"] input[type="search"],
+html[data-ui-mode="minimal"] textarea {
+  background: var(--md-sys-color-surface-container-lowest) !important;
+  border: 1px solid var(--md-sys-color-outline) !important;
+  border-radius: var(--md-sys-shape-corner-extra-small) !important;
+  color: var(--md-sys-color-on-surface) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: 10px 12px !important;
+  font-size: 14px !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-input:focus,
+html[data-ui-mode="minimal"] .cbi-input-text:focus,
+html[data-ui-mode="minimal"] .cbi-input-select:focus,
+html[data-ui-mode="minimal"] .at-field-control input:focus,
+html[data-ui-mode="minimal"] .at-field-control select:focus,
+html[data-ui-mode="minimal"] input[type="text"]:focus,
+html[data-ui-mode="minimal"] textarea:focus {
+  border-color: var(--md-sys-color-primary) !important;
+  box-shadow: inset 0 0 0 1px var(--md-sys-color-primary) !important;
+  outline: none !important;
+}
+
+html[data-ui-mode="minimal"] .at-field-label,
+html[data-ui-mode="minimal"] .mt5700-label {
+  color: var(--md-sys-color-on-surface-variant) !important;
+  font-weight: 500 !important;
+}
+html[data-ui-mode="minimal"] .at-field-hint,
+html[data-ui-mode="minimal"] .mt5700-hint {
+  color: var(--md-sys-color-on-surface-variant) !important;
+}
+
+/* MD3 switch：52×32 轨道 + 圆形 thumb（原生 checkbox 无依赖改造） */
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"],
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 52px !important;
+  height: 32px !important;
+  margin: 0 !important;
+  border: 2px solid var(--md-sys-color-outline) !important;
+  border-radius: var(--md-sys-shape-corner-full) !important;
+  background: var(--md-sys-color-surface-container-highest) !important;
+  position: relative;
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+              border-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
+  flex: 0 0 auto;
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]::after,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--md-sys-color-outline);
+  transform: translateY(-50%);
+  transition: transform var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+              width var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+              background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing);
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:checked,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked {
+  background: var(--md-sys-color-primary) !important;
+  border-color: var(--md-sys-color-primary) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:checked::after,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked::after {
+  background: var(--md-sys-color-on-primary);
+  width: 24px;
+  height: 24px;
+  transform: translate(20px, -50%);
+}
+
+/* ==========================================================================
+   6. Navigation / Tabs（MD3 indicator）
+   ========================================================================== */
+html[data-ui-mode="minimal"] .at-tabmenu-icon svg {
+  color: var(--md-sys-color-on-surface-variant);
+}
+html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].active > a,
+html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].cbi-tab > a {
+  color: var(--md-sys-color-primary) !important;
+  box-shadow: inset 0 -3px 0 var(--md-sys-color-primary) !important;
+}
+html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].active .at-tabmenu-icon svg,
+html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].cbi-tab .at-tabmenu-icon svg {
+  color: var(--md-sys-color-primary);
+}
+
+/* ==========================================================================
+   7. Dialogs —— 同一弹窗逻辑 + MD3 视觉（四套结构全覆盖）
+   --------------------------------------------------------------------------
+   弹窗业务实现（Mt5700.confirm / Ui.promptModal / smsModal / LuCI cbi /
+   主题 modal）一行未改，仅由全局 data-ui-mode 切换视觉。
+   ========================================================================== */
+html[data-ui-mode="minimal"] .mt5700-modal-mask,
+html[data-ui-mode="minimal"] .at-modal-mask,
+html[data-ui-mode="minimal"] .cbi-modal,
+html[data-ui-mode="minimal"] .modal-overlay,
+html[data-ui-mode="minimal"] .modal-backdrop {
+  background: rgba(0, 0, 0, 0.32) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: var(--md-sys-space-4) !important;
+  animation: md3-dialog-scrim 150ms var(--md-sys-motion-easing) !important;
+  z-index: 9999 !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-modal,
+html[data-ui-mode="minimal"] .at-modal,
+html[data-ui-mode="minimal"] .at-modal-wide,
+html[data-ui-mode="minimal"] .cbi-modal-dialog,
+html[data-ui-mode="minimal"] .modal-dialog,
+html[data-ui-mode="minimal"] .modal {
+  background: var(--md-sys-color-surface-container-high) !important;
+  border: none !important;
+  border-radius: var(--md-sys-shape-corner-extra-large) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: var(--md-sys-space-6) !important;
+  max-width: 560px !important;
+  width: 100% !important;
+  max-height: 85vh !important;
+  overflow-y: auto !important;
+  box-sizing: border-box !important;
+  animation: md3-dialog-enter 150ms var(--md-sys-motion-easing) !important;
+  color: var(--md-sys-color-on-surface) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-modal-title,
+html[data-ui-mode="minimal"] .at-modal-title,
+html[data-ui-mode="minimal"] .cbi-modal-title,
+html[data-ui-mode="minimal"] .modal-title {
+  font-size: 24px !important;
+  font-weight: 400 !important;
+  line-height: 1.33 !important;
+  color: var(--md-sys-color-on-surface) !important;
+  margin: 0 0 var(--md-sys-space-4) 0 !important;
+  display: block !important;
+  gap: 0 !important;
+}
+/* 普通模式标题左侧的渐变竖条属于装饰，MD3 Dialog 不需要 */
+html[data-ui-mode="minimal"] .mt5700-modal-title::before { display: none !important; content: none !important; }
+
+html[data-ui-mode="minimal"] .mt5700-modal-body,
+html[data-ui-mode="minimal"] .at-modal-body,
+html[data-ui-mode="minimal"] .cbi-modal-body,
+html[data-ui-mode="minimal"] .modal-body,
+html[data-ui-mode="minimal"] .mt5700-modal-body p,
+html[data-ui-mode="minimal"] .cbi-modal-body p,
+html[data-ui-mode="minimal"] .at-modal-body p {
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+  margin-bottom: var(--md-sys-space-6) !important;
+  padding: 0 !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-modal-body strong,
+html[data-ui-mode="minimal"] .at-modal-body strong,
+html[data-ui-mode="minimal"] .cbi-modal-body strong {
+  color: var(--md-sys-color-on-surface) !important;
+  font-weight: 500 !important;
+}
+html[data-ui-mode="minimal"] .mt5700-modal-body a,
+html[data-ui-mode="minimal"] .at-modal-body a,
+html[data-ui-mode="minimal"] .cbi-modal-body a { color: var(--md-sys-color-primary) !important; }
+html[data-ui-mode="minimal"] .mt5700-modal-body code,
+html[data-ui-mode="minimal"] .at-modal-body code,
+html[data-ui-mode="minimal"] .mt5700-modal-body pre,
+html[data-ui-mode="minimal"] .at-modal-body pre {
+  background: var(--md-sys-color-surface-variant) !important;
+  color: var(--md-sys-color-on-surface) !important;
+  border-radius: var(--md-sys-shape-corner-extra-small) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-modal-footer,
+html[data-ui-mode="minimal"] .at-modal-actions,
+html[data-ui-mode="minimal"] .cbi-modal-actions,
+html[data-ui-mode="minimal"] .modal-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: var(--md-sys-space-2) !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-top: none !important;
+  background: transparent !important;
+}
+
+/* 弹窗内按钮：MD3 text / filled，取消键不再用靛蓝深色 */
+html[data-ui-mode="minimal"] .mt5700-modal-footer .mt5700-btn,
+html[data-ui-mode="minimal"] .at-modal-actions .at-btn {
+  min-height: 40px !important;
+}
+html[data-ui-mode="minimal"] .mt5700-modal:not(.mt5700-sms-modal) .mt5700-modal-footer .mt5700-btn-ghost,
+html[data-ui-mode="minimal"] .at-modal .at-modal-actions .at-btn:not(.at-btn-primary):not(.at-btn-danger) {
+  color: var(--md-sys-color-primary) !important;
+  background: transparent !important;
+}
+
+/* 短信中心自绘弹窗沿用同一 MD3 表面（不改其业务结构） */
+html[data-ui-mode="minimal"] .mt5700-sms-modal-mask { background: rgba(0, 0, 0, 0.32) !important; backdrop-filter: none !important; }
+html[data-ui-mode="minimal"] .mt5700-modal.mt5700-sms-modal {
+  background: var(--md-sys-color-surface-container-high) !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  animation: md3-dialog-enter 150ms var(--md-sys-motion-easing) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-sms-modal .mt5700-modal-title { color: var(--md-sys-color-on-surface) !important; }
+html[data-ui-mode="minimal"] .mt5700-sms-modal .mt5700-modal-title::before { display: none !important; }
+
+@keyframes md3-dialog-scrim { from { opacity: 0; } to { opacity: 1; } }
+@keyframes md3-dialog-enter { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+
+/* ==========================================================================
+   8. Snackbars / Toast / Progress / Loading / Status
+   ========================================================================== */
+html[data-ui-mode="minimal"] .mt5700-toast {
+  top: auto !important;
+  bottom: var(--md-sys-space-6) !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  min-width: 280px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 14px 16px !important;
+  border-radius: var(--md-sys-shape-corner-extra-small) !important;
+  background: var(--md-sys-color-inverse-surface) !important;
+  color: var(--md-sys-color-inverse-on-surface) !important;
+  box-shadow: none !important;
+  white-space: normal !important;
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+  animation: md3-snackbar-in 200ms var(--md-sys-motion-easing) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-toast-success,
+html[data-ui-mode="minimal"] .mt5700-toast-error,
+html[data-ui-mode="minimal"] .mt5700-toast-warning,
+html[data-ui-mode="minimal"] .mt5700-toast-info {
+  background: var(--md-sys-color-inverse-surface) !important;
+  color: var(--md-sys-color-inverse-on-surface) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-toast-hide { animation: md3-snackbar-out 150ms var(--md-sys-motion-easing) forwards !important; }
+@keyframes md3-snackbar-in  { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes md3-snackbar-out { to { opacity: 0; transform: translate(-50%, 12px); } }
+
+html[data-ui-mode="minimal"] .mt5700-float-notice {
+  background: var(--md-sys-color-error-container) !important;
+  color: var(--md-sys-color-on-error-container) !important;
+  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-small) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  animation: none !important;
+}
+html[data-ui-mode="minimal"] .mt5700-float-notice > strong { color: var(--md-sys-color-error) !important; }
+
+html[data-ui-mode="minimal"] .mt5700-loading { background: transparent !important; box-shadow: none !important; }
+html[data-ui-mode="minimal"] .mt5700-loading-text { color: var(--md-sys-color-on-surface-variant) !important; font-size: 14px !important; }
+
+/* 状态指示器：去发光/脉冲，保留静态语义色 */
+html[data-ui-mode="minimal"] .mt-anim-pulse,
+html[data-ui-mode="minimal"] .mt-anim-stream,
+html[data-ui-mode="minimal"] .mt-beacon-pulse,
+html[data-ui-mode="minimal"] .mt-anime-spinner-box {
+  animation: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+html[data-ui-mode="minimal"] .cellular .bar { transition: none !important; }
+/* 极简模式停用扫描/连接装饰动画，状态仍由 data-state 静态表达 */
+html[data-ui-mode="minimal"] .cellular[data-state="searching"] .bar,
+html[data-ui-mode="minimal"] .cellular[data-state="connecting"] .connecting-dot {
+  animation: none !important;
+  opacity: 1 !important;
+}
+/* 信号语义色接入 MD3 tokens，不在组件里散落硬编码颜色 */
+html[data-ui-mode="minimal"] .cellular { color: var(--md-sys-color-success) !important; }
+html[data-ui-mode="minimal"] .cellular[data-state="none"],
+html[data-ui-mode="minimal"] .cellular[data-state="disconnected"] { color: var(--md-sys-color-outline) !important; }
+html[data-ui-mode="minimal"] .cellular[data-state="weak"] { color: var(--md-sys-color-warning) !important; }
+html[data-ui-mode="minimal"] .cellular[data-state="medium"] { color: var(--md-sys-color-tertiary) !important; }
+html[data-ui-mode="minimal"] .cellular[data-state="strong"],
+html[data-ui-mode="minimal"] .cellular[data-state="full"] { color: var(--md-sys-color-success) !important; }
+html[data-ui-mode="minimal"] .cellular[data-state="searching"] { color: var(--md-sys-color-secondary) !important; }
+html[data-ui-mode="minimal"] .cellular[data-state="connecting"] { color: var(--md-sys-color-primary) !important; }
+html[data-ui-mode="minimal"] .cellular[data-state="error"] { color: var(--md-sys-color-error) !important; }
+
+/* 极简模式信号塔换用重绘的 MD3 小区图标：统一尺寸与语义色，压过内联 style.color */
+html[data-ui-mode="minimal"] .mt-tower-svg-box { color: var(--md-sys-color-primary) !important; }
+html[data-ui-mode="minimal"] .mt-net-node-icon.tower .mt-tower-svg-box svg {
+  width: 40px !important;
+  height: 40px !important;
+}
+
+/* 装饰性背景图（CSS data:image/svg+xml 下拉/搜索箭头）在极简模式改用纯色边界 */
+html[data-ui-mode="minimal"] .mt5700-hero-art { gap: var(--md-sys-space-3) !important; }
+
+/* ==========================================================================
+   9. 全局装饰动画停用（保留功能性的 spinner 旋转与轻量交互反馈）
+   ========================================================================== */
+html[data-ui-mode="minimal"] .mt-mascot-img,
+html[data-ui-mode="minimal"] .mt-mascot-avatar,
+html[data-ui-mode="minimal"] .mt-bg-char,
+html[data-ui-mode="minimal"] .mt5700-hero-card,
+html[data-ui-mode="minimal"] .mt5700-card,
+html[data-ui-mode="minimal"] .mt-card,
+html[data-ui-mode="minimal"] .mt5700-banner-icon,
+html[data-ui-mode="minimal"] .mt5700-hero-badge-dot,
+html[data-ui-mode="minimal"] .mt-beacon-dot {
+  animation: none !important;
+}
+
+html[data-ui-mode="minimal"] *,
+html[data-ui-mode="minimal"] *::before,
+html[data-ui-mode="minimal"] *::after {
+  text-shadow: none !important;
+}
+
+/* ==========================================================================
+   10. 模式切换控件（新增元素；普通模式下贴合现有 pill 风格）
+   ========================================================================== */
+.mt-uimode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.10);
+  flex: 0 0 auto;
+}
+.mt-uimode-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: #5b4b8a;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color .18s ease, color .18s ease;
+}
+.mt-uimode-btn:hover { background: rgba(139, 92, 246, 0.12); }
+.mt-uimode-btn.is-active {
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(124, 58, 237, 0.25);
+}
+html.at-dark .mt-uimode-switch { background: rgba(30, 38, 62, 0.75); border-color: rgba(167, 139, 250, 0.35); }
+html.at-dark .mt-uimode-btn { color: #c4b5fd; }
+
+/* 极简模式：MD3 segmented button（outlined，选中项 secondary-container） */
+html[data-ui-mode="minimal"] .mt-uimode-switch {
+  background: var(--md-sys-color-surface-container-low) !important;
+  border: 1px solid var(--md-sys-color-outline) !important;
+  border-radius: var(--md-sys-shape-corner-full) !important;
+  box-shadow: none !important;
+  padding: 2px !important;
+}
+html[data-ui-mode="minimal"] .mt-uimode-btn {
+  color: var(--md-sys-color-on-surface-variant) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.1px;
+  padding: 8px 16px !important;
+  border-radius: var(--md-sys-shape-corner-full) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html[data-ui-mode="minimal"] .mt-uimode-btn:hover { background: var(--md-sys-color-surface-container) !important; }
+html[data-ui-mode="minimal"] .mt-uimode-btn.is-active {
+  background: var(--md-sys-color-secondary-container) !important;
+  color: var(--md-sys-color-on-secondary-container) !important;
+  box-shadow: none !important;
+}
+
+/* ==========================================================================
+   11. 响应式（手机 / PC）
+   ========================================================================== */
+@media (max-width: 768px) {
+  html[data-ui-mode="minimal"] .mt5700-page,
+  html[data-ui-mode="minimal"] .mt-anime-container { gap: var(--md-sys-space-3) !important; margin: var(--md-sys-space-2) auto !important; }
+  html[data-ui-mode="minimal"] .mt5700-hero-card { padding: var(--md-sys-space-4) !important; flex-wrap: wrap !important; gap: var(--md-sys-space-3) !important; }
+  html[data-ui-mode="minimal"] .mt5700-hero-title { font-size: 20px !important; }
+  html[data-ui-mode="minimal"] .mt5700-hero-art { width: 100% !important; justify-content: flex-start !important; }
+  html[data-ui-mode="minimal"] .mt5700-card,
+  html[data-ui-mode="minimal"] .mt-card { padding: var(--md-sys-space-3) !important; }
+  html[data-ui-mode="minimal"] .mt5700-modal,
+  html[data-ui-mode="minimal"] .at-modal,
+  html[data-ui-mode="minimal"] .cbi-modal-dialog,
+  html[data-ui-mode="minimal"] .modal-dialog,
+  html[data-ui-mode="minimal"] .modal {
+    max-width: 100% !important;
+    padding: var(--md-sys-space-6) var(--md-sys-space-4) !important;
+    border-radius: var(--md-sys-shape-corner-large) !important;
+  }
+  html[data-ui-mode="minimal"] .mt5700-modal-footer,
+  html[data-ui-mode="minimal"] .at-modal-actions,
+  html[data-ui-mode="minimal"] .cbi-modal-actions,
+  html[data-ui-mode="minimal"] .modal-footer { flex-wrap: wrap !important; }
+  html[data-ui-mode="minimal"] .mt5700-modal-footer .mt5700-btn,
+  html[data-ui-mode="minimal"] .at-modal-actions .at-btn { flex: 1 1 auto !important; }
+  html[data-ui-mode="minimal"] .mt5700-toast { bottom: var(--md-sys-space-4) !important; max-width: calc(100vw - 24px) !important; }
+  html[data-ui-mode="minimal"] .at-field { flex-direction: column !important; gap: var(--md-sys-space-1) !important; }
+  html[data-ui-mode="minimal"] .at-field-label { width: 100% !important; }
+  html[data-ui-mode="minimal"] .at-field-control { width: 100% !important; }
+  html[data-ui-mode="minimal"] .at-field-control input,
+  html[data-ui-mode="minimal"] .at-field-control select { width: 100% !important; max-width: 100% !important; }
+}
+
+/* 尊重系统「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui-mode="minimal"] .mt5700-modal,
+  html[data-ui-mode="minimal"] .at-modal,
+  html[data-ui-mode="minimal"] .mt5700-modal-mask,
+  html[data-ui-mode="minimal"] .at-modal-mask,
+  html[data-ui-mode="minimal"] .mt5700-toast { animation: none !important; }
+}
