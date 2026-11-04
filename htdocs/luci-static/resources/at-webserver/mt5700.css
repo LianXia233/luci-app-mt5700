@@ -2582,9 +2582,6 @@
     filter: drop-shadow(0 0 10px rgba(41, 169, 225, 0.8));
   }
 }@keyframes mt-float-slow {0% { transform: translateY(0px) rotate(0deg); }50% { transform: translateY(-8px) rotate(1.5deg); }100% { transform: translateY(0px) rotate(0deg); }
-}/* 空态立绘的漂浮：纯位移、不旋转 —— 旋转已由外层 .mt-anime-pos-shell 承担，
-   两者叠加会放大摆幅，所以这里只给上下浮动。 */
-@keyframes mt-anim-float {0%, 100% { transform: translateY(0); }50% { transform: translateY(-6px); }
 }@keyframes mt-data-stream {0% { stroke-dashoffset: 60; }100% { stroke-dashoffset: 0; }
 }@keyframes mt-spin-slow {0% { transform: rotate(0deg); }100% { transform: rotate(360deg); }
 }/* SVG 元素动画绑定类 */
@@ -2892,14 +2889,6 @@ select.mt5700-select {
   justify-content: center !important;
   padding: 36px 20px !important;
   gap: 12px !important;
-}/*
- * 空态立绘（小吱-喜欢，1000x1000 方图，140px 注入见 mt5700.js api.empty）。
- * 背景已透明化（无白色底rect），角色直接浮在卡片上；紫色投影 + 轻浮动画
- * 与 mt5700-loading 的呼吸节奏区分开——空态是「等人」而不是「在转」。
- */
-.mt-anime-empty-svg {
-  filter: drop-shadow(0 4px 10px rgba(139, 92, 246, 0.15)) !important;
-  animation: mt-anim-float 4s ease-in-out infinite alternate;
 }.mt5700-empty-text {
   font-size: 13.5px !important;
   color: #818cf8 !important;
@@ -5244,10 +5233,6 @@ select.mt5700-select {
 }@media (prefers-reduced-motion: reduce) {/* 悬浮动效每帧位移，低帧率/截图下看起来像「被切在边缘」 */
   .mt5700-page:not(.mt5700-sms-shell) .mt-mascot-avatar.mt-mascot-avatar {
     animation: none !important;
-  }/* 重复类名抬特异性：.mt-anime-mint-svg 的 animation 带 !important 且声明在本块之后 */
-  .mt-anime-empty-svg.mt-anime-empty-svg,
-  .mt-anime-mint-svg.mt-anime-mint-svg {
-    animation: none !important;
   }
 }.at-dark .mt5700-page:not(.mt5700-sms-shell) .mt-mascot-img.mt-mascot-img {
   background: linear-gradient(135deg, #6d5bd0 0%, #b0538a 100%) !important;
@@ -5590,13 +5575,6 @@ select.mt5700-select {
    ========================================================================== */
 .mt5700-hero-card.mt5700-hero-card:not(.mt5700-sms-hero-compact) {padding-top:10px!important;padding-bottom:10px!important;gap:16px!important;margin-bottom:12px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-badge {margin-bottom:5px!important;padding:2px 12px!important;font-size:11px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-title {font-size:21px!important;margin-bottom:3px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-desc {font-size:12.5px!important;line-height:1.4!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-mascot-avatar, .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-mascot-avatar.mt-mascot-avatar {width:60px!important;height:60px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-mascot-img.mt-mascot-img {width:100%!important;height:100%!important}@media (max-width:960px) {.mt5700-hero-card.mt5700-hero-card:not(.mt5700-sms-hero-compact) {flex-direction:row!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;padding:10px 14px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-art.mt5700-hero-art {width:auto!important;height:auto!important;max-width:none!important;flex:0 0 auto!important;align-self:center!important;justify-content:flex-end!important}
 }@media (max-width:768px) {.mt5700-hero-card.mt5700-hero-card:not(.mt5700-sms-hero-compact) {padding:9px 12px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-title.mt5700-hero-title {font-size:17px!important;margin-bottom:2px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-desc {font-size:11.5px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-badge {margin-bottom:4px!important}.mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-mascot-avatar, .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-mascot-avatar.mt-mascot-avatar {width:52px!important;height:52px!important}
-}/* ==========================================================================
-   v2.41.5 空态伙伴立绘 mint：与主立绘同时显示，位置每次渲染随机（JS 侧定位）
-   ========================================================================== */
-.mt5700-empty {position:relative!important}.mt-anime-empty-svg {position:relative!important;z-index:1!important}.mt-anime-mint-svg {position:absolute!important;z-index:0!important;width:68px!important;height:auto!important;pointer-events:none!important;opacity:.92!important;filter:drop-shadow(0 3px 8px rgba(64,180,200,0.28))!important;animation:mt-anim-float 4.6s ease-in-out infinite alternate!important}@media (max-width:768px) {.mt-anime-mint-svg {width:54px!important}}/* ==========================================================================
-   v2.41.6 空态双角色随机落位：主立绘与 mint 都在空白舞台内随机分布（JS 定位）
-   ========================================================================== */
-.mt-anime-empty-stage {position:relative!important;width:100%!important;height:150px!important}.mt-anime-pos-shell {position:absolute!important;transform-origin:center bottom!important}.mt-anime-pos-main {z-index:2!important}.mt-anime-pos-mint {z-index:1!important}.mt-anime-empty-svg {position:static!important;width:140px!important;height:140px!important}.mt-anime-mint-svg {position:static!important;width:68px!important;height:auto!important;opacity:.95!important}@media (max-width:768px) {.mt-anime-empty-stage {height:118px!important}.mt-anime-empty-svg {width:104px!important;height:104px!important}.mt-anime-mint-svg {width:50px!important}
 }/* ==========================================================================
    v2.41.7 插件全局背景：三角网格铺底（随明暗主题切换）+ 双角色每次刷新随机显示其一
    网格层为 fixed 装饰层（z-index:0），应用内容经 .mt5700-app {z-index:1}抬到其上；
