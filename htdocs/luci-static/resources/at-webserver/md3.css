@@ -265,9 +265,14 @@ html[data-ui-mode="minimal"] .mt-anime-container {
 }
 
 /* 底部留白：右下角是固定定位的界面设置 FAB（56px），滚动到末尾时
- * 必须有足够内距，否则最后一行数据会被按钮压住。 */
+ * 必须有足够内距，否则最后一行数据会被按钮压住。
+ * 短信中心例外：它按视口高度精确计算会话区，多出的内距会立刻变成滚动条。 */
 html[data-ui-mode="minimal"] .mt5700-page {
   padding-bottom: 72px !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-page.mt5700-sms-shell {
+  padding-bottom: 0 !important;
 }
 
 /* 页面底色：普通模式靠插件自绘壁纸 + 玻璃卡片；极简模式用 MD3 surface 纯色。
