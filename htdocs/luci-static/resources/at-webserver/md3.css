@@ -232,16 +232,15 @@ html[data-ui-mode="minimal"].at-dark {
 /* ==========================================================================
    2. 页面骨架 / 去除装饰性视觉
    ========================================================================== */
+/* 页面容器只换字体与颜色：宽度 / 最大宽度 / 外边距 / 栅格全部沿用普通模式原规则，
+ * 极简模式是「换皮」不是「换布局」。 */
 html[data-ui-mode="minimal"] .mt5700-page,
 html[data-ui-mode="minimal"] .mt-anime-container {
   font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  gap: var(--md-sys-space-4);
-  max-width: 1280px;
-  margin: var(--md-sys-space-4) auto;
   color: var(--md-sys-color-on-surface);
 }
 
-/* 这些资源由 JS 在极简模式下不创建；CSS 仅作旧 DOM 残留的兜底 */
+/* 这些资源由 JS 在极简模式下不创建（壁纸层 / 看板娘）；CSS 仅作旧 DOM 残留兜底 */
 html[data-ui-mode="minimal"] #mt5700-global-bg,
 html[data-ui-mode="minimal"] .mt-bg-char,
 html[data-ui-mode="minimal"] .mt-mascot-speech-wrap,
@@ -265,29 +264,48 @@ html[data-ui-mode="minimal"] .mt5700-float-notice {
   filter: none !important;
 }
 
-html[data-ui-mode="minimal"] .mt5700-hero-card {
-  border: 1px solid var(--md-sys-color-outline-variant) !important;
-  border-radius: var(--md-sys-shape-corner-large) !important;
-  background: var(--md-sys-color-primary-container) !important;
-  padding: var(--md-sys-space-6) !important;
+/* 极简模式不显示 hero 栏（装饰性标题卡）：去掉底色 / 描边 / 圆角 / 阴影 /
+ * 装饰伪元素与右侧插画区，只保留一行紧凑标题。hero 高度因此大幅收缩，
+ * 但它的位置与下方主体容器不变，页面结构与普通模式完全一致。 */
+html[data-ui-mode="minimal"] .mt5700-hero-card.mt5700-hero-card {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin-bottom: var(--md-sys-space-1) !important;
+  min-height: 0 !important;
+  overflow: visible !important;
   transform: none !important;
+  gap: 0 !important;
+}
+html[data-ui-mode="minimal"] .mt5700-hero-card::before,
+html[data-ui-mode="minimal"] .mt5700-hero-card::after {
+  content: none !important;
+  display: none !important;
+}
+html[data-ui-mode="minimal"] .mt5700-hero-art,
+html[data-ui-mode="minimal"] .mt5700-hero-badge {
+  display: none !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-hero-title {
-  font-size: 22px !important;
-  font-weight: 400 !important;
+  font-size: 20px !important;
+  font-weight: 500 !important;
   letter-spacing: 0 !important;
-  color: var(--md-sys-color-on-primary-container) !important;
+  line-height: 1.35 !important;
+  margin: 0 !important;
+  color: var(--md-sys-color-on-surface) !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-hero-desc {
-  font-size: 14px !important;
+  font-size: 13px !important;
   font-weight: 400 !important;
-  color: var(--md-sys-color-on-primary-container) !important;
-  opacity: 0.82;
+  margin: 2px 0 0 0 !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+  opacity: 1;
 }
 
-html[data-ui-mode="minimal"] .mt5700-hero-badge,
 html[data-ui-mode="minimal"] .mt-pill-tag {
   background: var(--md-sys-color-secondary-container) !important;
   color: var(--md-sys-color-on-secondary-container) !important;
@@ -874,15 +892,152 @@ html[data-ui-mode="minimal"] .mt-uimode-btn.is-active {
   box-shadow: none !important;
 }
 
+/* --------------------------------------------------------------------------
+   设置入口：右下角固定按钮 + 模式面板
+   - position:fixed 不参与文档流 → 普通模式布局 / 栅格 / 行宽零影响；
+   - 挂在 body 上而不在 hero 内 → 极简模式隐藏 hero 栏后入口照常可用。
+   -------------------------------------------------------------------------- */
+.mt-uimode-settings {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  box-sizing: border-box;
+}
+
+.mt-uimode-fab {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  color: #5b4b8a;
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.18);
+  cursor: pointer;
+  transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease;
+}
+.mt-uimode-fab:hover { transform: translateY(-1px); background: rgba(255, 255, 255, 0.8); }
+.mt-uimode-fab:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
+.mt-uimode-fab svg { width: 22px; height: 22px; }
+html.at-dark .mt-uimode-fab {
+  background: rgba(30, 38, 62, 0.82);
+  border-color: rgba(167, 139, 250, 0.35);
+  color: #d7c9ff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.mt-uimode-panel {
+  display: none;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  margin-bottom: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(139, 92, 246, 0.22);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 18px 40px rgba(18, 48, 86, 0.16);
+  color: #2c2a3d;
+  box-sizing: border-box;
+}
+.mt-uimode-panel.is-open { display: block; animation: mt-uimode-pop .16s ease-out; }
+@keyframes mt-uimode-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.mt-uimode-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.mt-uimode-panel-title { font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+.mt-uimode-close {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: #7b7392;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.mt-uimode-close:hover { background: rgba(139, 92, 246, 0.12); }
+.mt-uimode-close svg { width: 18px; height: 18px; }
+.mt-uimode-field { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.mt-uimode-field-label { font-size: 12px; font-weight: 600; color: #6b6385; letter-spacing: .2px; }
+.mt-uimode-hint { margin: 12px 0 0; font-size: 11.5px; line-height: 1.55; color: #7b7392; }
+.mt-uimode-status { margin-top: 8px; font-size: 11.5px; line-height: 1.5; min-height: 1em; color: #7b7392; }
+.mt-uimode-status.is-ok { color: #1f7a45; }
+.mt-uimode-status.is-error { color: #b3261e; }
+html.at-dark .mt-uimode-panel {
+  background: rgba(24, 30, 48, 0.95);
+  border-color: rgba(167, 139, 250, 0.28);
+  color: #e6e1f5;
+}
+html.at-dark .mt-uimode-panel-title { color: #e6e1f5; }
+html.at-dark .mt-uimode-field-label,
+html.at-dark .mt-uimode-hint,
+html.at-dark .mt-uimode-status { color: #a9a1c4; }
+
+/* 极简模式：MD3 扩展 FAB（56dp / 16dp 圆角 / primary-container，无阴影无毛玻璃）
+ * + MD3 弹层（surface-container-high / outline-variant / 无动画） */
+html[data-ui-mode="minimal"] .mt-uimode-settings { right: 16px; bottom: 16px; }
+html[data-ui-mode="minimal"] .mt-uimode-fab {
+  width: 56px;
+  height: 56px;
+  border: 0 !important;
+  border-radius: var(--md-sys-shape-corner-large) !important;
+  background: var(--md-sys-color-primary-container) !important;
+  color: var(--md-sys-color-on-primary-container) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+  transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
+}
+html[data-ui-mode="minimal"] .mt-uimode-fab:hover {
+  background: var(--md-sys-color-primary) !important;
+  color: var(--md-sys-color-on-primary) !important;
+}
+html[data-ui-mode="minimal"] .mt-uimode-fab svg { width: 24px; height: 24px; }
+html[data-ui-mode="minimal"] .mt-uimode-panel {
+  width: 320px;
+  padding: var(--md-sys-space-4) !important;
+  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-large) !important;
+  background: var(--md-sys-color-surface-container-high) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: var(--md-sys-color-on-surface) !important;
+}
+html[data-ui-mode="minimal"] .mt-uimode-panel.is-open { animation: none !important; }
+html[data-ui-mode="minimal"] .mt-uimode-panel-title { color: var(--md-sys-color-on-surface) !important; font-weight: 500 !important; font-size: 16px !important; }
+html[data-ui-mode="minimal"] .mt-uimode-close { color: var(--md-sys-color-on-surface-variant) !important; border-radius: var(--md-sys-shape-corner-full) !important; }
+html[data-ui-mode="minimal"] .mt-uimode-close:hover { background: var(--md-sys-color-surface-container) !important; }
+html[data-ui-mode="minimal"] .mt-uimode-field-label { color: var(--md-sys-color-on-surface-variant) !important; font-weight: 500 !important; }
+html[data-ui-mode="minimal"] .mt-uimode-hint { color: var(--md-sys-color-on-surface-variant) !important; font-size: 12px !important; }
+html[data-ui-mode="minimal"] .mt-uimode-status { color: var(--md-sys-color-on-surface-variant) !important; font-size: 12px !important; }
+html[data-ui-mode="minimal"] .mt-uimode-status.is-ok { color: var(--md-sys-color-success) !important; }
+html[data-ui-mode="minimal"] .mt-uimode-status.is-error { color: var(--md-sys-color-error) !important; }
+
 /* ==========================================================================
    11. 响应式（手机 / PC）
    ========================================================================== */
 @media (max-width: 768px) {
-  html[data-ui-mode="minimal"] .mt5700-page,
-  html[data-ui-mode="minimal"] .mt-anime-container { gap: var(--md-sys-space-3) !important; margin: var(--md-sys-space-2) auto !important; }
-  html[data-ui-mode="minimal"] .mt5700-hero-card { padding: var(--md-sys-space-4) !important; flex-wrap: wrap !important; gap: var(--md-sys-space-3) !important; }
-  html[data-ui-mode="minimal"] .mt5700-hero-title { font-size: 20px !important; }
-  html[data-ui-mode="minimal"] .mt5700-hero-art { width: 100% !important; justify-content: flex-start !important; }
+  /* 只调组件内边距与字号，不改页面宽度 / 外边距 / 栅格 —— 与普通模式同断点、同布局 */
+  html[data-ui-mode="minimal"] .mt5700-hero-card.mt5700-hero-card { padding: 0 !important; margin-bottom: var(--md-sys-space-1) !important; }
+  html[data-ui-mode="minimal"] .mt5700-hero-title { font-size: 19px !important; }
   html[data-ui-mode="minimal"] .mt5700-card,
   html[data-ui-mode="minimal"] .mt-card { padding: var(--md-sys-space-3) !important; }
   html[data-ui-mode="minimal"] .mt5700-modal,
@@ -901,6 +1056,9 @@ html[data-ui-mode="minimal"] .mt-uimode-btn.is-active {
   html[data-ui-mode="minimal"] .mt5700-modal-footer .mt5700-btn,
   html[data-ui-mode="minimal"] .at-modal-actions .at-btn { flex: 1 1 auto !important; }
   html[data-ui-mode="minimal"] .mt5700-toast { bottom: var(--md-sys-space-4) !important; max-width: calc(100vw - 24px) !important; }
+  /* 手机端上移，避开 LuCI 底部粘性操作栏（保存 / 应用） */
+  html[data-ui-mode="minimal"] .mt-uimode-settings { right: 12px; bottom: 84px; }
+  html[data-ui-mode="minimal"] .mt-uimode-panel { width: 100%; max-width: calc(100vw - 24px); }
   html[data-ui-mode="minimal"] .at-field { flex-direction: column !important; gap: var(--md-sys-space-1) !important; }
   html[data-ui-mode="minimal"] .at-field-label { width: 100% !important; }
   html[data-ui-mode="minimal"] .at-field-control { width: 100% !important; }
