@@ -52,11 +52,34 @@ function makeElement(tag, registry) {
 		style: { cssText: '' },
 		setAttribute: function (k, v) { this.attrs[k] = String(v); },
 		getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
-		appendChild: function (c) { this.children.push(c); return c; },
-		insertBefore: function (c) { this.children.unshift(c); return c; },
+		appendChild: function (c) { this.children.push(c); c.parentNode = this; return c; },
+		insertBefore: function (c) { this.children.unshift(c); c.parentNode = this; return c; },
+		removeChild: function (c) {
+			var i = this.children.indexOf(c);
+			if (i >= 0) this.children.splice(i, 1);
+			return c;
+		},
+		removeAttribute: function (k) { delete this.attrs[k]; },
 		addEventListener: function () {},
-		classList: { toggle: function () {}, contains: function () { return false; } },
 		closest: function () { return null; }
+	};
+	el.classList = {
+		contains: function (cls) {
+			return (' ' + (el.className || '') + ' ').indexOf(' ' + cls + ' ') >= 0;
+		},
+		add: function (cls) {
+			if (!this.contains(cls)) el.className = ((el.className || '') + ' ' + cls).trim();
+		},
+		remove: function (cls) {
+			if (this.contains(cls)) {
+				el.className = (' ' + (el.className || '') + ' ').split(' ' + cls + ' ').join(' ').trim();
+			}
+		},
+		toggle: function (cls, on) {
+			var has = this.contains(cls);
+			var want = (on === undefined) ? !has : !!on;
+			if (want) this.add(cls); else this.remove(cls);
+		}
 	};
 	if (registry) registry.push(el);
 	return el;
@@ -76,19 +99,32 @@ function makeEnv(opts) {
 	};
 	const listeners = [];
 	const store = {};
+	const body = makeElement('body', registry);
 	const doc = {
 		documentElement: html,
+		body: body,
 		readyState: 'complete',
 		addEventListener: function (type, fn, capture) { listeners.push({ type: type, fn: fn, capture: capture }); },
+		getElementById: function (id) {
+			for (let i = 0; i < registry.length; i++) {
+				if (registry[i].attrs.id === id) return registry[i];
+			}
+			return null;
+		},
+		querySelector: function (sel) { return doc.querySelectorAll(sel)[0] || null; },
 		querySelectorAll: function (sel) {
 			return registry.filter(function (el) {
 				if (sel === '[data-mt-uimode-value]') return el.attrs['data-mt-uimode-value'] != null;
 				if (sel === '[data-mt-uimode-decorated]') return el.attrs['data-mt-uimode-decorated'] != null;
+				if (sel === '[data-mt-uimode-toggle]') return el.attrs['data-mt-uimode-toggle'] != null;
+				if (sel === '[data-mt-uimode-close]') return el.attrs['data-mt-uimode-close'] != null;
+				if (sel.charAt(0) === '#') return el.attrs.id === sel.slice(1);
 				if (sel.indexOf('svg[') === 0) return false;
 				return false;
 			});
 		},
-		createElement: function (tag) { return makeElement(tag, registry); }
+		createElement: function (tag) { return makeElement(tag, registry); },
+		createElementNS: function (ns, tag) { return makeElement(tag, registry); }
 	};
 	const uciCalls = [];
 	let stored = o.initialUci == null ? undefined : o.initialUci;
@@ -280,6 +316,53 @@ check('任务要求语义全覆盖',
 		clickHandler({ target: btn });
 		await flush();
 		check('委托点击可切回普通模式', M.current() === 'normal');
+	}
+
+	/* B5b 设置入口：挂载幂等 / 面板开合 / 状态提示真实性 */
+	{
+		const env = makeEnv({});
+		const M = loadModule(modeFile, env.sandbox, 'AtUimode');
+		await flush();
+
+		const s1 = M.mountSettings();
+		const s2 = M.mountSettings();
+		check('设置入口挂在 document.body（不在 hero 内，极简模式隐藏 hero 后仍可用）',
+			!!s1 && s1.parentNode === env.doc.body);
+		check('mountSettings 幂等：重复调用只插入一次',
+			env.doc.body.children.length === 1 && s1 === s2,
+			'children=' + env.doc.body.children.length);
+		check('面板内含 normal/minimal 两个模式按钮',
+			env.doc.querySelectorAll('[data-mt-uimode-value]').length === 2);
+		check('面板默认收起', M.isPanelOpen() === false
+			&& env.doc.getElementById('mt-uimode-panel').className.indexOf('is-open') < 0);
+
+		M.openPanel();
+		check('openPanel 展开面板并同步 aria-expanded',
+			M.isPanelOpen() === true
+			&& env.doc.getElementById('mt-uimode-panel').className.indexOf('is-open') >= 0
+			&& env.doc.querySelector('[data-mt-uimode-toggle]').getAttribute('aria-expanded') === 'true');
+		M.closePanel();
+		check('closePanel 收起面板', M.isPanelOpen() === false
+			&& env.doc.querySelector('[data-mt-uimode-toggle]').getAttribute('aria-expanded') === 'false');
+
+		const status = env.doc.getElementById('mt-uimode-status');
+		M.reportStatus({ ok: true, persisted: true });
+		check('保存成功才提示「已保存到设备」',
+			status.textContent.indexOf('已保存到设备') >= 0, status.textContent);
+		M.reportStatus({ ok: false });
+		check('保存失败提示已恢复原模式（绝不谎报成功）',
+			status.textContent.indexOf('已恢复') >= 0
+			&& status.textContent.indexOf('已保存') < 0, status.textContent);
+
+		await M.set('minimal', { skipPersist: true });
+		check('模式变更后清空过期状态提示', status.textContent === '', status.textContent);
+		check('面板分段控件跟随当前模式',
+			env.doc.querySelectorAll('[data-mt-uimode-value]')
+				.filter(function (b) { return b.attrs['aria-pressed'] === 'true'; })
+				.map(function (b) { return b.attrs['data-mt-uimode-value']; }).join() === 'minimal');
+
+		M.unmountSettings();
+		check('unmountSettings 移除入口节点', env.doc.body.children.indexOf(s1) < 0);
 	}
 
 	/* B6 图标按模式重绘（Icon Manager 与 Mode Manager 联动） */
