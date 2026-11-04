@@ -10,7 +10,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.46.3';
+var MT5700_CSS_VERSION = '2.46.4';
 // 全局视觉修订层：弹窗文字可见性 + 后端未就绪提示条。
 // 这两项是**插件级组件**，不属于某个页面；本模块被 12 个视图全部 require，
 // 因此在这里注入即可一次覆盖所有页面（含只依赖 mt5700 的服务配置页）。
@@ -720,6 +720,8 @@ var Mt5700 = (function () {
 		 * 走「标签左 / 值右」的紧凑分栏行。
 		 */
 		if (headers.length === 2) table.classList.add('mt5700-table-kv');
+		/* 调用方可追加专类（如邻区表 / PDP 表），供移动端紧凑堆叠等定向样式使用 */
+		if (options.className) table.classList.add(options.className);
 
 		// 表头
 		var thead = E('thead');

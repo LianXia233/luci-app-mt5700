@@ -64,21 +64,23 @@ return L.view.extend({
 			'.mt-pdp-card-add:hover { border-color: #8b5cf6; background: rgba(139, 92, 246, 0.07); transform: translateY(-2px); }',
 			'/* 紧凑表格视图约束 */',
 			'.mt-pdp-table-wrap { max-width: 960px; margin: 0 auto; }',
-			'/* 手机端：PDP 网格单列全宽、操作按钮换行、表格视图横向滑动查看 */',
+			'/* 手机端：PDP 网格单列全宽，操作按钮一行三等分；表格视图 ≤768px 由',
+			' * mt5700.css 的 .mt5700-table-pdp 紧凑堆叠规则接管，不再横向滑动 */',
 			'@media (max-width: 640px) {',
 			'  .mt-pdp-grid { grid-template-columns: 1fr !important; }',
 			'  .mt-pdp-note { padding: 10px 12px; }',
 			'  .mt-pdp-card { padding: 12px 14px; }',
 			'  .mt-pdp-card-actions { flex-wrap: wrap; }',
-			'  .mt-pdp-card-actions .mt5700-btn { flex: 1 1 44%; min-width: 96px; }',
-			'  .mt-pdp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: none; }',
-			'  .mt-pdp-table-wrap .mt5700-table { min-width: 620px; }',
-			'  .mt-pdp-table-wrap .mt5700-table th:nth-child(5), .mt-pdp-table-wrap .mt5700-table td:nth-child(5) { width: auto; }',
+			'  .mt-pdp-card-actions .mt5700-btn { flex: 1 1 0; min-width: 0; }',
 			'}',
-			'.mt-pdp-table-wrap .mt5700-table th:nth-child(1), .mt-pdp-table-wrap .mt5700-table td:nth-child(1) { width: 70px; text-align: center; }',
-			'.mt-pdp-table-wrap .mt5700-table th:nth-child(2), .mt-pdp-table-wrap .mt5700-table td:nth-child(2) { width: 120px; }',
-			'.mt-pdp-table-wrap .mt5700-table th:nth-child(4), .mt-pdp-table-wrap .mt5700-table td:nth-child(4) { width: 90px; text-align: center; }',
-			'.mt-pdp-table-wrap .mt5700-table th:nth-child(5), .mt-pdp-table-wrap .mt5700-table td:nth-child(5) { width: 190px; text-align: right; }',
+			'/* 表格视图固定列宽只在桌面端生效：≤768px 表格已堆叠为卡片，',
+			' * 无 media 约束的固定宽度会把堆叠行挤成 CID 70px / APN 190px 的参差错位 */',
+			'@media (min-width: 769px) {',
+			'  .mt-pdp-table-wrap .mt5700-table th:nth-child(1), .mt-pdp-table-wrap .mt5700-table td:nth-child(1) { width: 70px; text-align: center; }',
+			'  .mt-pdp-table-wrap .mt5700-table th:nth-child(2), .mt-pdp-table-wrap .mt5700-table td:nth-child(2) { width: 120px; }',
+			'  .mt-pdp-table-wrap .mt5700-table th:nth-child(4), .mt-pdp-table-wrap .mt5700-table td:nth-child(4) { width: 90px; text-align: center; }',
+			'  .mt-pdp-table-wrap .mt5700-table th:nth-child(5), .mt-pdp-table-wrap .mt5700-table td:nth-child(5) { width: 190px; text-align: right; }',
+			'}',
 			'/* 底部暂存条适配 */',
 			'.mt5700-applybar { z-index: 100; }'
 		].join('\n'));
@@ -612,7 +614,7 @@ return L.view.extend({
 
 					return [cidEl, typeEl, apnEl, statusEl, opWrap];
 				});
-				wrap.appendChild(Mt5700.table(['CID', '协议类型', 'APN', '状态', '操作'], rows, { striped: true }));
+				wrap.appendChild(Mt5700.table(['CID', '协议类型', 'APN', '状态', '操作'], rows, { striped: true, className: 'mt5700-table-pdp' }));
 				pdpBody.appendChild(wrap);
 			}
 		}

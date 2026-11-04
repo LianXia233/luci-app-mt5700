@@ -5876,3 +5876,100 @@ html.at-dark .mt5700-switch input[type="checkbox"] {
     flex: 1 1 120px;
   }
 }
+/* ==========================================================================
+   v2.46.4 多列表格移动端紧凑堆叠（网络设置·邻区扫描 / 拨号设置·PDP 上下文）
+   --------------------------------------------------------------------------
+   问题：上方「表格 Soft Anime 样式」节的 .mt5700-table td
+   { padding:12px 14px !important; font-size:13px !important } 声明位置在
+   ≤600px 堆叠规则之后，!important 把卡片化后的 td 顶回桌面尺寸——实测
+   堆叠行高 44px，邻区单卡 8 行约 370px，一屏只放得下一个邻区；
+   601~768px 区间则维持 8 列真表格，贴边临界还要横向拖动。
+   方案：给调用方传了专类的表格（api.table options.className）在 ≤768px
+   统一改为两列网格堆叠卡（制式|频段 / ARFCN|PCI / RSRP|RSRQ / SINR|操作，
+   PDP 为 CID|协议 / APN|状态 / 操作整行），行数减半、行高压回约 26px；
+   本节声明位置在 Soft Anime 节之后且特异性更高，同级 !important 下后者胜。
+   ========================================================================== */
+@media (max-width: 768px) {
+  .mt5700-table-wrapper:has(> .mt5700-table-neighbor),
+  .mt5700-table-wrapper:has(> .mt5700-table-pdp) {
+    overflow-x: visible;
+    border: none;
+    background: transparent;
+  }
+  .mt5700-table.mt5700-table-neighbor,
+  .mt5700-table.mt5700-table-pdp,
+  .mt5700-table.mt5700-table-neighbor thead,
+  .mt5700-table.mt5700-table-pdp thead,
+  .mt5700-table.mt5700-table-neighbor tbody,
+  .mt5700-table.mt5700-table-pdp tbody,
+  .mt5700-table.mt5700-table-neighbor tr,
+  .mt5700-table.mt5700-table-pdp tr,
+  .mt5700-table.mt5700-table-neighbor th,
+  .mt5700-table.mt5700-table-pdp th,
+  .mt5700-table.mt5700-table-neighbor td,
+  .mt5700-table.mt5700-table-pdp td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .mt5700-table.mt5700-table-neighbor thead,
+  .mt5700-table.mt5700-table-pdp thead {
+    display: none !important;
+  }
+  .mt5700-table.mt5700-table-neighbor tbody tr,
+  .mt5700-table.mt5700-table-pdp tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 14px;
+    margin-bottom: 8px;
+    padding: 6px 11px 7px;
+    border: 1px solid var(--mt5700-border-subtle);
+    border-radius: var(--mt5700-radius-md);
+    background: var(--mt5700-card-bg) !important;
+    box-shadow: var(--mt5700-sh-1);
+  }
+  .mt5700-table.mt5700-table-neighbor tbody tr:last-child,
+  .mt5700-table.mt5700-table-pdp tbody tr:last-child {
+    margin-bottom: 0;
+  }
+  .mt5700-table.mt5700-table-neighbor tbody tr td,
+  .mt5700-table.mt5700-table-pdp tbody tr td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: auto;
+    min-width: 0;
+    padding: 5px 0 4px !important;
+    font-size: 12px !important;
+    color: var(--mt5700-text-secondary) !important;
+    border: none !important;
+    border-bottom: 1px dashed var(--mt5700-divider) !important;
+    text-align: right;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  /* 两列网格的最后一行（末两个单元格）不画分隔线 */
+  .mt5700-table.mt5700-table-neighbor tbody tr td:nth-last-child(-n+2),
+  .mt5700-table.mt5700-table-pdp tbody tr td:nth-last-child(-n+2) {
+    border-bottom: none !important;
+  }
+  .mt5700-table.mt5700-table-neighbor td[data-label]::before,
+  .mt5700-table.mt5700-table-pdp td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--mt5700-text-muted);
+    text-align: left;
+    white-space: nowrap;
+  }
+  /* PDP 表操作列（编辑/激活/删除三按钮）独占整行，按钮组有横向空间可摆 */
+  .mt5700-table.mt5700-table-pdp tbody tr td:last-child {
+    grid-column: 1 / -1;
+  }
+  .mt5700-table.mt5700-table-pdp tbody tr td:last-child .mt5700-inline {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}

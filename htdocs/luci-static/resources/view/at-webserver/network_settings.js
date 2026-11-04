@@ -376,6 +376,12 @@ return L.view.extend({
 
 		function renderNeighbors() {
 			neighBody.innerHTML = '';
+			if (!neighbors.length) {
+				/* 无数据只渲染空态组件：连表格一起画会出现「暂无数据」行 +
+				 * 空态立绘双重占位，手机端白白多出一整块高度 */
+				neighBody.appendChild(Mt5700.empty('暂无邻区数据，点击「扫描邻区」'));
+				return;
+			}
 			var rows = [];
 			for (var i = 0; i < neighbors.length; i++) {
 				var c = neighbors[i];
@@ -393,14 +399,12 @@ return L.view.extend({
 					lockBtn
 				]);
 			}
+			/* className 供移动端紧凑堆叠（mt5700.css v2.46.4）定向命中 */
 			neighBody.appendChild(Mt5700.table(
 				['制式', '频段', 'ARFCN', 'PCI', 'RSRP', 'RSRQ', 'SINR', '操作'],
 				rows,
-				{ striped: true }
+				{ striped: true, className: 'mt5700-table-neighbor' }
 			));
-			if (!neighbors.length) {
-				neighBody.appendChild(Mt5700.empty('暂无邻区数据，点击「扫描邻区」'));
-			}
 		}
 		renderNeighbors();
 
