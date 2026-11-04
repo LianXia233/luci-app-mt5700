@@ -8,6 +8,24 @@
 
 ---
 
+## v1.30.12（2026-11-05）
+
+### fix(ui) 邻区扫描与 PDP 上下文表格移动端紧凑堆叠；移除空态双角色立绘
+
+> 手机端两张多列表格（网络设置·邻区扫描 8 列 / 拨号设置·PDP 上下文 5 列）被「表格 Soft Anime 样式」节的 `.mt5700-table td { padding:12px 14px !important }` 压制（该节声明在 ≤600px 堆叠规则之后，同级 `!important` 击穿无 `!important` 的卡片化规则），堆叠行高回到桌面尺寸（实测 44px/行）——邻区单卡 8 行约 370px，一屏只放得下 1.5 个邻区；拨号页另有 `min-width:620px` 强制横滚与无 media 约束的固定列宽造成的堆叠错位。全部改动经实机 390 / 700 / 1280 三视口截图与 DOM 测量验证。
+
+- **refactor(ui) 移除空态双角色立绘**：删除 `MT_ANIME_EMPTY_SVG` / `MT_MINT_SVG` 两段立绘源码常量、`MT_ANIME_EMPTY_SEQ` 实例隔离计数器，`api.empty` 不再构建空白舞台与 `mt-anime-pos-shell` / `mt-anime-pos-main` / `mt-anime-pos-mint` 定位壳，只保留空态文案（15 处调用点行为不变）；CSS 同步删除 `.mt-anime-empty-svg` / `.mt-anime-mint-svg` / `.mt-anime-empty-stage` 等全部规则、`@keyframes mt-anim-float` 与 `prefers-reduced-motion` 对应降级块（v2.41.5 / v2.41.6 两节整节移除）
+- **feat(ui) `api.table` 支持 `options.className`**：调用方可为表格追加专类供定向样式命中（向后兼容，不影响其余 9 处调用）
+- **fix(ui) 多列表格移动端两列网格堆叠**：mt5700.css 末尾新增 v2.46.4 区块，≤768px 对带专类的表格（`.mt5700-table-neighbor` / `.mt5700-table-pdp`）启用两列网格堆叠卡——邻区表按「制式|频段 / ARFCN|PCI / RSRP|RSRQ / SINR|操作」排布，PDP 表按「CID|协议 / APN|状态 / 操作整行」排布；覆盖范围由 ≤600px 扩到 ≤768px，顺带消除 601~768px 区间 8 列真表格的临界横向滚动。实测邻区单卡 370→139px（−62%）、行高 44→28px，三视口零溢出
+- **fix(dial) PDP 表格视图去横滚、列宽限定桌面端**：删除手机端 `min-width:620px` 强制横滚与 `-webkit-overflow-scrolling` 补丁；CID/协议/状态/APN 固定列宽包进 `@media (min-width:769px)`，不再把堆叠行挤成参差错位；PDP 卡片操作按钮由 `flex:1 1 44%`（2+1 换行）改为一行三等分
+- **fix(ui) 邻区空数据不再双重占位**：`renderNeighbors()` 无数据时只渲染空态组件，不再连「暂无数据」表格行一起画
+- **chore(version) 缓存版本戳同步**：`MT5700_CSS_VERSION` 2.46.2→2.46.4、`MT5700_UI_VERSION` 1.30.11→1.30.12
+- **docs(AGENTS) 新增两条维护约定**：「更新日志同步」「发版版本一致性 + 文档徽标同步」——代码改动须同步 CHANGELOG；发版时四件套（`PKG_VERSION` / `MT5700_UI_VERSION` / CHANGELOG 小节 / 发布说明）与 README、docs 主页的版本徽标及下载链接必须一并对齐
+- **docs(pages) 主页下载链接修正**：`docs/index.html` 徽标与下载入口由滞留的 v1.30.10 对齐 v1.30.12，资产命名修正为现行 `1.30.12-r1`（此前沿用的 `1.30.10-1` 后缀与实际产物不符）
+- **test** `tests/static-check.js` 4/4、全部零依赖单测通过；实机热更新（5 个前端文件 md5 校验一致）后浏览器实测：邻区卡 390px 零溢出、700px 网格堆叠、1280px 真实表格保留；PDP 表格视图手机端零横滚、桌面端固定列宽 [70/120/自适应/90/190] 不变
+
+---
+
 ## v1.30.11（2026-11-03）
 
 ### feat(modem) modem-settings 页面新增 LTE 载波聚合 (CA) 开关，NR/LTE CA 均可读写状态

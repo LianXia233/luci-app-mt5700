@@ -11,6 +11,10 @@
 - 菜单与路由映射：`root/usr/share/luci/menu.d/luci-app-mt5700.json`。
 - 单元测试：`node tests/<name>-test.js`（纯 Node 脚本，无外部依赖，不接入 CI）。
 - **行尾强制 LF**：`.gitattributes` 已声明 `* text=auto eol=lf`，禁止提交 CRLF。
+- **更新日志同步**：任何进入 `main` 的功能 / 修复 / 样式 / 行为改动，必须同步更新 `CHANGELOG.md`（随改动提交，或在同版本定版提交前补齐），不得只改代码不写日志。
+- **发版版本一致性 + 文档徽标同步**：提升版本号（打 `v*` 标签出正式版）时，以下引用必须与新 `PKG_VERSION` 一致，缺一不可：
+  `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
+  同时同步文档徽标与下载入口 —— `README.md` 头部 Version 徽标、`docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 与四处 `releases/download/v<版本>/…` 下载链接。下载链接的资产命名以最近一次 Release 的实际产物为准（形如 `luci-app-mt5700_<版本>-r<PKG_RELEASE>_<架构>.ipk` / `luci-app-mt5700-<版本>-r<PKG_RELEASE>.apk`），不得沿用旧后缀。
 
 ### 全局组件的样式归属
 
