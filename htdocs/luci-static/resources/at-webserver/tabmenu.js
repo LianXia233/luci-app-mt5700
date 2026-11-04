@@ -1,6 +1,7 @@
 'use strict';
 'require baseclass';
 'require at-webserver/theme';
+'require at-webserver/icons';
 /* global L, AtTheme */
 /**
  * at-webserver/tabmenu.js —— LuCI Tab 菜单增强（SVG 图标 + 滚动位置保持）
@@ -154,27 +155,39 @@ var AtTabmenu = (function () {
 	}
 
 	// 生成图标包裹层：span.at-tabmenu-icon > svg
+	// 图标改由全局 Icon Manager 提供：普通模式返回逐字保留的 TAB_ICONS 图元
+	// （stroke 1.8、24×24、视觉零变化），极简模式返回重新绘制的 MD3 图元。
+	// svg 上的 data-mt-icon 让模式切换时只重绘内部图元，不重建菜单 DOM / 不重复注册事件。
 	function buildIconEl(key) {
-		var parts = TAB_ICONS[key] || TAB_ICONS._fallback;
-		var svg = svgEl('svg', {
-			viewBox: '0 0 24 24',
-			width: 16,
-			height: 16,
-			fill: 'none',
-			stroke: 'currentColor',
-			'stroke-width': 1.8,
-			'stroke-linecap': 'round',
-			'stroke-linejoin': 'round',
-			'aria-hidden': 'true',
-			focusable: 'false'
-		});
-		for (var i = 0; i < parts.length; i++) {
-			var p = parts[i];
-			var el = svgEl(p.tag, {});
-			for (var k in p) {
-				if (k !== 'tag') el.setAttribute(k, String(p[k]));
+		var iconKey = 'nav-' + (TAB_ICONS[key] ? key : 'fallback');
+		var svg = null;
+		if (typeof window !== 'undefined' && window.AtIcons
+			&& typeof window.AtIcons.build === 'function') {
+			svg = window.AtIcons.build(iconKey, { w: 16, h: 16 });
+		}
+		if (!svg) {
+			/* 兜底：Icon Manager 未就绪时沿用原有内联生成，导航图标绝不缺失 */
+			var parts = TAB_ICONS[key] || TAB_ICONS._fallback;
+			svg = svgEl('svg', {
+				viewBox: '0 0 24 24',
+				width: 16,
+				height: 16,
+				fill: 'none',
+				stroke: 'currentColor',
+				'stroke-width': 1.8,
+				'stroke-linecap': 'round',
+				'stroke-linejoin': 'round',
+				'aria-hidden': 'true',
+				focusable: 'false'
+			});
+			for (var i = 0; i < parts.length; i++) {
+				var p = parts[i];
+				var el = svgEl(p.tag, {});
+				for (var k in p) {
+					if (k !== 'tag') el.setAttribute(k, String(p[k]));
+				}
+				svg.appendChild(el);
 			}
-			svg.appendChild(el);
 		}
 		var wrap = document.createElement('span');
 		wrap.className = 'at-tabmenu-icon';
