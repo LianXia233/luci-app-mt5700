@@ -61,6 +61,8 @@ function makeElement(tag, registry) {
 		},
 		removeAttribute: function (k) { delete this.attrs[k]; },
 		addEventListener: function () {},
+		querySelector: function () { return null; },
+		querySelectorAll: function () { return []; },
 		closest: function () { return null; }
 	};
 	el.classList = {
@@ -390,6 +392,85 @@ check('任务要求语义全覆盖',
 		check('图标重绘复用同一 svg 节点，不重建 DOM', env.registry.filter(function (e) { return e.tagName === 'svg'; }).length === 1);
 	}
 
+	/* B7 hero 栏（页面标题卡）在极简模式真卸载（不是 CSS 隐藏） */
+	{
+		const env = makeEnv({});
+		const registry = env.registry;
+		env.doc.createTextNode = function (t) {
+			const n = makeElement('#text', null);
+			n.textContent = String(t);
+			return n;
+		};
+		/* mt5700.js 只用这三个选择器：页面节点、hero 插画容器（看板娘挂载点） */
+		env.doc.querySelectorAll = function (sel) {
+			return registry.filter(function (el) {
+				return sel.charAt(0) === '.' && el.classList.contains(sel.slice(1));
+			});
+		};
+
+		let mode = 'normal';
+		const changers = [];
+		env.win.AtUimode = {
+			current: function () { return mode; },
+			onChange: function (fn) { changers.push(fn); fn(mode); return function () {}; },
+			mountSettings: function () { return null; },
+			decorate: function (el) { return el; }
+		};
+
+		const Mt = loadModule(path.join(libDir, 'mt5700.js'), env.sandbox, 'Mt5700');
+		const title = 'MT5700 设备状态';
+		const sub = '5G 蜂窝网络 · 射频链路与硬件遥测';
+
+		const normalPage = Mt.page(title, sub, 'network_status', '在线');
+		check('普通模式 hero 栏照常创建（徽标 + 标题 + 副标题 + 插画）',
+			!!normalPage._hero && normalPage._hero.classList.contains('mt5700-hero-card')
+			&& normalPage.children[0] === normalPage._hero,
+			normalPage.children.length);
+		check('普通模式 hero 文案与视图传参一致',
+			normalPage._hero.children[0].children[1].textContent === title
+			&& normalPage._hero.children[0].children[2].textContent === sub);
+
+		const heroesBefore = registry.filter(function (el) {
+			return el.classList.contains('mt5700-hero-card');
+		}).length;
+		mode = 'minimal';
+		const minimalPage = Mt.page(title, sub, 'network_status', '在线');
+		const heroesAfter = registry.filter(function (el) {
+			return el.classList.contains('mt5700-hero-card');
+		}).length;
+		check('极简模式不创建 hero 节点（不是 CSS 隐藏）',
+			!minimalPage._hero && heroesAfter === heroesBefore, heroesBefore + ' -> ' + heroesAfter);
+		check('极简模式页面首个子节点即正文（正文顶到页首）',
+			minimalPage.children.length === 1 && minimalPage.children[0] === minimalPage._body);
+		function textOf(node) {
+			if (!node) return '';
+			let s = node.textContent == null ? '' : String(node.textContent);
+			(node.children || []).forEach(function (c) { s += ' ' + textOf(c); });
+			return s;
+		}
+		check('极简模式不再渲染「MT5700 设备状态 / 5G 蜂窝网络 · 射频链路与硬件遥测」',
+			textOf(minimalPage).indexOf(title) < 0 && textOf(minimalPage).indexOf(sub) < 0,
+			textOf(minimalPage).slice(0, 120));
+
+		/* 免刷新切换：极简 → 普通原地重建，普通 → 极简真移除 */
+		mode = 'normal';
+		changers.forEach(function (fn) { fn('normal'); });
+		check('切回普通模式按原参数原地重建 hero',
+			!!minimalPage._hero && minimalPage.children[0] === minimalPage._hero
+			&& minimalPage._hero.children[0].children[1].textContent === title);
+		mode = 'minimal';
+		changers.forEach(function (fn) { fn('minimal'); });
+		check('切到极简模式把已存在的 hero 从 DOM 移除',
+			!minimalPage._hero && minimalPage.children.length === 1);
+
+		/* 视图可要求重建时附加 class（短信中心的移动端紧凑 hero） */
+		minimalPage._heroArgs.extraClass = 'mt5700-sms-hero-compact';
+		mode = 'normal';
+		changers.forEach(function (fn) { fn('normal'); });
+		check('重建 hero 时保留视图附加的 class',
+			!!minimalPage._hero && minimalPage._hero.classList.contains('mt5700-sms-hero-compact'));
+	}
+
 	/* ==========================================================================
 	   C. 源码级静态断言
 	   ========================================================================== */
@@ -436,6 +517,13 @@ check('任务要求语义全覆盖',
 	check('MD3 design tokens 齐全（14 项）',
 		tokens.every(function (t) { return md3Css.indexOf('--md-sys-color-' + t + ':') > 0; }),
 		tokens.filter(function (t) { return md3Css.indexOf('--md-sys-color-' + t + ':') < 0; }).join(','));
+	check('排版 token 齐全（typescale / 行高 / 字重 / 字距）',
+		['headline-small-size', 'title-medium-size', 'body-medium-size', 'body-small-size',
+		 'label-medium-size', 'line-height-normal', 'weight-medium', 'tracking-label']
+			.every(function (t) { return md3Css.indexOf('--md-sys-typescale-' + t + ':') > 0; }));
+	check('纯文本类元素不被套容器（hint / agree-list 无描边无底色）',
+		/html\[data-ui-mode="minimal"\] \.mt5700-hint \{[^}]*border: 0 !important/.test(md3Css)
+		&& /html\[data-ui-mode="minimal"\] \.mt5700-agree-list \{[^}]*border: 0 !important/.test(md3Css));
 	check('明暗主题适配沿用 html.at-dark', md3Css.indexOf('html[data-ui-mode="minimal"].at-dark') > 0);
 	check('手机端响应式适配', /@media \(max-width: 768px\)/.test(md3Css));
 	check('尊重 prefers-reduced-motion', /prefers-reduced-motion/.test(md3Css));
@@ -555,8 +643,11 @@ check('任务要求语义全覆盖',
 	try {
 		/* HEAD 仍在基线 main 上，全部改动都在工作区（含未跟踪的新文件），
 		 * 因此以 status --porcelain 为准；已提交场景再补 diff 结果。 */
+		/* 注意：不能先 trim() 再 slice(3)。git status 首行形如「 M .github/…」，
+		 * 整体 trim 会把首行的前导空格吃掉，路径被切成「github/…」而漏判。 */
 		const status = execSync('git status --porcelain', { cwd: root, encoding: 'utf8' })
-			.trim().split('\n').filter(Boolean).map(function (l) { return l.slice(3); });
+			.split('\n').filter(function (l) { return l.trim(); })
+			.map(function (l) { return l.slice(3); });
 		let diff = [];
 		try {
 			diff = execSync('git diff --name-only origin/main...HEAD', { cwd: root, encoding: 'utf8' })
@@ -569,14 +660,29 @@ check('任务要求语义全覆盖',
 	const forbidden = [
 		'root/usr/share/rpcd/ucode/', 'src/rust/', 'root/etc/init.d/',
 		'root/etc/hotplug.d/', 'root/usr/share/rpcd/acl.d/',
-		'root/usr/share/luci/menu.d/', 'root/usr/libexec/',
-		'.github/workflows/'
+		'root/usr/share/luci/menu.d/', 'root/usr/libexec/'
 	];
 	const violations = changed.filter(function (f) {
 		return forbidden.some(function (p) { return f.indexOf(p) === 0; });
 	});
-	check('Ucode / Rust / init.d / hotplug / ACL / menu.d / CI 均未改动',
+	check('Ucode / Rust / init.d / hotplug / ACL / menu.d 均未改动',
 		violations.length === 0, violations.join(', '));
+
+	/* CI 允许改动，但只允许改「预览版发布策略」（A 项需求），
+	 * 构建矩阵 / SDK / 编译步骤一律不得触碰。 */
+	let wfDiff = '';
+	try {
+		wfDiff = execSync('git diff -U0 origin/main -- .github/workflows/build-openwrt.yml',
+			{ cwd: root, encoding: 'utf8' });
+	} catch (e) { wfDiff = ''; }
+	const wfLines = wfDiff.split('\n').filter(function (l) {
+		return /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l);
+	});
+	const wfRisky = wfLines.filter(function (l) {
+		return /matrix|sdks|runs-on|imagebuilder|cache-hit|PKG_SOURCE|make -j|make package/.test(l);
+	});
+	check('CI 改动仅限预览版发布策略（构建矩阵 / 编译步骤未动）',
+		wfRisky.length === 0, wfRisky.slice(0, 3).join(' | '));
 	check('业务 UCI 配置只新增 ui_mode（未改其它 option）',
 		(uciCfg.match(/option ui_mode/g) || []).length === 1);
 	check('未新增 ubus/RPC 方法或后端服务',

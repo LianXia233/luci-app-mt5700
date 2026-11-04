@@ -20,7 +20,7 @@ var MT5700_CSS_VERSION = '2.46.4';
 var GLOBAL_CSS_VERSION = '1.0.0';
 // 极简模式（Material Design 3）视觉层：只在 data-ui-mode="minimal" 时命中，
 // 全部规则带 html[data-ui-mode="minimal"] 前缀，普通模式零影响。
-var MT5700_MD3_CSS_VERSION = '1.0.1';
+var MT5700_MD3_CSS_VERSION = '1.1.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION);
@@ -194,6 +194,44 @@ var Mt5700 = (function () {
 		}
 	}
 
+	/* ---- hero 栏（页面标题卡）：极简模式真卸载 ----
+	 * hero 是装饰性标题卡（徽标 + 大标题 + 副标题 + 插画），页面身份已由 LuCI
+	 * 面包屑与菜单标题表达，极简模式下重复一遍只是占竖向空间。
+	 * 因此这里**不创建节点**（不是 CSS 隐藏）：正文直接从页面顶部开始。
+	 * 切回普通模式时按同一组参数原地重建、插回正文之前，普通模式 DOM 结构不变。
+	 */
+	function buildHero(args) {
+		var a = args || {};
+		var hero = E('div', { 'class': 'mt5700-hero-card' });
+		var content = E('div', { 'class': 'mt5700-hero-content' });
+
+		content.appendChild(E('div', { 'class': 'mt5700-hero-badge' }, [
+			E('span', { 'class': 'mt5700-hero-badge-dot' }),
+			E('span', {}, a.badge || 'MT5700 5G 模组')
+		]));
+		content.appendChild(E('h2', { 'class': 'mt5700-hero-title' }, a.title || ''));
+		if (a.subtitle) {
+			content.appendChild(E('p', { 'class': 'mt5700-hero-desc' }, a.subtitle));
+		}
+		hero.appendChild(content);
+		hero.appendChild(E('div', { 'class': 'mt5700-hero-art' }));
+		if (a.extraClass) hero.classList.add(a.extraClass);
+		return hero;
+	}
+
+	function syncHero(page) {
+		if (!page) return;
+		if (isMinimal()) {
+			if (page._hero && page._hero.parentNode === page) page.removeChild(page._hero);
+			page._hero = null;
+			return;
+		}
+		if (page._hero && page._hero.parentNode === page) return;
+		var hero = buildHero(page._heroArgs);
+		page._hero = hero;
+		page.insertBefore(hero, page._body || null);
+	}
+
 	var modeBound = false;
 	function bindMode() {
 		if (modeBound) return;
@@ -201,7 +239,12 @@ var Mt5700 = (function () {
 		try {
 			if (typeof window !== 'undefined' && window.AtUimode
 				&& typeof window.AtUimode.onChange === 'function') {
-				window.AtUimode.onChange(function () { syncMascots(); });
+				window.AtUimode.onChange(function () {
+					if (typeof document === 'undefined' || !document.querySelectorAll) return;
+					var pages = document.querySelectorAll('.mt5700-page');
+					for (var i = 0; i < pages.length; i++) syncHero(pages[i]);
+					syncMascots();
+				});
 			}
 		} catch (e) { /* ignore */ }
 	}
@@ -697,45 +740,29 @@ var Mt5700 = (function () {
 	api.page = function (title, subtitle, pageKey, badgeText) {
 		var node = E('div', { 'class': 'mt5700-page' });
 
-		/* pageKey/badgeText 由各视图显式传入（路由映射见 menu.d） */
-		var hero = E('div', { 'class': 'mt5700-hero-card' });
-		var content = E('div', { 'class': 'mt5700-hero-content' });
-
-		var badge = E('div', { 'class': 'mt5700-hero-badge' }, [
-			E('span', { 'class': 'mt5700-hero-badge-dot' }),
-			E('span', {}, badgeText || 'MT5700 5G 模组')
-		]);
-		content.appendChild(badge);
-
-		content.appendChild(E('h2', { 'class': 'mt5700-hero-title' }, title || ''));
-		if (subtitle) {
-			content.appendChild(E('p', { 'class': 'mt5700-hero-desc' }, subtitle));
-		}
-		hero.appendChild(content);
-
-		var art = E('div', { 'class': 'mt5700-hero-art' });
+		/* pageKey/badgeText 由各视图显式传入（路由映射见 menu.d）；
+		 * hero 参数先存起来：极简模式不创建 hero，切回普通模式时按原样重建。 */
+		node._heroArgs = { title: title, subtitle: subtitle, badge: badgeText };
 
 		/* 全局界面设置入口（齿轮按钮 → 模式面板）：挂在 document.body 右下角。
 		 * 1) 12 个视图的骨架都由 Mt5700.page 生成，这里调一次即可全页可用；
 		 * 2) mountSettings() 幂等，切页 / 重渲染不会重复插入节点；
-		 * 3) 极简模式隐藏 hero 栏后，入口不在 hero 内，因此照常可用；
+		 * 3) 入口不在 hero 内，极简模式不创建 hero 时照常可用；
 		 * 4) 固定定位不参与文档流，普通模式的栅格与宽度完全不受影响。 */
 		if (typeof window !== 'undefined' && window.AtUimode
 			&& typeof window.AtUimode.mountSettings === 'function') {
 			try { window.AtUimode.mountSettings(); } catch (e) { /* 入口失败不影响页面 */ }
 		}
-		hero.appendChild(art);
-
-		/* 看板娘按模式插入/移除；bindMode() 有单例守卫，多页不会重复注册事件 */
-		bindMode();
-		syncMascots();
-
-		node.appendChild(hero);
 
 		var body = E('div', { 'class': 'mt5700-page-body' });
 		node.appendChild(body);
 		node._body = body;
-		node._hero = hero;
+
+		/* hero 按模式创建/移除；bindMode() 有单例守卫，多页不会重复注册事件 */
+		bindMode();
+		syncHero(node);
+		syncMascots();
+
 		return node;
 	};
 
