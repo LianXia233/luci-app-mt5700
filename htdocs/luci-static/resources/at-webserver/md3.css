@@ -90,6 +90,30 @@ html[data-ui-mode="minimal"] {
   --md-sys-motion-duration-medium: 200ms;
   --md-sys-motion-easing: cubic-bezier(0.2, 0, 0, 1);
 
+  /* MD3 typescale（字号）：所有组件只允许引用这几个值，禁止页面内写死 px。
+   * 行高单独给 token，避免同一字号在不同组件里行高不一致。 */
+  --md-sys-typescale-headline-medium-size: 22px;
+  --md-sys-typescale-headline-small-size: 20px;
+  --md-sys-typescale-title-large-size: 18px;
+  --md-sys-typescale-title-medium-size: 16px;
+  --md-sys-typescale-title-small-size: 14px;
+  --md-sys-typescale-body-large-size: 14px;
+  --md-sys-typescale-body-medium-size: 13px;
+  --md-sys-typescale-body-small-size: 12px;
+  --md-sys-typescale-label-large-size: 14px;
+  --md-sys-typescale-label-medium-size: 12px;
+  --md-sys-typescale-label-small-size: 11px;
+  --md-sys-typescale-line-height-tight: 1.25;
+  --md-sys-typescale-line-height-normal: 1.55;
+  --md-sys-typescale-line-height-relaxed: 1.7;
+  /* 字重 */
+  --md-sys-typescale-weight-regular: 400;
+  --md-sys-typescale-weight-medium: 500;
+  --md-sys-typescale-weight-bold: 700;
+  /* 字距：MD3 中文正文用 0，标签用轻微正字距便于小字号辨认 */
+  --md-sys-typescale-tracking-none: 0;
+  --md-sys-typescale-tracking-label: 0.1px;
+
   /* ---- 现有变量重映射：一处改动，全组件统一进入 MD3 色系 ---- */
   --mt5700-anime-bg: var(--md-sys-color-surface);
   --mt5700-bg: var(--md-sys-color-surface);
@@ -240,6 +264,21 @@ html[data-ui-mode="minimal"] .mt-anime-container {
   color: var(--md-sys-color-on-surface);
 }
 
+/* 底部留白：右下角是固定定位的界面设置 FAB（56px），滚动到末尾时
+ * 必须有足够内距，否则最后一行数据会被按钮压住。 */
+html[data-ui-mode="minimal"] .mt5700-page {
+  padding-bottom: 72px !important;
+}
+
+/* 页面底色：普通模式靠插件自绘壁纸 + 玻璃卡片；极简模式用 MD3 surface 纯色。
+ * 不清掉主题底色的话，卡片是 MD3 的紫灰、页面却是主题的蓝白渐变，两套色系并存。 */
+html[data-ui-mode="minimal"] body,
+html[data-ui-mode="minimal"] #maincontent,
+html[data-ui-mode="minimal"] .main-content {
+  background-color: var(--md-sys-color-surface) !important;
+  background-image: none !important;
+}
+
 /* 这些资源由 JS 在极简模式下不创建（壁纸层 / 看板娘）；CSS 仅作旧 DOM 残留兜底 */
 html[data-ui-mode="minimal"] #mt5700-global-bg,
 html[data-ui-mode="minimal"] .mt-bg-char,
@@ -349,46 +388,103 @@ html[data-ui-mode="minimal"] .mt-card:hover {
 
 html[data-ui-mode="minimal"] .mt5700-card-title,
 html[data-ui-mode="minimal"] .mt-card-title {
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.1px;
+  display: flex !important;
+  align-items: center !important;
+  gap: var(--md-sys-space-2) !important;
+  font-size: var(--md-sys-typescale-title-medium-size) !important;
+  font-weight: var(--md-sys-typescale-weight-medium) !important;
+  line-height: var(--md-sys-typescale-line-height-tight) !important;
+  letter-spacing: var(--md-sys-typescale-tracking-none);
   color: var(--md-sys-color-on-surface) !important;
+}
+
+/* 标题前的渐变竖条 / 装饰伪元素：普通模式的视觉锚点，极简模式整条去掉。
+ * （这条 ::before 在 mt5700.css 里带 !important 的渐变背景，必须显式 content:none
+ *   才能真正不生成盒子，否则会在每个卡片标题左侧多出一条紫色短线。） */
+html[data-ui-mode="minimal"] .mt5700-card-title::before,
+html[data-ui-mode="minimal"] .mt5700-card-title::after,
+html[data-ui-mode="minimal"] .mt-card-title::before,
+html[data-ui-mode="minimal"] .mt-card-title::after {
+  content: none !important;
+  display: none !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-card-subtitle {
-  font-size: 12px !important;
+  font-size: var(--md-sys-typescale-body-small-size) !important;
+  line-height: var(--md-sys-typescale-line-height-normal) !important;
   color: var(--md-sys-color-on-surface-variant) !important;
 }
 
+/* 卡片内的次级信息块：只做「填充」不做「描边」。
+ * 卡片自身已有一圈 outline，内部再套边框就是双层框（截图上的「框中框」），
+ * 所以内层容器统一改成 MD3 的 tonal surface，靠色阶分层而不是靠线条分层。 */
 html[data-ui-mode="minimal"] .mt5700-metric {
-  background: var(--md-sys-color-surface-container) !important;
-  border: 1px solid var(--md-sys-color-outline-variant) !important;
+  background: var(--md-sys-color-surface-container-high) !important;
+  border: 0 !important;
   border-radius: var(--md-sys-shape-corner-medium) !important;
   box-shadow: none !important;
+  padding: var(--md-sys-space-3) var(--md-sys-space-4) !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-metric-value {
-  font-weight: 400 !important;
+  font-weight: var(--md-sys-typescale-weight-regular) !important;
   letter-spacing: -0.25px;
 }
 
+/* 表格：外层不再画框（卡片已有边界），只保留行间发丝线与表头浅底 */
 html[data-ui-mode="minimal"] .mt5700-table-wrapper {
-  border: 1px solid var(--md-sys-color-outline-variant) !important;
-  border-radius: var(--md-sys-shape-corner-medium) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
   box-shadow: none !important;
-  background: var(--md-sys-color-surface-container-low) !important;
+  background: none !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-table th {
-  background: var(--md-sys-color-surface-container) !important;
+  background: none !important;
   color: var(--md-sys-color-on-surface-variant) !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.1px;
+  font-size: var(--md-sys-typescale-label-medium-size) !important;
+  font-weight: var(--md-sys-typescale-weight-medium) !important;
+  letter-spacing: var(--md-sys-typescale-tracking-label);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant) !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-table td {
-  border-color: var(--md-sys-color-outline-variant) !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: 0 !important;
   color: var(--md-sys-color-on-surface) !important;
+  font-size: var(--md-sys-typescale-body-medium-size) !important;
+  line-height: var(--md-sys-typescale-line-height-normal) !important;
+}
+
+/* 普通模式把每一行做成独立白色卡片条（tr 带底色 + td 圆角），
+ * 在 MD3 里会变成一条条浮在卡片上的白条 —— 统一改为「行间发丝线」。 */
+html[data-ui-mode="minimal"] .mt5700-table tr {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-table tr:hover {
+  background: var(--md-sys-color-surface-container-high) !important;
+  box-shadow: none !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-table tr:last-child td {
+  border-bottom: 0 !important;
+}
+
+/* 键值表（两列）：手机端是「标签左 / 值右」分栏，逐个 td 画下划线会断成两段，
+ * 改为整行一条发丝线；桌面端同样是整行分隔，观感统一。 */
+html[data-ui-mode="minimal"] .mt5700-table-kv tbody td {
+  border-bottom: 0 !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-table-kv tbody tr {
+  border-bottom: 1px solid var(--md-sys-color-outline-variant) !important;
+}
+
+html[data-ui-mode="minimal"] .mt5700-table-kv tbody tr:last-child {
+  border-bottom: 0 !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-badge,
@@ -410,17 +506,50 @@ html[data-ui-mode="minimal"] .mt5700-badge-danger  { background: var(--md-sys-co
 html[data-ui-mode="minimal"] .mt5700-badge-info    { background: var(--md-sys-color-primary-container) !important; color: var(--md-sys-color-on-primary-container) !important; }
 html[data-ui-mode="minimal"] .mt5700-badge-neutral { background: var(--md-sys-color-surface-variant) !important; color: var(--md-sys-color-on-surface-variant) !important; }
 
-/* Chips / 提示条 / 分组块统一去玻璃 */
-html[data-ui-mode="minimal"] .mt5700-field-note,
+/* Chips / 提示条 / 分组块统一去玻璃。
+ * 注意：这里**不**给 .mt5700-hint 和 .mt5700-agree-list 加容器装饰 ——
+ * 两者在普通模式就是纯文本（hint 只有字号/颜色，agree-list 是 <ul>），
+ * 极简模式给它们套 1px 描边 + 底色会凭空多出一层框，属于视觉缺陷。 */
 html[data-ui-mode="minimal"] .mt5700-radio-card,
-html[data-ui-mode="minimal"] .mt5700-agree-list,
-html[data-ui-mode="minimal"] .mt5700-hint,
 html[data-ui-mode="minimal"] .mt5700-banner {
   background: var(--md-sys-color-surface-container) !important;
   border: 1px solid var(--md-sys-color-outline-variant) !important;
   border-radius: var(--md-sys-shape-corner-small) !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
+}
+
+/* 字段说明块：普通模式是「淡底色 + 左侧竖线」的嵌套块，极简模式压平为
+ * 辅助说明文字（无底色 / 无竖线 / 无内距）。它几乎总是出现在卡片内部，
+ * 再套一层容器就会形成「卡片 → 说明块」的双层框。 */
+html[data-ui-mode="minimal"] .mt5700-field-note {
+  background: none !important;
+  border: 0 !important;
+  padding: 0 !important;
+  margin-top: var(--md-sys-space-2) !important;
+  box-shadow: none !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+  font-size: var(--md-sys-typescale-body-small-size) !important;
+  line-height: var(--md-sys-typescale-line-height-normal) !important;
+}
+
+/* 说明文字：纯文本，只有字号与颜色，无底色 / 无描边 / 无内距 */
+html[data-ui-mode="minimal"] .mt5700-hint {
+  background: none !important;
+  border: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+  font-size: var(--md-sys-typescale-body-small-size) !important;
+  line-height: 1.55 !important;
+}
+
+/* 协议列表：保留普通模式的列表语义，不套容器 */
+html[data-ui-mode="minimal"] .mt5700-agree-list {
+  background: none !important;
+  border: 0 !important;
+  padding-left: 20px !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
 }
 
 /* ==========================================================================
@@ -510,6 +639,13 @@ html[data-ui-mode="minimal"] textarea {
   -webkit-backdrop-filter: none !important;
   padding: 10px 12px !important;
   font-size: 14px !important;
+}
+
+/* 占位符用 outline 色：暗色下不能沿用主题的深灰，否则几乎看不见 */
+html[data-ui-mode="minimal"] input::placeholder,
+html[data-ui-mode="minimal"] textarea::placeholder {
+  color: var(--md-sys-color-outline) !important;
+  opacity: 1 !important;
 }
 
 html[data-ui-mode="minimal"] .mt5700-input:focus,
@@ -1058,6 +1194,7 @@ html[data-ui-mode="minimal"] .mt-uimode-status.is-error { color: var(--md-sys-co
   html[data-ui-mode="minimal"] .mt5700-toast { bottom: var(--md-sys-space-4) !important; max-width: calc(100vw - 24px) !important; }
   /* 手机端上移，避开 LuCI 底部粘性操作栏（保存 / 应用） */
   html[data-ui-mode="minimal"] .mt-uimode-settings { right: 12px; bottom: 84px; }
+  html[data-ui-mode="minimal"] .mt5700-page { padding-bottom: 132px !important; }
   html[data-ui-mode="minimal"] .mt-uimode-panel { width: 100%; max-width: calc(100vw - 24px); }
   html[data-ui-mode="minimal"] .at-field { flex-direction: column !important; gap: var(--md-sys-space-1) !important; }
   html[data-ui-mode="minimal"] .at-field-label { width: 100% !important; }
