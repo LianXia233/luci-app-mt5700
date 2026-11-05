@@ -524,6 +524,20 @@ check('任务要求语义全覆盖',
 	check('纯文本类元素不被套容器（hint / agree-list 无描边无底色）',
 		/html\[data-ui-mode="minimal"\] \.mt5700-hint \{[^}]*border: 0 !important/.test(md3Css)
 		&& /html\[data-ui-mode="minimal"\] \.mt5700-agree-list \{[^}]*border: 0 !important/.test(md3Css));
+	/* 层叠收敛：Tab 条 / QAM 图形盒 / 表单分组在普通模式各有一圈描边，
+	 * 叠加起来就是「卡片套盒子再套控件」。极简模式必须全部改为无描边的色阶分层。 */
+	check('嵌套容器只保留一层边线（tab / mcs / poll 均无描边）',
+		/#tabmenu ul\.tabs,[\s\S]{0,500}?border: 0 !important/.test(md3Css)
+		&& /\.mt-mcs-box \{[^}]*border: 0 !important/.test(md3Css)
+		&& /\.mt5700-poll-box \{[^}]*border: 0 !important/.test(md3Css));
+	check('Tab 选中项用 primary-container 填充且无阴影',
+		/\.active > a,[\s\S]{0,220}?background: var\(--md-sys-color-primary-container\) !important[\s\S]{0,160}?box-shadow: none !important/.test(md3Css));
+	check('极简模式下拉框补回箭头（background 简写会清掉主题箭头）',
+		/\.mt5700-select,[\s\S]{0,320}?background-image: url\("data:image\/svg\+xml/.test(md3Css));
+	check('开关只保留一个旋钮（::before 已关闭）',
+		/\.mt5700-switch input\[type="checkbox"\]::before,[\s\S]{0,140}?display: none !important/.test(md3Css));
+	check('手机端齿轮按钮收到 44px',
+		/bottom: 78px;[\s\S]{0,260}?width: 44px;/.test(md3Css));
 	check('明暗主题适配沿用 html.at-dark', md3Css.indexOf('html[data-ui-mode="minimal"].at-dark') > 0);
 	check('手机端响应式适配', /@media \(max-width: 768px\)/.test(md3Css));
 	check('尊重 prefers-reduced-motion', /prefers-reduced-motion/.test(md3Css));
