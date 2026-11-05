@@ -577,6 +577,33 @@ check('任务要求语义全覆盖',
 		/\.mt5700-select,[\s\S]{0,320}?background-image: url\("data:image\/svg\+xml/.test(md3Css));
 	check('开关只保留一个旋钮（::before 已关闭）',
 		/\.mt5700-switch input\[type="checkbox"\]::before,[\s\S]{0,140}?display: none !important/.test(md3Css));
+	/* FAB / switch 的 MD3 状态机：尺寸与色阶要对得上规范，交互只叠 state layer */
+	check('FAB = primary-container + 16dp 圆角 + 三级着色阴影',
+		/\.mt-uimode-fab \{[\s\S]{0,600}?border-radius: var\(--md-sys-shape-corner-large\) !important[\s\S]{0,300}?background-color: var\(--md-sys-color-primary-container\) !important[\s\S]{0,300}?box-shadow: var\(--md-sys-elevation-3\) !important/.test(md3Css));
+	check('FAB 悬停只叠 8% state layer，不换 primary 实色',
+		/\.mt-uimode-fab:hover \{[\s\S]{0,600}?rgba\(var\(--md-sys-state-on-primary-container\), var\(--md-sys-state-hover-opacity\)\)/.test(md3Css)
+		&& !/\.mt-uimode-fab:hover \{[^}]*background-color: var\(--md-sys-color-primary\) !important/.test(md3Css));
+	check('FAB 展开态（aria-expanded）转 primary 实色作为打开反馈',
+		/\.mt-uimode-fab\[aria-expanded="true"\] \{[^}]*background-color: var\(--md-sys-color-primary\) !important/.test(md3Css));
+	check('开关 hover 8% / pressed 12% state layer 分选中与未选中两套',
+		/input\[type="checkbox"\]:hover:not\(:disabled\)[\s\S]{0,300}?--md-sys-state-on-surface[\s\S]{0,160}?--md-sys-state-hover-opacity/.test(md3Css)
+		&& /input\[type="checkbox"\]:checked:hover:not\(:disabled\)[\s\S]{0,300}?--md-sys-state-on-primary/.test(md3Css)
+		&& /input\[type="checkbox"\]:active:not\(:disabled\) \{[\s\S]{0,300}?--md-sys-state-pressed-opacity/.test(md3Css));
+	check('开关按下时旋钮拉伸到 28px（MD3 pressed 形态）',
+		/:active:not\(:disabled\)::after \{[\s\S]{0,160}?width: 28px/.test(md3Css));
+	check('开关选中旋钮 24px、位移 12px（左 8dp / 右 8dp 对称）',
+		/:checked::after \{[\s\S]{0,200}?width: 24px[\s\S]{0,120}?translate\(12px, -50%\)/.test(md3Css));
+	check('开关具备 disabled（12%/38%）与 focus-visible 焦点环',
+		/input\[type="checkbox"\]:disabled \{[\s\S]{0,300}?0\.12\)/.test(md3Css)
+		&& /:disabled::after \{[\s\S]{0,120}?0\.38\)/.test(md3Css)
+		&& /input\[type="checkbox"\]:focus-visible[\s\S]{0,200}?outline: 2px solid var\(--md-sys-color-primary\)/.test(md3Css));
+	check('elevation / state-layer / emphasized 曲线 token 齐全',
+		['--md-sys-elevation-2:', '--md-sys-elevation-3:', '--md-sys-elevation-4:',
+		 '--md-sys-state-on-surface:', '--md-sys-state-on-primary:',
+		 '--md-sys-state-on-primary-container:', '--md-sys-motion-easing-emphasized:']
+			.every(function (t) { return md3Css.indexOf(t) > 0; }));
+	check('暗色下重新定义 elevation（深底投影加重、去紫色调）',
+		/html\[data-ui-mode="minimal"\]\.at-dark \{[\s\S]*?--md-sys-elevation-3: 0 1px 3px rgba\(0, 0, 0, 0\.58\)/.test(md3Css));
 	check('手机端齿轮按钮收到 44px',
 		/bottom: 78px;[\s\S]{0,260}?width: 44px;/.test(md3Css));
 	check('明暗主题适配沿用 html.at-dark', md3Css.indexOf('html[data-ui-mode="minimal"].at-dark') > 0);
