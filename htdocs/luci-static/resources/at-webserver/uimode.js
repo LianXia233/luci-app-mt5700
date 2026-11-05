@@ -43,6 +43,12 @@ var AtUimode = (function () {
 	var bootPromise = null;
 	var panelOpen = false;
 
+	/* 启动竞态：用户可能在首次 L.uci.load() 返回前就点了切换。
+	 * 这一格记住「用户显式选过、但 boot 还没校准完」的模式，boot 的权威校准
+	 * 看到它就放手，否则旧配置会把刚切过去的界面顶回去（而保存却已成功）。 */
+	var pendingSelection = null;
+	var bootSettled = false;
+
 	/* ================= 纯函数（可单测） ================= */
 
 	api.modes = VALID.slice();
@@ -225,12 +231,23 @@ var AtUimode = (function () {
 		booted = true;
 		bindDelegate();
 
-		/* 1) 同步首屏：用上次已确认的模式，避免异步读 UCI 期间闪烁 */
-		current = api.normalize(readHint());
+		/* 1) 同步首屏：用上次已确认的模式，避免异步读 UCI 期间闪烁。
+		 * 若 set() 已经先于 boot() 落过选择，则以那次选择为准，不要用 hint 盖掉。 */
+		current = pendingSelection || api.normalize(readHint());
 		applyDom(current);
 
-		/* 2) UCI 为权威：加载完成后校准（非法值 / 读取失败均回退 normal） */
+		/* 2) UCI 为权威：加载完成后校准（非法值 / 读取失败均回退 normal）。
+		 * 但「用户在等待期间手动切过」时不能校准 —— 那是比磁盘配置更新的一次
+		 * 显式意图，覆盖它会让界面停在旧模式、而保存结果却是新的。DOM 已由
+		 * set() 应用过，这里只需接管 current，不再重复 applyDom（避免把刚写上的
+		 * 「正在保存」状态行清掉）。 */
 		bootPromise = loadFromUci().then(function (raw) {
+			bootSettled = true;
+			if (pendingSelection) {
+				current = pendingSelection;
+				pendingSelection = null;
+				return current;
+			}
 			var authoritative = api.normalize(raw);
 			if (authoritative !== current) {
 				current = authoritative;
@@ -259,6 +276,9 @@ var AtUimode = (function () {
 		current = next;
 		applyDom(next);
 
+		/* 抢在 boot 校准之前：这次点击晚于磁盘配置，必须以它为准 */
+		if (!bootSettled) pendingSelection = next;
+
 		/* 显式跳过持久化（供单测 / 预览使用） */
 		if (o.skipPersist) {
 			return Promise.resolve({ ok: true, changed: true, mode: next, persisted: false });
@@ -271,6 +291,7 @@ var AtUimode = (function () {
 				return { ok: true, changed: true, mode: next, persisted: true };
 			}
 			/* 失败：回滚前端状态 + UCI 内存暂存值，保证「看到的」与「设备里存的」一致 */
+			pendingSelection = null;
 			current = prev;
 			applyDom(prev);
 			restoreStaged(prev);
@@ -285,6 +306,7 @@ var AtUimode = (function () {
 			} catch (e) { /* ignore */ }
 			return { ok: false, changed: false, mode: prev, error: res.error };
 		}, function (err) {
+			pendingSelection = null;
 			current = prev;
 			applyDom(prev);
 			restoreStaged(prev);
