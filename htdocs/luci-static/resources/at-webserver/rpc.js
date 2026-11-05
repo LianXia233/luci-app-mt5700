@@ -86,7 +86,8 @@ var rpcUsageCtl = L.rpc.declare({
 	 * 曾写成 `days`：LuCI 按名字组装请求，字面量 `days` 不会出现在
 	 * args 里，ucode 那边 `int(getStr(a,'day'))` 恒为 0，
 	 * 「每月几号自动清零」永远是默认 1 号 —— 而界面上改完没有任何报错。 */
-	params: ['action', 'day'],
+	/* source 只在 set_source 时有效；LuCI 按名字组装请求，undefined 项会被省略 */
+	params: ['action', 'day', 'source'],
 	expect: {}
 });
 
@@ -1436,7 +1437,9 @@ function normalizeUsage(u) {
 		reset_day: Number(u.reset_day) || 0,
 		/* 时刻来源（NTP / 设备时钟）：回退设备时钟时按日历清零可能不准，前端据此提示 */
 		time_source: u.time_source || '',
-		device: u.device || ''
+		device: u.device || '',
+		/* 统计来源：netdev=WAN 物理网卡 sysfs / modem=模组 AT^DSFLOWQRY */
+		source: u.source === 'modem' ? 'modem' : 'netdev'
 	};
 }
 
@@ -1479,10 +1482,12 @@ function fetchUsage() {
  * 使用量控制（清零 / 开关持久化 / 改自动清零日）。
  * day 仅在 set_reset_day 时使用（每月几号，1~31）。
  */
-function fetchUsageCtl(action, day) {
-	/* day 只在 set_reset_day 时有效；其余动作传 undefined，LuCI 会省略该参数 */
+function fetchUsageCtl(action, day, source) {
+	/* day 只在 set_reset_day、source 只在 set_source 时有效；
+	 * 其余动作传 undefined，LuCI 会省略该参数 */
 	var d = (day == null) ? undefined : (Number(day) || 0);
-	return withTimeout(rpcUsageCtl(action, d), 5000, '使用量操作超时')
+	var s = (source == null) ? undefined : (source === 'modem' ? 'modem' : 'netdev');
+	return withTimeout(rpcUsageCtl(action, d, s), 5000, '使用量操作超时')
 		.then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {

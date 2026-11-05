@@ -113,7 +113,12 @@ async fn run(verbose: bool) -> Result<(), String> {
     let cache = crate::state::StateCache::new(client.clone(), ctx_rx.clone());
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
     // 使用量后台统计：常驻周期采样，与前端是否打开无关。
-    let usage = crate::usage::UsageTracker::new(cfg.usage_reset_day);
+    // 使用量来源可热切换：netdev 走 sysfs（零 AT），modem 复用状态缓存里的 AT^DSFLOWQRY。
+    let usage = crate::usage::UsageTracker::new(
+        cfg.usage_reset_day,
+        &cfg.usage_source,
+        cache.clone(),
+    );
     // 短信业务：与 AT 客户端共用同一条通道，短信操作享有最高优先级。
     let sms = crate::sms::SmsService::new(client.clone(), ctx_rx.clone(), client.sms_mode());
     // 短信本地归档：发送成功与收到新短信时由后端落盘，

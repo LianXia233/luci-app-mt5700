@@ -1,6 +1,12 @@
 'use strict';
 
-/* 针对 rpcd 实时速率采集的接口选择回归测试，无需 OpenWrt 环境。 */
+/* 流量统计口径回归测试（纯 Node，无需 OpenWrt 环境）。
+ *
+ * 覆盖 rpcd ucode 的 detectWanDevice / netrateCall 与 Rust usage.rs 同语义：
+ * 只认 WAN 区域里自动识别出的模组物理网口，排除 br-lan / lo / LAN 区域；
+ * 候选全无时回落到「非 LAN 归属的 USB 网卡」，再不行就停止统计。
+ * 同时验证 usage_source=modem 时 netrate 转发到 Rust 后端。
+ */
 
 const assert = require('assert');
 const fs = require('fs');
@@ -9,207 +15,247 @@ const vm = require('vm');
 
 const ucPath = path.join(__dirname, '..', 'root', 'usr', 'share', 'rpcd', 'ucode', 'mt5700.uc');
 const source = fs.readFileSync(ucPath, 'utf8');
+
+/* 抽取「接口选择」段：readCounter 起到「十进制 → 十六进制」注释之前。 */
 const start = source.indexOf('function readCounter(');
 const end = source.indexOf('/* 十进制', start);
 assert(start >= 0 && end > start, '无法抽取流量统计接口选择函数');
 const selectionSource = source.slice(start, end);
-/* USB 扫描只允许作为第 2 级兜底（boundModemNetdev 内），
- * 不得直接参与 MT5700M 的绑定优先级，避免覆盖用户显式绑定。 */
-const usbCallAt = selectionSource.indexOf('detectUsbNetdev()');
-assert(
-	usbCallAt < 0 || usbCallAt > selectionSource.indexOf('function boundModemNetdev('),
-	'USB 扫描只能出现在 boundModemNetdev 内'
-);
-assert(!selectionSource.includes('iface_v4'), '流量统计不应再受逻辑承载接口配置影响');
-/* 解析顺序：MT5700M → 绑定模组网口的其它接口 → LAN，LAN 只在前两级都取不到时生效 */
-const orderMt = selectionSource.indexOf("ifaceNetdev(cursor, 'MT5700M')", selectionSource.indexOf('function detectModemDevice('));
-const orderBound = selectionSource.indexOf('boundModemNetdev()', orderMt);
-const orderLan = selectionSource.indexOf("ifaceNetdev(cursor, 'lan')", orderBound);
-assert(orderMt > 0 && orderBound > orderMt && orderLan > orderBound, '接口解析顺序必须是 MT5700M → 绑定 → LAN');
-/* ucode 不做函数声明提升：被调函数必须文本上先声明。
- * readCounter 若被移到 netdevUsable 之后，设备上 netrate 会在运行时报
- * “access to undeclared variable readCounter”，整条 RPC 直接失败 ——
- * Node 的 vm 有提升语义，测不出来，只能靠这条顺序断言兜底。 */
-assert(
-	selectionSource.indexOf('function readCounter(') >= 0 &&
-		selectionSource.indexOf('function readCounter(') < selectionSource.indexOf('function netdevUsable('),
-	'readCounter 必须声明在 netdevUsable 之前'
-);
-assert(
-	selectionSource.indexOf('function netdevUsable(') < selectionSource.indexOf('function ifaceNetdev('),
-	'netdevUsable 必须声明在 ifaceNetdev 之前'
-);
 
-/* 把配置对象渲染成 uci show network 的输出（list 表现为 'a' 'b'） */
-function uciShowLines(config) {
-	const lines = [];
-	for (const key of Object.keys(config)) {
-		const value = config[key];
-		if (Array.isArray(value)) {
-			lines.push(key + '=' + value.map(function (item) { return "'" + item + "'"; }).join(' '));
-		} else {
-			lines.push(key + "='" + value + "'");
-		}
-	}
-	return lines;
+/* netrateCall 现已移到 rpcCall 之后（ucode 不做函数声明提升）。 */
+const nrStart = source.indexOf('function netrateCall(');
+const nrEnd = source.indexOf('\nreturn {', nrStart);
+assert(nrStart > source.indexOf('function rpcCall('), 'netrateCall 必须声明在 rpcCall 之后');
+assert(nrStart >= 0 && nrEnd > nrStart, '无法抽取 netrateCall');
+const netrateSource = source.slice(nrStart, nrEnd);
+
+/* 旧实现已彻底移除，不允许再有「回退 LAN 网桥」的兜底。 */
+for (const stale of ['function detectModemDevice(', 'function ifaceNetdev(',
+	'function boundModemNetdev(', "return 'br-lan'", 'iface_v4']) {
+	assert(!selectionSource.includes(stale), '不应残留旧接口选择逻辑: ' + stale);
+}
+/* ucode 声明顺序：被调函数必须文本上先声明。 */
+const order = [
+	'function readCounter(', 'function netdevUsable(', 'function uciValueTokens(',
+	'function uciShowText(', 'function zoneIfaces(', 'function networkDevices(',
+	'function resolveNetdev(', 'function isLanSide(', 'function boundOutsideLan(',
+	'function usageSource(', 'function detectWanDevice('
+];
+for (let i = 1; i < order.length; i++) {
+	assert(selectionSource.indexOf(order[i - 1]) >= 0 &&
+		selectionSource.indexOf(order[i]) > selectionSource.indexOf(order[i - 1]),
+		'声明顺序错误: ' + order[i] + ' 必须晚于 ' + order[i - 1]);
 }
 
-function detect(config, counters, usb) {
+/* 把配置对象渲染成 `uci show` 的输出（list 表现为 'a' 'b'）。 */
+function uciShowLines(config) {
+	return Object.keys(config).map(function (key) {
+		const value = config[key];
+		if (Array.isArray(value)) {
+			return key + '=' + value.map(function (v) { return "'" + v + "'"; }).join(' ');
+		}
+		return key + "='" + value + "'";
+	});
+}
+
+/* 实机拓扑（ImmortalWrt SNAPSHOT 实测）：
+ * WAN zone = MT5700M / MT5700Mv6 / wan / wan6，LAN zone = lan；
+ * eth2 挂在 USB 总线上（模组网口），eth1 是 SoC 物理 WAN 口，br-lan 是 LAN 桥。 */
+const REAL_FW = {
+	'firewall.@zone[0].name': 'lan',
+	'firewall.@zone[0].network': 'lan',
+	'firewall.@zone[1].name': 'wan',
+	'firewall.@zone[1].network': ['MT5700M', 'MT5700Mv6', 'wan', 'wan6']
+};
+const REAL_NET = {
+	'network.lan.device': 'br-lan',
+	'network.wan.device': 'eth1',
+	'network.wan6.device': '@wan',
+	'network.MT5700M.device': 'eth2',
+	'network.MT5700Mv6.device': '@MT5700M'
+};
+
+function runCase(cfg) {
+	const config = Object.assign({}, cfg.firewall || {}, cfg.network || {});
+	const lines = uciShowLines(config);
+	const calls = [];
 	const context = {
-		uci: {
-			cursor: function () {
-				return {
-					get: function (section, name, option) {
-						const key = section + '.' + name + '.' + option;
-						return Object.prototype.hasOwnProperty.call(config, key) ? config[key] : null;
-					}
-				};
-			}
-		},
-		/* ucode 内建函数的等价桩 */
-		type: function (value) {
-			if (value === null || value === undefined) {
-				return 'null';
-			}
-			return Array.isArray(value) ? 'array' : typeof value;
-		},
-		length: function (value) {
-			if (Array.isArray(value) || typeof value === 'string') {
-				return value.length;
-			}
-			return 0;
-		},
-		trim: function (value) {
-			return String(value).trim();
-		},
-		split: function (value, sep) {
-			const text = String(value);
-			if (sep === undefined) {
-				return text.split(/\s+/).filter(function (token) { return token.length > 0; });
-			}
+		/* ucode 内建函数等价桩 */
+		type: function (v) { return v === null || v === undefined ? 'null' : (Array.isArray(v) ? 'array' : typeof v); },
+		length: function (v) { return (Array.isArray(v) || typeof v === 'string') ? v.length : 0; },
+		trim: function (v) { return String(v).trim(); },
+		split: function (v, sep) {
+			const text = String(v);
+			if (sep === undefined) return text.split(/\s+/).filter(function (t) { return t.length > 0; });
 			return text.split(sep);
 		},
-		substr: function (value, start, length) {
-			return String(value).substr(start, length);
+		substr: function (v, start, len) { return String(v).substr(start, len); },
+		index: function (v, needle) { return String(v).indexOf(needle); },
+		keys: function (obj) { return Object.keys(obj); },
+		int: function (v) { const n = Number(String(v).trim()); return Number.isFinite(n) ? n : null; },
+		match: function (v, re) { return re.exec(String(v)); },
+		getStr: function (args, key) {
+			return args && args[key] != null ? String(args[key]) : null;
 		},
-		/* 第 2 级兜底的 USB 扫描结果直接注入，避免依赖真实 sysfs 布局 */
-		detectUsbNetdev: function () {
-			return usb;
-		},
-		/* 走真实 readCounter：用 fs 桩提供 sysfs 视图，而不是替换 readCounter 本身 */
-		int: function (value) {
-			const n = Number(String(value).trim());
-			return Number.isFinite(n) ? n : null;
+		detectUsbNetdev: function () { return cfg.usb == null ? null : cfg.usb; },
+		rpcCall: function (method, params) {
+			calls.push({ method: method, params: params });
+			return { success: true, device: 'modem:^DSFLOWQRY', rx_bytes: 1234, tx_bytes: 5678 };
 		},
 		fs: {
 			open: function (filePath) {
-				const match = /^\/sys\/class\/net\/([^/]+)\/statistics\/rx_bytes$/.exec(filePath);
-				if (!match || counters[match[1]] == null) {
-					return null;
-				}
+				const m = /^\/sys\/class\/net\/([^/]+)\/statistics\/(rx|tx)_bytes$/.exec(filePath);
+				if (!m || cfg.counters[m[1]] == null) return null;
 				return {
-					read: function () {
-						return String(counters[match[1]]) + '\n';
-					},
+					read: function () { return String(cfg.counters[m[1]]) + '\n'; },
 					close: function () { }
 				};
 			},
 			popen: function (cmd) {
-				if (!String(cmd).includes('uci')) {
-					throw new Error('未预期的 popen 命令: ' + cmd);
+				const text = String(cmd);
+				let out;
+				if (text.includes('uci -q get at-webserver.config.usage_source')) {
+					out = [cfg.source || 'netdev'];
+				} else if (text.includes('uci -q show firewall')) {
+					out = lines.filter(function (l) { return l.startsWith('firewall.'); });
+				} else if (text.includes('uci -q show network')) {
+					out = lines.filter(function (l) { return l.startsWith('network.'); });
+				} else {
+					throw new Error('未预期的 popen 命令: ' + text);
 				}
-				const lines = uciShowLines(config);
-				let index = 0;
+				let i = 0;
 				return {
-					read: function () {
-						return index < lines.length ? lines[index++] + '\n' : null;
-					},
+					read: function () { return i < out.length ? out[i++] + '\n' : null; },
 					close: function () { }
 				};
 			}
 		}
 	};
 	vm.createContext(context);
-	vm.runInContext(selectionSource + '\nthis.detect = detectModemDevice;', context);
-	return context.detect();
+	vm.runInContext(
+		selectionSource + '\n' + netrateSource +
+		'\nthis.detect = detectWanDevice; this.netrate = netrateCall;',
+		context
+	);
+	return {
+		detect: context.detect(),
+		netrate: function (device) { return context.netrate({ args: { device: device || '' } }); },
+		calls: calls
+	};
 }
 
-const cases = [
+const base = {
+	firewall: REAL_FW,
+	network: REAL_NET,
+	usb: 'eth2',
+	source: 'netdev',
+	counters: { eth2: 222126799063, eth1: 0, 'br-lan': 229510511167, lo: 164064442 }
+};
+
+/* 一、网卡自动识别 */
+const detectCases = [
 	{
-		name: '优先使用模组接口的物理绑定',
-		config: { 'network.MT5700M.device': 'usb0', 'network.lan.device': 'br-lan' },
-		counters: { usb0: 100, eth2: 300, 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'usb0'
+		name: '实机拓扑自动识别 USB 模组 WAN 口', cfg: base, expected: 'eth2'
 	},
 	{
-		name: '自动采用用户修改后的物理绑定',
-		config: { 'network.MT5700M.device': 'eth3', 'network.lan.device': 'br-lan' },
-		counters: { usb0: 100, eth3: 300, 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'eth3'
+		name: '模组尚未枚举时只取 WAN 区域物理网口，不碰 br-lan',
+		cfg: Object.assign({}, base, { usb: null }), expected: 'eth2'
 	},
 	{
-		name: '模组网卡计数器不可读时回退 LAN',
-		config: { 'network.MT5700M.device': 'usb0', 'network.lan.device': 'br-lan' },
-		counters: { 'br-lan': 200 },
-		usb: 'usb0',
-		expected: 'br-lan'
+		name: 'WAN 区域误写 br-lan 时拒绝统计',
+		cfg: {
+			firewall: { 'firewall.@zone[0].name': 'wan', 'firewall.@zone[0].network': ['badwan'],
+				'firewall.@zone[1].name': 'lan', 'firewall.@zone[1].network': 'lan' },
+			network: { 'network.badwan.device': 'br-lan', 'network.lan.device': 'br-lan' },
+			usb: 'br-lan', counters: base.counters
+		}, expected: null
 	},
 	{
-		name: '模组接口未配置时回退 LAN',
-		config: { 'network.lan.device': 'br-lan' },
-		counters: { 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'br-lan'
+		name: 'LAN 区域物理网卡即使出现在 WAN 列表里也排除',
+		cfg: {
+			firewall: { 'firewall.@zone[0].name': 'wan', 'firewall.@zone[0].network': 'wan',
+				'firewall.@zone[1].name': 'lan', 'firewall.@zone[1].network': 'lan' },
+			network: { 'network.wan.device': 'eth0', 'network.lan.device': 'eth0' },
+			usb: null, counters: { eth0: 10 }
+		}, expected: null
 	},
 	{
-		name: '兼容旧式 ifname 物理绑定',
-		config: { 'network.MT5700M.ifname': 'usb1', 'network.lan.device': 'br-lan' },
-		counters: { usb1: 100, 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'usb1'
+		name: '无 WAN 区域时用白名单逻辑接口而非 LAN',
+		cfg: Object.assign({}, base, { firewall: {} }), expected: 'eth2'
 	},
 	{
-		name: '模组与 LAN 均未配置时使用默认 LAN 网桥',
-		config: {},
-		counters: {},
-		usb: null,
-		expected: 'br-lan'
+		name: '候选全无时绑定非 LAN 归属的 USB 网卡',
+		cfg: {
+			firewall: {}, network: { 'network.wwan.device': 'usb0' },
+			usb: 'usb0', counters: { usb0: 100 }
+		}, expected: 'usb0'
 	},
 	{
-		name: '无 MT5700M 但有 wan 直接绑 eth2 时取 eth2',
-		config: { 'network.wan.device': 'eth2', 'network.lan.device': 'br-lan' },
-		counters: { eth2: 100, 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'eth2'
+		name: 'USB 网卡只被 LAN 绑定时拒绝',
+		cfg: {
+			firewall: { 'firewall.@zone[0].name': 'lan', 'firewall.@zone[0].network': 'lan' },
+			network: { 'network.lan.device': 'usb0' },
+			usb: 'usb0', counters: { usb0: 100 }
+		}, expected: null
 	},
 	{
-		name: '无 MT5700M 但 wan 用 ifname 绑 eth2 时取 eth2',
-		config: { 'network.wan.ifname': 'eth2', 'network.lan.device': 'br-lan' },
-		counters: { eth2: 100, 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'eth2'
+		name: '旧式 ifname 与 @别名均能解析',
+		cfg: {
+			firewall: REAL_FW,
+			network: { 'network.lan.ifname': 'br-lan', 'network.wan.ifname': 'eth1',
+				'network.wan6.device': '@wan', 'network.MT5700M.ifname': 'eth2',
+				'network.MT5700Mv6.device': '@MT5700M' },
+			usb: 'eth2', counters: base.counters
+		}, expected: 'eth2'
 	},
 	{
-		name: '只扫到 USB 网卡但没有接口绑定时不得覆盖 LAN',
-		config: { 'network.lan.device': 'br-lan' },
-		counters: { eth2: 100, 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'br-lan'
+		name: '全部计数器不可读时停止统计',
+		cfg: Object.assign({}, base, { counters: {} }), expected: null
 	},
 	{
-		name: 'ifname 为列表时取首项',
-		config: { 'network.MT5700M.ifname': ['eth2', 'eth3'], 'network.lan.device': 'br-lan' },
-		counters: { eth2: 100, eth3: 300, 'br-lan': 200 },
-		usb: 'eth2',
-		expected: 'eth2'
+		name: '什么都不存在时不回退 LAN',
+		cfg: { firewall: {}, network: {}, usb: null, counters: {} }, expected: null
 	}
 ];
 
-for (const test of cases) {
-	assert.strictEqual(detect(test.config, test.counters, test.usb), test.expected, test.name);
-	console.log('PASS ' + test.name);
+for (const t of detectCases) {
+	assert.strictEqual(runCase(t.cfg).detect, t.expected, t.name);
+	console.log('PASS ' + t.name);
 }
 
-console.log('netrate interface selection: ' + cases.length + ' tests passed');
+/* 二、netrate 入参与来源分流 */
+const auto = runCase(base);
+const r1 = auto.netrate('');
+assert.strictEqual(r1.success, true);
+assert.strictEqual(r1.device, 'eth2');
+assert.strictEqual(r1.rx_bytes, 222126799063);
+console.log('PASS 自动探测返回 WAN 模组网口计数器');
+
+const r2 = auto.netrate('br-lan');
+assert.strictEqual(r2.device, 'eth2', '显式 br-lan 必须被拒绝');
+assert.notStrictEqual(r2.rx_bytes, 229510511167, '绝不能读到 br-lan 的计数器');
+console.log('PASS 显式 br-lan 入参被拒绝，绝不计入 LAN 流量');
+
+const noWan = runCase(Object.assign({}, base, {
+	firewall: { 'firewall.@zone[0].name': 'wan', 'firewall.@zone[0].network': 'badwan' },
+	network: { 'network.badwan.device': 'br-lan', 'network.lan.device': 'br-lan' },
+	usb: 'br-lan'
+}));
+assert.strictEqual(noWan.netrate('').success, false, '无可用 WAN 网卡时应停止统计');
+console.log('PASS 无 WAN 网卡时返回 success:false 而非回退 LAN');
+
+const modem = runCase(Object.assign({}, base, { source: 'modem' }));
+const r3 = modem.netrate('');
+assert.strictEqual(r3.success, true);
+assert.strictEqual(r3.device, 'modem:^DSFLOWQRY');
+assert.strictEqual(modem.calls.length, 1, 'modem 来源必须转发到 Rust 后端');
+assert.strictEqual(modem.calls[0].method, 'netrate');
+console.log('PASS 模组来源转发到后端 netrate，口径与 usage 一致');
+
+const netdev = runCase(base);
+netdev.netrate('');
+assert.strictEqual(netdev.calls.length, 0, 'netdev 来源不应触碰后端/AT 通道');
+console.log('PASS 物理网卡来源零 AT 通道代价');
+
+console.log('netrate / WAN interface selection: ' +
+	(detectCases.length + 6) + ' checks passed');

@@ -8,6 +8,46 @@
 
 ---
 
+## v1.32.0（2026-11-05）
+
+> 流量统计口径修正版：实时速率与「本次使用量」只统计 WAN 区域里模组创建的物理网口，彻底排除 `br-lan` 与 LAN 侧网卡；新增统计来源手动开关（物理网卡计数器 / 模组 `AT^DSFLOWQRY`），DNS 下发目标改为按 WAN 区域自动反查，全程不绑定具体网卡名。
+
+### fix(usage) 流量统计仅统计 WAN 区域、排除 br-lan，并支持来源手动切换
+
+> 旧实现的解析顺序是 `MT5700M → 绑定模组网口的接口 → LAN → br-lan`：模组接口
+> 未创建或绑定失效时会回落到 LAN 网桥。实机 LAN 网桥上行计数器超过 200 GB，
+> 绝大部分来自 Wi-Fi 与内网互传，计入后会把蜂窝用量放大一到两个数量级。
+> 另外 `netrate` 允许显式传入任意 `device`，手工传 `br-lan` 可直接读到该计数器。
+
+- **refactor(usage) WAN 区域自动识别**：Rust `usage.rs` 与 rpcd ucode 改为一次
+  `uci show firewall` + 一次 `uci show network` 解析，`@别名` 递归解析、按 USB 总线
+  判据定位模组网口；优先级为「WAN 区域 ∩ USB 模组网口 → WAN 区域其它物理网口 →
+  候选全无时非 LAN 归属的 USB 网卡」。全程不写死网卡名，显式排除 `br-lan` /
+  `br-lan.*` / `lo` / LAN 区域网卡；全部失败时停止采样（累计值保留），不再回退 LAN。
+- **fix(netrate) 入参校验**：显式 `device` 必须与自动识别结果一致，`br-lan` 等
+  LAN 侧入参一律忽略；识别不到 WAN 网卡时返回 `success:false`，不再伪装成 0 流量。
+- **feat(usage) 统计来源开关**：新增 `at-webserver.config.usage_source`
+  （`netdev` 默认 / `modem`），可在「网络状态 → 本次使用量」里切换。`modem` 走
+  已在状态缓存白名单里的 `AT^DSFLOWQRY`（手册 16.12，DS 累计收发为 16 位十六进制
+  字节数），采样间隔对齐 2 秒刷新；切换写 UCI 并热更新，`device` 标签变化触发
+  重新基线、累计值保留。清零只重置插件侧累计，不下发 `AT^DSFLOWCLR`。
+- **feat(usage) 速率同口径**：`modem` 来源下 `netrate` 转发到 Rust 后端的
+  `netrate` 方法，返回同一份 DS 累计值；`netdev` 仍由 ucode 直读 sysfs，零 AT 负担。
+- **feat(dns) DNS 下发目标自动反查**：init.d 新增 `iface_in_wan_zone` /
+  `dns_direct_ifaces` / `dns_alias_ifaces`，按「USB 模组网口 + WAN 区域」找出所有
+  承载接口；IPv4 DNS 下发给直接绑定接口、IPv6 DNS 下发给 `@别名` 接口，
+  清除时覆盖全部曾下发接口。同时移除 USB 探测中对 `eth0|eth1` 的硬编码跳过，
+  改由 USB 总线判据决定。
+- **test** 重写 `tests/netrate-interface-test.js`（WAN 归属、br-lan 拒绝、全无兜底、
+  来源分流、声明顺序），新增 `tests/usage-source-test.js`（跨层契约与旧实现残留检查）。
+- **docs** README 补充统计口径、来源开关与 DNS 目标说明；UCI 默认配置补充
+  `usage_source` 及注释。
+- **chore(version) 版本与缓存戳同步**：`PKG_VERSION` / `MT5700_UI_VERSION`
+  1.31.1→1.32.0；README Version 徽标、文档站版本徽标与四处下载链接同步到
+  v1.32.0 资产，新增 `docs/release-notes/v1.32.0.md`。发版后浏览器缓存整体失效。
+
+---
+
 ## v1.31.1（2026-11-05）
 
 ### fix(parse) HFREQINFO 同行多组 NR 载波仅解析第一组（Issue #38）

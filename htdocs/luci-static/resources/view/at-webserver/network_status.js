@@ -295,6 +295,20 @@ return L.view.extend({
 						E('span', { 'class': 'mt-usage-val', 'id': 'usage-peak' }, '↓0 B/s · ↑0 B/s')
 					]),
 					E('div', { 'class': 'mt-usage-cell wide auto' }, [
+						E('span', { 'class': 'mt-usage-lbl' }, '统计来源'),
+						E('span', { 'class': 'mt-usage-auto' }, [
+							E('select', {
+								'class': 'mt-usage-days', 'id': 'usage-source',
+								'title': '物理网卡：自动识别 WAN 区域模组网口，直读 sysfs 计数器，零 AT 负担；模组 AT：AT^DSFLOWQRY 上报的 DS 累计流量（2 秒粒度）',
+								'change': setUsageSource
+							}, [
+								E('option', { 'value': 'netdev' }, '物理网卡'),
+								E('option', { 'value': 'modem' }, '模组 AT')
+							]),
+							E('span', { 'class': 'mt-usage-unit', 'id': 'usage-source-hint' }, '')
+						])
+					]),
+					E('div', { 'class': 'mt-usage-cell wide auto' }, [
 						E('span', { 'class': 'mt-usage-lbl' }, '每月清零'),
 						E('span', { 'class': 'mt-usage-auto' }, [
 							E('input', {
@@ -1496,6 +1510,25 @@ return L.view.extend({
 			});
 		}
 
+		/* 切换统计来源：物理网卡 sysfs / 模组 AT^DSFLOWQRY。
+		 * 后端写 UCI 并热更新；切换后 device 标签改变，累计值保留、自动重新基线。
+		 * 失败时把控件回滚到当前实际来源，避免界面显示与后端不一致。 */
+		function setUsageSource() {
+			var el = document.getElementById('usage-source');
+			if (!el) return;
+			var source = (el.value === 'modem') ? 'modem' : 'netdev';
+			AtWs.usageCtl('set_source', undefined, source).then(function (r) {
+				if (r && r.success && r.usage) {
+					state.usage = r.usage;
+					renderSpeedUI();
+				} else {
+					el.value = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+				}
+			}).catch(function () {
+				el.value = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+			});
+		}
+
 		function formatSpeedNumber(bytesPerSec) {
 			var bits = bytesPerSec * 8;
 			if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gbps';
@@ -1569,6 +1602,20 @@ return L.view.extend({
 			if (uPersist) {
 				if (u && u.persist) uPersist.classList.add('on');
 				else uPersist.classList.remove('on');
+			}
+			/* 来源控件由每秒轮询同步；用户正在操作时别抢焦点 */
+			var elSource = document.getElementById('usage-source');
+			if (elSource && u && u.source && document.activeElement !== elSource) {
+				elSource.value = (u.source === 'modem') ? 'modem' : 'netdev';
+			}
+			var elSourceHint = document.getElementById('usage-source-hint');
+			if (elSourceHint) {
+				elSourceHint.textContent = (u && u.source === 'modem')
+					? (u.device ? '模组累计' : '缓存未就绪')
+					: (u && u.device ? u.device : 'WAN 未就绪');
+				elSourceHint.title = (u && u.source === 'modem')
+					? '数据源：AT^DSFLOWQRY（经状态缓存，2 秒刷新）'
+					: '数据源：WAN 区域模组物理网口的 sysfs 计数器';
 			}
 		}
 
