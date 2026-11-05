@@ -6,6 +6,7 @@
  * 覆盖 Issue #38：parseHFREQINFO 同行多组 NR 载波仅解析第一组
  * 覆盖 Issue #39：atStatusFromText 区分 AT 终止状态、computeSccSignalReason 区分 SCC 信号缺失原因
  * 覆盖 PR #41 Codex review 两条 P2：匹配到小区但测量全空也要给原因；非超时的传输失败不得记成 timeout
+ * 覆盖 PR #42 零信任复审：RSSI 透传 / cause 条件拼装 / 渲染判据守卫
  */
 const fs = require('fs');
 const path = require('path');
@@ -248,6 +249,10 @@ try {
 	mockState5b.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
 	var carriers5b = syncExec(mockState5b, Parse, AtWs);
 	check('SCC1(LTE) 有 RSSI → 不标注缺测', carriers5b[1] && !carriers5b[1].signalReason, carriers5b[1] && carriers5b[1].signalReason);
+	check('SCC1(LTE) 仅 RSSI → rssi 透传到载波对象（渲染层可显示 RSSI）',
+		carriers5b[1] && carriers5b[1].rssi === -65, carriers5b[1] && carriers5b[1].rssi);
+	check('渲染层缺测说明判据覆盖 rssi',
+		/c\.rsrp == null && c\.rsrq == null && c\.sinr == null && c\.rssi == null/.test(netCode));
 
 	// 孤儿 SCC（HFREQINFO 未覆盖，仅 MONSSC/CASCELLINFO 上报）同样要补缺测原因
 	var mockState6 = JSON.parse(JSON.stringify(mockState));
@@ -326,7 +331,8 @@ try {
 	 * Codex 在 PR #42 指出的正是 ucode 搬了、Rust 的 at 出口没搬这一断链。 */
 	var rustSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'rust', 'src', 'rpcserver.rs'), 'utf8');
 	check('AtCommandResponse 带 cause 字段', /pub struct AtCommandResponse \{[\s\S]*?pub cause: Option<String>,/.test(rustSrc));
-	check('at 出口把 cause 一并回传前端', /"result": \{[\s\S]*?"cause":\s*resp\.cause,/.test(rustSrc));
+	check('at 出口把 cause 一并回传前端', /if let Some\(cause\) = resp\.cause[\s\S]*?result\["cause"\]/.test(rustSrc));
+	check('成功应答不输出 cause 字段（形状不变）', !/"cause":\s*resp\.cause/.test(rustSrc) && /if let Some\(cause\) = resp\.cause/.test(rustSrc));
 	check('外层应答超时标为 timeout', /error: Some\("命令执行超时"\.into\(\)\),\s*cause: Some\("timeout"\.into\(\)\)/.test(rustSrc));
 	check('err_response 自动归类超时', /pub fn err_response[\s\S]*?cause: at_failure_cause\(msg\)/.test(rustSrc));
 	check('模组回 ERROR 不标超时', /if resp\.has_error\(\) \{[\s\S]*?cause: None \};/.test(rustSrc));

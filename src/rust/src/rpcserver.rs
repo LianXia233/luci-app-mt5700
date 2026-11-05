@@ -360,12 +360,17 @@ impl RpcServer {
                     }
                 }
                 let resp = self.run_command(cmd).await;
-                serde_json::json!({ "id": id, "result": {
+                let mut result = serde_json::json!({
                     "success": resp.success,
                     "data": resp.data,
                     "error": resp.error,
-                    "cause": resp.cause,
-                } })
+                });
+                /* 仅失败应答带 cause：skip_serializing_if 只作用于 serde 序列化，
+                 * json! 手工拼接必须自己判空，否则成功应答也会多出 cause:null。 */
+                if let Some(cause) = resp.cause {
+                    result["cause"] = serde_json::Value::String(cause);
+                }
+                serde_json::json!({ "id": id, "result": result })
             }
             "events" => {
                 let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
