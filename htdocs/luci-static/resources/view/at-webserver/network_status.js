@@ -1904,7 +1904,7 @@ return L.view.extend({
 				var measExtra = c.measType && c.measType !== '—' && c.measType !== 'Serving' ? (' · ' + c.measType) : '';
 
 				/* SCC 信号缺失原因说明（issue #39）：仅在 SCC 且全部信号为空时显示 */
-				var sigReasonText = (!isPcc && c.signalReason && c.rsrp == null && c.rsrq == null && c.sinr == null)
+				var sigReasonText = (!isPcc && c.signalReason && c.rsrp == null && c.rsrq == null && c.sinr == null && c.rssi == null)
 					? getSignalReasonText(c.signalReason) : '';
 
 				caHtml +=
@@ -2221,6 +2221,7 @@ return L.view.extend({
 		 * 拷贝的 —— 模组上报了辅小区却没带测量时，pci/rsrp/rsrq/sinr 全是 null。
 		 * 所以「匹配上了」不等于「有读数」，判据必须和渲染层的破折号对齐：
 		 * RSRP/RSRQ/SINR/RSSI 全空就按缺测处理，补上可解释的原因。
+		 * HFREQINFO 分支同步透传 rssi，渲染层第三列才能用 RSSI 兜底显示。
 		 */
 		function hasUsableSignal(sig) {
 			return !!sig && (sig.rsrp != null || sig.rsrq != null || sig.sinr != null || sig.rssi != null);
@@ -2325,6 +2326,7 @@ return L.view.extend({
 					rsrp: sig ? sig.rsrp : null,
 					rsrq: sig ? sig.rsrq : null,
 					sinr: sig ? sig.sinr : null,
+					rssi: sig && sig.rssi != null ? sig.rssi : null,
 					measType: sig ? sig.measType : null,
 					signalReason: sigReason
 				});
