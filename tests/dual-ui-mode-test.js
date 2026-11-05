@@ -14,7 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
 const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'at-webserver');
@@ -698,7 +698,8 @@ check('任务要求语义全覆盖',
 	check('生成脚本 --check 严格校验通过（含「极简必须重绘」断言）',
 		(function () {
 			try {
-				execSync('node ' + path.join(root, 'scripts', 'gen-dual-ui-icons.js') + ' --check',
+				execFileSync(process.execPath,
+					[path.join(root, 'scripts', 'gen-dual-ui-icons.js'), '--check'],
 					{ stdio: 'pipe' });
 				return true;
 			} catch (e) { return false; }
