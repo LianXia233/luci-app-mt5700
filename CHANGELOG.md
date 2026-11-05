@@ -8,6 +8,94 @@
 
 ---
 
+## v1.32.1（2026-11-05）
+
+### feat(ui) 流量统计图表跟随统计来源切换
+
+> 「本次使用量 → 统计来源」切换后，下行 / 上行速率火花线仍保留旧来源的
+> 12 个历史点，且 `renderSpeedUI()` 被使用量轮询、清零、持久化等 9 处复用，
+> 每次调用都推一个点，一秒内混进多个重复点；两套计数器绝对值不同还会
+> 画出虚假尖峰，图上完全看不出当前用的是哪个源。
+
+- **feat(ui) 按源换图**：新增 `sparkSource` 与 `resetTrafficSeries()`，
+  切换来源时清空两套火花线历史、速率数值与采样基线；`setUsageSource()`
+  成功后立即换源并重新采样，`sampleUsage()` 也能发现页面外（UCI /
+  其它会话）的来源变化。
+- **refactor(ui) 推点收敛**：火花线推进抽成 `pushTrafficSample()`，
+  只在 `sampleRate()` 每次采样后调用；`renderSpeedUI()` 只负责渲染，
+  不再重复推点。采样基线新增 `source` 字段，即使 device 标签巧合相同
+  也不会把 netdev 的 sysfs 累计与 modem 的 DS 累计混算。
+- **feat(ui) 来源可见**：卡片头「实时」标签改为「实时 · 物理网卡 /
+  实时 · 模组 AT」，上下行图表悬停提示同步标明来源；`modem` 来源下
+  不再把 `modem:^DSFLOWQRY` 这个来源标签写进「数据通信接口」。
+- **test** 跨层测试按函数切片断言推点位置、换源动作与来源分流，
+  防止图表再次与来源脱钩。
+
+### feat(usage) 无模组 WAN 口时回落默认 WAN 口物理网卡
+
+> 部分设备不会为模组单独创建 WAN 逻辑接口，而是直接复用出厂默认 `wan`；
+> 此前只在 WAN 区域成员里按 UCI 顺序取第一个可用物理网卡，没有把
+> 「默认 WAN 口」列为明确判据，模组口缺席时可能取到无关成员或停止统计。
+
+- **feat(usage) 默认 WAN 口判据**：`select_wan_netdev()` / `detectWanDevice()`
+  在「模组 WAN 口（WAN 区域 ∩ USB 网口）」之后新增第 2 级：当 `wan` 逻辑接口
+  确实属于 WAN 区域时，按 `network.wan` 反查其物理网卡（`device` / 旧式
+  `ifname` / `@alias` 递归均可），校验非 LAN 侧且计数器可读后采用；
+  之后才轮到 WAN 区域其它成员与「非 LAN 归属的 USB 网卡」回落。
+- **note(usage) 口径边界**：仍不回退 LAN / `br-lan`；DNS 下发与 `IFACE_4G`
+  接口创建保持原判据，不会把主 WAN 的 DNS 或拨号接口误改到模组口上。
+- **test** Rust / ucode / 跨层测试新增默认 WAN 口回落与「wan 不在 WAN 区域」
+  拒绝用例，前端「数据通信接口」提示同步说明判据。
+
+### feat(usage) 数据通信接口判断优先模组物理网卡位置
+
+> 「设备信息 → 数据通信接口」此前只在 `netrate` 采样成功时才写入
+> `state.deviceInterface`，一旦速率 RPC 失败就回落为 `—`；init.d 自动模式
+> 也只按物理网卡绑定挑第一个接口，未校验 WAN 区域归属。
+
+- **feat(ui) 物理网卡优先**：优先取 `state.usage.device`（后端按 WAN 区域 ∩
+  USB 模组网口识别、每秒刷新），`modem` 来源下该字段是 DS 来源标签不当网卡名；
+  再回落 `netrate` 采样值，并给单元格补上判据说明。
+- **feat(init) 承载接口反查**：`resolve_ifaces()` 的 auto 分支复用
+  `dns_direct_ifaces()`（USB 模组网口 + WAN 区域），无 WAN 归属才回落到
+  `modem_direct_ifaces()`，避免同网卡的 LAN 侧接口被误选。
+- **test** 跨层契约新增前端优先级与 init.d 反查断言。
+
+### fix(usage) ucode 单参数 split 导致实机 netrate 整条 RPC 失败
+
+> v1.32.0 新增的 WAN 区域解析里有 8 处 `split(trim(x))` 单参数调用；
+> 实机 ucode 的 `split()` 单参数返回 `null`（不会按空白切分），
+> `networkDevices()` 对 null 求 `length()` 抛 `left-hand side expression is null`，
+> rpcd 回 `UBUS_STATUS_UNKNOWN_ERROR`，表现为实时速率取不到数。
+
+- **fix(usage) 显式分隔符**：8 处单参数 `split` 全部补上 `' '`；
+  `detectWanDevice()` 第 2 级改为跳过空项（实机 `split('', ' ')` 返回 `['']`），
+  避免候选全无时返回空串、吞掉「WAN 侧 USB 网卡回落」分支。
+- **test** `tests/netrate-interface-test.js` 的 `split` / `length` 模拟改为实机语义
+  （单参数返回 null、对 null 求 length 抛错），并新增源码残留断言；
+  否则这类回归在 Node 侧永远测不出来。
+
+### style(usage) 统计来源控件改为贴合文字的紧凑方框
+
+> 来源下拉框复用了天数输入框的 `.mt-usage-days`，又被全局 `select` 深度美化
+> 规则的 `!important` 强制成白底、深蓝紫等宽粗体、13.5px 与 8px 36px 大内边距，
+> 在浅色卡片里呈现为一枚突兀的白色大胶囊，设备名提示与控件挤在一起。
+
+- **style(usage) 独立控件样式**：来源行加 `.source` 修饰、下拉改用
+  `.mt-usage-source`、提示加 `.mt-usage-source-hint`；以更高特异性压过全局
+  `select` 深度美化，改为透明底 + 细描边 + 4px 小圆角方框 + 10.5px 次要文字色
+  + 紧贴文字的小箭头；不设 `min-width` / `max-width`，宽度刚好包住
+  「物理网卡 / 模组 AT」，hover / focus 不再整块染紫；暗色主题同步适配选项弹层。
+- **style(usage) 层级收敛**：来源行内边距 4px→3px，标签显式透明底与统一字色，
+  设备名提示改淡色等宽小字并加 `·` 分隔、超长省略，整行更小巧。
+- **chore(version) 缓存版本戳同步**：`MT5700_CSS_VERSION` 2.46.4→2.46.6；
+  `PKG_VERSION` / `MT5700_UI_VERSION` 1.32.0→1.32.1，README 徽标、文档站徽标
+  与四处下载链接同步，新增 `docs/release-notes/v1.32.1.md`，确保浏览器重新拉取样式。
+- **test** `tests/usage-source-test.js` 增加视图 / CSS / 版本戳契约断言，
+  防止来源控件再次复用天数输入框样式或漏递增缓存戳。
+
+---
+
 ## v1.32.0（2026-11-05）
 
 > 流量统计口径修正版：实时速率与「本次使用量」只统计 WAN 区域里模组创建的物理网口，彻底排除 `br-lan` 与 LAN 侧网卡；新增统计来源手动开关（物理网卡计数器 / 模组 `AT^DSFLOWQRY`），DNS 下发目标改为按 WAN 区域自动反查，全程不绑定具体网卡名。

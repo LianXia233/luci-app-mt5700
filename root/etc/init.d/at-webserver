@@ -452,7 +452,11 @@ resolve_ifaces() {
 	fi
 
 	if [ "$v4" = auto ]; then
-		found=$(modem_direct_ifaces | head -n 1)
+		# 数据通信接口优先按「模组物理网卡位置 + WAN 区域归属」反查，复用 DNS
+		# 下发同一套判据（dns_direct_ifaces），避免同网卡的 LAN 侧接口被误选；
+		# 没有 WAN 归属时再退回纯物理网卡反查，最后才用出厂默认接口名。
+		found=$(dns_direct_ifaces | head -n 1)
+		[ -n "$found" ] || found=$(modem_direct_ifaces | head -n 1)
 		if [ -n "$found" ]; then
 			IFACE_4G="$found"
 		elif [ -n "$(detect_usb_netdev 2>/dev/null)" ]; then

@@ -119,8 +119,17 @@ return L.view.extend({
 		}
 
 		// 流量趋势微型火花线数据（初始为真实空/0采样点，绝不伪造随机数）
-		var sparkDown = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-		var sparkUp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+		var SPARK_POINTS = 12;
+		function zeroSparkSeries() {
+			var a = [];
+			for (var i = 0; i < SPARK_POINTS; i++) a.push(0);
+			return a;
+		}
+		var sparkDown = zeroSparkSeries();
+		var sparkUp = zeroSparkSeries();
+		/* 火花线数据当前所属的统计来源：切源时必须整体换源，
+		 * 不能把两套计数器的历史采样点混在一张图里。 */
+		var sparkSource = null;
 
 		// DOM 根容器
 		var layout = E('div', { 'class': 'mt-anime-container' });
@@ -228,7 +237,7 @@ return L.view.extend({
 				]),
 				E('span', { 'class': 'mt-pill-tag' }, [
 					E('span', { 'class': 'mt-beacon-dot' }),
-					E('span', {}, '实时')
+					E('span', { 'id': 'traffic-source-tag' }, '实时 · 物理网卡')
 				])
 			]),
 			E('div', { 'class': 'mt-traffic-rows' }, [
@@ -241,7 +250,8 @@ return L.view.extend({
 							E('span', { 'class': 'mt-traffic-val', 'id': 'traffic-dl-val' }, '0 B/s')
 						])
 					]),
-					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-dl-box' })
+					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-dl-box',
+						'title': '下行速率趋势 · 来源：物理网卡' })
 				]),
 				// 上行
 				E('div', { 'class': 'mt-traffic-item' }, [
@@ -252,7 +262,8 @@ return L.view.extend({
 							E('span', { 'class': 'mt-traffic-val', 'id': 'traffic-ul-val' }, '0 B/s')
 						])
 					]),
-					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-ul-box' })
+					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-ul-box',
+						'title': '上行速率趋势 · 来源：物理网卡' })
 				])
 			]),
 			// 本次使用量（后端常驻统计：页面关闭/刷新都不影响；可选持久化、可自动清零）
@@ -294,20 +305,20 @@ return L.view.extend({
 						E('span', { 'class': 'mt-usage-lbl' }, '峰值速率'),
 						E('span', { 'class': 'mt-usage-val', 'id': 'usage-peak' }, '↓0 B/s · ↑0 B/s')
 					]),
-					E('div', { 'class': 'mt-usage-cell wide auto' }, [
-						E('span', { 'class': 'mt-usage-lbl' }, '统计来源'),
-						E('span', { 'class': 'mt-usage-auto' }, [
-							E('select', {
-								'class': 'mt-usage-days', 'id': 'usage-source',
-								'title': '物理网卡：自动识别 WAN 区域模组网口，直读 sysfs 计数器，零 AT 负担；模组 AT：AT^DSFLOWQRY 上报的 DS 累计流量（2 秒粒度）',
-								'change': setUsageSource
-							}, [
-								E('option', { 'value': 'netdev' }, '物理网卡'),
-								E('option', { 'value': 'modem' }, '模组 AT')
-							]),
-							E('span', { 'class': 'mt-usage-unit', 'id': 'usage-source-hint' }, '')
-						])
-					]),
+				E('div', { 'class': 'mt-usage-cell wide auto source' }, [
+					E('span', { 'class': 'mt-usage-lbl' }, '统计来源'),
+					E('span', { 'class': 'mt-usage-auto' }, [
+						E('select', {
+							'class': 'mt-usage-source', 'id': 'usage-source',
+							'title': '物理网卡：自动识别 WAN 区域模组网口，直读 sysfs 计数器，零 AT 负担；模组 AT：AT^DSFLOWQRY 上报的 DS 累计流量（2 秒粒度）',
+							'change': setUsageSource
+						}, [
+							E('option', { 'value': 'netdev' }, '物理网卡'),
+							E('option', { 'value': 'modem' }, '模组 AT')
+						]),
+						E('span', { 'class': 'mt-usage-unit mt-usage-source-hint', 'id': 'usage-source-hint' }, '')
+					])
+				]),
 					E('div', { 'class': 'mt-usage-cell wide auto' }, [
 						E('span', { 'class': 'mt-usage-lbl' }, '每月清零'),
 						E('span', { 'class': 'mt-usage-auto' }, [
@@ -1520,7 +1531,10 @@ return L.view.extend({
 			AtWs.usageCtl('set_source', undefined, source).then(function (r) {
 				if (r && r.success && r.usage) {
 					state.usage = r.usage;
-					renderSpeedUI();
+					/* 图表与速率立即换源：清空旧来源历史点、重置采样基线，
+					 * 并马上按新来源采一次，避免旧来源的点继续画在图上。 */
+					resetTrafficSeries(r.usage.source);
+					sampleRate();
 				} else {
 					el.value = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
 				}
@@ -1539,7 +1553,37 @@ return L.view.extend({
 			return Math.round(bits / 8) + ' B/s';
 		}
 
+		/* 火花线推进：只在速率采样产生新点时调用，与当前来源绑定。 */
+		function pushTrafficSample(down, up) {
+			sparkDown.push(down > 0 ? down : 0);
+			if (sparkDown.length > SPARK_POINTS) sparkDown.shift();
+			sparkUp.push(up > 0 ? up : 0);
+			if (sparkUp.length > SPARK_POINTS) sparkUp.shift();
+		}
+
+		/* 统计来源切换：速率数值、火花线历史、采样基线整体换源。
+		 * netdev 是 sysfs 接口累计、modem 是 DS 累计，绝对值与刷新粒度
+		 * 都不同，混在一张图里会画出虚假尖峰。 */
+		function resetTrafficSeries(source) {
+			sparkSource = source === 'modem' ? 'modem' : 'netdev';
+			sparkDown = zeroSparkSeries();
+			sparkUp = zeroSparkSeries();
+			state.rtDown = 0;
+			state.rtUp = 0;
+			rateSample = null;
+			renderSpeedUI();
+		}
+
 		function renderSpeedUI() {
+			var src = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+			var srcLabel = src === 'modem' ? '模组 AT' : '物理网卡';
+			var srcTag = document.getElementById('traffic-source-tag');
+			if (srcTag) srcTag.textContent = '实时 · ' + srcLabel;
+			var dlBox = document.getElementById('spark-dl-box');
+			var ulBox = document.getElementById('spark-ul-box');
+			if (dlBox) dlBox.title = '下行速率趋势 · 来源：' + srcLabel;
+			if (ulBox) ulBox.title = '上行速率趋势 · 来源：' + srcLabel;
+
 			var dlStr = formatSpeedNumber(state.rtDown);
 			var ulStr = formatSpeedNumber(state.rtUp);
 
@@ -1549,14 +1593,9 @@ return L.view.extend({
 			var elUl = document.getElementById('traffic-ul-val');
 			if (elUl) elUl.textContent = ulStr;
 
-			// 更新迷你火花线：纯设备真实采样数据，为 0 则为 0，严禁使用 Math.random 伪造
-			/* 空闲（或计数器采样被重置）时老实现会塞随机数，图上在跑流量而数字是 0 B/s，
-			 * 自相矛盾。没有流量就如实画 0。 */
-			sparkDown.push(state.rtDown > 0 ? state.rtDown : 0);
-			if (sparkDown.length > 12) sparkDown.shift();
-			sparkUp.push(state.rtUp > 0 ? state.rtUp : 0);
-			if (sparkUp.length > 12) sparkUp.shift();
-
+			// 火花线只渲染 pushTrafficSample() 采到的真实点（按当前来源），
+			// 为 0 则如实画 0，严禁 Math.random 伪造；本函数被使用量轮询、
+			// 清零 / 持久化按钮等多处复用，绝不能在这里重复推点。
 			renderMiniSparkline('spark-dl-box', sparkDown, '#38bdf8');
 			renderMiniSparkline('spark-ul-box', sparkUp, '#ec4899');
 
@@ -1716,7 +1755,18 @@ return L.view.extend({
 			if (state.temps && state.temps.modem1) {
 				avgT = state.temps.modem1 + ' ℃' + (state.temps.sub6GPA ? ' (基带 ' + state.temps.modem1 + '℃, PA ' + state.temps.sub6GPA + '℃)' : '');
 			}
-			var devIface = state.deviceInterface || (rateSample && rateSample.device) || '—';
+			/* 数据通信接口优先显示后端识别的物理网卡：state.usage.device 是后端按
+			 * 「WAN 区域 ∩ USB 模组网口」识别、无模组口时回落到默认 WAN 口物理网卡
+			 * 的结果（netdev 来源），每秒刷新且不依赖 netrate 是否成功；modem 来源
+			 * 时该字段是 DS 来源标签，不能当网卡名用。之后才回落到速率采样值。 */
+			var usageNetdev = (state.usage && state.usage.source !== 'modem'
+				&& state.usage.device) ? state.usage.device : '';
+			var sampledNetdev = (rateSample && rateSample.device) ? rateSample.device : '';
+			var devIface = usageNetdev || state.deviceInterface || sampledNetdev || '—';
+			var devIfaceTitle = usageNetdev
+				? 'WAN 区域物理网卡：优先模组 USB 网口，未识别到时回落默认 WAN 口物理网卡，不绑定接口名'
+				: ((state.deviceInterface || sampledNetdev)
+					? '实时速率采样到的 WAN 网卡' : '暂未识别到 WAN 区域物理网卡');
 			tabPanes['tab-dev'].innerHTML =
 				'<table class="mt-info-table">' +
 				'  <tr><td>模组型号</td><td>' + (state.modemInfo.model || '读取中...') + '</td></tr>' +
@@ -1724,7 +1774,7 @@ return L.view.extend({
 				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || '—') + '</td></tr>' +
 				'  <tr><td>模组 IMEI</td><td>' + (state.modemInfo.imei || '—') + '</td></tr>' +
 				'  <tr><td>芯片温度概览</td><td>' + avgT + '</td></tr>' +
-				'  <tr><td>数据通信接口</td><td>' + devIface + '</td></tr>' +
+				'  <tr><td>数据通信接口</td><td title="' + devIfaceTitle + '">' + devIface + '</td></tr>' +
 				'</table>';
 
 			// Tab 3: SIM 卡信息 (完整真实显示 IMSI 与 ICCID，真实读取 AT+CPIN?)
@@ -2753,7 +2803,14 @@ return L.view.extend({
 		function sampleUsage() {
 			return AtWs.usage().then(function (r) {
 				if (r && r.success && r.usage) {
+					var prevSource = state.usage && state.usage.source;
 					state.usage = r.usage;
+					/* 来源也可能由页面之外（UCI / 其它会话）切换，发现变化同样换源 */
+					if (prevSource && prevSource !== r.usage.source) {
+						resetTrafficSeries(r.usage.source);
+						sampleRate();
+						return;
+					}
 					renderSpeedUI();
 				}
 			});
@@ -2761,16 +2818,23 @@ return L.view.extend({
 
 		function sampleRate() {
 			return AtWs.netRate('').then(function (r) {
+				/* 速率与火花线始终跟着当前统计来源走：netdev 直读 sysfs，
+				 * modem 由 ucode 转发后端取 DS 累计值。来源一变就整体换源。 */
+				var src = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+				if (sparkSource !== src) resetTrafficSeries(src);
 				if (!r.success) {
 					rateSample = null;
 					state.rtDown = 0;
 					state.rtUp = 0;
+					pushTrafficSample(0, 0);
 					renderSpeedUI();
 					return;
 				}
 				var now = Date.now();
-				if (r.device) state.deviceInterface = r.device;
-				if (rateSample && rateSample.device === r.device) {
+				/* modem 来源的 device 是 DS 来源标签而非物理网卡，
+				 * 不能写进「数据通信接口」用的 deviceInterface。 */
+				if (r.device && src !== 'modem') state.deviceInterface = r.device;
+				if (rateSample && rateSample.device === r.device && rateSample.source === src) {
 					var dt = (now - rateSample.t) / 1000;
 					if (dt >= 0.2) {
 						var drx = r.rx_bytes - rateSample.rx;
@@ -2778,13 +2842,19 @@ return L.view.extend({
 						state.rtDown = drx >= 0 ? drx / dt : 0;
 						state.rtUp = dtx >= 0 ? dtx / dt : 0;
 
-						rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+						rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes,
+							device: r.device, source: src };
+						pushTrafficSample(state.rtDown, state.rtUp);
 						renderSpeedUI();
 						return;
 					}
 					return;
 				}
-				rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+				rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes,
+					device: r.device, source: src };
+				state.rtDown = 0;
+				state.rtUp = 0;
+				pushTrafficSample(0, 0);
 				renderSpeedUI();
 			}).catch(function () {});
 		}

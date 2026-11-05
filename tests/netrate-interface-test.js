@@ -3,8 +3,9 @@
 /* 流量统计口径回归测试（纯 Node，无需 OpenWrt 环境）。
  *
  * 覆盖 rpcd ucode 的 detectWanDevice / netrateCall 与 Rust usage.rs 同语义：
- * 只认 WAN 区域里自动识别出的模组物理网口，排除 br-lan / lo / LAN 区域；
- * 候选全无时回落到「非 LAN 归属的 USB 网卡」，再不行就停止统计。
+ * 优先认 WAN 区域里自动识别出的模组物理网口；无模组口时回落到默认 WAN 口
+ * 的物理网卡，再回落到其它 WAN 成员；候选全无时只认非 LAN 归属的 USB 网卡，
+ * 再不行就停止统计。全程排除 br-lan / lo / LAN 区域。
  * 同时验证 usage_source=modem 时 netrate 转发到 Rust 后端。
  */
 
@@ -82,11 +83,17 @@ function runCase(cfg) {
 	const context = {
 		/* ucode 内建函数等价桩 */
 		type: function (v) { return v === null || v === undefined ? 'null' : (Array.isArray(v) ? 'array' : typeof v); },
-		length: function (v) { return (Array.isArray(v) || typeof v === 'string') ? v.length : 0; },
+		length: function (v) {
+			/* 实机 ucode：对 null 求 length 会抛 "left-hand side expression is null" */
+			if (v === null || v === undefined) throw new Error('left-hand side expression is null');
+			return (Array.isArray(v) || typeof v === 'string') ? v.length : 0;
+		},
 		trim: function (v) { return String(v).trim(); },
 		split: function (v, sep) {
 			const text = String(v);
-			if (sep === undefined) return text.split(/\s+/).filter(function (t) { return t.length > 0; });
+			/* 实机 ucode 的 split() 单参数返回 null，不会按空白切分。
+			 * 这里必须保持同一语义，否则「单参数 split」的回归测不出来。 */
+			if (sep === undefined) return null;
 			return text.split(sep);
 		},
 		substr: function (v, start, len) { return String(v).substr(start, len); },
@@ -158,8 +165,30 @@ const detectCases = [
 		name: '实机拓扑自动识别 USB 模组 WAN 口', cfg: base, expected: 'eth2'
 	},
 	{
-		name: '模组尚未枚举时只取 WAN 区域物理网口，不碰 br-lan',
-		cfg: Object.assign({}, base, { usb: null }), expected: 'eth2'
+		name: '模组尚未枚举时回落默认 WAN 口物理网卡，不碰 br-lan',
+		cfg: Object.assign({}, base, { usb: null }), expected: 'eth1'
+	},
+	{
+		name: '只有默认 WAN 口（无模组专用接口）时选其物理网卡',
+		cfg: {
+			firewall: { 'firewall.@zone[0].name': 'wan',
+				'firewall.@zone[0].network': ['wan', 'wan6'],
+				'firewall.@zone[1].name': 'lan', 'firewall.@zone[1].network': 'lan' },
+			network: { 'network.lan.device': 'br-lan', 'network.wan.device': 'eth1',
+				'network.wan6.device': '@wan' },
+			usb: null, counters: { eth1: 100, 'br-lan': 999 }
+		}, expected: 'eth1'
+	},
+	{
+		name: 'wan 接口不在 WAN 区域时不能仅凭名字选其物理网卡',
+		cfg: {
+			firewall: { 'firewall.@zone[0].name': 'wan',
+				'firewall.@zone[0].network': 'badwan',
+				'firewall.@zone[1].name': 'lan', 'firewall.@zone[1].network': 'lan' },
+			network: { 'network.lan.device': 'br-lan', 'network.wan.device': 'eth1',
+				'network.badwan.device': 'br-lan' },
+			usb: null, counters: { eth1: 100, 'br-lan': 999 }
+		}, expected: null
 	},
 	{
 		name: 'WAN 区域误写 br-lan 时拒绝统计',
