@@ -2459,23 +2459,27 @@ return L.view.extend({
 		}
 
 		/*
-		 * 把 sendCommand 的结果折算成 AT 终止状态（issue #41 Codex review）。
+		 * 把 sendCommand 的结果折算成 AT 终止状态（issue #41 / PR #42 Codex review）。
 		 *
-		 * 「传输失败」不等于「超时」。rpc.js 的 sendCommand 在 success:false 时带 cause：
-		 *   not-connected / circuit-open —— 请求根本没发出的快速失败（rpc.js:441、rpc.js:459）
-		 *   timeout                     —— withTimeout 到点，请求已发出但无响应（rpc.js:506）
-		 *   其它                        —— 后端/模组明确回了失败
+		 * 「传输失败」不等于「超时」，还要再分清是**谁**没响应。rpc.js 的 sendCommand
+		 * 在 success:false 时带 cause，cause 一路来自三个层次：
+		 *   timeout        —— 请求已发出但没等到响应：前端超时预算（rpc.js:506）、
+		 *                     ucode 对后端的 nc 硬超时（mt5700.uc:1044）、
+		 *                     Rust 侧模组静默 / 排队预算耗尽（rpcserver.rs at_failure_cause）
+		 *   unavailable    —— 请求根本没发出，或后端本身不可用：
+		 *                     not-connected、circuit-open、not-listening、no-nc、
+		 *                     spawn-failed、no-reply
+		 *   error          —— 模组回了 ERROR，或后端明确报了业务失败（cause 缺省）
 		 * 原先一律记 'timeout'，后端掉线或通道熔断时页面会说「辅站查询超时」，
 		 * 把通道故障误导成模组无响应，排障方向就带偏了。
 		 */
 		function atStatusFromResult(res) {
-			if (!res || res.success !== true) {
-				var cause = res && res.cause;
-				if (cause === 'timeout') return 'timeout';
-				if (cause === 'not-connected' || cause === 'circuit-open') return 'unavailable';
-				return 'error';
-			}
-			return Parse.atStatusFromText(res.data);
+			if (res && res.success === true) return Parse.atStatusFromText(res.data);
+			var cause = (res && res.cause) || '';
+			if (cause === 'timeout') return 'timeout';
+			if (cause === 'not-connected' || cause === 'circuit-open' || cause === 'not-listening'
+				|| cause === 'no-nc' || cause === 'spawn-failed' || cause === 'no-reply') return 'unavailable';
+			return 'error';
 		}
 
 		function loadSecondary() {

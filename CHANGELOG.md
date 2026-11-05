@@ -33,6 +33,28 @@
   测量全空、仅 PCI、有 RSRP / RSSI 不标注、孤儿 SCC、`not-queried` /
   `unavailable` / `not-applicable`，以及五种 `sendCommand` 失败原因的映射。
 
+### fix(at) `at` 通道丢失 Rust 侧的超时分类（PR #42 Codex review）
+
+> 上一节的 `atStatusFromResult()` 按 `cause` 分档，但 `cause` 只在 ucode 层
+> 生成（`mt5700.uc` 的 `backendErrorShape` 会把 `cause` 平移到顶层）；Rust 侧
+> 模组静默时 `rpcserver.rs::run_command` 只回 `{ success:false, error:"命令执行
+> 超时" }`，`at` 分支手工拼 JSON 时又只搬 `success` / `data` / `error` —— 超时
+> 这件事在这一层被抹平，前端只能把「模组没回」降级成「AT ERROR / 后端报错」。
+
+- **fix(at) cause 贯通三层**：`AtCommandResponse` 新增 `cause: Option<String>`
+  （`skip_serializing_if`，成功应答的 JSON 形状不变）；外层应答预算耗尽直接标
+  `timeout`，`send_command_pri` 的错误串经新增的 `at_failure_cause()` 归类
+  （含「超时」即 `timeout`，覆盖 `at_queue` 的排队预算耗尽与 `transport` 的连接
+  超时），模组明确回 ERROR 的分支保持 `None`；`at` 分支的应答补上 `cause`，
+  ucode 原样透传、`rpc.js` 已在转发，前端因此能真正区分超时与后端报错。
+- **fix(ui) 分档补全**：`atStatusFromResult()` 识别 ucode 的全部通道类 `cause`
+  （`not-listening` / `no-nc` / `spawn-failed` / `no-reply` 一并归
+  `unavailable`），`backend-error` / `bad-reply` / `parse-failed` 仍归 `error`，
+  不谎称「未发起查询」；`rpc.js` 头部注明 `cause` 的三个来源层次。
+- **test** Rust 新增 `at_failure_cause` 单测 3 条（`cargo test` 345 passed /
+  0 failed）；前端断言 68 → 83 条，逐层守卫 `Rust → ucode → rpc.js → 视图` 的
+  `cause` 通路，防止任何一层再次漏搬。
+
 ---
 
 ## v1.32.1（2026-11-05）
