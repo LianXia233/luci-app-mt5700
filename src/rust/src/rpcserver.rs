@@ -444,8 +444,27 @@ impl RpcServer {
                 let snap = self.usage.snapshot().await;
                 serde_json::json!({ "id": id, "result": snap })
             }
+            // 实时速率计数器：与 usage 共用同一套来源口径。
+            // netdev 由 ucode 直读 sysfs；modem 来源下 ucode 转发到这里，
+            // 返回 AT^DSFLOWQRY 的 DS 累计值，前端按采样差算速率。
+            "netrate" => {
+                match self.usage.counters().await {
+                    Some((device, rx, tx)) => serde_json::json!({
+                        "id": id,
+                        "result": { "success": true, "device": device, "rx_bytes": rx, "tx_bytes": tx }
+                    }),
+                    None => serde_json::json!({
+                        "id": id,
+                        "result": {
+                            "success": false,
+                            "device": "",
+                            "error": "未识别到 WAN 区域网卡，已停止统计（不回退 LAN/br-lan）"
+                        }
+                    }),
+                }
+            }
             // 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off /
-            // set_reset_day（改自动清零日 = 每月几号，写 UCI）。
+            // set_reset_day（改自动清零日 = 每月几号）/ set_source（切换统计来源）。
             "usage_ctl" => {
                 let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("");
                 let result = match action {
@@ -459,6 +478,14 @@ impl RpcServer {
                             return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
                         }
                         // set_reset_day 内部已热更新内存值，snapshot 读到的就是新的清零日
+                        Some(self.usage.snapshot().await)
+                    }
+                    // 统计来源：只接受 netdev / modem，归一化与 UCI 写入在 usage 模块
+                    "set_source" => {
+                        let source = req.params.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                        if let Err(e) = self.usage.set_source(source).await {
+                            return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
+                        }
                         Some(self.usage.snapshot().await)
                     }
                     _ => None,

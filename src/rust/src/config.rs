@@ -418,6 +418,11 @@ pub struct Config {
     /// 设置跟着一起丢会让用户每次重启后都要重填。
     /// 日历语义（大小月 / 闰年 / 跨年）见 [`crate::monthly`]。
     pub usage_reset_day: u32,
+    /// 使用量统计来源：`netdev`（WAN 物理网卡，默认）/ `modem`（模组 AT^DSFLOWQRY）。
+    ///
+    /// 与清零日同样放 UCI：状态文件在「持久化关」时重启即失，
+    /// 用户选择的来源不能跟着一起丢。
+    pub usage_source: String,
     /// 短信默认存储区（SM / ME），启动时兜底应用；界面「保存存储位置」也会写回。
     pub sms_storage: String,
 }
@@ -505,6 +510,7 @@ pub fn default_config() -> Config {
             day_nr: BandLock { type_: 3, bands: String::new(), arfcns: String::new(), scs_types: String::new(), pcis: String::new() },
         },
         usage_reset_day: crate::monthly::DEFAULT_RESET_DAY,
+        usage_source: crate::usage::SOURCE_NETDEV.to_string(),
         sms_storage: DEFAULT_SMS_STORAGE.to_string(),
     }
 }
@@ -859,6 +865,10 @@ pub async fn load_config() -> Config {
     // 一律回落默认 —— 填了「不存在的日期」说明是误填，按默认走比夹到月末更可预期。
     // 短信默认存储区：SM / ME，默认 ME（槽位大、长短信不会被拆到两个存储区）。
     cfg.sms_storage = normalize_sms_storage(&values.str("sms_storage", DEFAULT_SMS_STORAGE));
+    // 统计来源：非法值一律回落 netdev，避免误配成「统计 LAN 网桥」之类口径。
+    cfg.usage_source = crate::usage::normalize_usage_source(
+        &values.str("usage_source", crate::usage::SOURCE_NETDEV),
+    ).to_string();
 
     let raw_day = values.int("usage_reset_day", crate::monthly::DEFAULT_RESET_DAY as i64);
     cfg.usage_reset_day = if (crate::monthly::MIN_RESET_DAY as i64..=crate::monthly::MAX_RESET_DAY as i64)

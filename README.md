@@ -6,7 +6,7 @@
 
 **适用于 OpenWrt / ImmortalWrt 平台的 MT5700M 5G 模组全功能控制中心与常驻守护套件**
 
-[![Version](https://img.shields.io/badge/Version-v1.31.1-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v1.32.0-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
 [![OpenWrt CI](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/build-openwrt.yml?branch=main&label=Build%20OpenWrt&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/build-openwrt.yml)
 [![Static Checks](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/checks.yml?branch=main&label=Checks&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/checks.yml)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square&logo=gnu&logoColor=white)](LICENSE)
@@ -290,11 +290,32 @@ service at-webserver restart
 |:---|:---|:---|
 | RSRP / RSRQ / SINR | `AT^HCSQ`（手册 13.5） | 严格按制式解析字段表，`255` 编码值如实判定为不可测 |
 | 驻留小区 / 频段 / PCI | `AT^MONSC` · `AT^HFREQINFO?` | 优先取 `^MONSC` 驻留小区，缺项由 `^HCSQ` 补齐 |
-| 实时速率 / 本次使用量 | `/sys/class/net/<网卡>/statistics/{rx,tx}_bytes` | 经 rpcd `netrate` 读取内核计数器，**全程不下发 AT**，零串口负担 |
+| 实时速率 / 本次使用量 | WAN 区域模组物理网口 `sysfs` 计数器，或模组 `AT^DSFLOWQRY` | 来源可手动切换；默认走物理网卡，**全程不下发 AT**，零串口负担 |
 | 签约速率 (AMBR) | `AT^DSAMBR=<cid>`（手册 16.17） | 4G/5G 均可用；取不到时以 `AT+C5GQOSRDP` 的 Session-AMBR 兜底 |
 | SIM 状态 / IMSI / ICCID | `AT+CPIN?` / `AT+CIMI` / `AT^ICCID?` | 状态机分层核对，防止误报就绪 |
 | 芯片温度矩阵 | `AT^CHIPTEMP?`（手册 17.1.1） | 12 路硬件测温点逐路定级，仪表盘以**最高通道结温**评定整体散热 |
 | 发射功率 | `AT^NTXPOWER?`（NR）/ `AT^TXPOWER?`（LTE） | NR 模式下 `AT^TXPOWER?` 恒报错属模组硬件正常行为 |
+
+#### 流量统计口径与来源开关
+
+累计用量与实时速率共用同一套口径：**只统计 WAN 防火墙区域**，自动识别模组创建的
+物理网口，不写死任何网卡名。显式排除 `br-lan` 及其 VLAN 子接口、`lo` 与 LAN 区域网卡。
+识别顺序为：WAN 区域成员 ∩ USB 模组网口 → WAN 区域内其它物理网口 → 候选全无时
+「非 LAN 归属的 USB 网卡」；全部取不到则停止统计，累计值保留，**绝不回退 LAN 侧计数器**。
+
+来源由 `at-webserver.config.usage_source` 控制，也可在「网络状态 → 本次使用量」里切换：
+
+| 取值 | 数据源 | 粒度 / 代价 |
+|:---|:---|:---|
+| `netdev`（默认） | WAN 区域模组物理网口的 `/sys/class/net/<dev>/statistics/{rx,tx}_bytes` | 1 秒，零 AT 负担 |
+| `modem` | 模组 `AT^DSFLOWQRY` 的 DS 累计收发字节（手册 16.12，16 位十六进制） | 2 秒（复用既有状态缓存），速率为 2 秒粒度 |
+
+切换会写入 UCI 并热更新；统计器按 `device` 标签变化自动重新基线，累计值保留。
+`netrate` 在 `modem` 来源下转发到 Rust 后端取同一份 DS 累计值，保证速率与使用量同口径。
+「清零」只重置插件侧累计与基线，不会下发 `AT^DSFLOWCLR` 清除模组全局计数。
+
+DNS 下发同样按「USB 模组网口 + WAN 区域」自动反查承载接口：IPv4 DNS 下发给直接绑定
+模组网口的接口，IPv6 DNS 下发给经 `@别名` 引用它们的接口，不再绑定具体接口名称。
 
 ---
 
