@@ -8,7 +8,7 @@
 
 ---
 
-## Unreleased
+## v1.31.1（2026-11-05）
 
 ### fix(parse) HFREQINFO 同行多组 NR 载波仅解析第一组（Issue #38）
 
@@ -23,6 +23,7 @@
 - **feat(parse) atStatusFromText**：新增 AT 终止状态检测函数，区分 OK / ERROR / NONE / empty / other，让前端能区分传输层成功与 AT 命令实际结果
 - **feat(ui) SCC 信号缺失原因**：`syncCarriers` 为每个信号为空的 SCC 添加 `signalReason` 字段（`at-error` / `no-measurement` / `timeout`）；`renderCarriersAdv` 在 SCC 信号全部为空时显示可解释说明，如"已取得载波频点/带宽，未取得独立信号测量"或"辅站查询返回 ERROR"；绝不复制 PCC 读数或填 0
 - **test** 新增 `tests/hfreq-multicarrier-test.js`（49 条断言），覆盖单组/两组/三组/多行/不完整行解析、AT 状态检测、SCC 信号缺失原因、syncCarriers 端到端验证
+- **chore(version) 缓存版本戳同步**：`PKG_VERSION` / `MT5700_UI_VERSION` 1.31.0→1.31.1，发版后浏览器缓存整体失效，确保升级用户加载到修复后的解析逻辑
 
 ---
 
