@@ -12,6 +12,8 @@
 #      其中 tests/author-attribution-test.js 负责校验作者信息：署名文案
 #      「作者：LianXia233」、链接指向主仓库、target/rel 安全属性、字号与居中、
 #      未扩散到其他视图、AGENTS.md 规则仍在。
+#   3) src/rust —— `cargo test --locked`（Rust 后端单测，独立 job 计时）；
+#      CI 原先只跑 Node，Rust 改动无法在合并前被编译校验。
 #
 # 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
 #      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
@@ -51,11 +53,12 @@
 #      风格统一或自动化清理为由移除清单内的元素。
 #
 #   6) 行尾强制 LF：Shell、Python、配置与本工作流一律 LF。CRLF 会导致 BusyBox
-#      ash 与 procd 侧脚本失败；仓库已用 .gitattributes 强制 eol=lf，检查项 3
-#      会在 CI 中兜底拦截。
+#      ash 与 procd 侧脚本失败；仓库已用 .gitattributes 强制 eol=lf，static-check
+#      的行尾校验会在 CI 中兜底拦截。
 #
-#   7) 依赖与时长：不引入 npm 依赖与第三方 action，单次运行控制在 1 分钟内；
-#      新增检查应优先写成 tests/ 下的零依赖 Node 脚本。
+#   7) 依赖与时长：不引入 npm 依赖与第三方 action；静态与 Node 门禁控制在
+#      1 分钟内，Rust job 独立计时（15 分钟超时）；新增检查优先写成 tests/
+#      下的零依赖 Node 脚本。
 #
 #   8) 权限边界：本工作流只读仓库，不得为其申请 contents: write；打包、发布、
 #      Release 清理等写操作一律留在 build-openwrt.yml，由 tag 或手动触发。
@@ -113,3 +116,16 @@ jobs:
             node "$f"
             echo "::endgroup::"
           done
+
+  rust-unit:
+    name: Rust 单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+      - name: 准备 Rust 工具链
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: 单元测试（cargo test --locked）
+        working-directory: src/rust
+        run: cargo test --locked
