@@ -530,6 +530,14 @@ check('任务要求语义全覆盖',
 		/#tabmenu ul\.tabs,[\s\S]{0,500}?border: 0 !important/.test(md3Css)
 		&& /\.mt-mcs-box \{[^}]*border: 0 !important/.test(md3Css)
 		&& /\.mt5700-poll-box \{[^}]*border: 0 !important/.test(md3Css));
+	/* 巡检 / 限频分组的容器被彻底压平：卡片 body 本身就是表单网格，
+	 * 再套一个带内距的子面板会让内部字段比同级字段右缩 16px。 */
+	check('巡检/限频分组不再生成子面板（无底色、无内距）',
+		/\.mt5700-poll-box \{[^}]*background: none !important/.test(md3Css)
+		&& /\.mt5700-poll-box \{[^}]*padding: 0 !important/.test(md3Css));
+	check('巡检/限频分组改用分隔线 + 小标题表达层级',
+		/\.mt5700-poll-title \{[^}]*border-top: 1px solid var\(--md-sys-color-outline-variant\) !important/.test(md3Css)
+		&& /\.mt5700-poll-title \{[^}]*color: var\(--md-sys-color-on-surface-variant\) !important/.test(md3Css));
 	check('Tab 选中项用 primary-container 填充且无阴影',
 		/\.active > a,[\s\S]{0,220}?background: var\(--md-sys-color-primary-container\) !important[\s\S]{0,160}?box-shadow: none !important/.test(md3Css));
 	check('极简模式下拉框补回箭头（background 简写会清掉主题箭头）',
