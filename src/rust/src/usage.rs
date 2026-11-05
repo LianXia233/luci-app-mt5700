@@ -336,11 +336,22 @@ fn select_wan_netdev(
             return Some(usb_dev.to_string());
         }
     }
-    // 2) WAN 区域内的其它物理网口（仍排除 LAN 侧与 br-lan）
+    // 2) 默认 WAN 口所在的物理网卡：设备上没有模组专用 WAN 口可用时，
+    //    按 `network.wan` 反查出的物理网卡统计，仍绝不回退 LAN。
+    //    仅当 wan 逻辑接口确实属于 WAN 区域时才采用，避免把被挪到
+    //    其它区域的接口误当成 WAN 出口。
+    if wan_ifaces.iter().any(|i| i == "wan") {
+        if let Some(dev) = resolve_netdev("wan", &net) {
+            if !is_lan_side(&dev, &lan_devs) && usable(&dev) {
+                return Some(dev);
+            }
+        }
+    }
+    // 3) WAN 区域内的其它物理网口（仍排除 LAN 侧与 br-lan）
     if let Some(dev) = candidates.first() {
         return Some(dev.clone());
     }
-    // 3) 候选全无：只接受非 LAN 归属的 USB 网卡
+    // 4) 候选全无：只接受非 LAN 归属的 USB 网卡
     if let Some(usb_dev) = usb {
         if !is_lan_side(usb_dev, &lan_devs)
             && usable(usb_dev)
@@ -872,13 +883,33 @@ mod tests {
     }
 
     #[test]
-    fn wan_zone_without_usb_still_picks_first_wan_dev() {
-        // 模组尚未枚举：退回 WAN 区域里的物理网口，但绝不退回 br-lan
+    fn no_other_modem_wan_port_selects_default_wan_physical_dev() {
+        // 模组 USB 网口未枚举：优先按默认 WAN 口 network.wan 反查物理网卡，
+        // 而不是继续沿用某个残留的模组绑定，也绝不退回 br-lan。
         assert_eq!(
             select_wan_netdev(real_world_fw(), real_world_net(), None, all_usable),
-            Some("eth2".into()),
-            "WAN zone 首个成员 MT5700M 的物理绑定优先"
+            Some("eth1".into()),
+            "无模组 WAN 口时应选默认 WAN 口的物理网卡"
         );
+
+        // 只有默认 wan/wan6、完全没有模组专用接口的设备同样命中该判据。
+        let fw = "firewall.@zone[0].name='wan'\nfirewall.@zone[0].network='wan' 'wan6'\n\
+                  firewall.@zone[1].name='lan'\nfirewall.@zone[1].network='lan'\n";
+        assert_eq!(
+            select_wan_netdev(fw, real_world_net(), None, all_usable),
+            Some("eth1".into())
+        );
+    }
+
+    #[test]
+    fn default_wan_dev_is_ignored_when_wan_is_not_in_wan_zone() {
+        // wan 逻辑接口被挪出 WAN 区域时，不能仅凭名字把它当 WAN 出口；
+        // 此时仍应回到 WAN 区域成员 / USB 回落判据。
+        let fw = "firewall.@zone[0].name='wan'\nfirewall.@zone[0].network='wwan'\n\
+                  firewall.@zone[1].name='lan'\nfirewall.@zone[1].network='lan'\n";
+        let net = "network.wan.device='eth1'\nnetwork.wwan.device='br-lan'\n\
+                   network.lan.device='br-lan'\n";
+        assert_eq!(select_wan_netdev(fw, net, None, all_usable), None);
     }
 
     #[test]

@@ -482,7 +482,7 @@ function uciValueTokens(raw) {
 		}
 	}
 	if (out == '') {
-		let plain = split(trim(raw));
+		let plain = split(trim(raw), ' ');
 		if (length(plain) > 0) {
 			out = plain[0] + ' ';
 		}
@@ -524,7 +524,7 @@ function zoneIfaces(text, zone) {
 		if (pos < 0) continue;
 		let kp = split(trim(substr(lines[i], 0, pos)), '.');
 		if (length(kp) != 3 || kp[2] != 'name') continue;
-		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))));
+		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))), ' ');
 		if (length(vals) > 0 && vals[0] == zone) {
 			sections = sections + kp[1] + ' ';
 		}
@@ -536,7 +536,7 @@ function zoneIfaces(text, zone) {
 		let kp = split(trim(substr(lines[i], 0, pos)), '.');
 		if (length(kp) != 3 || kp[2] != 'network') continue;
 		if (index(sections, ' ' + kp[1] + ' ') < 0) continue;
-		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))));
+		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))), ' ');
 		for (let j = 0; j < length(vals); j++) {
 			if (index(' ' + out, ' ' + vals[j] + ' ') < 0) {
 				out = out + vals[j] + ' ';
@@ -555,7 +555,7 @@ function networkDevices(text) {
 		if (pos < 0) continue;
 		let kp = split(trim(substr(lines[i], 0, pos)), '.');
 		if (length(kp) != 3 || (kp[2] != 'device' && kp[2] != 'ifname')) continue;
-		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))));
+		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))), ' ');
 		if (length(vals) == 0) continue;
 		/* device 优先于旧式 ifname；已写入则不再覆盖 */
 		if (kp[2] == 'ifname' && out[kp[1]] != null) continue;
@@ -591,7 +591,7 @@ function isLanSide(dev, lanTokens) {
  * 候选全无时给 USB 网卡做 WAN 侧归属校验。 */
 function boundOutsideLan(dev, devs, lanIfaces) {
 	let ks = keys(devs);
-	let lanList = split(trim(lanIfaces));
+	let lanList = split(trim(lanIfaces), ' ');
 	for (let i = 0; i < length(ks); i++) {
 		let skip = false;
 		for (let j = 0; j < length(lanList); j++) {
@@ -643,14 +643,14 @@ function detectWanDevice() {
 	let devs = networkDevices(netText);
 
 	let lanTokens = '';
-	let lanList = split(trim(lanIfaces));
+	let lanList = split(trim(lanIfaces), ' ');
 	for (let i = 0; i < length(lanList); i++) {
 		let d = resolveNetdev(lanList[i], devs);
 		if (d != null) lanTokens = lanTokens + d + ' ';
 	}
 
 	let candidates = '';
-	let wanList = split(trim(wanIfaces));
+	let wanList = split(trim(wanIfaces), ' ');
 	for (let i = 0; i < length(wanList); i++) {
 		let d = resolveNetdev(wanList[i], devs);
 		if (d == null || isLanSide(d, lanTokens)) continue;
@@ -668,10 +668,22 @@ function detectWanDevice() {
 
 	/* 1) 模组创建的 WAN 口 */
 	if (usb != null && index(' ' + candidates, ' ' + usb + ' ') >= 0) return usb;
-	/* 2) WAN 区域内的其它物理网口 */
-	let list = split(trim(candidates));
-	if (length(list) > 0) return list[0];
-	/* 3) 候选全无：只认非 LAN 归属的 USB 网卡 */
+	/* 2) 默认 WAN 口所在的物理网卡：设备上没有模组专用 WAN 口可用时，
+	 * 按 network.wan 反查出的物理网卡统计，仍绝不回退 LAN。
+	 * 仅当 wan 逻辑接口确实属于 WAN 区域时才采用。 */
+	if (index(' ' + trim(wanIfaces) + ' ', ' wan ') >= 0) {
+		let defaultWan = resolveNetdev('wan', devs);
+		if (defaultWan != null && !isLanSide(defaultWan, lanTokens)
+			&& netdevUsable(defaultWan)) return defaultWan;
+	}
+	/* 3) WAN 区域内的其它物理网口。
+	 * 实机 ucode 的 split('', ' ') 返回 [''] 而不是 []，必须跳过空项，
+	 * 否则候选全无时会返回空串、直接吞掉下面第 3 级 USB 回落。 */
+	let list = split(trim(candidates), ' ');
+	for (let i = 0; i < length(list); i++) {
+		if (list[i] != '') return list[i];
+	}
+	/* 4) 候选全无：只认非 LAN 归属的 USB 网卡 */
 	if (usb != null && !isLanSide(usb, lanTokens) && netdevUsable(usb)
 		&& boundOutsideLan(usb, devs, lanIfaces)) return usb;
 	return null;

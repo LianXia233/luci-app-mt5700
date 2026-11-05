@@ -3180,6 +3180,90 @@ select.mt5700-select {
   background: #ffffff !important;
   color: #1e1b4b !important;
   padding: 8px !important;
+}/* ---------- 统计来源：贴合文字的紧凑方框（压过上面的全局 select 深度美化） ----------
+ * 上面的 `.mt5700-select, .cbi-input-select, select` 用 !important 强制白底、
+ * 深蓝紫粗体、13.5px 与 8px 36px 大内边距。来源下拉若复用天数输入框的
+ * .mt-usage-days，背景色与字色夺不回来，会变成突兀的白色大胶囊。
+ * 这里给来源控件独立 class，以更高特异性收回样式：透明底 + 细描边小方框，
+ * 不设 min/max-width，宽度完全交给「物理网卡 / 模组 AT」这些选项文字决定，
+ * 只留一枚紧贴文字的小箭头；hover / focus 不再整块染成紫色。
+ */
+.mt-usage-cell.source {
+  padding: 3px 8px !important;
+}
+.mt-usage-cell.source .mt-usage-lbl {
+  padding: 0 !important;
+  background: transparent !important;
+  color: var(--mt5700-text-secondary) !important;
+}
+.mt-usage-cell.source .mt-usage-auto {
+  gap: 5px !important;
+}
+.mt-usage-cell.source .mt-usage-auto select.mt-usage-source {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
+  box-sizing: border-box !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  padding: 0 13px 0 5px !important;
+  font-family: inherit !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.5 !important;
+  letter-spacing: 0 !important;
+  text-align: left !important;
+  text-align-last: left !important;
+  color: var(--mt5700-text-secondary) !important;
+  background-color: transparent !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%2394a3b8'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 4px center !important;
+  background-size: 6px 4px !important;
+  border: 1px solid var(--mt5700-border) !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  outline: none !important;
+  cursor: pointer !important;
+  transition: color 0.18s ease, border-color 0.18s ease !important;
+}
+.mt-usage-cell.source .mt-usage-auto select.mt-usage-source:hover {
+  color: var(--mt5700-accent) !important;
+  border-color: var(--mt5700-accent-light) !important;
+  background-color: transparent !important;
+}
+.mt-usage-cell.source .mt-usage-auto select.mt-usage-source:focus {
+  color: var(--mt5700-text-secondary) !important;
+  border-color: var(--mt5700-border-focus, var(--mt5700-accent-light)) !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.mt-usage-cell.source .mt-usage-auto select.mt-usage-source option {
+  background: var(--mt5700-bg-elevated, #fff) !important;
+  color: var(--mt5700-text) !important;
+  padding: 4px 8px !important;
+}
+html.at-dark .mt-usage-cell.source .mt-usage-auto select.mt-usage-source option {
+  background: #1e2438 !important;
+  color: #f1f5f9 !important;
+}
+.mt-usage-cell.source .mt-usage-source-hint {
+  font-family: "JetBrains Mono", Consolas, monospace !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  color: var(--mt5700-text-secondary) !important;
+  opacity: 0.72;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mt-usage-cell.source .mt-usage-source-hint::before {
+  content: '·';
+  margin-right: 4px;
+  opacity: 0.6;
 }/* ---------- 调制方式与空间流 SVG 专属视觉网格 ---------- */
 .mt-mcs-visual-grid {
   display: grid !important;
