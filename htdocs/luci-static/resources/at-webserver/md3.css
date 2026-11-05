@@ -636,20 +636,33 @@ html[data-ui-mode="minimal"] .mt5700-agree-list {
    普通模式给它画整圈 1px 描边 + 淡底色，塞进卡片后就是「卡片套盒子」。
    极简模式改为无描边的 tonal 分组：靠色阶分层，全页每条嵌套路径最多一条线。
    -------------------------------------------------------------------------- */
+/* 信号定时巡检 / 推送频率限制：**不再是一个子面板**。
+ *
+ * 它们所在的卡片 body 本身就是 .mt5700-form-grid，字段按两列排；这两块又各自是
+ * 一个 .mt5700-form-grid 并带底色、圆角、16px 内距 —— 于是同一张卡片里出现了
+ * 「卡片 → 面板 → 字段」三层，且内部字段比上面的字段整整右缩 16px，左边缘对不齐。
+ *
+ * 现在把容器完全压平：无底色、无描边、无圆角、无内距，与上面的字段共用同一层
+ * 网格和同一个左边线。分组只靠段前的 1px 分隔线 + 一行小标题表达，不再多一个面。 */
 html[data-ui-mode="minimal"] .mt5700-poll-box {
-  background: var(--md-sys-color-surface-container-high) !important;
+  background: none !important;
   border: 0 !important;
-  border-radius: var(--md-sys-shape-corner-medium) !important;
-  padding: var(--md-sys-space-3) var(--md-sys-space-4) var(--md-sys-space-2) !important;
-  margin: var(--md-sys-space-2) 0 var(--md-sys-space-3) !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: var(--md-sys-space-2) 0 0 !important;
   box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 html[data-ui-mode="minimal"] .mt5700-poll-title {
-  margin: 0 0 var(--md-sys-space-2) !important;
-  font-size: var(--md-sys-typescale-title-small-size) !important;
+  margin: 0 0 var(--md-sys-space-1) !important;
+  padding-top: var(--md-sys-space-3) !important;
+  border-top: 1px solid var(--md-sys-color-outline-variant) !important;
+  font-size: var(--md-sys-typescale-label-large-size) !important;
   font-weight: var(--md-sys-typescale-weight-medium) !important;
-  letter-spacing: 0;
-  color: var(--md-sys-color-on-surface) !important;
+  line-height: var(--md-sys-typescale-line-height-tight);
+  letter-spacing: var(--md-sys-typescale-tracking-label);
+  color: var(--md-sys-color-on-surface-variant) !important;
   opacity: 1 !important;
 }
 html[data-ui-mode="minimal"] .mt5700-poll-box .mt5700-label {
