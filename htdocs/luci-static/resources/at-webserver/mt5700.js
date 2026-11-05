@@ -20,7 +20,7 @@ var MT5700_CSS_VERSION = '2.46.4';
 var GLOBAL_CSS_VERSION = '1.0.0';
 // 极简模式（Material Design 3）视觉层：只在 data-ui-mode="minimal" 时命中，
 // 全部规则带 html[data-ui-mode="minimal"] 前缀，普通模式零影响。
-var MT5700_MD3_CSS_VERSION = '1.1.0';
+var MT5700_MD3_CSS_VERSION = '1.2.0';
 // 先落主题明暗结论（html.at-dark / at-light），再注入样式，避免首屏明暗闪烁
 if (window.AtTheme) window.AtTheme.apply();
 if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserver/mt5700.css?v=' + MT5700_CSS_VERSION);

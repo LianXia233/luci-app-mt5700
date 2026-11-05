@@ -492,6 +492,72 @@ html[data-ui-mode="minimal"] .mt5700-table-kv tbody tr:last-child {
   border-bottom: 0 !important;
 }
 
+/* --------------------------------------------------------------------------
+   3.1 卡内图形容器（QAM 星座图 / MIMO 空间流）
+   普通模式是「卡片 → 白盒 → SVG 视口框」三层，每层各画一圈边。
+   极简模式只留卡片这一层边线：图形盒退为无描边的 tonal 填充，
+   SVG 自带的视口矩形透明化，避免框里再套框。
+   -------------------------------------------------------------------------- */
+html[data-ui-mode="minimal"] .mt-mcs-box {
+  background: var(--md-sys-color-surface-container-high) !important;
+  border: 0 !important;
+  border-radius: var(--md-sys-shape-corner-medium) !important;
+  padding: var(--md-sys-space-3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+html[data-ui-mode="minimal"] .mt-mcs-box:hover {
+  background: var(--md-sys-color-surface-container-high) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+html[data-ui-mode="minimal"] .mt-mcs-visual-grid {
+  gap: var(--md-sys-space-3) !important;
+  margin-bottom: var(--md-sys-space-3) !important;
+}
+html[data-ui-mode="minimal"] .mt-mcs-header {
+  gap: var(--md-sys-space-2) !important;
+  margin-bottom: var(--md-sys-space-2) !important;
+}
+html[data-ui-mode="minimal"] .mt-mcs-tag {
+  border: 0 !important;
+  border-radius: var(--md-sys-shape-corner-small) !important;
+  padding: 3px 8px !important;
+  font-size: var(--md-sys-typescale-label-small-size) !important;
+  font-weight: var(--md-sys-typescale-weight-medium) !important;
+  letter-spacing: var(--md-sys-typescale-tracking-label);
+}
+html[data-ui-mode="minimal"] .mt-mcs-tag.mt-tag-cyan {
+  background: var(--md-sys-color-secondary-container) !important;
+  color: var(--md-sys-color-on-secondary-container) !important;
+}
+/* 普通模式用青 / 紫两色区分两块图，在 MD3 里会引入主题外的第三、第四色；
+ * 极简模式统一成二级容器色，靠标题文字区分即可。 */
+html[data-ui-mode="minimal"] .mt-mcs-tag.mt-tag-purple {
+  background: var(--md-sys-color-secondary-container) !important;
+  color: var(--md-sys-color-on-secondary-container) !important;
+}
+html[data-ui-mode="minimal"] .mt-mcs-desc {
+  color: var(--md-sys-color-on-surface-variant) !important;
+  font-size: var(--md-sys-typescale-body-small-size) !important;
+  text-align: right;
+}
+/* 图形按 320×190 的自然尺寸居中：手机端整列宽会把 SVG 拉到 500px 宽、
+ * 近 300px 高，盒子被撑得又高又空。 */
+html[data-ui-mode="minimal"] .mt-constellation-svg,
+html[data-ui-mode="minimal"] .mt-mimo-svg {
+  width: 100% !important;
+  max-width: 320px !important;
+  height: auto !important;
+  margin: 0 auto !important;
+  filter: none !important;
+}
+html[data-ui-mode="minimal"] .mt-constellation-svg > rect,
+html[data-ui-mode="minimal"] .mt-mimo-svg > rect {
+  fill: transparent !important;
+  stroke: none !important;
+}
+
 html[data-ui-mode="minimal"] .mt5700-badge,
 html[data-ui-mode="minimal"] .mt5700-badge-success,
 html[data-ui-mode="minimal"] .mt5700-badge-warning,
@@ -515,10 +581,18 @@ html[data-ui-mode="minimal"] .mt5700-badge-neutral { background: var(--md-sys-co
  * 注意：这里**不**给 .mt5700-hint 和 .mt5700-agree-list 加容器装饰 ——
  * 两者在普通模式就是纯文本（hint 只有字号/颜色，agree-list 是 <ul>），
  * 极简模式给它们套 1px 描边 + 底色会凭空多出一层框，属于视觉缺陷。 */
-html[data-ui-mode="minimal"] .mt5700-radio-card,
-html[data-ui-mode="minimal"] .mt5700-banner {
+/* 可选中的卡片（radio-card）保留描边：它是控件，不是容器。
+ * 提示条（banner）是纯信息块，改为无描边的 tonal 填充，避免与卡片边框重叠。 */
+html[data-ui-mode="minimal"] .mt5700-radio-card {
   background: var(--md-sys-color-surface-container) !important;
   border: 1px solid var(--md-sys-color-outline-variant) !important;
+  border-radius: var(--md-sys-shape-corner-small) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+html[data-ui-mode="minimal"] .mt5700-banner {
+  background: var(--md-sys-color-surface-container) !important;
+  border: 0 !important;
   border-radius: var(--md-sys-shape-corner-small) !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
@@ -555,6 +629,39 @@ html[data-ui-mode="minimal"] .mt5700-agree-list {
   border: 0 !important;
   padding-left: 20px !important;
   color: var(--md-sys-color-on-surface-variant) !important;
+}
+
+/* --------------------------------------------------------------------------
+   3.2 表单内嵌分组（信号定时巡检 / 推送频率限制）
+   普通模式给它画整圈 1px 描边 + 淡底色，塞进卡片后就是「卡片套盒子」。
+   极简模式改为无描边的 tonal 分组：靠色阶分层，全页每条嵌套路径最多一条线。
+   -------------------------------------------------------------------------- */
+html[data-ui-mode="minimal"] .mt5700-poll-box {
+  background: var(--md-sys-color-surface-container-high) !important;
+  border: 0 !important;
+  border-radius: var(--md-sys-shape-corner-medium) !important;
+  padding: var(--md-sys-space-3) var(--md-sys-space-4) var(--md-sys-space-2) !important;
+  margin: var(--md-sys-space-2) 0 var(--md-sys-space-3) !important;
+  box-shadow: none !important;
+}
+html[data-ui-mode="minimal"] .mt5700-poll-title {
+  margin: 0 0 var(--md-sys-space-2) !important;
+  font-size: var(--md-sys-typescale-title-small-size) !important;
+  font-weight: var(--md-sys-typescale-weight-medium) !important;
+  letter-spacing: 0;
+  color: var(--md-sys-color-on-surface) !important;
+  opacity: 1 !important;
+}
+html[data-ui-mode="minimal"] .mt5700-poll-box .mt5700-label {
+  font-size: var(--md-sys-typescale-label-medium-size) !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-poll-box .mt5700-hint {
+  color: var(--md-sys-color-on-surface-variant) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-poll-sep {
+  color: var(--md-sys-color-on-surface-variant) !important;
+  opacity: 1 !important;
 }
 
 /* ==========================================================================
@@ -634,16 +741,42 @@ html[data-ui-mode="minimal"] input[type="text"],
 html[data-ui-mode="minimal"] input[type="password"],
 html[data-ui-mode="minimal"] input[type="number"],
 html[data-ui-mode="minimal"] input[type="search"],
+html[data-ui-mode="minimal"] input[type="time"],
 html[data-ui-mode="minimal"] textarea {
   background: var(--md-sys-color-surface-container-lowest) !important;
   border: 1px solid var(--md-sys-color-outline) !important;
-  border-radius: var(--md-sys-shape-corner-extra-small) !important;
+  border-radius: var(--md-sys-shape-corner-small) !important;
   color: var(--md-sys-color-on-surface) !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  padding: 10px 12px !important;
-  font-size: 14px !important;
+  padding: 9px 12px !important;
+  min-height: 40px !important;
+  font-size: var(--md-sys-typescale-body-large-size) !important;
+  transition: border-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+              background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing);
+}
+
+/* 下拉框箭头：上面的 background 简写会把主题的 data:image 箭头一并清掉，
+ * 这里用 MD3 细描边 chevron 补回，并按明暗切换颜色（data URI 里不能用 var）。 */
+html[data-ui-mode="minimal"] .mt5700-select,
+html[data-ui-mode="minimal"] .cbi-input-select,
+html[data-ui-mode="minimal"] .at-field-control select,
+html[data-ui-mode="minimal"] select {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  padding-right: 38px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2349454f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  background-size: 16px 16px !important;
+  cursor: pointer !important;
+}
+html[data-ui-mode="minimal"].at-dark .mt5700-select,
+html[data-ui-mode="minimal"].at-dark .cbi-input-select,
+html[data-ui-mode="minimal"].at-dark .at-field-control select,
+html[data-ui-mode="minimal"].at-dark select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23cac4d0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") !important;
 }
 
 /* 占位符用 outline 色：暗色下不能沿用主题的深灰，否则几乎看不见 */
@@ -681,7 +814,10 @@ html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"] {
   appearance: none !important;
   -webkit-appearance: none !important;
   width: 52px !important;
+  min-width: 52px !important;
+  max-width: 52px !important;
   height: 32px !important;
+  box-sizing: border-box !important;
   margin: 0 !important;
   border: 2px solid var(--md-sys-color-outline) !important;
   border-radius: var(--md-sys-shape-corner-full) !important;
@@ -690,11 +826,21 @@ html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"] {
   cursor: pointer;
   transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
               border-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
-  flex: 0 0 auto;
+  flex: 0 0 52px !important;
 }
+/* 普通模式的旋钮画在 ::before（20px 白圆 + translateX(20px)），本层改用
+ * ::after 重绘 24px 旋钮。不关掉 ::before 会同时出现两个白圆，右侧那颗被
+ * 轨道圆角裁掉，看起来像个白色月牙。 */
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]::before,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]::before {
+  content: none !important;
+  display: none !important;
+}
+
 html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]::after,
 html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]::after {
-  content: '';
+  content: '' !important;
+  display: block !important;
   position: absolute;
   top: 50%;
   left: 6px;
@@ -717,23 +863,90 @@ html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked::aft
   background: var(--md-sys-color-on-primary);
   width: 24px;
   height: 24px;
-  transform: translate(20px, -50%);
+  transform: translate(14px, -50%);
 }
 
 /* ==========================================================================
-   6. Navigation / Tabs（MD3 indicator）
+   6. Navigation / Tabs（MD3 分段胶囊，单层容器）
+   --------------------------------------------------------------------------
+   主题通常给 Tab 栏叠两层框（外层容器 + 内层 .tabs），选中项再叠一层
+   白底 + 阴影，视觉上是三层。极简模式收敛为一层：
+     容器 = surface-container 填充（无描边）
+     选中 = primary-container 填充（无描边、无阴影）
+     未选中 = 完全透明
    ========================================================================== */
-html[data-ui-mode="minimal"] .at-tabmenu-icon svg {
-  color: var(--md-sys-color-on-surface-variant);
+html[data-ui-mode="minimal"] #tabmenu,
+html[data-ui-mode="minimal"] #tabmenu > * {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
+
+html[data-ui-mode="minimal"] #tabmenu ul.tabs,
+html[data-ui-mode="minimal"] #tabmenu ul.cbi-tabmenu {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  padding: 4px !important;
+  margin: 0 0 var(--md-sys-space-3) !important;
+  border: 0 !important;
+  border-radius: var(--md-sys-shape-corner-full) !important;
+  background: var(--md-sys-color-surface-container) !important;
+  box-shadow: none !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none;
+  font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+html[data-ui-mode="minimal"] #tabmenu ul.tabs::-webkit-scrollbar,
+html[data-ui-mode="minimal"] #tabmenu ul.cbi-tabmenu::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-ui-mode="minimal"] #tabmenu ul > li {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+
+html[data-ui-mode="minimal"] #tabmenu ul > li > a {
+  display: flex !important;
+  align-items: center !important;
+  gap: var(--md-sys-space-1) !important;
+  padding: 8px 16px !important;
+  border: 0 !important;
+  border-radius: var(--md-sys-shape-corner-full) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--md-sys-color-on-surface-variant) !important;
+  font-size: var(--md-sys-typescale-label-large-size) !important;
+  font-weight: var(--md-sys-typescale-weight-medium) !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+  transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+              color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
+}
+
+html[data-ui-mode="minimal"] #tabmenu ul > li > a:hover {
+  background: var(--md-sys-color-surface-container-high) !important;
+  color: var(--md-sys-color-on-surface) !important;
+}
+
 html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].active > a,
 html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].cbi-tab > a {
-  color: var(--md-sys-color-primary) !important;
-  box-shadow: inset 0 -3px 0 var(--md-sys-color-primary) !important;
+  background: var(--md-sys-color-primary-container) !important;
+  color: var(--md-sys-color-on-primary-container) !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
-html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].active .at-tabmenu-icon svg,
-html[data-ui-mode="minimal"] #tabmenu li[class*="tabmenu-item-"].cbi-tab .at-tabmenu-icon svg {
-  color: var(--md-sys-color-primary);
+
+html[data-ui-mode="minimal"] .at-tabmenu-icon svg {
+  color: currentColor !important;
+}
+html[data-ui-mode="minimal"] #tabmenu li.active .at-tabmenu-icon svg,
+html[data-ui-mode="minimal"] #tabmenu li.cbi-tab .at-tabmenu-icon svg {
+  color: var(--md-sys-color-on-primary-container) !important;
 }
 
 /* ==========================================================================
@@ -1197,10 +1410,23 @@ html[data-ui-mode="minimal"] .mt-uimode-status.is-error { color: var(--md-sys-co
   html[data-ui-mode="minimal"] .mt5700-modal-footer .mt5700-btn,
   html[data-ui-mode="minimal"] .at-modal-actions .at-btn { flex: 1 1 auto !important; }
   html[data-ui-mode="minimal"] .mt5700-toast { bottom: var(--md-sys-space-4) !important; max-width: calc(100vw - 24px) !important; }
-  /* 手机端上移，避开 LuCI 底部粘性操作栏（保存 / 应用） */
-  html[data-ui-mode="minimal"] .mt-uimode-settings { right: 12px; bottom: 84px; }
-  html[data-ui-mode="minimal"] .mt5700-page { padding-bottom: 132px !important; }
+  /* 手机端：齿轮按钮从 56 收到 44，并上移避开 LuCI 底部粘性操作栏 */
+  html[data-ui-mode="minimal"] .mt-uimode-settings { right: 12px; bottom: 78px; }
+  html[data-ui-mode="minimal"] .mt-uimode-fab {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--md-sys-shape-corner-medium) !important;
+  }
+  html[data-ui-mode="minimal"] .mt-uimode-fab svg { width: 20px; height: 20px; }
+  html[data-ui-mode="minimal"] .mt5700-page { padding-bottom: 128px !important; }
   html[data-ui-mode="minimal"] .mt-uimode-panel { width: 100%; max-width: calc(100vw - 24px); }
+  /* 手机端 Tab 条再收一档，避免 12 个页签把胶囊撑到需要横向拖两次 */
+  html[data-ui-mode="minimal"] #tabmenu ul.tabs,
+  html[data-ui-mode="minimal"] #tabmenu ul.cbi-tabmenu { padding: 3px !important; }
+  html[data-ui-mode="minimal"] #tabmenu ul > li > a {
+    padding: 7px 12px !important;
+    font-size: var(--md-sys-typescale-body-medium-size) !important;
+  }
   html[data-ui-mode="minimal"] .at-field { flex-direction: column !important; gap: var(--md-sys-space-1) !important; }
   html[data-ui-mode="minimal"] .at-field-label { width: 100% !important; }
   html[data-ui-mode="minimal"] .at-field-control { width: 100% !important; }
