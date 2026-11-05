@@ -24,39 +24,46 @@
 /* ==========================================================================
    1. MD3 Design Tokens
    --------------------------------------------------------------------------
-   Material 3 baseline 色板 + 项目状态语义色（success/warning/error）。
+   以普通模式品牌色为种子的 MD3 色板 + 项目状态语义色（success/warning/error）。
    明暗由 theme.js 写入的 html.at-dark / html.at-light 驱动，跟随当前 LuCI 主题，
    不额外增加夜间模式开关。
    ========================================================================== */
 html[data-ui-mode="minimal"] {
-  --md-sys-color-primary: #6750a4;
+  /* 色板种子取自普通模式的品牌色，而不是 MD3 baseline 的紫：
+   *   primary    ← --mt5700-accent  #8b5cf6（violet-500）
+   *   secondary  ← --mt5700-cyan    #0ea5e9（sky-500）
+   *   tertiary   ← --mt5700-pink    #ec4899（pink-500）
+   * 两种模式共用同一色相，极简模式只是把玻璃/渐变换成 MD3 的色阶分层，
+   * 切模式时不会出现「整个界面换了个色系」的割裂感。
+   * 每个色角色值即该色族在 MD3 tone 上的对应档位（40/90/10 等）。 */
+  --md-sys-color-primary: #7c3aed;               /* violet-600 ≈ tone 40 */
   --md-sys-color-on-primary: #ffffff;
-  --md-sys-color-primary-container: #eaddff;
-  --md-sys-color-on-primary-container: #21005d;
-  --md-sys-color-secondary: #625b71;
+  --md-sys-color-primary-container: #ede9fe;     /* violet-100 ≈ tone 90 */
+  --md-sys-color-on-primary-container: #2e1065;  /* violet-900 ≈ tone 10 */
+  --md-sys-color-secondary: #0284c7;             /* sky-600 */
   --md-sys-color-on-secondary: #ffffff;
-  --md-sys-color-secondary-container: #e8def8;
-  --md-sys-color-on-secondary-container: #1d192b;
-  --md-sys-color-tertiary: #7d5260;
+  --md-sys-color-secondary-container: #e0f2fe;   /* sky-100 */
+  --md-sys-color-on-secondary-container: #0c4a6e;/* sky-900 */
+  --md-sys-color-tertiary: #db2777;              /* pink-600 */
   --md-sys-color-on-tertiary: #ffffff;
-  --md-sys-color-tertiary-container: #ffd8e4;
-  --md-sys-color-on-tertiary-container: #31111d;
-  --md-sys-color-surface: #fffbfd;
-  --md-sys-color-surface-dim: #ded8e0;
-  --md-sys-color-surface-bright: #fffbfd;
+  --md-sys-color-tertiary-container: #fce7f3;    /* pink-100 */
+  --md-sys-color-on-tertiary-container: #500724; /* pink-950 */
+  --md-sys-color-surface: #fbf9ff;               /* 比普通模式底 #f5f3ff 更亮，但同色相 */
+  --md-sys-color-surface-dim: #ded8ec;
+  --md-sys-color-surface-bright: #fbf9ff;
   --md-sys-color-surface-container-lowest: #ffffff;
-  --md-sys-color-surface-container-low: #f7f2f7;
-  --md-sys-color-surface-container: #f3edf7;
-  --md-sys-color-surface-container-high: #ece6f0;
-  --md-sys-color-surface-container-highest: #e6e0e9;
-  --md-sys-color-surface-variant: #e7e0ec;
-  --md-sys-color-on-surface: #1d1b20;
-  --md-sys-color-on-surface-variant: #49454f;
-  --md-sys-color-inverse-surface: #322f35;
-  --md-sys-color-inverse-on-surface: #f5eff7;
-  --md-sys-color-inverse-primary: #d0bcff;
-  --md-sys-color-outline: #79747e;
-  --md-sys-color-outline-variant: #cac4d0;
+  --md-sys-color-surface-container-low: #f8f5ff;
+  --md-sys-color-surface-container: #f3effc;
+  --md-sys-color-surface-container-high: #ede8f9;
+  --md-sys-color-surface-container-highest: #e7e1f4;
+  --md-sys-color-surface-variant: #e8e1f2;
+  --md-sys-color-on-surface: #1b1b23;
+  --md-sys-color-on-surface-variant: #494551;
+  --md-sys-color-inverse-surface: #302e38;
+  --md-sys-color-inverse-on-surface: #f4effa;
+  --md-sys-color-inverse-primary: #c4b5fd;
+  --md-sys-color-outline: #7a7585;
+  --md-sys-color-outline-variant: #cbc4d9;
   --md-sys-color-scrim: #000000;
   --md-sys-color-error: #b3261e;
   --md-sys-color-on-error: #ffffff;
@@ -84,11 +91,24 @@ html[data-ui-mode="minimal"] {
   --md-sys-space-8: 32px;
   --md-sys-elevation-0: none;
   --md-sys-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.10);
+  /* FAB 专用三级阴影：第二层用 primary 色相着色（surface tint 的等效做法），
+   * 比纯黑投影更有 Google 的「彩色浮起」质感。 */
+  --md-sys-elevation-2: 0 1px 2px rgba(27, 27, 35, 0.22), 0 2px 5px 1px rgba(124, 58, 237, 0.10);
+  --md-sys-elevation-3: 0 1px 3px rgba(27, 27, 35, 0.26), 0 4px 8px 2px rgba(124, 58, 237, 0.14);
+  --md-sys-elevation-4: 0 2px 3px rgba(27, 27, 35, 0.26), 0 6px 11px 3px rgba(124, 58, 237, 0.16);
   --md-sys-state-hover-opacity: 0.08;
   --md-sys-state-focus-opacity: 0.10;
+  --md-sys-state-pressed-opacity: 0.12;
+  /* state layer 基色：存 RGB 分量，用 rgba(var(--x), 0.08) 叠加。
+   * 不存颜色值是因为 CSS 变量无法在 rgba() 里再取透明度。 */
+  --md-sys-state-on-surface: 27, 27, 35;
+  --md-sys-state-on-primary: 255, 255, 255;
+  --md-sys-state-on-primary-container: 46, 16, 101;
   --md-sys-motion-duration-short: 120ms;
   --md-sys-motion-duration-medium: 200ms;
   --md-sys-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  /* MD3 emphasized decelerate：开关旋钮、FAB 位移用手感更「弹」的那条曲线 */
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
 
   /* MD3 typescale（字号）：所有组件只允许引用这几个值，禁止页面内写死 px。
    * 行高单独给 token，避免同一字号在不同组件里行高不一致。 */
@@ -195,34 +215,35 @@ html[data-ui-mode="minimal"] {
 
 /* 明暗主题适配：沿用 theme.js 的 html.at-dark / html.at-light 结论 */
 html[data-ui-mode="minimal"].at-dark {
-  --md-sys-color-primary: #d0bcff;
-  --md-sys-color-on-primary: #381e72;
-  --md-sys-color-primary-container: #4f378b;
-  --md-sys-color-on-primary-container: #eaddff;
-  --md-sys-color-secondary: #ccc2dc;
-  --md-sys-color-on-secondary: #332d41;
-  --md-sys-color-secondary-container: #4a4458;
-  --md-sys-color-on-secondary-container: #e8def8;
-  --md-sys-color-tertiary: #efb8c8;
-  --md-sys-color-on-tertiary: #492532;
-  --md-sys-color-tertiary-container: #633b48;
-  --md-sys-color-on-tertiary-container: #ffd8e4;
-  --md-sys-color-surface: #141218;
-  --md-sys-color-surface-dim: #141218;
-  --md-sys-color-surface-bright: #3b383e;
-  --md-sys-color-surface-container-lowest: #0f0d13;
-  --md-sys-color-surface-container-low: #1d1b20;
-  --md-sys-color-surface-container: #211f26;
-  --md-sys-color-surface-container-high: #2b2930;
-  --md-sys-color-surface-container-highest: #36343b;
-  --md-sys-color-surface-variant: #49454f;
-  --md-sys-color-on-surface: #e6e0e9;
-  --md-sys-color-on-surface-variant: #cac4d0;
-  --md-sys-color-inverse-surface: #e6e0e9;
-  --md-sys-color-inverse-on-surface: #322f35;
-  --md-sys-color-inverse-primary: #6750a4;
-  --md-sys-color-outline: #938f99;
-  --md-sys-color-outline-variant: #49454f;
+  /* 暗色沿用同一色相的 tone 80 / 30 档，保证从亮切暗时只变明度不变色相 */
+  --md-sys-color-primary: #c4b5fd;               /* violet-300 */
+  --md-sys-color-on-primary: #34137a;
+  --md-sys-color-primary-container: #5b21b6;     /* violet-800 */
+  --md-sys-color-on-primary-container: #ede9fe;
+  --md-sys-color-secondary: #7dd3fc;             /* sky-300 */
+  --md-sys-color-on-secondary: #00344f;
+  --md-sys-color-secondary-container: #0b4a68;
+  --md-sys-color-on-secondary-container: #d6efff;
+  --md-sys-color-tertiary: #f9a8d4;              /* pink-300 */
+  --md-sys-color-on-tertiary: #500724;
+  --md-sys-color-tertiary-container: #831843;
+  --md-sys-color-on-tertiary-container: #ffe0ee;
+  --md-sys-color-surface: #131018;
+  --md-sys-color-surface-dim: #131018;
+  --md-sys-color-surface-bright: #3a3543;
+  --md-sys-color-surface-container-lowest: #0e0b12;
+  --md-sys-color-surface-container-low: #1b1724;
+  --md-sys-color-surface-container: #1f1b27;
+  --md-sys-color-surface-container-high: #2a2533;
+  --md-sys-color-surface-container-highest: #352f3f;
+  --md-sys-color-surface-variant: #47414f;
+  --md-sys-color-on-surface: #e8e2ef;
+  --md-sys-color-on-surface-variant: #cbc4d6;
+  --md-sys-color-inverse-surface: #e8e2ef;
+  --md-sys-color-inverse-on-surface: #302e38;
+  --md-sys-color-inverse-primary: #7c3aed;
+  --md-sys-color-outline: #968fa1;
+  --md-sys-color-outline-variant: #47414f;
   --md-sys-color-error: #f2b8b5;
   --md-sys-color-on-error: #601410;
   --md-sys-color-error-container: #8c1d18;
@@ -232,6 +253,14 @@ html[data-ui-mode="minimal"].at-dark {
   --md-sys-color-success-container: #1f5130;
   --md-sys-color-warning: #ffb951;
   --md-sys-color-warning-container: #5c3c00;
+
+  /* 暗色下投影要更重才压得住深底；着色阴影改用黑，避免在暗底上发灰紫 */
+  --md-sys-elevation-2: 0 1px 2px rgba(0, 0, 0, 0.55), 0 2px 6px 2px rgba(0, 0, 0, 0.34);
+  --md-sys-elevation-3: 0 1px 3px rgba(0, 0, 0, 0.58), 0 4px 8px 3px rgba(0, 0, 0, 0.38);
+  --md-sys-elevation-4: 0 2px 3px rgba(0, 0, 0, 0.58), 0 6px 10px 4px rgba(0, 0, 0, 0.42);
+  --md-sys-state-on-surface: 232, 226, 239;
+  --md-sys-state-on-primary: 52, 19, 122;
+  --md-sys-state-on-primary-container: 237, 233, 254;
 
   --mt5700-text: var(--md-sys-color-on-surface);
   --mt5700-text-secondary: var(--md-sys-color-on-surface-variant);
@@ -821,7 +850,16 @@ html[data-ui-mode="minimal"] .mt5700-hint {
   color: var(--md-sys-color-on-surface-variant) !important;
 }
 
-/* MD3 switch：52×32 轨道 + 圆形 thumb（原生 checkbox 无依赖改造） */
+/* --------------------------------------------------------------------------
+   MD3 switch（52×32）：完整状态机，纯原生 checkbox + 伪元素，零 JS 依赖
+     rest     track = surface-container-highest + 2dp outline，thumb 16dp outline
+     hover    轨道叠 8% state layer（未选中 on-surface / 选中 on-primary）
+     pressed  thumb 拉伸到 28dp（贴边距不动），state layer 叠到 12%
+     checked  track = primary（描边同色，视觉上无边框），thumb 24dp on-primary
+     disabled track on-surface 12%，thumb on-surface 38%
+   几何：高 32 减 2dp 边框 → 内容 28；thumb 24 垂直居中即上下各 2，
+   水平两侧各留 8dp（含边框），与 MD3 spec 的 52/32/24/16 一致。
+   -------------------------------------------------------------------------- */
 html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"],
 html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"] {
   appearance: none !important;
@@ -834,7 +872,9 @@ html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"] {
   margin: 0 !important;
   border: 2px solid var(--md-sys-color-outline) !important;
   border-radius: var(--md-sys-shape-corner-full) !important;
-  background: var(--md-sys-color-surface-container-highest) !important;
+  background-color: var(--md-sys-color-surface-container-highest) !important;
+  background-image: none !important;
+  box-shadow: none !important;
   position: relative;
   cursor: pointer;
   transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
@@ -859,16 +899,19 @@ html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]::after {
   left: 6px;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  box-sizing: border-box;
+  border-radius: var(--md-sys-shape-corner-full);
   background: var(--md-sys-color-outline);
-  transform: translateY(-50%);
-  transition: transform var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
-              width var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+  transform: translate(0, -50%);
+  transition: transform var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing-emphasized),
+              width var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing-emphasized),
+              height var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing-emphasized),
               background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing);
 }
+
 html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:checked,
 html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked {
-  background: var(--md-sys-color-primary) !important;
+  background-color: var(--md-sys-color-primary) !important;
   border-color: var(--md-sys-color-primary) !important;
 }
 html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:checked::after,
@@ -876,7 +919,80 @@ html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked::aft
   background: var(--md-sys-color-on-primary);
   width: 24px;
   height: 24px;
-  transform: translate(14px, -50%);
+  transform: translate(12px, -50%);
+}
+
+/* state layer：MD3 悬停不改组件主色，只在轨道上叠一层 8% 前景色。
+ * 用 background-image 叠加而不是改 background-color，选中态才不会丢掉 primary。
+ *
+ * ⚠ 这里必须再声明一次 background-color：mt5700.css 末尾的「Argon 主题兼容」
+ * 块给 .mt5700-switch 的 hover 加了带 !important 的 `background` 简写
+ * （未选中灰 rgba(127,127,127,.35)、选中蓝 #087cba），会把极简模式的轨道底色
+ * 一起改掉，出现「悬停变灰 / 变蓝」。它们的特异性低于本层，只要把底色显式写回
+ * 就能压住。active / focus / disabled 同理。 */
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:hover:not(:disabled),
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:hover:not(:disabled) {
+  background-color: var(--md-sys-color-surface-container-highest) !important;
+  background-image: linear-gradient(
+    rgba(var(--md-sys-state-on-surface), var(--md-sys-state-hover-opacity)),
+    rgba(var(--md-sys-state-on-surface), var(--md-sys-state-hover-opacity))) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:checked:hover:not(:disabled),
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked:hover:not(:disabled) {
+  background-color: var(--md-sys-color-primary) !important;
+  background-image: linear-gradient(
+    rgba(var(--md-sys-state-on-primary), var(--md-sys-state-hover-opacity)),
+    rgba(var(--md-sys-state-on-primary), var(--md-sys-state-hover-opacity))) !important;
+}
+
+/* 按下：thumb 从 16/24 拉伸到 28，边距不变（未选中向左贴、选中向右贴） */
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:active:not(:disabled),
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:active:not(:disabled) {
+  background-color: var(--md-sys-color-surface-container-highest) !important;
+  background-image: linear-gradient(
+    rgba(var(--md-sys-state-on-surface), var(--md-sys-state-pressed-opacity)),
+    rgba(var(--md-sys-state-on-surface), var(--md-sys-state-pressed-opacity))) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:checked:active:not(:disabled),
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked:active:not(:disabled) {
+  background-color: var(--md-sys-color-primary) !important;
+  background-image: linear-gradient(
+    rgba(var(--md-sys-state-on-primary), var(--md-sys-state-pressed-opacity)),
+    rgba(var(--md-sys-state-on-primary), var(--md-sys-state-pressed-opacity))) !important;
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:active:not(:disabled)::after,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:active:not(:disabled)::after {
+  width: 28px;
+  height: 28px;
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:checked:active:not(:disabled)::after,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:checked:active:not(:disabled)::after {
+  transform: translate(8px, -50%);
+}
+
+/* 禁用：MD3 用 on-surface 12% 轨道 + 38% 旋钮，不降饱和。
+ * 主题/兼容块会给 disabled 加 opacity + grayscale，这里一并压掉，
+ * 否则轨道已经够淡，再降透明度会看不出来。 */
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:disabled,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:disabled {
+  background-color: rgba(var(--md-sys-state-on-surface), 0.12) !important;
+  background-image: none !important;
+  border-color: rgba(var(--md-sys-state-on-surface), 0.12) !important;
+  opacity: 1 !important;
+  filter: none !important;
+  cursor: not-allowed !important;
+}
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:disabled::after,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:disabled::after {
+  background: rgba(var(--md-sys-state-on-surface), 0.38);
+}
+
+html[data-ui-mode="minimal"] .mt5700-switch input[type="checkbox"]:focus-visible,
+html[data-ui-mode="minimal"] .at-autorefresh input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary) !important;
+  outline-offset: 2px !important;
+  /* 兼容块在 focus-visible 上加了 box-shadow 焦点环，会和 outline 叠成两圈 */
+  box-shadow: none !important;
 }
 
 /* ==========================================================================
@@ -1356,25 +1472,59 @@ html.at-dark .mt-uimode-field-label,
 html.at-dark .mt-uimode-hint,
 html.at-dark .mt-uimode-status { color: #a9a1c4; }
 
-/* 极简模式：MD3 扩展 FAB（56dp / 16dp 圆角 / primary-container，无阴影无毛玻璃）
- * + MD3 弹层（surface-container-high / outline-variant / 无动画） */
+/* 极简模式：MD3 扩展 FAB（56dp / 16dp 圆角 / primary-container / 三级着色阴影）
+ * + MD3 弹层（surface-container-high / outline-variant / 无动画）
+ *
+ * 交互遵循 MD3：hover / press 只叠 state layer（8% / 12% on-primary-container），
+ * 不把底色换成 primary —— 换色会让开关状态与按钮状态混在一起，且失去层级感。
+ * 阴影带 primary 色相（surface tint），比纯黑投影更接近 Google 的浮起质感。 */
 html[data-ui-mode="minimal"] .mt-uimode-settings { right: 16px; bottom: 16px; }
 html[data-ui-mode="minimal"] .mt-uimode-fab {
   width: 56px;
   height: 56px;
   border: 0 !important;
   border-radius: var(--md-sys-shape-corner-large) !important;
-  background: var(--md-sys-color-primary-container) !important;
+  background-color: var(--md-sys-color-primary-container) !important;
+  background-image: none !important;
   color: var(--md-sys-color-on-primary-container) !important;
-  box-shadow: none !important;
+  box-shadow: var(--md-sys-elevation-3) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  transform: none !important;
-  transition: background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
+  transform: none;
+  transition: box-shadow var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing),
+              background-color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+              color var(--md-sys-motion-duration-short) var(--md-sys-motion-easing),
+              transform var(--md-sys-motion-duration-short) var(--md-sys-motion-easing) !important;
 }
 html[data-ui-mode="minimal"] .mt-uimode-fab:hover {
-  background: var(--md-sys-color-primary) !important;
+  background-color: var(--md-sys-color-primary-container) !important;
+  color: var(--md-sys-color-on-primary-container) !important;
+  background-image: linear-gradient(
+    rgba(var(--md-sys-state-on-primary-container), var(--md-sys-state-hover-opacity)),
+    rgba(var(--md-sys-state-on-primary-container), var(--md-sys-state-hover-opacity))) !important;
+  box-shadow: var(--md-sys-elevation-4) !important;
+  transform: translateY(-1px);
+}
+html[data-ui-mode="minimal"] .mt-uimode-fab:active {
+  background-image: linear-gradient(
+    rgba(var(--md-sys-state-on-primary-container), var(--md-sys-state-pressed-opacity)),
+    rgba(var(--md-sys-state-on-primary-container), var(--md-sys-state-pressed-opacity))) !important;
+  box-shadow: var(--md-sys-elevation-2) !important;
+  transform: translateY(0);
+}
+/* 面板展开时 FAB 转成 primary 实色：给「已打开」一个明确且不靠位置变化的反馈 */
+html[data-ui-mode="minimal"] .mt-uimode-fab[aria-expanded="true"] {
+  background-color: var(--md-sys-color-primary) !important;
   color: var(--md-sys-color-on-primary) !important;
+}
+html[data-ui-mode="minimal"] .mt-uimode-fab[aria-expanded="true"]:hover {
+  background-image: linear-gradient(
+    rgba(var(--md-sys-state-on-primary), var(--md-sys-state-hover-opacity)),
+    rgba(var(--md-sys-state-on-primary), var(--md-sys-state-hover-opacity))) !important;
+}
+html[data-ui-mode="minimal"] .mt-uimode-fab:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary) !important;
+  outline-offset: 3px !important;
 }
 html[data-ui-mode="minimal"] .mt-uimode-fab svg { width: 24px; height: 24px; }
 html[data-ui-mode="minimal"] .mt-uimode-panel {
