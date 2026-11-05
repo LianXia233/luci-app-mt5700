@@ -1061,6 +1061,33 @@ var Parse = (function () {
 	};
 
 	/*
+	 * 判断 AT 响应文本的终止状态。
+	 *
+	 * 传输层成功（sendCommand.success === true）不等于 AT 命令成功：
+	 * 模组可能在传输正常时返回 ERROR 文本。前端需要区分三个层次：
+	 *   1. 传输/后台调用是否成功（success）
+	 *   2. AT 最终响应是 OK、ERROR 还是超时（本函数）
+	 *   3. 是否解析出有效、可关联到目标载波的独立测量（parseMonsscAll 等）
+	 *
+	 * 返回：'ok' | 'error' | 'none' | 'empty' | 'other'
+	 *   'ok'    —— 文本含 OK 终止符
+	 *   'error' —— 文本含 ERROR（模组拒绝命令或参数不支持）
+	 *   'none'  —— 文本以 NONE 开头（模组明确返回"无辅连接小区"）
+	 *   'empty' —— data 为空（未取得任何文本）
+	 *   'other' —— 既无 OK 也无 ERROR（如超时后的部分响应）
+	 */
+	api.atStatusFromText = function (text) {
+		if (text === undefined || text === null) return 'empty';
+		var txt = String(text);
+		if (txt.trim() === '') return 'empty';
+		// 先查 ERROR 再查 OK：避免 "ERROR" 被 "OK" 前缀误判
+		if (/^\s*ERROR\b/i.test(txt) || /\bERROR\b/.test(txt)) return 'error';
+		if (/^\s*OK\b/i.test(txt) || /\bOK\b/.test(txt)) return 'ok';
+		if (/^\s*NONE\b/i.test(txt) || /\bNONE\b/i.test(txt)) return 'none';
+		return 'other';
+	};
+
+	/*
 	 * 频点归一化：^HFREQINFO 的 dl_fcn 与 ^MONSSC 的 arfcn 都是字符串，
 	 * 空串会被 Number() 变成 0，进而把 arfcn=0 的辅小区误判成「已匹配」。
 	 * 这里统一把空值/非法值折成 null，让调用方显式处理。
