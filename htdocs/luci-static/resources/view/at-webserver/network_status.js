@@ -8,6 +8,8 @@
 'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
+'require at-webserver/icons';
+'require at-webserver/uimode';
 /* global L, AtWs, Parse, Mt5700 */
 
 	/*
@@ -492,6 +494,15 @@ return L.view.extend({
 		   ========================================================================== */
 
 		function svgIcon(name) {
+			/* 图标改由全局 Icon Manager 提供：普通模式返回逐字保留的原 12 个
+			 * 内联图元（st-* 表，stroke 2、24×24，视觉零变化），极简模式返回
+			 * 重新绘制的 MD3 图元。data-mt-icon 让模式切换时只重绘内部图元。 */
+			if (window.AtIcons && typeof window.AtIcons.build === 'function') {
+				var icon = window.AtIcons.build('st-' + name, { className: 'mt-card-title-icon' });
+				if (icon) return icon;
+			}
+
+			/* 兜底：Icon Manager 未就绪时沿用原有内联生成，图标绝不缺失 */
 			var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 			svg.setAttribute('class', 'mt-card-title-icon');
 			svg.setAttribute('viewBox', '0 0 24 24');
@@ -533,6 +544,14 @@ return L.view.extend({
 		function createCellularTowerSvg(size) {
 			var px = size || 72;
 			var wrap = E('div', { 'class': 'mt-tower-svg-box' });
+			/* 极简模式：不再注入 1024×1024 的广播塔复杂路径（数十个 path + 装饰
+			 * 填充），改用重绘的 MD3 小区图标。DOM 节点与渲染开销真正下降。 */
+			if (window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal'
+				&& window.AtIcons && typeof window.AtIcons.build === 'function') {
+				var icon = window.AtIcons.build('op-cell', { w: px, h: px });
+				if (icon) { wrap.appendChild(icon); return wrap; }
+			}
 			var svg = '<svg viewBox="0 0 1024 1024" width="' + px + '" height="' + px + '" fill="currentColor" aria-hidden="true">';
 			for (var i = 0; i < BROADCAST_TOWER_PATHS.length; i++) {
 				svg += '<path d="' + BROADCAST_TOWER_PATHS[i] + '"></path>';
@@ -692,6 +711,17 @@ return L.view.extend({
 			var pathD = 'M ' + pts.join(' L ');
 			var lastPt = pts[pts.length - 1].split(' ');
 			var gradId = 'spark-grad-' + targetId;
+
+			/* 极简模式：不创建渐变 defs / 面积填充 / 脉冲圆点，只保留折线与端点 */
+			if (window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal') {
+				box.innerHTML =
+					'<svg viewBox="0 0 100 36" width="90" height="32">' +
+					'  <path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="2.2" stroke-linecap="round"/>' +
+					'  <circle cx="' + lastPt[0] + '" cy="' + lastPt[1] + '" r="2.5" fill="' + color + '"/>' +
+					'</svg>';
+				return;
+			}
 
 			box.innerHTML =
 				'<svg viewBox="0 0 100 36" width="90" height="32">' +
@@ -1146,6 +1176,11 @@ return L.view.extend({
 				return null;
 			}
 
+			/* 极简模式：数据/曲线计算完全共用，只跳过纯视觉装饰层
+			 * （渐变面积、质量分区背景带、末端脉冲点与 defs），减少 DOM 与持续动画。 */
+			var minimalChart = !!(window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal');
+
 			/* ---- 背景质量分区带（窄屏不标注档位文字，避免拥挤） ---- */
 			var bands = '';
 			for (var b = 0; b < SIGNAL_TIERS.length; b++) {
@@ -1207,7 +1242,7 @@ return L.view.extend({
 			/* ---- 主曲线层（按图例可见性渲染） ---- */
 			var seriesLayer = '';
 			if (chartSeries.rsrp) {
-				seriesLayer += '<path d="' + areaPathFor('rsrp') + '" fill="url(#rsrp-area)"/>' +
+				seriesLayer += (minimalChart ? '' : '<path d="' + areaPathFor('rsrp') + '" fill="url(#rsrp-area)"/>') +
 					'<path d="' + strokePathFor('rsrp') + '" fill="none" stroke="' + CHART_COLORS.rsrp + '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
 					isolatedDotsFor(seriesMeta[0]);
 			}
@@ -1250,14 +1285,18 @@ return L.view.extend({
 			}
 			var tierY = 44 + activeMeta.length * rowH - 4;
 
-			box.innerHTML =
-				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="overflow:visible; display:block;">' +
+			if (minimalChart) { bands = ''; endDots = ''; }
+			var defsLayer = minimalChart ? '' :
 				'  <defs>' +
 				'    <linearGradient id="rsrp-area" x1="0" y1="0" x2="0" y2="1">' +
 				'      <stop offset="0%" stop-color="' + CHART_COLORS.rsrp + '" stop-opacity="0.35"/>' +
 				'      <stop offset="100%" stop-color="' + CHART_COLORS.rsrp + '" stop-opacity="0.02"/>' +
 				'    </linearGradient>' +
-				'  </defs>' +
+				'  </defs>';
+
+			box.innerHTML =
+				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="overflow:visible; display:block;">' +
+				defsLayer +
 				/* 质量分区背景 */
 				bands +
 				/* 网格与双轴刻度 */
