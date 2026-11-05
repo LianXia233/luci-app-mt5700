@@ -2463,9 +2463,10 @@ return L.view.extend({
 		 *
 		 * 「传输失败」不等于「超时」，还要再分清是**谁**没响应。rpc.js 的 sendCommand
 		 * 在 success:false 时带 cause，cause 一路来自三个层次：
-		 *   timeout        —— 请求已发出但没等到响应：前端超时预算（rpc.js:506）、
-		 *                     ucode 对后端的 nc 硬超时（mt5700.uc:1044）、
-		 *                     Rust 侧模组静默 / 排队预算耗尽（rpcserver.rs at_failure_cause）
+		 *   timeout        —— 请求已发出但没等到响应：前端超时预算（rpc.js 的
+		 *                     withTimeout 分支）、ucode 对后端的 nc 硬超时
+		 *                     （mt5700.uc）、Rust 侧模组静默与排队预算耗尽
+		 *                     （rpcserver.rs 的 at_failure_cause）
 		 *   unavailable    —— 请求根本没发出，或后端本身不可用：
 		 *                     not-connected、circuit-open、not-listening、no-nc、
 		 *                     spawn-failed、no-reply
