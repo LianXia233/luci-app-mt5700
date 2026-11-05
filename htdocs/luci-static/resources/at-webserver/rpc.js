@@ -12,7 +12,10 @@
  *   （/usr/share/rpcd/ucode/mt5700.uc）→ Rust 后端（127.0.0.1:<port>，TCP newline-JSON）
  *
  * 语义兼容：
- * - sendCommand(cmd) → {success,data,error}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
+ * - sendCommand(cmd) → {success,data,error,cause}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
+ *   cause 一路来自三个层次：前端本地拦截（not-connected / circuit-open）、
+ *   ucode 对后端的 nc 硬超时（timeout / no-nc / not-listening / no-reply / spawn-failed）、
+ *   Rust 侧的 AT 执行结果（timeout = 模组静默或排队预算耗尽；缺省 = 模组回了 ERROR）
  * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型）。订阅者收到的事件类型：
  *   urc_data（由 raw_data 文本解析而来）/ new_sms / incoming_call / pdcp_data / memory_full / cellscan
  * - 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI websocket_auth_key 由 ucode 代理附加，

@@ -302,7 +302,40 @@ try {
 		check('无 cause 的失败不当成超时',
 			atStatusFromResult({ success: false }) === 'error', atStatusFromResult({ success: false }));
 		check('空结果按 error 处理（不误报超时）', atStatusFromResult(null) === 'error', atStatusFromResult(null));
+
+		/* PR #42 第二轮 Codex review：Rust 侧的模组静默超时必须能走到 timeout 分支。
+		 * AtCommandResponse 的 cause 是 Option，serde_json 把 None 序列化成 null，
+		 * 所以「模组回了 ERROR」到前端是 cause:null —— 归 error，不能被当成超时。 */
+		check('cause:null（Rust 回了 AT ERROR）→ error',
+			atStatusFromResult({ success: false, cause: null, error: 'ERROR' }) === 'error',
+			atStatusFromResult({ success: false, cause: null, error: 'ERROR' }));
+		['not-listening', 'no-nc', 'spawn-failed', 'no-reply'].forEach(function (c) {
+			check('cause:' + c + ' → unavailable（后端不可用不是模组无响应）',
+				atStatusFromResult({ success: false, cause: c }) === 'unavailable',
+				atStatusFromResult({ success: false, cause: c }));
+		});
+		['backend-error', 'bad-reply', 'parse-failed'].forEach(function (c) {
+			check('cause:' + c + ' → error（后端明确报错，不谎称未发起）',
+				atStatusFromResult({ success: false, cause: c }) === 'error',
+				atStatusFromResult({ success: false, cause: c }));
+		});
 	}
+
+	/* ---- cause 通路逐层守卫：Rust → ucode → rpc.js → 视图 ----
+	 * 这四段分属三种语言，任何一段漏搬 cause，前端就退回「一律 error」。
+	 * Codex 在 PR #42 指出的正是 ucode 搬了、Rust 的 at 出口没搬这一断链。 */
+	var rustSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'rust', 'src', 'rpcserver.rs'), 'utf8');
+	check('AtCommandResponse 带 cause 字段', /pub struct AtCommandResponse \{[\s\S]*?pub cause: Option<String>,/.test(rustSrc));
+	check('at 出口把 cause 一并回传前端', /"result": \{[\s\S]*?"cause":\s*resp\.cause,/.test(rustSrc));
+	check('外层应答超时标为 timeout', /error: Some\("命令执行超时"\.into\(\)\),\s*cause: Some\("timeout"\.into\(\)\)/.test(rustSrc));
+	check('err_response 自动归类超时', /pub fn err_response[\s\S]*?cause: at_failure_cause\(msg\)/.test(rustSrc));
+	check('模组回 ERROR 不标超时', /if resp\.has_error\(\) \{[\s\S]*?cause: None \};/.test(rustSrc));
+
+	var ucSrc = fs.readFileSync(path.join(__dirname, '..', 'root', 'usr', 'share', 'rpcd', 'ucode', 'mt5700.uc'), 'utf8');
+	check('ucode 原样透传后端 result（不吞 cause）', /if \(resp\.result\) \{\s*\n\s*return resp\.result;/.test(ucSrc));
+
+	var rpcSrc = fs.readFileSync(path.join(libDir, 'rpc.js'), 'utf8');
+	check('rpc.js 转发后端 cause', /return \{ success: false, error: resp\.error \|\| '命令执行失败', cause: resp\.cause \};/.test(rpcSrc));
 
 } catch (e) {
 	console.error('测试执行异常:', e);
