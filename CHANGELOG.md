@@ -8,6 +8,33 @@
 
 ---
 
+## Unreleased
+
+### fix(ui) 辅站信号缺失原因的两处漏判（PR #41 Codex review）
+
+> v1.31.1 合并后 Codex 复核提出两条 P2：其一，`Parse.carrierSignalFor()` 只要
+> ARFCN 命中就返回对象，测量字段原样拷贝，模组上报了辅小区却没带测量时四个
+> 读数全空，而 `syncCarriers()` 用 `if (!sig)` 判缺测 —— 这条路径下
+> `signalReason` 留空，SCC 卡片仍是一排「—」却没有任何解释，正是 Issue #39
+> 想消除的困惑；其二，`loadSecondary()` 把 `sendCommand()` 的一切失败都记成
+> `'timeout'`，可 `rpc.js` 的 `not-connected` / `circuit-open` 是请求根本没发出
+> 的快速失败，后端掉线时页面会说「辅站查询超时」，把通道故障误导成模组无响应。
+
+- **fix(ui) 匹配到小区 ≠ 拿到读数**：新增 `hasUsableSignal()`，与渲染层破折号取
+  同一口径（RSRP / RSRQ / SINR / RSSI 全空即缺测）；`syncCarriers()` 改用它判缺测，
+  HFREQINFO 未覆盖的孤儿 SCC 同样补上 `signalReason`，绝不伪造读数。
+- **fix(ui) 保留真实失败原因**：新增 `atStatusFromResult()`，只在 `cause: timeout`
+  时记超时，`not-connected` / `circuit-open` 记 `unavailable`，后端明确回错记 `error`。
+- **fix(ui) 原因口径收口**：`computeSccSignalReason()` 本轮未查询（状态为 `null`）
+  时返回 `not-queried`，不再谎报「已取得频点但未取得测量」；非 NR/LTE 制式返回
+  原本写了却永不命中的 `not-applicable`；新增两条文案并在 `at-error` 文案中并入
+  「后端报错」，避免把通道失败说成模组返回 ERROR。
+- **test** `tests/hfreq-multicarrier-test.js` 49 → 68 条断言，覆盖 ARFCN 命中但
+  测量全空、仅 PCI、有 RSRP / RSSI 不标注、孤儿 SCC、`not-queried` /
+  `unavailable` / `not-applicable`，以及五种 `sendCommand` 失败原因的映射。
+
+---
+
 ## v1.32.1（2026-11-05）
 
 ### feat(ui) 流量统计图表跟随统计来源切换

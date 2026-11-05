@@ -5,6 +5,7 @@
  *
  * 覆盖 Issue #38：parseHFREQINFO 同行多组 NR 载波仅解析第一组
  * 覆盖 Issue #39：atStatusFromText 区分 AT 终止状态、computeSccSignalReason 区分 SCC 信号缺失原因
+ * 覆盖 PR #41 Codex review 两条 P2：匹配到小区但测量全空也要给原因；非超时的传输失败不得记成 timeout
  */
 const fs = require('fs');
 const path = require('path');
@@ -208,6 +209,99 @@ try {
 		var carriers2 = syncExec(mockState2, Parse, AtWs);
 		check('SCC1 signalReason = at-error（MONSSC error）',
 			carriers2[1] && carriers2[1].signalReason === 'at-error', carriers2[1] && carriers2[1].signalReason);
+	}
+
+	// ---- PR #41 Codex review 跟进一：匹配到小区但测量全空也要给原因 ----
+	// Parse.carrierSignalFor 只要 ARFCN 命中就返回对象，测量字段是原样拷贝的，
+	// 模组上报了辅小区却没带测量时全是 null。原实现用 `if (!sig)` 判缺测，
+	// 这条路径下 signalReason 留空，页面只剩一排「—」而无任何解释。
+	var mockState3 = JSON.parse(JSON.stringify(mockState));
+	mockState3.secondaryNR = [{ arfcn: '630000', pci: null, rsrp: null, rsrq: null, sinr: null, measType: null }];
+	mockState3.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
+	var carriers3 = syncExec(mockState3, Parse, AtWs);
+	check('SCC1 匹配到小区但无读数 → rsrp 仍为 null（不伪造）', carriers3[1] && carriers3[1].rsrp == null, carriers3[1] && carriers3[1].rsrp);
+	check('SCC1 匹配到小区但测量全空 → no-measurement（不再静默）',
+		carriers3[1] && carriers3[1].signalReason === 'no-measurement', carriers3[1] && carriers3[1].signalReason);
+
+	// 只有 PCI、没有任何信号读数，同样属于缺测
+	var mockState4 = JSON.parse(JSON.stringify(mockState));
+	mockState4.secondaryNR = [{ arfcn: '630000', pci: 300, rsrp: null, rsrq: null, sinr: null, measType: 'SSB' }];
+	mockState4.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
+	var carriers4 = syncExec(mockState4, Parse, AtWs);
+	check('SCC1 仅 PCI 无信号读数 → no-measurement',
+		carriers4[1] && carriers4[1].signalReason === 'no-measurement', carriers4[1] && carriers4[1].signalReason);
+
+	// 有任一可用读数时不该给缺测说明
+	var mockState5 = JSON.parse(JSON.stringify(mockState));
+	mockState5.secondaryNR = [{ arfcn: '630000', pci: 300, rsrp: -71, rsrq: -9, sinr: 18, measType: 'SSB' }];
+	mockState5.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
+	var carriers5 = syncExec(mockState5, Parse, AtWs);
+	check('SCC1 有 RSRP → signalReason 为 null', carriers5[1] && carriers5[1].signalReason === null, carriers5[1] && carriers5[1].signalReason);
+
+	// RSSI 也算可用读数（LTE 侧 SINR 恒空，页面用 RSSI 兜底显示）
+	var mockState5b = JSON.parse(JSON.stringify(mockState));
+	mockState5b.secondaryLTE = [{ dlArfcn: '630000', pci: 300, rsrp: null, rsrq: null, rssi: -65 }];
+	mockState5b.rawHfreq = [
+		{ n: 0, sysMode: 'NR', band: '78', dlFcn: '636664', dlFreqKHz: 3549960, dlBwKHz: 100000, sysModeCode: '7' },
+		{ n: 0, sysMode: 'LTE', band: '3', dlFcn: '630000', dlFreqKHz: 3450000, dlBwKHz: 100000, sysModeCode: '6' }
+	];
+	mockState5b.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
+	var carriers5b = syncExec(mockState5b, Parse, AtWs);
+	check('SCC1(LTE) 有 RSSI → 不标注缺测', carriers5b[1] && !carriers5b[1].signalReason, carriers5b[1] && carriers5b[1].signalReason);
+
+	// 孤儿 SCC（HFREQINFO 未覆盖，仅 MONSSC/CASCELLINFO 上报）同样要补缺测原因
+	var mockState6 = JSON.parse(JSON.stringify(mockState));
+	mockState6.rawHfreq = [mockState6.rawHfreq[0]];
+	mockState6.secondaryNR = [{ arfcn: '630000', pci: null, rsrp: null, rsrq: null, sinr: null, measType: null }];
+	mockState6.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
+	var carriers6 = syncExec(mockState6, Parse, AtWs);
+	check('孤儿 NR 辅站无读数 → no-measurement',
+		carriers6[1] && carriers6[1].signalReason === 'no-measurement', carriers6[1] && carriers6[1].signalReason);
+
+	// ---- computeSccSignalReason 补齐的三种状态 ----
+	check('MONSSC 尚未查询（null）→ not-queried',
+		computeReason({ monssc: null, cascell: null }, { sysMode: 'NR' }) === 'not-queried',
+		computeReason({ monssc: null, cascell: null }, { sysMode: 'NR' }));
+	check('MONSSC unavailable（未连接/熔断）→ unavailable',
+		computeReason({ monssc: 'unavailable', cascell: 'unavailable' }, { sysMode: 'NR' }) === 'unavailable',
+		computeReason({ monssc: 'unavailable', cascell: 'unavailable' }, { sysMode: 'NR' }));
+	check('非 NR/LTE 制式 → not-applicable',
+		computeReason({ monssc: 'ok', cascell: 'ok' }, { sysMode: 'WCDMA' }) === 'not-applicable',
+		computeReason({ monssc: 'ok', cascell: 'ok' }, { sysMode: 'WCDMA' }));
+	check('sysMode 为空时按 NR 口径（与载波卡片一致）',
+		computeReason({ monssc: 'ok', cascell: 'error' }, {}) === 'no-measurement',
+		computeReason({ monssc: 'ok', cascell: 'error' }, {}));
+
+	// ---- PR #41 Codex review 跟进二：保留非超时的传输失败原因 ----
+	var arsStart = netCode.indexOf('function atStatusFromResult');
+	var arsEnd = netCode.indexOf('function loadSecondary');
+	if (arsStart < 0 || arsEnd < 0) {
+		check('atStatusFromResult 可从源码提取', false, '源码定位失败');
+	} else {
+		var arsCode = netCode.slice(arsStart, arsEnd) + '\nreturn atStatusFromResult;';
+		var atStatusFromResult = new Function('Parse', arsCode)(Parse);
+		check('atStatusFromResult 函数存在', typeof atStatusFromResult === 'function');
+		check('success:true + "^MONSSC: NONE\\nOK" → ok',
+			atStatusFromResult({ success: true, data: '^MONSSC: NONE\nOK' }) === 'ok',
+			atStatusFromResult({ success: true, data: '^MONSSC: NONE\nOK' }));
+		check('success:true + ERROR → error',
+			atStatusFromResult({ success: true, data: 'ERROR' }) === 'error',
+			atStatusFromResult({ success: true, data: 'ERROR' }));
+		check('cause:timeout → timeout',
+			atStatusFromResult({ success: false, cause: 'timeout' }) === 'timeout',
+			atStatusFromResult({ success: false, cause: 'timeout' }));
+		check('cause:not-connected → unavailable（不再误报超时）',
+			atStatusFromResult({ success: false, cause: 'not-connected' }) === 'unavailable',
+			atStatusFromResult({ success: false, cause: 'not-connected' }));
+		check('cause:circuit-open → unavailable（熔断秒回不是超时）',
+			atStatusFromResult({ success: false, cause: 'circuit-open' }) === 'unavailable',
+			atStatusFromResult({ success: false, cause: 'circuit-open' }));
+		check('后端回其它错误 → error',
+			atStatusFromResult({ success: false, cause: 'offline', error: 'Rust 后端未就绪' }) === 'error',
+			atStatusFromResult({ success: false, cause: 'offline', error: 'Rust 后端未就绪' }));
+		check('无 cause 的失败不当成超时',
+			atStatusFromResult({ success: false }) === 'error', atStatusFromResult({ success: false }));
+		check('空结果按 error 处理（不误报超时）', atStatusFromResult(null) === 'error', atStatusFromResult(null));
 	}
 
 } catch (e) {
