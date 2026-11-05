@@ -23,8 +23,12 @@ name: OpenWrt 软件包云编译（apk + ipk）
 #   - 正式版（stable）：push 标签 v*，或手动派发时选 stable → tag 用标签名
 #     （如 v1.29.0），同名则覆盖更新；会成为 GitHub 的 latest。
 #   - 预览版（preview）：**仅手动派发**（workflow_dispatch 选 preview，默认）→
-#     tag 为 preview-v<PKG_VERSION>-r<PKG_RELEASE>（如 preview-v1.29.0-r8），
-#     带 Pre-release 标记。**不会**触碰正式版 Release，也不会抢占 latest。
+#     tag 为 preview-<提交短SHA>（如 preview-99425b0），带 Pre-release 标记。
+#     **不会**触碰正式版 Release，也不会抢占 latest。
+#     预览版本 tag 不含 v<PKG_VERSION>-r<PKG_RELEASE>：版本号与正式版完全分开，
+#     避免「preview-v1.30.12-r1」这种看起来就是正式版版本号的名称造成误装。
+#     预览通道**全局只保留一个**：发布前先删掉所有历史 preview-* Release，
+#     不依赖保留数排序，任何时刻 Releases 列表里最多一个测试包。
 #
 # 为什么预览版改为仅手动：main 上每次 push 都自动编译，开发中的小改动静很大
 # （6 个矩阵各跑一遍 SDK），产物也随每次提交堆积；改为手动后，需要出验证包时
@@ -60,9 +64,9 @@ on:
         default: '1'
         type: string
       keep_previews:
-        description: '预览版：发布后保留最近几个 preview-* Release，更早的自动删除（正式版不参与计数）'
+        description: '预览版：固定为 1（发布前已清空全部历史 preview-*，此值仅作兜底，小于 1 按 1 处理）'
         required: false
-        default: '3'
+        default: '1'
         type: string
 
 permissions:
@@ -305,10 +309,14 @@ jobs:
             if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v${VER}"; fi
             PRERELEASE=false
           else
-            # 预览版 tag 带发行号：同一 PKG_VERSION 下每次 rN 递进都是一份独立产物，
-            # 不会「同名覆盖」把上一次的预览版悄悄换掉；也保证 ^v[0-9] 规则不匹配它，
-            # 从而不参与正式版的保留名额竞争。
-            TAG="preview-v${VER}-r${REL}"
+            # 预览版 tag 必须与正式版**彻底区分**：不再复用 v<PKG_VERSION>-r<PKG_RELEASE>。
+            # 旧命名 preview-v1.30.12-r1 里直接带「v1.30.12」，在 Releases 列表上和正式版
+            # 只差一个前缀，用户极易把测试包当成正式版安装。改用提交短 SHA 作为唯一标识：
+            #   ① 与正式版 tag（v1.30.12）不共享任何版本号片段；
+            #   ② 天然唯一且可追溯 —— 同一次提交重跑是覆盖重建，不同提交不会撞名；
+            #   ③ 源码版本写在 Release 标题与说明表格里，不塞进 tag。
+            SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+            TAG="preview-${SHORT_SHA}"
             PRERELEASE=true
           fi
 
@@ -449,6 +457,34 @@ jobs:
             gh release delete "$TAG" --yes --repo "${GITHUB_REPOSITORY}"
             echo "==> 已清理旧 Release ${TAG}，将重建"
           fi
+
+      # 预览通道**全局只保留一个**：发布前把所有历史 preview-* Release 清掉。
+      # 不依赖 keep_previews 计数，也不依赖 createdAt 排序 —— 只要不是本次 tag 一律删除，
+      # 所以「任何时刻 Releases 里最多一个测试包」是硬保证，而不是保留数凑出来的结果。
+      # 只删 Release 与对应远端 git tag（--cleanup-tag），不动正式版 v* 与 debian-v* 线。
+      - name: 清空历史预览版（预览通道只保留本次）
+        if: steps.ver.outputs.channel == 'preview'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -e
+          mapfile -t OLD < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 200 \
+            --json tagName --jq '.[] | select(.tagName | test("^preview-")) | .tagName')
+          if [ "${#OLD[@]}" -eq 0 ]; then
+            echo "==> 当前没有历史预览版"
+            exit 0
+          fi
+          echo "==> 历史预览版 ${#OLD[@]} 个，全部清理（本次 tag=${TAG}）"
+          for t in "${OLD[@]}"; do
+            if [ "$t" = "$TAG" ]; then
+              echo "  [跳过] ${t}（本次要重建的 tag，已在上一步删除）"
+              continue
+            fi
+            echo "  [删除] ${t}"
+            gh release delete "$t" --yes --cleanup-tag --repo "${GITHUB_REPOSITORY}" \
+              || echo "::warning::删除 ${t} 失败，已跳过不影响发布"
+          done
 
       # Release 简介的取用顺序：
       #   1) docs/release-notes/<tag>.md —— 手写、简明，发版时顺手补一个小文件；
@@ -634,12 +670,19 @@ jobs:
           # 预览版加 --prerelease：Releases 页面单独打 Pre-release 标记，而且
           # **不会抢占 latest** —— latest 只认最新的「非草稿且非预发布」Release，
           # 所以正式版 v<VERSION> 的 latest 身份在这里是天然受保护的。
-          FLAGS=(--repo "${GITHUB_REPOSITORY}")
+          # --target 必须显式给：预览 tag（preview-<短SHA>）在发布前刚被清理掉，
+          # 此刻 tag 并不存在，gh 会用「默认分支的最新提交」现场创建它 —— 而本次
+          # 构建的源码是 GITHUB_SHA（可能是 feature 分支），两者一旦不同，
+          # checkout preview-<sha> 拿到的就不是被构建的那份代码。正式版通道传的是
+          # 已存在的 tag，gh 会忽略该参数，因此统一加没有副作用。
+          FLAGS=(--repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}")
           TITLE="AT WebServer ${TAG}"
           if [ "$PRERELEASE" = "true" ]; then
             FLAGS+=(--prerelease)
-            # 标题同样带警示：Releases 列表页一眼能看出这是测试版，不是正式版
-            TITLE="⚠️ AT WebServer ${TAG}（测试版本 · 仅供验证）"
+            # 标题承担「版本号」职责：tag 本身只是提交短 SHA，不含 PKG_VERSION，
+            # 因此这里必须写清源码版本，否则测试包无法与 Makefile 对应。
+            # 同时保留警示，Releases 列表页一眼能看出这是测试版。
+            TITLE="⚠️ 预览版 ${TAG}（源码 v${{ steps.ver.outputs.version }}-r${{ steps.ver.outputs.release }} · 仅供验证）"
           fi
           if [ -n "$BODY" ] && [ -s "$BODY" ]; then
             gh release create "$TAG" "${FILES[@]}" \
@@ -657,21 +700,32 @@ jobs:
       # 每个版本 13 个资产、约 9 MB，历史 Release 会一路堆积。
       # 只删 **Release 与其资产**，不动 git tag —— tag 指向提交，删了会让
       # 「某版本对应哪次提交」无从追溯，而 Release 只是可重发的下载入口。
+      # （预览版的 tag 例外：它是提交短 SHA，由发布前的「清空历史预览版」步骤
+      #   连同 Release 一起清掉，避免 tag 列表随每次构建线性膨胀。）
       # 分**两组独立**清理，互不计入对方名额：
       #   正式版：tag 形如 v1.29.0，只保留最近 KEEP_RELEASES 个；
-      #   预览版：tag 形如 preview-v1.29.0-r8，只保留最近 KEEP_PREVIEWS 个。
+      #   预览版：tag 形如 preview-99425b0，只保留最近 KEEP_PREVIEWS 个（默认且至少 1）。
       # 两组正则各自只匹配本组（^v[0-9] 匹配不到 preview- 前缀），因此
       # **发布预览版永远不会把正式版挤出保留名额** —— 这是硬保护，不是靠配置约定。
       # 两组共用两条保护：① 只认本组前缀（debian-v2.0.1 这类另一条发布线的产物不参与）；
       #                   ② latest 那个即使超出保留数也保留（它可能不是时间上最新的）。
-      - name: 清理历史 Release（正式版 / 预览版各保留最近若干个）
+      # 预览版实际上在发布前已被清空，这里只是幂等兜底：万一有并发/残留，
+      # 也保证最终只剩 1 个。
+      - name: 清理历史 Release（正式版保留若干个 / 预览版只保留 1 个）
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP_RELEASES: ${{ github.event.inputs.keep_releases || '1' }}
-          KEEP_PREVIEWS: ${{ github.event.inputs.keep_previews || '3' }}
+          KEEP_PREVIEWS: ${{ github.event.inputs.keep_previews || '1' }}
         run: |
           set -e
+          # 预览版硬下限：无论输入填什么（0 / 空 / 负数 / 非数字），都按 1 处理。
+          # 传 0 会把刚发布的包立刻删掉，属于不可接受的操作。
+          case "${KEEP_PREVIEWS}" in
+            ''|*[!0-9]*) KEEP_PREVIEWS=1 ;;
+            *) [ "${KEEP_PREVIEWS}" -ge 1 ] || KEEP_PREVIEWS=1 ;;
+          esac
+          echo "==> 保留数：正式版=${KEEP_RELEASES} / 预览版=${KEEP_PREVIEWS}"
           cleanup_group() {
             local regex="$1" keep="$2" label="$3"
             mapfile -t ROWS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
@@ -699,4 +753,4 @@ jobs:
             done
           }
           cleanup_group '^v[0-9]' "$KEEP_RELEASES" '正式版 v* Release'
-          cleanup_group '^preview-v' "$KEEP_PREVIEWS" '预览版 preview-* Release'
+          cleanup_group '^preview-' "$KEEP_PREVIEWS" '预览版 preview-* Release'

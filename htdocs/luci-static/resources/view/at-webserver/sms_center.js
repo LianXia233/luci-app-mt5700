@@ -85,6 +85,7 @@ return L.view.extend({
 		 * 聊天页最缺的是竖向空间：桌面上那块大标题占掉近三分之一屏，
 		 * 结果输入框被顶到折叠线以下，看起来像「发不出去」。
 		 */
+		page._heroArgs.extraClass = 'mt5700-sms-hero-compact';
 		if (page._hero) {
 			page._hero.classList.add('mt5700-sms-hero-compact');
 		}
