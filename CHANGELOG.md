@@ -8,7 +8,7 @@
 
 ---
 
-## Unreleased（feature/dual-ui-mode）
+## v1.31.0（2026-11-05）
 
 > 全局双 UI 模式重构：普通模式完整保留，新增 Google Material Design 3 极简模式。两种模式共用同一套 JS 业务逻辑、Ucode 后端、RPC/ubus 接口、UCI 配置、数据请求、状态管理、事件处理与弹窗业务实现；不修改 AT 调度、短信收发、拨号、USB 网络与硬件控制。
 
@@ -23,6 +23,7 @@
 - **chore(ui) 缓存版本戳**：`MT5700_MD3_CSS_VERSION` 1.0.0→1.0.1
 - **refactor(ui) 接入点**：`mt5700.js`（注入 md3.css、按模式分支、弹窗 decorate、信号/加载/图表重绘）、`tabmenu.js`（导航图标走 Icon Manager）、`network_status.js`（卡片标题/广播塔/图表走 Icon Manager）；其余 10 个视图、`at.css` / `global.css` / `mt5700.css`、Ucode 后端、Rust 源码、ACL、menu.d 均未改动
 - **docs/test** 新增 `docs/dual-ui-mode-inventory.md`（真实源码清单）、`scripts/gen-dual-ui-icons.js`（图标资源生成与一致性校验）、`tests/dual-ui-mode-test.js`（双模式/图标/弹窗/性能/业务安全回归）
+- **chore(version) 缓存版本戳同步**：`PKG_VERSION` / `MT5700_UI_VERSION` 1.30.12→1.31.0，发版后浏览器缓存整体失效，确保升级用户加载到包含 UI Mode Manager 的新模块（对齐 AGENTS.md 发版版本一致性约定）
 
 ---
 

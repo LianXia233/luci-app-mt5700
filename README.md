@@ -6,7 +6,7 @@
 
 **适用于 OpenWrt / ImmortalWrt 平台的 MT5700M 5G 模组全功能控制中心与常驻守护套件**
 
-[![Version](https://img.shields.io/badge/Version-v1.30.12-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v1.31.0-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
 [![OpenWrt CI](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/build-openwrt.yml?branch=main&label=Build%20OpenWrt&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/build-openwrt.yml)
 [![Static Checks](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/checks.yml?branch=main&label=Checks&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/checks.yml)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square&logo=gnu&logoColor=white)](LICENSE)
