@@ -670,7 +670,12 @@ jobs:
           # 预览版加 --prerelease：Releases 页面单独打 Pre-release 标记，而且
           # **不会抢占 latest** —— latest 只认最新的「非草稿且非预发布」Release，
           # 所以正式版 v<VERSION> 的 latest 身份在这里是天然受保护的。
-          FLAGS=(--repo "${GITHUB_REPOSITORY}")
+          # --target 必须显式给：预览 tag（preview-<短SHA>）在发布前刚被清理掉，
+          # 此刻 tag 并不存在，gh 会用「默认分支的最新提交」现场创建它 —— 而本次
+          # 构建的源码是 GITHUB_SHA（可能是 feature 分支），两者一旦不同，
+          # checkout preview-<sha> 拿到的就不是被构建的那份代码。正式版通道传的是
+          # 已存在的 tag，gh 会忽略该参数，因此统一加没有副作用。
+          FLAGS=(--repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}")
           TITLE="AT WebServer ${TAG}"
           if [ "$PRERELEASE" = "true" ]; then
             FLAGS+=(--prerelease)
