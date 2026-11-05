@@ -1828,10 +1828,12 @@ return L.view.extend({
 			/* SCC 信号缺失原因文案（issue #39）：保持真实空值，补充可解释状态 */
 			function getSignalReasonText(reason) {
 				switch (reason) {
-					case 'at-error': return '辅站查询返回 ERROR，模组未返回有效测量';
+					case 'at-error': return '辅站查询失败（AT ERROR 或后端报错），模组未返回有效测量';
 					case 'no-measurement': return '已取得载波频点/带宽，未取得独立信号测量';
 					case 'timeout': return '辅站查询超时';
 					case 'not-applicable': return '当前制式不适用该辅站查询';
+					case 'unavailable': return 'AT 通道暂不可用（后端未就绪或已熔断），本轮未发起辅站查询';
+					case 'not-queried': return '辅站查询本轮尚未执行，等待下一轮刷新';
 					default: return '';
 				}
 			}
@@ -1902,7 +1904,7 @@ return L.view.extend({
 				var measExtra = c.measType && c.measType !== '—' && c.measType !== 'Serving' ? (' · ' + c.measType) : '';
 
 				/* SCC 信号缺失原因说明（issue #39）：仅在 SCC 且全部信号为空时显示 */
-				var sigReasonText = (!isPcc && c.signalReason && c.rsrp == null && c.rsrq == null && c.sinr == null)
+				var sigReasonText = (!isPcc && c.signalReason && c.rsrp == null && c.rsrq == null && c.sinr == null && c.rssi == null)
 					? getSignalReasonText(c.signalReason) : '';
 
 				caHtml +=
@@ -2213,28 +2215,47 @@ return L.view.extend({
 		}
 
 		/*
+		 * SCC 是否真的拿到了可用读数（issue #41 Codex review）。
+		 *
+		 * Parse.carrierSignalFor() 只要 ARFCN 命中就返回对象，测量字段是原样
+		 * 拷贝的 —— 模组上报了辅小区却没带测量时，pci/rsrp/rsrq/sinr 全是 null。
+		 * 所以「匹配上了」不等于「有读数」，判据必须和渲染层的破折号对齐：
+		 * RSRP/RSRQ/SINR/RSSI 全空就按缺测处理，补上可解释的原因。
+		 * HFREQINFO 分支同步透传 rssi，渲染层第三列才能用 RSSI 兜底显示。
+		 */
+		function hasUsableSignal(sig) {
+			return !!sig && (sig.rsrp != null || sig.rsrq != null || sig.sinr != null || sig.rssi != null);
+		}
+
+		/*
 		 * 计算 SCC 信号缺失的原因（issue #39）。
 		 *
 		 * 区分三个层次：
-		 *   - 传输层是否成功（由 atStatus 记录）
-		 *   - AT 最终响应是 OK、ERROR 还是超时
-		 *   - 是否解析出有效、可关联到目标载波的独立测量
+		 *   - 这一轮到底有没有发出请求（atStatus 为 null 表示还没查过）
+		 *   - 传输层是快速失败、超时，还是拿到了响应
+		 *   - AT 最终响应是 OK、ERROR、NONE，以及是否解析出可关联的独立测量
 		 *
 		 * 返回：
 		 *   'at-error'       —— AT 命令返回 ERROR（模组拒绝或参数不支持）
-		 *   'no-measurement' —— AT 命令成功（OK/NONE），但未返回可关联的独立测量
-		 *   'timeout'        —— 传输层失败或超时
-		 *   null             —— 有信号读数（不该走到这里）
+		 *   'no-measurement' —— AT 命令成功（OK/NONE/空），但未返回可关联的独立测量
+		 *   'timeout'        —— 请求已发出，在超时预算内无响应
+		 *   'unavailable'    —— 请求根本没发出（后端未就绪 / 通道熔断，秒回失败）
+		 *   'not-queried'    —— 本轮尚未执行辅站查询
+		 *   'not-applicable' —— 该制式没有对应的辅站查询命令
 		 *
 		 * 绝不复制 PCC 读数或填 0；缺测就如实说明缺测原因。
 		 */
 		function computeSccSignalReason(atStatus, carrier) {
 			var st = atStatus || {};
-			var isLte = carrier && carrier.sysMode === 'LTE';
-			var status = isLte ? st.cascell : st.monssc;
+			var mode = (carrier && carrier.sysMode) || 'NR';
+			/* ^MONSSC 只上报 NR 辅站，^CASCELLINFO? 只上报 LTE 辅站；
+			 * 2G/3G 载波两者都不适用，不能说成「未返回测量」。 */
+			if (mode !== 'NR' && mode !== 'LTE') return 'not-applicable';
+			var status = mode === 'LTE' ? st.cascell : st.monssc;
 			if (status === 'error') return 'at-error';
-			if (status === 'ok' || status === 'none' || status === 'empty' || status === 'other') return 'no-measurement';
 			if (status === 'timeout') return 'timeout';
+			if (status === 'unavailable') return 'unavailable';
+			if (status === null || status === undefined) return 'not-queried';
 			return 'no-measurement';
 		}
 
@@ -2290,7 +2311,8 @@ return L.view.extend({
 				var sig = Parse.carrierSignalFor(h, secNR, secLTE);
 				var hBand = h.band || (h.sysMode === 'NR' ? getBandFromNrArfcn(h.dlFcn) : getBandFromLteArfcn(h.dlFcn));
 				var sigReason = null;
-				if (!sig) sigReason = computeSccSignalReason(state.secondaryATStatus, h);
+				/* 匹配到小区 ≠ 拿到读数：ARFCN 命中但测量全空时同样要给原因 */
+				if (!hasUsableSignal(sig)) sigReason = computeSccSignalReason(state.secondaryATStatus, h);
 				merged.push({
 					isPcc: false,
 					carrierRole: 'SCC',
@@ -2304,6 +2326,7 @@ return L.view.extend({
 					rsrp: sig ? sig.rsrp : null,
 					rsrq: sig ? sig.rsrq : null,
 					sinr: sig ? sig.sinr : null,
+					rssi: sig && sig.rssi != null ? sig.rssi : null,
 					measType: sig ? sig.measType : null,
 					signalReason: sigReason
 				});
@@ -2328,7 +2351,8 @@ return L.view.extend({
 						rsrp: nCell.rsrp != null ? nCell.rsrp : null,
 						rsrq: nCell.rsrq != null ? nCell.rsrq : null,
 						sinr: nCell.sinr != null ? nCell.sinr : null,
-						measType: nCell.measType || 'SSB'
+						measType: nCell.measType || 'SSB',
+						signalReason: hasUsableSignal(nCell) ? null : computeSccSignalReason(state.secondaryATStatus, { sysMode: 'NR' })
 					});
 				});
 			}
@@ -2351,7 +2375,8 @@ return L.view.extend({
 						rsrp: lCell.rsrp != null ? lCell.rsrp : null,
 						rsrq: lCell.rsrq != null ? lCell.rsrq : null,
 						sinr: null,
-						rssi: lCell.rssi != null ? lCell.rssi : null
+						rssi: lCell.rssi != null ? lCell.rssi : null,
+						signalReason: hasUsableSignal(lCell) ? null : computeSccSignalReason(state.secondaryATStatus, { sysMode: 'LTE' })
 					});
 				});
 			}
@@ -2435,17 +2460,42 @@ return L.view.extend({
 			});
 		}
 
+		/*
+		 * 把 sendCommand 的结果折算成 AT 终止状态（issue #41 / PR #42 Codex review）。
+		 *
+		 * 「传输失败」不等于「超时」，还要再分清是**谁**没响应。rpc.js 的 sendCommand
+		 * 在 success:false 时带 cause，cause 一路来自三个层次：
+		 *   timeout        —— 请求已发出但没等到响应：前端超时预算（rpc.js 的
+		 *                     withTimeout 分支）、ucode 对后端的 nc 硬超时
+		 *                     （mt5700.uc）、Rust 侧模组静默与排队预算耗尽
+		 *                     （rpcserver.rs 的 at_failure_cause）
+		 *   unavailable    —— 请求根本没发出，或后端本身不可用：
+		 *                     not-connected、circuit-open、not-listening、no-nc、
+		 *                     spawn-failed、no-reply
+		 *   error          —— 模组回了 ERROR，或后端明确报了业务失败（cause 缺省）
+		 * 原先一律记 'timeout'，后端掉线或通道熔断时页面会说「辅站查询超时」，
+		 * 把通道故障误导成模组无响应，排障方向就带偏了。
+		 */
+		function atStatusFromResult(res) {
+			if (res && res.success === true) return Parse.atStatusFromText(res.data);
+			var cause = (res && res.cause) || '';
+			if (cause === 'timeout') return 'timeout';
+			if (cause === 'not-connected' || cause === 'circuit-open' || cause === 'not-listening'
+				|| cause === 'no-nc' || cause === 'spawn-failed' || cause === 'no-reply') return 'unavailable';
+			return 'error';
+		}
+
 		function loadSecondary() {
 			return AtWs.client.sendCommand('AT^MONSSC').then(function (monssc) {
 				state.secondaryNR = (monssc.success && monssc.data) ? Parse.parseMonsscAll(String(monssc.data)) : [];
 				state.secondarySuccess = monssc.success;
 				/* 记录 AT 终止状态：传输成功不等于 AT 命令成功（如 ERROR / NONE） */
-				state.secondaryATStatus.monssc = monssc.success ? Parse.atStatusFromText(monssc.data) : 'timeout';
+				state.secondaryATStatus.monssc = atStatusFromResult(monssc);
 				return AtWs.client.sendCommand('AT^CASCELLINFO?');
 			}).then(function (cascell) {
 				state.secondaryLTE = (cascell.success && cascell.data) ? Parse.parseCascellAll(String(cascell.data)) : [];
 				if (cascell.success) state.secondarySuccess = true;
-				state.secondaryATStatus.cascell = cascell.success ? Parse.atStatusFromText(cascell.data) : 'timeout';
+				state.secondaryATStatus.cascell = atStatusFromResult(cascell);
 				syncCarriers();
 				renderCarriersAdv();
 				renderTabsUI();

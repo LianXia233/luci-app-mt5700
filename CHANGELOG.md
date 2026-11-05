@@ -8,6 +8,73 @@
 
 ---
 
+## Unreleased
+
+### fix(ui) 辅站信号缺失原因的两处漏判（PR #41 Codex review）
+
+> v1.31.1 合并后 Codex 复核提出两条 P2：其一，`Parse.carrierSignalFor()` 只要
+> ARFCN 命中就返回对象，测量字段原样拷贝，模组上报了辅小区却没带测量时四个
+> 读数全空，而 `syncCarriers()` 用 `if (!sig)` 判缺测 —— 这条路径下
+> `signalReason` 留空，SCC 卡片仍是一排「—」却没有任何解释，正是 Issue #39
+> 想消除的困惑；其二，`loadSecondary()` 把 `sendCommand()` 的一切失败都记成
+> `'timeout'`，可 `rpc.js` 的 `not-connected` / `circuit-open` 是请求根本没发出
+> 的快速失败，后端掉线时页面会说「辅站查询超时」，把通道故障误导成模组无响应。
+
+- **fix(ui) 匹配到小区 ≠ 拿到读数**：新增 `hasUsableSignal()`，与渲染层破折号取
+  同一口径（RSRP / RSRQ / SINR / RSSI 全空即缺测）；`syncCarriers()` 改用它判缺测，
+  HFREQINFO 未覆盖的孤儿 SCC 同样补上 `signalReason`，绝不伪造读数。
+- **fix(ui) 保留真实失败原因**：新增 `atStatusFromResult()`，只在 `cause: timeout`
+  时记超时，`not-connected` / `circuit-open` 记 `unavailable`，后端明确回错记 `error`。
+- **fix(ui) 原因口径收口**：`computeSccSignalReason()` 本轮未查询（状态为 `null`）
+  时返回 `not-queried`，不再谎报「已取得频点但未取得测量」；非 NR/LTE 制式返回
+  原本写了却永不命中的 `not-applicable`；新增两条文案并在 `at-error` 文案中并入
+  「后端报错」，避免把通道失败说成模组返回 ERROR。
+- **test** `tests/hfreq-multicarrier-test.js` 49 → 68 条断言，覆盖 ARFCN 命中但
+  测量全空、仅 PCI、有 RSRP / RSSI 不标注、孤儿 SCC、`not-queried` /
+  `unavailable` / `not-applicable`，以及五种 `sendCommand` 失败原因的映射。
+
+### fix(at) `at` 通道丢失 Rust 侧的超时分类（PR #42 Codex review）
+
+> 上一节的 `atStatusFromResult()` 按 `cause` 分档，但 `cause` 只在 ucode 层
+> 生成（`mt5700.uc` 的 `backendErrorShape` 会把 `cause` 平移到顶层）；Rust 侧
+> 模组静默时 `rpcserver.rs::run_command` 只回 `{ success:false, error:"命令执行
+> 超时" }`，`at` 分支手工拼 JSON 时又只搬 `success` / `data` / `error` —— 超时
+> 这件事在这一层被抹平，前端只能把「模组没回」降级成「AT ERROR / 后端报错」。
+
+- **fix(at) cause 贯通三层**：`AtCommandResponse` 新增 `cause: Option<String>`
+  （`skip_serializing_if` 只作用于 serde 序列化，`at` 出口改为条件拼装，
+  成功应答的 JSON 形状不变）；外层应答预算耗尽直接标 `timeout`，
+  `send_command_pri` 的错误串经新增的 `at_failure_cause()` 归类
+  （含「超时」即 `timeout`，覆盖 `at_queue` 的排队预算耗尽与 `transport` 的连接
+  超时），模组明确回 ERROR 的分支保持 `None`；`at` 分支的失败应答补上 `cause`
+  （成功应答保持原形状），ucode 原样透传、`rpc.js` 已在转发，前端因此能真正
+  区分超时与后端报错。
+- **fix(ui) 分档补全**：`atStatusFromResult()` 识别 ucode 的全部通道类 `cause`
+  （`not-listening` / `no-nc` / `spawn-failed` / `no-reply` 一并归
+  `unavailable`），`backend-error` / `bad-reply` / `parse-failed` 仍归 `error`，
+  不谎称「未发起查询」；`rpc.js` 头部注明 `cause` 的三个来源层次。
+- **test** Rust 新增 `at_failure_cause` 单测 3 条（`cargo test` 345 passed /
+  0 failed）；前端断言 68 → 83 → 86 条，逐层守卫 `Rust → ucode → rpc.js → 视图` 的
+  `cause` 通路，防止任何一层再次漏搬。
+
+### fix(ui)/fix(at)/ci PR #42 零信任复审收口
+
+- **fix(ui) 补齐 RSSI 透传**：`syncCarriers()` 的 HFREQINFO 分支此前未把
+  `Parse.carrierSignalFor()` 返回的 `rssi` 放进载波对象；「仅上报 RSSI」的 LTE SCC
+  虽被 `hasUsableSignal()` 判为有读数，渲染层第三列却拿不到值，仍是一排「—」且无
+  解释。现补上 `rssi` 透传，并让 `sigReasonText` 判据一并覆盖 `rssi`。
+- **fix(at) 成功应答形状不变**：`at` 出口原用 `json!` 无条件拼 `cause`，
+  `skip_serializing_if` 对 `json!` 不生效，成功应答也会多出 `cause:null`；改为仅在
+  `Some(cause)` 时写入该键，失败应答才带 `cause`。
+- **ci** `checks.yml` 新增 `Rust 单元测试` job（`cargo test --locked`，15 分钟超时），
+  补齐 CI 原先只跑 Node、不编译 Rust 的门禁缺口；同步订正检查项清单与时长约定。
+- **test** 前端断言 83 → **86** 条：新增 RSSI 透传、渲染判据、`cause` 形状三类守卫；
+  `node tests/static-check.js` 4/4、20 个测试文件全通过、`cargo test --locked`
+  **345 passed / 0 failed / 2 ignored**；反向回滚复现 **12 条失败**（非 9 条），确认断言
+  确实绑定新逻辑。
+
+---
+
 ## v1.32.1（2026-11-05）
 
 ### feat(ui) 流量统计图表跟随统计来源切换
