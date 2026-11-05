@@ -130,9 +130,17 @@ function makeEnv(opts) {
 	};
 	const uciCalls = [];
 	let stored = o.initialUci == null ? undefined : o.initialUci;
+	/* deferLoad：把 L.uci.load() 挂起，用于复现「首次读取尚未返回，用户已经点了切换」
+	 * 的启动竞态。测试自己调 releaseLoad() 决定何时让 boot 校准继续。 */
+	let releaseLoad = null;
 	const L = classExtendStub();
 	L.uci = {
-		load: function (pkg) { uciCalls.push(['load', pkg]); return o.loadFails ? Promise.reject(new Error('uci 读取失败')) : Promise.resolve(); },
+		load: function (pkg) {
+			uciCalls.push(['load', pkg]);
+			if (o.loadFails) return Promise.reject(new Error('uci 读取失败'));
+			if (o.deferLoad) return new Promise(function (res) { releaseLoad = res; });
+			return Promise.resolve();
+		},
 		get: function (pkg, sec, opt) { return stored; },
 		set: function (pkg, sec, opt, v) { uciCalls.push(['set', pkg, sec, opt, v]); stored = v; },
 		save: function (pkg) { uciCalls.push(['save', pkg]); return o.saveFails ? Promise.reject(new Error('权限不足')) : Promise.resolve(); },
@@ -155,7 +163,8 @@ function makeEnv(opts) {
 	return {
 		sandbox: sandbox, attrs: attrs, uciCalls: uciCalls, listeners: listeners,
 		registry: registry, win: win, errors: errors, doc: doc,
-		getStored: function () { return stored; }
+		getStored: function () { return stored; },
+		releaseLoad: function () { if (releaseLoad) { const r = releaseLoad; releaseLoad = null; r(); } }
 	};
 }
 
@@ -283,6 +292,30 @@ check('任务要求语义全覆盖',
 			env.getStored() === 'normal', 'stored=' + env.getStored());
 		check('回滚过程未调用 L.uci.apply()',
 			env.uciCalls.every(function (c) { return c[0] !== 'apply'; }));
+	}
+
+	/* B4b 启动竞态：首次 L.uci.load() 还没返回，用户就点了切换。
+	 * 旧实现里 boot 的权威校准会把 current 改回磁盘旧值，随后 persist 却照样成功 ——
+	 * 界面停在旧模式、配置已是新模式，要等刷新才「追上」。 */
+	{
+		const env = makeEnv({ initialUci: 'normal', deferLoad: true });
+		const M = loadModule(modeFile, env.sandbox, 'AtUimode');
+		check('UCI 未返回时先按 hint 落首屏', env.attrs['data-ui-mode'] === 'normal');
+
+		const p = M.set('minimal');
+		check('等待 UCI 期间切换即时生效',
+			M.current() === 'minimal' && env.attrs['data-ui-mode'] === 'minimal',
+			'current=' + M.current());
+
+		env.releaseLoad();
+		const r = await p;
+		check('UCI 旧值返回后不覆盖用户刚选的新模式',
+			M.current() === 'minimal' && env.attrs['data-ui-mode'] === 'minimal',
+			'current=' + M.current() + ' attr=' + env.attrs['data-ui-mode']);
+		check('保存结果、内存状态、DOM 与磁盘四处一致',
+			r.ok === true && r.mode === 'minimal' && M.current() === 'minimal'
+			&& env.attrs['data-ui-mode'] === 'minimal' && env.getStored() === 'minimal',
+			'ok=' + r.ok + ' current=' + M.current() + ' stored=' + env.getStored());
 	}
 
 	/* B5 单例 / 去重 / 弹窗 decorate / 切换控件委托 */
@@ -705,6 +738,11 @@ check('任务要求语义全覆盖',
 	});
 	check('CI 改动仅限预览版发布策略（构建矩阵 / 编译步骤未动）',
 		wfRisky.length === 0, wfRisky.slice(0, 3).join(' | '));
+	/* 预览 tag 在发布前刚被清理，gh 会用「默认分支最新提交」现场建 tag；
+	 * 必须显式 --target，否则 checkout preview-<sha> 拿到的不是被构建的那份代码。 */
+	const wfFull = read(path.join(root, '.github/workflows/build-openwrt.yml'));
+	check('发布 Release 时 tag 指向被构建的提交（--target $GITHUB_SHA）',
+		/--target "\$\{GITHUB_SHA\}"/.test(wfFull) && /FLAGS=\(--repo/.test(wfFull));
 	check('业务 UCI 配置只新增 ui_mode（未改其它 option）',
 		(uciCfg.match(/option ui_mode/g) || []).length === 1);
 	check('未新增 ubus/RPC 方法或后端服务',
