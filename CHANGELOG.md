@@ -8,7 +8,7 @@
 
 ---
 
-## Unreleased
+## v1.32.2（2026-11-06）
 
 ### fix(ui) 辅站信号缺失原因的两处漏判（PR #41 Codex review）
 
