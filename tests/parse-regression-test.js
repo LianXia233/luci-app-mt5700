@@ -210,6 +210,8 @@ try {
 		const lte = Parse.parseC5gQosRdp('+C5GQOSRDP: 1,0,,,,,,\r\nOK');
 		check('C5GQOSRDP (4G) 速率字段为空，不能编造数值', lte && lte.ambrUl === null && lte.ambrDl === null,
 			lte ? JSON.stringify(lte) : 'null');
+		// 5QI/QCI 0 表示「由网络选择」，解析层原样保留 0，由视图层判为未上报（issue #43）
+		check('C5GQOSRDP (4G) 5QI=0 原样保留，不臆造等级', lte && lte.qci === 0, lte ? JSON.stringify(lte) : 'null');
 	}
 	{
 		check('C5GQOSRDP 无匹配行返回 null', Parse.parseC5gQosRdp('ERROR') === null, 'not null');
