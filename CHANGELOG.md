@@ -8,6 +8,201 @@
 
 ---
 
+## v1.32.2（2026-11-06）
+
+### fix(ui) 辅站信号缺失原因的两处漏判（PR #41 Codex review）
+
+> v1.31.1 合并后 Codex 复核提出两条 P2：其一，`Parse.carrierSignalFor()` 只要
+> ARFCN 命中就返回对象，测量字段原样拷贝，模组上报了辅小区却没带测量时四个
+> 读数全空，而 `syncCarriers()` 用 `if (!sig)` 判缺测 —— 这条路径下
+> `signalReason` 留空，SCC 卡片仍是一排「—」却没有任何解释，正是 Issue #39
+> 想消除的困惑；其二，`loadSecondary()` 把 `sendCommand()` 的一切失败都记成
+> `'timeout'`，可 `rpc.js` 的 `not-connected` / `circuit-open` 是请求根本没发出
+> 的快速失败，后端掉线时页面会说「辅站查询超时」，把通道故障误导成模组无响应。
+
+- **fix(ui) 匹配到小区 ≠ 拿到读数**：新增 `hasUsableSignal()`，与渲染层破折号取
+  同一口径（RSRP / RSRQ / SINR / RSSI 全空即缺测）；`syncCarriers()` 改用它判缺测，
+  HFREQINFO 未覆盖的孤儿 SCC 同样补上 `signalReason`，绝不伪造读数。
+- **fix(ui) 保留真实失败原因**：新增 `atStatusFromResult()`，只在 `cause: timeout`
+  时记超时，`not-connected` / `circuit-open` 记 `unavailable`，后端明确回错记 `error`。
+- **fix(ui) 原因口径收口**：`computeSccSignalReason()` 本轮未查询（状态为 `null`）
+  时返回 `not-queried`，不再谎报「已取得频点但未取得测量」；非 NR/LTE 制式返回
+  原本写了却永不命中的 `not-applicable`；新增两条文案并在 `at-error` 文案中并入
+  「后端报错」，避免把通道失败说成模组返回 ERROR。
+- **test** `tests/hfreq-multicarrier-test.js` 49 → 68 条断言，覆盖 ARFCN 命中但
+  测量全空、仅 PCI、有 RSRP / RSSI 不标注、孤儿 SCC、`not-queried` /
+  `unavailable` / `not-applicable`，以及五种 `sendCommand` 失败原因的映射。
+
+### fix(at) `at` 通道丢失 Rust 侧的超时分类（PR #42 Codex review）
+
+> 上一节的 `atStatusFromResult()` 按 `cause` 分档，但 `cause` 只在 ucode 层
+> 生成（`mt5700.uc` 的 `backendErrorShape` 会把 `cause` 平移到顶层）；Rust 侧
+> 模组静默时 `rpcserver.rs::run_command` 只回 `{ success:false, error:"命令执行
+> 超时" }`，`at` 分支手工拼 JSON 时又只搬 `success` / `data` / `error` —— 超时
+> 这件事在这一层被抹平，前端只能把「模组没回」降级成「AT ERROR / 后端报错」。
+
+- **fix(at) cause 贯通三层**：`AtCommandResponse` 新增 `cause: Option<String>`
+  （`skip_serializing_if` 只作用于 serde 序列化，`at` 出口改为条件拼装，
+  成功应答的 JSON 形状不变）；外层应答预算耗尽直接标 `timeout`，
+  `send_command_pri` 的错误串经新增的 `at_failure_cause()` 归类
+  （含「超时」即 `timeout`，覆盖 `at_queue` 的排队预算耗尽与 `transport` 的连接
+  超时），模组明确回 ERROR 的分支保持 `None`；`at` 分支的失败应答补上 `cause`
+  （成功应答保持原形状），ucode 原样透传、`rpc.js` 已在转发，前端因此能真正
+  区分超时与后端报错。
+- **fix(ui) 分档补全**：`atStatusFromResult()` 识别 ucode 的全部通道类 `cause`
+  （`not-listening` / `no-nc` / `spawn-failed` / `no-reply` 一并归
+  `unavailable`），`backend-error` / `bad-reply` / `parse-failed` 仍归 `error`，
+  不谎称「未发起查询」；`rpc.js` 头部注明 `cause` 的三个来源层次。
+- **test** Rust 新增 `at_failure_cause` 单测 3 条（`cargo test` 345 passed /
+  0 failed）；前端断言 68 → 83 → 86 条，逐层守卫 `Rust → ucode → rpc.js → 视图` 的
+  `cause` 通路，防止任何一层再次漏搬。
+
+### fix(ui)/fix(at)/ci PR #42 零信任复审收口
+
+- **fix(ui) 补齐 RSSI 透传**：`syncCarriers()` 的 HFREQINFO 分支此前未把
+  `Parse.carrierSignalFor()` 返回的 `rssi` 放进载波对象；「仅上报 RSSI」的 LTE SCC
+  虽被 `hasUsableSignal()` 判为有读数，渲染层第三列却拿不到值，仍是一排「—」且无
+  解释。现补上 `rssi` 透传，并让 `sigReasonText` 判据一并覆盖 `rssi`。
+- **fix(at) 成功应答形状不变**：`at` 出口原用 `json!` 无条件拼 `cause`，
+  `skip_serializing_if` 对 `json!` 不生效，成功应答也会多出 `cause:null`；改为仅在
+  `Some(cause)` 时写入该键，失败应答才带 `cause`。
+- **ci** `checks.yml` 新增 `Rust 单元测试` job（`cargo test --locked`，15 分钟超时），
+  补齐 CI 原先只跑 Node、不编译 Rust 的门禁缺口；同步订正检查项清单与时长约定。
+- **test** 前端断言 83 → **86** 条：新增 RSSI 透传、渲染判据、`cause` 形状三类守卫；
+  `node tests/static-check.js` 4/4、20 个测试文件全通过、`cargo test --locked`
+  **345 passed / 0 failed / 2 ignored**；反向回滚复现 **12 条失败**（非 9 条），确认断言
+  确实绑定新逻辑。
+
+---
+
+## v1.32.1（2026-11-05）
+
+### feat(ui) 流量统计图表跟随统计来源切换
+
+> 「本次使用量 → 统计来源」切换后，下行 / 上行速率火花线仍保留旧来源的
+> 12 个历史点，且 `renderSpeedUI()` 被使用量轮询、清零、持久化等 9 处复用，
+> 每次调用都推一个点，一秒内混进多个重复点；两套计数器绝对值不同还会
+> 画出虚假尖峰，图上完全看不出当前用的是哪个源。
+
+- **feat(ui) 按源换图**：新增 `sparkSource` 与 `resetTrafficSeries()`，
+  切换来源时清空两套火花线历史、速率数值与采样基线；`setUsageSource()`
+  成功后立即换源并重新采样，`sampleUsage()` 也能发现页面外（UCI /
+  其它会话）的来源变化。
+- **refactor(ui) 推点收敛**：火花线推进抽成 `pushTrafficSample()`，
+  只在 `sampleRate()` 每次采样后调用；`renderSpeedUI()` 只负责渲染，
+  不再重复推点。采样基线新增 `source` 字段，即使 device 标签巧合相同
+  也不会把 netdev 的 sysfs 累计与 modem 的 DS 累计混算。
+- **feat(ui) 来源可见**：卡片头「实时」标签改为「实时 · 物理网卡 /
+  实时 · 模组 AT」，上下行图表悬停提示同步标明来源；`modem` 来源下
+  不再把 `modem:^DSFLOWQRY` 这个来源标签写进「数据通信接口」。
+- **test** 跨层测试按函数切片断言推点位置、换源动作与来源分流，
+  防止图表再次与来源脱钩。
+
+### feat(usage) 无模组 WAN 口时回落默认 WAN 口物理网卡
+
+> 部分设备不会为模组单独创建 WAN 逻辑接口，而是直接复用出厂默认 `wan`；
+> 此前只在 WAN 区域成员里按 UCI 顺序取第一个可用物理网卡，没有把
+> 「默认 WAN 口」列为明确判据，模组口缺席时可能取到无关成员或停止统计。
+
+- **feat(usage) 默认 WAN 口判据**：`select_wan_netdev()` / `detectWanDevice()`
+  在「模组 WAN 口（WAN 区域 ∩ USB 网口）」之后新增第 2 级：当 `wan` 逻辑接口
+  确实属于 WAN 区域时，按 `network.wan` 反查其物理网卡（`device` / 旧式
+  `ifname` / `@alias` 递归均可），校验非 LAN 侧且计数器可读后采用；
+  之后才轮到 WAN 区域其它成员与「非 LAN 归属的 USB 网卡」回落。
+- **note(usage) 口径边界**：仍不回退 LAN / `br-lan`；DNS 下发与 `IFACE_4G`
+  接口创建保持原判据，不会把主 WAN 的 DNS 或拨号接口误改到模组口上。
+- **test** Rust / ucode / 跨层测试新增默认 WAN 口回落与「wan 不在 WAN 区域」
+  拒绝用例，前端「数据通信接口」提示同步说明判据。
+
+### feat(usage) 数据通信接口判断优先模组物理网卡位置
+
+> 「设备信息 → 数据通信接口」此前只在 `netrate` 采样成功时才写入
+> `state.deviceInterface`，一旦速率 RPC 失败就回落为 `—`；init.d 自动模式
+> 也只按物理网卡绑定挑第一个接口，未校验 WAN 区域归属。
+
+- **feat(ui) 物理网卡优先**：优先取 `state.usage.device`（后端按 WAN 区域 ∩
+  USB 模组网口识别、每秒刷新），`modem` 来源下该字段是 DS 来源标签不当网卡名；
+  再回落 `netrate` 采样值，并给单元格补上判据说明。
+- **feat(init) 承载接口反查**：`resolve_ifaces()` 的 auto 分支复用
+  `dns_direct_ifaces()`（USB 模组网口 + WAN 区域），无 WAN 归属才回落到
+  `modem_direct_ifaces()`，避免同网卡的 LAN 侧接口被误选。
+- **test** 跨层契约新增前端优先级与 init.d 反查断言。
+
+### fix(usage) ucode 单参数 split 导致实机 netrate 整条 RPC 失败
+
+> v1.32.0 新增的 WAN 区域解析里有 8 处 `split(trim(x))` 单参数调用；
+> 实机 ucode 的 `split()` 单参数返回 `null`（不会按空白切分），
+> `networkDevices()` 对 null 求 `length()` 抛 `left-hand side expression is null`，
+> rpcd 回 `UBUS_STATUS_UNKNOWN_ERROR`，表现为实时速率取不到数。
+
+- **fix(usage) 显式分隔符**：8 处单参数 `split` 全部补上 `' '`；
+  `detectWanDevice()` 第 2 级改为跳过空项（实机 `split('', ' ')` 返回 `['']`），
+  避免候选全无时返回空串、吞掉「WAN 侧 USB 网卡回落」分支。
+- **test** `tests/netrate-interface-test.js` 的 `split` / `length` 模拟改为实机语义
+  （单参数返回 null、对 null 求 length 抛错），并新增源码残留断言；
+  否则这类回归在 Node 侧永远测不出来。
+
+### style(usage) 统计来源控件改为贴合文字的紧凑方框
+
+> 来源下拉框复用了天数输入框的 `.mt-usage-days`，又被全局 `select` 深度美化
+> 规则的 `!important` 强制成白底、深蓝紫等宽粗体、13.5px 与 8px 36px 大内边距，
+> 在浅色卡片里呈现为一枚突兀的白色大胶囊，设备名提示与控件挤在一起。
+
+- **style(usage) 独立控件样式**：来源行加 `.source` 修饰、下拉改用
+  `.mt-usage-source`、提示加 `.mt-usage-source-hint`；以更高特异性压过全局
+  `select` 深度美化，改为透明底 + 细描边 + 4px 小圆角方框 + 10.5px 次要文字色
+  + 紧贴文字的小箭头；不设 `min-width` / `max-width`，宽度刚好包住
+  「物理网卡 / 模组 AT」，hover / focus 不再整块染紫；暗色主题同步适配选项弹层。
+- **style(usage) 层级收敛**：来源行内边距 4px→3px，标签显式透明底与统一字色，
+  设备名提示改淡色等宽小字并加 `·` 分隔、超长省略，整行更小巧。
+- **chore(version) 缓存版本戳同步**：`MT5700_CSS_VERSION` 2.46.4→2.46.6；
+  `PKG_VERSION` / `MT5700_UI_VERSION` 1.32.0→1.32.1，README 徽标、文档站徽标
+  与四处下载链接同步，新增 `docs/release-notes/v1.32.1.md`，确保浏览器重新拉取样式。
+- **test** `tests/usage-source-test.js` 增加视图 / CSS / 版本戳契约断言，
+  防止来源控件再次复用天数输入框样式或漏递增缓存戳。
+
+---
+
+## v1.32.0（2026-11-05）
+
+> 流量统计口径修正版：实时速率与「本次使用量」只统计 WAN 区域里模组创建的物理网口，彻底排除 `br-lan` 与 LAN 侧网卡；新增统计来源手动开关（物理网卡计数器 / 模组 `AT^DSFLOWQRY`），DNS 下发目标改为按 WAN 区域自动反查，全程不绑定具体网卡名。
+
+### fix(usage) 流量统计仅统计 WAN 区域、排除 br-lan，并支持来源手动切换
+
+> 旧实现的解析顺序是 `MT5700M → 绑定模组网口的接口 → LAN → br-lan`：模组接口
+> 未创建或绑定失效时会回落到 LAN 网桥。实机 LAN 网桥上行计数器超过 200 GB，
+> 绝大部分来自 Wi-Fi 与内网互传，计入后会把蜂窝用量放大一到两个数量级。
+> 另外 `netrate` 允许显式传入任意 `device`，手工传 `br-lan` 可直接读到该计数器。
+
+- **refactor(usage) WAN 区域自动识别**：Rust `usage.rs` 与 rpcd ucode 改为一次
+  `uci show firewall` + 一次 `uci show network` 解析，`@别名` 递归解析、按 USB 总线
+  判据定位模组网口；优先级为「WAN 区域 ∩ USB 模组网口 → WAN 区域其它物理网口 →
+  候选全无时非 LAN 归属的 USB 网卡」。全程不写死网卡名，显式排除 `br-lan` /
+  `br-lan.*` / `lo` / LAN 区域网卡；全部失败时停止采样（累计值保留），不再回退 LAN。
+- **fix(netrate) 入参校验**：显式 `device` 必须与自动识别结果一致，`br-lan` 等
+  LAN 侧入参一律忽略；识别不到 WAN 网卡时返回 `success:false`，不再伪装成 0 流量。
+- **feat(usage) 统计来源开关**：新增 `at-webserver.config.usage_source`
+  （`netdev` 默认 / `modem`），可在「网络状态 → 本次使用量」里切换。`modem` 走
+  已在状态缓存白名单里的 `AT^DSFLOWQRY`（手册 16.12，DS 累计收发为 16 位十六进制
+  字节数），采样间隔对齐 2 秒刷新；切换写 UCI 并热更新，`device` 标签变化触发
+  重新基线、累计值保留。清零只重置插件侧累计，不下发 `AT^DSFLOWCLR`。
+- **feat(usage) 速率同口径**：`modem` 来源下 `netrate` 转发到 Rust 后端的
+  `netrate` 方法，返回同一份 DS 累计值；`netdev` 仍由 ucode 直读 sysfs，零 AT 负担。
+- **feat(dns) DNS 下发目标自动反查**：init.d 新增 `iface_in_wan_zone` /
+  `dns_direct_ifaces` / `dns_alias_ifaces`，按「USB 模组网口 + WAN 区域」找出所有
+  承载接口；IPv4 DNS 下发给直接绑定接口、IPv6 DNS 下发给 `@别名` 接口，
+  清除时覆盖全部曾下发接口。同时移除 USB 探测中对 `eth0|eth1` 的硬编码跳过，
+  改由 USB 总线判据决定。
+- **test** 重写 `tests/netrate-interface-test.js`（WAN 归属、br-lan 拒绝、全无兜底、
+  来源分流、声明顺序），新增 `tests/usage-source-test.js`（跨层契约与旧实现残留检查）。
+- **docs** README 补充统计口径、来源开关与 DNS 目标说明；UCI 默认配置补充
+  `usage_source` 及注释。
+- **chore(version) 版本与缓存戳同步**：`PKG_VERSION` / `MT5700_UI_VERSION`
+  1.31.1→1.32.0；README Version 徽标、文档站版本徽标与四处下载链接同步到
+  v1.32.0 资产，新增 `docs/release-notes/v1.32.0.md`。发版后浏览器缓存整体失效。
+
+---
+
 ## v1.31.1（2026-11-05）
 
 ### fix(parse) HFREQINFO 同行多组 NR 载波仅解析第一组（Issue #38）

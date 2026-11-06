@@ -51,6 +51,24 @@ pub struct AtCommandResponse {
     pub data: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// 失败原因分类，前端据此区分「模组没回」与「通道/后端本身不可用」。
+    /// ucode 层（mt5700.uc）本来就把 `cause` 平移到顶层给前端，`at` 通道早先
+    /// 漏了这一维：模组静默时后端报的是超时，前端却只能当成 AT ERROR。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+}
+
+/// 从 `send_command_pri` 的错误串里识别超时类失败。
+///
+/// 排队超时（`at_queue`：「等待空闲通道超时（Ns）…」）、传输层连接超时、
+/// 外层应答超时都属于「没等到响应」，与模组明确回了 ERROR 是两回事，
+/// 前端要按「查询超时」呈现，不能写成「AT ERROR」。
+fn at_failure_cause(err: &str) -> Option<String> {
+    if err.contains("超时") {
+        Some("timeout".to_string())
+    } else {
+        None
+    }
 }
 
 /// 短信存储用量 → 前端 JSON。
@@ -342,11 +360,17 @@ impl RpcServer {
                     }
                 }
                 let resp = self.run_command(cmd).await;
-                serde_json::json!({ "id": id, "result": {
+                let mut result = serde_json::json!({
                     "success": resp.success,
                     "data": resp.data,
                     "error": resp.error,
-                } })
+                });
+                /* 仅失败应答带 cause：skip_serializing_if 只作用于 serde 序列化，
+                 * json! 手工拼接必须自己判空，否则成功应答也会多出 cause:null。 */
+                if let Some(cause) = resp.cause {
+                    result["cause"] = serde_json::Value::String(cause);
+                }
+                serde_json::json!({ "id": id, "result": result })
             }
             "events" => {
                 let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -444,8 +468,27 @@ impl RpcServer {
                 let snap = self.usage.snapshot().await;
                 serde_json::json!({ "id": id, "result": snap })
             }
+            // 实时速率计数器：与 usage 共用同一套来源口径。
+            // netdev 由 ucode 直读 sysfs；modem 来源下 ucode 转发到这里，
+            // 返回 AT^DSFLOWQRY 的 DS 累计值，前端按采样差算速率。
+            "netrate" => {
+                match self.usage.counters().await {
+                    Some((device, rx, tx)) => serde_json::json!({
+                        "id": id,
+                        "result": { "success": true, "device": device, "rx_bytes": rx, "tx_bytes": tx }
+                    }),
+                    None => serde_json::json!({
+                        "id": id,
+                        "result": {
+                            "success": false,
+                            "device": "",
+                            "error": "未识别到 WAN 区域网卡，已停止统计（不回退 LAN/br-lan）"
+                        }
+                    }),
+                }
+            }
             // 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off /
-            // set_reset_day（改自动清零日 = 每月几号，写 UCI）。
+            // set_reset_day（改自动清零日 = 每月几号）/ set_source（切换统计来源）。
             "usage_ctl" => {
                 let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("");
                 let result = match action {
@@ -459,6 +502,14 @@ impl RpcServer {
                             return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
                         }
                         // set_reset_day 内部已热更新内存值，snapshot 读到的就是新的清零日
+                        Some(self.usage.snapshot().await)
+                    }
+                    // 统计来源：只接受 netdev / modem，归一化与 UCI 写入在 usage 模块
+                    "set_source" => {
+                        let source = req.params.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                        if let Err(e) = self.usage.set_source(source).await {
+                            return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
+                        }
                         Some(self.usage.snapshot().await)
                     }
                     _ => None,
@@ -934,15 +985,23 @@ impl RpcServer {
             Ok(Ok(resp)) => {
                 let text = resp.text();
                 if resp.has_error() {
-                    return AtCommandResponse { success: false, data: None, error: Some(text) };
+                    /* 模组明确回了 ERROR：属于真实的 AT 失败，不是没等到响应 */
+                    return AtCommandResponse { success: false, data: None, error: Some(text), cause: None };
                 }
-                AtCommandResponse { success: true, data: Some(text), error: None }
+                AtCommandResponse { success: true, data: Some(text), error: None, cause: None }
             }
             Ok(Err(e)) => {
                 log_debug!("AT 命令失败: {} -> {}", command.trim(), e);
-                AtCommandResponse { success: false, data: None, error: Some(e) }
+                let cause = at_failure_cause(&e);
+                AtCommandResponse { success: false, data: None, error: Some(e), cause }
             }
-            Err(_) => AtCommandResponse { success: false, data: None, error: Some("命令执行超时".into()) },
+            /* 外层预算（排队 + 应答 + 余量）耗尽：模组静默/正在重连，前端要按超时呈现 */
+            Err(_) => AtCommandResponse {
+                success: false,
+                data: None,
+                error: Some("命令执行超时".into()),
+                cause: Some("timeout".into()),
+            },
         }
     }
 
@@ -960,6 +1019,7 @@ impl RpcServer {
                 success: true,
                 data: Some(format!("{SCHED_RESPONSE_PREFIX}{payload}\r\nOK")),
                 error: None,
+                cause: None,
             });
         }
 
@@ -985,6 +1045,7 @@ impl RpcServer {
                 success: true,
                 data: Some(format!("{SCHED_RESPONSE_PREFIX}OK\r\nOK")),
                 error: None,
+                cause: None,
             });
         }
 
@@ -1199,11 +1260,16 @@ async fn run_cell_scan(
 }
 
 pub fn ok_response(data: &str) -> AtCommandResponse {
-    AtCommandResponse { success: true, data: Some(data.to_string()), error: None }
+    AtCommandResponse { success: true, data: Some(data.to_string()), error: None, cause: None }
 }
 
 pub fn err_response(msg: &str) -> AtCommandResponse {
-    AtCommandResponse { success: false, data: None, error: Some(msg.to_string()) }
+    AtCommandResponse {
+        success: false,
+        data: None,
+        error: Some(msg.to_string()),
+        cause: at_failure_cause(msg),
+    }
 }
 
 /// 修补前端发来的 AT^SYSCFGEX：把频段参数重新加上引号，并补齐末尾两个空参数。
@@ -1353,5 +1419,37 @@ mod imei_write_guard_tests {
         assert_eq!(extract_imei15(""), None);
         assert_eq!(extract_imei15("12345678901234"), None); // 14 位
         assert_eq!(extract_imei15("8622340512345678"), None); // 16 位 IMEISV，无恰好 15 位段
+    }
+}
+
+#[cfg(test)]
+mod at_failure_cause_tests {
+    use super::{at_failure_cause, err_response};
+
+    #[test]
+    fn 排队与连接超时归为_timeout() {
+        // at_queue 的排队预算耗尽、transport 的连接超时，都是「没等到响应」
+        assert_eq!(
+            at_failure_cause("等待空闲通道超时（10s）：模组正忙或正在重连，请稍后重试").as_deref(),
+            Some("timeout")
+        );
+        assert_eq!(at_failure_cause("连接超时").as_deref(), Some("timeout"));
+        assert_eq!(at_failure_cause("命令执行超时").as_deref(), Some("timeout"));
+    }
+
+    #[test]
+    fn 非超时失败不给_cause() {
+        // 这些交给前端按「AT ERROR / 后端报错」呈现，不能谎报超时
+        assert_eq!(at_failure_cause("串口已断开"), None);
+        assert_eq!(at_failure_cause("正在扫频，模组暂时无法响应其它命令，请先取消扫频"), None);
+        assert_eq!(at_failure_cause(""), None);
+    }
+
+    #[test]
+    fn err_response_自动带上超时分类() {
+        let r = err_response("扫频超时");
+        assert_eq!(r.cause.as_deref(), Some("timeout"));
+        assert!(!r.success);
+        assert_eq!(err_response("当前没有正在进行的扫频").cause, None);
     }
 }

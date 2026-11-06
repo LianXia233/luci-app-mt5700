@@ -470,147 +470,223 @@ function netdevUsable(dev) {
 	return readCounter('/sys/class/net/' + dev + '/statistics/rx_bytes') != null;
 }
 
-/* 接口绑定的网卡名：先 device，其次旧式 ifname；每级都要求计数器可读。
- * list 写法（ifname: ['eth2','eth3']）取首项，与 usage.rs 的 first_netdev 同口径：
- * uci get 对列表返回数组，直接当字符串用会被 substr() 报错，也会把整串当网卡名。
- * '@别名' 不是物理网卡名，视为取不到。 */
-function ifaceNetdev(cursor, name) {
-	const options = ['device', 'ifname'];
-	for (let i = 0; i < length(options); i++) {
-		let raw = null;
-		try {
-			raw = cursor.get('network', name, options[i]);
-		} catch (e) {
-			raw = null;
+/* 取 `uci show` 某行等号右侧的引号内取值，返回空格分隔的 token 串。
+ * 标量 'eth2' 与列表 'a' 'b' 都能处理；无引号时退化为取首个空白分隔项。 */
+function uciValueTokens(raw) {
+	let parts = split(raw, "'");
+	let out = '';
+	for (let i = 1; i < length(parts); i += 2) {
+		let v = trim(parts[i]);
+		if (v != '') {
+			out = out + v + ' ';
 		}
-		if (type(raw) == 'array') {
-			raw = length(raw) > 0 ? raw[0] : null;
-		}
-		if (raw == null || raw == '') {
-			continue;
-		}
-		let tokens = split(trim(raw));
-		if (length(tokens) == 0) {
-			continue;
-		}
-		let dev = tokens[0];
-		if (substr(dev, 0, 1) == '@' || !netdevUsable(dev)) {
-			continue;
-		}
-		return dev;
 	}
-	return null;
+	if (out == '') {
+		let plain = split(trim(raw), ' ');
+		if (length(plain) > 0) {
+			out = plain[0] + ' ';
+		}
+	}
+	return out;
 }
 
-/* 是否有 network 接口显式绑定了该物理网卡（device，其次旧式 ifname）。
- * 与 usage.rs 的 iface_bound_to 同口径：一次 uci show network，逐行取
- * network.<section>.device|ifname 的取值，按引号切开后比对网卡名，
- * 这样 list 写法（'eth2' 'eth3'）也能命中。 */
-function netdevBoundByIface(netdev) {
+/* 执行 `uci -q show <pkg>`，把全部输出拼成一个文本返回（失败返回空串）。 */
+function uciShowText(pkg) {
 	let p;
 	try {
-		p = fs.popen('uci -q show network', 'r');
+		p = fs.popen('uci -q show ' + pkg, 'r');
 	} catch (e) {
-		return false;
+		return '';
 	}
 	if (!p) {
-		return false;
+		return '';
 	}
-	let hit = false;
+	let text = '';
 	while (true) {
 		let line = p.read('line');
 		if (line == null) {
 			break;
 		}
-		let kv = split(trim(line), '=');
-		if (length(kv) != 2) {
+		text = text + line;
+	}
+	p.close();
+	return text;
+}
+
+/* 从 `uci show firewall` 文本里取指定区域（wan / lan）的逻辑接口名，空格分隔。
+ * 先找 name='<zone>' 的 section，再取同 section 的 network 列表，
+ * 兼容匿名 section（@zone[1]）与命名 section。 */
+function zoneIfaces(text, zone) {
+	let lines = split(text, '\n');
+	let sections = ' ';
+	for (let i = 0; i < length(lines); i++) {
+		let pos = index(lines[i], '=');
+		if (pos < 0) continue;
+		let kp = split(trim(substr(lines[i], 0, pos)), '.');
+		if (length(kp) != 3 || kp[2] != 'name') continue;
+		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))), ' ');
+		if (length(vals) > 0 && vals[0] == zone) {
+			sections = sections + kp[1] + ' ';
+		}
+	}
+	let out = '';
+	for (let i = 0; i < length(lines); i++) {
+		let pos = index(lines[i], '=');
+		if (pos < 0) continue;
+		let kp = split(trim(substr(lines[i], 0, pos)), '.');
+		if (length(kp) != 3 || kp[2] != 'network') continue;
+		if (index(sections, ' ' + kp[1] + ' ') < 0) continue;
+		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))), ' ');
+		for (let j = 0; j < length(vals); j++) {
+			if (index(' ' + out, ' ' + vals[j] + ' ') < 0) {
+				out = out + vals[j] + ' ';
+			}
+		}
+	}
+	return out;
+}
+
+/* 从 `uci show network` 文本里建立 section -> device/ifname 首值的映射。 */
+function networkDevices(text) {
+	let out = {};
+	let lines = split(text, '\n');
+	for (let i = 0; i < length(lines); i++) {
+		let pos = index(lines[i], '=');
+		if (pos < 0) continue;
+		let kp = split(trim(substr(lines[i], 0, pos)), '.');
+		if (length(kp) != 3 || (kp[2] != 'device' && kp[2] != 'ifname')) continue;
+		let vals = split(trim(uciValueTokens(substr(lines[i], pos + 1))), ' ');
+		if (length(vals) == 0) continue;
+		/* device 优先于旧式 ifname；已写入则不再覆盖 */
+		if (kp[2] == 'ifname' && out[kp[1]] != null) continue;
+		out[kp[1]] = vals[0];
+	}
+	return out;
+}
+
+/* 逻辑接口 -> 物理网卡；@别名最多跟 4 层，防配置成环。 */
+function resolveNetdev(iface, devs) {
+	let cur = iface;
+	for (let i = 0; i < 4; i++) {
+		let v = devs[cur];
+		if (v == null || v == '') return null;
+		if (substr(v, 0, 1) == '@') {
+			cur = substr(v, 1);
 			continue;
 		}
-		let kp = split(kv[0], '.');
-		if (length(kp) != 3 || kp[0] != 'network'
-			|| (kp[2] != 'device' && kp[2] != 'ifname')) {
-			continue;
-		}
-		let parts = split(kv[1], "'");
-		for (let i = 0; i < length(parts); i++) {
-			if (trim(parts[i]) == netdev) {
-				hit = true;
+		return v;
+	}
+	return null;
+}
+
+/* LAN 侧网卡判定：硬排除 br-lan 及 VLAN 子接口、lo，以及 LAN 区域绑定的网卡。 */
+function isLanSide(dev, lanTokens) {
+	if (dev == null || dev == '' || dev == 'lo' || dev == 'br-lan') return true;
+	if (substr(dev, 0, 7) == 'br-lan.') return true;
+	if (index(' ' + lanTokens + ' ', ' ' + dev + ' ') >= 0) return true;
+	return false;
+}
+
+/* 网卡是否被「非 LAN 区域」的 network 接口绑定：
+ * 候选全无时给 USB 网卡做 WAN 侧归属校验。 */
+function boundOutsideLan(dev, devs, lanIfaces) {
+	let ks = keys(devs);
+	let lanList = split(trim(lanIfaces), ' ');
+	for (let i = 0; i < length(ks); i++) {
+		let skip = false;
+		for (let j = 0; j < length(lanList); j++) {
+			if (lanList[j] == ks[i]) {
+				skip = true;
 				break;
 			}
 		}
-		if (hit) {
-			break;
-		}
+		if (skip) continue;
+		if (devs[ks[i]] == dev) return true;
 	}
-	p.close();
-	return hit;
+	return false;
 }
 
-/* 固件里显式绑定模组网口的其它接口（例如 wan 直接 option device 'eth2'）。
- * 网口自动模式下 init.d 会复用既有接口而不创建 MT5700M，
- * 「MT5700M 不存在」并不等于「没有模组绑定」，必须先确认绑定关系，
- * 确认不到才允许退回 LAN。 */
-function boundModemNetdev() {
-	let usb;
+/* 统计来源：netdev（默认，sysfs）/ modem（模组 AT^DSFLOWQRY）。
+ * 非法值一律回落 netdev，避免误配导致口径漂移。 */
+function usageSource() {
+	let p;
+	try {
+		p = fs.popen('uci -q get at-webserver.config.usage_source', 'r');
+	} catch (e) {
+		return 'netdev';
+	}
+	if (!p) return 'netdev';
+	let line = p.read('line');
+	p.close();
+	if (line != null && trim(line) == 'modem') return 'modem';
+	return 'netdev';
+}
+
+/*
+ * 选出流量统计用的唯一物理网卡（与 src/rust/src/usage.rs 同语义）。
+ * 全程不写死任何网卡名，自动识别「模组创建的 WAN 口 / 物理网口」：
+ *   1) WAN 区域成员（交集）USB 模组网口 -> 采用；
+ *   2) 模组网口未命中时，取 WAN 区域里第一个非 LAN 侧的可用物理网口；
+ *   3) 候选全无时，仍只接受「非 LAN 归属的 USB 网卡」；
+ *   4) 全部失败返回 null —— 停止统计，绝不回退 LAN / br-lan。
+ * 取数只走一次 `uci show firewall` + 一次 `uci show network`，
+ * 比旧实现逐个 `uci get` 起子进程更省。
+ */
+function detectWanDevice() {
+	let fwText = uciShowText('firewall');
+	let netText = uciShowText('network');
+	let wanIfaces = zoneIfaces(fwText, 'wan');
+	let lanIfaces = zoneIfaces(fwText, 'lan');
+	if (trim(wanIfaces) == '') {
+		wanIfaces = 'MT5700M MT5700Mv6 wan wan6 ';
+	}
+	let devs = networkDevices(netText);
+
+	let lanTokens = '';
+	let lanList = split(trim(lanIfaces), ' ');
+	for (let i = 0; i < length(lanList); i++) {
+		let d = resolveNetdev(lanList[i], devs);
+		if (d != null) lanTokens = lanTokens + d + ' ';
+	}
+
+	let candidates = '';
+	let wanList = split(trim(wanIfaces), ' ');
+	for (let i = 0; i < length(wanList); i++) {
+		let d = resolveNetdev(wanList[i], devs);
+		if (d == null || isLanSide(d, lanTokens)) continue;
+		if (!netdevUsable(d)) continue;
+		if (index(' ' + candidates, ' ' + d + ' ') >= 0) continue;
+		candidates = candidates + d + ' ';
+	}
+
+	let usb = null;
 	try {
 		usb = detectUsbNetdev();
 	} catch (e) {
 		usb = null;
 	}
-	if (!netdevUsable(usb)) {
-		return null;
-	}
-	let bound = false;
-	try {
-		bound = netdevBoundByIface(usb);
-	} catch (e) {
-		bound = false;
-	}
-	return bound ? usb : null;
-}
 
-/*
- * 解析流量统计使用的网络设备名（与 src/rust/src/usage.rs 的 detect_netdev 同语义）：
- *   1) 模组自建接口 MT5700M 的物理绑定；用户修改 device/ifname 后，
- *      下一次采样会直接使用修改后的网卡；
- *   2) MT5700M 不存在或绑定不可用时，取固件中显式绑定模组网口的其它接口
- *      （网口自动模式下 init.d 会生成这种复用配置，例如 wan 绑 eth2）；
- *   3) 前两级都取不到时才退回 LAN；LAN 也未配置时用默认网桥名 br-lan。
- * USB 扫描只作为第 2 步的定位手段，且必须确认确有接口绑定才采用，
- * 不允许用它覆盖用户在网络接口页面设置的物理绑定。
- */
-function detectModemDevice() {
-	let cursor;
-	try {
-		cursor = uci.cursor();
-	} catch (e) {
-		return 'br-lan';
+	/* 1) 模组创建的 WAN 口 */
+	if (usb != null && index(' ' + candidates, ' ' + usb + ' ') >= 0) return usb;
+	/* 2) 默认 WAN 口所在的物理网卡：设备上没有模组专用 WAN 口可用时，
+	 * 按 network.wan 反查出的物理网卡统计，仍绝不回退 LAN。
+	 * 仅当 wan 逻辑接口确实属于 WAN 区域时才采用。 */
+	if (index(' ' + trim(wanIfaces) + ' ', ' wan ') >= 0) {
+		let defaultWan = resolveNetdev('wan', devs);
+		if (defaultWan != null && !isLanSide(defaultWan, lanTokens)
+			&& netdevUsable(defaultWan)) return defaultWan;
 	}
-
-	let dev = null;
-	try {
-		dev = ifaceNetdev(cursor, 'MT5700M');
-	} catch (e) {
-		dev = null;
+	/* 3) WAN 区域内的其它物理网口。
+	 * 实机 ucode 的 split('', ' ') 返回 [''] 而不是 []，必须跳过空项，
+	 * 否则候选全无时会返回空串、直接吞掉下面第 3 级 USB 回落。 */
+	let list = split(trim(candidates), ' ');
+	for (let i = 0; i < length(list); i++) {
+		if (list[i] != '') return list[i];
 	}
-	if (dev == null) {
-		try {
-			dev = boundModemNetdev();
-		} catch (e) {
-			dev = null;
-		}
-	}
-	if (dev == null) {
-		try {
-			dev = ifaceNetdev(cursor, 'lan');
-		} catch (e) {
-			dev = null;
-		}
-	}
-	if (dev == null) {
-		dev = 'br-lan';
-	}
-	return dev;
+	/* 4) 候选全无：只认非 LAN 归属的 USB 网卡 */
+	if (usb != null && !isLanSide(usb, lanTokens) && netdevUsable(usb)
+		&& boundOutsideLan(usb, devs, lanIfaces)) return usb;
+	return null;
 }
 
 /* 十进制 → 大写十六进制（ucode 无 sprintf('%X') 之外的便捷格式化，自己拼） */
@@ -664,41 +740,6 @@ function tcpHasListen(tcpContent, port) {
 	return false;
 }
 
-/* 取网络接口累计字节数（只读，不累加任何东西）。
- *
- * 实时速率由前端按「两次采样差 / 时间差」计算；累计使用量改由 Rust 后端
- * 常驻采样统计（见 src/rust/src/usage.rs），与本方法无关 —— 那样才能做到
- * 前端关闭 / 刷新都不影响统计。
- *
- * 关键：全程不向模组下发任何 AT 命令，避免占用 AT 通道、干扰模组工作。
- */
-function netrateCall(req) {
-	let a = req.args;
-	let dev = getStr(a, 'device');
-	/* device 会拼进 sysfs 只读路径：只接受接口名字符（明确排除 '/'，
-	 * 阻断 ../ 穿越）；非法值忽略并回落自动探测，不报错。 */
-	if (dev != null && dev != '' && match(dev, /^[A-Za-z0-9._@:-]+$/) == null) {
-		dev = null;
-	}
-	if (dev == null || dev == '') {
-		dev = detectModemDevice();
-	}
-
-	const base = '/sys/class/net/' + dev;
-	const rx = readCounter(base + '/statistics/rx_bytes');
-	const tx = readCounter(base + '/statistics/tx_bytes');
-
-	if (rx == null && tx == null) {
-		return { success: false, device: dev, error: '读不到接口计数器，设备可能不存在或未 up' };
-	}
-
-	return {
-		success: true,
-		device: dev,
-		rx_bytes: rx == null ? 0 : rx,
-		tx_bytes: tx == null ? 0 : tx
-	};
-}
 
 /*
  * 取模组与路由器之间的 USB 链路速率（自动识别，不硬编码设备路径/产品名）。
@@ -1036,6 +1077,64 @@ function rpcCall(method, params, timeoutSec) {
 	}
 }
 
+/* 取网络接口累计字节数（只读，不累加任何东西）。
+ *
+ * 实时速率由前端按「两次采样差 / 时间差」计算；累计使用量由 Rust 后端
+ * 常驻采样统计（src/rust/src/usage.rs），与本方法无关。
+ *
+ * 统计口径与后端一致，由 `usage_source` 手动切换：
+ *   netdev（默认） -> 自动识别 WAN 区域模组物理网口，直读 sysfs，零 AT 负担；
+ *   modem          -> 转发到 Rust 后端，取 AT^DSFLOWQRY 的 DS 累计值。
+ * 两种情况都排除 br-lan / lo / LAN 区域网卡，取不到即 success:false，绝不回退 LAN。
+ *
+ * 本函数必须放在 rpcCall() 之后：ucode 不做函数声明提升，放在前面会在
+ * 运行时报 "access to undeclared variable rpcCall"（见 AGENTS 声明顺序守卫）。
+ */
+function netrateCall(req) {
+	let a = req.args;
+	let dev = getStr(a, 'device');
+	/* device 会拼进 sysfs 只读路径：只接受接口名字符（明确排除 '/'，
+	 * 阻断 ../ 穿越）；非法值忽略并回落自动探测，不报错。 */
+	if (dev != null && dev != '' && match(dev, /^[A-Za-z0-9._@:-]+$/) == null) {
+		dev = null;
+	}
+
+	/* 模组来源：交给后端取 DS 累计值，保证速率与「本次使用量」同口径。
+	 * 后端走已有的 2s 状态缓存，不会额外挤占 AT 通道。 */
+	if (usageSource() == 'modem') {
+		return rpcCall('netrate', {
+			device: dev == null ? '' : dev,
+			_rid: getStr(a, '_rid')
+		});
+	}
+
+	let wan = detectWanDevice();
+	/* 显式入参必须与自动识别结果一致：br-lan / lo / LAN 侧网卡一律拒绝，
+	 * 防止旧前端或手工 RPC 把局域网桥接流量算成蜂窝流量。 */
+	if (dev != null && dev != '' && dev != wan) {
+		dev = null;
+	}
+	if (dev == null || dev == '') {
+		dev = wan;
+	}
+	if (dev == null || dev == '') {
+		return { success: false, device: '', error: '未识别到 WAN 区域网卡，已停止统计（不回退 LAN/br-lan）' };
+	}
+
+	const base = '/sys/class/net/' + dev;
+	const rx = readCounter(base + '/statistics/rx_bytes');
+	const tx = readCounter(base + '/statistics/tx_bytes');
+	if (rx == null && tx == null) {
+		return { success: false, device: dev, error: '读不到 WAN 接口计数器，设备可能不存在或未 up' };
+	}
+	return {
+		success: true,
+		device: dev,
+		rx_bytes: rx == null ? 0 : rx,
+		tx_bytes: tx == null ? 0 : tx
+	};
+}
+
 return {
 	mt5700: {
 		at: {
@@ -1190,18 +1289,28 @@ return {
 			}
 		},
 		usage_ctl: {
-			args: { action: '', day: 0, _rid: '' },
+			args: { action: '', day: 0, source: '', _rid: '' },
 			call: function (req) {
 				let a = req.args;
 				let action = getStr(a, 'action');
-				/* action 走白名单，不透传客户端原值；day 只在 set_reset_day 时带上 */
-				if (action != 'reset' && action != 'persist_on' && action != 'persist_off' && action != 'set_reset_day') {
+				/* action 走白名单，不透传客户端原值；day / source 按动作带上 */
+				if (action != 'reset' && action != 'persist_on' && action != 'persist_off'
+					&& action != 'set_reset_day' && action != 'set_source') {
 					return { success: false, error: '不支持的 usage_ctl 动作' };
 				}
 				let params = { action: action, _rid: getStr(a, '_rid') };
 				if (action == 'set_reset_day') {
 					/* 每月几号：1~31，越界交给后端夹取（大小月判定也在后端 monthly 模块） */
 					params.day = int(getStr(a, 'day')) || 0;
+				}
+				if (action == 'set_source') {
+					/* 来源走白名单：只认 netdev / modem，其它值后端也会回落 netdev */
+					let source = getStr(a, 'source');
+					if (source == 'modem') {
+						params.source = 'modem';
+					} else {
+						params.source = 'netdev';
+					}
 				}
 				return rpcCall('usage_ctl', params);
 			}
