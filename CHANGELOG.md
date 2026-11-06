@@ -8,6 +8,48 @@
 
 ---
 
+## v1.32.5（未发布）
+
+### feat(ui) 窄屏（≤768px）把 Tab 菜单收进可展开的悬浮菜单
+
+> 12 个页签在手机竖屏下换行成 3 排（360 / 390 宽实测 Tab 条高 108px），不但
+> 挤占内容区，还会把首屏推下去一屏的六分之一。桌面宽度下一排排布正常，问题
+> 只在窄屏。改动只针对交互形态：收起态保留一行高的药丸触发器（当前页名 +
+> 页签总数），展开后是覆盖内容的气泡浮层，选中即跳转；桌面端不构建任何节点。
+
+- **feat(ui)** `tabmenu.js` 新增窄屏悬浮菜单：`≤768px` 时把原生 Tab 条收起，
+  在原位置挂一个 38px 高的触发器，展开为 300px 宽的气泡浮层（`max-height:
+  min(60vh, 420px)`，超出内部滚动）。浮层条目按原顺序生成、沿用原标题与已注入
+  的图标，当前页高亮并带 `aria-current="page"`。
+- **feat(ui)** 交互口径：点击触发器展开/再点收起；点击浮层以外任意位置收起；
+  `Esc` 收起并把焦点交还触发器；浮层条目按 DOM 顺序自然进入 `Tab` 焦点链；
+  浮层为绝对定位、不参与文档流，页面滚动与底部固定操作栏位置均不受影响。
+- **feat(ui)** 兼容两套 Tab 结构：`#tabmenu > ul.tabs / ul.cbi-tabmenu`（
+  bootstrap / material / argon / openwrt-2020）与 ImmortalWrt Vantage 主题的
+  `nav#vt-tabs > .vt-pagetabs > a.vt-tab`（无 `#tabmenu` 容器，页签名从 href 末段取）。
+- **feat(ui)** 渐进增强：只有悬浮菜单构建成功才给 `body` 加 `at-tabmenu-mobile`
+  并由该类的 CSS 隐藏原生 Tab 条；JS 未执行、主题结构变化或宽度回到桌面时，
+  原生 Tab 条保持可用（不删节点、不改 href）。
+- **fix(ui)** 顺带修正：此前 Tab 增强只认 `#tabmenu`，在 Vantage 主题上整段
+  逻辑空转（既不注入图标也不做滚动校正）；现在图标注入仍只作用于 `#tabmenu`
+  系以保持 Vantage 桌面观感零改动，窄屏悬浮菜单则两套结构都生效。
+- **fix(ui)** ARIA 语义对齐（PR #48 Codex 评审）：浮层只是「触发器 + 链接列表」
+  的展开收起，之前却标了 `role="menu"` / `role="menuitem"` 与
+  `aria-haspopup="true"`，等于对外声明一个带方向键导航的菜单，而实现只有
+  `Tab` 与 `Esc`。现改为 `role="group"`（保留「页面切换」分组名），条目回归
+  原生链接语义、移出 `role="menuitem"`，触发器去掉 `aria-haspopup`，只留
+  `aria-expanded` / `aria-controls` 的 disclosure 语义；交互与视觉均未变。
+- **style(css)** 悬浮菜单沿用插件既有变量（`--mt5700-float-bg` / `--mt5700-glass`
+  / `--mt5700-accent-pale` / `--mt5700-sh-float`），亮色与 `html.at-dark` 暗色
+  均无新增色值；`MT5700_CSS_VERSION` 2.46.7 → 2.46.8。
+- **test** `tests/tabmenu-test.js` 断言数 33 → 54：覆盖 Vantage / `#tabmenu` 两套
+  结构下的构建、默认收起、点击展开与再收起、`Esc` 回焦、点击外部收起、选中条目
+  收起、断点回退销毁、桌面零副作用、浮层 ARIA 语义（分组而非 menu），以及
+  `tabKeyFromHref` 取键口径。
+- **验证** 实机（192.168.88.1，Vantage 主题，Playwright + Chromium）逐宽度读几何：
+  内容区首卡 y 由 360 宽 226→120、390/414 宽 190→120、768 宽 168→134；1280 宽
+  内容区 `(80,132,1176)` 与改动前完全一致，`nav.vt-tabs` 高度 60 未变。
+
 ## v1.32.4（2026-11-06）
 
 ### fix(css) 短信中心补齐夜间模式（普通模式与简洁模式都覆盖）
