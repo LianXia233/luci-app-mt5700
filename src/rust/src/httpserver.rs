@@ -17,8 +17,9 @@
 //!   POST /api/service/restart    延时后退出进程（systemd 自动拉起）
 //!   GET/POST /api/file/read|write|list|stat   受限文件访问（日志文件等）
 //!   POST /api/rpc/mt5700/usage                流量使用量快照（常驻采样，从 main 同步）
-//!   POST /api/rpc/mt5700/usage_ctl            使用量控制：reset / persist_on / persist_off / set_reset_day
+//!   POST /api/rpc/mt5700/usage_ctl            使用量控制：reset / persist_on / persist_off / set_reset_day / set_source
 //!   POST /api/rpc/mt5700/notify_test          推送通道测试（企业微信 / QQ，可选 channel）
+//!   POST /api/rpc/mt5700/sms                  短信事务（list/send/delete/容量/存储/短信中心/会话租约）
 //!   GET  /ws                     WebSocket 事件推送（每 400ms 批量增量；每 30s ping 保活）
 //!
 //! 认证：配置 auth_key 后，/api 与 /ws 需携带 X-Auth-Key 头（/ws 可用 ?key=）；
@@ -417,6 +418,24 @@ impl HttpServer {
                     .to_string();
                 match self.notifier.notify_test(&channel).await {
                     Ok(()) => ok_json(json!({ "success": true })),
+                    Err(e) => ok_json(json!({ "success": false, "error": e })),
+                }
+            }
+            // 短信事务（列表/发送/删除/容量/存储/短信中心/会话租约）。
+            // 前端 rpc.js 的 sms 按名传参，请求体本身就是参数字典（含 action）。
+            // 失败统一平铺成 {"success": false, "error": "..."} 且保持 200：
+            // 「模组回 ERROR」不等于「后端不可用」，用 5xx 会被前端熔断器误判。
+            ("POST", "/api/rpc/mt5700/sms") => {
+                let body = match serde_json::from_slice::<Value>(&req.body) {
+                    Ok(v) => v,
+                    Err(e) => return err_json(400, &format!("请求体不是有效 JSON: {e}")),
+                };
+                let action = body.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                if action.is_empty() {
+                    return err_json(400, "缺少参数 action");
+                }
+                match self.rpc.sms_action(action, &body).await {
+                    Ok(v) => ok_json(v),
                     Err(e) => ok_json(json!({ "success": false, "error": e })),
                 }
             }

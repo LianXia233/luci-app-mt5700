@@ -43,7 +43,6 @@
 		'at-webserver/uimode',
 		'at-webserver/tabmenu',
 		'at-webserver/rpc',
-		'at-webserver/smsEncode',
 		'at-webserver/mt5700',
 		'at-webserver/ui'
 	];
