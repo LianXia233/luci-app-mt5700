@@ -42,7 +42,7 @@
 - **style(css)** 悬浮菜单沿用插件既有变量（`--mt5700-float-bg` / `--mt5700-glass`
   / `--mt5700-accent-pale` / `--mt5700-sh-float`），亮色与 `html.at-dark` 暗色
   均无新增色值；`MT5700_CSS_VERSION` 2.46.7 → 2.46.8。
-- **test** `tests/tabmenu-test.js` 12 → 32 条断言：覆盖 Vantage / `#tabmenu` 两套
+- **test** `tests/tabmenu-test.js` 断言数 33 → 54：覆盖 Vantage / `#tabmenu` 两套
   结构下的构建、默认收起、点击展开与再收起、`Esc` 回焦、点击外部收起、选中条目
   收起、断点回退销毁、桌面零副作用、浮层 ARIA 语义（分组而非 menu），以及
   `tabKeyFromHref` 取键口径。
