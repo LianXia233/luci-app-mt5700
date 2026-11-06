@@ -292,7 +292,7 @@ service at-webserver restart
 | 驻留小区 / 频段 / PCI | `AT^MONSC` · `AT^HFREQINFO?` | 优先取 `^MONSC` 驻留小区，缺项由 `^HCSQ` 补齐 |
 | 实时速率 / 本次使用量 | WAN 区域模组物理网口 `sysfs` 计数器，或模组 `AT^DSFLOWQRY` | 来源可手动切换；默认走物理网卡，**全程不下发 AT**，零串口负担 |
 | 签约速率 (AMBR) | `AT^DSAMBR=<cid>`（手册 16.17） | 4G/5G 均可用；取不到时以 `AT+C5GQOSRDP` 的 Session-AMBR 兜底 |
-| QoS 等级 (5QI / QCI) | `AT+C5GQOSRDP=<数据 cid>`（3GPP TS 27.007） | 只读数据承载的等级字段；`0`（由网络选择）与 IMS 特征值按未上报显示 |
+| QoS 等级 (5QI / QCI) | `AT+C5GQOSRDP=<数据 cid>`（3GPP TS 27.007） | 只读数据承载的等级字段并校验应答 CID；`0`（由网络选择）按未上报显示 |
 | SIM 状态 / IMSI / ICCID | `AT+CPIN?` / `AT+CIMI` / `AT^ICCID?` | 状态机分层核对，防止误报就绪 |
 | 芯片温度矩阵 | `AT^CHIPTEMP?`（手册 17.1.1） | 12 路硬件测温点逐路定级，仪表盘以**最高通道结温**评定整体散热 |
 | 发射功率 | `AT^NTXPOWER?`（NR）/ `AT^TXPOWER?`（LTE） | NR 模式下 `AT^TXPOWER?` 恒报错属模组硬件正常行为 |
