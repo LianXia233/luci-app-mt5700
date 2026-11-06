@@ -219,6 +219,30 @@ impl RpcServer {
         self.archive = Some(a);
     }
 
+    /// HTTP 层短信入口（等价 TCP RPC 的 `sms` 方法）。
+    ///
+    /// TCP 层用 `{id, result|error}` 回包，而独立 WebUI 的 HTTP 层只需要结果本身，
+    /// 因此这里把两种信封拆平：成功给 `result` 对象，失败给错误文案。
+    /// 错误文案原样透出（含 `sms_busy:` 前缀），前端据此决定是否退避重试。
+    pub async fn sms_action(
+        &self,
+        action: &str,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let id = serde_json::json!(0);
+        let v = self.handle_sms(&id, action, params).await;
+        if let Some(result) = v.get("result") {
+            return Ok(result.clone());
+        }
+        let msg = v
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("短信操作失败")
+            .to_string();
+        Err(msg)
+    }
+
     pub fn hub(&self) -> Hub {
         self.hub.clone()
     }

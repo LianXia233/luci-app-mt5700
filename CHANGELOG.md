@@ -6,11 +6,77 @@
 > 变更记录见 `main` 分支的 `CHANGELOG.md`。本分支自 `76d1f82` 起脱离 LuCI 体系独立演进，
 > 版本号与 `main` **完全独立**，不对应 `main` 的 v1.x 编号。
 >
-> **版本号来源**：后端 `src/rust/Cargo.toml` 的 `version` 即 deb 包版本（`2.3.0`），
+> **版本号来源**：后端 `src/rust/Cargo.toml` 的 `version` 即 deb 包版本（`2.3.1`），
 > 由 `debian/build-deb.sh` 单点读取；Release 标签统一用 `debian-v*` 前缀
-> （当前已发布：`debian-v2.3.0`，含 amd64 / arm64 两个 deb）。
+> （当前已发布：`debian-v2.3.1`，含 amd64 / arm64 两个 deb）。
 >
 > **详细说明**：逐版本的完整设计说明与实测记录见 `docs/release-notes/`。
+
+## v2.3.1 (2026-11-06)
+
+### 批次三：补齐推送/短信入口，收尾 debian 打包
+
+`v2.3.0` 把 main 的后端与 WebUI 搬齐后，本分支仍有四处「功能在、入口无」的空档：
+推送通道只能改配置文件、短信中心与存储区因为缺 HTTP 路由而不可用。本版把它们补齐，
+并把 `debian/` 的旧路径文案与新键样例同步。
+
+- **feat(service) 通知总开关**: 新增 `notify_enabled`（后端所有外发消息的闸门，关闭后
+  信号巡检一并停止）与 `wechat_enabled`（企业微信通道独立开关）——两者此前只能改配置
+- **feat(service) 定时推送卡**: `notify_timer_interval`（1~1440 分钟，默认 10）+ 8 个
+  常用间隔快捷项；语义是「每 N 分钟推一次现状」，与事件驱动的实时通知互不影响
+- **feat(service) 信号定时巡检卡**: `notify_poll_enabled` / `notify_poll_start` /
+  `notify_poll_end` / `notify_poll_interval`（30~3600 秒）/ `notify_poll_delta`（1~30 dB）/
+  `notify_poll_all`；跨零点时段（22:00~06:00）可用
+- **feat(service) 信号类通知限频**: `notify_signal_min_interval`（0~10080 分钟，0 不限频），
+  只约束事件驱动的信号通知，短信与来电保持实时
+- **feat(service) QQ 推送卡**: `qq_enabled` / `qq_app_id` / `qq_app_secret` /
+  `qq_target_type`（group / c2c / channel / bind）/ `qq_target_id` / `qq_bind_qq` /
+  `qq_msg_format`（auto / markdown / text）/ `qq_max_per_minute`（0~60）；
+  AppSecret 可留空改用环境变量 `QQ_BOT_APP_SECRET`
+- **feat(httpserver) 短信路由**: 新增 `POST /api/rpc/mt5700/sms` —— 此前 `rpcserver.rs`
+  的 `handle_sms` 是私有 `async fn`，HTTP 层拿不到，短信中心与存储区一律报错；
+  新增公开转发 `RpcServer::sms_action`（把 TCP 的 `{id, result|error}` 信封拆平），
+  失败按前端 `rpc.js` 约定平铺成 `{"success": false, "error": "..."}` 且保持 200
+  （用 5xx 会被前端熔断器误判成「后端不可用」）
+- **refactor(webui)**: 删除 `at-webserver/smsEncode.js`（main v1.25 起已删除，编码并入
+  `rpc.js`），`app.js` 预加载顺序由 10 项收敛为 9 项
+- **fix(service) 署名与统一启动入口**: 补回 `.mt5700-author` 页脚（作者署名 + 主仓库链接，
+  按仓库「作者署名保护规则」必须保留，此前 Debian 化时丢失），并把 `Ui.startup(page, null)`
+  接入与其余 11 个视图一致的统一启动入口
+- **test**: 移植 main 的 11 个纯前端单测到 `tests/`（仅把资源根 `htdocs` 改写为 `webui`）：
+  合计 **238 项断言全部通过**（见下「验证」）
+- **chore(debian)**: `install.sh` 卸载文案的旧路径 `/etc/at-webserver-usage.json` 改为
+  实际的 `/etc/mt5700/usage.json`；`debian/config.json` 补 20 个新键示例（推送、巡检、QQ、
+  `usage_source`、`sms_storage`），QQ 凭据一律留空占位
+- **chore(version)**: `2.3.0` → `2.3.1`。`debian-v2.3.0` 已在批次二中间状态由 CI 建出并
+  保持不动，本版让 CI 重新生成 `debian-v2.3.1` 指向内容定稿的这一笔
+
+#### 两个新键的入口取舍（未新增卡片，说明理由）
+
+- **`usage_source`（流量统计来源）**：状态页「统计来源」下拉已通过
+  `/api/rpc/mt5700/usage_ctl` 的 `set_source` 即时换源（后端同时写回配置），
+  无需重启，因此在服务页重复放一个入口只会造成「两处都能改、且一处要重启」的割裂
+- **`sms_storage`（短信存储区）**：由短信设置页经 `mt5700.sms` 的存储区动作写回
+  （后端同步 `config.json`），随本版开放 `/api/rpc/mt5700/sms` 一并可用；
+  它属于「模组侧动作 + 配置」，单独做一个配置输入框反而会与模组实际存储区不一致
+
+#### 验证
+
+- `cargo check` 0 error 0 warning；`cargo test` **297 passed / 2 ignored / 0 failed**
+- `node --check` 全部改动 JS 通过；静态断言 **49/49**；三个 mock-modem 单测 29/29、45/45、26/26
+- 移植的 11 个单测全绿：`apn-channel` 12、`ca-status` 17、`cellular-icon` 38、`global-css` 29、
+  `parse-ndis` 4、`parse-regression` 43、`pdp-addr` 10、`signal-chart` 29、`switch-rollback` 6、
+  `theme` 44、`ui-lifecycle` 6
+- 服务页渲染证据（stub DOM 实跑 `load()` + `render()`）：8 张卡片 / 35 个表单标签，
+  「自动推送总开关」「企业微信推送」「定时推送」「信号定时巡检」「QQ 推送」全部命中
+- 改动文件全 LF + UTF-8；脱敏扫描无真实凭据（QQ 凭据键在样例中均为空值）
+- **未验证**：deb 安装与 systemd 启停、真实 AT 串口、QQ 真实收发、浏览器实机渲染
+  （本机无模组、无 systemd、无 9000 端口服务实例）
+- **未移植**（main 侧依赖本分支已删除的内容，非功能缺口）：`author-attribution-test`
+  （依赖仓库根 `AGENTS.md`）、`push-rate-test`（依赖 `root/etc/config/at-webserver`）、
+  `tabmenu-test`（依赖 `root/usr/share/luci/menu.d/*.json`）；另 `netrate-interface` /
+  `ucode-json` / `ucode-decl-order` / `usage-source` / `dual-ui-mode` / `hfreq-multicarrier`
+  测的是 OpenWrt 的 ubus/ucode/UCI 层，本分支无对应实现
 
 ## v2.3.0 (2026-11-06)
 
