@@ -515,7 +515,6 @@ var AtTabmenu = (function () {
 		trigger.setAttribute('type', 'button');
 		trigger.className = 'at-tabmenu-trigger';
 		trigger.setAttribute('aria-expanded', 'false');
-		trigger.setAttribute('aria-haspopup', 'true');
 		trigger.setAttribute('aria-controls', MOBILE_PANEL_ID);
 
 		var glyph = document.createElement('span');
@@ -536,10 +535,12 @@ var AtTabmenu = (function () {
 		trigger.appendChild(count);
 		trigger.appendChild(chevronGlyph());
 
+		// 只是「触发器 + 链接列表」的展开收起（disclosure），不是 ARIA menu：
+		// 用 role="group" 保留分组名称，条目走原生链接语义，Tab 顺序与普通导航一致
 		var panel = document.createElement('div');
 		panel.className = 'at-tabmenu-panel';
 		panel.setAttribute('id', MOBILE_PANEL_ID);
-		panel.setAttribute('role', 'menu');
+		panel.setAttribute('role', 'group');
 		panel.setAttribute('aria-label', '页面切换');
 		panel.setAttribute('hidden', '');
 
@@ -553,7 +554,6 @@ var AtTabmenu = (function () {
 			var active = item === activeItem;
 			var a = document.createElement('a');
 			a.className = 'at-tabmenu-panel-item' + (active ? ' is-active' : '');
-			a.setAttribute('role', 'menuitem');
 			a.setAttribute('href', href);
 			a.setAttribute('aria-current', active ? 'page' : 'false');
 			a.appendChild(buildIconEl(tabKeyOf(item, link)));
