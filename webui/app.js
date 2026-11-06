@@ -5,9 +5,12 @@
  * 独立 WebUI 的页面清单（path / title / view），视图代码位于
  * webui/luci-static/resources/view/at-webserver/*.js。
  *
- * 加载方式与 LuCI 的 require 一致：fetch 视图源码 → 剥离 'require ...'
- * 声明行 → new Function('L', code) 求值 → 取返回的视图类 →
- * 实例化后依次调用 load()/render() → 挂载到主区域。
+ * 加载方式与 LuCI 的 require 一致：fetch 模块源码 → 解析并剥除
+ * 'require <name>[ as <alias>];' 声明行 → 从模块注册表解析依赖
+ * （LuCI 内置名映射到垫片 L.*，at-webserver/* 映射到已加载的模块导出）→
+ * new Function(...依赖名, 'L', code) 求值 → 返回值即 LuCI 约定的
+ * 模块导出（视图类 / 资源模块的 Class 子类）。
+ * 视图实例化后依次调用 load()/render() → 挂载到主区域；
  * 切页时调用实例的 _dispose()（若视图定义）并触发 Ui 的 hashchange 清理。
  */
 
@@ -28,17 +31,37 @@
 		{ path: 'config',            title: '服务配置',   view: 'service' }
 	];
 
+	/* 资源模块加载顺序：必须满足 main 版模块间 'require' 声明的依赖——
+	 *   tabmenu ← theme + icons；rpc ← compat + parse；mt5700 ← compat +
+	 *   theme + tabmenu + icons + uimode；ui ← compat + theme + rpc。
+	 * mt5700.js 顶层同步调用 window.AtTheme.apply/injectCss，theme 必须先求值。 */
 	var RESOURCE_ORDER = [
 		'at-webserver/compat',
 		'at-webserver/parse',
+		'at-webserver/theme',
+		'at-webserver/icons',
+		'at-webserver/uimode',
+		'at-webserver/tabmenu',
 		'at-webserver/rpc',
 		'at-webserver/smsEncode',
 		'at-webserver/mt5700',
 		'at-webserver/ui'
 	];
 
+	/* LuCI 内置模块 → 垫片导出。main 的模块用 'require baseclass'/'rpc'/
+	 * 'uci'/'fs' 引用内置能力；'poll'/'ui' 等本项目未用到的内置暂不提供，
+	 * 误引用时 loader 会抛出可诊断的错误而不是静默返回 undefined。 */
+	var BUILTIN_MODULES = {
+		baseclass: window.L.Class,
+		rpc: window.L.rpc,
+		uci: window.L.uci,
+		fs: window.L.fs,
+		view: window.L.view
+	};
+
 	var loadedResources = null;
 	var loadedViews = {};
+	var moduleRegistry = {};   /* 'at-webserver/xxx' → 模块导出（Class） */
 	var currentInstance = null;
 
 	var navEl = document.getElementById('nav');
@@ -46,16 +69,42 @@
 
 	/* ---------- 模块加载 ---------- */
 
+	/* LuCI require 别名约定：'a/b/c' 缺省别名取最后一段 c */
+	function requireAlias(name, explicit) {
+		if (explicit) return explicit;
+		var i = name.lastIndexOf('/');
+		return i >= 0 ? name.slice(i + 1) : name;
+	}
+
+	function resolveRequire(name) {
+		if (Object.prototype.hasOwnProperty.call(BUILTIN_MODULES, name)) return BUILTIN_MODULES[name];
+		return moduleRegistry[name];
+	}
+
 	function evalModule(url) {
 		return fetch(url).then(function (resp) {
 			if (!resp.ok) throw new Error('加载模块失败: ' + url + ' (HTTP ' + resp.status + ')');
 			return resp.text();
 		}).then(function (code) {
-			/* 剥离 LuCI 'require ...' 声明行（普通 script 求值里它们只是字符串，无副作用） */
-			code = code.replace(/^\s*'require [^']*';\s*$/mg, '');
-			var factory = new Function('L', '"use strict";\n' + code + '\n');
-			/* 返回值 = LuCI 约定的模块类；资源模块同时会把实例挂到 window */
-			return factory(window.L);
+			/* 解析并剥除 LuCI 'require ...' 声明行（普通 script 求值里它们只是字符串） */
+			var depNames = [];
+			var depAlias = [];
+			code = code.replace(/^[ \t]*'require\s+([^']+?)';[ \t]*$/mg, function (_, spec) {
+				var parts = spec.trim().split(/\s+as\s+/);
+				var name = parts[0].trim();
+				depNames.push(name);
+				depAlias.push(requireAlias(name, parts[1] && parts[1].trim()));
+				return '';
+			});
+			var deps = depNames.map(function (n) {
+				var exp = resolveRequire(n);
+				if (exp === undefined) throw new Error('模块 ' + url + ' 依赖的 ' + n + ' 未注册（检查加载顺序）');
+				return exp;
+			});
+			/* 注入形参 = require 别名（裸标识符，与 LuCI 语义一致）+ L */
+			var paramNames = depAlias.concat(['L']);
+			var factory = Function.apply(null, paramNames.concat(['"use strict";\n' + code + '\n']));
+			return factory.apply(null, deps.concat([window.L]));
 		});
 	}
 
@@ -63,7 +112,10 @@
 		if (loadedResources) return loadedResources;
 		loadedResources = RESOURCE_ORDER.reduce(function (chain, name) {
 			return chain.then(function () {
-				return evalModule('/luci-static/resources/' + name + '.js');
+				return evalModule('/luci-static/resources/' + name + '.js').then(function (exp) {
+					moduleRegistry[name] = exp;
+					return exp;
+				});
 			});
 		}, Promise.resolve());
 		return loadedResources;

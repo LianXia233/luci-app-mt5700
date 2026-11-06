@@ -160,6 +160,13 @@
 			if (method === 'logs') return httpJson('/api/logs?since=' + encodeURIComponent(params.since || 0) + '&limit=' + encodeURIComponent(params.limit || 300));
 			if (method === 'netrate') return httpJson('/api/netrate?device=' + encodeURIComponent(params.device || ''));
 			if (method === 'usb') return httpJson('/api/usb');
+			/* 语义化 RPC（与通用转发等价，显式列出便于核对）：
+			 *   sms        —— 短信事务（list/send/delete/... ，参数形状见 rpc.js 的 rpcSms 声明）
+			 *   usage      —— 流量使用量快照
+			 *   usage_ctl  —— 使用量控制（action/day/source） */
+			if (method === 'sms') return httpJson('/api/rpc/mt5700/sms', { method: 'POST', body: params });
+			if (method === 'usage') return httpJson('/api/rpc/mt5700/usage', { method: 'POST', body: params });
+			if (method === 'usage_ctl') return httpJson('/api/rpc/mt5700/usage_ctl', { method: 'POST', body: params });
 		}
 		/* log 对象：读取系统日志 → /api/syslog */
 		if (object === 'log' && method === 'read') {
