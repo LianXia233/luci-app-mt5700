@@ -8,6 +8,8 @@
 'require at-webserver/parse';
 'require at-webserver/ui';
 'require at-webserver/mt5700';
+'require at-webserver/icons';
+'require at-webserver/uimode';
 /* global L, AtWs, Parse, Mt5700 */
 
 	/*
@@ -47,7 +49,7 @@ return L.view.extend({
 		var state = {
 			cell: {
 				mcc: '', mnc: '', lac: '', cid: '', channel: '', pci: '',
-				rsrp: null, rsrq: null, sinr: null, sysMode: '', signalPercent: ''
+				rsrp: null, rsrq: null, sinr: null, sysMode: ''
 			},
 			diag: { reg: null, tx: null, nrTx: [], endc: null, addrs: [] },
 			secondaryNR: [],
@@ -55,10 +57,19 @@ return L.view.extend({
 			rawHfreq: [],
 			hfreqSuccess: null,
 			secondarySuccess: null,
-			telemetryError: false,
+			/* 辅站查询的 AT 终止状态（区分传输成功与 AT 命令实际结果，issue #39） */
+			secondaryATStatus: { monssc: null, cascell: null },
 			caStatus: {
 				state: 'pending', // 'pending' | 'single' | 'ca' | 'none' | 'error' | 'expired'
 				lastSuccessTime: 0
+			},
+			/* SSB 波束遥测（AT^NRSSBID?，手册 13.28）：只存真实上报，无效值一律 null */
+			ssb: {
+				ok: false,          // 命令是否成功且解析出结构
+				queried: false,     // 是否至少查询过一次
+				lastSuccessTime: 0,
+				pci: null,
+				beams: [null, null, null, null, null, null, null, null]
 			},
 			carriers: [],
 			rtDown: 0,
@@ -72,26 +83,20 @@ return L.view.extend({
 			apn: '',
 			pdpType: '',
 			apnCid: '',
-			imsApn: '',
 			simStatus: '检测中...',
 			deviceInterface: '',
-			qci: '',
 			flow: {
-				currentConnectTime: '',
-				currentDownloadFlow: '',
-				currentUploadFlow: '',
-				totalDownloadFlow: '',
-				totalUploadFlow: '',
-				totalConnectTime: ''
+				currentConnectTime: ''
 			},
 			temps: null,
-			dhcpv4: { ipv4Address: '', subnetMask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
-			dhcpv6: { ipv6Address: '', netmask: '', gateway: '', dhcpServer: '', primaryDNS: '', secondaryDNS: '' },
-			ipv6Cap: { capValue: 0, description: '' },
-			mcs: { dlMod: '', ulMod: '', dlRank: null, ulRank: null, dlMcs: null, ulMcs: null, dlEff: 0, ulEff: 0 },
+			dhcpv4: { ipv4Address: '', gateway: '', primaryDNS: '', secondaryDNS: '' },
+			dhcpv6: { ipv6Address: '' },
+			mcs: { dlMod: '', ulMod: '', dlMcs: null, ulMcs: null, dlCw: null, ulCw: null, tm: '' },
 			modemInfo: { manufacturer: '', model: '', fw: '', imei: '', imsi: '', iccid: '' },
 			// 签约速率（Session-AMBR，来自 AT+C5GQOSRDP=1）
 			subRate: null,
+			/* QoS 等级（5QI / QCI，来自 AT+C5GQOSRDP=<数据 CID>；取不到为 null） */
+			qos: null,
 			dataBearer: null
 		};
 
@@ -116,8 +121,17 @@ return L.view.extend({
 		}
 
 		// 流量趋势微型火花线数据（初始为真实空/0采样点，绝不伪造随机数）
-		var sparkDown = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-		var sparkUp = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+		var SPARK_POINTS = 12;
+		function zeroSparkSeries() {
+			var a = [];
+			for (var i = 0; i < SPARK_POINTS; i++) a.push(0);
+			return a;
+		}
+		var sparkDown = zeroSparkSeries();
+		var sparkUp = zeroSparkSeries();
+		/* 火花线数据当前所属的统计来源：切源时必须整体换源，
+		 * 不能把两套计数器的历史采样点混在一张图里。 */
+		var sparkSource = null;
 
 		// DOM 根容器
 		var layout = E('div', { 'class': 'mt-anime-container' });
@@ -140,7 +154,7 @@ return L.view.extend({
 			]),
 			E('div', { 'class': 'mt-sig-main-row' }, [
 				E('div', { 'class': 'mt-sig-val-group' }, [
-					E('div', {}, [
+					E('div', { 'class': 'mt-sig-num-line' }, [
 						E('span', { 'class': 'mt-sig-large-num', 'id': 'sig-rsrp-display' }, '-'),
 						E('span', { 'class': 'mt-sig-unit' }, 'dBm')
 					]),
@@ -166,7 +180,9 @@ return L.view.extend({
 					E('span', { 'class': 'mt-sub-metric-label' }, 'SINR'),
 					E('span', { 'class': 'mt-sub-metric-val', 'id': 'sig-sub-sinr' }, '-')
 				])
-			])
+			]),
+			/* SSB 波束电平矩阵：8 个波束的实测 RSRP(dBm)，取自 AT^NRSSBID? */
+			buildSsbMatrix()
 		]);
 		statGrid.appendChild(cardSig);
 
@@ -182,28 +198,34 @@ return L.view.extend({
 					E('span', { 'id': 'net-status-text' }, '已连接')
 				])
 			]),
-			E('div', { 'class': 'mt-net-main-row' }, [
-				E('div', { 'class': 'mt-tower-svg-box' }, [
-					createCellularTowerSvg()
+			/* 链路拓扑：SIM 卡 → 蜂窝基站 → 数据网络。
+			   三个节点与下方信息格全部取自既有 state（无新增接口、无新增命令）。 */
+			E('div', { 'class': 'mt-net-flow' }, [
+				E('div', { 'class': 'mt-net-node' }, [
+					E('div', { 'class': 'mt-net-node-icon' }, [svgIcon('sim')]),
+					E('span', { 'class': 'mt-net-node-title' }, 'SIM 卡'),
+					E('span', { 'class': 'mt-net-node-sub', 'id': 'net-node-sim' }, '读取中...')
 				]),
-				E('div', { 'class': 'mt-net-info-grid' }, [
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, '运营商'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-operator' }, '读取中...')
-					]),
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, '频段'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-band' }, '读取中...')
-					]),
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, 'CA 状态'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-ca' }, '单载波')
-					]),
-					E('div', { 'class': 'mt-net-info-cell' }, [
-						E('span', { 'class': 'mt-net-lbl' }, 'IP 地址'),
-						E('span', { 'class': 'mt-net-val', 'id': 'net-val-ip' }, '读取中...')
-					])
+				netFlowLink(),
+				E('div', { 'class': 'mt-net-node' }, [
+					E('div', { 'class': 'mt-net-node-icon tower' }, [createCellularTowerSvg(40)]),
+					E('span', { 'class': 'mt-net-node-title', 'id': 'net-node-tower-title' }, '蜂窝基站'),
+					E('span', { 'class': 'mt-net-node-sub', 'id': 'net-node-band' }, '读取中...')
+				]),
+				netFlowLink(),
+				E('div', { 'class': 'mt-net-node' }, [
+					E('div', { 'class': 'mt-net-node-icon' }, [svgIcon('internet')]),
+					E('span', { 'class': 'mt-net-node-title' }, '数据网络'),
+					E('span', { 'class': 'mt-net-node-sub', 'id': 'net-node-stack' }, '读取中...')
 				])
+			]),
+			E('div', { 'class': 'mt-net-info-grid' }, [
+				netInfoCell('sim', '运营商', 'net-val-operator', '读取中...'),
+				netInfoCell('bars', '网络类型', 'net-val-rat', '读取中...'),
+				netInfoCell('band', '频段', 'net-val-band', '读取中...'),
+				netInfoCell('layers', 'CA 状态', 'net-val-ca', '单载波'),
+				netInfoCell('ip', 'IP 地址', 'net-val-ip', '读取中...'),
+				netInfoCell('ipv6', 'IPv6 地址', 'net-val-ipv6', '—')
 			])
 		]);
 		statGrid.appendChild(cardNet);
@@ -217,7 +239,7 @@ return L.view.extend({
 				]),
 				E('span', { 'class': 'mt-pill-tag' }, [
 					E('span', { 'class': 'mt-beacon-dot' }),
-					E('span', {}, '实时')
+					E('span', { 'id': 'traffic-source-tag' }, '实时 · 物理网卡')
 				])
 			]),
 			E('div', { 'class': 'mt-traffic-rows' }, [
@@ -230,7 +252,8 @@ return L.view.extend({
 							E('span', { 'class': 'mt-traffic-val', 'id': 'traffic-dl-val' }, '0 B/s')
 						])
 					]),
-					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-dl-box' })
+					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-dl-box',
+						'title': '下行速率趋势 · 来源：物理网卡' })
 				]),
 				// 上行
 				E('div', { 'class': 'mt-traffic-item' }, [
@@ -241,7 +264,8 @@ return L.view.extend({
 							E('span', { 'class': 'mt-traffic-val', 'id': 'traffic-ul-val' }, '0 B/s')
 						])
 					]),
-					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-ul-box' })
+					E('div', { 'class': 'mt-traffic-chart-mini', 'id': 'spark-ul-box',
+						'title': '上行速率趋势 · 来源：物理网卡' })
 				])
 			]),
 			// 本次使用量（后端常驻统计：页面关闭/刷新都不影响；可选持久化、可自动清零）
@@ -283,6 +307,20 @@ return L.view.extend({
 						E('span', { 'class': 'mt-usage-lbl' }, '峰值速率'),
 						E('span', { 'class': 'mt-usage-val', 'id': 'usage-peak' }, '↓0 B/s · ↑0 B/s')
 					]),
+				E('div', { 'class': 'mt-usage-cell wide auto source' }, [
+					E('span', { 'class': 'mt-usage-lbl' }, '统计来源'),
+					E('span', { 'class': 'mt-usage-auto' }, [
+						E('select', {
+							'class': 'mt-usage-source', 'id': 'usage-source',
+							'title': '物理网卡：自动识别 WAN 区域模组网口，直读 sysfs 计数器，零 AT 负担；模组 AT：AT^DSFLOWQRY 上报的 DS 累计流量（2 秒粒度）',
+							'change': setUsageSource
+						}, [
+							E('option', { 'value': 'netdev' }, '物理网卡'),
+							E('option', { 'value': 'modem' }, '模组 AT')
+						]),
+						E('span', { 'class': 'mt-usage-unit mt-usage-source-hint', 'id': 'usage-source-hint' }, '')
+					])
+				]),
 					E('div', { 'class': 'mt-usage-cell wide auto' }, [
 						E('span', { 'class': 'mt-usage-lbl' }, '每月清零'),
 						E('span', { 'class': 'mt-usage-auto' }, [
@@ -408,11 +446,15 @@ return L.view.extend({
 		]);
 		midGrid.appendChild(chartCard);
 
-		/* 点击/触摸图表以外的区域时收起趋势悬浮卡（整页仅注册一次） */
-		document.addEventListener('pointerdown', function (ev) {
+		/* 点击/触摸图表以外的区域时收起趋势悬浮卡；离开本页时摘除，避免反复进出累积 */
+		var onDocPointerDown = function (ev) {
 			var b = document.getElementById('sig-trend-chart-box');
 			if (b && !b.contains(ev.target)) hideTrendHover();
-		}, true);
+		};
+		document.addEventListener('pointerdown', onDocPointerDown, true);
+		Ui.onLeave(function () {
+			document.removeEventListener('pointerdown', onDocPointerDown, true);
+		});
 
 		/* ==========================================================================
 		   3. 底部折叠面板: 高级遥测与硬件诊断 (保留原有全量数据)
@@ -451,7 +493,7 @@ return L.view.extend({
 		rowAdv1.appendChild(carrierCard);
 
 		var tempBadge = E('span');
-		var tempCard = Mt5700.card('模组芯片温度矩阵', '7 通道芯片结温物理分布', tempBadge);
+		var tempCard = Mt5700.card('模组芯片温度矩阵', '12 通道芯片结温（手册 17.1.1）', tempBadge);
 		var tempBody = E('div');
 		tempCard._body.appendChild(tempBody);
 		rowAdv1.appendChild(tempCard);
@@ -481,6 +523,15 @@ return L.view.extend({
 		   ========================================================================== */
 
 		function svgIcon(name) {
+			/* 图标改由全局 Icon Manager 提供：普通模式返回逐字保留的原 12 个
+			 * 内联图元（st-* 表，stroke 2、24×24，视觉零变化），极简模式返回
+			 * 重新绘制的 MD3 图元。data-mt-icon 让模式切换时只重绘内部图元。 */
+			if (window.AtIcons && typeof window.AtIcons.build === 'function') {
+				var icon = window.AtIcons.build('st-' + name, { className: 'mt-card-title-icon' });
+				if (icon) return icon;
+			}
+
+			/* 兜底：Icon Manager 未就绪时沿用原有内联生成，图标绝不缺失 */
 			var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 			svg.setAttribute('class', 'mt-card-title-icon');
 			svg.setAttribute('viewBox', '0 0 24 24');
@@ -498,19 +549,179 @@ return L.view.extend({
 				svg.innerHTML = '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>';
 			} else if (name === 'trend') {
 				svg.innerHTML = '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>';
+			} else if (name === 'bars') {
+				svg.innerHTML = '<path d="M4 20v-4M9 20v-8M14 20v-13M19 20v-17"/>';
+			} else if (name === 'sim') {
+				svg.innerHTML = '<rect x="3" y="3" width="18" height="18" rx="3.5"/><rect x="8.5" y="8.5" width="7" height="7" rx="1.2"/><path d="M12 3v3M12 18v3"/>';
+			} else if (name === 'band') {
+				svg.innerHTML = '<path d="M12 21V9"/><path d="M8.6 12.6a5 5 0 0 1 6.8 0"/><path d="M5.4 9.2a9.6 9.6 0 0 1 13.2 0"/>';
+			} else if (name === 'layers') {
+				svg.innerHTML = '<path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/>';
+			} else if (name === 'internet') {
+				svg.innerHTML = '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>';
+			} else if (name === 'ip') {
+				svg.innerHTML = '<path d="M9.5 15.5H7a3.5 3.5 0 0 1 0-7h2.5"/><path d="M14.5 8.5H17a3.5 3.5 0 0 1 0 7h-2.5"/><path d="M8.5 12h7"/>';
+			} else if (name === 'ipv6') {
+				svg.innerHTML = '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.8 2.8M16.2 16.2 19 19M19 5l-2.8 2.8M7.8 16.2 5 19"/>';
+			} else if (name === 'beam') {
+				/* 三条由一点发散的射线 + 源点，对应 SSB 波束扫描 */
+				svg.innerHTML = '<circle cx="12" cy="20" r="1.6"/><path d="M12 18.4 5.5 5.5"/><path d="M12 18.4V4"/><path d="M12 18.4 18.5 5.5"/>';
 			}
 			return svg;
 		}
 
-		function createCellularTowerSvg() {
+		function createCellularTowerSvg(size) {
+			var px = size || 72;
 			var wrap = E('div', { 'class': 'mt-tower-svg-box' });
-			var svg = '<svg viewBox="0 0 1024 1024" width="72" height="72" fill="currentColor" aria-hidden="true">';
+			/* 极简模式：不再注入 1024×1024 的广播塔复杂路径（数十个 path + 装饰
+			 * 填充），改用重绘的 MD3 小区图标。DOM 节点与渲染开销真正下降。 */
+			if (window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal'
+				&& window.AtIcons && typeof window.AtIcons.build === 'function') {
+				var icon = window.AtIcons.build('op-cell', { w: px, h: px });
+				if (icon) { wrap.appendChild(icon); return wrap; }
+			}
+			var svg = '<svg viewBox="0 0 1024 1024" width="' + px + '" height="' + px + '" fill="currentColor" aria-hidden="true">';
 			for (var i = 0; i < BROADCAST_TOWER_PATHS.length; i++) {
 				svg += '<path d="' + BROADCAST_TOWER_PATHS[i] + '"></path>';
 			}
 			svg += '</svg>';
 			wrap.innerHTML = svg;
 			return wrap;
+		}
+
+		/* ==========================================================================
+		   SSB 波束电平（AT^NRSSBID?，手册 13.28 / PDF 第 378~381 页）
+		   --------------------------------------------------------------------------
+		   模组逐 SSB 上报服务小区 8 个波束的 Beam 测量结果（RSRP，单位 dBm）。
+		   上报顺序不保证按 ID 升序，parseNRSSBID 已按 ID 归位到数组下标，此处只负责渲染。
+		   无效值（SSB ID 0xFF / RSRP 0x7FFF）在解析层已置为 null，
+		   这里一律显示「—」+「无信号」，绝不拿 0 或 -140 之类的假数占位。
+		   ========================================================================== */
+
+		/*
+		 * 波束电平分级：比 SIGNAL_TIERS（4 档）更细，共 5 档。
+		 * 单独一张表，不动 SIGNAL_TIERS —— 后者服务趋势图背景分区且有单测依赖。
+		 * 「弱」与「无信号」必须一眼可辨：弱是橙色实心，无信号是灰色虚线且显示「—」。
+		 */
+		var SSB_TIERS = [
+			{ label: '优', min: -80, max: 0, color: '#10b981' },
+			{ label: '良', min: -90, max: -80, color: '#38bdf8' },
+			{ label: '中', min: -100, max: -90, color: '#eab308' },
+			{ label: '弱', min: -110, max: -100, color: '#f97316' },
+			{ label: '差', min: -156, max: -110, color: '#ef4444' }
+		];
+
+		/* RSRP(dBm) → 波束档位；无测量值返回 null（不是返回最低档） */
+		function ssbTierOf(rsrp) {
+			if (rsrp === null || rsrp === undefined || rsrp === '' || isNaN(rsrp)) return null;
+			var v = Number(rsrp);
+			for (var i = 0; i < SSB_TIERS.length; i++) {
+				if (v >= SSB_TIERS[i].min && v < SSB_TIERS[i].max) return SSB_TIERS[i];
+			}
+			return null;
+		}
+
+		/* 单个波束格子：上排「SSB n」+ 实测 dBm，下排色点 + 档位名 */
+		function ssbCell(idx) {
+			return E('div', { 'class': 'mt-ssb-cell', 'data-ssb': String(idx), 'data-state': 'none' }, [
+				E('div', { 'class': 'mt-ssb-cell-top' }, [
+					E('span', { 'class': 'mt-ssb-id' }, 'SSB ' + idx),
+					E('span', { 'class': 'mt-ssb-val', 'id': 'ssb-val-' + idx }, '—')
+				]),
+				E('div', { 'class': 'mt-ssb-cell-bot' }, [
+					E('i', { 'class': 'mt-ssb-dot' }),
+					E('span', { 'class': 'mt-ssb-tier', 'id': 'ssb-tier-' + idx }, '无信号')
+				])
+			]);
+		}
+
+		function buildSsbMatrix() {
+			var cells = [];
+			for (var i = 0; i < 8; i++) cells.push(ssbCell(i));
+			return E('div', { 'class': 'mt-ssb-panel' }, [
+				E('div', { 'class': 'mt-ssb-head' }, [
+					svgIcon('beam'),
+					E('span', { 'class': 'mt-ssb-title' }, 'SSB 波束电平'),
+					E('span', { 'class': 'mt-ssb-summary', 'id': 'ssb-summary' }, '读取中...')
+				]),
+				E('div', { 'class': 'mt-ssb-grid' }, cells)
+			]);
+		}
+
+		/*
+		 * 按 state.ssb 的真实上报刷新矩阵：
+		 *   · 有值 → 显示「-63 dBm」+ 档位色点（优 / 良 / 中 / 弱 / 差）
+		 *   · 无值 → 显示「—」+「无信号」，灰色虚线弱化，与弱信号明显区分
+		 *   · 最强波束额外标注 data-best，纯由实测 RSRP 比较得出，不猜测“主用”
+		 */
+		function refreshSsbMatrix() {
+			var grid = document.querySelector('.mt-ssb-grid');
+			if (!grid) return;
+			var ssb = state.ssb;
+			var beams = (ssb && ssb.beams) || [];
+			var measured = 0;
+			var bestIdx = -1;
+			var bestVal = null;
+			for (var i = 0; i < 8; i++) {
+				var bv = (beams[i] === undefined) ? null : beams[i];
+				if (bv === null || bv === undefined) continue;
+				measured++;
+				if (bestVal === null || bv > bestVal) { bestVal = bv; bestIdx = i; }
+			}
+			for (var k = 0; k < 8; k++) {
+				var cell = grid.children[k];
+				if (!cell) continue;
+				var valEl = document.getElementById('ssb-val-' + k);
+				var tierEl = document.getElementById('ssb-tier-' + k);
+				var val = (beams[k] === undefined) ? null : beams[k];
+				var tier = ssbTierOf(val);
+				if (tier === null) {
+					cell.setAttribute('data-state', 'none');
+					cell.style.removeProperty('--ssb-color');
+					if (valEl) valEl.textContent = '—';
+					if (tierEl) tierEl.textContent = '无信号';
+				} else {
+					cell.setAttribute('data-state', 'ok');
+					cell.style.setProperty('--ssb-color', tier.color);
+					if (valEl) valEl.textContent = val + ' dBm';
+					if (tierEl) tierEl.textContent = tier.label;
+				}
+				cell.setAttribute('data-best', (k === bestIdx) ? '1' : '0');
+			}
+			var summary = document.getElementById('ssb-summary');
+			if (summary) {
+				if (!ssb || !ssb.queried) summary.textContent = '读取中...';
+				else if (!ssb.ok) summary.textContent = '未上报';
+				else if (measured === 0) summary.textContent = '网侧未配置测量';
+				else summary.textContent = '实测 ' + measured + '/8 · 最强 SSB ' + bestIdx;
+				if (measured > 0) {
+					summary.setAttribute('title',
+						'服务小区 PCI ' + (ssb.pci == null ? '—' : ssb.pci) +
+						' · 最强波束 SSB ' + bestIdx + ' = ' + bestVal + ' dBm');
+				}
+			}
+		}
+
+
+		/* 拓扑连线：两端圆点 + 中间虚线 */
+		function netFlowLink() {
+			return E('div', { 'class': 'mt-net-link' }, [
+				E('span', { 'class': 'mt-net-link-dot' }),
+				E('span', { 'class': 'mt-net-link-line' }),
+				E('span', { 'class': 'mt-net-link-dot' })
+			]);
+		}
+
+		/* 网络状态卡信息格：图标 + 标签 + 取值（id 与原实现保持一致） */
+		function netInfoCell(icon, label, id, placeholder) {
+			return E('div', { 'class': 'mt-net-info-cell' }, [
+				E('span', { 'class': 'mt-net-ico' }, [svgIcon(icon)]),
+				E('div', { 'class': 'mt-net-info-txt' }, [
+					E('span', { 'class': 'mt-net-lbl' }, label),
+					E('span', { 'class': 'mt-net-val', 'id': id }, placeholder)
+				])
+			]);
 		}
 
 		function renderMiniSparkline(targetId, data, color) {
@@ -529,6 +740,17 @@ return L.view.extend({
 			var pathD = 'M ' + pts.join(' L ');
 			var lastPt = pts[pts.length - 1].split(' ');
 			var gradId = 'spark-grad-' + targetId;
+
+			/* 极简模式：不创建渐变 defs / 面积填充 / 脉冲圆点，只保留折线与端点 */
+			if (window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal') {
+				box.innerHTML =
+					'<svg viewBox="0 0 100 36" width="90" height="32">' +
+					'  <path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="2.2" stroke-linecap="round"/>' +
+					'  <circle cx="' + lastPt[0] + '" cy="' + lastPt[1] + '" r="2.5" fill="' + color + '"/>' +
+					'</svg>';
+				return;
+			}
 
 			box.innerHTML =
 				'<svg viewBox="0 0 100 36" width="90" height="32">' +
@@ -619,14 +841,9 @@ return L.view.extend({
 				var prefix = isNr ? 'N' : 'B';
 				var bandNum = c.band || '';
 				if (!bandNum) {
-					var ch = parseInt(c.channel, 10);
-					if (ch >= 500000 && ch <= 540000) bandNum = '41';
-					else if (ch >= 620000 && ch <= 680000) bandNum = '78';
-					else if (ch >= 690000 && ch <= 730000) bandNum = '79';
-					else if (ch >= 150000 && ch <= 170000) bandNum = '28';
-					else if (ch >= 420000 && ch <= 440000) bandNum = '1';
-					else if (ch >= 360000 && ch <= 380000) bandNum = '3';
-					else bandNum = 'CH ' + c.channel;
+					/* 与载波聚合卡片用同一套映射（Parse.bandFromArfcn），不再维护内联区间 */
+					var mapped = isNr ? getBandFromNrArfcn(c.channel) : getBandFromLteArfcn(c.channel);
+					bandNum = mapped || ('CH ' + c.channel);
 				}
 				var resTag = prefix + bandNum;
 				if (c.channel && bandNum !== 'CH ' + c.channel) {
@@ -702,6 +919,15 @@ return L.view.extend({
 			return s;
 		}
 
+		/* 数据承载协议栈文案（AT+CGDCONT 的 <PDP_type>）；取不到就如实显示 — ，不猜测 */
+		function pdpStackText() {
+			var t = String(state.pdpType || '').toUpperCase();
+			if (t === 'IPV4V6') return 'IPv4 / IPv6';
+			if (t === 'IP') return '仅 IPv4';
+			if (t === 'IPV6') return '仅 IPv6';
+			return t || '—';
+		}
+
 		function renderSignalUI() {
 			var c = state.cell;
 			var rsrp = c.rsrp;
@@ -745,6 +971,9 @@ return L.view.extend({
 			var celBox = document.getElementById('sig-cellular-box');
 			var celEl = celBox ? celBox.querySelector('.cellular') : null;
 			if (celEl && typeof celEl.setCellularState === 'function') celEl.setCellularState(sigState);
+
+			/* SSB 波束矩阵：按 AT^NRSSBID? 的真实上报刷新（未上报则显示「无信号」） */
+			refreshSsbMatrix();
 
 			/* 信号塔图标配色与状态同源（不再写死紫色） */
 			var towerBox = document.querySelector('.mt-tower-svg-box');
@@ -791,7 +1020,13 @@ return L.view.extend({
 		   曲线经 Catmull-Rom → 三次贝塞尔平滑，末端点带呼吸脉冲标记“当前”。
 		   ========================================================================== */
 
-		/* RSRP 质量分区（阈值与 computeCellularState 的分档保持一致） */
+		/*
+		 * RSRP 质量分区（阈值与 computeCellularState 的分档保持一致）。
+		 * 这张表驱动信号趋势图的背景分区与悬浮数据卡的「质量」字段——一处定义，
+		 * 图表分区与真实评级不会各说各话。
+		 * 注：卡片一底部的 SSB 波束矩阵用的是更细的 SSB_TIERS（优/良/中/弱/差），
+		 *     那张表只服务波束电平，与本表互不干扰。
+		 */
 		/* 档位中文名（用于悬浮数据卡的“质量”字段；图内不再绘制档位文字） */
 		var SIGNAL_TIERS = [
 			{ label: '较差', min: -125, max: -110, color: '#ef4444' },
@@ -970,6 +1205,11 @@ return L.view.extend({
 				return null;
 			}
 
+			/* 极简模式：数据/曲线计算完全共用，只跳过纯视觉装饰层
+			 * （渐变面积、质量分区背景带、末端脉冲点与 defs），减少 DOM 与持续动画。 */
+			var minimalChart = !!(window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal');
+
 			/* ---- 背景质量分区带（窄屏不标注档位文字，避免拥挤） ---- */
 			var bands = '';
 			for (var b = 0; b < SIGNAL_TIERS.length; b++) {
@@ -1031,7 +1271,7 @@ return L.view.extend({
 			/* ---- 主曲线层（按图例可见性渲染） ---- */
 			var seriesLayer = '';
 			if (chartSeries.rsrp) {
-				seriesLayer += '<path d="' + areaPathFor('rsrp') + '" fill="url(#rsrp-area)"/>' +
+				seriesLayer += (minimalChart ? '' : '<path d="' + areaPathFor('rsrp') + '" fill="url(#rsrp-area)"/>') +
 					'<path d="' + strokePathFor('rsrp') + '" fill="none" stroke="' + CHART_COLORS.rsrp + '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
 					isolatedDotsFor(seriesMeta[0]);
 			}
@@ -1055,10 +1295,9 @@ return L.view.extend({
 			}
 
 			/* ---- 时间横轴（一律保留到秒：同一分钟内多点时只写 时:分 会出现三条重复标签） ---- */
-			function fmtTime(ts) { return ts; }
-			var firstTime = fmtTime(view[0].time);
-			var midTime = fmtTime(view[Math.floor(n / 2)].time);
-			var lastTime = fmtTime(view[n - 1].time);
+			var firstTime = view[0].time;
+			var midTime = view[Math.floor(n / 2)].time;
+			var lastTime = view[n - 1].time;
 
 			/* ---- 悬浮卡：只列出当前可见序列，高度随可见数量自适应 ---- */
 			var tipW = narrow ? 170 : 188;
@@ -1075,14 +1314,18 @@ return L.view.extend({
 			}
 			var tierY = 44 + activeMeta.length * rowH - 4;
 
-			box.innerHTML =
-				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="overflow:visible; display:block;">' +
+			if (minimalChart) { bands = ''; endDots = ''; }
+			var defsLayer = minimalChart ? '' :
 				'  <defs>' +
 				'    <linearGradient id="rsrp-area" x1="0" y1="0" x2="0" y2="1">' +
 				'      <stop offset="0%" stop-color="' + CHART_COLORS.rsrp + '" stop-opacity="0.35"/>' +
 				'      <stop offset="100%" stop-color="' + CHART_COLORS.rsrp + '" stop-opacity="0.02"/>' +
 				'    </linearGradient>' +
-				'  </defs>' +
+				'  </defs>';
+
+			box.innerHTML =
+				'<svg id="mt-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="overflow:visible; display:block;">' +
+				defsLayer +
 				/* 质量分区背景 */
 				bands +
 				/* 网格与双轴刻度 */
@@ -1213,15 +1456,6 @@ return L.view.extend({
 
 		/* 字节量格式化，用于累计使用量。注意与 formatSpeedNumber 区别：
 		   这里的换算单位是 B / KB / MB / GB（已是字节，不再乘 8）。 */
-		function formatBytes(bytes) {
-			var b = Number(bytes);
-			if (!isFinite(b) || b < 0) b = 0;
-			if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
-			if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
-			if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
-			return Math.round(b) + ' B';
-		}
-
 		/* 秒 → HH:MM:SS（用于采样时长；起止时间戳均来自设备侧，无浏览器时钟偏差） */
 		function formatUsageDuration(sec) {
 			var s = Math.floor(isFinite(sec) && sec > 0 ? sec : 0);
@@ -1239,6 +1473,16 @@ return L.view.extend({
 				return m + ' Mbps';
 			}
 			return Math.round(v) + ' Kbps';
+		}
+
+		/* QoS 等级文案（issue #43）：5G 下称 5QI，LTE 下称 QCI，
+		 * 都由 AT+C5GQOSRDP 的第二个字段上报。
+		 * 0 表示「由网络选择」，等价于模组没给出有效等级，按未上报处理；
+		 * 取不到就如实说明，不用其它承载或别的 CID 的值来凑。 */
+		function qosText() {
+			var q = state.qos;
+			if (!q || q.qci == null || q.qci === 0) return '模组未上报';
+			return String(q.qci);
 		}
 
 		/* 签约速率文案：有值才显示，没有就如实说明模组未上报 */
@@ -1289,6 +1533,28 @@ return L.view.extend({
 			});
 		}
 
+		/* 切换统计来源：物理网卡 sysfs / 模组 AT^DSFLOWQRY。
+		 * 后端写 UCI 并热更新；切换后 device 标签改变，累计值保留、自动重新基线。
+		 * 失败时把控件回滚到当前实际来源，避免界面显示与后端不一致。 */
+		function setUsageSource() {
+			var el = document.getElementById('usage-source');
+			if (!el) return;
+			var source = (el.value === 'modem') ? 'modem' : 'netdev';
+			AtWs.usageCtl('set_source', undefined, source).then(function (r) {
+				if (r && r.success && r.usage) {
+					state.usage = r.usage;
+					/* 图表与速率立即换源：清空旧来源历史点、重置采样基线，
+					 * 并马上按新来源采一次，避免旧来源的点继续画在图上。 */
+					resetTrafficSeries(r.usage.source);
+					sampleRate();
+				} else {
+					el.value = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+				}
+			}).catch(function () {
+				el.value = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+			});
+		}
+
 		function formatSpeedNumber(bytesPerSec) {
 			var bits = bytesPerSec * 8;
 			if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gbps';
@@ -1299,7 +1565,37 @@ return L.view.extend({
 			return Math.round(bits / 8) + ' B/s';
 		}
 
+		/* 火花线推进：只在速率采样产生新点时调用，与当前来源绑定。 */
+		function pushTrafficSample(down, up) {
+			sparkDown.push(down > 0 ? down : 0);
+			if (sparkDown.length > SPARK_POINTS) sparkDown.shift();
+			sparkUp.push(up > 0 ? up : 0);
+			if (sparkUp.length > SPARK_POINTS) sparkUp.shift();
+		}
+
+		/* 统计来源切换：速率数值、火花线历史、采样基线整体换源。
+		 * netdev 是 sysfs 接口累计、modem 是 DS 累计，绝对值与刷新粒度
+		 * 都不同，混在一张图里会画出虚假尖峰。 */
+		function resetTrafficSeries(source) {
+			sparkSource = source === 'modem' ? 'modem' : 'netdev';
+			sparkDown = zeroSparkSeries();
+			sparkUp = zeroSparkSeries();
+			state.rtDown = 0;
+			state.rtUp = 0;
+			rateSample = null;
+			renderSpeedUI();
+		}
+
 		function renderSpeedUI() {
+			var src = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+			var srcLabel = src === 'modem' ? '模组 AT' : '物理网卡';
+			var srcTag = document.getElementById('traffic-source-tag');
+			if (srcTag) srcTag.textContent = '实时 · ' + srcLabel;
+			var dlBox = document.getElementById('spark-dl-box');
+			var ulBox = document.getElementById('spark-ul-box');
+			if (dlBox) dlBox.title = '下行速率趋势 · 来源：' + srcLabel;
+			if (ulBox) ulBox.title = '上行速率趋势 · 来源：' + srcLabel;
+
 			var dlStr = formatSpeedNumber(state.rtDown);
 			var ulStr = formatSpeedNumber(state.rtUp);
 
@@ -1309,25 +1605,20 @@ return L.view.extend({
 			var elUl = document.getElementById('traffic-ul-val');
 			if (elUl) elUl.textContent = ulStr;
 
-			// 更新迷你火花线：纯设备真实采样数据，为 0 则为 0，严禁使用 Math.random 伪造
-			/* 空闲（或计数器采样被重置）时老实现会塞随机数，图上在跑流量而数字是 0 B/s，
-			 * 自相矛盾。没有流量就如实画 0。 */
-			sparkDown.push(state.rtDown > 0 ? state.rtDown : 0);
-			if (sparkDown.length > 12) sparkDown.shift();
-			sparkUp.push(state.rtUp > 0 ? state.rtUp : 0);
-			if (sparkUp.length > 12) sparkUp.shift();
-
+			// 火花线只渲染 pushTrafficSample() 采到的真实点（按当前来源），
+			// 为 0 则如实画 0，严禁 Math.random 伪造；本函数被使用量轮询、
+			// 清零 / 持久化按钮等多处复用，绝不能在这里重复推点。
 			renderMiniSparkline('spark-dl-box', sparkDown, '#38bdf8');
 			renderMiniSparkline('spark-ul-box', sparkUp, '#ec4899');
 
 			/* 本次使用量（设备侧累计，来自 netrate 返回的 usage） */
 			var u = state.usage;
 			var uDl = document.getElementById('usage-dl');
-			if (uDl) uDl.textContent = u ? formatBytes(u.total_rx) : '0 B';
+			if (uDl) uDl.textContent = u ? AtWs.formatFlow(u.total_rx) : '0 B';
 			var uUl = document.getElementById('usage-ul');
-			if (uUl) uUl.textContent = u ? formatBytes(u.total_tx) : '0 B';
+			if (uUl) uUl.textContent = u ? AtWs.formatFlow(u.total_tx) : '0 B';
 			var uTot = document.getElementById('usage-total');
-			if (uTot) uTot.textContent = u ? formatBytes(u.total_rx + u.total_tx) : '0 B';
+			if (uTot) uTot.textContent = u ? AtWs.formatFlow(u.total_rx + u.total_tx) : '0 B';
 			var uPeak = document.getElementById('usage-peak');
 			if (uPeak) uPeak.textContent = u
 				? '↓' + formatSpeedNumber(u.peak_rx) + ' · ↑' + formatSpeedNumber(u.peak_tx)
@@ -1362,6 +1653,20 @@ return L.view.extend({
 			if (uPersist) {
 				if (u && u.persist) uPersist.classList.add('on');
 				else uPersist.classList.remove('on');
+			}
+			/* 来源控件由每秒轮询同步；用户正在操作时别抢焦点 */
+			var elSource = document.getElementById('usage-source');
+			if (elSource && u && u.source && document.activeElement !== elSource) {
+				elSource.value = (u.source === 'modem') ? 'modem' : 'netdev';
+			}
+			var elSourceHint = document.getElementById('usage-source-hint');
+			if (elSourceHint) {
+				elSourceHint.textContent = (u && u.source === 'modem')
+					? (u.device ? '模组累计' : '缓存未就绪')
+					: (u && u.device ? u.device : 'WAN 未就绪');
+				elSourceHint.title = (u && u.source === 'modem')
+					? '数据源：AT^DSFLOWQRY（经状态缓存，2 秒刷新）'
+					: '数据源：WAN 区域模组物理网口的 sysfs 计数器';
 			}
 		}
 
@@ -1408,11 +1713,42 @@ return L.view.extend({
 				ipEl.textContent = curIp;
 			}
 
+			/* 链路拓扑三节点的副标题与两个新增信息格（全部复用既有 state，不新增命令） */
+			var nodeSim = document.getElementById('net-node-sim');
+			if (nodeSim) nodeSim.textContent = state.operator || '—';
+
+			var nodeTower = document.getElementById('net-node-tower-title');
+			if (nodeTower) {
+				var ratShort = ratBadgeText(c.sysMode || prim.sysMode);
+				nodeTower.textContent = ratShort ? (ratShort + ' 基站') : '蜂窝基站';
+			}
+
+			var nodeBand = document.getElementById('net-node-band');
+			if (nodeBand) nodeBand.textContent = bandCombo;
+
+			var nodeStack = document.getElementById('net-node-stack');
+			if (nodeStack) nodeStack.textContent = pdpStackText();
+
+			var ratCell = document.getElementById('net-val-rat');
+			if (ratCell) {
+				var rawRat = String(c.sysMode || prim.sysMode || '').toUpperCase();
+				var shortRat = ratBadgeText(c.sysMode || prim.sysMode);
+				if (!shortRat) ratCell.textContent = '—';
+				else if (rawRat === 'NR' || rawRat === 'LTE') ratCell.textContent = shortRat + ' ' + rawRat;
+				else ratCell.textContent = shortRat;
+			}
+
+			var ipv6Cell = document.getElementById('net-val-ipv6');
+			if (ipv6Cell) {
+				/* 变量名避开下方 APN 分组里已有的 pdpIpv6，避免同函数内重复声明 */
+				var addrIpv6 = (state.diag.addrs || []).filter(function (a) { return a.family === 'IPv6'; })[0];
+				ipv6Cell.textContent = state.dhcpv6.ipv6Address || (addrIpv6 ? addrIpv6.address : '—');
+			}
+
 			// Tab 1: 网络信息
 			var dlModText = state.mcs.dlMod ? state.mcs.dlMod + ' (DL)' : '—';
 			var ulModText = state.mcs.ulMod ? state.mcs.ulMod + ' (UL)' : '—';
-			var dlRankText = state.mcs.dlRank != null ? state.mcs.dlRank + ' 层并发 (DL)' : '—';
-			var ulRankText = state.mcs.ulRank != null ? state.mcs.ulRank + ' 层 (UL)' : '—';
+			var mimoText = mimoSummary(state.mcs);
 
 			tabPanes['tab-net'].innerHTML =
 				'<table class="mt-info-table">' +
@@ -1421,7 +1757,7 @@ return L.view.extend({
 				'  <tr><td>运营商</td><td>' + (state.operator || '—') + '</td></tr>' +
 				'  <tr><td>连接时长</td><td>' + duration + '</td></tr>' +
 				'  <tr><td>调制方式</td><td><span class="mt-pill-tag mt-pill-cyan">QAM</span> ' + (state.mcs.dlMod ? (dlModText + ' / ' + ulModText) : '— (模组未上报)') + '</td></tr>' +
-				'  <tr><td>空间流 (MIMO)</td><td><span class="mt-pill-tag mt-pill-purple">MIMO</span> ' + (state.mcs.dlRank != null ? (dlRankText + ' / ' + ulRankText) : '— (模组未上报)') + '</td></tr>' +
+				'  <tr><td>空间流 / 传输模式</td><td><span class="mt-pill-tag mt-pill-purple">MIMO</span> ' + (mimoText || '— (模组未上报)') + '</td></tr>' +
 				'  <tr><td>物理小区 (PCI)</td><td>' + (c.pci != null && c.pci !== '' ? c.pci : '—') + '</td></tr>' +
 				'  <tr><td>基站标识 (eNB/gNB)</td><td>' + (c.cid || '—') + (c.lac ? ' (TAC ' + c.lac + ')' : '') + '</td></tr>' +
 				'</table>';
@@ -1431,7 +1767,18 @@ return L.view.extend({
 			if (state.temps && state.temps.modem1) {
 				avgT = state.temps.modem1 + ' ℃' + (state.temps.sub6GPA ? ' (基带 ' + state.temps.modem1 + '℃, PA ' + state.temps.sub6GPA + '℃)' : '');
 			}
-			var devIface = state.deviceInterface || (rateSample && rateSample.device) || '—';
+			/* 数据通信接口优先显示后端识别的物理网卡：state.usage.device 是后端按
+			 * 「WAN 区域 ∩ USB 模组网口」识别、无模组口时回落到默认 WAN 口物理网卡
+			 * 的结果（netdev 来源），每秒刷新且不依赖 netrate 是否成功；modem 来源
+			 * 时该字段是 DS 来源标签，不能当网卡名用。之后才回落到速率采样值。 */
+			var usageNetdev = (state.usage && state.usage.source !== 'modem'
+				&& state.usage.device) ? state.usage.device : '';
+			var sampledNetdev = (rateSample && rateSample.device) ? rateSample.device : '';
+			var devIface = usageNetdev || state.deviceInterface || sampledNetdev || '—';
+			var devIfaceTitle = usageNetdev
+				? 'WAN 区域物理网卡：优先模组 USB 网口，未识别到时回落默认 WAN 口物理网卡，不绑定接口名'
+				: ((state.deviceInterface || sampledNetdev)
+					? '实时速率采样到的 WAN 网卡' : '暂未识别到 WAN 区域物理网卡');
 			tabPanes['tab-dev'].innerHTML =
 				'<table class="mt-info-table">' +
 				'  <tr><td>模组型号</td><td>' + (state.modemInfo.model || '读取中...') + '</td></tr>' +
@@ -1439,7 +1786,7 @@ return L.view.extend({
 				'  <tr><td>固件版本</td><td>' + (state.modemInfo.fw || '—') + '</td></tr>' +
 				'  <tr><td>模组 IMEI</td><td>' + (state.modemInfo.imei || '—') + '</td></tr>' +
 				'  <tr><td>芯片温度概览</td><td>' + avgT + '</td></tr>' +
-				'  <tr><td>数据通信接口</td><td>' + devIface + '</td></tr>' +
+				'  <tr><td>数据通信接口</td><td title="' + devIfaceTitle + '">' + devIface + '</td></tr>' +
 				'</table>';
 
 			// Tab 3: SIM 卡信息 (完整真实显示 IMSI 与 ICCID，真实读取 AT+CPIN?)
@@ -1457,6 +1804,7 @@ return L.view.extend({
 				'  <tr><td>运营商代码 (PLMN)</td><td>' + plmnStr + '</td></tr>' +
 				'  <tr><td>网络注册与漫游</td><td>' + roamStr + '</td></tr>' +
 				'  <tr><td>签约速率</td><td>' + subRateText() + '</td></tr>' +
+				'  <tr><td title="来自 AT+C5GQOSRDP 数据承载的 5QI/QCI 字段，取不到时显示未上报">QoS 等级 (5QI / QCI)</td><td>' + qosText() + '</td></tr>' +
 				'  <tr><td>IMSI</td><td>' + (state.modemInfo.imsi || '读取中...') + '</td></tr>' +
 				'  <tr><td>ICCID</td><td>' + (state.modemInfo.iccid || '读取中...') + '</td></tr>' +
 				'</table>';
@@ -1489,6 +1837,19 @@ return L.view.extend({
 			carrierBox.innerHTML = '';
 			var list = state.carriers || [];
 			var caSt = state.caStatus || { state: 'pending' };
+
+			/* SCC 信号缺失原因文案（issue #39）：保持真实空值，补充可解释状态 */
+			function getSignalReasonText(reason) {
+				switch (reason) {
+					case 'at-error': return '辅站查询失败（AT ERROR 或后端报错），模组未返回有效测量';
+					case 'no-measurement': return '已取得载波频点/带宽，未取得独立信号测量';
+					case 'timeout': return '辅站查询超时';
+					case 'not-applicable': return '当前制式不适用该辅站查询';
+					case 'unavailable': return 'AT 通道暂不可用（后端未就绪或已熔断），本轮未发起辅站查询';
+					case 'not-queried': return '辅站查询本轮尚未执行，等待下一轮刷新';
+					default: return '';
+				}
+			}
 
 			// 1. 查询待刷新状态 (避免直接当作单载波)
 			if (caSt.state === 'pending') {
@@ -1555,6 +1916,10 @@ return L.view.extend({
 				var sinrStr = (c.sinr != null && !isNaN(c.sinr)) ? (c.sinr + ' dB') : (c.rssi != null ? ('RSSI ' + c.rssi + ' dBm') : '—');
 				var measExtra = c.measType && c.measType !== '—' && c.measType !== 'Serving' ? (' · ' + c.measType) : '';
 
+				/* SCC 信号缺失原因说明（issue #39）：仅在 SCC 且全部信号为空时显示 */
+				var sigReasonText = (!isPcc && c.signalReason && c.rsrp == null && c.rsrq == null && c.sinr == null && c.rssi == null)
+					? getSignalReasonText(c.signalReason) : '';
+
 				caHtml +=
 					'<div class="mt-carrier-card-item" style="padding:12px 16px; background:var(--mt5700-subtle-bg); border-radius:10px; border:1px solid var(--mt5700-border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">' +
 					'  <div style="display:flex; align-items:center; gap:10px; min-width:240px;">' +
@@ -1584,6 +1949,7 @@ return L.view.extend({
 					'      <div style="font-size:11px; color:var(--mt5700-text-muted);">SINR</div>' +
 					'      <div style="font-family:monospace; font-size:13px; font-weight:700; color:' + (c.sinr != null ? 'var(--mt5700-green)' : 'var(--mt5700-text-muted)') + ';">' + sinrStr + '</div>' +
 					'    </div>' +
+					(sigReasonText ? ('    <div style="font-size:10.5px; color:var(--mt5700-text-muted); text-align:right; min-width:180px; padding-top:3px; margin-top:2px; border-top:1px dashed rgba(128,128,128,0.15);">' + sigReasonText + '</div>') : '') +
 					'  </div>' +
 					'</div>';
 			});
@@ -1599,20 +1965,104 @@ return L.view.extend({
 			carrierBox.innerHTML = caHtml;
 		}
 
+		/* ---------- 芯片温度分档表（唯一实现） ----------
+		 * 为什么是 6 档而不是 3 档：三档只有「正常 / 偏高 / 过热」，40℃ 与 52℃
+		 * 会显示成同一个档，看不出季节性的缓慢升温；而散热判断恰恰需要这层分辨率。
+		 *
+		 * 这张表同时被三处消费，必须只此一份：
+		 *   1) 温度格子的着色（tempLevel → CSS 变量）；
+		 *   2) 卡片的整体定级（按最热通道取档，见 renderTempAdv）；
+		 *   3) tests/mock-modem/temp-level-test.js —— 它按字面量正则从本文件抽取
+		 *      阈值表与函数体，改了写法（例如换用箭头函数/对象常量）测试会直接
+		 *      报「无法从源码抽取温度逻辑」而不是静默放过。
+		 * 曾把它当零引用导出从 mt5700.js 删掉过，渲染侧退回三档内联阈值，
+		 * mt5700.css 里的 temp-* 六档色从此无人写 —— 别再拆开。
+		 */
+		var TEMP_LEVELS = [
+			{ level: 'high',   min: 77 },
+			{ level: 'hot',    min: 69 },
+			{ level: 'warm',   min: 61 },
+			{ level: 'normal', min: 53 },
+			{ level: 'cool',   min: 35 },
+			{ level: 'cold',   min: -Infinity }
+		];
+
+		/* 温度值 → 档位（cold/cool/normal/warm/hot/high）；无效值返回 null。
+		 * 0 与负值都视为「没读到」：0℃ 的基带结温是传感器未初始化的表现，
+		 * 把它当真实读数会画出满格绿色的假温度。 */
+		function tempLevel(value) {
+			var v = parseFloat(value);
+			if (isNaN(v) || v <= 0) return null;
+			for (var i = 0; i < TEMP_LEVELS.length; i++) {
+				if (v >= TEMP_LEVELS[i].min) return TEMP_LEVELS[i].level;
+			}
+			return null;
+		}
+
+		/* 档位 → 颜色变量。只用 mt5700.css 里**确实存在**的主题变量：
+		 *   danger（红）/ amber（橙）/ green（绿）/ cyan（蓝）/ text-muted（灰）。
+		 * 六档要挤进五个色，故 warm 与 hot 共用 amber，靠档位文案区分。
+		 * --mt5700-orange / --mt5700-blue 都不在色板里，写
+		 * var(--mt5700-orange, #xxx) 虽然能靠兜底色渲染，但暗色主题下那一格
+		 * 不会跟着变 —— 不引入色板外的变量。 */
+		function tempColor(level) {
+			switch (level) {
+				case 'high': return 'var(--mt5700-danger)';
+				case 'hot':
+				case 'warm': return 'var(--mt5700-amber)';
+				case 'normal': return 'var(--mt5700-green)';
+				case 'cool': return 'var(--mt5700-cyan)';
+				case 'cold': return 'var(--mt5700-cyan)';
+				default: return 'var(--mt5700-text-muted)';
+			}
+		}
+
+		/* 档位 → 中文短语（卡片整体定级用） */
+		function tempLevelText(level) {
+			switch (level) {
+				case 'high': return '过高';
+				case 'hot': return '偏高';
+				case 'warm': return '偏暖';
+				case 'normal': return '正常';
+				case 'cool': return '温和';
+				case 'cold': return '低温';
+				default: return '未知';
+			}
+		}
+
+		/* 档位 → Mt5700.badge 的 kind */
+		function tempBadgeKind(level) {
+			switch (level) {
+				case 'high': return 'danger';
+				case 'hot': return 'warning';
+				case 'warm': return 'warning';
+				case 'cold': return 'neutral';
+				default: return 'info';
+			}
+		}
+
 		/* ---------- 芯片温度渲染 (折叠面板内部，严格根据设备 AT^CHIPTEMP 真实上报) ---------- */
 		function renderTempAdv() {
 			tempBody.innerHTML = '';
 			var t = state.temps || {};
 			/* 查询失败/未就绪时显示占位符，不能用 47/46/43.3 这类合成默认值
 			 * 冒充实测结温 —— 用户会拿假温度去做散热判断。 */
+			/* 手册 17.1.1：^CHIPTEMP 恒定上报 12 路传感器（sub3G/sub6G/MIMO/TCXO/
+			 * peri1/peri2/ap1/ap2/modem1/modem2/bbp1/bbp2），全部展示，
+			 * 只挑 7 路会把 bbp/peri 的偏高悄悄藏起来。 */
 			var items = [
-				{ label: 'Modem1 基带', value: t.modem1 },
+				{ label: 'Sub3G PA', value: t.sub3GPA },
+				{ label: 'Sub6G PA', value: t.sub6GPA },
+				{ label: 'MIMO PA', value: t.mimoPa },
+				{ label: 'TCXO 晶振', value: t.tcxo },
+				{ label: 'Peri1 外设', value: t.peri1 },
+				{ label: 'Peri2 外设', value: t.peri2 },
 				{ label: 'AP1 主控', value: t.ap1 },
 				{ label: 'AP2 核心', value: t.ap2 },
-				{ label: 'Sub6G PA', value: t.sub6GPA },
-				{ label: 'Sub3G PA', value: t.sub3GPA },
-				{ label: 'MIMO PA', value: t.mimoPa },
-				{ label: 'TCXO 晶振', value: t.tcxo }
+				{ label: 'Modem1 基带', value: t.modem1 },
+				{ label: 'Modem2 基带', value: t.modem2 },
+				{ label: 'BBP1 基带处理', value: t.bbp1 },
+				{ label: 'BBP2 基带处理', value: t.bbp2 }
 			];
 			var hasAnyTemp = items.some(function (it) { return it.value != null && !isNaN(parseFloat(it.value)); });
 			if (!hasAnyTemp) {
@@ -1626,9 +2076,13 @@ return L.view.extend({
 
 			var maxC = 0, sumC = 0, nC = 0;
 			items.forEach(function (it) {
-				if (it.value != null && !isNaN(parseFloat(it.value))) {
-					if (it.value > maxC) maxC = it.value;
-					sumC += parseFloat(it.value);
+				/* 汇总口径与 tempLevel 一致：v <= 0 是传感器未初始化，不是真实读数。
+				 * 不排除的话，全 0 时徽章会写「最高 0 ℃ · 均温 0 ℃」而格子全是「—」，
+				 * 部分 0 时均温也会被向下拉偏。 */
+				var v = parseFloat(it.value);
+				if (!isNaN(v) && v > 0) {
+					if (v > maxC) maxC = v;
+					sumC += v;
 					nC++;
 				}
 			});
@@ -1636,13 +2090,14 @@ return L.view.extend({
 
 			var grid = E('div', { 'class': 'mt-temp-grid' });
 			items.forEach(function (it) {
-				var has = it.value != null && !isNaN(parseFloat(it.value));
+				var lv = tempLevel(it.value);
+				var has = lv != null;
 				var v = has ? parseFloat(it.value) : 0;
-				var color = !has ? 'var(--mt5700-text-muted)'
-					: (v >= 75 ? 'var(--mt5700-danger)' : (v >= 60 ? 'var(--mt5700-amber)' : 'var(--mt5700-green)'));
+				/* 格子着色与卡片定级共用同一张分档表，避免「格子黄、徽章绿」的自相矛盾 */
+				var color = tempColor(lv);
 				var pct = has ? Math.min(100, (v / 85) * 100) : 0;
-
-				var cell = E('div', { 'style': 'background:var(--mt5700-subtle-bg); padding:10px; border-radius:8px; text-align:center; border:1px solid var(--mt5700-border-subtle);' }, [
+				var cell = E('div', { 'class': 'mt-temp-cell temp-' + (lv || 'unknown'),
+					'style': 'background:var(--mt5700-subtle-bg); padding:10px; border-radius:8px; text-align:center; border:1px solid var(--mt5700-border-subtle);' }, [
 					E('div', { 'style': 'font-size:11px; color:var(--mt5700-text-muted); font-weight:600;' }, it.label),
 					E('div', { 'style': 'font-size:15px; font-weight:800; font-family:monospace; color:' + color + '; margin:4px 0;' }, has ? (v + ' ℃') : '—'),
 					E('div', { 'style': 'height:4px; background:rgba(0,0,0,0.08); border-radius:2px; overflow:hidden;' }, [
@@ -1654,8 +2109,17 @@ return L.view.extend({
 			tempBody.appendChild(grid);
 
 			if (tempBadge) {
+				/* 定级与格子的着色同一口径（都走 tempLevel 六档表）。
+				 * 早先这里恒写「温和」——那是已删除的 tempLevel 分级留下的死文案，
+				 * 会让 90℃ 的 PA 也显示成温和。散热看的是最热的结温，
+				 * 故按最高通道定级，同时给出均温参考。 */
 				tempBadge.innerHTML = '';
-				tempBadge.appendChild(Mt5700.badge(avgC != null ? ('均温 ' + avgC + ' ℃ · 温和') : '暂无温度读数', 'info'));
+				var worst = tempLevel(maxC);
+				/* 一路有效读数都没有时不写 0——「最高 0 ℃」会被当成真实结温 */
+				var maxShow = nC ? maxC : '—';
+				tempBadge.appendChild(Mt5700.badge(
+					'最高 ' + maxShow + ' ℃ · 均温 ' + (avgC === null ? '—' : avgC) + ' ℃ · ' + tempLevelText(worst),
+					tempBadgeKind(worst)));
 			}
 		}
 
@@ -1691,13 +2155,29 @@ return L.view.extend({
 		}
 
 		/* ---------- 调制方式与空间流动态 SVG 渲染 (折叠面板内部，真实读取 AT^MCS) ---------- */
+
+		/*
+		 * 空间流文案。手册里没有「当前 rank / N 层 MIMO」这一项：
+		 *   - AT^MCS（13.22）只给 direction、rat、MCS 表号与各码字 MCS；
+		 *   - AT^TRANSMODE?（13.31）只给 LTE 的传输模式 TM1~TM10。
+		 * 早先把 ^MCS 的 f1（制式标志 0=LTE/1=NR）当成层数显示，NR 下恒为
+		 * 「1 层」、LTE 下为「0 层」，是假数据。现在只报两个真实量：
+		 * LTE 传输模式 + 下行码字数（2 码字即两流空间复用）。
+		 */
+		function mimoSummary(m) {
+			var parts = [];
+			if (m.tm) parts.push(m.tm);
+			if (m.dlCw != null) parts.push('下行 ' + m.dlCw + ' 码字');
+			if (m.ulCw != null) parts.push('上行 ' + m.ulCw + ' 码字');
+			return parts.join(' · ');
+		}
+
 		function renderMcsAdv() {
 			mcsBody.innerHTML = '';
 			var m = state.mcs;
 			var dlMod = m.dlMod || '';
 			var ulMod = m.ulMod || '';
-			var dlRank = m.dlRank;
-			var ulRank = m.ulRank;
+			var mimoText = mimoSummary(m);
 
 			var visualWrap = E('div', { 'class': 'mt-mcs-visual-grid' });
 
@@ -1711,14 +2191,14 @@ return L.view.extend({
 			qamBox.appendChild(Mt5700.constellationSvg(dlMod || 'QPSK'));
 			visualWrap.appendChild(qamBox);
 
-			// 2. 空间流 (MIMO 空间天线与波束动态矢量 SVG)
+			// 2. 空间流 (按下行码字数绘制空间流，LTE 另标传输模式)
 			var mimoBox = E('div', { 'class': 'mt-mcs-box' });
 			var mimoTitle = E('div', { 'class': 'mt-mcs-header' }, [
-				E('span', { 'class': 'mt-mcs-tag mt-tag-purple' }, 'MIMO 空间流'),
-				E('span', { 'class': 'mt-mcs-desc' }, dlRank ? (dlRank + '×' + dlRank + ' MIMO (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '空间流读取中...')
+				E('span', { 'class': 'mt-mcs-tag mt-tag-purple' }, '空间流 / 传输模式'),
+				E('span', { 'class': 'mt-mcs-desc' }, mimoText || '模组上报读取中...')
 			]);
 			mimoBox.appendChild(mimoTitle);
-			mimoBox.appendChild(Mt5700.mimoSvg(dlRank || 1));
+			mimoBox.appendChild(Mt5700.mimoSvg(m.dlCw != null ? m.dlCw : 1));
 			visualWrap.appendChild(mimoBox);
 
 			mcsBody.appendChild(visualWrap);
@@ -1726,7 +2206,9 @@ return L.view.extend({
 			var rows = [
 				['下行调制方式 (DL)', dlMod ? (dlMod + ' (MCS ' + (m.dlMcs != null ? m.dlMcs : '—') + ')') : '— (模组未上报)'],
 				['上行调制方式 (UL)', ulMod ? (ulMod + ' (MCS ' + (m.ulMcs != null ? m.ulMcs : '—') + ')') : '— (模组未上报)'],
-				['空间多路复用流', dlRank ? (dlRank + ' 层空间复用流 (DL)' + (ulRank ? ' / ' + ulRank + ' 层 (UL)' : '')) : '— (模组未上报)']
+				['下行空间流数 (码字)', m.dlCw != null ? (m.dlCw + ' 码字空间复用') : '— (模组未上报)'],
+				['上行空间流数 (码字)', m.ulCw != null ? (m.ulCw + ' 码字') : '— (模组未上报)'],
+				['LTE 传输模式', m.tm || '— (仅 LTE 上报)']
 			];
 			mcsBody.appendChild(Mt5700.table(['链路参数', '当前工作状态'], rows, { striped: true }));
 		}
@@ -1735,35 +2217,59 @@ return L.view.extend({
 		   6. 周期轮询与数据刷新 (完全保持原有后端 RPC 接口不变)
 		   ========================================================================== */
 
+		/* 频点反推频段：映射表统一收敛在 Parse.bandFromArfcn（单一来源），
+		 * 保留函数名与返回字符串的契约，供 syncCarriers 与下方测试切片使用 */
 		function getBandFromNrArfcn(arfcn) {
-			if (!arfcn) return '';
-			var ch = parseInt(arfcn, 10);
-			if (isNaN(ch)) return '';
-			if (ch >= 499200 && ch <= 537999) return '41';
-			if (ch >= 620000 && ch <= 680000) return '78';
-			if (ch >= 693334 && ch <= 733333) return '79';
-			if (ch >= 151600 && ch <= 160600) return '28';
-			if (ch >= 422000 && ch <= 434000) return '1';
-			if (ch >= 376000 && ch <= 396000) return '3';
-			if (ch >= 173800 && ch <= 175000) return '5';
-			if (ch >= 185000 && ch <= 192000) return '8';
-			return '';
+			return Parse.bandFromArfcn('NR', arfcn);
 		}
 
 		function getBandFromLteArfcn(arfcn) {
-			if (!arfcn) return '';
-			var ch = parseInt(arfcn, 10);
-			if (isNaN(ch)) return '';
-			if (ch >= 0 && ch <= 599) return '1';
-			if (ch >= 1200 && ch <= 1949) return '3';
-			if (ch >= 2400 && ch <= 2649) return '5';
-			if (ch >= 3450 && ch <= 3799) return '8';
-			if (ch >= 36200 && ch <= 36349) return '34';
-			if (ch >= 37750 && ch <= 38249) return '38';
-			if (ch >= 38250 && ch <= 38649) return '39';
-			if (ch >= 38650 && ch <= 39649) return '40';
-			if (ch >= 39650 && ch <= 41589) return '41';
-			return '';
+			return Parse.bandFromArfcn('LTE', arfcn);
+		}
+
+		/*
+		 * SCC 是否真的拿到了可用读数（issue #41 Codex review）。
+		 *
+		 * Parse.carrierSignalFor() 只要 ARFCN 命中就返回对象，测量字段是原样
+		 * 拷贝的 —— 模组上报了辅小区却没带测量时，pci/rsrp/rsrq/sinr 全是 null。
+		 * 所以「匹配上了」不等于「有读数」，判据必须和渲染层的破折号对齐：
+		 * RSRP/RSRQ/SINR/RSSI 全空就按缺测处理，补上可解释的原因。
+		 * HFREQINFO 分支同步透传 rssi，渲染层第三列才能用 RSSI 兜底显示。
+		 */
+		function hasUsableSignal(sig) {
+			return !!sig && (sig.rsrp != null || sig.rsrq != null || sig.sinr != null || sig.rssi != null);
+		}
+
+		/*
+		 * 计算 SCC 信号缺失的原因（issue #39）。
+		 *
+		 * 区分三个层次：
+		 *   - 这一轮到底有没有发出请求（atStatus 为 null 表示还没查过）
+		 *   - 传输层是快速失败、超时，还是拿到了响应
+		 *   - AT 最终响应是 OK、ERROR、NONE，以及是否解析出可关联的独立测量
+		 *
+		 * 返回：
+		 *   'at-error'       —— AT 命令返回 ERROR（模组拒绝或参数不支持）
+		 *   'no-measurement' —— AT 命令成功（OK/NONE/空），但未返回可关联的独立测量
+		 *   'timeout'        —— 请求已发出，在超时预算内无响应
+		 *   'unavailable'    —— 请求根本没发出（后端未就绪 / 通道熔断，秒回失败）
+		 *   'not-queried'    —— 本轮尚未执行辅站查询
+		 *   'not-applicable' —— 该制式没有对应的辅站查询命令
+		 *
+		 * 绝不复制 PCC 读数或填 0；缺测就如实说明缺测原因。
+		 */
+		function computeSccSignalReason(atStatus, carrier) {
+			var st = atStatus || {};
+			var mode = (carrier && carrier.sysMode) || 'NR';
+			/* ^MONSSC 只上报 NR 辅站，^CASCELLINFO? 只上报 LTE 辅站；
+			 * 2G/3G 载波两者都不适用，不能说成「未返回测量」。 */
+			if (mode !== 'NR' && mode !== 'LTE') return 'not-applicable';
+			var status = mode === 'LTE' ? st.cascell : st.monssc;
+			if (status === 'error') return 'at-error';
+			if (status === 'timeout') return 'timeout';
+			if (status === 'unavailable') return 'unavailable';
+			if (status === null || status === undefined) return 'not-queried';
+			return 'no-measurement';
 		}
 
 		function syncCarriers() {
@@ -1817,6 +2323,9 @@ return L.view.extend({
 				var h = rawHfreq[hi];
 				var sig = Parse.carrierSignalFor(h, secNR, secLTE);
 				var hBand = h.band || (h.sysMode === 'NR' ? getBandFromNrArfcn(h.dlFcn) : getBandFromLteArfcn(h.dlFcn));
+				var sigReason = null;
+				/* 匹配到小区 ≠ 拿到读数：ARFCN 命中但测量全空时同样要给原因 */
+				if (!hasUsableSignal(sig)) sigReason = computeSccSignalReason(state.secondaryATStatus, h);
 				merged.push({
 					isPcc: false,
 					carrierRole: 'SCC',
@@ -1830,7 +2339,9 @@ return L.view.extend({
 					rsrp: sig ? sig.rsrp : null,
 					rsrq: sig ? sig.rsrq : null,
 					sinr: sig ? sig.sinr : null,
-					measType: sig ? sig.measType : null
+					rssi: sig && sig.rssi != null ? sig.rssi : null,
+					measType: sig ? sig.measType : null,
+					signalReason: sigReason
 				});
 			}
 
@@ -1853,7 +2364,8 @@ return L.view.extend({
 						rsrp: nCell.rsrp != null ? nCell.rsrp : null,
 						rsrq: nCell.rsrq != null ? nCell.rsrq : null,
 						sinr: nCell.sinr != null ? nCell.sinr : null,
-						measType: nCell.measType || 'SSB'
+						measType: nCell.measType || 'SSB',
+						signalReason: hasUsableSignal(nCell) ? null : computeSccSignalReason(state.secondaryATStatus, { sysMode: 'NR' })
 					});
 				});
 			}
@@ -1876,7 +2388,8 @@ return L.view.extend({
 						rsrp: lCell.rsrp != null ? lCell.rsrp : null,
 						rsrq: lCell.rsrq != null ? lCell.rsrq : null,
 						sinr: null,
-						rssi: lCell.rssi != null ? lCell.rssi : null
+						rssi: lCell.rssi != null ? lCell.rssi : null,
+						signalReason: hasUsableSignal(lCell) ? null : computeSccSignalReason(state.secondaryATStatus, { sysMode: 'LTE' })
 					});
 				});
 			}
@@ -1926,7 +2439,6 @@ return L.view.extend({
 					if (serving.rsrq != null) state.cell.rsrq = serving.rsrq;
 					if (serving.sinr != null) state.cell.sinr = serving.sinr;
 					if (serving.sysMode) state.cell.sysMode = serving.sysMode;
-					if (serving.signalPercent) state.cell.signalPercent = serving.signalPercent;
 				}
 				var needHcsq = state.cell.rsrp == null || state.cell.rsrq == null || state.cell.sinr == null;
 				if (!needHcsq) return null;
@@ -1943,7 +2455,6 @@ return L.view.extend({
 					return null;
 				});
 			}).then(function () {
-				state.telemetryError = false;
 				syncCarriers();
 				renderSignalUI();
 				renderTabsUI();
@@ -1955,7 +2466,6 @@ return L.view.extend({
 				 * 只是辅助遥测偶发失败」的情况被误判成信号读取异常。
 				 * HFREQINFO 自身的成败已在上一级 then 中如实记录。
 				 */
-				state.telemetryError = true;
 				syncCarriers();
 				renderCarriersAdv();
 				renderTabsUI();
@@ -1963,14 +2473,42 @@ return L.view.extend({
 			});
 		}
 
+		/*
+		 * 把 sendCommand 的结果折算成 AT 终止状态（issue #41 / PR #42 Codex review）。
+		 *
+		 * 「传输失败」不等于「超时」，还要再分清是**谁**没响应。rpc.js 的 sendCommand
+		 * 在 success:false 时带 cause，cause 一路来自三个层次：
+		 *   timeout        —— 请求已发出但没等到响应：前端超时预算（rpc.js 的
+		 *                     withTimeout 分支）、ucode 对后端的 nc 硬超时
+		 *                     （mt5700.uc）、Rust 侧模组静默与排队预算耗尽
+		 *                     （rpcserver.rs 的 at_failure_cause）
+		 *   unavailable    —— 请求根本没发出，或后端本身不可用：
+		 *                     not-connected、circuit-open、not-listening、no-nc、
+		 *                     spawn-failed、no-reply
+		 *   error          —— 模组回了 ERROR，或后端明确报了业务失败（cause 缺省）
+		 * 原先一律记 'timeout'，后端掉线或通道熔断时页面会说「辅站查询超时」，
+		 * 把通道故障误导成模组无响应，排障方向就带偏了。
+		 */
+		function atStatusFromResult(res) {
+			if (res && res.success === true) return Parse.atStatusFromText(res.data);
+			var cause = (res && res.cause) || '';
+			if (cause === 'timeout') return 'timeout';
+			if (cause === 'not-connected' || cause === 'circuit-open' || cause === 'not-listening'
+				|| cause === 'no-nc' || cause === 'spawn-failed' || cause === 'no-reply') return 'unavailable';
+			return 'error';
+		}
+
 		function loadSecondary() {
 			return AtWs.client.sendCommand('AT^MONSSC').then(function (monssc) {
 				state.secondaryNR = (monssc.success && monssc.data) ? Parse.parseMonsscAll(String(monssc.data)) : [];
 				state.secondarySuccess = monssc.success;
+				/* 记录 AT 终止状态：传输成功不等于 AT 命令成功（如 ERROR / NONE） */
+				state.secondaryATStatus.monssc = atStatusFromResult(monssc);
 				return AtWs.client.sendCommand('AT^CASCELLINFO?');
 			}).then(function (cascell) {
 				state.secondaryLTE = (cascell.success && cascell.data) ? Parse.parseCascellAll(String(cascell.data)) : [];
 				if (cascell.success) state.secondarySuccess = true;
+				state.secondaryATStatus.cascell = atStatusFromResult(cascell);
 				syncCarriers();
 				renderCarriersAdv();
 				renderTabsUI();
@@ -2000,6 +2538,42 @@ return L.view.extend({
 				state.diag.addrs = (pdp.success && pdp.data) ? Parse.parseCgpaddr(pdp.data) : [];
 				renderDiagAdv();
 			}).catch(function () {});
+		}
+
+		/*
+		 * SSB 波束遥测（AT^NRSSBID?，手册 13.28）：
+		 *   · 仅在 NR 连接态、且网侧配置了 Beam 测量时才会有有效值，其余情况模组
+		 *     整包填无效值（SSB ID 0xFF / RSRP 0x7FFF），解析层已统一置 null；
+		 *   · 单条回包较长，逐轮查询会挤占串口带宽，因此按轮次节流（每 3 轮 ≈ 15s）；
+		 *   · 查询失败或网侧未配置时如实回落到「未上报 / 无信号」，不保留过期假象。
+		 */
+		var ssbPollTick = 0;
+		var SSB_POLL_EVERY = 3;
+
+		function loadSSB() {
+			ssbPollTick++;
+			/* 已经拿到过数据就按节流间隔走；从未成功过则每轮都试，尽快给出真值 */
+			if (ssbPollTick % SSB_POLL_EVERY !== 1 && state.ssb.lastSuccessTime > 0) {
+				return Promise.resolve();
+			}
+			return AtWs.client.sendCommand('AT^NRSSBID?').then(function (res) {
+				state.ssb.queried = true;
+				var parsed = (res && res.success && res.data) ? AtWs.parseNRSSBID(res.data) : null;
+				if (parsed && parsed.beams) {
+					state.ssb.ok = true;
+					state.ssb.lastSuccessTime = Date.now();
+					state.ssb.pci = parsed.pci;
+					state.ssb.beams = parsed.beams;
+				} else {
+					/* 命令通了但解析不出结构：本次视为无有效上报 */
+					state.ssb.ok = false;
+				}
+				refreshSsbMatrix();
+			}).catch(function () {
+				state.ssb.queried = true;
+				state.ssb.ok = false;
+				refreshSsbMatrix();
+			});
 		}
 
 		function getPSReg() {
@@ -2032,9 +2606,10 @@ return L.view.extend({
 					if (str) {
 						var d = str.split(',');
 						if (d.length >= 6) {
+							/* subnetMask/dhcpServer 模组有上报但页面不展示，不进 state */
 							state.dhcpv4 = {
-								ipv4Address: AtWs.hexToIP(d[0].trim()), subnetMask: AtWs.hexToIP(d[1].trim()),
-								gateway: AtWs.hexToIP(d[2].trim()), dhcpServer: AtWs.hexToIP(d[3].trim()),
+								ipv4Address: AtWs.hexToIP(d[0].trim()),
+								gateway: AtWs.hexToIP(d[2].trim()),
 								primaryDNS: AtWs.hexToIP(d[4].trim()), secondaryDNS: AtWs.hexToIP(d[5].trim())
 							};
 						}
@@ -2051,13 +2626,10 @@ return L.view.extend({
 					if (str) {
 						var d = str.split(',');
 						if (d.length >= 6) {
+							/* ^DSFLOWQRY 共 6 项，页面只展示连续连接时长；
+							 * 其余累计流量由接口计数器(netrate)与后端 usage 负责，不在此重复 */
 							state.flow = {
-								currentConnectTime: AtWs.formatDuration(parseInt(d[0].trim(), 16)),
-								currentDownloadFlow: AtWs.formatFlow(parseInt(d[1].trim(), 16)),
-								currentUploadFlow: AtWs.formatFlow(parseInt(d[2].trim(), 16)),
-								totalConnectTime: AtWs.formatDuration(parseInt(d[3].trim(), 16)),
-								totalDownloadFlow: AtWs.formatFlow(parseInt(d[4].trim(), 16)),
-								totalUploadFlow: AtWs.formatFlow(parseInt(d[5].trim(), 16))
+								currentConnectTime: AtWs.formatDuration(parseInt(d[0].trim(), 16))
 							};
 						}
 					}
@@ -2078,30 +2650,42 @@ return L.view.extend({
 			}).catch(function () {});
 		}
 
+		/*
+		 * ^MCS 按手册 13.22 只给「制式 + MCS 表号 + 各载波码字的 MCS」，EN-DC 下
+		 * 一次应答含 LTE、NR 两行，因此按当前驻留制式挑对应的那一行；
+		 * 空间流数量取主载波码字数（code1 合法即 2 码字 = 两流空间复用），
+		 * LTE 再补一条手册 13.31 的 AT^TRANSMODE?（TM1~TM10，非 LTE 制式回 ERROR）。
+		 */
+		function pickMcsEntry(parsed) {
+			var rat = String((state.cell && state.cell.sysMode) || '').toUpperCase();
+			var want = rat.indexOf('NR') === 0 ? 'NR' : (rat.indexOf('LTE') === 0 ? 'LTE' : '');
+			return Parse.mcsEntry(parsed, want);
+		}
+
 		function getMCS() {
 			return AtWs.client.sendCommand('AT^MCS=1').then(function (resDl) {
 				if (resDl && resDl.success && resDl.data) {
-					var parsedDl = Parse.parseMCS(resDl.data);
-					if (parsedDl) {
-						if (parsedDl.rank) state.mcs.dlRank = parsedDl.rank;
-						if (parsedDl.mcs != null) {
-							state.mcs.dlMcs = parsedDl.mcs;
-							state.mcs.dlMod = Parse.mcsModulation(parsedDl.mcs) || state.mcs.dlMod;
-						}
+					var e = pickMcsEntry(Parse.parseMCS(resDl.data));
+					if (e && e.carriers[0].mcs != null) {
+						state.mcs.dlMcs = e.carriers[0].mcs;
+						state.mcs.dlMod = Parse.mcsModulation(e.carriers[0].mcs) || state.mcs.dlMod;
+						state.mcs.dlCw = Parse.mcsCodewords(e);
 					}
 				}
 				return AtWs.client.sendCommand('AT^MCS=0');
 			}).then(function (resUl) {
 				if (resUl && resUl.success && resUl.data) {
-					var parsedUl = Parse.parseMCS(resUl.data);
-					if (parsedUl) {
-						if (parsedUl.rank) state.mcs.ulRank = parsedUl.rank;
-						if (parsedUl.mcs != null) {
-							state.mcs.ulMcs = parsedUl.mcs;
-							state.mcs.ulMod = Parse.mcsModulation(parsedUl.mcs) || state.mcs.ulMod;
-						}
+					var e = pickMcsEntry(Parse.parseMCS(resUl.data));
+					if (e && e.carriers[0].mcs != null) {
+						state.mcs.ulMcs = e.carriers[0].mcs;
+						state.mcs.ulMod = Parse.mcsModulation(e.carriers[0].mcs) || state.mcs.ulMod;
+						state.mcs.ulCw = Parse.mcsCodewords(e);
 					}
 				}
+				return AtWs.client.sendCommand('AT^TRANSMODE?');
+			}).then(function (resTm) {
+				var tm = resTm && resTm.success ? Parse.parseTransMode(resTm.data) : null;
+				state.mcs.tm = tm || '';
 				renderMcsAdv();
 				renderTabsUI();
 			}).catch(function () {
@@ -2225,49 +2809,52 @@ return L.view.extend({
 				if (res && res.success && res.data) {
 					/* 只认数据通道：详见 pickDataContext 的说明 */
 					var ctx = pickDataContext(res.data);
-					if (ctx.imsApn) state.imsApn = ctx.imsApn;
 					if (ctx.data) {
 						state.pdpType = ctx.data.ptype;
 						state.apn = ctx.data.apn;
 						state.apnCid = ctx.data.cid;
 					}
 				}
-				/* 签约速率只查**数据上网**那条上下文，绝不查 IMS。
+				/* 签约速率与 QoS 等级都只查**数据上网**那条上下文，绝不查 IMS。
 				 * state.apnCid 来自 pickDataContext —— 它已剔除 IMS / 紧急 / MMS / SUPL
 				 * 等专用承载 APN，所以这里拿到的必然是数据通道 CID；
 				 * 万一没解析到，退回 CID 1（默认数据上下文，实机 +CGACT: 1,1 即上网承载）。
 				 *
-				 * 优先用厂商私有命令 AT^DSAMBR（手册 16.17「签约速率查询」）：
+				 * 签约速率优先用厂商私有命令 AT^DSAMBR（手册 16.17「签约速率查询」），
 				 * 它 4G/5G 下都能拿到真实的上下行签约速率（kbps）。
-				 * 只有它不返回时，才退回标准命令 AT+C5GQOSRDP（Session-AMBR）。 */
+				 * 5QI/QCI 只有标准命令 AT+C5GQOSRDP 才报（issue #43），
+				 * 该命令的 Session-AMBR 同时作为签约速率的兜底来源。 */
 				var dataCid = state.apnCid || '1';
 				return AtWs.client.sendCommand('AT^DSAMBR=' + dataCid);
 			}).then(function (res) {
+				/* 签约速率优先取 AT^DSAMBR，但它不报 5QI/QCI，
+				 * 所以无论这条是否成功都要再查一次 AT+C5GQOSRDP：
+				 * 同一条数据承载上既读 QoS 等级，也作为签约速率的兜底来源。 */
 				var q = (res && res.success && res.data) ? Parse.parseDsambr(res.data) : null;
-				if (!q || (!q.dlAmbr && !q.ulAmbr)) {
-					return AtWs.client.sendCommand('AT+C5GQOSRDP=' + (state.apnCid || '1'));
-				}
-				q.source = 'dsambr';
-				state.subRate = q;
-				return null;
-			}).then(function (res) {
-				if (res && res.data) {
-					var q2 = Parse.parseC5gQosRdp(res.data);
-					/* 5QI 1（VoLTE 语音）/ 5（IMS 信令）是 IMS 专用承载的特征值：
-					 * 万一真拿到这种值，说明查到的不是数据上网那条上下文，
-					 * 宁可不显示也不张冠李戴。 */
-					if (q2 && q2.qci !== 1 && q2.qci !== 5 && (q2.ambrUl || q2.ambrDl)) {
-						q2.source = 'qosrdp';
-						state.subRate = {
-							dlAmbr: q2.ambrDl, ulAmbr: q2.ambrUl,
-							apn: state.apn, cid: q2.cid, source: 'qosrdp'
-						};
-					} else {
-						state.subRate = null;
-					}
+				if (q && (q.dlAmbr || q.ulAmbr)) {
+					q.source = 'dsambr';
+					state.subRate = q;
 				} else {
-					/* DSAMBR 已经给出结果时 res 为 null，无需再动 */
-					if (!state.subRate || state.subRate.source !== 'dsambr') state.subRate = null;
+					state.subRate = null;
+				}
+				return AtWs.client.sendCommand('AT+C5GQOSRDP=' + (state.apnCid || '1'));
+			}).then(function (res) {
+				var q2 = (res && res.success && res.data) ? Parse.parseC5gQosRdp(res.data) : null;
+				/* 只认应答 CID 与请求的数据 CID 一致的结果（PR #45 Codex P2）：
+				 * 5QI/QCI 1（会话语音）、5（IMS 信令）本身都是合法等级，
+				 * 不能用「等级值像 IMS」来推断承载归属 —— 那样会误杀数据承载上
+				 * 真实上报的等级；反过来，应答 CID 对不上时才说明拿到的不是
+				 * 上网承载。qci 为 0 表示「由网络选择」，按未上报处理。 */
+				var reqCid = parseInt(state.apnCid || '1', 10);
+				var cidMatch = q2 && q2.cid != null && q2.cid === reqCid;
+				state.qos = (cidMatch && q2.qci != null && q2.qci !== 0)
+					? { qci: q2.qci } : null;
+				/* 只有 DSAMBR 没给出签约速率时，才用这条的 Session-AMBR 兜底 */
+				if (!state.subRate && cidMatch && (q2.ambrUl || q2.ambrDl)) {
+					state.subRate = {
+						dlAmbr: q2.ambrDl, ulAmbr: q2.ambrUl,
+						apn: state.apn, cid: q2.cid, source: 'qosrdp'
+					};
 				}
 				renderTabsUI();
 			}).catch(function (e) {
@@ -2277,14 +2864,20 @@ return L.view.extend({
 
 		// 实时网络速率采样 (每 1000ms 采样一次接口统计)
 		var rateSample = null;
-		var rateTimer = null;
 
 		/* 本次使用量由 Rust 后端常驻统计（见 src/rust/src/usage.rs），
 		 * 前端关闭 / 刷新都不影响累计；这里只负责拉取快照展示。 */
 		function sampleUsage() {
 			return AtWs.usage().then(function (r) {
 				if (r && r.success && r.usage) {
+					var prevSource = state.usage && state.usage.source;
 					state.usage = r.usage;
+					/* 来源也可能由页面之外（UCI / 其它会话）切换，发现变化同样换源 */
+					if (prevSource && prevSource !== r.usage.source) {
+						resetTrafficSeries(r.usage.source);
+						sampleRate();
+						return;
+					}
 					renderSpeedUI();
 				}
 			});
@@ -2292,16 +2885,23 @@ return L.view.extend({
 
 		function sampleRate() {
 			return AtWs.netRate('').then(function (r) {
+				/* 速率与火花线始终跟着当前统计来源走：netdev 直读 sysfs，
+				 * modem 由 ucode 转发后端取 DS 累计值。来源一变就整体换源。 */
+				var src = (state.usage && state.usage.source === 'modem') ? 'modem' : 'netdev';
+				if (sparkSource !== src) resetTrafficSeries(src);
 				if (!r.success) {
 					rateSample = null;
 					state.rtDown = 0;
 					state.rtUp = 0;
+					pushTrafficSample(0, 0);
 					renderSpeedUI();
 					return;
 				}
 				var now = Date.now();
-				if (r.device) state.deviceInterface = r.device;
-				if (rateSample && rateSample.device === r.device) {
+				/* modem 来源的 device 是 DS 来源标签而非物理网卡，
+				 * 不能写进「数据通信接口」用的 deviceInterface。 */
+				if (r.device && src !== 'modem') state.deviceInterface = r.device;
+				if (rateSample && rateSample.device === r.device && rateSample.source === src) {
 					var dt = (now - rateSample.t) / 1000;
 					if (dt >= 0.2) {
 						var drx = r.rx_bytes - rateSample.rx;
@@ -2309,22 +2909,31 @@ return L.view.extend({
 						state.rtDown = drx >= 0 ? drx / dt : 0;
 						state.rtUp = dtx >= 0 ? dtx / dt : 0;
 
-						rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+						rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes,
+							device: r.device, source: src };
+						pushTrafficSample(state.rtDown, state.rtUp);
 						renderSpeedUI();
 						return;
 					}
 					return;
 				}
-				rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes, device: r.device };
+				rateSample = { t: now, rx: r.rx_bytes, tx: r.tx_bytes,
+					device: r.device, source: src };
+				state.rtDown = 0;
+				state.rtUp = 0;
+				pushTrafficSample(0, 0);
 				renderSpeedUI();
 			}).catch(function () {});
 		}
 
-		rateTimer = setInterval(sampleRate, 1000);
+		/* 速率与使用量各一条轮询线：与全量刷新解耦，互不阻塞。
+		 * 统一走 Ui.interval：离开本页（hashchange）时自动 clear，
+		 * 不再依赖 beforeunload（LuCI 是 hash SPA，切页不触发它）。 */
+		Ui.interval(1000, sampleRate);
 		sampleRate();
 		/* 使用量单独一条轮询线：与速率解耦，互不阻塞。
 		 * 累计由后端常驻做，这里拉不到只影响展示，不影响统计本身。 */
-		setInterval(sampleUsage, 1000);
+		Ui.interval(1000, sampleUsage);
 		sampleUsage();
 
 		// 全量状态轮询刷新：纯串行执行，避免单通道 AT 串口并发阻塞冲突
@@ -2343,7 +2952,8 @@ return L.view.extend({
 				getFlow,
 				getTemp,
 				getMCS,
-				loadDiagnostics
+				loadDiagnostics,
+				loadSSB
 			];
 
 			return tasks.reduce(function (p, fn) {
@@ -2360,26 +2970,19 @@ return L.view.extend({
 			});
 		}
 
+		/* 首屏先画一版 SSB 矩阵（尚未查询 → 全部「无信号」）；真实数据到达后由 loadSSB 刷新 */
+		refreshSsbMatrix();
+
 		// 初始触发
 		refreshAll();
 
 		// 定时自动刷新 (每 5 秒刷新一次遥测数据)
-		/* Mt5700.interval 的签名是 (ms, fn)：参数顺序写反会让 setInterval 把 5000
+		/* Ui.interval 的签名是 (ms, fn)：参数顺序写反会让 setInterval 把 5000
 		 * 当回调、抛 TypeError，整个状态页在 render() 阶段就挂掉。 */
-		var pollInterval = Mt5700.interval(5000, function () {
+		Ui.interval(5000, function () {
 			return refreshAll();
 		});
 
-		// 页面卸载时清理定时器
-		window.addEventListener('beforeunload', function () {
-			if (rateTimer) clearInterval(rateTimer);
-			if (pollInterval) clearInterval(pollInterval);
-		});
-
 		return page;
-	},
-
-	handleSaveApply: null,
-	handleSave: null,
-	handleReset: null
+	}
 });

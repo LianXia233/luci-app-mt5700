@@ -12,7 +12,10 @@
  *   （/usr/share/rpcd/ucode/mt5700.uc）→ Rust 后端（127.0.0.1:<port>，TCP newline-JSON）
  *
  * 语义兼容：
- * - sendCommand(cmd) → {success,data,error}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
+ * - sendCommand(cmd) → {success,data,error,cause}，保持 FIFO 顺序（RPC 逐条应答，前端仍串行化）
+ *   cause 一路来自三个层次：前端本地拦截（not-connected / circuit-open）、
+ *   ucode 对后端的 nc 硬超时（timeout / no-nc / not-listening / no-reply / spawn-failed）、
+ *   Rust 侧的 AT 执行结果（timeout = 模组静默或排队预算耗尽；缺省 = 模组回了 ERROR）
  * - subscribe/unsubscribe：事件轮询拉取增量（RPC 为请求-响应模型）。订阅者收到的事件类型：
  *   urc_data（由 raw_data 文本解析而来）/ new_sms / incoming_call / pdcp_data / memory_full / cellscan
  * - 认证：LuCI 登录态由 rpcd 会话/ACL 保证；UCI websocket_auth_key 由 ucode 代理附加，
@@ -31,6 +34,25 @@ var rpcEvents = L.rpc.declare({
 	object: 'mt5700',
 	method: 'events',
 	params: ['since'],
+	expect: {}
+});
+
+/*
+ * 语义化短信接口。
+ *
+ * 与 `at` 透传的根本差别：一个动作 = 后端一次事务（全程独占通道、享有最高
+ * 优先级），而不是前端连发几条各自排队的 AT 命令。多步骤流程（发送要
+ * CMGF→CSCA→CMGS×N，批量删除要 CMGD×N）因此不会被后台巡检从中间插进来。
+ *
+ * params 里每一项都是数据而非命令片段，ucode 侧逐项取值，不存在 AT 注入面。
+ */
+var rpcSms = L.rpc.declare({
+	object: 'mt5700',
+	method: 'sms',
+	/* 末尾三个是本地归档动作用的：
+	 *   number —— 会话号码；items —— [{direction,content,time}]；all —— 清空全部。
+	 * 未传的项由 LuCI 省略（undefined 不进 JSON），不会触发 rpcd 的类型校验。 */
+	params: ['action', 'destination', 'message', 'smsc', 'mem', 'indices', 'session_id', 'ttl_ms', 'dedup_key', 'enable', 'number', 'items', 'all'],
 	expect: {}
 });
 
@@ -62,7 +84,13 @@ var rpcUsage = L.rpc.declare({
 var rpcUsageCtl = L.rpc.declare({
 	object: 'mt5700',
 	method: 'usage_ctl',
-	params: ['action', 'days'],
+	/* 第二个参数必须叫 `day`（单日，1~31），与 ucode 的 args 声明
+	 * `{action, day}` 和后端 usage_ctl 的 `params.day` 三处同名。
+	 * 曾写成 `days`：LuCI 按名字组装请求，字面量 `days` 不会出现在
+	 * args 里，ucode 那边 `int(getStr(a,'day'))` 恒为 0，
+	 * 「每月几号自动清零」永远是默认 1 号 —— 而界面上改完没有任何报错。 */
+	/* source 只在 set_source 时有效；LuCI 按名字组装请求，undefined 项会被省略 */
+	params: ['action', 'day', 'source'],
 	expect: {}
 });
 
@@ -90,9 +118,6 @@ function withTimeout(p, ms, msg) {
 
 function ATClient() {
 	this.connected = false;
-	this.authenticated = true;       // RPC 模式：登录态由 LuCI/rpcd 会话保证
-	this.requireAuth = false;
-	this.authKey = '';
 	this.commandTimeout = 14000;
 	/* 探活超时：略大于 ucode 的 12s 硬超时，避免提前掐断后端结论 */
 	this.healthTimeout = 13000;
@@ -105,8 +130,6 @@ function ATClient() {
 	this.pollInterval = 1500;         // 事件轮询间隔（毫秒）
 	this.eventSeq = 0;
 	this.firstPoll = true;
-	this.host = '127.0.0.1';
-	this.port = 8765;
 	/* 降级自动重连定时器与尝试次数（由 scheduleReconnect 维护，必须初始化，
 	 * 否则 clearTimeout(undefined) 虽然无害，但 reconnectAttempts 累加会 NaN） */
 	this.reconnectTimer = null;
@@ -136,25 +159,13 @@ ATClient.prototype.isReady = function () {
 	return this.connected;
 };
 
-/* ---------- 配置加载（Debian：后端即本机 HTTP 服务，连接信息取自当前站点） ---------- */
+/* ---------- 配置加载 ----------
+ * 保留其副作用：确认 at-webserver 的 UCI 可读，作为 connect() 的 configReady 门闸。
+ * 连接参数（端口/绑定地址/认证密钥）由 rpcd 与 ucode 代理侧消费，前端不再读取。 */
 
 ATClient.prototype.loadConfig = function () {
-	var self = this;
-	/* 独立 WebUI：前端与后端同源部署（默认 http://<设备IP>:9000），
-	 * 连接信息直接取当前站点地址；仅拉一次配置用于密钥判定。 */
-	return L.uci.load('at-webserver').then(function () {
-		self.port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-		self.bind = window.location.hostname || '127.0.0.1';
-		self.host = self.bind;
-		self.requireAuth = false;
-		self.authKey = '';
-		return self.port;
-	}).catch(function (err) {
-		console.warn('加载配置失败，使用当前站点地址', err);
-		self.port = window.location.port || '80';
-		self.bind = window.location.hostname || '127.0.0.1';
-		self.host = self.bind;
-		return self.port;
+	return L.uci.load('at-webserver').catch(function (err) {
+		console.warn('加载 UCI 配置失败', err);
 	});
 };
 
@@ -273,7 +284,6 @@ ATClient.prototype.connect = function () {
 		 */
 		if (!wasDegraded) {
 			self.connected = true;
-			self.authenticated = true;
 			self.firstPoll = true;
 			self.reconnectAttempts = 0;
 			if (self.reconnectTimer) {
@@ -296,7 +306,6 @@ ATClient.prototype.connect = function () {
 			} else if (wasDegraded) {
 				/* 重连成功：清熔断、恢复状态 */
 				self.connected = true;
-				self.authenticated = true;
 				self.firstPoll = true;
 				self.reconnectAttempts = 0;
 				self.failStreak = 0;
@@ -352,26 +361,7 @@ ATClient.prototype.scheduleReconnect = function () {
 	}, delay);
 };
 
-ATClient.prototype.disconnect = function () {
-	this.clearPendingCommands('连接已手动断开');
-	this.stopPolling();
-	if (this.reconnectTimer) {
-		clearTimeout(this.reconnectTimer);
-		this.reconnectTimer = null;
-	}
-	this.connected = false;
-	this.authenticated = false;
-	this.setConnectionState('disconnected');
-	return Promise.resolve();
-};
-
-ATClient.prototype.reconnect = function () {
-	if (this.connected) return Promise.resolve();
-	this.setConnectionState('reconnecting');
-	return this.connect().catch(function () {});
-};
 /* ---------- 事件轮询 ---------- */
-
 ATClient.prototype.startPolling = function () {
 	var self = this;
 	if (this.pollTimer) return;
@@ -433,7 +423,14 @@ ATClient.prototype.handlePush = function (ev) {
  * 把「模组无响应」和「后端还在排队」混为一谈。故前端放宽到 14s，
  * 留出网络与 rpcd 代理余量，让用户看到后端给出的准确原因。
  */
-ATClient.prototype.sendCommand = function (command) {
+/*
+ * 发一条 AT 命令。
+ *
+ * timeoutMs 可选：仅少数命令需要比默认 14s 更长的预算（目前只有短信提交）。
+ * 默认值与 ucode 的 nc 硬超时（12s）配套，不能全局调大 —— 那样后端真挂掉时
+ * 每条命令都要白等更久，整页的失败反馈会变得很迟钝。
+ */
+ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
 	var self = this;
 	this.commandQueue = this.commandQueue.then(function () {
 		/*
@@ -478,13 +475,27 @@ ATClient.prototype.sendCommand = function (command) {
 				cause: 'circuit-open'
 			};
 		}
-		return withTimeout(rpcAt(command), self.commandTimeout,
+		var budget = (typeof timeoutMs === 'number' && timeoutMs > 0) ? timeoutMs : self.commandTimeout;
+		return withTimeout(rpcAt(command), budget,
 			'命令执行超时（模组可能正忙或正在重连，请稍后重试）').then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
 				/* ucode 侧熔断标记生效时，同步到前端，让后续请求立即短路 */
 				if (resp.cause === 'circuit-open') {
 					self.markBackendDown('circuit-open', resp.error);
+				}
+				/*
+				 * 短信优先模式占用（后端 sms_busy: 前缀，issue #23）：
+				 * 2s 退避后自动重试一次，不把「请稍后重试」抛给用户，
+				 * 也不计入熔断 —— 这不是通道故障，是短信中心正在活动。
+				 * 重试排在同一条命令队列里，顺序不乱。
+				 */
+				if (!retried && typeof resp.error === 'string' && resp.error.indexOf('sms_busy:') === 0) {
+					return new Promise(function (resolve) {
+						setTimeout(function () {
+							resolve(self.sendCommand(command, timeoutMs, true));
+						}, 2000);
+					});
 				}
 				self.noteCommandFailure(resp.cause);
 				return { success: false, error: resp.error || '命令执行失败', cause: resp.cause };
@@ -498,6 +509,126 @@ ATClient.prototype.sendCommand = function (command) {
 		});
 	});
 	return this.commandQueue;
+};
+
+/*
+ * 短信动作的默认预算（毫秒）。
+ *
+ * 必须与后端的预算同量级且略大（让后端先出结论）：
+ *   send / purge  —— 后端排队(10s) + 总预算(60s)，给 72s
+ *   delete        —— 后端排队(10s) + 每槽位一句 AT+CMGD(2s) + 回读(2s)。
+ *                     槽位数由前端按 8 个一批限住（见 sms_center.js 的
+ *                     SMS_DELETE_CHUNK），否则一次勾满几十条必然超预算。
+ *   list / 存储类 —— 后端排队(10s) + 列表(20s)，给 42s
+ *   其余          —— 走普通命令预算
+ */
+var SMS_ACTION_TIMEOUT_MS = {
+	send: 72000,
+	purge: 72000,
+	delete: 42000,
+	list: 42000,
+	capacity: 42000,
+	set_storage: 42000,
+	get_smsc: 42000,
+	set_smsc: 42000,
+	power: 72000,
+	set_ims: 42000,
+	get_ims: 42000,
+	/* 归档动作只读写本地文件，超时预算可以短一些 */
+	store_stats: 22000,
+	store_read: 22000,
+	store_drop: 22000
+};
+
+/*
+ * 调用一个短信动作。
+ *
+ * 说明：这里**不走** sendCommand 的全局命令队列 —— 短信动作的排队与互斥由
+ * 后端的事务锁负责，前端再排一次只会让「后端已经在跑」的请求被额外拖延。
+ * 但会尊重 AT 通道的整体不可用/熔断状态，后端挂掉时不会白白等满预算。
+ */
+ATClient.prototype.sms = function (action, params, retried) {
+	var self = this;
+	params = params || {};
+	if (self.state === 'degraded' || self.state === 'error' || self.state === 'disconnected') {
+		return Promise.resolve({
+			success: false,
+			error: self.error || '未连接到调制解调器',
+			cause: 'not-connected'
+		});
+	}
+	if (self.circuitOpenUntil > Date.now()) {
+		return Promise.resolve({
+			success: false,
+			error: 'AT 通道连续失败，已暂停请求，请稍后重试',
+			cause: 'circuit-open'
+		});
+	}
+	if (self.backendKnownDown) {
+		return Promise.resolve({
+			success: false,
+			error: self.backendDownError || 'Rust 后端无应答，请稍后重试',
+			cause: 'circuit-open'
+		});
+	}
+	var budget = SMS_ACTION_TIMEOUT_MS[action] || self.commandTimeout;
+	/*
+	 * 形参顺序必须与上面 `rpcSms` 的 params 声明、ucode 的 args 声明
+	 * （也就是 JSON 键序）三者严格一致：LuCI 按**位置**把实参绑到
+	 * params 的名字上，rpcd/ucode 再按名字取值，中间任何一处错位都会让
+	 * 参数落到相邻字段。改顺序时请三处一起改。
+	 */
+	/* `enable` 只属于 `power` / `set_ims`，`all` 只属于 `store_drop`：
+	 * 其余动作传 undefined（LuCI 会把它从 JSON 里省略）。
+	 * 这条不是洁癖 —— `false` 是**合法布尔**，会一路序列化到后端，
+	 * 而 `power` 会真的动射频，不能让一个含义错位的 false 误触发关闭。 */
+	var enable = (action === 'power' || action === 'set_ims')
+		? (params.enable === true || params.enable === '1' || params.enable === 'true')
+		: undefined;
+	var all = (action === 'store_drop')
+		? (params.all === true || params.all === '1' || params.all === 'true')
+		: undefined;
+	var req = rpcSms(
+		action,                 // action
+		params.destination,     // destination
+		params.message,         // message
+		params.smsc,            // smsc
+		params.mem,             // mem
+		params.indices,         // indices
+		params.session_id,      // session_id
+		params.ttl_ms,          // ttl_ms
+		params.dedup_key,       // dedup_key
+		enable,                 // enable
+		params.number,          // number
+		params.items,           // items
+		all                     // all
+	);
+	return withTimeout(req, budget, '短信操作超时（模组可能正忙或正在重连，请稍后重试）')
+		.then(function (resp) {
+			resp = resp || {};
+			if (resp.success === false) {
+				if (resp.cause === 'circuit-open') {
+					self.markBackendDown('circuit-open', resp.error);
+				}
+				/* 短信优先模式占用：2s 退避自动重试一次（issue #23），不计熔断 */
+				if (!retried && typeof resp.error === 'string' && resp.error.indexOf('sms_busy:') === 0) {
+					return new Promise(function (resolve) {
+						setTimeout(function () {
+							resolve(self.sms(action, params, true));
+						}, 2000);
+					});
+				}
+				self.noteCommandFailure(resp.cause);
+				return { success: false, error: resp.error || '短信操作失败', cause: resp.cause };
+			}
+			self.noteCommandSuccess();
+			self.markBackendUp();
+			return { success: true, result: resp };
+		})
+		.catch(function (err) {
+			self.noteCommandFailure('timeout');
+			return { success: false, error: (err && err.message) || '短信操作失败', cause: 'timeout' };
+		});
 };
 
 /*
@@ -537,63 +668,6 @@ ATClient.prototype.noteCommandSuccess = function () {
 	this.circuitOpenUntil = 0;
 };
 
-/*
- * 批量发送（并发分组）：用于页面初始化 / 定时刷新这类「一批命令一起要」的场景。
- *
- * 与 sendCommand 的区别：sendCommand 走全局 FIFO，保证单条命令的先后次序；
- * sendBatch 把一批命令分成若干组，**组内串行、组间并发**，在不违反
- * 「同一 AT 通道同一时刻只跑一条命令」的前提下，把往返延迟重叠起来。
- *
- * 为什么不是全并发：Rust 后端有优先级门闸（at_queue::PriLock），
- * 全并发只会让请求在门闸里排队，前端侧看到的延迟不变，却放大了
- * rpcd 与 ucode 的并发压力。分组（默认 3 组）是实测比较平衡的取值。
- *
- * 返回与入参等长的结果数组，顺序与入参一致；任一命令失败不影响其它命令，
- * 调用方按索引取用即可（这正是「单个接口失败不影响其他区块」的基础）。
- */
-ATClient.prototype.sendBatch = function (commands, groups) {
-	var self = this;
-	var list = Array.isArray(commands) ? commands : [];
-	if (!list.length) return Promise.resolve([]);
-
-	var n = parseInt(groups, 10) || 3;
-	if (n < 1) n = 1;
-	if (n > list.length) n = list.length;
-
-	var results = new Array(list.length);
-	var buckets = [];
-	for (var i = 0; i < n; i++) buckets.push([]);
-	/* 轮转分配：把耗时差异较大的命令均匀打散到各组，
-	 * 避免「一组长、一组空」导致整体被最慢组拖住 */
-	for (var j = 0; j < list.length; j++) {
-		buckets[j % n].push(j);
-	}
-
-	var runners = [];
-	for (var b = 0; b < buckets.length; b++) {
-		runners.push((function (idxList) {
-			var chain = Promise.resolve();
-			idxList.forEach(function (idx) {
-				chain = chain.then(function () {
-					return self.sendCommand(list[idx]).then(function (r) {
-						results[idx] = r;
-					}).catch(function (err) {
-						results[idx] = { success: false, error: (err && err.message) || '命令执行失败' };
-					});
-				});
-			});
-			return chain;
-		})(buckets[b]));
-	}
-
-	return Promise.all(runners).then(function () { return results; });
-};
-
-ATClient.prototype.clearPendingCommands = function (err) {
-	// RPC 模式下无挂起 FIFO；保留函数以兼容调用点
-	void err;
-};
-
 /* ---------- 订阅 ---------- */
 
 ATClient.prototype.subscribe = function (cb) {
@@ -620,23 +694,27 @@ ATClient.prototype.onConnectionStateChange = function (cb) {
 	cb(this.state, this.error);
 };
 
+/*
+ * 注销连接状态回调。
+ *
+ * 这个数组只增不减会带来真实的泄漏：ATClient 是**全页面单例**，
+ * 而 ui.js 每次 Ui.startup() 都会注册一个闭包（捕获本页的 body 与 onReady），
+ * SPA 内每切一次页面就多一个。旧回调虽然只是往已经脱离文档的 body 里插提示条、
+ * 用户看不见，但它把整页 DOM 和页面数据一直吊在内存里，切得越多留得越多；
+ * 每次状态变化还要把这些死页面的回调全部跑一遍。
+ * 因此页面离场（Ui.onLeave）时按同一函数引用注销。
+ */
+ATClient.prototype.offConnectionStateChange = function (cb) {
+	var i = this.stateCallbacks.indexOf(cb);
+	if (i >= 0) this.stateCallbacks.splice(i, 1);
+};
+
 ATClient.prototype.dispatchRawData = function (text) {
 	var self = this;
 	var parsed = parseRawData(text);
 	for (var i = 0; i < parsed.length; i++) {
 		self.emitPush({ success: true, type: 'urc_data', data: parsed[i] });
 	}
-};
-
-ATClient.prototype.setConnection = function (host, port) {
-	// RPC 模式下连接由 LuCI/rpcd 决定，仅记录参数保持兼容
-	this.host = String(host || '').replace(/^\[|\]$/g, '');
-	this.port = parseInt(port, 10) || this.port;
-	try {
-		localStorage.setItem('atHost', this.host);
-		localStorage.setItem('atPort', String(this.port));
-	} catch (e) { /* ignore */ }
-	return Promise.resolve();
 };
 
 /* ================= UCI 保存/应用编排 =================
@@ -664,7 +742,6 @@ var AtUci = {
 	// 当前页面是否有未保存更改（true=有）
 	_dirty: false,
 	_beforeUnload: null,
-	_dirtyFlush: [],
 
 	// 标记当前页面存在未保存更改，并在离开时提示（等价 LuCI 自带行为）
 	markDirty: function () {
@@ -687,8 +764,6 @@ var AtUci = {
 			this._beforeUnload = null;
 		}
 	},
-
-	isDirty: function () { return this._dirty; },
 
 	// 查询该配置是否存在待应用变更（rpcd uci.changes）
 	uciHasChanges: function (section) {
@@ -735,39 +810,6 @@ var AtUci = {
 				throw err;
 			});
 		});
-	},
-
-	/**
-	 * commit 型保存：save 后同样调用 apply，走完整 commit+apply 流程
-	 * （与 uciSave 实现一致，会记录 config hash 并触发 procd reload）。
-	 */
-	uciCommit: function (section) {
-		var result = { saved: false, applied: false, appliedSkipped: false };
-		return this.uciHasChanges(section).then(function (has) {
-			if (!has) {
-				result.saved = true;
-				result.appliedSkipped = true;
-				return result;
-			}
-			return L.uci.save(section).then(function () {
-				result.saved = true;
-				// append=true 表示「保存并应用」，会走 rpcd 的 commit+apply 全流程，
-				// 从而正确记录 config hash 并触发 procd reload。
-				return L.uci.apply(false, true);
-			}).then(function () {
-				result.applied = true;
-				return result;
-			}, function (err) {
-				var code = err && err.code;
-				var msg = (err && err.message) || '';
-				if (code === 5 || /未收到数据|No data|NO_DATA/i.test(msg)) {
-					result.applied = true;
-					result.appliedSkipped = true;
-					return result;
-				}
-				throw err;
-			});
-		});
 	}
 };
 
@@ -804,8 +846,6 @@ function calculateSignalPercent(rsrp) {
 	return Math.round(Math.max(0, Math.min(1, ratio)) * 100) + '%';
 }
 
-function parseHexValue(hexStr) { return parseInt(hexStr, 16) || 0; }
-
 function hexToIP(hex) {
 	if (!hex || typeof hex !== 'string') return '0.0.0.0';
 	var clean = hex.trim().replace(/[\r\n]/g, '');
@@ -817,34 +857,25 @@ function hexToIP(hex) {
 	return bytes.reverse().join('.');
 }
 
+/*
+ * 温度换算的唯一实现在 parse.js（Parse.parseTemperature，手册 17.1.3：
+ * 单位 0.1℃、65535 为查询失败归 null）。此处只做转接，避免两处判定走偏；
+ * 用函数包一层而非直接取 Parse.parseTemperature，是为了不在模块加载期
+ * 依赖 parse.js 的求值顺序。
+ */
 function parseTemperature(v) {
-	var n = typeof v === 'number' ? v : parseInt(v, 10);
-	if (n >= 65535 || isNaN(n) || n > 1500) return 0;
-	return parseFloat((n / 10).toFixed(1));
+	return Parse.parseTemperature(v);
 }
 
+/* 字节数人话化（使用量/速率/归档占用共用；负数与非数值一律按 0 处理） */
 function formatFlow(bytes) {
-	if (bytes < 1024) return bytes + ' B';
-	if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
-	if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
-	if (bytes < 1099511627776) return (bytes / 1073741824).toFixed(2) + ' GB';
-	return (bytes / 1099511627776).toFixed(2) + ' TB';
-}
-
-function formatSpeed(bytesPerSecond) {
-	var bits = bytesPerSecond * 8;
-	if (bits >= 1e9) return (bits / 1e9).toFixed(2) + ' Gbps';
-	if (bits >= 1e6) return (bits / 1e6).toFixed(2) + ' Mbps';
-	if (bits >= 1e3) return (bits / 1e3).toFixed(2) + ' Kbps';
-	return Math.round(bits) + ' bps';
-}
-
-function splitSpeed(bytesPerSecond) {
-	var bits = bytesPerSecond * 8;
-	if (bits >= 1e9) return { value: (bits / 1e9).toFixed(2), unit: 'Gbps' };
-	if (bits >= 1e6) return { value: (bits / 1e6).toFixed(2), unit: 'Mbps' };
-	if (bits >= 1e3) return { value: (bits / 1e3).toFixed(1), unit: 'Kbps' };
-	return { value: Math.round(bits).toString(), unit: 'bps' };
+	var b = Number(bytes);
+	if (!isFinite(b) || b < 0) b = 0;
+	if (b >= 1099511627776) return (b / 1099511627776).toFixed(2) + ' TB';
+	if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+	if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+	if (b >= 1024) return (b / 1024).toFixed(2) + ' KB';
+	return Math.round(b) + ' B';
 }
 
 function formatDuration(seconds, showDays) {
@@ -941,13 +972,6 @@ function parseHCSQ(data) {
 	return result;
 }
 
-function signalColor(rsrp) {
-	if (rsrp == null || rsrp >= 0) return '#8f8f8f';
-	if (rsrp >= -90) return '#2e7d32';
-	if (rsrp >= -105) return '#f9a825';
-	return '#c62828';
-}
-
 /* ---- PS 注册状态 ---- */
 
 function psRegText(stat) {
@@ -960,16 +984,6 @@ function psRegText(stat) {
 		case 5: return '已注册（漫游）';
 		default: return '等待状态中';
 	}
-}
-
-/* ---- 主动上报识别 ---- */
-
-function isUnsolicitedText(text) {
-	if (!text) return false;
-	if (text === 'RING' || text === 'IRING' || text === '^IRING' || text === 'NO CARRIER') return true;
-	return text.indexOf('+CMTI:') === 0 || text.indexOf('^CEND:') === 0 ||
-		text.indexOf('^SMMEMFULL') === 0 || text.indexOf('MEMORY FULL') >= 0 ||
-		text.indexOf('^REJINFO') === 0 || (text.indexOf('+CUSD:') === 0 && text.indexOf(',') >= 0);
 }
 
 /* ---- raw_data 拆分（^PDCPDATAINFO / URC） ---- */
@@ -1026,19 +1040,31 @@ function parsePDCP(fields) {
 /* ---- MONSC ---- */
 
 /*
- * 3GPP 规定的 PCI / PSC 取值上限，用于判断十六进制解析是否越界。
+ * 3GPP 规定的 PCI 取值上限，用于判断十六进制解析是否越界。
  *   NR  : TS 38.211，N_ID^cell 共 1008 个 → 0~1007 (0x3EF)
  *   LTE : TS 36.211，共 504 个          → 0~503
- *   WCDMA: PSC 共 512 个                → 0~511
+ * （WCDMA 的 PSC 手册 13.9.3 明确是十进制 0~511，不走十六进制解析，故不在此列）
  */
 var PCI_MAX_NR = 1007;
 var PCI_MAX_LTE = 503;
-var PCI_MAX_OTHER = 511;
+
+/*
+ * 手册 13.9.3 给出的 NR 三个测量字段的「无效值」哨兵（模组没测到时就填这三个数）：
+ *   RSRP 无效 -1256（= -157 × 8）、RSRQ 无效 -348（= -43.5 × 8）、SINR 无效 -188。
+ * 它们会越出各自的合法区间（RSRP -156~-31、RSRQ -43~20、SINR -23~40），
+ * 当成真实读数显示会报出 -1256 dBm 这种荒谬值，故一律归一成 null。
+ */
+var NR_RSRP_INVALID = -1256;
+var NR_RSRQ_INVALID = -348;
+var NR_SINR_INVALID = -188;
+
+/* 手册 13.9.3 的 <SCS> 编码：0~4 → 15/30/60/120/240 kHz */
+var NR_SCS_KHZ = [15, 30, 60, 120, 240];
 
 /*
  * PCI 十六进制解析（带越界回退）。
  *
- * 背景：^MONSC 的 NR 分支 PCI 明确为十六进制（手册 13.27.3，取值 0~0x3EF，
+ * 背景：^MONSC 的 NR 分支 PCI 明确为十六进制（手册 13.9.3，取值 0~0x3EF，
  * 实测 0x80 → 128），LTE 分支实测同样为十六进制。但模组在部分制式/固件上
  * 会以十进制上报 PCI，此时把 "500" 按 16 进制解析会得到 1280，
  * 已越出该制式的取值上限，属于明显错误。
@@ -1072,80 +1098,111 @@ function parsePciDec(raw) {
 	return isFinite(dec) ? dec : 0;
 }
 
+/*
+ * ^MONSC 测量值取值：手册 13.9.3 说明「暂时未获取到的参数留空」，NR 另有
+ * 无效值哨兵。留空与哨兵都不是真实读数，统一归一为 null，由上层决定回落
+ * （例如 4G 的 SINR 一律改由 ^HCSQ 补齐）。
+ */
+function monscMeasure(raw, invalid) {
+	if (raw === undefined || raw === null || raw === '') return null;
+	var v = parseFloat(raw);
+	if (!isFinite(v)) return null;
+	if (invalid !== undefined && v === invalid) return null;
+	return v;
+}
+
 function parseMONSC(data) {
 	var str = extractATData(data, '^MONSC');
 	if (!str) return null;
 	var p = str.split(',').map(function (s) { return s.trim(); });
 	/*
-	 * 两种实测格式，按首字段是否为纯数字自动判别：
-	 *   格式 A（NR，带前导制式）:
-	 *     ^MONSC: NR,<mcc>,<mnc>,<tac>,<flag>,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<sinr>
-	 *     实测: ^MONSC: NR,460,00,<tac>,1,<cid>,<pci>,<arfcn>,<rsrp>,<rsrq>,<sinr>
-	 *     RSRP/RSRQ/SINR 为直接工程值（dBm/dB/dB），无需 convert* 换算。
-	 *     与 ^HCSQ: "NR",77,236,31 独立交叉验证一致（77→-63, 236→27.2）。
-	 *   格式 B（旧编码，无前导制式，直接给出编码值）:
-	 *     ^MONSC: <mcc>,<mnc>,<lac>,<cid>,<pci>,<ch>,<rsrp_raw>,<rsrq_raw>,<sinr_raw>,<sysmode>
+	 * 手册 13.9.1 的应答恒为 `^MONSC: <RAT>[,<cell_paras>]`，<RAT> ∈
+	 * WCDMA / LTE / NR / NONE（NONE = 无服务，其后不带小区参数）。
+	 * 三种制式的 <cell_paras> 顺序互不相同，必须分支取值（13.9.3 参数表 +
+	 * 13.9.5 例句）：
+	 *   LTE  ^MONSC: LTE,460,01,1650,A54933,1F3,183D,-98,-5,-72
+	 *        <MCC>,<MNC>,<ARFCN 十进制 0~133121>,<Cell_ID hex>,<PCI hex 0~0x1F7>,
+	 *        <TAC hex>,<RSRP -140~-44>,<RSRQ -19.5~-3>,<RSSI -90~-25>
+	 *   NR   ^MONSC: NR,460,01,1650,1,AB12345678,1F3,1234AB,-80,-10,32
+	 *        <MCC>,<MNC>,<ARFCN-NR 0~2279166>,<SCS 0~4>,<Cell_ID hex>,
+	 *        <PCI hex 0~0x3EF>,<TAC hex>,<RSRP>,<RSRQ>,<SINR>
+	 *   WCDMA
+	 *        <MCC>,<MNC>,<ARFCN 0~16383>,<PSC 0~511>,<Cell_ID hex>,<LAC hex>,
+	 *        <RSCP>,<RXLEV>,<EC/N0>,<DRX>,<URA>
+	 * 下标必须与 Rust 侧 urc.rs::query_monsc 保持一致，否则页面显示的小区参数
+	 * 与后台主动推送的会互相矛盾。RSRP/RSRQ/SINR 为直接工程值（dBm/dB/dB），
+	 * 不需要 convert* 还原。
+	 *
+	 * 历史坑（本次修正）：LTE 分支曾按「TAC,CID,PCI,ARFCN」取值，把 p[3] 当 TAC、
+	 * p[6] 当 ARFCN —— 手册与例句都表明 p[3] 是**十进制 ARFCN**、p[6] 是
+	 * **十六进制 TAC**（41134 / 1650 这类频点不可能是 TAC，8103 / 183D 这类
+	 * 十六进制不可能是 ARFCN）。错位会让 getBandFromLteArfcn 拿 TAC 去推频段，
+	 * 4G 下显示的频段/频点全是错的。
 	 */
 	var hasLeadingMode = p.length > 0 && !/^-?\d+$/.test(p[0]);
 	var d;
-	if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'LTE') {
-		/*
-		 * 手册 13.9.3/13.9.5：LTE 的 <cell_paras> 与 NR 布局差异很大（实测
-		 * ^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54）：
-		 *   LTE,<mcc>,<mnc>,<tac_hex>,<cid_hex>,<pci_hex>,<arfcn_hex>,<rsrp>,<rsrq>,<rssi>
-		 * 与 NR 相比：没有 flag 位、PCI/ARFCN/TAC 为十六进制、末位是 RSSI
-		 * （-90~-25 dBm 工程值），且 **没有 SINR 字段**——4G 的 SINR 一律由
-		 * ^HCSQ 兜底补齐（见 network_status 的 needHcsq 逻辑）。
-		 * 注意：若直接套用 NR 布局，4G 下 cid/pci/channel/rsrp/rsrq 会全部错位
-		 * （rsrp 取到 rsrq、rsrq 取到 RSSI、channel 变成 "-85"）。
-		 */
-		d = {
-			sysMode: 'LTE',
-			mcc: p[1] || '',
-			mnc: p[2] || '',
-			lac: p[3] || '',
-			cid: p[4] || '',
-			pci: parsePciHex(p[5], PCI_MAX_LTE),
-			channel: p[6] || '',
-			rsrp: p[7] !== undefined && p[7] !== '' ? parseFloat(p[7]) : null,
-			rsrq: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
-			sinr: null,
-			rssi: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null
-		};
-	} else if (hasLeadingMode && (p[0] || '').replace(/"/g, '').trim().toUpperCase() === 'NR') {
-		/*
-		 * 手册 13.9.3/13.9.5：NR 的 <cell_paras>
-		 * 实测: ^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25
-		 *   NR,<mcc>,<mnc>,<arfcn>,<flag>,<cid_hex>,<pci_hex>,<tac_hex>,<rsrp>,<rsrq>,<sinr>
-		 * PCI 为十六进制（0x80 -> 128，与手册 13.27.3 取值 0~0x3EF 一致）
-		 * 频点 ARFCN 为 p[3]，小区 ID 为 p[5]，TAC 为 p[7]
-		 */
-		d = {
-			sysMode: 'NR',
-			mcc: p[1] || '',
-			mnc: p[2] || '',
-			channel: p[3] || '',
-			cid: p[5] || '',
-			pci: parsePciHex(p[6], PCI_MAX_NR),
-			lac: p[7] || '',
-			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
-			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
-			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
-		};
-	} else if (hasLeadingMode) {
-		d = {
-			sysMode: p[0] || '',
-			mcc: p[1] || '',
-			mnc: p[2] || '',
-			channel: p[3] || '',
-			cid: p[5] || '',
-			pci: parsePciHex(p[6], PCI_MAX_OTHER),
-			lac: p[7] || '',
-			rsrp: p[8] !== undefined && p[8] !== '' ? parseFloat(p[8]) : null,
-			rsrq: p[9] !== undefined && p[9] !== '' ? parseFloat(p[9]) : null,
-			sinr: p[10] !== undefined && p[10] !== '' ? parseFloat(p[10]) : null
-		};
+	if (hasLeadingMode) {
+		var rat = (p[0] || '').replace(/"/g, '').trim().toUpperCase();
+		/* 手册 13.9.3：NONE 表示无网络，其后不带小区参数，按「读不到」处理 */
+		if (rat === 'NONE') return null;
+		if (rat === 'LTE') {
+			d = {
+				sysMode: 'LTE',
+				mcc: p[1] || '',
+				mnc: p[2] || '',
+				/* <ARFCN> 十进制频点：频段由此反推（getBandFromLteArfcn） */
+				channel: p[3] || '',
+				cid: p[4] || '',
+				pci: parsePciHex(p[5], PCI_MAX_LTE),
+				/* <TAC> 十六进制跟踪区域码 */
+				lac: p[6] || '',
+				rsrp: monscMeasure(p[7]),
+				rsrq: monscMeasure(p[8]),
+				/* LTE 布局里没有 SINR 字段，末位是 RSSI；4G 的 SINR 由 ^HCSQ 兜底 */
+				sinr: null,
+				rssi: monscMeasure(p[9])
+			};
+		} else if (rat === 'NR') {
+			var scsCode = parseInt(p[4], 10);
+			d = {
+				sysMode: 'NR',
+				mcc: p[1] || '',
+				mnc: p[2] || '',
+				/* <ARFCN-NR>：手册 13.9.2 明确这是 SSB 频点，与上下行频点可以不一致 */
+				channel: p[3] || '',
+				/* <SCS> 子载波间隔编码 0~4（旧注释把它误称为「flag 位」） */
+				scs: isFinite(scsCode) ? scsCode : null,
+				scsKHz: NR_SCS_KHZ[scsCode] !== undefined ? NR_SCS_KHZ[scsCode] : null,
+				cid: p[5] || '',
+				pci: parsePciHex(p[6], PCI_MAX_NR),
+				lac: p[7] || '',
+				rsrp: monscMeasure(p[8], NR_RSRP_INVALID),
+				rsrq: monscMeasure(p[9], NR_RSRQ_INVALID),
+				sinr: monscMeasure(p[10], NR_SINR_INVALID)
+			};
+		} else {
+			/* WCDMA：PCI 位置其实是 PSC（十进制 0~511），信号量为 RSCP/RXLEV/EC-N0 */
+			d = {
+				sysMode: rat,
+				mcc: p[1] || '',
+				mnc: p[2] || '',
+				channel: p[3] || '',
+				pci: parsePciDec(p[4]),
+				cid: p[5] || '',
+				lac: p[6] || '',
+				rsrp: monscMeasure(p[7]),
+				rssi: monscMeasure(p[8]),
+				rsrq: monscMeasure(p[9]),
+				sinr: null
+			};
+		}
 	} else {
+		/*
+		 * 无前导 <RAT> 的旧固件编码格式：手册 13.9.1 不认这种布局，仅作为
+		 * 早期固件的兼容兜底保留（现网 MT5700M-CN 一律带 <RAT> 前缀）。
+		 * 该格式的 rsrp/rsrq/sinr 是需要 convert* 还原的编码值，与上面的
+		 * 直接工程值不同，不要与本手册布局混用。
+		 */
 		d = {
 			mcc: p[0] || '',
 			mnc: p[1] || '',
@@ -1169,17 +1226,33 @@ function parseMONSC(data) {
 /* ---- HFREQINFO 载波 ---- */
 
 /*
- * ^HFREQINFO:<n>,<sysmode>,<band_classN>,<dl_fcnN>,<dl_freqN>,<dl_bwN>,
- *            <ul_fcnN>,<ul_freqN>,<ul_bwN>   （N 为载波号，NR 最多 4 个）
+ * ^HFREQINFO:<n>,<sysmode>,<band>,<dl_fcn>,<dl_freq>,<dl_bw>,
+ *            <ul_fcn>,<ul_freq>,<ul_bw>,   （每组 7 字段）
+ *            <band>,<dl_fcn>,<dl_freq>,<dl_bw>,
+ *            <ul_fcn>,<ul_freq>,<ul_bw>    （可有多组）
  *
- * 手册 13.16.3 权威字段顺序（实测 NR n41）：
+ * 布局：共享头 2 字段（n, sysmode）+ N × 7 字段载波组。
+ * NR 最多 4 组。同一行可上报多组载波（如 SA n78+n78 CA 场景），
+ * 旧版每行只解析第一组（p[2..8]），第二组及之后被丢弃，页面误显示单载波。
+ *
+ * 手册 13.16.3 权威字段顺序（实测 NR n41 单组）：
  *   0,7,41,513000,2565000,100000,513000,2565000,100000
  *   -> n=0  sysmode=7(NR)  band=41  dl_fcn=513000
  *      dl_freq=2565000kHz(2565MHz)  dl_bw=100000kHz(100MHz)
  *      ul_fcn=513000  ul_freq=2565000kHz  ul_bw=100000kHz
  *
+ * 实测 SA 同行多组（n78+n78，2+7×2=16 字段）：
+ *   0,7,78,636664,3549960,100000,636664,3549960,100000,
+ *    78,630000,3450000,100000,0,0,1400
+ *   -> 第一组 n78 dl=636664/3549.96MHz/100MHz ul=636664/3549.96MHz/100MHz
+ *   -> 第二组 n78 dl=630000/3450MHz/100MHz ul=0/0/1400kHz（上行占位，非有效双上行）
+ *
  * 注意：本命令只上报频率/带宽，不返回 RSRP/RSRQ/SINR。信号质量一律取自
- * ^MONSC（13.9.3），不要在此处解析信号字段。
+ * ^MONSC / ^MONSSC（13.9.3 / 13.27），不要在此处解析信号字段。
+ *
+ * 兼容性：行长度必须满足 (len-2) % 7 === 0（单组 len=9、两组 len=16…）；
+ * 不完整行跳过，避免 parseInt 截断非法字段产生残缺载波。
+ * 保留原始共享 n，不人为改为载波索引。
  */
 function parseHFREQINFO(data) {
 	var out = [];
@@ -1188,20 +1261,125 @@ function parseHFREQINFO(data) {
 		var p = lines[i].split(',').map(function (s) { return s.trim(); });
 		if (!p.length) continue;
 		var syscode = p[1] ? p[1].replace(/"/g, '').trim() : '';
-		out.push({
-			n: p[0] !== undefined ? parseInt(p[0], 10) : 0,
-			sysModeCode: syscode,
-			sysMode: sysModeName(syscode),
-			band: p[2] ? p[2].trim() : '',
-			dlFcn: p[3] ? p[3].trim() : '',
-			dlFreqKHz: p[4] ? parseInt(p[4], 10) : 0,
-			dlBwKHz: p[5] ? parseInt(p[5], 10) : 0,
-			ulFcn: p[6] ? p[6].trim() : '',
-			ulFreqKHz: p[7] ? parseInt(p[7], 10) : 0,
-			ulBwKHz: p[8] ? parseInt(p[8], 10) : 0
-		});
+		var sysMode = sysModeName(syscode);
+		var sharedN = p[0] !== undefined ? parseInt(p[0], 10) : 0;
+		/* 共享头 2 字段后，每 7 字段一组；行长度不完整则跳过 */
+		if (p.length < 9 || (p.length - 2) % 7 !== 0) continue;
+		for (var off = 2; off < p.length; off += 7) {
+			var g = p.slice(off, off + 7);
+			out.push({
+				n: sharedN,
+				sysModeCode: syscode,
+				sysMode: sysMode,
+				band: g[0] ? g[0].trim() : '',
+				dlFcn: g[1] ? g[1].trim() : '',
+				dlFreqKHz: g[2] ? parseInt(g[2], 10) : 0,
+				dlBwKHz: g[3] ? parseInt(g[3], 10) : 0,
+				ulFcn: g[4] ? g[4].trim() : '',
+				ulFreqKHz: g[5] ? parseInt(g[5], 10) : 0,
+				ulBwKHz: g[6] ? parseInt(g[6], 10) : 0
+			});
+		}
 	}
 	return out;
+}
+
+/*
+ * AT^NRSSBID? —— 查询小区 SSB 信息（手册 13.28，PDF 第 378~381 页）
+ * --------------------------------------------------------------------------
+ * 语法：^NRSSBID: <ARFCN-NR>,<CID>,<PCI>,<RSRP>,<SINR>,<TA>,
+ *                <Scell_description>,<N_NB_CELL>[,<Ncell_description>]
+ *
+ * <Scell_description>（服务小区 SSB 信息 = Beam 测量结果）固定 8 组、16 个字段：
+ *   <S_SSBID0>,<S_ID0_RSRP>, <S_SSBID1>,<S_ID1_RSRP>, ... <S_SSBID7>,<S_ID7_RSRP>
+ *   · <S_SSBIDx>    无符号 8 位，服务区 SSB ID，范围 0~7，无效值 0xFF(255)
+ *   · <S_IDx_RSRP>  有符号 16 位，该 SSB ID 对应 RSRP(dBm)，无效值 0x7FFF(32767)
+ *
+ * <Ncell_description>（邻区，每个 4 + 8 个字段，最多 N_NB_CELL=4 个）：
+ *   <NB_PCI>,<NB_ARFCN>,<NB_RSRP>,<NB_SINR>,
+ *   <NB_SSBID0>,<NB_ID0_RSRP>, ... 共 4 组（按 Beam 能量排序的前 4 个）
+ *
+ * 实测样例（内网测试机，SA 驻网）：
+ *   ^NRSSBID: 504990,0000000c2840c002,128,-64,24,-1,
+ *             1,-62,0,-63,2,-80,3,-81,4,-79,5,-78,6,-81,255,32767,
+ *             1,643,504990,-66,24,7,-62,6,-75,5,-77,4,-78
+ *   解读：服务小区 PCI=128 / RSRP=-64 / SINR=24；
+ *         SSB 0~6 分别 -63/-62/-80/-81/-79/-78/-81 dBm，SSB 7 无效未上报；
+ *         1 个邻区 PCI=643 / RSRP=-66 / SINR=24。
+ *
+ * 生效条件（手册原文，务必如实传达给 UI）：
+ *   · SA  场景：仅在主模连接态、且网侧配置了测量时生效；
+ *   · ENDC场景：仅在 ENDC 建立成功、且网侧配置了测量时生效；
+ *   · 否则全部字段填无效值（SSB ID 0xFF / RSRP 0x7FFF），UI 必须显示「—」而不是 0。
+ *
+ * 无效值一律解析为 null，绝不转成 0 或 -140 之类的"看起来像真数"的占位值。
+ */
+var SSB_INVALID_ID = 0xFF;      /* 手册：SSB ID 无效值 0xFF */
+var SSB_INVALID_RSRP = 0x7FFF;  /* 手册：RSRP/SINR 无效值 0x7FFF */
+
+/* 单个数值：越界/无效/非数字一律返回 null */
+function ssbNum(raw, isUnsigned) {
+	if (raw === undefined || raw === null || raw === '') return null;
+	var v = parseInt(raw, 10);
+	if (isNaN(v)) return null;
+	if (isUnsigned) return v === SSB_INVALID_ID ? null : v;
+	return v === SSB_INVALID_RSRP ? null : v;
+}
+
+/*
+ * 把「ID,RSRP」成对切片解析成按 SSB ID 0~7 索引的数组。
+ * 上报顺序不保证按 ID 升序（实测就是 1,0,2,3,...），因此按 ID 归位；
+ * 未出现的 ID 保留为 null（= 该波束本次未测量）。
+ */
+function ssbPairs(count, off, parts) {
+	var byId = [];
+	for (var i = 0; i < 8; i++) byId.push(null);
+	for (var k = 0; k < count; k++) {
+		var id = ssbNum(parts[off + k * 2], true);
+		var rsrp = ssbNum(parts[off + k * 2 + 1], false);
+		if (id === null || rsrp === null) continue;
+		if (id < 0 || id > 7) continue;
+		byId[id] = rsrp;
+	}
+	return byId;
+}
+
+function parseNRSSBID(data) {
+	/* AT 回包为空 / 非字符串时不要抛错——轮询里失败是常态，返回 null 由 UI 显示「—」 */
+	if (typeof data !== 'string' || !data) return null;
+	var str = extractATData(data, '^NRSSBID');
+	if (!str) return null;
+	var parts = str.split(',').map(function (s) { return s.trim(); });
+	/* 最小长度：6 个头字段 + 8 组服务小区（16 个）+ 1 个邻区计数 = 23 */
+	if (parts.length < 23) return null;
+
+	var scell = ssbPairs(8, 6, parts);
+	var nbCount = ssbNum(parts[22], true) || 0;
+	var neighbors = [];
+	var base = 23;
+	for (var n = 0; n < nbCount && base + 11 < parts.length + 1; n++) {
+		var nb = {
+			pci: ssbNum(parts[base], true),
+			arfcn: ssbNum(parts[base + 1], true),
+			rsrp: ssbNum(parts[base + 2], false),
+			sinr: ssbNum(parts[base + 3], false),
+			beams: ssbPairs(4, base + 4, parts)
+		};
+		neighbors.push(nb);
+		base += 12;
+	}
+
+	return {
+		arfcn: ssbNum(parts[0], true),
+		cid: parts[1] || '',
+		pci: ssbNum(parts[2], true),
+		rsrp: ssbNum(parts[3], false),
+		sinr: ssbNum(parts[4], false),
+		ta: parts[5] !== undefined ? parseInt(parts[5], 10) : null,
+		/* 服务小区 8 个波束的实测 RSRP(dBm)，下标 = SSB ID，未测量为 null */
+		beams: scell,
+		neighbors: neighbors
+	};
 }
 
 /*
@@ -1224,11 +1402,6 @@ function operatorFromCode(code) {
 		'46008': '中国移动', '46009': '中国联通', '46011': '中国电信', '46013': '中国电信'
 	};
 	return table[code] || code;
-}
-
-function qciLabel(qci) {
-	var table = { '1': 'QCI1 (VoLTE)', '2': 'QCI2', '3': 'QCI3', '4': 'QCI4', '5': 'QCI5 (IMS信令)', '6': 'QCI6', '7': 'QCI7', '8': 'QCI8', '9': 'QCI9 (默认承载)' };
-	return table[String(qci).trim()] || ('QCI' + qci);
 }
 
 /* ================= 导出 ================= */
@@ -1267,7 +1440,9 @@ function normalizeUsage(u) {
 		reset_day: Number(u.reset_day) || 0,
 		/* 时刻来源（NTP / 设备时钟）：回退设备时钟时按日历清零可能不准，前端据此提示 */
 		time_source: u.time_source || '',
-		device: u.device || ''
+		device: u.device || '',
+		/* 统计来源：netdev=WAN 物理网卡 sysfs / modem=模组 AT^DSFLOWQRY */
+		source: u.source === 'modem' ? 'modem' : 'netdev'
 	};
 }
 
@@ -1310,10 +1485,12 @@ function fetchUsage() {
  * 使用量控制（清零 / 开关持久化 / 改自动清零日）。
  * day 仅在 set_reset_day 时使用（每月几号，1~31）。
  */
-function fetchUsageCtl(action, day) {
-	var params = { action: action };
-	if (day != null) params.day = Number(day) || 0;
-	return withTimeout(rpcUsageCtl(action, params.day || 0), 5000, '使用量操作超时')
+function fetchUsageCtl(action, day, source) {
+	/* day 只在 set_reset_day、source 只在 set_source 时有效；
+	 * 其余动作传 undefined，LuCI 会省略该参数 */
+	var d = (day == null) ? undefined : (Number(day) || 0);
+	var s = (source == null) ? undefined : (source === 'modem' ? 'modem' : 'netdev');
+	return withTimeout(rpcUsageCtl(action, d, s), 5000, '使用量操作超时')
 		.then(function (resp) {
 			resp = resp || {};
 			if (resp.success === false) {
@@ -1384,25 +1561,20 @@ var AtWs = {
 	convertRssi: convertRssi,
 	convertEcio: convertEcio,
 	calculateSignalPercent: calculateSignalPercent,
-	parseHexValue: parseHexValue,
 	hexToIP: hexToIP,
 	parseTemperature: parseTemperature,
 	formatFlow: formatFlow,
-	formatSpeed: formatSpeed,
-	splitSpeed: splitSpeed,
 	formatDuration: formatDuration,
 	parseHCSQ: parseHCSQ,
 	parseMONSC: parseMONSC,
 	parseHFREQINFO: parseHFREQINFO,
+	parseNRSSBID: parseNRSSBID,
 	sysModeName: sysModeName,
 	parsePDCP: parsePDCP,
 	parseRawData: parseRawData,
-	signalColor: signalColor,
 	psRegText: psRegText,
 	operatorFromCode: operatorFromCode,
-	qciLabel: qciLabel,
 	bandName: bandName,
-	isUnsolicitedText: isUnsolicitedText,
 	uci: AtUci
 };
 

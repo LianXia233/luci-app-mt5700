@@ -269,11 +269,17 @@ impl HttpServer {
                     return err_json(400, "缺少参数 cmd");
                 }
                 let resp = self.rpc.run_command(cmd).await;
-                ok_json(json!({
+                let mut body = json!({
                     "success": resp.success,
                     "data": resp.data,
                     "error": resp.error,
-                }))
+                });
+                /* main 前端 sendCommand 依赖 cause 区分超时/熔断（rpcserver 同款判空，
+                 * 避免 JSON 显式出现 cause:null）。 */
+                if let Some(cause) = resp.cause {
+                    body["cause"] = Value::String(cause);
+                }
+                ok_json(body)
             }
             ("GET", "/api/events") => {
                 let since = req.query.get("since").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
@@ -381,6 +387,18 @@ impl HttpServer {
                             Ok(d) => {
                                 let snap = self.usage.snapshot().await;
                                 ok_json(serde_json::to_value(&snap).unwrap_or(json!({ "reset_day": d })))
+                            }
+                            Err(e) => err_json(500, &e),
+                        }
+                    }
+                    // 统计来源切换（main 前端 network_status「流量统计来源」）：
+                    // 只接受 netdev / modem，归一化与配置写入在 usage 模块。
+                    "set_source" => {
+                        let source = body.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                        match self.usage.set_source(source).await {
+                            Ok(_) => {
+                                let snap = self.usage.snapshot().await;
+                                ok_json(serde_json::to_value(&snap).unwrap_or(json!({})))
                             }
                             Err(e) => err_json(500, &e),
                         }

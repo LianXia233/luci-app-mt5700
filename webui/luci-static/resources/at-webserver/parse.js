@@ -1,9 +1,9 @@
 'use strict';
 'require baseclass';
-/* global AtWs */
 /**
  * 补充解析库：运行状态 / 扫频 / USSD / 短信 / 锁频 / 定时锁频 DTO。
  * 各解析函数与 Rust 后端的应答格式严格一致。
+ * 本模块不引用其它全局库（rpc.js 反而依赖这里的 Parse），保持单向依赖。
  */
 
 var Parse = (function () {
@@ -122,12 +122,6 @@ var Parse = (function () {
 	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
 	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
 	 */
-	/*
-	 * AT+CGPADDR：一行可携带**多个地址**（双栈时为 IPv4 + IPv6 各一个）。
-	 * 实测：+CGPADDR: 1,"198.51.100.10","32.1.13.184.0.0.0.0.0.0.0.0.0.0.0.1"
-	 * 旧实现每行只取第一个地址，IPv6 会被静默丢弃（页面显示 —）。
-	 * 现解析行内全部引号包裹的地址，分别格式化后逐条返回（cid 相同）。
-	 */
 	api.parseCgpaddr = function (text) {
 		var out = [];
 		String(text).split(/\r?\n/).forEach(function (line) {
@@ -148,36 +142,138 @@ var Parse = (function () {
 
 	/* ================= 温度 ================= */
 
-	// AT^CHIPTEMP?
+	/*
+	 * 手册 17.1.3：^CHIPTEMP 单位 0.1℃，查询失败返回 65535；实际温度超过
+	 * +120℃ 或低于 -40℃ 时模组不再给出准确读数。
+	 * 失败值必须归 null 而不是 0 —— 早先返回 0 会让「没读到的传感器」在界面上
+	 * 显示 0.0℃，并被温度面板计入最高温/平均温，读起来像一块极冷的芯片。
+	 * 这里用 ±150℃（原始值 1500 / -400）作为粗上限挡掉明显越界的读数。
+	 */
+	api.parseTemperature = function (v) {
+		var n = typeof v === 'number' ? v : parseInt(v, 10);
+		if (isNaN(n) || n >= 65535 || n > 1500 || n < -400) return null;
+		return parseFloat((n / 10).toFixed(1));
+	};
+
+	/*
+	 * 手册 17.1.1/17.1.3：^CHIPTEMP 固定 12 个字段，顺序为
+	 *   <sub3G PA>,<sub6G PA>,<MIMO PA>,<TCXO>,<peri1>,<peri2>,
+	 *   <ap1>,<ap2>,<modem1>,<modem2>,<bbp1>,<bbp2>
+	 * 单位 0.1℃（100 → 10℃），查询失败回 65535。
+	 * 下标不能连着往下排：ap1/modem1 在 peri1/peri2 之后（6/8），
+	 * 早先按 4/5/6 取数会把 peri1/peri2/ap1 当成 ap1/ap2/modem1 显示。
+	 */
 	api.parseCHIPTEMP = function (text) {
 		var match = text.match(/\^CHIPTEMP:\s*(.+)/);
 		if (!match) return null;
 		var f = match[1].split(',').map(function (s) { return s.trim(); });
-		var g = function (i) { return f[i] !== undefined ? AtWs.parseTemperature(f[i]) : 0; };
-		return { sub3GPA: g(0), sub6GPA: g(1), mimoPa: g(2), tcxo: g(3), ap1: g(4), ap2: g(5), modem1: g(6) };
+		var g = function (i) { return f[i] !== undefined ? api.parseTemperature(f[i]) : null; };
+		return {
+			sub3GPA: g(0), sub6GPA: g(1), mimoPa: g(2), tcxo: g(3),
+			peri1: g(4), peri2: g(5), ap1: g(6), ap2: g(7),
+			modem1: g(8), modem2: g(9), bbp1: g(10), bbp2: g(11)
+		};
+	};
+
+	/* ================= 拨号接口配置（AT^TDCFG） ================= */
+
+	/*
+	 * 手册 16.23.1：AT^TDCFG? 的应答不是逗号串，而是「^TDCFG:」空行头 + 5 行键值：
+	 *   Mode : <mode_value>   1=USB Stick+网口 E5 数传（缺省） 2=USB E5+网口 E5 数传
+	 *   Dmz : <dmz_str>       IPv4 目的主机；未配置显示 "not cfg"（16.23.3）
+	 *   PostRoute：<pr_value> 0=未配置（缺省） 1=打开 2=关闭
+	 *   LHCM: <lanIP>,<mask>,<start>,<end>
+	 *   Share-pdp：<sp_value> 0=关闭（缺省） 1=开启（仅 USB Stick 模式）
+	 * 而 16.23.5 的示例又写成半角冒号且键名后无空格（"Dmz: 192.168.224.102"），
+	 * 手册两处口径不一致，所以两种冒号与任意空白都要容忍 —— 否则真机的
+	 * "Dmz : not cfg" 永远匹配不上，界面把已配置的 DMZ 显示成「未配置」。
+	 */
+	api.parseTdcfg = function (text) {
+		var s = String(text);
+		function field(re) {
+			var m = s.match(re);
+			return m ? m[1].trim() : undefined;
+		}
+		var mode = field(/Mode\s*[：:]\s*(\d+)/);
+		var postRoute = field(/PostRoute\s*[：:]\s*(\d+)/);
+		/* "not cfg" 里带空格，取到行尾而不是取到下一个空白 */
+		var dmz = field(/Dmz\s*[：:]\s*([^\r\n]+)/);
+		if (dmz !== undefined) dmz = dmz.replace(/^"|"$/g, '');
+		var unset = dmz === undefined || dmz === 'not cfg';
+		return {
+			mode: mode !== undefined ? parseInt(mode, 10) : undefined,
+			postRoute: postRoute !== undefined ? parseInt(postRoute, 10) : undefined,
+			dmz: { enabled: !unset, host: unset ? '' : dmz }
+		};
 	};
 
 	/* ================= MCS ================= */
 
 	// AT^MCS=0 / =1
 	/*
-	 * ^MCS 实测格式（5 字段，纯十进制文本，无字节序问题）：
-	 *   ^MCS: <方向回显>,<层数>,<码字/保留>,<MCS 值>,<保留>
-	 *   下行查询 AT^MCS=1 → "^MCS: 1,1,1,0,255"
-	 *   上行查询 AT^MCS=0 → "^MCS: 0,1,1,20,255"
-	 * f0 是查询方向回显（1=DL / 0=UL），不是 MCS；MCS 在 f3。
-	 * MCS 有效值域 0-31，超出（如 255）视为无效，回退 null。
+	 * 手册 13.22.1/13.22.3 的权威布局（EN-DC 下模组连回两行，LTE 在前 NR 在后）：
+	 *   ^MCS: <direction>,<rat>,<mcsTableIndex>,<code0>,<code1>
+	 *         [, <mcsTableIndex>,<code0>,<code1>]*     ← 从辅载波起每 3 个字段一组
+	 *   direction 0=上行 1=下行；rat 0=LTE 1=NR；MCS 取值 0~31，其余为非法值
+	 *   （例：LTE 上行 "^MCS: 0,0,0,6,255"、NR 下行 "^MCS: 1,1,1,6,5"）。
+	 *
+	 * 两个此前被误读的点：
+	 *   1) f1 是 <rat>（制式标志），不是 MIMO 层数/rank —— ^MCS 根本没有层数
+	 *      字段，把它当 rank 会让 NR 下恒定显示「1 层」、LTE 下显示「0 层」。
+	 *      空间流信息改由手册 13.31 的 AT^TRANSMODE?（LTE 传输模式）与码字数提供。
+	 *   2) 多载波时后续组是 3 个字段（table,code0,code1），不能再按 5 个切。
 	 */
 	api.parseMCS = function (text) {
-		var match = text.match(/\^MCS:\s*(.+)/);
-		if (!match) return null;
-		var f = match[1].split(',').map(function (s) { return s.trim(); });
-		var mcs = f[3] !== undefined ? parseInt(f[3], 10) : NaN;
-		var rank = f[1] !== undefined ? parseInt(f[1], 10) : NaN;
-		return {
-			mcs: (mcs >= 0 && mcs <= 31) ? mcs : null,
-			rank: (rank >= 1 && rank <= 8) ? rank : null
-		};
+		var lines = String(text || '').replace(/\r/g, '').split('\n');
+		var entries = [];
+		var direction = null;
+		for (var i = 0; i < lines.length; i++) {
+			var m = lines[i].match(/\^MCS:\s*(.+)/);
+			if (!m) continue;
+			var f = m[1].split(',').map(function (s) { return s.trim(); });
+			var d = parseInt(f[0], 10);
+			if (isNaN(d)) continue;
+			if (direction === null) direction = d;
+			var rat = parseInt(f[1], 10);
+			var carriers = [];
+			// f2..f4 为首载波组（table,code0,code1），其后每 3 字段一个辅载波
+			for (var j = 2; j + 2 < f.length; j += 3) {
+				carriers.push({
+					table: parseInt(f[j], 10),
+					mcs: validMcs(f[j + 1]),
+					mcs2: validMcs(f[j + 2])
+				});
+			}
+			if (!carriers.length) continue;
+			entries.push({ rat: rat === 1 ? 'NR' : (rat === 0 ? 'LTE' : ''), carriers: carriers });
+		}
+		return entries.length ? { direction: direction, entries: entries } : null;
+	};
+
+	function validMcs(s) {
+		if (s === undefined || s === '') return null;
+		var n = parseInt(s, 10);
+		return (n >= 0 && n <= 31) ? n : null;
+	}
+
+	/*
+	 * 取指定制式的载波组；rat 传 'LTE' / 'NR'，传空则退回第一行
+	 * （EN-DC 下第一行是 LTE，单制式下只有一行）。
+	 */
+	api.mcsEntry = function (parsed, rat) {
+		if (!parsed || !parsed.entries || !parsed.entries.length) return null;
+		if (rat) {
+			for (var i = 0; i < parsed.entries.length; i++) {
+				if (parsed.entries[i].rat === rat) return parsed.entries[i];
+			}
+		}
+		return parsed.entries[0];
+	};
+
+	/* 主载波码字数：code1 合法（0~31）即为 2 码字空间复用，否则单码字 */
+	api.mcsCodewords = function (entry) {
+		if (!entry || !entry.carriers || !entry.carriers.length) return null;
+		return entry.carriers[0].mcs2 != null ? 2 : 1;
 	};
 
 	/*
@@ -194,6 +290,21 @@ var Parse = (function () {
 		if (mcs <= 16) return '16QAM';
 		if (mcs <= 25) return '64QAM';
 		return '256QAM';
+	};
+
+	/* ================= LTE 传输模式 ================= */
+
+	/*
+	 * 手册 13.31「AT^TRANSMODE? - LTE 传输模式查询」：
+	 *   ^TRANSMODE: <mode>，mode ∈ {1,2,3,4,5,6,8,9,10} → TM1…TM10（无 TM7）。
+	 * 该命令只在 LTE 下有效，WCDMA/NR 下模组回 ERROR，此时返回 null 由界面显示占位。
+	 */
+	var TRANSMODES = { 1: 'TM1', 2: 'TM2', 3: 'TM3', 4: 'TM4', 5: 'TM5', 6: 'TM6', 8: 'TM8', 9: 'TM9', 10: 'TM10' };
+
+	api.parseTransMode = function (text) {
+		var match = String(text || '').match(/\^TRANSMODE:\s*(\d+)/);
+		if (!match) return null;
+		return TRANSMODES[parseInt(match[1], 10)] || null;
 	};
 
 	/* ================= IPv6 CAP ================= */
@@ -357,33 +468,11 @@ var Parse = (function () {
 	};
 
 	/*
-	 * Date → PDU 时间串 `YY/MM/DD,HH:MM:SS`。
-	 *
-	 * 这是短信中心内部统一的时间表示（也是 AT+CMGL 文本模式给出的格式）。
-	 * 传进来的 Date 无效时返回**空串**而不是回落当前时刻：
-	 * 旧实现回落成 `new Date().toLocaleString()`，等于给一条时间未知的短信
-	 * 盖上「刚刚」的章，既污染排序又误导用户。空串在界面上会显示为「时间未知」。
-	 */
-	api.formatPDUTime = function (ts) {
-		/*
-		 * null / undefined 表示「时间未知」，必须显式短路：
-		 * `new Date(null)` 会得到 epoch（1970-01-01T00:00:00Z），那是一个**合法**日期，
-		 * 单靠下面的 isNaN 判不出来 —— 会把「不知道什么时候」渲染成 1970 年，
-		 * 而且它小于任何真实时间，排序时还会被排到最前面。
-		 */
-		if (ts == null) return '';
-		var d = ts instanceof Date ? ts : new Date(ts);
-		if (isNaN(d.getTime())) return '';
-		var pad = function (n) { return String(n).padStart(2, '0'); };
-		return pad(d.getFullYear() % 100) + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate()) +
-			',' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-	};
-
-	/*
 	 * 时间串 → Date；无法识别返回 **null**（不是「此刻」）。
 	 *
 	 * 支持两种来源：
-	 *   - `YY/MM/DD,HH:MM:SS`，即 formatPDUTime 的输出；
+	 *   - `YY/MM/DD,HH:MM:SS` —— 后端 `pdu.rs` 把 TP-SCTS / TP-VP 解成这个格式
+	 *     （与手册 9.9 文本模式给的时间字段同形），界面显示与排序用的都是它；
 	 *   - 任何 `new Date()` 能识别的串（兜底容错）。
 	 *
 	 * 为什么必须返回 null：旧实现在两种都失败时返回 `new Date()`。
@@ -550,8 +639,9 @@ var Parse = (function () {
 	 *               VPF=10（1 字节相对格式，本插件发信时用的就是它）拿不到绝对时间，
 	 *               此时 date 返回 null —— 宁可显示「时间未知」，也不编一个时刻出来。
 	 *
-	 * 为什么必须支持 SUBMIT：旧实现开头就是 `if (mti !== 0) return null`，
-	 * 整条 SUBMIT 被丢掉；而 parseCMGL 又把解析成功的统统标成 'received'。
+	 * 为什么必须支持 SUBMIT：旧实现开头就是 `if (mti !== 0) return null`，整条 SUBMIT
+	 * 被丢掉；而当年的前端 CMGL 解析（api.parseCMGL，已随「列表一律以后端事务返回值
+	 * 为准」一起删掉）又把凡是解出来的统统标成 'received'。
 	 * 两者叠加会把「本机发出的短信」变成一条假的 incoming —— 号码是自己的收件人，
 	 * 方向却是「收到」。这里由 PDU 的 MTI 决定方向，不再靠调用方猜。
 	 *
@@ -681,74 +771,19 @@ var Parse = (function () {
 		};
 	};
 
-	// 解析 CMGL=4 应答（PDU 块 / 已解码文本行），输出 SMS[]
-	api.parseCMGL = function (data) {
-		var sms = [];
-		var text = data;
-		try {
-			var jsonData = JSON.parse(data);
-			if (jsonData.success && jsonData.data) text = jsonData.data;
-		} catch (e) { /* not json */ }
-		if (typeof text !== 'string') return sms;
-
-		var blocks = text.split(/(?=\+CMGL:\s*\d+)/);
-		for (var b = 0; b < blocks.length; b++) {
-			var block = blocks[b];
-			var idxM = block.match(/\+CMGL:\s*(\d+)/);
-			var idx = idxM ? parseInt(idxM[1], 10) : null;
-			if (!idxM) continue;
-
-			// 已解码文本行：+CMGL: idx,"REC READ","<number>",,"<time>"
-			var simple = block.match(/\+CMGL:\s*\d+,"([^"]*)","([^"]*)",,"([^"]*)"/);
-			if (simple) {
-				sms.push({
-					index: idx,
-					content: block.split('\n').slice(1).join('\n').trim(),
-					number: api.normalizePhoneNumber(simple[2] || ''),
-					time: simple[3] || '',
-					type: simple[1].indexOf('REC') === 0 ? 'received' : 'sent'
-				});
-				continue;
-			}
-
-			// PDU 块：+CMGL: idx,stat,,,<len> 下一行是 PDU hex
-			var lines = block.split('\n').map(function (l) { return l.trim(); });
-			var pduHex = '';
-			for (var li = 0; li < lines.length; li++) {
-				if (/^[0-9A-Fa-f]{20,}$/.test(lines[li])) { pduHex = lines[li]; break; }
-			}
-			if (pduHex) {
-				var decoded = api.decodeIncomingPdu(pduHex);
-				if (decoded) {
-					/*
-					 * 方向必须取自 PDU 的 MTI，不能像旧实现那样硬编码 'received'：
-					 * 模组把已发短信也列出来时（SUBMIT PDU），硬编码会让「我发出去的」
-					 * 显示成「我收到的」，号码还是对方 —— 直接看反了对话方向。
-					 * 时间同样如实传递：decoded.date 为 null 时 formatPDUTime 返回空串，
-					 * 界面标注「时间未知」，排序也不会被假时间带偏。
-					 */
-					sms.push({
-						index: idx,
-						content: decoded.content,
-						number: api.normalizePhoneNumber(decoded.number || ''),
-						time: api.formatPDUTime(decoded.date),
-						type: decoded.direction,
-						timeApprox: decoded.timeApprox,
-						/* 长短信拼接只对收到的消息做（发送侧由本机自己分片，无需重组） */
-						isConcatenated: !!decoded.partial && decoded.direction === 'received',
-						concatenatedRef: decoded.partial ? decoded.partial.reference : undefined,
-						concatenatedSeq: decoded.partial ? decoded.partial.part_number : undefined,
-						concatenatedTotal: decoded.partial ? decoded.partial.parts_count : undefined
-					});
-				}
-			}
-		}
-		return sms;
-	};
-
-	// 短信中心保存的已发消息缓存（localStorage sms_sent_messages_cache）
+	/*
+	 * 【已废弃的数据源】localStorage sms_sent_messages_cache
+	 *
+	 * 旧版本把已发短信存在浏览器本地、并在渲染短信列表时合并进来。它带来两个
+	 * 实打实的问题：
+	 *   1) 本地条目没有模组序号（用负数代替），删除时按着不存在的 index 下发
+	 *      AT+CMGD，模组一律回 ERROR；
+	 *   2) 模组里已经删掉的短信仍会显示在界面上，用旧数据掩盖了模组的真实状态。
+	 *
+	 * 现在短信列表一律以模组实时返回为准，本文件只保留「清除历史残留」所需的读取、
+	 * 计数、删除三个函数，任何页面都不应再把本地缓存当数据源。
+	 */
 	api.SMS_CACHE_KEY = 'sms_sent_messages_cache';
-	api.MAX_SMS_CACHE = 1000;
 
 	api.getCachedSentMessages = function () {
 		try {
@@ -760,16 +795,17 @@ var Parse = (function () {
 		return [];
 	};
 
-	api.saveSentMessageToCache = function (msg) {
-		var list = api.getCachedSentMessages();
-		list.unshift(msg);
-		if (list.length > api.MAX_SMS_CACHE) list = list.slice(0, api.MAX_SMS_CACHE);
-		try { localStorage.setItem(api.SMS_CACHE_KEY, JSON.stringify(list)); } catch (e) { /* ignore */ }
-		return list;
-	};
-
 	api.clearSentMessageCache = function () {
 		try { localStorage.removeItem(api.SMS_CACHE_KEY); } catch (e) { /* ignore */ }
+	};
+
+	/* 历史遗留条数（仅供「清除残留」显示，不作为数据源） */
+	api.countLegacySentMessages = function () {
+		try {
+			return api.getCachedSentMessages().length;
+		} catch (e) {
+			return 0;
+		}
 	};
 
 	/* ================= 锁频 ================= */
@@ -794,6 +830,8 @@ var Parse = (function () {
 	];
 	api.MAX_LOCK_ITEMS = 20;
 	api.MAX_ARFCN = 4294967295;
+	/* 手册 13.12.3 / 13.13.3：<band> 为逗号分隔字符串（0~65535，页面只从固定频段表
+	 * 取值，故不再单设上限）；<pci> LTE 0~503、NR 0~1007，<num> 1~20。 */
 	api.MAX_PCI = { lte: 503, nr: 1007 };
 
 	api.getDefaultScsType = function (band) {
@@ -801,6 +839,32 @@ var Parse = (function () {
 		if ([257, 258, 260, 261].indexOf(Number(band)) >= 0) return 3;
 		if ([41, 48, 77, 78, 79].indexOf(Number(band)) >= 0) return 1;
 		return 0;
+	};
+
+	/* ARFCN → 频段号反推（邻区展示与一键锁频共用，单一来源）。
+	 * 区间依据 3GPP TS 38.104 Table 5.4.2.3-1 / TS 36.101。
+	 * n77 是 620000–680000（3.3–4.2GHz），n78 是 620000–653333（3.3–3.8GHz），
+	 * 两者在 620000–653333 上重叠，单凭频点不可区分。按国内现网部署约定，
+	 * 重叠区统一判为 n78，故把 78 排在 77 之前（旧版 network_settings 的表把
+	 * 77 排在前面，78 分支实际不可达）；653334–680000 为 n77 独有，仍判 n77。 */
+	var LTE_ARFCN_BANDS = [
+		[1, 0, 599], [3, 1200, 1949], [5, 2400, 2649], [8, 3450, 3799],
+		[34, 36200, 36349], [38, 37750, 38249], [39, 38250, 38649], [40, 38650, 39649], [41, 39650, 41589]
+	];
+	var NR_ARFCN_BANDS = [
+		[1, 422000, 434000], [3, 361000, 376000], [5, 173800, 178800], [8, 185000, 192000],
+		[28, 151600, 160600], [41, 499200, 537999],
+		[78, 620000, 653333], [77, 620000, 680000], [79, 693334, 733333]
+	];
+	api.bandFromArfcn = function (kind, arfcn) {
+		if (arfcn == null || arfcn === '') return '';
+		var ch = Number(arfcn);
+		if (isNaN(ch)) return '';
+		var map = kind === 'LTE' ? LTE_ARFCN_BANDS : NR_ARFCN_BANDS;
+		for (var i = 0; i < map.length; i++) {
+			if (ch >= map[i][1] && ch <= map[i][2]) return String(map[i][0]);
+		}
+		return '';
 	};
 
 	var checkArfcn = function (label, raw) {
@@ -816,26 +880,42 @@ var Parse = (function () {
 		return raw;
 	};
 
-	api.toLockLists = function (kind, type, items) {
-		var empty = { type: type, bands: '', arfcns: '', scs_types: '', pcis: '' };
-		if (type === 0) return empty;
-		var label = kind === 'lte' ? 'LTE' : 'NR';
-		var valid = items.filter(function (i) { return i.band != null; });
-		if (!valid.length) throw new Error('请至少输入一个有效的 ' + label + ' 频段');
-		if (valid.length > api.MAX_LOCK_ITEMS) throw new Error(label + ' 最多只能锁 ' + api.MAX_LOCK_ITEMS + ' 组');
-		var bands = valid.map(function (i) { return String(i.band); }).join(',');
-		if (type === 3) return { type: type, bands: bands, arfcns: '', scs_types: '', pcis: '' };
-		var arfcns = valid.map(function (i) { return checkArfcn(label, String(i.arfcn || '').trim()); }).join(',');
-		var scs_types = kind === 'nr' ? valid.map(function (i) { return String(i.scs != null ? i.scs : api.getDefaultScsType(i.band)); }).join(',') : '';
-		if (type === 1) return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: '' };
-		var pcis = valid.map(function (i) { return checkPci(kind, String(i.pci || '').trim()); }).join(',');
-		return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: pcis };
-	};
+		/*
+		 * 取值转字符串：**只有 null / undefined 才算空**。
+		 *
+		 * 原来写的是 `String(i.arfcn || '')`，`0` 是合法 EARFCN/PCI（LTE band 1 的
+		 * 最低频点就是 0，PCI 0 也是真实小区），却被 `||` 判成空值，导致用户
+		 * 明明填了 0 却提示「频点必须为 0-4294967295 的整数」，保存不了。
+		 * Codex 在 PR #29 上标了 P2，这里按「空值只认 null」修掉。
+		 */
+		var cellText = function (v) { return v == null ? '' : String(v).trim(); };
+
+		api.toLockLists = function (kind, type, items) {
+			var empty = { type: type, bands: '', arfcns: '', scs_types: '', pcis: '' };
+			if (type === 0) return empty;
+			var label = kind === 'lte' ? 'LTE' : 'NR';
+			var valid = items.filter(function (i) { return i.band != null; });
+			if (!valid.length) throw new Error('请至少输入一个有效的 ' + label + ' 频段');
+			if (valid.length > api.MAX_LOCK_ITEMS) throw new Error(label + ' 最多只能锁 ' + api.MAX_LOCK_ITEMS + ' 组');
+			var bands = valid.map(function (i) { return String(i.band); }).join(',');
+			if (type === 3) return { type: type, bands: bands, arfcns: '', scs_types: '', pcis: '' };
+			var arfcns = valid.map(function (i) { return checkArfcn(label, cellText(i.arfcn)); }).join(',');
+			var scs_types = kind === 'nr' ? valid.map(function (i) { return String(i.scs != null ? i.scs : api.getDefaultScsType(i.band)); }).join(',') : '';
+			if (type === 1) return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: '' };
+			var pcis = valid.map(function (i) { return checkPci(kind, cellText(i.pci)); }).join(',');
+			return { type: type, bands: bands, arfcns: arfcns, scs_types: scs_types, pcis: pcis };
+		};
 
 	// 拼接锁频命令（即时生效场景，如扫频结果一键锁定）
+	/*
+	 * 手册 13.12.1 / 13.13.1：`AT^xxFREQLOCK=<operatetype>[,<forbidFlag>,<num>[,...]]`
+	 * forbidFlag 只认 0（不允许重选和切换）/ 1（允许重选和切换）；
+	 * 锁频点(1)与锁小区(2)与锁band(3) 携带的参数组不同，num 必须等于组数。
+	 */
 	api.buildLockCommand = function (kind, type, mobility, items) {
 		var cmd = kind === 'lte' ? 'AT^LTEFREQLOCK' : 'AT^NRFREQLOCK';
 		if (type === 0) return cmd + '=0';
+		if (mobility !== 0 && mobility !== 1) throw new Error('移动性标志只能取 0（不允许重选和切换）或 1（允许）');
 		var l = api.toLockLists(kind, type, items);
 		var num = l.bands.split(',').length;
 		var head = cmd + '=' + type + ',' + mobility + ',' + num;
@@ -880,7 +960,21 @@ var Parse = (function () {
 		return 'AT+SCHED=' + JSON.stringify(payload);
 	};
 
-	api.modeText = function (mode) { return mode === '' ? '当前时段不锁频' : mode; };
+	/*
+	 * `^NDISSTATQRY?` 回包：`^NDISSTATQRY: <cid>,<stat>,…`
+	 *
+	 * 手册 16.4.1/16.4.5：首字段是 CID、第二字段才是状态（1=已连接）。
+	 * 按首字段判「已激活」的话，只要模组带 CID 1 这一行就永远认为是激活态。
+	 *
+	 * 拨号页（判断是否已拨上）与扫频页（扫频会断网，需二次确认）原先各写了一份
+	 * 同一条正则，这里统一收口，避免两边对「第几个字段才是状态」再产生分歧。
+	 * 返回第二字段的字符串；无回包或格式不符时返回 null（调用方按「未激活」处理）。
+	 */
+	api.parseNdisStat = function (text) {
+		var m = String(text == null ? '' : text).replace(/\r/g, '')
+			.match(/\^NDISSTATQRY:\s*1\s*,\s*(\d+)/i);
+		return m ? m[1] : null;
+	};
 
 	/* ================= 辅载波/辅站小区 ================= */
 	// 手册 13.27 AT^MONSSC — NSA 下 5G 辅连接服务小区（最多 8CC）
@@ -964,6 +1058,33 @@ var Parse = (function () {
 
 	api.parseCascellAll = function (text) {
 		return String(text).split(/\r?\n/).map(api.parseCascell).filter(Boolean);
+	};
+
+	/*
+	 * 判断 AT 响应文本的终止状态。
+	 *
+	 * 传输层成功（sendCommand.success === true）不等于 AT 命令成功：
+	 * 模组可能在传输正常时返回 ERROR 文本。前端需要区分三个层次：
+	 *   1. 传输/后台调用是否成功（success）
+	 *   2. AT 最终响应是 OK、ERROR 还是超时（本函数）
+	 *   3. 是否解析出有效、可关联到目标载波的独立测量（parseMonsscAll 等）
+	 *
+	 * 返回：'ok' | 'error' | 'none' | 'empty' | 'other'
+	 *   'ok'    —— 文本含 OK 终止符
+	 *   'error' —— 文本含 ERROR（模组拒绝命令或参数不支持）
+	 *   'none'  —— 文本以 NONE 开头（模组明确返回"无辅连接小区"）
+	 *   'empty' —— data 为空（未取得任何文本）
+	 *   'other' —— 既无 OK 也无 ERROR（如超时后的部分响应）
+	 */
+	api.atStatusFromText = function (text) {
+		if (text === undefined || text === null) return 'empty';
+		var txt = String(text);
+		if (txt.trim() === '') return 'empty';
+		// 先查 ERROR 再查 OK：避免 "ERROR" 被 "OK" 前缀误判
+		if (/^\s*ERROR\b/i.test(txt) || /\bERROR\b/.test(txt)) return 'error';
+		if (/^\s*OK\b/i.test(txt) || /\bOK\b/.test(txt)) return 'ok';
+		if (/^\s*NONE\b/i.test(txt) || /\bNONE\b/i.test(txt)) return 'none';
+		return 'other';
 	};
 
 	/*
@@ -1187,6 +1308,143 @@ var Parse = (function () {
 			};
 		}
 		return null;
+	};
+
+	/* ================= FOTA 状态机（手册 15.3~15.7 + FOTA 升级指南） ================= */
+
+	/*
+	 * 手册 15.5.3 的 <status> 定义：10 Idle / 11 查询 / 12 发现新版本 /
+	 * 13 查询新版本失败 / 14 未发现版本 / 20 下载失败 / 30 正在下载 /
+	 * 31 下载挂起 / 40 下载完成 / 50 准备升级。
+	 * 70 只出现在 15.4.5「若升级失败」的示例里（参数表未列），按升级失败处理。
+	 */
+	var FOTA_STATE_META = {
+		10: { color: '', text: '空闲（IDLE）' },
+		11: { color: 'accent', text: '正在查询新版本' },
+		12: { color: 'success', text: '发现新版本' },
+		13: { color: 'danger', text: '查询新版本失败' },
+		14: { color: '', text: '服务器无新版本' },
+		20: { color: 'danger', text: '下载失败' },
+		30: { color: 'warning', text: '下载中' },
+		31: { color: 'warning', text: '下载挂起' },
+		40: { color: 'success', text: '下载完成，待升级' },
+		50: { color: 'danger', text: '准备升级' },
+		70: { color: 'danger', text: '升级失败' }
+	};
+
+	api.fotaStateMeta = function (s) {
+		return FOTA_STATE_META[s] || { color: '', text: (s == null ? '未知' : '状态 ' + s) };
+	};
+
+	/* 手册 15.3.3：30/31/40 可用 AT^FOTADL=0 取消并回到 IDLE */
+	api.isFotaCancellable = function (s) { return s === 30 || s === 31 || s === 40; };
+
+	/*
+	 * 手册 15.5.1：查询态为 `^FOTASTATE: <status>`；
+	 * <status> 为 13 / 20 时带 <error_code>；12 时（主动上报）带
+	 * <version>,<packet_size>,<description>。
+	 * 12 的 <version> 两种形态都要认：手册示例带引号（"MC…"），《FOTA 升级指南》
+	 * 4.1.1 的实机示例**不带引号**（`12,V100R001C00B002,6129664,1.product_name=…`），
+	 * 只认带引号会把指南机型的新版本号与包大小整段丢掉。
+	 */
+	api.parseFotaState = function (text) {
+		var str = String(text || '').replace(/\r/g, '');
+		var m = str.match(/\^FOTASTATE:\s*([0-9]+)\s*(?:,\s*([0-9]+))?/);
+		if (!m) return null;
+		var state = parseInt(m[1], 10);
+		var out = { state: state, errorCode: null, version: '', packetSize: null };
+		if (m[2] != null && (state === 13 || state === 20)) out.errorCode = parseInt(m[2], 10);
+		if (state === 12) {
+			var v = str.match(/\^FOTASTATE:\s*12\s*,\s*(?:"([^"]*)"|([^",]*))\s*(?:,\s*([0-9]+))?/);
+			if (v) {
+				out.version = (v[1] != null ? v[1] : v[2]).trim();
+				out.packetSize = v[3] != null ? parseInt(v[3], 10) : null;
+			}
+		}
+		return out;
+	};
+
+	/*
+	 * `+CEREG: <n>,<stat>[,<tac>,<ci>,<AcT>]`（指南 4.1.1 用它确认已注册网络，
+	 * §5【建议】注册成功后再进行 FOTA）。stat：1 本网注册 / 5 漫游注册，
+	 * 其余（0 未注册 2 搜网中 3 拒绝 4 未知）都视为不可升级。
+	 */
+	api.parseCeregStat = function (text) {
+		var m = String(text || '').replace(/\r/g, '').match(/\+CEREG:\s*([0-9]+)\s*,\s*([0-9]+)/);
+		return m ? parseInt(m[2], 10) : null;
+	};
+
+	/*
+	 * 手册 15.5.3 错误码表（只在 status=13/20 有效）。这里保留中文释义，
+	 * 未收录的码值回退成「错误码 N」，不猜含义。
+	 */
+	var FOTA_ERRORS = {
+		1: '未知错误', 2: '上一条命令未完成', 3: '命令参数错误', 4: '不支持该操作',
+		5: '系统错误', 11: '网络尚未打开', 12: '网络已打开', 13: '打开网络失败',
+		14: '链路尚未建立', 15: '链路已建立', 16: '建立链路失败', 17: '绑定端口失败',
+		18: '连接指定地址失败', 19: '域名无效', 20: 'DNS 解析失败', 21: 'HTTP 服务器错误',
+		22: '文件类型不正确', 23: '文件来源不正确', 51: '获取升级文件列表失败（检查 URL/端口/证书）',
+		52: 'MD5 校验失败', 54: 'FOTA 处于冲突状态',
+		101: 'TE 取消导致发送失败', 102: '重试次数超过 10 次', 103: '文件大小错误',
+		104: '包序号错误', 105: '协议非 1K-Xmodem', 106: '端口无效',
+		107: '文件或子文件 CRC 错误', 108: '升级类型错误', 109: '产品型号不匹配'
+	};
+
+	api.fotaErrorText = function (code) {
+		if (code == null) return '';
+		return FOTA_ERRORS[code] || ('错误码 ' + code);
+	};
+
+	/*
+	 * 手册 15.6.1：`^FOTADLQ: <index>,"<file_type>",<dl_size>,<file_size>`，
+	 * 多文件时逐行上报，index 1~10。
+	 * 已下载字节数是 **第三个** 字段、文件总字节数是 **第四个** —— 顺序读反
+	 * 会让进度恒为 100%（dl < file 时算出 >100 再被截断）。
+	 * 文件类型 "FIRMWARE1" 自带数字，必须先按整行正则取数，
+	 * 不能「剥掉非数字字符后按逗号切」。
+	 */
+	api.parseFotaDlq = function (text) {
+		var lines = String(text || '').replace(/\r/g, '').split('\n');
+		var files = [];
+		for (var i = 0; i < lines.length; i++) {
+			var m = lines[i].match(/\^FOTADLQ:\s*([0-9]+)\s*,\s*"?([^",]*)"?\s*,\s*([0-9]+)\s*,\s*([0-9]+)/);
+			if (!m) continue;
+			files.push({
+				index: parseInt(m[1], 10),
+				type: m[2].trim(),
+				downloaded: parseInt(m[3], 10),
+				total: parseInt(m[4], 10)
+			});
+		}
+		if (!files.length) return null;
+		var dl = 0, total = 0;
+		files.forEach(function (f) { dl += f.downloaded; total += f.total; });
+		return {
+			files: files,
+			downloaded: dl,
+			total: total,
+			percent: total > 0 ? Math.max(0, Math.min(100, Math.floor(dl / total * 100))) : null
+		};
+	};
+
+	/*
+	 * FOTA 地址校验（手册 15.7.3）：http 形式 http://<host>:<port>/<path>，
+	 * 指向**路径**而非文件名且必须以 / 结尾，整串最长 255 字节；
+	 * HTTPS 的证书方案在《FOTA 升级指南》3.2 标注「暂未支持」，因此只放 http://。
+	 * 引号与 CR/LF 会把指令拼成另一条 AT，必须拒绝。
+	 * 返回归一化后的 URL；不合法时返回 null，由调用方给出提示。
+	 */
+	api.normalizeFotaUrl = function (raw) {
+		var url = String(raw || '').trim();
+		if (!/^http:\/\/[^\s]+$/.test(url)) return null;
+		if (url.indexOf('"') >= 0 || /[\r\n]/.test(url)) return null;
+		if (url.charAt(url.length - 1) !== '/') url += '/';
+		var bytes = 0;
+		for (var i = 0; i < url.length; i++) {
+			var c = url.charCodeAt(i);
+			bytes += c <= 0x7f ? 1 : (c <= 0x7ff ? 2 : 3);
+		}
+		return bytes <= 255 ? url : null;
 	};
 
 	return api;

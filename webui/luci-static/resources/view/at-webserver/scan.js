@@ -152,15 +152,14 @@ return L.view.extend({
 		}
 
 		/* ---------- 动作 ---------- */
+		/* 手册 16.4.1/16.4.5：^NDISSTATQRY? 回 "^NDISSTATQRY: <cid>,<stat>,…"，
+		 * 首字段是 CID、第二字段才是状态（1=已连接）。按首字段判「已激活」的话，
+		 * 只要模组带 CID 1 这一行就永远弹「扫频会断网」的确认框，反过来
+		 * CID 1 已断开（1,0,…）时也一样判为激活 —— 解析口径统一在
+		 * Parse.parseNdisStat（与拨号页共用一条，这里取第二字段）。 */
 		function ndisDataActive(res) {
 			if (!res || !res.success || !res.data) return false;
-			var lines = String(res.data).split('\n');
-			for (var i = 0; i < lines.length; i++) {
-				var l = lines[i].trim();
-				if (l.indexOf('^NDISSTATQRY:') !== 0) continue;
-				return l.slice('^NDISSTATQRY:'.length).trim().split(',')[0].trim() === '1';
-			}
-			return false;
+			return Parse.parseNdisStat(res.data) === '1';
 		}
 
 		function start() {
@@ -303,12 +302,14 @@ return L.view.extend({
 			});
 		});
 
-		self._dispose = function () {
+		/* 离开本页（hash 路由切换）时停轮询、退订推送并主动收掉本页发起的扫频。
+		 * LuCI view 无 dispose 钩子，原先的 _dispose 从不执行，扫频会一直空转 */
+		Ui.onLeave(function () {
 			clearInterval(pollTimer);
 			AtWs.client.unsubscribe(handler);
 			// 离开页面时主动收掉本页发起的扫频
 			if (startedRef) AtWs.client.sendCommand(Parse.SCAN_ABORT_COMMAND).catch(function () {});
-		};
+		});
 
 		/* ---------- 初始化 ---------- */
 		render();
