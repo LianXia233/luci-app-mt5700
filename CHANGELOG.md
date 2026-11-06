@@ -10,6 +10,24 @@
 
 ## v1.32.2（2026-11-06）
 
+### feat(sim) 网络状态 SIM 卡信息新增 QoS 等级（5QI / QCI）采集（Issue #43）
+
+> Issue #43 希望在已有的「运营商签约速率」旁补上 QCI/5QI 显示。模组侧
+> `AT^DSAMBR` 只报签约速率，等级要看标准命令 `AT+C5GQOSRDP=<cid>` 的第二个
+> 字段；而原先该命令仅在 DSAMBR 取不到速率时才下发，正常联网时根本不会
+> 拿到 5QI。实机（NR）返回 `+C5GQOSRDP: 1,6,,,,,1000000,100000`，数据承载
+> CID 1 的 5QI 为 6。
+
+- **feat(ui)** SIM 卡信息页在「签约速率」下新增「QoS 等级 (5QI / QCI)」，
+  只取数据承载 CID（`pickDataContext` 已剔除 IMS / 紧急等专用承载）的等级；
+  `0`（由网络选择）、IMS 特征值 `1` / `5`、命令失败一律显示「模组未上报」，
+  不跨承载凑值。
+- **feat(at)** `AT+C5GQOSRDP` 改为每次无条件查询一次：既读 5QI，也在 DSAMBR
+  无有效值时兜底 Session-AMBR；签约速率的原有优先级与取数口径不变。
+- **test** `tests/parse-regression-test.js` 增加 4G `5QI=0` 原样保留断言，
+  守卫「解析层不臆造等级、由视图层判未上报」的边界。
+- **docs(README)** 核心指标取数对照表补充 QoS 等级来源。
+
 ### fix(ui) 辅站信号缺失原因的两处漏判（PR #41 Codex review）
 
 > v1.31.1 合并后 Codex 复核提出两条 P2：其一，`Parse.carrierSignalFor()` 只要
