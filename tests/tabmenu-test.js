@@ -609,6 +609,14 @@ const TWELVE_TABS = [
 			triggerM.querySelector('.at-tabmenu-trigger-count').textContent === '12');
 		check('窄屏: 不给 Vantage 原生 Tab 注入图标（桌面观感零改动）',
 			domM.strip.querySelectorAll('.at-tabmenu-icon').length === 0);
+		/* ARIA：这是「触发器 + 链接列表」的展开收起，不冒充 ARIA menu（无方向键导航） */
+		const firstItemM = panelM.querySelectorAll('a.at-tabmenu-panel-item')[0];
+		check('窄屏: 浮层用分组语义而非 menu（条目保持原生链接语义）',
+			panelM.getAttribute('role') === 'group' &&
+			panelM.getAttribute('aria-label') === '页面切换' &&
+			firstItemM.getAttribute('role') === null &&
+			triggerM.getAttribute('aria-haspopup') === null &&
+			triggerM.getAttribute('aria-expanded') === 'false');
 
 		/* 12b. 点击展开 / 再点收起 */
 		triggerM.dispatch('click', { preventDefault: function () {} });
