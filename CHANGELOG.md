@@ -8,6 +8,44 @@
 
 ---
 
+## v1.31.1（2026-11-05）
+
+### fix(parse) HFREQINFO 同行多组 NR 载波仅解析第一组（Issue #38）
+
+> `parseHFREQINFO()` 每行只解析 `p[2..8]` 作为第一组七字段载波，同一行后续 `p[9..15]` 被丢弃。SA n78+n78 场景中模组在同一条 `^HFREQINFO` 响应中上报两组 NR 载波，第二组因此丢失，页面误显示"单载波 (PCC)"。
+
+- **fix(parse) 同行多组循环解析**：共享头 2 字段（n, sysmode）后每 7 字段一组，循环处理所有完整七字段组；保留原有输出字段契约，单组/多行/多组均兼容；不完整行（长度不满足 `(len-2) % 7 === 0`）跳过，避免 `parseInt` 截断非法字段产生残缺载波；保留原始共享 n，不人为改为载波索引
+
+### fix(ui) 辅载波信号缺失时区分未上报、查询失败和不适用（Issue #39）
+
+> 修复 #38 后，SCC 卡片的 PCI/RSRP/RSRQ/SINR 仍为"—"。当前 `secondarySuccess` 只区分传输层是否成功，无法区分模组返回 `NONE`（明确未上报）、`ERROR`（命令失败）和超时。建议区分三个层次，保持真实空值并补充可解释原因。
+
+- **feat(parse) atStatusFromText**：新增 AT 终止状态检测函数，区分 OK / ERROR / NONE / empty / other，让前端能区分传输层成功与 AT 命令实际结果
+- **feat(ui) SCC 信号缺失原因**：`syncCarriers` 为每个信号为空的 SCC 添加 `signalReason` 字段（`at-error` / `no-measurement` / `timeout`）；`renderCarriersAdv` 在 SCC 信号全部为空时显示可解释说明，如"已取得载波频点/带宽，未取得独立信号测量"或"辅站查询返回 ERROR"；绝不复制 PCC 读数或填 0
+- **test** 新增 `tests/hfreq-multicarrier-test.js`（49 条断言），覆盖单组/两组/三组/多行/不完整行解析、AT 状态检测、SCC 信号缺失原因、syncCarriers 端到端验证
+- **chore(version) 缓存版本戳同步**：`PKG_VERSION` / `MT5700_UI_VERSION` 1.31.0→1.31.1，发版后浏览器缓存整体失效，确保升级用户加载到修复后的解析逻辑
+
+---
+
+## v1.31.0（2026-11-05）
+
+> 全局双 UI 模式重构：普通模式完整保留，新增 Google Material Design 3 极简模式。两种模式共用同一套 JS 业务逻辑、Ucode 后端、RPC/ubus 接口、UCI 配置、数据请求、状态管理、事件处理与弹窗业务实现；不修改 AT 调度、短信收发、拨号、USB 网络与硬件控制。
+
+- **feat(ui) 全局 UI Mode Manager**：新增 `at-webserver/uimode.js`，单例状态写到 `<html data-ui-mode="normal|minimal">`，切换即时生效免刷新、跨页面/刷新/重新登录保持；默认 `normal`，非法值与读取失败安全回退；`document` 单次点击委托 + `onChange` 去重，避免重复初始化与重复注册事件
+- **feat(uci) 模式持久化**：`at-webserver.config.ui_mode`（只允许 `normal` / `minimal`），读取走 `L.uci.load/get`、写入走 `L.uci.set/save`（**只 commit、不 apply**），复用现有 ACL 权限、不新增后端服务；保存失败同时回滚前端状态与 `L.uci.set()` 写入的内存暂存值并明确报错，绝不误报保存成功，也避免后续保存把失败值一并提交
+- **feat(ui) MD3 极简视觉层**：新增 `at-webserver/md3.css`（由 `mt5700.js` 在 `global.css` 之后注入），MD3 design tokens（primary/on-primary/primary-container/secondary/tertiary/surface/surface-container/surface-variant/on-surface/outline/error/success…）统一由 CSS Variables 管理并适配 `html.at-dark` 明暗主题；组件覆盖 buttons/cards/chips/lists/navigation/tabs/switches/inputs/selects/progress/dialogs/snackbars/tooltips/status；所有规则带 `html[data-ui-mode="minimal"]` 前缀，普通模式零命中
+- **feat(icons) 独立重绘的极简 SVG 图标体系**：新增 `at-webserver/icons.js`（Icon Manager）+ `icons/normal/*.svg` / `icons/minimal/*.svg` 共 142 个规范 SVG 资源（71 语义 × 2 套，24×24 viewBox、currentColor、无障碍属性）。`normal` 逐字保留 `tabmenu.js` TAB_ICONS 与 `network_status.js` svgIcon 的原有内联图元；`minimal` 全部重新绘制为 MD3 几何造型，禁止复用/滤镜/换色冒充。`data-mt-icon` + `AtIcons.refresh()` 按模式重绘，不重建业务 DOM
+- **feat(dialogs) 弹窗完整复用 + MD3 视觉适配**：`Mt5700.confirm` / `Ui.promptModal` / `smsModal` / toast / loading / degradedNotice / LuCI `.cbi-modal` / `.modal` 四套结构的业务实现与调用接口一行未改，仅由 `AtUimode.decorate()` 打模式标记；MD3 Dialog 规范（28px 圆角、surface-container-high、24px 标题、无毛玻璃、标准按钮、移动端适配）由 `md3.css` 覆盖
+- **perf(ui) 极简模式真正减少视觉开销**：JS 层不创建全局角色立绘/三角网格层与看板娘 `img`（不是 CSS 假隐藏）；星座图/MIMO 图跳过 256 点光晕、渐变 defs 与 SMIL `animateMotion`；广播塔换轻量 MD3 图标；趋势图跳过渐变面积/分区背景/脉冲点；sparkline 去渐变；装饰动画统一停用。模式切换不重建轮询、不重复初始化组件、不触发任何 AT / 拨号 / USB / 网络配置重应用
+- **feat(ui) 界面设置入口**：模式切换从 hero 栏内的内联 pill 移到右下角固定「齿轮」按钮（`position:fixed`，不占文档流），点开为「界面设置」面板：界面模式分段控件 + 保存说明 + `aria-live` 状态行。入口挂在 `document.body`（`mountSettings()` 幂等，12 视图共用同一节点），因此极简模式隐藏 hero 栏后入口依旧可用；`document` 单次点击委托统一处理开合/切换/面板外点击/Esc，控件自身不注册监听器。保存成功才提示「已保存到设备」，失败明确提示「已恢复为…」，模式变更即清空过期状态行
+- **feat(ui) 极简模式不显示壁纸与 hero 栏**：壁纸层由 JS 在极简模式真实卸载 `#mt5700-global-bg`（webp 不再请求），hero 栏去掉底色/渐变/描边/阴影/装饰伪元素与右侧插画区、徽标，只保留一行紧凑标题；页面宽度、最大宽度、外边距、卡片栅格与断点全部沿用普通模式原规则（极简是换皮不是换布局）
+- **chore(ui) 缓存版本戳**：`MT5700_MD3_CSS_VERSION` 1.0.0→1.0.1
+- **refactor(ui) 接入点**：`mt5700.js`（注入 md3.css、按模式分支、弹窗 decorate、信号/加载/图表重绘）、`tabmenu.js`（导航图标走 Icon Manager）、`network_status.js`（卡片标题/广播塔/图表走 Icon Manager）；其余 10 个视图、`at.css` / `global.css` / `mt5700.css`、Ucode 后端、Rust 源码、ACL、menu.d 均未改动
+- **docs/test** 新增 `docs/dual-ui-mode-inventory.md`（真实源码清单）、`scripts/gen-dual-ui-icons.js`（图标资源生成与一致性校验）、`tests/dual-ui-mode-test.js`（双模式/图标/弹窗/性能/业务安全回归）
+- **chore(version) 缓存版本戳同步**：`PKG_VERSION` / `MT5700_UI_VERSION` 1.30.12→1.31.0，发版后浏览器缓存整体失效，确保升级用户加载到包含 UI Mode Manager 的新模块（对齐 AGENTS.md 发版版本一致性约定）
+
+---
+
 ## v1.30.12（2026-11-05）
 
 ### fix(ui) 邻区扫描与 PDP 上下文表格移动端紧凑堆叠；移除空态双角色立绘
