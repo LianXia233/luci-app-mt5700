@@ -31,8 +31,18 @@
   读到的是同一份暗色。
 - **fix(css)** 按钮文字对比度：发送、新短信、确定三处蓝底白字在暗色下改用
   更深的蓝（`#0b7cb8` / `#0d74ae`），悬停态同步；危险键改用 `#d13a50`。
+- **fix(css)** 补齐 hover / focus 态（PR #47 评审）：「+ 新短信」悬停原被
+  `.mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-primary:hover:not(:disabled)`
+  的 `!important` 渐变（特异性 0-5-0）压回亮蓝，补 `html.at-dark …:hover`
+  （0-6-0）改为 `#096fa6`；归档弹窗危险键补 `color:#fff`，避免简洁模式
+  被 `md3.css` 的 `--md-sys-color-on-error` 染成深红字；新短信「确定」补
+  暗色 `:hover` 渐变，避免简洁模式悬停回落到 md3 的浅紫 `#c4b5fd`。
+- **fix(css)** 三处 `::placeholder` 补 `!important`，否则被原规则的
+  `!important` 覆盖成为死声明；`::placeholder` 统一为 `#93a3b5`（暗底 5.48）。
 - **test** 实机 Playwright 四组合（普通/简洁 × 亮/暗）逐项读取计算色并算对比度：
   暗色全部 ≥ 4.5（原 1.07-2.71）；亮色两种模式的计算样式与截图与改动前一致。
+  另补 hover / focus 态实测（新短信悬停 5.47、发送悬停 5.78、弹窗危险键
+  4.74、确定键悬停 5.47，普通/简洁两模式均 ≥ 4.5）。
 - **chore** `MT5700_CSS_VERSION` 2.46.6 → 2.46.7，`PKG_VERSION` /
   `MT5700_UI_VERSION` 1.32.3 → 1.32.4。
 

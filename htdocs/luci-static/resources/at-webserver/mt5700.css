@@ -6118,7 +6118,7 @@ html.at-dark .mt5700-sms-shell .mt5700-sms-search input[type="text"] {
   box-shadow: none !important;
   color: var(--sms-text) !important;
 }html.at-dark .mt5700-sms-shell .mt5700-sms-search input::placeholder {
-  color: #8494a7;
+  color: #93a3b5 !important;
 }html.at-dark .mt5700-sms-shell .mt5700-sms-filters button {
   background: transparent;
   color: var(--sms-muted);
@@ -6143,6 +6143,10 @@ html.at-dark .mt5700-sms-shell .mt5700-sms-search input[type="text"] {
 }html.at-dark .mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-primary {
   background: #0b7cb8 !important;
   color: #fff !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-primary:hover:not(:disabled) {
+  background: #096fa6 !important;
+  color: #fff !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .4) !important;
 }html.at-dark .mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-ghost {
   border-color: rgba(148, 163, 184, .22) !important;
   background: #262b33 !important;
@@ -6202,7 +6206,7 @@ html.at-dark .mt5700-sms-shell .mt5700-sms-msgs {
 }html.at-dark .mt5700-sms-shell .mt5700-sms-row.incoming .mt5700-sms-del {
   color: #ff9aa5 !important;
 }html.at-dark .mt5700-sms-shell .mt5700-sms-del:hover {
-  background: rgba(239, 68, 68, .16);
+  background: rgba(239, 68, 68, .16) !important;
 }html.at-dark .mt5700-sms-shell .mt5700-sms-avatar {
   background: #2a3039;
 }
@@ -6221,7 +6225,7 @@ html.at-dark .mt5700-sms-shell .mt5700-sms-composer {
   background: #262b33 !important;
   color: var(--sms-text) !important;
 }html.at-dark .mt5700-sms-shell .mt5700-sms-composer textarea::placeholder {
-  color: #8494a7;
+  color: #93a3b5 !important;
 }html.at-dark .mt5700-sms-shell .mt5700-sms-composer textarea:focus {
   border-color: rgba(18, 183, 245, .55) !important;
   background: #2a3039 !important;
@@ -6257,10 +6261,12 @@ html.at-dark body .mt5700-modal.mt5700-sms-modal {
 }html.at-dark .mt5700-sms-modal .mt5700-btn-danger {
   border-color: #d13a50 !important;
   background: #d13a50 !important;
+  color: #fff !important;
   box-shadow: 0 4px 12px rgba(209, 58, 80, .24) !important;
 }html.at-dark .mt5700-sms-modal .mt5700-btn-danger:hover:not(:disabled) {
   border-color: #bd3044 !important;
   background: #bd3044 !important;
+  color: #fff !important;
 }html.at-dark .mt5700-sms-modal .mt5700-sms-modal-list {
   border-color: rgba(148, 163, 184, .18);
   background: rgba(20, 24, 30, .9);
@@ -6317,12 +6323,20 @@ html.at-dark .mt5700-sms-prompt .cbi-input-text:hover {
   background: #2a3039 !important;
   box-shadow: 0 0 0 3px rgba(18, 183, 245, .14) !important;
 }html.at-dark .mt5700-sms-prompt .cbi-input-text::placeholder {
-  color: #8494a7;
+  color: #93a3b5 !important;
 }html.at-dark .mt5700-sms-prompt .at-btn-neutral {
   border-color: rgba(148, 163, 184, .24) !important;
   background: #262b33 !important;
+}html.at-dark .mt5700-sms-prompt .at-btn-neutral:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, .34) !important;
+  background: #2d3441 !important;
+  color: #dbe4ef !important;
 }html.at-dark .mt5700-sms-prompt .at-btn-primary {
   border-color: transparent !important;
   background: linear-gradient(135deg, #0d74ae, #08568a) !important;
+  color: #fff !important;
+}html.at-dark .mt5700-sms-prompt .at-btn-primary:hover:not(:disabled) {
+  border-color: transparent !important;
+  background: linear-gradient(135deg, #096fa6, #064b7a) !important;
   color: #fff !important;
 }
