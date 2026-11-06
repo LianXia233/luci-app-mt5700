@@ -56,7 +56,15 @@ function makeEl(tag) {
 		getAttribute: function (k) {
 			return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null;
 		},
+		removeAttribute: function (k) { delete this.attrs[k]; },
 		appendChild: function (c) { c.parentNode = this; this.children.push(c); return c; },
+		removeChild: function (c) {
+			const i = this.children.indexOf(c);
+			if (i >= 0) this.children.splice(i, 1);
+			c.parentNode = null;
+			return c;
+		},
+		focus: function () { this._focused = true; },
 		insertBefore: function (c, ref) {
 			c.parentNode = this;
 			const idx = ref ? this.children.indexOf(ref) : -1;
@@ -109,6 +117,14 @@ function makeEl(tag) {
 	Object.defineProperty(el, 'firstChild', {
 		get: function () { return this.children[0] || null; }
 	});
+	Object.defineProperty(el, 'textContent', {
+		get: function () {
+			if (this.nodeType === 3) return this._text || '';
+			if (this._text != null) return this._text;
+			return this.children.map(function (c) { return c.textContent || ''; }).join('');
+		},
+		set: function (v) { this.children = []; this._text = String(v); }
+	});
 	Object.defineProperty(el, 'href', {
 		get: function () { return this._href || ''; },
 		set: function (v) {
@@ -160,6 +176,12 @@ function makeEnv(pathname) {
 				});
 			})(documentStub.body);
 			return found[0] || null;
+		},
+		querySelector: function (sel) {
+			return documentStub.body.querySelector(sel);
+		},
+		querySelectorAll: function (sel) {
+			return documentStub.body.querySelectorAll(sel);
 		}
 	};
 
@@ -514,6 +536,145 @@ const TWELVE_TABS = [
 			check('对比度兜底: 亮色场景容器零改动',
 				!c.dom.tabmenu.classList.contains('at-tabmenu-fix'));
 		}
+	}
+
+	/* ---------- 12. 窄屏悬浮菜单（Vantage 结构 / 无 #tabmenu） ---------- */
+	{
+		/* 构造 nav#vt-tabs > .vt-pagetabs > a.vt-tab（ImmortalWrt Vantage 等新主题） */
+		function buildVantage(env, opts) {
+			const doc = env.documentStub;
+			const nav = doc.createElement('nav');
+			nav.setAttribute('id', 'vt-tabs');
+			nav.setAttribute('class', 'vt-tabs');
+			const strip = doc.createElement('div');
+			strip.setAttribute('class', 'vt-pagetabs');
+			opts.tabs.forEach(function (t) {
+				const a = doc.createElement('a');
+				a.setAttribute('class', 'vt-tab');
+				a.setAttribute('href', '/cgi-bin/luci/admin/modem/5g/' + t.name);
+				if (t.name === opts.activeKey) a.setAttribute('aria-current', 'page');
+				a.appendChild(doc.createTextNode(t.title));
+				strip.appendChild(a);
+			});
+			nav.appendChild(strip);
+			doc.body.appendChild(nav);
+			return { nav: nav, strip: strip };
+		}
+
+		/* 模拟窄屏：matchMedia 命中，可随时改 matches 模拟旋转/拉宽 */
+		function goMobile(env) {
+			const mq = {
+				matches: true,
+				addEventListener: function () {}, removeEventListener: function () {},
+				addListener: function () {}, removeListener: function () {}
+			};
+			env.windowStub.innerWidth = 390;
+			env.windowStub.matchMedia = function () { return mq; };
+			return mq;
+		}
+
+		check('tabKeyFromHref 从地址末段取页签名',
+			api0.tabKeyFromHref('/cgi-bin/luci/admin/modem/5g/modem-settings') === 'modem-settings' &&
+			api0.tabKeyFromHref('/cgi-bin/luci/admin/modem/5g/status/') === 'status' &&
+			api0.tabKeyFromHref('/cgi-bin/luci/admin/status/overview') === null);
+
+		/* 12a. 窄屏：构建触发器 + 浮层，原生 Tab 条保持原样 */
+		const envM = makeEnv('/cgi-bin/luci/admin/modem/5g/status');
+		const mq = goMobile(envM);
+		const domM = buildVantage(envM, { tabs: TWELVE_TABS, activeKey: 'status' });
+		/* 先建 DOM 再加载模块：init 一次命中并绑定事件（与真实加载顺序一致） */
+		const apiM = loadModule(envM);
+		apiM.enhance();
+
+		check('窄屏: body 挂 .at-tabmenu-mobile', envM.documentStub.body.classList.contains('at-tabmenu-mobile'));
+		const wrapM = domM.nav.querySelector('.at-tabmenu-float');
+		check('窄屏: 触发器挂在原生 Tab 条之前',
+			!!wrapM && domM.nav.children[0] === wrapM);
+		const triggerM = wrapM && wrapM.querySelector('.at-tabmenu-trigger');
+		const panelM = wrapM && wrapM.querySelector('.at-tabmenu-panel');
+		check('窄屏: 触发器/浮层均生成', !!triggerM && !!panelM);
+		check('窄屏: 浮层默认收起（hidden + aria-expanded=false）',
+			panelM.getAttribute('hidden') !== null && triggerM.getAttribute('aria-expanded') === 'false');
+		check('窄屏: 浮层条目与原 Tab 一一对应（12 条）',
+			panelM.querySelectorAll('a.at-tabmenu-panel-item').length === 12,
+			'n=' + panelM.querySelectorAll('a.at-tabmenu-panel-item').length);
+		check('窄屏: 条目文字沿用原 Tab 标题',
+			panelM.querySelectorAll('a.at-tabmenu-panel-item')[10].textContent === '运行日志');
+		check('窄屏: 当前页条目标记 is-active + aria-current',
+			panelM.querySelectorAll('a.at-tabmenu-panel-item')[0].classList.contains('is-active') &&
+			panelM.querySelectorAll('a.at-tabmenu-panel-item')[0].getAttribute('aria-current') === 'page' &&
+			panelM.querySelectorAll('a.at-tabmenu-panel-item')[1].getAttribute('aria-current') === 'false');
+		check('窄屏: 触发器显示当前页标题与页签总数',
+			triggerM.querySelector('.at-tabmenu-trigger-label').textContent === '网络状态' &&
+			triggerM.querySelector('.at-tabmenu-trigger-count').textContent === '12');
+		check('窄屏: 不给 Vantage 原生 Tab 注入图标（桌面观感零改动）',
+			domM.strip.querySelectorAll('.at-tabmenu-icon').length === 0);
+		/* ARIA：这是「触发器 + 链接列表」的展开收起，不冒充 ARIA menu（无方向键导航） */
+		const firstItemM = panelM.querySelectorAll('a.at-tabmenu-panel-item')[0];
+		check('窄屏: 浮层用分组语义而非 menu（条目保持原生链接语义）',
+			panelM.getAttribute('role') === 'group' &&
+			panelM.getAttribute('aria-label') === '页面切换' &&
+			firstItemM.getAttribute('role') === null &&
+			triggerM.getAttribute('aria-haspopup') === null &&
+			triggerM.getAttribute('aria-expanded') === 'false');
+
+		/* 12b. 点击展开 / 再点收起 */
+		triggerM.dispatch('click', { preventDefault: function () {} });
+		check('窄屏: 点击触发器展开浮层',
+			panelM.getAttribute('hidden') === null &&
+			triggerM.getAttribute('aria-expanded') === 'true' &&
+			wrapM.classList.contains('is-open'));
+		triggerM.dispatch('click', { preventDefault: function () {} });
+		check('窄屏: 再次点击收起浮层',
+			panelM.getAttribute('hidden') !== null && triggerM.getAttribute('aria-expanded') === 'false');
+
+		/* 12c. Esc 收起并回焦触发器 */
+		triggerM.dispatch('click', { preventDefault: function () {} });
+		envM.documentStub.dispatch('keydown', { key: 'Escape' });
+		check('窄屏: Esc 收起浮层并把焦点交还触发器',
+			panelM.getAttribute('hidden') !== null && triggerM._focused === true);
+
+		/* 12d. 点击外部收起 */
+		triggerM.dispatch('click', { preventDefault: function () {} });
+		envM.documentStub.dispatch('click', { target: { closest: function () { return null; } } });
+		check('窄屏: 点击浮层外部收起', panelM.getAttribute('hidden') !== null);
+
+		/* 12e. 点击浮层条目后收起（随后由浏览器正常跳转） */
+		triggerM.dispatch('click', { preventDefault: function () {} });
+		const itemM = panelM.querySelectorAll('a.at-tabmenu-panel-item')[1];
+		panelM.dispatch('click', { target: itemM });
+		check('窄屏: 选中条目后浮层收起', panelM.getAttribute('hidden') !== null);
+
+		/* 12f. 拉宽到桌面：悬浮菜单销毁，原生 Tab 条恢复可用 */
+		mq.matches = false;
+		apiM.enhance();
+		check('桌面: 悬浮菜单被销毁且 body 类摘除',
+			domM.nav.querySelector('.at-tabmenu-float') === null &&
+			!envM.documentStub.body.classList.contains('at-tabmenu-mobile'));
+		check('桌面: 原生 Vantage Tab 条仍在且未注入图标',
+			domM.strip.querySelectorAll('a.vt-tab').length === 12 &&
+			domM.strip.querySelectorAll('.at-tabmenu-icon').length === 0);
+
+		/* 12g. 一直处于桌面宽度：完全不构建悬浮菜单 */
+		const envD = makeEnv('/cgi-bin/luci/admin/modem/5g/status');
+		const apiD = loadModule(envD);
+		const domD = buildVantage(envD, { tabs: TWELVE_TABS, activeKey: 'status' });
+		apiD.enhance();
+		check('桌面: 不生成悬浮菜单（零副作用）',
+			domD.nav.querySelector('.at-tabmenu-float') === null &&
+			!envD.documentStub.body.classList.contains('at-tabmenu-mobile'));
+
+		/* 12h. #tabmenu 系主题在窄屏下也走同一套悬浮菜单 */
+		const envL = makeEnv('/cgi-bin/luci/admin/modem/5g/logs');
+		goMobile(envL);
+		const apiL = loadModule(envL);
+		const domL = buildTabmenu(envL, { tabs: TWELVE_TABS, activeKey: 'logs', scrollable: false });
+		apiL.enhance();
+		check('窄屏: #tabmenu 系同样生成悬浮菜单',
+			!!domL.tabmenu.querySelector('.at-tabmenu-float') &&
+			envL.documentStub.body.classList.contains('at-tabmenu-mobile'));
+		check('窄屏: #tabmenu 系浮层复用已注入的图标',
+			domL.tabmenu.querySelector('.at-tabmenu-float').querySelectorAll('.at-tabmenu-icon').length === 12);
 	}
 
 	/* ---------- 汇总 ---------- */

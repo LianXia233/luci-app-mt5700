@@ -6,7 +6,7 @@
 
 **适用于 OpenWrt / ImmortalWrt 平台的 MT5700M 5G 模组全功能控制中心与常驻守护套件**
 
-[![Version](https://img.shields.io/badge/Version-v1.32.2-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v1.32.5-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
 [![OpenWrt CI](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/build-openwrt.yml?branch=main&label=Build%20OpenWrt&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/build-openwrt.yml)
 [![Static Checks](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/checks.yml?branch=main&label=Checks&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/checks.yml)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square&logo=gnu&logoColor=white)](LICENSE)
@@ -84,6 +84,7 @@
 > `admin/modem/5g` 下的 12 个页面共用 LuCI 原生 Tab 菜单，插件在加载后执行纯 DOM 增强（`at-webserver/tabmenu.js`，不修改 LuCI 核心与主题，不拦截点击）：
 > 1. **横向滚动记忆保持**：在横向滚动主题下，切换、返回或刷新页面后，菜单会自动将当前选中项居中滚入可视区，不再重置到首项；用户手动滚动的偏移量会在 `sessionStorage` 中按路径记忆。
 > 2. **统一矢量 SVG 图标**：12 个页签各配一枚 24×24 线性图标（`stroke=currentColor` 随主题自适应着色，桌面端 16px / 窄屏 15px），语义精准对应业务功能。
+> 3. **窄屏悬浮菜单**：宽度 ≤768px 时，12 个页签不再换行平铺，而是收进一个 38px 高的药丸触发器（显示当前页名与页签总数）；点击展开 300px 宽的气泡浮层，选中即跳转。点击外部、再点触发器或按 `Esc` 均可收起，`Tab` 键可依次进入浮层条目。桌面宽屏保持原生一排 Tab 不变，暗色模式下浮层沿用插件既有玻璃卡片配色。
 
 > [!NOTE]
 > **信号指标取数来源（`AT^HCSQ`，鼎桥手册 13.5）**  
@@ -254,7 +255,7 @@ service at-webserver restart
 
 | 业务领域 | 页面名称 | 访问路径 | 核心能力说明 |
 |:---|:---|:---|:---|
-| 📡 **射频与基站** | **网络状态** | `admin/modem/5g/status` | 4 联射频仪表盘（RSRP / RSRQ / SINR / 综合信号评分）；**实时双 Y 轴趋势图**（支持质量底色、图例开关、缺口断点）；载波聚合（CA）频谱图；芯片 12 路微热力矩阵；MCS 动态 I/Q 星座图；**内核级流量火花线与设备侧使用量累计**（重启不丢失、定时清零）；SIM 签约速率（`^DSAMBR`）；双栈地址与驻网制式。 |
+| 📡 **射频与基站** | **网络状态** | `admin/modem/5g/status` | 4 联射频仪表盘（RSRP / RSRQ / SINR / 综合信号评分）；**实时双 Y 轴趋势图**（支持质量底色、图例开关、缺口断点）；载波聚合（CA）频谱图；芯片 12 路微热力矩阵；MCS 动态 I/Q 星座图；**内核级流量火花线与设备侧使用量累计**（重启不丢失、定时清零）；SIM 签约速率（`^DSAMBR`）与 QoS 等级（5QI / QCI，`+C5GQOSRDP`）；双栈地址与驻网制式。 |
 | | **网络设置** | `admin/modem/5g/network` | 5G / 4G 网络模式优先选择、SA / NSA 组网模式指定；APN 接入点分组配置（预设公众卡与物联网卡，精准剔除失效老 APN）。 |
 | | **全网扫频** | `admin/modem/5g/scan` | 全频段或指定频段邻区基站快速扫描，物理层小区参数导出；扫频期间自动优雅暂离蜂窝数据并在完成后无缝复原。 |
 | | **定时锁频** | `admin/modem/5g/schedule` | 支持锁定指定频段（Band）、频点（EARFCN）与基站物理小区 ID（PCI）；支持按日间/夜间时间策略自动轮转执行。 |
@@ -292,6 +293,7 @@ service at-webserver restart
 | 驻留小区 / 频段 / PCI | `AT^MONSC` · `AT^HFREQINFO?` | 优先取 `^MONSC` 驻留小区，缺项由 `^HCSQ` 补齐 |
 | 实时速率 / 本次使用量 | WAN 区域模组物理网口 `sysfs` 计数器，或模组 `AT^DSFLOWQRY` | 来源可手动切换；默认走物理网卡，**全程不下发 AT**，零串口负担 |
 | 签约速率 (AMBR) | `AT^DSAMBR=<cid>`（手册 16.17） | 4G/5G 均可用；取不到时以 `AT+C5GQOSRDP` 的 Session-AMBR 兜底 |
+| QoS 等级 (5QI / QCI) | `AT+C5GQOSRDP=<数据 cid>`（3GPP TS 27.007） | 只读数据承载的等级字段并校验应答 CID；`0`（由网络选择）按未上报显示 |
 | SIM 状态 / IMSI / ICCID | `AT+CPIN?` / `AT+CIMI` / `AT^ICCID?` | 状态机分层核对，防止误报就绪 |
 | 芯片温度矩阵 | `AT^CHIPTEMP?`（手册 17.1.1） | 12 路硬件测温点逐路定级，仪表盘以**最高通道结温**评定整体散热 |
 | 发射功率 | `AT^NTXPOWER?`（NR）/ `AT^TXPOWER?`（LTE） | NR 模式下 `AT^TXPOWER?` 恒报错属模组硬件正常行为 |

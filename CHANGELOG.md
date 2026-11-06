@@ -8,6 +8,110 @@
 
 ---
 
+## v1.32.5（2026-11-06）
+
+### feat(ui) 窄屏（≤768px）把 Tab 菜单收进可展开的悬浮菜单
+
+> 12 个页签在手机竖屏下换行成 3 排（360 / 390 宽实测 Tab 条高 108px），不但
+> 挤占内容区，还会把首屏推下去一屏的六分之一。桌面宽度下一排排布正常，问题
+> 只在窄屏。改动只针对交互形态：收起态保留一行高的药丸触发器（当前页名 +
+> 页签总数），展开后是覆盖内容的气泡浮层，选中即跳转；桌面端不构建任何节点。
+
+- **feat(ui)** `tabmenu.js` 新增窄屏悬浮菜单：`≤768px` 时把原生 Tab 条收起，
+  在原位置挂一个 38px 高的触发器，展开为 300px 宽的气泡浮层（`max-height:
+  min(60vh, 420px)`，超出内部滚动）。浮层条目按原顺序生成、沿用原标题与已注入
+  的图标，当前页高亮并带 `aria-current="page"`。
+- **feat(ui)** 交互口径：点击触发器展开/再点收起；点击浮层以外任意位置收起；
+  `Esc` 收起并把焦点交还触发器；浮层条目按 DOM 顺序自然进入 `Tab` 焦点链；
+  浮层为绝对定位、不参与文档流，页面滚动与底部固定操作栏位置均不受影响。
+- **feat(ui)** 兼容两套 Tab 结构：`#tabmenu > ul.tabs / ul.cbi-tabmenu`（
+  bootstrap / material / argon / openwrt-2020）与 ImmortalWrt Vantage 主题的
+  `nav#vt-tabs > .vt-pagetabs > a.vt-tab`（无 `#tabmenu` 容器，页签名从 href 末段取）。
+- **feat(ui)** 渐进增强：只有悬浮菜单构建成功才给 `body` 加 `at-tabmenu-mobile`
+  并由该类的 CSS 隐藏原生 Tab 条；JS 未执行、主题结构变化或宽度回到桌面时，
+  原生 Tab 条保持可用（不删节点、不改 href）。
+- **fix(ui)** 顺带修正：此前 Tab 增强只认 `#tabmenu`，在 Vantage 主题上整段
+  逻辑空转（既不注入图标也不做滚动校正）；现在图标注入仍只作用于 `#tabmenu`
+  系以保持 Vantage 桌面观感零改动，窄屏悬浮菜单则两套结构都生效。
+- **fix(ui)** ARIA 语义对齐（PR #48 Codex 评审）：浮层只是「触发器 + 链接列表」
+  的展开收起，之前却标了 `role="menu"` / `role="menuitem"` 与
+  `aria-haspopup="true"`，等于对外声明一个带方向键导航的菜单，而实现只有
+  `Tab` 与 `Esc`。现改为 `role="group"`（保留「页面切换」分组名），条目回归
+  原生链接语义、移出 `role="menuitem"`，触发器去掉 `aria-haspopup`，只留
+  `aria-expanded` / `aria-controls` 的 disclosure 语义；交互与视觉均未变。
+- **style(css)** 悬浮菜单沿用插件既有变量（`--mt5700-float-bg` / `--mt5700-glass`
+  / `--mt5700-accent-pale` / `--mt5700-sh-float`），亮色与 `html.at-dark` 暗色
+  均无新增色值；`MT5700_CSS_VERSION` 2.46.7 → 2.46.8。
+- **test** `tests/tabmenu-test.js` 断言数 33 → 54：覆盖 Vantage / `#tabmenu` 两套
+  结构下的构建、默认收起、点击展开与再收起、`Esc` 回焦、点击外部收起、选中条目
+  收起、断点回退销毁、桌面零副作用、浮层 ARIA 语义（分组而非 menu），以及
+  `tabKeyFromHref` 取键口径。
+- **验证** 实机（192.168.88.1，Vantage 主题，Playwright + Chromium）逐宽度读几何：
+  内容区首卡 y 由 360 宽 226→120、390/414 宽 190→120、768 宽 168→134；1280 宽
+  内容区 `(80,132,1176)` 与改动前完全一致，`nav.vt-tabs` 高度 60 未变。
+- **chore** 发版：`PKG_VERSION` / `MT5700_UI_VERSION` 1.32.4 → 1.32.5；
+  `MT5700_CSS_VERSION` 保持 2.46.8（本版未再改动样式文件）。
+
+## v1.32.4（2026-11-06）
+
+### fix(css) 短信中心补齐夜间模式（普通模式与简洁模式都覆盖）
+
+> 短信页是全站唯一一块彻底写死浅色的页面：`mt5700.css` 里同时含
+> `at-dark` 与 `mt5700-sms` 的选择器数量为 0，源码注释也写明它「保持现状、
+> 不随 LuCI 主题变量改写」。但夜间模式下主题仍会把继承文字与表单控件改成
+> 浅色，于是出现浅底浅字：实测普通模式暗色下搜索框文字对比度 1.10、
+> 空状态 2.71、归档弹窗正文 1.07、弹窗标题 1.08；简洁模式（`md3.css`）
+> 暗色下搜索框 1.13、页面层文字 1.27、归档行标题 1.15。
+
+- **fix(css)** 新增「短信中心 · 夜间模式适配」一节，整节以 `html.at-dark`
+  开头：亮色态没有任何规则命中，`@media` 里的桌面 QQ 式布局与窄屏布局的
+  配色原样保留，只换暗色下的值。
+- **fix(css)** 页内语义色（`--sms-text` / `--sms-muted` / `--sms-soft` /
+  `--sms-line` / `--sms-selected` / `--sms-bubble-in` 等）在暗色下重定值，
+  搜索、筛选、会话项、气泡、日期条、输入框、字数提示、发送键随之整体转暗。
+- **fix(css)** 归档 / 批量删除弹窗（挂在 `body` 上，不在页壳内）与新短信
+  弹窗单独补暗色，选择器特异性高于 `md3.css` 的
+  `html[data-ui-mode="minimal"] …`，因此 `ui_mode=normal` 与 `minimal`
+  读到的是同一份暗色。
+- **fix(css)** 按钮文字对比度：发送、新短信、确定三处蓝底白字在暗色下改用
+  更深的蓝（`#0b7cb8` / `#0d74ae`），悬停态同步；危险键改用 `#d13a50`。
+- **fix(css)** 补齐 hover / focus 态（PR #47 评审）：「+ 新短信」悬停原被
+  `.mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-primary:hover:not(:disabled)`
+  的 `!important` 渐变（特异性 0-5-0）压回亮蓝，补 `html.at-dark …:hover`
+  （0-6-0）改为 `#096fa6`；归档弹窗危险键补 `color:#fff`，避免简洁模式
+  被 `md3.css` 的 `--md-sys-color-on-error` 染成深红字；新短信「确定」补
+  暗色 `:hover` 渐变，避免简洁模式悬停回落到 md3 的浅紫 `#c4b5fd`。
+- **fix(css)** 三处 `::placeholder` 补 `!important`，否则被原规则的
+  `!important` 覆盖成为死声明；`::placeholder` 统一为 `#93a3b5`（暗底 5.48）。
+- **test** 实机 Playwright 四组合（普通/简洁 × 亮/暗）逐项读取计算色并算对比度：
+  暗色全部 ≥ 4.5（原 1.07-2.71）；亮色两种模式的计算样式与截图与改动前一致。
+  另补 hover / focus 态实测（新短信悬停 5.47、发送悬停 5.78、弹窗危险键
+  4.74、确定键悬停 5.47，普通/简洁两模式均 ≥ 4.5）。
+- **chore** `MT5700_CSS_VERSION` 2.46.6 → 2.46.7，`PKG_VERSION` /
+  `MT5700_UI_VERSION` 1.32.3 → 1.32.4。
+
+## v1.32.3（2026-11-06）
+
+### feat(sim) 网络状态 SIM 卡信息新增 QoS 等级（5QI / QCI）采集（Issue #43）
+
+> Issue #43 希望在已有的「运营商签约速率」旁补上 QCI/5QI 显示。模组侧
+> `AT^DSAMBR` 只报签约速率，等级要看标准命令 `AT+C5GQOSRDP=<cid>` 的第二个
+> 字段；而原先该命令仅在 DSAMBR 取不到速率时才下发，正常联网时根本不会
+> 拿到 5QI。实机（NR）返回 `+C5GQOSRDP: 1,6,,,,,1000000,100000`，数据承载
+> CID 1 的 5QI 为 6。
+
+- **feat(ui)** SIM 卡信息页在「签约速率」下新增「QoS 等级 (5QI / QCI)」，
+  只取数据承载 CID（`pickDataContext` 已剔除 IMS / 紧急等专用承载）的等级，
+  并校验 `+C5GQOSRDP` 应答 CID 与请求 CID 一致；`0`（由网络选择）或 CID 不符
+  时显示「模组未上报」。
+- **fix(ui)** 采纳 PR #45 Codex P2：不再用「等级等于 1 / 5」反推 IMS 承载，
+  改为校验应答 CID，避免误杀数据承载真实上报的合法等级（如会话语音 5QI 1）。
+- **feat(at)** `AT+C5GQOSRDP` 改为每次无条件查询一次：既读 5QI，也在 DSAMBR
+  无有效值时兜底 Session-AMBR；签约速率的原有优先级与取数口径不变。
+- **test** `tests/parse-regression-test.js` 增加 4G `5QI=0` 原样保留断言，
+  守卫「解析层不臆造等级、由视图层判未上报」的边界。
+- **docs(README)** 核心指标取数对照表补充 QoS 等级来源。
+
 ## v1.32.2（2026-11-06）
 
 ### fix(ui) 辅站信号缺失原因的两处漏判（PR #41 Codex review）
