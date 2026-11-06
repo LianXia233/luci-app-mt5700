@@ -19,9 +19,11 @@
 > CID 1 的 5QI 为 6。
 
 - **feat(ui)** SIM 卡信息页在「签约速率」下新增「QoS 等级 (5QI / QCI)」，
-  只取数据承载 CID（`pickDataContext` 已剔除 IMS / 紧急等专用承载）的等级；
-  `0`（由网络选择）、IMS 特征值 `1` / `5`、命令失败一律显示「模组未上报」，
-  不跨承载凑值。
+  只取数据承载 CID（`pickDataContext` 已剔除 IMS / 紧急等专用承载）的等级，
+  并校验 `+C5GQOSRDP` 应答 CID 与请求 CID 一致；`0`（由网络选择）或 CID 不符
+  时显示「模组未上报」。
+- **fix(ui)** 采纳 PR #45 Codex P2：不再用「等级等于 1 / 5」反推 IMS 承载，
+  改为校验应答 CID，避免误杀数据承载真实上报的合法等级（如会话语音 5QI 1）。
 - **feat(at)** `AT+C5GQOSRDP` 改为每次无条件查询一次：既读 5QI，也在 DSAMBR
   无有效值时兜底 Session-AMBR；签约速率的原有优先级与取数口径不变。
 - **test** `tests/parse-regression-test.js` 增加 4G `5QI=0` 原样保留断言，

@@ -2840,15 +2840,17 @@ return L.view.extend({
 				return AtWs.client.sendCommand('AT+C5GQOSRDP=' + (state.apnCid || '1'));
 			}).then(function (res) {
 				var q2 = (res && res.success && res.data) ? Parse.parseC5gQosRdp(res.data) : null;
-				/* 5QI 1（VoLTE 语音）/ 5（IMS 信令）是 IMS 专用承载的特征值：
-				 * 万一真拿到这种值，说明查到的不是数据上网那条上下文，
-				 * 宁可不显示也不张冠李戴。qci 为 0 表示「由网络选择」，
-				 * 同样不算模组给出了有效等级。 */
-				var isImsBearer = q2 && (q2.qci === 1 || q2.qci === 5);
-				state.qos = (q2 && q2.qci != null && q2.qci !== 0 && !isImsBearer)
+				/* 只认应答 CID 与请求的数据 CID 一致的结果（PR #45 Codex P2）：
+				 * 5QI/QCI 1（会话语音）、5（IMS 信令）本身都是合法等级，
+				 * 不能用「等级值像 IMS」来推断承载归属 —— 那样会误杀数据承载上
+				 * 真实上报的等级；反过来，应答 CID 对不上时才说明拿到的不是
+				 * 上网承载。qci 为 0 表示「由网络选择」，按未上报处理。 */
+				var reqCid = parseInt(state.apnCid || '1', 10);
+				var cidMatch = q2 && q2.cid != null && q2.cid === reqCid;
+				state.qos = (cidMatch && q2.qci != null && q2.qci !== 0)
 					? { qci: q2.qci } : null;
 				/* 只有 DSAMBR 没给出签约速率时，才用这条的 Session-AMBR 兜底 */
-				if (!state.subRate && q2 && !isImsBearer && (q2.ambrUl || q2.ambrDl)) {
+				if (!state.subRate && cidMatch && (q2.ambrUl || q2.ambrDl)) {
 					state.subRate = {
 						dlAmbr: q2.ambrDl, ulAmbr: q2.ambrUl,
 						apn: state.apn, cid: q2.cid, source: 'qosrdp'
