@@ -6057,3 +6057,272 @@ html.at-dark .mt5700-switch input[type="checkbox"] {
     gap: 6px;
   }
 }
+/* ==========================================================================
+   短信中心 · 夜间模式适配（仅 html.at-dark 生效）
+   --------------------------------------------------------------------------
+   短信页是全站唯一一套「写死浅色」的 palette（见上文 IM 会话界面一节的
+   说明：保持蓝紫配色、不随主题变量改写），所以夜间模式下它留在浅色，
+   而主题又把继承文字改成浅色 —— 浅底浅字，搜索框 1.10、归档弹窗正文 1.07。
+
+   这里给同一套结构补一份暗色 palette：只在 html.at-dark 下覆盖颜色类属性，
+   布局、间距、字号、圆角、阴影层级、动效一律不动。
+   亮色态没有任何规则命中 —— 所有选择器都以 html.at-dark 开头。
+
+   两种界面模式都覆盖：
+   - normal：本文件 `@media (min-width: 821px)` 的 QQ 式会话窗口；
+   - minimal：md3.css 只改了弹窗表面与页面容器，没有任何短信专属样式，
+     这里的选择器特异性高于 md3.css 的 `html[data-ui-mode="minimal"] …`，
+     保证两种模式下读到的是同一份暗色（复用同一组语义色，便于维护）。
+   ========================================================================== */
+
+/* 语义色：只换值，不改名，页内所有 var(--sms-*) 使用点自动跟随 */
+html.at-dark .mt5700-sms-shell {
+  --sms-bg: #14171c;
+  --sms-panel: #1b1f26;
+  --sms-side: #1b1f26;
+  --sms-line: rgba(148, 163, 184, .18);
+  --sms-text: #e8edf5;
+  --sms-muted: #9aa8b8;
+  --sms-soft: #a7b4c4;
+  --sms-blue-deep: #5ecbff;
+  --sms-selected: rgba(23, 57, 82, .55);
+  --sms-bubble-in: #262b33;
+}
+
+/* 整窗与左右两栏 */
+html.at-dark .mt5700-sms-shell .mt5700-sms-layout {
+  border-color: rgba(148, 163, 184, .22);
+  background: #16191f;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .3);
+  color: var(--sms-text);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-side {
+  border-right-color: rgba(148, 163, 184, .14);
+  background: #1b1f26;
+  color: var(--sms-text);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-chat {
+  border-color: transparent;
+  background: #12151a;
+  box-shadow: none;
+  color: var(--sms-text);
+}
+
+/* 左栏：搜索、筛选、会话项 */
+html.at-dark .mt5700-sms-shell .mt5700-sms-search {
+  border-color: rgba(148, 163, 184, .16);
+  background: #262b33;
+  color: #8ea0b3;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-search input,
+html.at-dark .mt5700-sms-shell .mt5700-sms-search input[type="text"] {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--sms-text) !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-search input::placeholder {
+  color: #8494a7;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-filters button {
+  background: transparent;
+  color: var(--sms-muted);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-filters button:hover {
+  background: #232a33;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-filters button.active {
+  background: rgba(18, 183, 245, .16);
+  color: #5ecbff;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-conv:hover {
+  background: #232a33;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-conv.active {
+  border-color: transparent;
+  background: #1c2f40;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-conv-name {
+  color: var(--sms-text);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-conv-preview {
+  color: var(--sms-soft);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-conv-time {
+  color: #8ea0b3;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-side-foot {
+  border-top-color: rgba(148, 163, 184, .14);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-primary {
+  background: #0b7cb8 !important;
+  color: #fff !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-ghost {
+  border-color: rgba(148, 163, 184, .22) !important;
+  background: #262b33 !important;
+  color: #c3cfdd !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-side-foot .mt5700-btn-ghost:hover:not(:disabled) {
+  border-color: rgba(94, 203, 255, .4) !important;
+  background: #2d3441 !important;
+  color: #5ecbff !important;
+}
+
+/* 右栏：顶栏与操作键 */
+html.at-dark .mt5700-sms-shell .mt5700-sms-chat-head {
+  border-bottom-color: rgba(148, 163, 184, .14);
+  background: #1b1f26;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-chat-copy h2 {
+  color: var(--sms-text);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-channel {
+  color: #8ea0b3;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-channel-status {
+  background: rgba(139, 92, 246, .18);
+  color: #c4b5fd;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-dot {
+  background: #7d8b9c;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-chat-actions .mt5700-btn-ghost {
+  color: #a9b8c9 !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-chat-actions .mt5700-btn-ghost:hover:not(:disabled) {
+  background: #232a33 !important;
+  color: #5ecbff !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-chat-actions .mt5700-btn-danger {
+  color: #ff9aa5 !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-chat-actions .mt5700-btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, .14) !important;
+  color: #ffb3bb !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-back {
+  border-color: rgba(148, 163, 184, .22);
+  background: #262b33;
+  color: var(--sms-blue-deep);
+}
+
+/* 消息区：日期、气泡、时间戳、删除键 */
+html.at-dark .mt5700-sms-shell .mt5700-sms-msgs {
+  scrollbar-color: rgba(148, 163, 184, .35) transparent;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-date span {
+  background: rgba(255, 255, 255, .06);
+  color: #93a3b5;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-bubble {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-row.incoming .mt5700-sms-bubble {
+  border-color: rgba(148, 163, 184, .16);
+  background: #262b33;
+  color: var(--sms-text);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-row.outgoing .mt5700-sms-bubble {
+  border-color: rgba(255, 255, 255, .2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-meta .mt5700-sms-time {
+  color: #8ea0b3 !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-row.incoming .mt5700-sms-del {
+  color: #ff9aa5 !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-del:hover {
+  background: rgba(239, 68, 68, .16);
+}html.at-dark .mt5700-sms-shell .mt5700-sms-avatar {
+  background: #2a3039;
+}
+
+/* 空状态提示（原为 #818cf8，浅底上 2.71，深底上需提亮） */
+html.at-dark .mt5700-sms-shell .mt5700-empty-text {
+  color: #a5b4fc !important;
+}
+
+/* 输入区：输入框、发送键、字数提示 */
+html.at-dark .mt5700-sms-shell .mt5700-sms-composer {
+  border-top-color: rgba(148, 163, 184, .14);
+  background: #1b1f26;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-composer textarea {
+  border-color: rgba(148, 163, 184, .18) !important;
+  background: #262b33 !important;
+  color: var(--sms-text) !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-composer textarea::placeholder {
+  color: #8494a7;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-composer textarea:focus {
+  border-color: rgba(18, 183, 245, .55) !important;
+  background: #2a3039 !important;
+  box-shadow: 0 0 0 2px rgba(18, 183, 245, .14) !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-composer .mt5700-sms-send {
+  background: #0b7cb8 !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-composer .mt5700-sms-send:hover:not(:disabled) {
+  background: #096fa6 !important;
+}html.at-dark .mt5700-sms-shell .mt5700-sms-hint {
+  background: #1b1f26;
+}
+
+/* 归档 / 批量删除弹窗（挂在 body 上，不在 .mt5700-sms-shell 内） */
+html.at-dark body .mt5700-modal.mt5700-sms-modal {
+  border-color: rgba(148, 163, 184, .2) !important;
+  background: rgba(24, 28, 35, .97) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55) !important;
+  color: #e8edf5;
+}html.at-dark .mt5700-sms-modal .mt5700-modal-title {
+  color: #e8edf5 !important;
+}html.at-dark .mt5700-sms-modal .mt5700-hint {
+  color: #9aa8b8 !important;
+}html.at-dark .mt5700-sms-modal .mt5700-modal-footer {
+  border-top-color: rgba(148, 163, 184, .16) !important;
+}html.at-dark .mt5700-sms-modal .mt5700-btn-ghost {
+  border-color: rgba(148, 163, 184, .24) !important;
+  background: #262b33 !important;
+  color: #c3cfdd !important;
+}html.at-dark .mt5700-sms-modal .mt5700-btn-ghost:hover:not(:disabled) {
+  border-color: rgba(94, 203, 255, .4) !important;
+  background: #2d3441 !important;
+  color: #5ecbff !important;
+}html.at-dark .mt5700-sms-modal .mt5700-btn-danger {
+  border-color: #d13a50 !important;
+  background: #d13a50 !important;
+  box-shadow: 0 4px 12px rgba(209, 58, 80, .24) !important;
+}html.at-dark .mt5700-sms-modal .mt5700-btn-danger:hover:not(:disabled) {
+  border-color: #bd3044 !important;
+  background: #bd3044 !important;
+}html.at-dark .mt5700-sms-modal .mt5700-sms-modal-list {
+  border-color: rgba(148, 163, 184, .18);
+  background: rgba(20, 24, 30, .9);
+  scrollbar-color: rgba(148, 163, 184, .35) transparent;
+}html.at-dark .mt5700-sms-modal-list > .mt5700-sms-pick-row + .mt5700-sms-pick-row,
+html.at-dark .mt5700-sms-modal-list > .mt5700-sms-archive-row + .mt5700-sms-archive-row {
+  border-top-color: rgba(148, 163, 184, .12);
+}html.at-dark .mt5700-sms-modal .mt5700-sms-modal-list .mt5700-sms-pick-row:hover {
+  background: rgba(255, 255, 255, .05);
+}html.at-dark .mt5700-sms-modal .mt5700-sms-pick-text {
+  color: #dbe4ef !important;
+}html.at-dark .mt5700-sms-archive-row strong {
+  color: #e8edf5;
+}html.at-dark .mt5700-sms-archive-row .mt5700-hint {
+  color: #9aa8b8 !important;
+}html.at-dark .mt5700-sms-modal .mt5700-sms-opt-row {
+  background: rgba(38, 43, 51, .9);
+  color: #dbe4ef;
+}html.at-dark .mt5700-sms-modal .mt5700-sms-selectall {
+  border-bottom-color: rgba(148, 163, 184, .16);
+  background: #232a33;
+  color: #dbe4ef;
+}html.at-dark .mt5700-sms-modal .mt5700-sms-selectall-count {
+  color: #8ea0b3;
+}html.at-dark .mt5700-sms-modal-scroll {
+  scrollbar-color: rgba(148, 163, 184, .35) transparent;
+}html.at-dark .mt5700-sms-modal-scroll .mt5700-sms-date span {
+  background: rgba(255, 255, 255, .06);
+  color: #93a3b5;
+}html.at-dark .mt5700-sms-modal-scroll .mt5700-sms-row.incoming .mt5700-sms-bubble {
+  border-color: rgba(148, 163, 184, .16);
+  background: #262b33;
+  color: #e8edf5;
+}html.at-dark .mt5700-sms-modal-scroll .mt5700-sms-row.incoming .mt5700-sms-time {
+  color: #8ea0b3;
+}
+
+/* 新短信弹窗（窄屏底部面板规则在 @media 内写死了白底，这里一并改暗） */
+html.at-dark .mt5700-sms-prompt .at-modal {
+  border-color: rgba(148, 163, 184, .2) !important;
+  background: rgba(24, 28, 35, .97) !important;
+  color: #e8edf5 !important;
+}html.at-dark .mt5700-sms-prompt .at-modal-title {
+  color: #e8edf5 !important;
+}html.at-dark .mt5700-sms-prompt .at-field-label {
+  color: #9aa8b8 !important;
+}html.at-dark .mt5700-sms-prompt .cbi-input-text,
+html.at-dark .mt5700-sms-prompt .cbi-input-text:hover {
+  border-color: rgba(148, 163, 184, .22) !important;
+  background: #262b33 !important;
+  color: #e8edf5 !important;
+}html.at-dark .mt5700-sms-prompt .cbi-input-text:focus {
+  border-color: rgba(18, 183, 245, .55) !important;
+  background: #2a3039 !important;
+  box-shadow: 0 0 0 3px rgba(18, 183, 245, .14) !important;
+}html.at-dark .mt5700-sms-prompt .cbi-input-text::placeholder {
+  color: #8494a7;
+}html.at-dark .mt5700-sms-prompt .at-btn-neutral {
+  border-color: rgba(148, 163, 184, .24) !important;
+  background: #262b33 !important;
+}html.at-dark .mt5700-sms-prompt .at-btn-primary {
+  border-color: transparent !important;
+  background: linear-gradient(135deg, #0d74ae, #08568a) !important;
+  color: #fff !important;
+}
