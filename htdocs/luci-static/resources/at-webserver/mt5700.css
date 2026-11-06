@@ -3677,6 +3677,195 @@ html.at-dark .mt-usage-cell.source .mt-usage-auto select.mt-usage-source option 
 		height: 15px;
 		margin-right: 5px;
 	}
+}/* ---------- 窄屏悬浮菜单（tabmenu.js 在 ≤768px 时构建） ----------
+   - .at-tabmenu-float 常驻原 Tab 条位置：只剩一行高的触发器，把 12 个页签
+     让出的垂直空间还给内容区；
+   - .at-tabmenu-panel 是绝对定位气泡浮层，只在展开时覆盖内容、不参与文档流，
+     因此不影响页面滚动，也不动底部固定操作栏的位置；
+   - body.at-tabmenu-mobile 由 JS 构建成功后添加：JS 未执行或主题结构变化时
+     原生 Tab 条保持原样（渐进增强，不做无条件的硬隐藏）。 */
+@media (max-width: 768px) {
+	body.at-tabmenu-mobile #tabmenu > ul.tabs,
+	body.at-tabmenu-mobile #tabmenu > ul.cbi-tabmenu,
+	body.at-tabmenu-mobile .vt-tabs > .vt-pagetabs {
+		display: none !important;
+	}
+
+	.at-tabmenu-float {
+		position: relative;
+		display: block;
+		z-index: 40;
+	}
+
+	.at-tabmenu-trigger {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		box-sizing: border-box;
+		max-width: 100%;
+		min-height: 38px;
+		padding: 0 12px;
+		font-family: inherit;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 1.2;
+		color: var(--mt5700-text);
+		background: var(--mt5700-float-bg);
+		border: 1px solid var(--mt5700-border-subtle);
+		border-radius: 999px;
+		box-shadow: var(--mt5700-sh-1);
+		backdrop-filter: var(--mt5700-glass);
+		-webkit-backdrop-filter: var(--mt5700-glass);
+		cursor: pointer;
+		-webkit-tap-highlight-color: transparent;
+		transition: box-shadow var(--mt5700-transition-fast), border-color var(--mt5700-transition-fast);
+	}
+
+	.at-tabmenu-trigger:hover {
+		box-shadow: var(--mt5700-sh-2);
+	}
+
+	.at-tabmenu-trigger:focus-visible {
+		outline: 2px solid var(--mt5700-accent);
+		outline-offset: 2px;
+	}
+
+	.at-tabmenu-trigger-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 16px;
+		height: 16px;
+		opacity: 0.75;
+	}
+
+	.at-tabmenu-trigger-icon > svg {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+
+	.at-tabmenu-trigger-label {
+		max-width: 46vw;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.at-tabmenu-trigger-count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		min-width: 20px;
+		height: 18px;
+		padding: 0 5px;
+		box-sizing: border-box;
+		border-radius: 999px;
+		background: var(--mt5700-accent-pale);
+		color: var(--mt5700-accent);
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 1;
+	}
+
+	.at-tabmenu-trigger-chevron {
+		flex: 0 0 auto;
+		width: 14px;
+		height: 14px;
+		opacity: 0.6;
+		transition: transform var(--mt5700-transition-fast);
+	}
+
+	.at-tabmenu-float.is-open .at-tabmenu-trigger-chevron {
+		transform: rotate(180deg);
+	}
+
+	.at-tabmenu-panel {
+		position: absolute;
+		top: calc(100% + 8px);
+		left: 0;
+		z-index: 60;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		box-sizing: border-box;
+		width: 300px;
+		max-width: calc(100vw - 40px);
+		max-height: min(60vh, 420px);
+		padding: 6px;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		-webkit-overflow-scrolling: touch;
+		background: var(--mt5700-float-bg);
+		border: 1px solid var(--mt5700-border);
+		border-radius: 16px;
+		box-shadow: var(--mt5700-sh-float);
+		backdrop-filter: var(--mt5700-glass);
+		-webkit-backdrop-filter: var(--mt5700-glass);
+	}
+
+	.at-tabmenu-panel[hidden] {
+		display: none !important;
+	}
+
+	.at-tabmenu-panel-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 9px 10px;
+		border-radius: 10px;
+		color: var(--mt5700-text-secondary);
+		font-size: 13px;
+		font-weight: 500;
+		line-height: 1.3;
+		text-decoration: none !important;
+	}
+
+	.at-tabmenu-panel-item:hover {
+		background: var(--mt5700-subtle-bg);
+		color: var(--mt5700-text);
+	}
+
+	.at-tabmenu-panel-item:focus-visible {
+		outline: 2px solid var(--mt5700-accent);
+		outline-offset: -2px;
+	}
+
+	.at-tabmenu-panel-item.is-active {
+		background: var(--mt5700-accent-pale);
+		color: var(--mt5700-accent);
+		font-weight: 700;
+	}
+
+	.at-tabmenu-panel-text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.at-tabmenu-panel-item .at-tabmenu-icon,
+	body.at-tabmenu-mobile #tabmenu .at-tabmenu-panel-item .at-tabmenu-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 16px;
+		height: 16px;
+		margin-right: 0;
+		opacity: 0.72;
+	}
+
+	.at-tabmenu-panel-item .at-tabmenu-icon > svg {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+
+	.at-tabmenu-panel-item.is-active .at-tabmenu-icon {
+		opacity: 1;
+	}
 }/* ===========================================================================
  * 表单两列网格（.mt5700-form-grid）
  *

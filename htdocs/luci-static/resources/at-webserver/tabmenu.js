@@ -17,19 +17,25 @@
  *     2) Tab 项只有文字没有图标，12 个页面扫读成本高。
  *
  * 做法（不改 LuCI 与主题本身，仅在本插件页面加载后增强 DOM）：
- *   - 等 #tabmenu 渲染完成（轮询 + MutationObserver，主题无关）；
+ *   - 等 Tab 菜单渲染完成（轮询 + MutationObserver，主题无关）；
  *   - 按 li.tabmenu-item-<name> 匹配统一风格的 24×24 线性 SVG 图标
  *     （stroke=currentColor，自动继承主题 tab 文字配色，桌面/移动端自适应）；
  *   - 把当前选中项水平滚入可视区：仅操作 Tab 条自身的 scrollLeft，
  *     不动窗口滚动，避免刷新时页面被顶回顶部；
  *   - 用 sessionStorage 记住每个路径下用户手动滚动的位置：返回 / 刷新时
- *     若选中项仍完整可见则恢复该偏移，否则回退为「选中项居中」。
+ *     若选中项仍完整可见则恢复该偏移，否则回退为「选中项居中」；
+ *   - 窄屏（≤768px）把整条 Tab 菜单收进一个紧凑触发器 + 气泡浮层：
+ *     12 个页签不再平铺换行挤占内容区，桌面宽度完全不介入。
  *
  * 兼容性：
- *   - 只识别 li[class*="tabmenu-item-"]（bootstrap / material / argon /
- *     openwrt-2020 一致）；footstrap 等无 Tab 栏的主题自动跳过；
+ *   - Tab 条识别两套结构：#tabmenu > ul.tabs / ul.cbi-tabmenu（bootstrap /
+ *     material / argon / openwrt-2020），以及 Vantage 等 ImmortalWrt 新主题的
+ *     nav#vt-tabs > .vt-pagetabs > a.vt-tab（无 #tabmenu 容器）；
+ *     footstrap 等无 Tab 栏的主题自动跳过；
  *   - 仅当路径含 /admin/modem/ 时启用，不影响其他 LuCI 页面；
- *   - 纯增强：不拦截点击、不改 href、不删节点，原有路由与功能零改动。
+ *   - 纯增强：不拦截点击、不改 href、不删节点，原有路由与功能零改动；
+ *   - 窄屏悬浮菜单由 JS 构建成功后才给 body 加 .at-tabmenu-mobile，
+ *     JS 未执行或主题结构变化时保留主题原生 Tab 条（渐进增强，不做硬隐藏）。
  */
 
 var AtTabmenu = (function () {
@@ -131,6 +137,14 @@ var AtTabmenu = (function () {
 	}
 	api.tabKeyFromClass = tabKeyFromClass;
 
+	// 从链接地址提取页签名：'/cgi-bin/luci/admin/modem/5g/modem-settings' → 'modem-settings'
+	// Vantage 等主题的页签是裸 <a class="vt-tab">，没有 tabmenu-item-* 类名，只能看 href
+	function tabKeyFromHref(href) {
+		var m = /\/admin\/modem\/5g\/([A-Za-z0-9_-]+)\/?$/i.exec(String(href || ''));
+		return m ? m[1] : null;
+	}
+	api.tabKeyFromHref = tabKeyFromHref;
+
 	// 按位移增量夹取到合法滚动范围 [0, max]（max 已保证非负）
 	function clampScrollLeft(base, delta, max) {
 		var m = Math.max(0, max || 0);
@@ -221,6 +235,51 @@ var AtTabmenu = (function () {
 		} catch (e) { /* 跨环境降级：仅类名判定 */ }
 		return false;
 	}
+
+	// 页签节点可能是 li（#tabmenu 系）也可能是 a 本身（Vantage 系），统一取 <a>
+	function linkOf(item) {
+		if (!item) return null;
+		var tag = String(item.tagName || item.tag || '').toUpperCase();
+		if (tag === 'A') return item;
+		return item.querySelector('a');
+	}
+
+	// 页签名：优先 tabmenu-item-* 类名，其次 href 末段
+	function tabKeyOf(item, link) {
+		var key = tabKeyFromClass(item && item.className);
+		if (key) return key;
+		return tabKeyFromHref(link && link.getAttribute ? link.getAttribute('href') : '');
+	}
+
+	// 选中项判定：aria-current（Vantage）优先，再退回类名 / href 口径
+	function isActiveItem(item, link) {
+		if (item && item.getAttribute && item.getAttribute('aria-current')) return true;
+		if (link && link.getAttribute && link.getAttribute('aria-current')) return true;
+		return isActiveLi(item, link);
+	}
+
+	// 归一化 Tab 条结构：{ kind, root, list, items, linkOfItem }
+	//   luci  ：#tabmenu > ul.tabs / ul.cbi-tabmenu > li.tabmenu-item-*
+	//   vantage：nav#vt-tabs > .vt-pagetabs > a.vt-tab（无 #tabmenu 容器）
+	function resolveTabStrip() {
+		var container = document.getElementById('tabmenu');
+		if (container) {
+			var list = container.querySelector('ul.tabs, ul.cbi-tabmenu');
+			var items = (list || container).querySelectorAll('li[class*="tabmenu-item-"]');
+			if (items.length) {
+				return { kind: 'luci', root: container, list: list || items[0].parentNode, items: items };
+			}
+		}
+		var vt = (typeof document.querySelector === 'function') ? document.querySelector('.vt-pagetabs') : null;
+		if (vt) {
+			var vtItems = vt.querySelectorAll('a.vt-tab');
+			if (vtItems.length) {
+				return { kind: 'vantage', root: vt.parentNode || vt, list: vt, items: vtItems };
+			}
+		}
+		return null;
+	}
+	api.resolveTabStrip = resolveTabStrip;
 
 	/* ================= 滚动位置保持 ================= */
 
@@ -381,32 +440,251 @@ var AtTabmenu = (function () {
 	}
 	api.checkTabContrast = checkTabContrast;
 
+	/* ================= 窄屏悬浮菜单 ================= */
+
+	// 断点与 mt5700.css 的 @media (max-width: 768px) 保持一致
+	var MOBILE_MAX_WIDTH = 768;
+	var MOBILE_PANEL_ID = 'at-tabmenu-panel';
+	var mobile = null;              // 当前悬浮菜单实例；null = 桌面态或未构建
+	var mobileGlobalsBound = false;
+
+	function isMobileView() {
+		if (typeof window === 'undefined') return false;
+		if (typeof window.matchMedia === 'function') {
+			try {
+				return window.matchMedia('(max-width: ' + MOBILE_MAX_WIDTH + 'px)').matches;
+			} catch (e) { /* 落到 innerWidth 兜底 */ }
+		}
+		var w = window.innerWidth;
+		return typeof w === 'number' && w > 0 && w <= MOBILE_MAX_WIDTH;
+	}
+	api.isMobileView = isMobileView;
+
+	function setMobileOpen(open) {
+		if (!mobile) return;
+		mobile.open = !!open;
+		if (open) {
+			if (typeof mobile.panel.removeAttribute === 'function') mobile.panel.removeAttribute('hidden');
+		} else {
+			mobile.panel.setAttribute('hidden', '');
+		}
+		mobile.trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+		try { mobile.wrap.classList.toggle('is-open', !!open); } catch (e) { /* ignore */ }
+	}
+	api.setMobileOpen = setMobileOpen;
+
+	function teardownMobileUI() {
+		if (!mobile) return;
+		var wrap = mobile.wrap;
+		if (wrap && wrap.parentNode && typeof wrap.parentNode.removeChild === 'function') {
+			wrap.parentNode.removeChild(wrap);
+		}
+		try { if (document.body && document.body.classList) document.body.classList.remove('at-tabmenu-mobile'); } catch (e) { /* ignore */ }
+		mobile = null;
+	}
+
+	// 触发器上的菜单图标（三条横线，静态不随页签变化）
+	function menuGlyph() {
+		var svg = svgEl('svg', {
+			viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none',
+			stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round',
+			'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false'
+		});
+		svg.appendChild(svgEl('path', { d: 'M4 7h16' }));
+		svg.appendChild(svgEl('path', { d: 'M4 12h16' }));
+		svg.appendChild(svgEl('path', { d: 'M4 17h10' }));
+		return svg;
+	}
+
+	function chevronGlyph() {
+		var svg = svgEl('svg', {
+			viewBox: '0 0 24 24', width: 14, height: 14, fill: 'none',
+			stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round',
+			'stroke-linejoin': 'round', 'class': 'at-tabmenu-trigger-chevron',
+			'aria-hidden': 'true', focusable: 'false'
+		});
+		svg.appendChild(svgEl('path', { d: 'm6 9 6 6 6-6' }));
+		return svg;
+	}
+
+	function buildMobileUI(strip, activeItem) {
+		var wrap = document.createElement('div');
+		wrap.className = 'at-tabmenu-float';
+
+		var trigger = document.createElement('button');
+		trigger.setAttribute('type', 'button');
+		trigger.className = 'at-tabmenu-trigger';
+		trigger.setAttribute('aria-expanded', 'false');
+		trigger.setAttribute('aria-haspopup', 'true');
+		trigger.setAttribute('aria-controls', MOBILE_PANEL_ID);
+
+		var glyph = document.createElement('span');
+		glyph.className = 'at-tabmenu-trigger-icon';
+		glyph.setAttribute('aria-hidden', 'true');
+		glyph.appendChild(menuGlyph());
+
+		var label = document.createElement('span');
+		label.className = 'at-tabmenu-trigger-label';
+
+		var count = document.createElement('span');
+		count.className = 'at-tabmenu-trigger-count';
+		count.setAttribute('aria-hidden', 'true');
+		count.textContent = String(strip.items.length);
+
+		trigger.appendChild(glyph);
+		trigger.appendChild(label);
+		trigger.appendChild(count);
+		trigger.appendChild(chevronGlyph());
+
+		var panel = document.createElement('div');
+		panel.className = 'at-tabmenu-panel';
+		panel.setAttribute('id', MOBILE_PANEL_ID);
+		panel.setAttribute('role', 'menu');
+		panel.setAttribute('aria-label', '页面切换');
+		panel.setAttribute('hidden', '');
+
+		// 浮层条目：按原 Tab 条顺序生成，选中项高亮；点击后由浏览器正常跳转
+		var entries = [];
+		for (var i = 0; i < strip.items.length; i++) {
+			var item = strip.items[i];
+			var link = linkOf(item);
+			if (!link) continue;
+			var href = link.getAttribute('href') || '';
+			var active = item === activeItem;
+			var a = document.createElement('a');
+			a.className = 'at-tabmenu-panel-item' + (active ? ' is-active' : '');
+			a.setAttribute('role', 'menuitem');
+			a.setAttribute('href', href);
+			a.setAttribute('aria-current', active ? 'page' : 'false');
+			a.appendChild(buildIconEl(tabKeyOf(item, link)));
+			var text = document.createElement('span');
+			text.className = 'at-tabmenu-panel-text';
+			text.textContent = String(link.textContent || '').replace(/\s+/g, ' ').trim();
+			a.appendChild(text);
+			panel.appendChild(a);
+			entries.push({ item: item, anchor: a, key: tabKeyOf(item, link) });
+		}
+
+		wrap.appendChild(trigger);
+		wrap.appendChild(panel);
+
+		// 挂到原 Tab 条所在位置（不移动、不删除原生节点，桌面态原样可用）
+		var host = strip.list.parentNode || strip.root;
+		if (host && typeof host.insertBefore === 'function') {
+			host.insertBefore(wrap, strip.list);
+		} else if (host && typeof host.appendChild === 'function') {
+			host.appendChild(wrap);
+		} else {
+			return;
+		}
+
+		mobile = {
+			wrap: wrap, trigger: trigger, panel: panel, label: label, count: count,
+			entries: entries, list: strip.list, kind: strip.kind, open: false
+		};
+
+		trigger.addEventListener('click', function (ev) {
+			if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+			if (!mobile) return;
+			setMobileOpen(!mobile.open);
+		});
+
+		// 点击条目后立即收起，缩短跳转前的浮层残留时间
+		panel.addEventListener('click', function (ev) {
+			var t = ev && ev.target;
+			if (!t || typeof t.closest !== 'function') return;
+			if (t.closest('a.at-tabmenu-panel-item')) setMobileOpen(false);
+		});
+
+		try { if (document.body && document.body.classList) document.body.classList.add('at-tabmenu-mobile'); } catch (e) { /* ignore */ }
+
+		syncMobileUI(strip, activeItem);
+	}
+
+	function syncMobileUI(strip, activeItem) {
+		if (!mobile) return;
+		var link = activeItem ? linkOf(activeItem) : null;
+		var title = link ? String(link.textContent || '').replace(/\s+/g, ' ').trim() : '';
+		mobile.label.textContent = title || '页面切换';
+		mobile.count.textContent = String(strip.items.length);
+		for (var i = 0; i < mobile.entries.length; i++) {
+			var e = mobile.entries[i];
+			var on = e.item === activeItem;
+			try { e.anchor.classList.toggle('is-active', on); } catch (err) { /* ignore */ }
+			e.anchor.setAttribute('aria-current', on ? 'page' : 'false');
+		}
+	}
+
+	function ensureMobileUI(strip, activeItem) {
+		if (!isMobileView()) {
+			teardownMobileUI();
+			return;
+		}
+		// Tab 条被主题重建（list 变化）时整体重建，避免引用失效
+		if (mobile && mobile.list !== strip.list) teardownMobileUI();
+		if (mobile) {
+			syncMobileUI(strip, activeItem);
+			return;
+		}
+		buildMobileUI(strip, activeItem);
+	}
+	api.ensureMobileUI = ensureMobileUI;
+
+	function bindMobileGlobals() {
+		if (mobileGlobalsBound) return;
+		mobileGlobalsBound = true;
+
+		// 点击浮层/触发器之外收起；capture 阶段保证在页面其他处理器之前生效
+		document.addEventListener('click', function (ev) {
+			if (!mobile || !mobile.open) return;
+			var t = ev && ev.target;
+			if (t && typeof t.closest === 'function' && t.closest('.at-tabmenu-float')) return;
+			setMobileOpen(false);
+		}, true);
+
+		// Esc 收起并把焦点还给触发器，键盘用户不会困在浮层里
+		document.addEventListener('keydown', function (ev) {
+			if (!mobile || !mobile.open) return;
+			var key = ev && ev.key;
+			if (key === 'Escape' || key === 'Esc') {
+				setMobileOpen(false);
+				if (typeof mobile.trigger.focus === 'function') mobile.trigger.focus();
+			}
+		});
+	}
+
 	/* ================= 增强主流程 ================= */
 
 	var currentItem = null;
 	var pollStarted = false;
 	var eventsBound = false;
 
+	function resolveActiveItem(strip) {
+		for (var i = 0; i < strip.items.length; i++) {
+			var a = linkOf(strip.items[i]);
+			if (a && isActiveItem(strip.items[i], a)) return strip.items[i];
+		}
+		return null;
+	}
+
 	function enhance() {
-		var container = findTabContainer();
-		if (!container) return false;
+		var strip = resolveTabStrip();
+		if (!strip) return false;
 
-		var items = container.querySelectorAll('li[class*="tabmenu-item-"]');
-		if (!items.length) return false;
-
-		var activeLi = null;
-		for (var i = 0; i < items.length; i++) {
-			var li = items[i];
-			var a = li.querySelector('a');
+		var activeItem = resolveActiveItem(strip);
+		for (var i = 0; i < strip.items.length; i++) {
+			var item = strip.items[i];
+			var a = linkOf(item);
 			if (!a) continue;
-			if (!a.querySelector('.at-tabmenu-icon')) {
-				a.insertBefore(buildIconEl(tabKeyFromClass(li.className)), a.firstChild);
+			// 原生 Tab 条只给 #tabmenu 系补图标；Vantage 桌面观感保持原样不动
+			if (strip.kind === 'luci' && !a.querySelector('.at-tabmenu-icon')) {
+				a.insertBefore(buildIconEl(tabKeyOf(item, a)), a.firstChild);
 			}
-			if (!activeLi && isActiveLi(li, a)) activeLi = li;
 		}
 
-		currentItem = activeLi;
-		if (activeLi) applyScroll(activeLi);
+		currentItem = activeItem;
+		if (activeItem) applyScroll(activeItem);
+		ensureMobileUI(strip, activeItem);
 		return true;
 	}
 	api.enhance = enhance;
@@ -417,10 +695,15 @@ var AtTabmenu = (function () {
 
 		// 主题 Tab 栏对比度兜底检测（暗色主题下未选中项可能深底深字）
 		bindContrastWatch();
+		// 窄屏悬浮菜单的全局收起逻辑（外点 / Esc），只绑一次
+		bindMobileGlobals();
 
 		// 视口变化 / 字体加载后 tab 宽度可能变化，重新校正选中项位置
 		var reapply = debounce(function () {
 			if (currentItem) applyScroll(currentItem);
+			// 视口跨断点（手机横竖屏 / 旋转平板）时重建或销毁悬浮菜单
+			var strip = resolveTabStrip();
+			if (strip) ensureMobileUI(strip, resolveActiveItem(strip) || currentItem);
 		}, 150);
 
 		window.addEventListener('resize', reapply);
