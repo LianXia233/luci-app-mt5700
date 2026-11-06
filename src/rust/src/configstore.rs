@@ -88,6 +88,16 @@ fn write_map_unlocked(path: &std::path::Path, map: &ConfigMap) -> Result<(), Str
     Ok(())
 }
 
+/// 同步读取整个配置映射（供同步上下文使用，如 QQ 键盘地址推导）。
+///
+/// 只读、无副作用；文件不存在或解析失败时返回空映射（与 `read_map` 的
+/// 「全部走默认值」语义一致）。
+pub fn read_map_sync() -> ConfigMap {
+    let path = config_path();
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    read_map_unlocked(&path).unwrap_or_default()
+}
+
 /// 便捷读取：取字符串键（缺失返回默认值）。
 pub async fn get_str(key: &str, def: &str) -> String {
     match read_map().await {

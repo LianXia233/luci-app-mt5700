@@ -18,7 +18,7 @@
 //!   GET/POST /api/file/read|write|list|stat   受限文件访问（日志文件等）
 //!   POST /api/rpc/mt5700/usage                流量使用量快照（常驻采样，从 main 同步）
 //!   POST /api/rpc/mt5700/usage_ctl            使用量控制：reset / persist_on / persist_off / set_reset_day
-//!   POST /api/rpc/mt5700/notify_test          推送通道测试（固定文案直发企业微信）
+//!   POST /api/rpc/mt5700/notify_test          推送通道测试（企业微信 / QQ，可选 channel）
 //!   GET  /ws                     WebSocket 事件推送（每 400ms 批量增量；每 30s ping 保活）
 //!
 //! 认证：配置 auth_key 后，/api 与 /ws 需携带 X-Auth-Key 头（/ws 可用 ?key=）；
@@ -38,6 +38,9 @@ use tokio::sync::RwLock;
 /// 配置文件单次请求体上限（普通 JSON 足够）。
 const MAX_BODY: usize = 64 * 1024 * 1024;
 /// 需要重启服务才能生效的配置键（其余 schedule_* 等可热应用）。
+///
+/// 判定依据是「运行期有没有人重新读这份配置」：通知器、信号巡检、定时推送、
+/// 短信存储区、使用量来源都是在启动时构造的，改了只改配置不会换掉已建好的实例。
 const RESTART_KEYS: &[&str] = &[
     "enabled", "connection_type", "network_host", "network_port", "network_timeout",
     "serial_port", "serial_port_custom", "serial_baudrate", "serial_timeout",
@@ -46,6 +49,20 @@ const RESTART_KEYS: &[&str] = &[
     "cellscan_timeout", "netdev", "uplink_hook",
     "notify_sms", "notify_call", "notify_memory_full", "notify_signal",
     "wechat_webhook", "log_file",
+    // 通知总开关与模板：Notifier 在启动时拷走一份
+    "notify_enabled", "notify_tpl_prefix", "notify_tpl_sms", "notify_tpl_call",
+    "notify_tpl_memory", "notify_tpl_signal", "notify_tpl_batch", "notify_tpl_qq_sms_md",
+    // 定时推送与信号巡检：TimerPusher / SignalWatcher 的周期在启动时固定
+    "notify_timer_interval", "notify_signal_min_interval",
+    "notify_poll_enabled", "notify_poll_start", "notify_poll_end", "notify_poll_interval",
+    "notify_poll_all", "notify_poll_delta",
+    // 企业微信与 QQ 推送：通道在启动时按凭据构造
+    "wechat_enabled",
+    "qq_enabled", "qq_app_id", "qq_app_secret", "qq_target_type", "qq_target_id",
+    "qq_bind_qq", "qq_msg_format", "qq_keyboard_enabled", "qq_keyboard_url",
+    "qq_menu_enabled", "qq_max_per_minute",
+    // 短信存储区与使用量来源：启动时各应用一次
+    "sms_storage", "usage_source",
 ];
 
 pub struct HttpServer {
@@ -371,11 +388,20 @@ impl HttpServer {
                     other => err_json(400, &format!("未知的 usage_ctl 动作: {other}")),
                 }
             }
-            // 推送通道测试（从 main 分支同步）：固定文案直发企业微信。
-            ("POST", "/api/rpc/mt5700/notify_test") => match self.notifier.notify_test().await {
-                Ok(()) => ok_json(json!({ "success": true })),
-                Err(e) => ok_json(json!({ "success": false, "error": e })),
-            },
+            // 推送通道测试（从 main 分支同步）：固定文案直发指定通道。
+            // 请求体可选 {"channel":"wechat"|"qq"}，缺省为企业微信（兼容旧前端）。
+            ("POST", "/api/rpc/mt5700/notify_test") => {
+                let body = serde_json::from_slice::<Value>(&req.body).unwrap_or(Value::Null);
+                let channel = body
+                    .get("channel")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("wechat")
+                    .to_string();
+                match self.notifier.notify_test(&channel).await {
+                    Ok(()) => ok_json(json!({ "success": true })),
+                    Err(e) => ok_json(json!({ "success": false, "error": e })),
+                }
+            }
             ("POST", "/api/rpc/mt5700/task_status") => {
                 let body = match serde_json::from_slice::<Value>(&req.body) {
                     Ok(v) => v,

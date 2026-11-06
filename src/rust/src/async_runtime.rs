@@ -1,7 +1,8 @@
 //! 统一任务管理器（Async Task Manager）与取消令牌（CancellationToken）。
 //!
 //! 对应异步化架构的「后台任务异步化 / 任务生命周期管理 / 取消机制 / 超时」：
-//!   - 长耗时操作（小区扫频、锁频恢复、固件升级等）统一以 Task 提交后台执行；
+//!   - **当前只有小区扫频接入**（`rpcserver` 的 `spawn_with_timeout("cellscan", …)`）；
+//!     锁频由 `schedule` 自己的循环执行，固件升级走 ucode 的独立链路，两者都不经本管理器；
 //!   - 每个 Task 拥有 task_id、创建/开始/结束时刻、进度、状态、错误与结果；
 //!   - 支持 Pending/Running/Completed/Failed/Cancelled/Timeout 状态机；
 //!   - 外部可通过 task_id cancel / status，任务体内通过 CancellationToken 收取消信号；
@@ -110,9 +111,11 @@ impl TaskManager {
     ///
     /// 立即返回 task_id；执行在 manager 持有的 tokio 任务中，不阻塞调用方。
     ///
-    /// `spawn` 是通用入口（任务自行管理超时）；需要整体超时保护请用
-    /// [Self::spawn_with_timeout]。
-    #[allow(dead_code)] // 通用入口，供后续长任务（SMS 批量 / 固件升级）复用
+    /// 通用入口（任务自行管理超时）；需要整体超时保护请用
+    /// [Self::spawn_with_timeout]。**当前仅单元测试覆盖**：生产路径一律走
+    /// `spawn_with_timeout`，因为只有扫频需要整体超时。若将来真接入无超时的
+    /// 长任务，再移除下方的 `#[cfg(test)]`。
+    #[cfg(test)]
     pub async fn spawn<F, Fut>(&self, kind: &str, f: F) -> String
     where
         F: FnOnce(watch::Receiver<bool>) -> Fut + Send + 'static,
@@ -238,7 +241,7 @@ impl TaskManager {
         for h in tasks.values() {
             out.push(h.info.read().await.clone());
         }
-        out.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        out.sort_by_key(|a| a.created_at);
         out
     }
 
@@ -267,8 +270,13 @@ impl TaskManager {
         let threshold = older_than.as_millis() as i64;
         let to_remove: Vec<String> = {
             let tasks = self.tasks.read().await;
+            // 先收集句柄再从读锁里出来：下面要逐条拿 info 的写/读锁，
+            // 在 tasks 读锁内 await 另一个锁会延长持有时间（也不利于后续维护）。
+            let handles: Vec<(String, Arc<TaskHandle>)> =
+                tasks.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            drop(tasks);
             let mut v = Vec::new();
-            for (id, h) in tasks.iter() {
+            for (id, h) in handles {
                 let info = h.info.read().await;
                 let Some(finished) = info.finished_at else { continue };
                 if !matches!(
@@ -281,7 +289,7 @@ impl TaskManager {
                     continue;
                 }
                 if now.saturating_sub(finished) > threshold {
-                    v.push(id.clone());
+                    v.push(id);
                 }
             }
             v
@@ -298,6 +306,7 @@ impl TaskManager {
     }
 
     /// 淘汰：超过 cap 时删除最早结束的已完成任务（软上限兜底）。
+    /// `_kind` 预留按类型淘汰，当前未使用。
     fn evict_locked(&self, tasks: &mut HashMap<String, Arc<TaskHandle>>, _kind: &str) {
         while tasks.len() > self.cap {
             // 找最早 finished_at 的已完成任务；找不到（全在跑）则保留并停止淘汰。
@@ -328,8 +337,10 @@ impl TaskManager {
     }
 }
 
-/// 当前毫秒时间戳：走 [`crate::nettime`]（NTP 优先、设备时钟兜底），
-/// 与日志、通知、短信时间保持同一条时间线。
+/// 当前毫秒时间戳。
+///
+/// 走 [`crate::nettime`]（NTP 优先、设备时钟兜底）：这里记的是「任务是什么时候建的」，
+/// 属于墙上时间，必须和日志、通知、清零判定同一条时间线。
 fn now_ms() -> i64 {
     crate::nettime::now_ms()
 }

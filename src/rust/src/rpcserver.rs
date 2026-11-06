@@ -1,5 +1,5 @@
 //! LuCI RPC 服务：TCP newline-JSON（127.0.0.1:8765），由 rpcd ucode 插件（mt5700.uc）代理转发。
-//! 核心业务逻辑（伪命令 / 扫频 / 命令分发 / 事件总线）均在本模块内实现。
+//! 核心业务逻辑（伪命令/扫频/命令分发/事件总线）均在此实现。
 //!
 //! 协议（每行一个 JSON 对象）：
 //!   请求: {"id":1,"method":"at","params":{"cmd":"AT+CSQ","auth_key":"..."}}
@@ -8,12 +8,13 @@
 //!   应答: {"id":2,"result":{"seq":18,"events":[{"type":"raw_data","data":"..."}]}}
 //!   错误: {"id":1,"error":{"code":-1,"message":"..."}}
 //!
+//! 另支持方法：logs / task_status / task_cancel / task_list。
 //! 事件不主动推送：前端通过 events(since) 拉取增量（LuCI RPC 为请求-响应模型）。
 
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::async_runtime::{TaskInfo, TaskManager};
 use crate::atclient::AtClient;
-use crate::schedconfig::{SCHED_QUERY_COMMAND, SCHED_RESPONSE_PREFIX, SCHED_SET_PREFIX, SchedConfigDto, dto_to_schedule, schedule_to_dto, write_schedule_uci};
+use crate::schedconfig::{SCHED_QUERY_COMMAND, SCHED_RESPONSE_PREFIX, SCHED_SET_PREFIX, SchedConfigDto, dto_to_schedule, schedule_to_dto, write_schedule_config};
 use crate::schedule::Scheduler;
 use crate::state::StateCache;
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,17 @@ use tokio::io::AsyncRead;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 
-const RPC_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// 两次读取之间的空闲上限（不是单条请求的执行上限）。
+///
+/// 这个超时包住的是「读下一行请求」，而请求的**处理**发生在这之后，所以它本身
+/// 不限制任何命令的执行时长。原先取 30s 太小：`purge` 要逐区
+/// `AT+CPMS` → 等 500ms → `AT+CMGD=1,4`（每区最多 25s），`power` 要跑完整段
+/// 射频重启，这些动作最坏都在 60s 以上；而 ucode 侧给它们的是 70s 硬超时。
+/// 连接先断、ucode 等不到应答，用户看到的是「Rust 后端应答超时」，偏偏那次操作
+/// 其实已经成功了 —— 同一台设备上「点清空，报超时，刷新发现已清空」就是这个。
+/// 取 120s：大于所有 ucode 侧动作超时（最大 70s），保证先拿到后端的明确结论，
+/// 又给「空闲半开连接」留了一个合理的回收点。
+const RPC_READ_TIMEOUT: Duration = Duration::from_secs(120);
 /// RPC 请求行长度上限（防异常长行撑爆内存）。
 const MAX_RPC_LINE: usize = 8192;
 const CELLSCAN_ABORT_TOKEN: &str = "abcd";
@@ -40,32 +51,46 @@ pub struct AtCommandResponse {
     pub data: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// 失败原因分类，前端据此区分「模组没回」与「通道/后端本身不可用」。
+    /// ucode 层（mt5700.uc）本来就把 `cause` 平移到顶层给前端，`at` 通道早先
+    /// 漏了这一维：模组静默时后端报的是超时，前端却只能当成 AT ERROR。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
 }
 
-/// 扫频推给前端的事件 data。state 取值 running/done/aborted/error。
-#[derive(Serialize)]
-#[allow(dead_code)] // 扫频推送结构保留（后续断点续扫扩展）
-pub struct ScanPush {
-    pub state: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cell: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lines: Option<Vec<String>>,
-    pub count: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+/// 从 `send_command_pri` 的错误串里识别超时类失败。
+///
+/// 排队超时（`at_queue`：「等待空闲通道超时（Ns）…」）、传输层连接超时、
+/// 外层应答超时都属于「没等到响应」，与模组明确回了 ERROR 是两回事，
+/// 前端要按「查询超时」呈现，不能写成「AT ERROR」。
+fn at_failure_cause(err: &str) -> Option<String> {
+    if err.contains("超时") {
+        Some("timeout".to_string())
+    } else {
+        None
+    }
 }
 
+/// 短信存储用量 → 前端 JSON。
+fn storage_json(s: &crate::sms::StorageInfo) -> serde_json::Value {
+    serde_json::json!({
+        "used": s.used,
+        "total": s.total,
+        "mem1": s.mem1,
+        "mem2": s.mem2,
+        "mem3": s.mem3,
+    })
+}
+
+/// 扫频进行中的状态快照（供 cellscan 进度查询与并发保护）。
 pub struct ScanState {
     pub running: bool,
     pub aborted: bool,
     pub lines: Vec<String>,
-    /// 当前扫频对应的后台任务 id（异步化新增），用于状态查询/取消。
-    pub task_id: Option<String>,
 }
 
 /// 事件总线：向所有订阅客户端广播。
-/// 所有推送（raw_data/new_sms/incoming_call/pdcp_data/memory_full/cellscan/urc_data）
+/// 推送类型（urc_data/new_sms/incoming_call/pdcp_data/cellscan/raw_data）
 /// 按序入队并分配单调递增 seq；前端轮询 events(since) 拉取增量。
 #[derive(Clone)]
 pub struct Hub {
@@ -134,13 +159,27 @@ pub struct RpcServer {
     scan_timeout: Duration,
     /// 异步状态缓存：只读状态查询优先命中内存，避免重复 AT 与排队阻塞。
     cache: Arc<StateCache>,
-    /// 统一后台任务管理器：长耗时操作（扫频/锁频/固件升级）以 task_id 提交后台执行，
+    /// 统一后台任务管理器。**目前只有扫频接入**（`spawn_with_timeout("cellscan", …)`，
+    /// 因为只有它需要整体超时保护）；锁频与固件升级并不经由这里——锁频由
+    /// `schedule` 自己的循环执行，固件升级走 ucode 的独立链路。
     /// 支持状态查询与取消，RPC handler 立即返回，不阻塞。
     tasks: Arc<TaskManager>,
+    /// 通知器：notify_test 直发测试消息，验证推送通道链路。
+    notify: Arc<crate::notify::Notifier>,
+    /// 短信业务：列表/发送/删除/容量/存储/短信中心，全部实时走模组。
+    sms: Arc<crate::sms::SmsService>,
+    /// QQ 绑定进度（bind 模式时由绑定任务更新，qq_bind_status 读取；未设置则返回 idle）
+    bind_status: Option<std::sync::Arc<crate::qqbind::BindStatus>>,
+    /// 使用量后台统计器：`usage` / `usage_ctl` 读写的都是它。
+    usage: Arc<crate::usage::UsageTracker>,
+    /// 短信本地归档：`store_stats` / `store_read` / `store_drop` 读写的都是它。
+    /// 为 `None` 时（例如只跑单测的场合）归档动作返回「未启用」。
+    archive: Option<std::sync::Arc<crate::sms_store::SmsArchive>>,
     ctx: tokio::sync::watch::Receiver<bool>,
 }
 
 impl RpcServer {
+    #[allow(clippy::too_many_arguments)] // 依赖随模块增长而增长，拆分收益低于可读性的损失
     pub fn new(
         client: Arc<AtClient>,
         auth_key: String,
@@ -148,18 +187,36 @@ impl RpcServer {
         ctx: tokio::sync::watch::Receiver<bool>,
         cache: Arc<StateCache>,
         tasks: Arc<TaskManager>,
+        notify: Arc<crate::notify::Notifier>,
+        usage: Arc<crate::usage::UsageTracker>,
+        sms: Arc<crate::sms::SmsService>,
     ) -> RpcServer {
         RpcServer {
             client,
             auth_key,
             sched,
             hub: Hub::new(),
-            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new(), task_id: None })),
+            scan: Arc::new(AsyncMutex::new(ScanState { running: false, aborted: false, lines: Vec::new() })),
             scan_timeout: DEFAULT_SCAN_TIMEOUT,
             cache,
             tasks,
             ctx,
+            notify,
+            bind_status: None,
+            usage,
+            sms,
+            archive: None,
         }
+    }
+
+    /// 注入 QQ 绑定进度句柄（main 在 spawn 绑定任务前调用）。
+    pub fn set_bind_status(&mut self, s: std::sync::Arc<crate::qqbind::BindStatus>) {
+        self.bind_status = Some(s);
+    }
+
+    /// 注入短信本地归档句柄（main 在建好归档目录后调用）。
+    pub fn set_archive(&mut self, a: std::sync::Arc<crate::sms_store::SmsArchive>) {
+        self.archive = Some(a);
     }
 
     pub fn hub(&self) -> Hub {
@@ -222,6 +279,11 @@ impl RpcServer {
             cache: self.cache.clone(),
             tasks: self.tasks.clone(),
             ctx: self.ctx.clone(),
+            notify: self.notify.clone(),
+            bind_status: self.bind_status.clone(),
+            usage: self.usage.clone(),
+            sms: self.sms.clone(),
+            archive: self.archive.clone(),
         }
     }
 
@@ -309,8 +371,8 @@ impl RpcServer {
         };
         let id = req.id;
 
-        // 认证：配置了密钥时，每个请求必须携带匹配的 auth_key（rpcd ucode 代理从 UCI 读取并附加；
-        // 密钥校验保持既有配置语义兼容）。
+        // 认证：配置了密钥时，每个请求必须携带匹配的 auth_key（客户端从配置读取并附加；
+        // 密钥保持原配置语义兼容）。
         let key = req.params.get("auth_key").and_then(|v| v.as_str()).unwrap_or("");
         if !self.auth_key.is_empty() && key != self.auth_key {
             log_warn!("RPC 请求被拒绝: 密钥错误 (method={})", req.method);
@@ -323,17 +385,115 @@ impl RpcServer {
                 if cmd.is_empty() {
                     return serde_json::json!({ "id": id, "error": { "code": -32602, "message": "缺少参数 cmd" } });
                 }
+                // IMEI 写入防护：AT^PHYNUM=IMEI,<imei> 是「修改IMEI」功能的写入通道。
+                // 前端已做格式 + Luhn 校验，这里在后端再兜一层（防绕过 UI 直调 RPC）。
+                if let Err(reason) = validate_imei_write(cmd) {
+                    log_warn!("拒绝 IMEI 写入（{}）: {:?}", reason, cmd);
+                    return serde_json::json!({ "id": id, "error": { "code": -32002, "message": format!("IMEI 校验失败：{reason}") } });
+                }
+                // 新旧一致检查：写入前回读当前 IMEI，相同则拒发（写同值只会白耗一次
+                // NVRAM 写入）。回读失败时不拦截，交由结构校验与模组自身兜底。
+                if let Some(new_imei) = cmd.strip_prefix("AT^PHYNUM=IMEI,").map(str::trim) {
+                    let cur = self.run_command("AT+CGSN").await;
+                    if cur.success {
+                        if let Some(actual) = extract_imei15(cur.data.as_deref().unwrap_or("")) {
+                            if actual == new_imei {
+                                log_warn!("拒绝 IMEI 写入（新 IMEI 与当前 IMEI 相同）: {:?}", cmd);
+                                return serde_json::json!({ "id": id, "error": { "code": -32003, "message": "新 IMEI 与当前 IMEI 相同，无需修改" } });
+                            }
+                        }
+                    }
+                }
                 let resp = self.run_command(cmd).await;
-                serde_json::json!({ "id": id, "result": {
+                let mut result = serde_json::json!({
                     "success": resp.success,
                     "data": resp.data,
                     "error": resp.error,
-                } })
+                });
+                /* 仅失败应答带 cause：skip_serializing_if 只作用于 serde 序列化，
+                 * json! 手工拼接必须自己判空，否则成功应答也会多出 cause:null。 */
+                if let Some(cause) = resp.cause {
+                    result["cause"] = serde_json::Value::String(cause);
+                }
+                serde_json::json!({ "id": id, "result": result })
             }
             "events" => {
                 let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
                 let (seq, events) = self.hub.bus.since(since);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "events": events } })
+            }
+            // 短信业务：列表/发送/删除/容量/存储/短信中心/前台优先会话。
+            //
+            // 与 `at` 通道的关键差别：这里的每个动作都是**一次真实的模组交互**，
+            // 不经过状态缓存，也不返回任何历史快照；多步骤动作（发送分片、批量
+            // 删除）在后端一次事务里跑完，期间其它 AT 命令拿不到通道。
+            "sms" => {
+                let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                self.handle_sms(&id, action, &req.params).await
+            }
+            // 通知通道测试（LuCI「发送测试通知」按钮）：绕过事件链路直发一条测试消息。
+            // channel 分两组语义：
+            //   qq / wechat —— 只测**通道连通性**（固定文案，不走事件链路）；
+            //   sms / call  —— 测**某一类的完整链路**，构造同形状事件走 notify()，
+            //                  收到的文本与真实短信/来电一致（含实时直发与文案模板）。
+            // signal / memory_full 也交给类型化分支：它们不受支持，但理由必须说清楚
+            // （信号指标是真实读数，造假的「RSRP -xx dBm」只会误导），而不是笼统的
+            // 「未知通道」——后者会让人以为是拼错了名字，反复试。
+            "notify_test" => {
+                let channel = req.params.get("channel").and_then(|v| v.as_str()).unwrap_or("qq").to_string();
+                let kind = match channel.as_str() {
+                    "sms" => Some(crate::notify::NotifyKind::Sms),
+                    "call" => Some(crate::notify::NotifyKind::Call),
+                    "signal" => Some(crate::notify::NotifyKind::Signal),
+                    "memory_full" => Some(crate::notify::NotifyKind::MemoryFull),
+                    _ => None,
+                };
+                let result = match kind {
+                    Some(k) => self.notify.notify_test_event(k).await,
+                    None => self.notify.notify_test(&channel).await,
+                };
+                match result {
+                    Ok(()) => serde_json::json!({ "id": id, "result": { "success": true, "channel": channel } }),
+                    Err(e) => serde_json::json!({ "id": id, "result": { "success": false, "channel": channel, "error": e } }),
+                }
+            }
+            // QQ 绑定进度（LuCI bind 模式轮询展示状态与倒计时）。
+            "qq_bind_status" => {
+                let s = self
+                    .bind_status
+                    .as_ref()
+                    .map(|b| b.snapshot())
+                    .unwrap_or_default();
+                // waiting 状态计算倒计时剩余秒数；其余状态不适用
+                let left = if s.state == "waiting" {
+                    s.started
+                        .map(|t| {
+                            let elapsed = t.elapsed().as_secs();
+                            crate::qqbind::BIND_WINDOW_SECS.saturating_sub(elapsed)
+                        })
+                        .unwrap_or(crate::qqbind::BIND_WINDOW_SECS)
+                } else {
+                    0
+                };
+                serde_json::json!({ "id": id, "result": {
+                    "state": if s.state.is_empty() { "idle" } else { s.state.as_str() },
+                    "left": left,
+                    "target_type": s.target.as_ref().map(|t| t.target_type.as_str()).unwrap_or(""),
+                    "target_id": s.target.as_ref().map(|t| t.target_id.as_str()).unwrap_or(""),
+                    "error": s.error,
+                } })
+            }
+            // QQ 自定义菜单（LuCI「配置 QQ 菜单」按钮）：set=覆盖配置默认菜单，
+            // get=查询当前菜单。菜单仅 C2C 场景生效，见 qqpush 模块文档。
+            "qq_menu" => {
+                let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("set").to_string();
+                match self.notify.qq_menu(&action).await {
+                    Ok(mut result) => {
+                        result["success"] = serde_json::json!(true);
+                        serde_json::json!({ "id": id, "result": result })
+                    }
+                    Err(e) => serde_json::json!({ "id": id, "result": { "success": false, "action": action, "error": e } }),
+                }
             }
             // 后端运行日志（含被级别过滤掉的 info）：拨号对齐、串口探测、接口拉起协作、
             // URC 分发等过程都在这里，是 syslog 看不到的部分（稳态级别是 Warn）。
@@ -347,6 +507,62 @@ impl RpcServer {
                     .min(1200) as usize;
                 let (seq, entries) = crate::logger::snapshot(since, limit);
                 serde_json::json!({ "id": id, "result": { "seq": seq, "entries": entries } })
+            }
+            // 使用量统计快照：由后端常驻采样累加，与前端是否打开无关。
+            "usage" => {
+                let snap = self.usage.snapshot().await;
+                serde_json::json!({ "id": id, "result": snap })
+            }
+            // 实时速率计数器：与 usage 共用同一套来源口径。
+            // netdev 由 ucode 直读 sysfs；modem 来源下 ucode 转发到这里，
+            // 返回 AT^DSFLOWQRY 的 DS 累计值，前端按采样差算速率。
+            "netrate" => {
+                match self.usage.counters().await {
+                    Some((device, rx, tx)) => serde_json::json!({
+                        "id": id,
+                        "result": { "success": true, "device": device, "rx_bytes": rx, "tx_bytes": tx }
+                    }),
+                    None => serde_json::json!({
+                        "id": id,
+                        "result": {
+                            "success": false,
+                            "device": "",
+                            "error": "未识别到 WAN 区域网卡，已停止统计（不回退 LAN/br-lan）"
+                        }
+                    }),
+                }
+            }
+            // 使用量控制：reset（清零，含落盘文件）/ persist_on / persist_off /
+            // set_reset_day（改自动清零日 = 每月几号）/ set_source（切换统计来源）。
+            "usage_ctl" => {
+                let action = req.params.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                let result = match action {
+                    "reset" => Some(self.usage.reset().await),
+                    "persist_on" => Some(self.usage.set_persist(true).await),
+                    "persist_off" => Some(self.usage.set_persist(false).await),
+                    // 每月几号清零：日期语义（大小月/闰年）由 crate::monthly 负责
+                    "set_reset_day" => {
+                        let day = req.params.get("day").and_then(|v| v.as_u64()).unwrap_or(0);
+                        if let Err(e) = self.usage.set_reset_day(day as u32).await {
+                            return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
+                        }
+                        // set_reset_day 内部已热更新内存值，snapshot 读到的就是新的清零日
+                        Some(self.usage.snapshot().await)
+                    }
+                    // 统计来源：只接受 netdev / modem，归一化与配置写入在 usage 模块
+                    "set_source" => {
+                        let source = req.params.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                        if let Err(e) = self.usage.set_source(source).await {
+                            return serde_json::json!({ "id": id, "error": { "code": -32003, "message": e } });
+                        }
+                        Some(self.usage.snapshot().await)
+                    }
+                    _ => None,
+                };
+                match result {
+                    Some(snap) => serde_json::json!({ "id": id, "result": snap }),
+                    None => serde_json::json!({ "id": id, "error": { "code": -32602, "message": format!("未知的 usage_ctl 动作: {action}") } }),
+                }
             }
             // 后台任务管理（异步化新增）：查询状态 / 取消 / 列表。
             // 不改变既有 at/events/logs 接口，前端仍通过 AT^CELLSCAN 伪命令触发扫频。
@@ -394,6 +610,352 @@ impl RpcServer {
         }
     }
 
+    /// 短信业务入口。所有动作都实时下发 AT，不含任何缓存分支。
+    async fn handle_sms(
+        &self,
+        id: &serde_json::Value,
+        action: &str,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        use crate::sms::SendRequest;
+
+        fn ok(id: &serde_json::Value, result: serde_json::Value) -> serde_json::Value {
+            serde_json::json!({ "id": id, "result": result })
+        }
+        fn err(id: &serde_json::Value, msg: impl Into<String>) -> serde_json::Value {
+            serde_json::json!({ "id": id, "error": { "code": -32010, "message": msg.into() } })
+        }
+
+        // 会话租约：进入短信中心 / 执行短信操作前登记，页面退出或超时自动解除。
+        // 它是「后台轮询暂停」的开关 —— 不登记就不会暂停，避免了误伤其它页面。
+        match action {
+            "session_open" => {
+                let ttl = params.get("ttl_ms").and_then(|v| v.as_u64());
+                let id2 = self.sms.session_open(ttl).await;
+                return ok(id, serde_json::json!({ "session_id": id2, "ttl_ms": ttl.unwrap_or(crate::sms::SMS_MODE_LEASE.as_millis() as u64) }));
+            }
+            "session_renew" => {
+                let sid = params.get("session_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let ttl = params.get("ttl_ms").and_then(|v| v.as_u64());
+                let renewed = self.sms.session_renew(sid, ttl).await;
+                return ok(id, serde_json::json!({ "renewed": renewed, "sessions": self.sms.session_count().await }));
+            }
+            "session_release" => {
+                let sid = params.get("session_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                self.sms.session_release(sid).await;
+                return ok(id, serde_json::json!({ "released": true, "sessions": self.sms.session_count().await }));
+            }
+            _ => {}
+        }
+
+        // ============= 短信本地归档 =============
+        //
+        // 这三个动作只做文件读写，**不占用 AT 通道、不开短信事务** ——
+        // 因此必须放在事务段之前，否则浏览归档会把模组通道堵住。
+        match action {
+            "store_stats" => {
+                let Some(a) = self.archive.as_ref() else {
+                    return err(id, "短信本地归档未启用");
+                };
+                let st = a.stats();
+                let conversations: Vec<serde_json::Value> = st
+                    .conversations
+                    .iter()
+                    .map(|c| {
+                        serde_json::json!({
+                            "number": c.number,
+                            "count": c.count,
+                            "bytes": c.bytes,
+                            "updatedAtMs": c.updated_at_ms,
+                    "lastContent": c.last_content,
+                        })
+                    })
+                    .collect();
+                return ok(id, serde_json::json!({
+                    "dir": st.dir,
+                    "totalBytes": st.total_bytes,
+                    "maxBytes": st.max_bytes,
+                    "conversations": conversations,
+                }));
+            }
+            "store_read" => {
+                let Some(a) = self.archive.as_ref() else {
+                    return err(id, "短信本地归档未启用");
+                };
+                let number = params.get("number").and_then(|v| v.as_str()).unwrap_or("");
+                if number.is_empty() {
+                    return err(id, "缺少参数 number");
+                }
+                return match a.read(number) {
+                    Ok(recs) => {
+                        let entries: Vec<serde_json::Value> = recs
+                            .iter()
+                            .map(|r| {
+                                serde_json::json!({
+                                    "fingerprint": r.fingerprint,
+                                    "direction": r.direction,
+                                    "number": r.number,
+                                    "content": r.content,
+                                    "time": r.time,
+                                    "timeApprox": r.time_approx,
+                                    "index": r.index,
+                                    "archivedAtMs": r.archived_at_ms,
+                                })
+                            })
+                            .collect();
+                        ok(id, serde_json::json!({ "entries": entries }))
+                    }
+                    Err(e) => err(id, e),
+                };
+            }
+            "store_drop" => {
+                let Some(a) = self.archive.as_ref() else {
+                    return err(id, "短信本地归档未启用");
+                };
+                let number = params
+                    .get("number")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                let mut fingerprints = Vec::new();
+                let indices: Vec<u32> = params
+                    .get("indices")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as u32).collect())
+                    .unwrap_or_default();
+
+                /*
+                 * `items: [{ direction, content, time }]` 只传原始字段，
+                 * 指纹由**后端**按 `方向|号码|时间|正文` 计算 ——
+                 * 前端因此不必自己实现一次 SHA-256，两处口径也不会走偏。
+                 */
+                if let Some(items) = params.get("items").and_then(|v| v.as_array()) {
+                    for it in items {
+                        let d = it.get("direction").and_then(|v| v.as_str()).unwrap_or("");
+                        let c = it.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        let t = it.get("time").and_then(|v| v.as_str());
+                        let n = it.get("number").and_then(|v| v.as_str()).unwrap_or(&number);
+                        fingerprints.push(crate::sms_store::fingerprint(d, n, t, c));
+                    }
+                }
+
+                if all {
+                    match a.purge() {
+                        Ok((n, freed)) => {
+                            return ok(id, serde_json::json!({
+                                "scope": "all",
+                                "dropped": n,
+                                "freedBytes": freed,
+                                "totalBytes": a.total_bytes(),
+                                "maxBytes": a.max_bytes(),
+                            }));
+                        }
+                        Err(e) => return err(id, e),
+                    }
+                }
+
+                /*
+                 * 只给了号码、没给任何命中线索 → 整个会话的归档一起删。
+                 * 界面上「清空该会话」走这条路；按条删除则走下面的 remove_records。
+                 */
+                if fingerprints.is_empty() && indices.is_empty() {
+                    if number.is_empty() {
+                        return err(id, "缺少参数：需要 number，或 all=true");
+                    }
+                    return match a.drop_conversation(&number) {
+                        Ok(freed) => ok(id, serde_json::json!({
+                            "scope": "conversation",
+                            "dropped": 1,
+                            "freedBytes": freed,
+                            "totalBytes": a.total_bytes(),
+                            "maxBytes": a.max_bytes(),
+                        })),
+                        Err(e) => err(id, e),
+                    };
+                }
+
+                match a.remove_records(
+                    &number,
+                    &crate::sms_store::RecordSelector { fingerprints, indices },
+                ) {
+                    Ok((removed, touched)) => {
+                        return ok(id, serde_json::json!({
+                            "scope": "records",
+                            "dropped": removed,
+                            "touched": touched,
+                            "totalBytes": a.total_bytes(),
+                            "maxBytes": a.max_bytes(),
+                        }));
+                    }
+                    Err(e) => return err(id, e),
+                }
+            }
+            _ => {}
+        }
+
+        // 以下都是「短信事务」级操作：全程独占通道，且享有最高优先级。
+        let result = match action {
+            "list" => match self.sms.list().await {
+                Ok(r) => {
+                    let entries: Vec<serde_json::Value> = r
+                        .entries
+                        .iter()
+                        .map(|e| {
+                            serde_json::json!({
+                                "index": e.index,
+                                "stat": e.stat,
+                                "direction": e.direction,
+                                "number": e.number,
+                                "content": e.content,
+                                "time": e.time,
+                                "timeApprox": e.time_approx,
+                                "concat": e.concat.as_ref().map(|c| serde_json::json!({
+                                    "reference": c.reference,
+                                    "partsCount": c.parts_count,
+                                    "partNumber": c.part_number,
+                                })),
+                                "error": e.error,
+                            })
+                        })
+                        .collect();
+                    ok(id, serde_json::json!({
+                        "entries": entries,
+                        "fetchedAt": r.fetched_at_ms,
+                        "totalLines": r.total_lines,
+                        /* 容量随列表一起回：前端要区分「一条都没有」与「有短信但一条都没
+                         * 解析出来」，只靠 entries 长度做不到。多读一次 `AT+CPMS?`
+                         * 会再占一次通道，这里复用 list 已付出的那次查询结果。 */
+                        "storage": r.storage.as_ref().map(storage_json),
+                    }))
+                }
+                Err(e) => err(id, e),
+            },
+            "send" => {
+                let destination = params.get("destination").and_then(|v| v.as_str()).unwrap_or("");
+                let message = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                let smsc = params
+                    .get("smsc")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let dedup = params
+                    .get("dedup_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                match self.sms.send(SendRequest { destination: destination.to_string(), message: message.to_string(), smsc, dedup_key: dedup }).await {
+                    Ok(r) => ok(id, serde_json::json!({
+                        "outcome": r.outcome.as_str(),
+                        "encoding": r.encoding,
+                        "message": r.message,
+                        "parts": r.parts.iter().map(|p| serde_json::json!({
+                            "partNumber": p.part_number,
+                            "partsCount": p.parts_count,
+                            "outcome": p.outcome.as_str(),
+                            "detail": p.detail,
+                        })).collect::<Vec<_>>(),
+                        "storage": r.storage.as_ref().map(storage_json),
+                    })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "delete" => {
+                let indices: Vec<u32> = params
+                    .get("indices")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as u32).collect())
+                    .unwrap_or_default();
+                match self.sms.delete(indices).await {
+                    Ok(r) => ok(id, serde_json::json!({
+                        "requested": r.requested,
+                        "deleted": r.deleted,
+                        "failed": r.failed,
+                        "storage": r.storage.as_ref().map(storage_json),
+                    })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "purge" => match self.sms.purge_all().await {
+                Ok(r) => ok(id, serde_json::json!({
+                    "requested": r.requested,
+                    "deleted": r.deleted,
+                    "errors": r.errors,
+                    "storage": r.storage.as_ref().map(storage_json),
+                })),
+                Err(e) => err(id, e),
+            },
+            "capacity" => match self.sms.capacity().await {
+                Ok(s) => ok(id, serde_json::json!({
+                    "storage": storage_json(&s),
+                    /* 模组告知过「存储已满」且尚未回落。注意：**当前界面并不读这个键**
+                     * （sms_center / sms_settings 的容量提示只看 storage 里的 used/total），
+                     * 保留给直连 RPC 的调用方；要界面提示得前端一并接。 */
+                    "memFull": self.sms.memory_full(),
+                })),
+                Err(e) => err(id, e),
+            },
+            "set_storage" => {
+                let mem = params.get("mem").and_then(|v| v.as_str()).unwrap_or("");
+                match self.sms.set_storage(mem).await {
+                    Ok(s) => ok(id, serde_json::json!({ "storage": storage_json(&s) })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "get_smsc" => match self.sms.get_smsc().await {
+                Ok(n) => ok(id, serde_json::json!({ "smsc": n })),
+                Err(e) => err(id, e),
+            },
+            // 短信功能开关（读 CEUS → 必要时 CEUS/CFUN 重启 → IMSSWITCH → 可选 CSCA）
+            // 与 IMS 开关。两者都是「会改变模组状态」的操作，同样必须独占通道跑完。
+            "power" => {
+                let enable = match params.get("enable").and_then(|v| v.as_bool()) {
+                    // 类型不对就报错：这里 default 成 false 等于「点开启、得到关闭」，
+                    // 而关闭与开启做的是完全不同的事（关 IMS vs 重启射频）。
+                    Some(v) => v,
+                    None => return err(id, "enable 必须为布尔值（true/false）"),
+                };
+                let smsc = params
+                    .get("smsc")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                match self.sms.power_set(enable, smsc).await {
+                    Ok(r) => ok(id, serde_json::json!({
+                        "enabled": r.enabled,
+                        "stepsDone": r.steps_done,
+                        "failedAt": r.failed_at,
+                        "failedDetail": r.failed_detail,
+                        "smsc": r.smsc,
+                        "storage": r.storage.as_ref().map(storage_json),
+                    })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "set_ims" => {
+                let enable = match params.get("enable").and_then(|v| v.as_bool()) {
+                    Some(v) => v,
+                    None => return err(id, "enable 必须为布尔值（true/false）"),
+                };
+                match self.sms.ims_set(enable).await {
+                    Ok(()) => ok(id, serde_json::json!({ "enabled": enable })),
+                    Err(e) => err(id, e),
+                }
+            }
+            "get_ims" => match self.sms.ims_state().await {
+                Ok(v) => ok(id, serde_json::json!({ "enabled": v })),
+                Err(e) => err(id, e),
+            },
+            "set_smsc" => {
+                let number = params.get("smsc").and_then(|v| v.as_str()).unwrap_or("");
+                match self.sms.set_smsc(number).await {
+                    Ok(n) => ok(id, serde_json::json!({ "smsc": n })),
+                    Err(e) => err(id, e),
+                }
+            }
+            other => err(id, format!("未知短信动作: {other}")),
+        };
+        result
+    }
+
     /// 把前端发来的字符串当作 AT 命令执行并整理成应答。
     pub async fn run_command(&self, command: &str) -> AtCommandResponse {
         log_debug!("前端请求: {}", command.trim());
@@ -423,27 +985,42 @@ impl RpcServer {
         // 状态缓存优先：白名单内的只读查询命中内存即毫秒级返回，下发 AT 的去重、
         // 刷新与断线失效都由缓存负责。miss / 非白名单 / 抓取失败一律走 live 路径，
         // 保证终端页手动执行同一条查询也能拿到真实结果。
-        match self.cache.resolve(&command).await {
-            Ok(Some(text)) => {
-                log_debug!("缓存命中: {}", command.trim());
-                return ok_response(&text);
-            }
-            _ => {}
+        if let Ok(Some(text)) = self.cache.resolve(&command).await {
+            log_debug!("缓存命中: {}", command.trim());
+            return ok_response(&text);
+        }
+
+        // 短信提交单独给足预算：`AT+CMGS=<长度>` 后面带 PDU 时，要把 TPDU 交给网络侧，
+        // 回 `+CMGS` 的耗时取决于信号与基站排队，弱信号下好几秒甚至十几秒。
+        // 其余命令仍按 2 秒算 —— 不能因为短信把整页的失败检测一起拖慢。
+        //
+        // 判据复用 [atclient::is_single_shot_cmgs]，与读循环里「不能被 `> ` 提前结束」
+        // 是同一个判断：字面 `\r`（业务路径与厂商形态）与真 CR（终端页手敲）都算。
+        // 只报长度的那一半（`AT+CMGS=14`，两种分隔符都没有）仍走短超时，它只等提示符。
+        let is_sms_submit = crate::atclient::is_single_shot_cmgs(&command);
+        let cmd_timeout = if is_sms_submit {
+            crate::atclient::SMS_SUBMIT_TIMEOUT
+        } else {
+            crate::atclient::COMMAND_TIMEOUT
+        };
+        if is_sms_submit {
+            // 用 {:?} 而不是 {}：这条命令里可能同时出现字面 `\r`（两个字符）与真实
+            // 控制字符（两段式的 Ctrl+Z），只有转义形式能区分「发出去了什么」。
+            // 稳态日志级别是 Warn，所以这行不会刷满 prolog；排查时用 -verbose。
+            log_info!("短信提交：等待模组回执，预算 {}s，原始串 {:?}", cmd_timeout.as_secs(), command);
         }
 
         // 外层超时 = 排队预算 + 应答预算 + 余量。
         // 排队预算单独给足，避免初始化/重连期间用户的终端命令被外层提前掐断，
         // 从而出现「模组无响应」的假失败（终端页只有 ATI 有回复的根因）。
         let result = tokio::time::timeout(
-            crate::atclient::QUEUE_WAIT_TIMEOUT
-                + crate::atclient::COMMAND_TIMEOUT
-                + Duration::from_secs(3),
+            crate::atclient::QUEUE_WAIT_TIMEOUT + cmd_timeout + Duration::from_secs(3),
             // 用户主动的 AT 操作属于 High 优先级，可越过后台刷新的 Low/Background。
             self.client.send_command_pri(
                 &self.ctx,
                 crate::at_queue::AtPriority::High,
                 &command,
-                crate::atclient::COMMAND_TIMEOUT,
+                cmd_timeout,
                 None,
             ),
         )
@@ -453,15 +1030,23 @@ impl RpcServer {
             Ok(Ok(resp)) => {
                 let text = resp.text();
                 if resp.has_error() {
-                    return AtCommandResponse { success: false, data: None, error: Some(text) };
+                    /* 模组明确回了 ERROR：属于真实的 AT 失败，不是没等到响应 */
+                    return AtCommandResponse { success: false, data: None, error: Some(text), cause: None };
                 }
-                AtCommandResponse { success: true, data: Some(text), error: None }
+                AtCommandResponse { success: true, data: Some(text), error: None, cause: None }
             }
             Ok(Err(e)) => {
                 log_debug!("AT 命令失败: {} -> {}", command.trim(), e);
-                AtCommandResponse { success: false, data: None, error: Some(e) }
+                let cause = at_failure_cause(&e);
+                AtCommandResponse { success: false, data: None, error: Some(e), cause }
             }
-            Err(_) => AtCommandResponse { success: false, data: None, error: Some("命令执行超时".into()) },
+            /* 外层预算（排队 + 应答 + 余量）耗尽：模组静默/正在重连，前端要按超时呈现 */
+            Err(_) => AtCommandResponse {
+                success: false,
+                data: None,
+                error: Some("命令执行超时".into()),
+                cause: Some("timeout".into()),
+            },
         }
     }
 
@@ -479,6 +1064,7 @@ impl RpcServer {
                 success: true,
                 data: Some(format!("{SCHED_RESPONSE_PREFIX}{payload}\r\nOK")),
                 error: None,
+                cause: None,
             });
         }
 
@@ -490,7 +1076,7 @@ impl RpcServer {
             if let Err(e) = dto.validate() {
                 return Some(err_response(&e));
             }
-            if let Err(e) = write_schedule_uci(&dto).await {
+            if let Err(e) = write_schedule_config(&dto).await {
                 return Some(err_response(&e));
             }
             self.sched.set_config(dto_to_schedule(&dto)).await;
@@ -504,6 +1090,7 @@ impl RpcServer {
                 success: true,
                 data: Some(format!("{SCHED_RESPONSE_PREFIX}OK\r\nOK")),
                 error: None,
+                cause: None,
             });
         }
 
@@ -564,7 +1151,9 @@ impl RpcServer {
         let hub = self.hub.clone();
         let tasks = self.tasks.clone();
         let scan_state = self.scan.clone();
-        let timeout = if self.scan_timeout > Duration::ZERO { self.scan_timeout } else { DEFAULT_SCAN_TIMEOUT };
+        // scan_timeout 恒为正：new() 取 DEFAULT，set_scan_timeout() 显式忽略零值，
+        // 唯一外部来源 main.rs 传 config.scan_timeout，而 config 已按下限 10s 夹取。
+        let timeout = self.scan_timeout;
         let ctx = self.ctx.clone();
         let command = command.trim().to_string();
         let tid = tasks
@@ -572,10 +1161,6 @@ impl RpcServer {
                 run_cell_scan(client, hub, scan_state, ctx, cancel, command, timeout).await
             })
             .await;
-        {
-            let mut scan = self.scan.lock().await;
-            scan.task_id = Some(tid.clone());
-        }
 
         // 立刻应答，让前端的命令队列不被这条几分钟的命令堵住。
         ok_response(&format!("^CELLSCAN: STARTED {tid}\r\nOK"))
@@ -676,7 +1261,6 @@ async fn run_cell_scan(
     scan.running = false;
     scan.aborted = false;
     scan.lines.clear();
-    scan.task_id = None;
     drop(scan);
 
     // 扫频结束（成功/失败/超时/取消均必经此处）：先复位扫频标志，再无条件恢复数据面。
@@ -721,11 +1305,16 @@ async fn run_cell_scan(
 }
 
 pub fn ok_response(data: &str) -> AtCommandResponse {
-    AtCommandResponse { success: true, data: Some(data.to_string()), error: None }
+    AtCommandResponse { success: true, data: Some(data.to_string()), error: None, cause: None }
 }
 
 pub fn err_response(msg: &str) -> AtCommandResponse {
-    AtCommandResponse { success: false, data: None, error: Some(msg.to_string()) }
+    AtCommandResponse {
+        success: false,
+        data: None,
+        error: Some(msg.to_string()),
+        cause: at_failure_cause(msg),
+    }
 }
 
 /// 修补前端发来的 AT^SYSCFGEX：把频段参数重新加上引号，并补齐末尾两个空参数。
@@ -733,7 +1322,7 @@ fn normalize_syscfgex(command: &str) -> String {
     if !command.starts_with("AT^SYSCFGEX") {
         return command.to_string();
     }
-    let cleaned = command.replace('\r', "").replace('\n', "").replace("OK", "");
+    let cleaned = command.replace(['\r', '\n'], "").replace("OK", "");
     if cleaned.contains(",\"\",\"\"") {
         let parts: Vec<&str> = cleaned.split(',').collect();
         if parts.len() >= 5 {
@@ -765,7 +1354,7 @@ where
         if raw.len() >= max {
             overlong = true;
             let mut drain = Vec::new();
-            let _ = (&mut *reader).read_until(b'\n', &mut drain).await;
+            let _ = (*reader).read_until(b'\n', &mut drain).await;
         }
     } else {
         raw.pop();
@@ -774,4 +1363,138 @@ where
         }
     }
     Ok(Some((String::from_utf8_lossy(&raw).into_owned(), overlong)))
+}
+
+/// IMEI 写入指令（`AT^PHYNUM=IMEI,<imei>`）的结构校验：
+/// `<imei>` 必须是 15 位纯数字，且末位校验位通过 Luhn 算法
+/// （左起第 2、4…14 位翻倍、超 9 减 9，全部求和被 10 整除）。
+/// 非 IMEI 写入指令一律放行；返回 Err(原因) 时 RPC 层拒绝下发模组。
+fn validate_imei_write(cmd: &str) -> Result<(), String> {
+    let imei = match cmd.strip_prefix("AT^PHYNUM=IMEI,") {
+        Some(rest) => rest.trim(),
+        None => return Ok(()),
+    };
+    if imei.len() != 15 || !imei.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("须为 15 位数字".into());
+    }
+    // 全为数字已确认，`b - b'0'` 不会下溢
+    let mut sum: u32 = 0;
+    for (i, b) in imei.bytes().enumerate() {
+        let mut d = (b - b'0') as u32;
+        if i % 2 == 1 {
+            d *= 2;
+            if d > 9 {
+                d -= 9;
+            }
+        }
+        sum += d;
+    }
+    if sum % 10 != 0 {
+        return Err("末位校验位未通过 Luhn 校验".into());
+    }
+    Ok(())
+}
+
+/// 从 AT 应答文本中提取第一个恰好连续 15 位的数字串（即 IMEI）。
+/// 无匹配（如应答异常或为 16 位 IMEISV）时返回 None，调用方应放行不拦。
+fn extract_imei15(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut run_start: Option<usize> = None;
+    // 追加一个非数字哨兵，保证以数字结尾的串也能在循环内收尾
+    for (i, b) in bytes.iter().copied().chain(std::iter::once(b' ')).enumerate() {
+        if b.is_ascii_digit() {
+            if run_start.is_none() {
+                run_start = Some(i);
+            }
+        } else if let Some(s) = run_start {
+            if i - s == 15 {
+                return Some(text[s..i].to_string());
+            }
+            run_start = None;
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod imei_write_guard_tests {
+    use super::{extract_imei15, validate_imei_write};
+
+    #[test]
+    fn 非写入指令不受影响() {
+        assert!(validate_imei_write("AT+CSQ").is_ok());
+        assert!(validate_imei_write("AT+CGSN").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM?").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI").is_ok()); // 无逗号参数，不构成写入
+    }
+
+    #[test]
+    fn 合法_imei_通过() {
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,490154203237518").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,862234051234567").is_ok());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI, 490154203237518 ").is_ok()); // 容忍首尾空白
+    }
+
+    #[test]
+    fn 非法_格式拒绝() {
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,12345").is_err()); // 位数不足
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,1234567890123456").is_err()); // 超长
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,12345678901234a").is_err()); // 含非数字
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,").is_err()); // 空
+    }
+
+    #[test]
+    fn 校验位错拒绝() {
+        // 490154203237518 合法，末位改成 9 即非法
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,490154203237519").is_err());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,123456789012345").is_err());
+        assert!(validate_imei_write("AT^PHYNUM=IMEI,862234051234560").is_err());
+    }
+
+    #[test]
+    fn 提取_imei15_常规应答() {
+        assert_eq!(extract_imei15("862234051234567\r\nOK").as_deref(), Some("862234051234567"));
+        assert_eq!(extract_imei15("862234051234567").as_deref(), Some("862234051234567")); // 无行尾
+        assert_eq!(extract_imei15("AT+CGSN\n490154203237518\nOK").as_deref(), Some("490154203237518"));
+    }
+
+    #[test]
+    fn 提取_imei15_异常应答返回_none() {
+        assert_eq!(extract_imei15("ERROR"), None);
+        assert_eq!(extract_imei15(""), None);
+        assert_eq!(extract_imei15("12345678901234"), None); // 14 位
+        assert_eq!(extract_imei15("8622340512345678"), None); // 16 位 IMEISV，无恰好 15 位段
+    }
+}
+
+#[cfg(test)]
+mod at_failure_cause_tests {
+    use super::{at_failure_cause, err_response};
+
+    #[test]
+    fn 排队与连接超时归为_timeout() {
+        // at_queue 的排队预算耗尽、transport 的连接超时，都是「没等到响应」
+        assert_eq!(
+            at_failure_cause("等待空闲通道超时（10s）：模组正忙或正在重连，请稍后重试").as_deref(),
+            Some("timeout")
+        );
+        assert_eq!(at_failure_cause("连接超时").as_deref(), Some("timeout"));
+        assert_eq!(at_failure_cause("命令执行超时").as_deref(), Some("timeout"));
+    }
+
+    #[test]
+    fn 非超时失败不给_cause() {
+        // 这些交给前端按「AT ERROR / 后端报错」呈现，不能谎报超时
+        assert_eq!(at_failure_cause("串口已断开"), None);
+        assert_eq!(at_failure_cause("正在扫频，模组暂时无法响应其它命令，请先取消扫频"), None);
+        assert_eq!(at_failure_cause(""), None);
+    }
+
+    #[test]
+    fn err_response_自动带上超时分类() {
+        let r = err_response("扫频超时");
+        assert_eq!(r.cause.as_deref(), Some("timeout"));
+        assert!(!r.success);
+        assert_eq!(err_response("当前没有正在进行的扫频").cause, None);
+    }
 }
