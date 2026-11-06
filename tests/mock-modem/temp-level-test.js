@@ -1,15 +1,20 @@
-/* 模组温度分级逻辑单测（6 档）—— 从 mt5700.js 抽取纯函数在 Node 中验证 */
+/* 模组温度分级逻辑单测（6 档）—— 从 network_status.js 抽取纯函数在 Node 中验证 */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 
-const MTJS = path.join(__dirname, '..', '..', 'webui', 'luci-static', 'resources', 'at-webserver', 'mt5700.js');
-const src = fs.readFileSync(MTJS, 'utf8');
+/* 温度分档与着色是「状态页渲染」的一部分，实现在 network_status.js 的
+ * renderTempAdv 之前（TEMP_LEVELS / tempLevel）。曾放在 mt5700.js，v1.17.0 的
+ * 死代码清理把 6 档表当成零引用导出删掉，渲染侧退回三档内联阈值，
+ * mt5700.css 里的 temp-* 六档色从此无人写、本测试也抽不到源码。
+ * 现在分档回到唯一实现，页面与 CSS、本测试共用同一张表。 */
+const NSJS = path.join(__dirname, '..', '..', 'webui', 'luci-static', 'resources', 'view', 'at-webserver', 'network_status.js');
+const src = fs.readFileSync(NSJS, 'utf8');
 
 /* 抽取 TEMP_LEVELS 表与 tempLevel 的真实实现，避免测试与实现漂移 */
-const tblM = src.match(/api\.TEMP_LEVELS\s*=\s*\[([\s\S]*?)\];/);
-const fnM = src.match(/api\.tempLevel\s*=\s*function\s*\(value\)\s*\{([\s\S]*?)\n\t\};/);
+const tblM = src.match(/var TEMP_LEVELS\s*=\s*\[([\s\S]*?)\n\t\t\];/);
+const fnM = src.match(/function tempLevel\(value\) \{([\s\S]*?)\n\t\t\}/);
 
 if (!tblM || !fnM) {
 	console.error('无法从源码抽取温度逻辑');
@@ -29,9 +34,9 @@ if (!TEMP_LEVELS.length) {
 	process.exit(1);
 }
 
-const api = { TEMP_LEVELS };
 // eslint-disable-next-line no-new-func
-const tempLevel = new Function('api', 'isNaN', 'return function(value){' + fnM[1] + '};')(api, isNaN);
+const tempLevel = new Function('TEMP_LEVELS', 'parseFloat', 'isNaN',
+	'return function(value){' + fnM[1] + '};')(TEMP_LEVELS, parseFloat, isNaN);
 
 console.log('=== 解析到的阈值表（由高到低） ===');
 TEMP_LEVELS.forEach(function (l) {

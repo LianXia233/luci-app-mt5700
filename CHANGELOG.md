@@ -6,11 +6,56 @@
 > 变更记录见 `main` 分支的 `CHANGELOG.md`。本分支自 `76d1f82` 起脱离 LuCI 体系独立演进，
 > 版本号与 `main` **完全独立**，不对应 `main` 的 v1.x 编号。
 >
-> **版本号来源**：后端 `src/rust/Cargo.toml` 的 `version` 即 deb 包版本（`2.0.0`），
+> **版本号来源**：后端 `src/rust/Cargo.toml` 的 `version` 即 deb 包版本（`2.3.0`），
 > 由 `debian/build-deb.sh` 单点读取；Release 标签统一用 `debian-v*` 前缀
-> （当前已发布：`debian-v2.0.0`，含 amd64 / arm64 两个 deb）。
+> （当前已发布：`debian-v2.3.0`，含 amd64 / arm64 两个 deb）。
 >
 > **详细说明**：逐版本的完整设计说明与实测记录见 `docs/release-notes/`。
+
+## v2.3.0 (2026-11-06)
+
+### 同步 main 分支 v1.24.3 → v1.32.5：后端 + 前端两批内容搬运
+
+**同步口径**：仍采用「纯内容搬运」（不产生与 `main` 的 merge 血缘提交），同步点只在
+本文件记录。批次一 = Rust 后端（提交 `6696299`），批次二 = WebUI 全量映射
+（提交 `0091170`）。本分支的 deb 打包体系（`debian/`、`build-deb.yml`）与
+`service.js` / `rpc.js` 独立实现按既有约定保留。
+
+#### 批次一：Rust 后端（31 文件，+14673 / -688）
+
+- **feat(sms)**: 新增 `sms.rs` / `sms_store.rs` —— 短信列表/发送/删除/容量/短信中心全部实时走模组，另有本地归档（`store_stats` / `store_read` / `store_drop`）
+- **feat(qqpush)**: 新增 `qqpush.rs` / `qqbind.rs` —— QQ 机器人推送与扫码绑定；UCI 写回改由 `configstore` 落 `config.json`，管理页地址由 `ip route` + 配置端口推导（不依赖 OpenWrt 网络体系）
+- **feat(notify)**: 新增 `signalgrade.rs` / `signalwatch.rs` / `timerpush.rs` —— 信号等级、信号定时巡检、定时实际情况推送
+- **feat(config)**: `config.rs` 取主线全量（新增全部配置字段、默认值与单测）；取数入口由 `uci show at-webserver` 换成 `configstore::read_map()` + `UciReader::from_map`，删除 `uci_values()` / `unquote_uci()`。本分支独有的 `HttpConfig`（`http_port` / `http_bind` / `web_root` / `auth_key`）原样保留
+- **feat(httpserver)**: 本分支独有的 HTTP API 层整文件保留，两处适配 —— `notify_test` 增加可选 `channel`；`RESTART_KEYS` 补齐通知模板、定时推送、信号巡检、企业微信、QQ、短信存储区、`usage_source` 等约 40 个键
+- **refactor(usage)**: 去掉主线的 UCI WAN 区解析与 12 条相关用例（本分支无 UCI），改为 sysfs 网卡探测 + 配置键 `usage_source`（`netdev` / `modem`）；持久化文件迁至 `/etc/mt5700/usage.json`
+- **refactor(nettime)**: 取主线 NTP 改进，但 `Tz` 继续 `chrono::Local`（Debian 自带 tzdata，不需要解析 POSIX TZ 串）；不引入主线的 `localtime.rs`，其余模块统一到 `nettime`
+- **fix(state_cfg)**: 状态缓存白名单按主线收敛为 23 条，并恢复 4 条回归用例 —— 本分支旧版保留的 `AT+CGDCONT?` / `AT+CGMR` / `AT^FOTASTATE?` 属「写后读 / 状态机 / 升级后回读」，缓存会让界面读到旧值
+- **feat(rpcserver)**: 取主线版（TCP newline-JSON 通道）并接入短信/使用量/归档句柄；`Cargo.toml` 补 `tokio-tungstenite` 与 `futures-util`
+
+#### 批次二：WebUI 全量映射（178 文件，+13756 / -4638）
+
+- **feat(webui) 资源映射**：`main` 的 `htdocs/luci-static/resources/**` 共 **176 个文件**全部映射到 `webui/luci-static/resources/**`（12 个视图 + 公共模块 + `bg/` 6 张 WebP + `icons/minimal` / `icons/normal` 92 个 SVG + 双头像 PNG），无遗漏、无主线独有文件残留
+- **feat(webui) 新增公共模块**：`theme.js`（明暗主题）、`uimode.js`（极简 MD3 模式）、`icons.js`、`tabmenu.js`（窄屏 Tab 悬浮菜单）、`global.css`、`md3.css`
+- **refactor(webui) 模块加载器**：`app.js` 的 `evalModule` 由 `new Function('L', code)` 升级为 LuCI 风格 loader —— 解析 `'require xxx'` 头、内置模块注册表、按名注入依赖，适配主线视图顶层的裸标识符写法（`view.extend` / `rpc.` / `uci.` / `fs.` / `ui.`）；预加载顺序扩为 10 项（`theme` 必须早于 `mt5700`）
+- **feat(luci.js)**: 垫片补 `fs` 与 `ui` 内置模块导出；`mt5700.sms` / `usage` / `usage_ctl` 映射到 `/api/rpc/mt5700/*`
+- **保留本分支版**：`view/at-webserver/service.js`（systemd 服务管理，主线走 init.d `ubus service.list` / `rc.init`，本分支无等价物，继续走 `/api/service/status|restart`）
+- **feat(httpserver)**: `usage_ctl` 补 `set_source` 分支；`/api/at` 应答补 `cause` 字段（区分「模组没回」与「通道不可用」）
+- **未复活**：`Makefile`、`root/`、`po/`、`scripts/` 等 Debian 分支刻意删除的 OpenWrt 内容一律未引入
+
+#### 版本与缓存口径
+
+- **chore(version)**: `src/rust/Cargo.toml` 提至 `2.3.0`，`debian/build-deb.sh` 单点读取即生效（`sed` 取 `version` 首个匹配）
+- **chore(webui) 缓存戳递增**：`MT5700_CSS_VERSION` `2.46.8` → `2.47.0`（`mt5700.css` 本次改动 6000+ 行）、`AT_CSS_VERSION` `1.15.1` → `1.15.2`（`at.css` 改动 128 行）
+- **chore(webui) 不引入主线 UI 版本常量**：`main` 的 `MT5700_UI_VERSION = 1.32.5` 属 LuCI 资源加载器的 `resource_version` 机制，本分支无该加载器，`compat.js` 恢复为本分支版（只保留 `String.prototype.format` 垫片）
+
+#### 验证
+
+- **test(backend)**: `cargo check` 0 error 0 warning（`cargo clean -p at-webserver` 后全量重建）；`cargo test` **297 passed / 2 ignored / 0 failed**
+- **test(webui)**: `node --check` 24 个 JS 全部通过；静态断言 51 项 PASS（含 22 个公共模块真实求值冒烟）
+- **chore(format)**: 本次改动文件全部 LF + UTF-8（按字节校验）
+- **未验证项**（本机无法覆盖，见 `docs/release-notes/v2.3.0.md`）：deb 安装与 systemd 启停、真实 AT 串口交互、QQ 真实收发、浏览器实机 12 视图渲染
+- **已知缺口（待后续批次）**：`main` 的 `service.js` 承载 QQ 推送、定时推送、信号巡检等设置入口，本分支 `service.js` 为独立实现，这些入口尚未接入；`usage_source` / `sms_storage` 在 `main` 上也无前端入口，需本分支另行设计
 
 ## v2.1.0 (2026-10-17)
 

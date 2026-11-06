@@ -325,16 +325,18 @@ usage 清零日每月 1 号、服务运行时长正常渲染（`AtWs.formatDurat
 **保持同源同步**：`main` 的纯前端 UI 改动可直接同步到本分支对应路径，改动随下次
 `install.sh` 部署即生效，无需打包或构建。
 
-**v2.2.0 已整包同步至 `main` v1.24.3**（Soft Anime 重构 + v1.16~v1.24 全量特性），
-同步策略为逐文件决策：
+**v2.3.0 已整包同步至 `main` v1.32.5**（v1.25~v1.32 全量特性，含 QCI/5QI 展示、短信页夜间模式、
+窄屏 Tab 悬浮菜单），同步策略为逐文件决策：
 
 | 类别 | 文件 | 处理方式 |
 | --- | --- | --- |
-| 主线原样采用 | `at.css` / `mt5700.css` / `mt5700.js` / `parse.js` / `ui.js` / `compat.js` / `smsEncode.js` / `mascot.png` + 11 个视图（`service.js` 除外） | 直接取主线版 |
+| 主线原样采用 | `main` 的 `htdocs/luci-static/resources/**` 共 176 个文件 —— `at.css` / `mt5700.css` / `mt5700.js` / `parse.js` / `ui.js` / `compat.js` / `theme.js` / `uimode.js` / `icons.js` / `tabmenu.js` / `global.css` / `md3.css`、`bg/` 6 张 WebP、`icons/minimal` 与 `icons/normal` 92 个 SVG、双头像 PNG + 11 个视图（`service.js` 除外） | 直接取主线版 |
 | 保留本分支版 | `view/at-webserver/service.js` | systemd 服务管理为本分支独有（主线走 init.d） |
 | 适配重贴 | `at-webserver/rpc.js` 的 `loadConfig` | 主线读 UCI `websocket_port/bind/auth_key`；本分支为同源部署，连接信息取当前站点地址 |
-| 适配重贴 | `mt5700.css` 的 768px Hero 移动端规则 | 主线该处回归丢失 `.mt5700-hero-card`（column-reverse）与标题 20px 两条规则，按本分支既有适配补回 |
-| 无需适配 | `network_status.js` | 主线重构后自洽（内联 `.mt-row-2col` 注入已改为 CSS 类，网格均为 2 子元素） |
+| 适配重贴 | `webui/app.js` 的模块加载器 | 主线视图顶层用裸标识符（`view.extend` / `rpc.` / `uci.` / `fs.` / `ui.`）与 `'require xxx'` 头，本分支 loader 改为按名注入依赖并扩到 10 个预加载模块 |
+| 适配重贴 | `webui/luci.js` 垫片 | 补 `fs` / `ui` 内置模块导出，`mt5700.sms` / `usage` / `usage_ctl` 映射到 `/api/rpc/mt5700/*` |
+| 不引入 | `main` 的 `MT5700_UI_VERSION` | 该常量属 LuCI 加载器的 `resource_version` 缓存机制，本分支无此加载器；`compat.js` 只保留 `String.prototype.format` 垫片 |
+| 保留待评估 | `at-webserver/smsEncode.js` | `main` v1.25 起已删除该模块（编码并入 `rpc.js`）；本分支文件仍在且被 `app.js` 预加载，确认无引用后再清理 |
 
 以下文件为 Debian 独立实现，**同步时必须保留本分支版本，不得用 `main` 覆盖**：
 
@@ -351,7 +353,7 @@ usage 清零日每月 1 号、服务运行时长正常渲染（`AtWs.formatDurat
 本分支的变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，逐版本的设计说明与实测记录见
 [`docs/release-notes/`](docs/release-notes/)。
 
-版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.2.0`，
+版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.3.0`，
 Release 标签前缀 `debian-v*`），不对应 `main` 的 v1.x 编号；`main` 侧的变更记录见
 `main` 分支的 `CHANGELOG.md`。
 
