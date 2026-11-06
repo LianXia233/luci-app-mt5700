@@ -95,6 +95,8 @@ return L.view.extend({
 			modemInfo: { manufacturer: '', model: '', fw: '', imei: '', imsi: '', iccid: '' },
 			// 签约速率（Session-AMBR，来自 AT+C5GQOSRDP=1）
 			subRate: null,
+			/* QoS 等级（5QI / QCI，来自 AT+C5GQOSRDP=<数据 CID>；取不到为 null） */
+			qos: null,
 			dataBearer: null
 		};
 
@@ -1473,6 +1475,16 @@ return L.view.extend({
 			return Math.round(v) + ' Kbps';
 		}
 
+		/* QoS 等级文案（issue #43）：5G 下称 5QI，LTE 下称 QCI，
+		 * 都由 AT+C5GQOSRDP 的第二个字段上报。
+		 * 0 表示「由网络选择」，等价于模组没给出有效等级，按未上报处理；
+		 * 取不到就如实说明，不用其它承载或别的 CID 的值来凑。 */
+		function qosText() {
+			var q = state.qos;
+			if (!q || q.qci == null || q.qci === 0) return '模组未上报';
+			return String(q.qci);
+		}
+
 		/* 签约速率文案：有值才显示，没有就如实说明模组未上报 */
 		function subRateText() {
 			var q = state.subRate;
@@ -1792,6 +1804,7 @@ return L.view.extend({
 				'  <tr><td>运营商代码 (PLMN)</td><td>' + plmnStr + '</td></tr>' +
 				'  <tr><td>网络注册与漫游</td><td>' + roamStr + '</td></tr>' +
 				'  <tr><td>签约速率</td><td>' + subRateText() + '</td></tr>' +
+				'  <tr><td title="来自 AT+C5GQOSRDP 数据承载的 5QI/QCI 字段，取不到时显示未上报">QoS 等级 (5QI / QCI)</td><td>' + qosText() + '</td></tr>' +
 				'  <tr><td>IMSI</td><td>' + (state.modemInfo.imsi || '读取中...') + '</td></tr>' +
 				'  <tr><td>ICCID</td><td>' + (state.modemInfo.iccid || '读取中...') + '</td></tr>' +
 				'</table>';
@@ -2802,42 +2815,44 @@ return L.view.extend({
 						state.apnCid = ctx.data.cid;
 					}
 				}
-				/* 签约速率只查**数据上网**那条上下文，绝不查 IMS。
+				/* 签约速率与 QoS 等级都只查**数据上网**那条上下文，绝不查 IMS。
 				 * state.apnCid 来自 pickDataContext —— 它已剔除 IMS / 紧急 / MMS / SUPL
 				 * 等专用承载 APN，所以这里拿到的必然是数据通道 CID；
 				 * 万一没解析到，退回 CID 1（默认数据上下文，实机 +CGACT: 1,1 即上网承载）。
 				 *
-				 * 优先用厂商私有命令 AT^DSAMBR（手册 16.17「签约速率查询」）：
+				 * 签约速率优先用厂商私有命令 AT^DSAMBR（手册 16.17「签约速率查询」），
 				 * 它 4G/5G 下都能拿到真实的上下行签约速率（kbps）。
-				 * 只有它不返回时，才退回标准命令 AT+C5GQOSRDP（Session-AMBR）。 */
+				 * 5QI/QCI 只有标准命令 AT+C5GQOSRDP 才报（issue #43），
+				 * 该命令的 Session-AMBR 同时作为签约速率的兜底来源。 */
 				var dataCid = state.apnCid || '1';
 				return AtWs.client.sendCommand('AT^DSAMBR=' + dataCid);
 			}).then(function (res) {
+				/* 签约速率优先取 AT^DSAMBR，但它不报 5QI/QCI，
+				 * 所以无论这条是否成功都要再查一次 AT+C5GQOSRDP：
+				 * 同一条数据承载上既读 QoS 等级，也作为签约速率的兜底来源。 */
 				var q = (res && res.success && res.data) ? Parse.parseDsambr(res.data) : null;
-				if (!q || (!q.dlAmbr && !q.ulAmbr)) {
-					return AtWs.client.sendCommand('AT+C5GQOSRDP=' + (state.apnCid || '1'));
-				}
-				q.source = 'dsambr';
-				state.subRate = q;
-				return null;
-			}).then(function (res) {
-				if (res && res.data) {
-					var q2 = Parse.parseC5gQosRdp(res.data);
-					/* 5QI 1（VoLTE 语音）/ 5（IMS 信令）是 IMS 专用承载的特征值：
-					 * 万一真拿到这种值，说明查到的不是数据上网那条上下文，
-					 * 宁可不显示也不张冠李戴。 */
-					if (q2 && q2.qci !== 1 && q2.qci !== 5 && (q2.ambrUl || q2.ambrDl)) {
-						q2.source = 'qosrdp';
-						state.subRate = {
-							dlAmbr: q2.ambrDl, ulAmbr: q2.ambrUl,
-							apn: state.apn, cid: q2.cid, source: 'qosrdp'
-						};
-					} else {
-						state.subRate = null;
-					}
+				if (q && (q.dlAmbr || q.ulAmbr)) {
+					q.source = 'dsambr';
+					state.subRate = q;
 				} else {
-					/* DSAMBR 已经给出结果时 res 为 null，无需再动 */
-					if (!state.subRate || state.subRate.source !== 'dsambr') state.subRate = null;
+					state.subRate = null;
+				}
+				return AtWs.client.sendCommand('AT+C5GQOSRDP=' + (state.apnCid || '1'));
+			}).then(function (res) {
+				var q2 = (res && res.success && res.data) ? Parse.parseC5gQosRdp(res.data) : null;
+				/* 5QI 1（VoLTE 语音）/ 5（IMS 信令）是 IMS 专用承载的特征值：
+				 * 万一真拿到这种值，说明查到的不是数据上网那条上下文，
+				 * 宁可不显示也不张冠李戴。qci 为 0 表示「由网络选择」，
+				 * 同样不算模组给出了有效等级。 */
+				var isImsBearer = q2 && (q2.qci === 1 || q2.qci === 5);
+				state.qos = (q2 && q2.qci != null && q2.qci !== 0 && !isImsBearer)
+					? { qci: q2.qci } : null;
+				/* 只有 DSAMBR 没给出签约速率时，才用这条的 Session-AMBR 兜底 */
+				if (!state.subRate && q2 && !isImsBearer && (q2.ambrUl || q2.ambrDl)) {
+					state.subRate = {
+						dlAmbr: q2.ambrDl, ulAmbr: q2.ambrUl,
+						apn: state.apn, cid: q2.cid, source: 'qosrdp'
+					};
 				}
 				renderTabsUI();
 			}).catch(function (e) {
