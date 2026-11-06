@@ -43,7 +43,8 @@ impl AsyncWrite for TcpWriter {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        // 写超时由上层 send_command / RPC 写路径负责；此处不可每 poll 重建 timeout future
+        // 此处不可每 poll 重建 timeout future；写超时目前**任何一层都没有实现**
+        // （atclient 的命令超时 select! 发生在 write_all 之后，管不到写本身）
         let this = self.get_mut();
         std::pin::Pin::new(&mut this.stream).poll_write(cx, buf)
     }
@@ -60,6 +61,7 @@ impl AsyncWrite for TcpWriter {
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
+        // 连接由上层 drop 关闭，此处不主动 shutdown。
         std::task::Poll::Ready(Ok(()))
     }
 }

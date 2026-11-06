@@ -1,17 +1,26 @@
-//! 定时锁频调度器：按时段切换锁频设置，长时间无服务时自动解锁恢复。
+//! 定时锁频调度器：按时段切换 LTE/NR 锁频，可选切换飞行模式；
+//! 长时间无服务时自动解锁恢复，并推送通知。
 
 use chrono::Timelike;
 use crate::{log_info, log_warn};
 use crate::atclient::AtClient;
 use crate::config::{BandLock, ScheduleConfig};
 use crate::notify::{Notification, NotifyKind, Notifier, SENDER_SIGNAL};
-use crate::schedconfig::{SchedStatusDto, next_switch_at, parse_hhmm, split_list};
+use crate::schedconfig::{SchedStatusDto, next_switch_at, next_switch_time, parse_hhmm, seconds_to_next_switch, split_list};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// 扫频结束后留给模组重新驻留的时间，这段时间内不做无服务判定。
 const SCAN_RECOVERY_GRACE: Duration = Duration::from_secs(60);
+
+/// 重连后补下发锁频的静默期。
+///
+/// USB 重新枚举 / 模组自重启会把锁频清掉，此时必须重新下发一次，否则「夜里锁了
+/// B8、模组重启后就一直不锁」——用户不在页面跟前根本发现不了。
+/// 但链路抖动会让 connected 反复跳变，每次跳变都补一次 `CFUN=0/1` + 锁频
+/// 会把模组拖进复位循环，所以刚下发过（默认 2 分钟内）就不再重复。
+const REAPPLY_AFTER_RECONNECT_QUIET: Duration = Duration::from_secs(120);
 
 /// SSB 默认按 30kHz 子载波间隔的频段（sub-6 的 TDD 中高频段）。
 const NR_30KHZ_BANDS: &[i64] = &[41, 48, 77, 78, 79];
@@ -40,6 +49,10 @@ pub struct SchedState {
     pub last_applied: LockPair,
     pub applied: bool,
     pub announced: bool,
+    /// 最近一次成功下发锁频的时刻（用于重连补下发的静默期判断）。
+    pub applied_at: Instant,
+    /// 已处理过的 AT 连接代次：模组重连后锁频会失效，靠它识别「需要补下发」。
+    pub connect_epoch: u64,
 }
 
 impl Scheduler {
@@ -61,6 +74,8 @@ impl Scheduler {
                 last_applied: LockPair { lte: BandLock { type_: -1, ..Default::default() }, nr: BandLock { type_: -1, ..Default::default() } },
                 applied: false,
                 announced: false,
+                applied_at: Instant::now(),
+                connect_epoch: 0,
             })),
         })
     }
@@ -78,26 +93,56 @@ impl Scheduler {
 
     pub async fn status(&self) -> SchedStatusDto {
         let s = self.state.read().await;
+        // 三个时间字段取同一个 now：分别取会让「插件时间 / 下次切换 / 倒计时」
+        // 相差几秒，用户拿它们互相校对就会觉得对不上。
+        let now = crate::nettime::now();
         SchedStatusDto {
             current_mode: s.current_mode.clone(),
-            next_switch: next_switch_at(&s.cfg, crate::nettime::now()),
+            next_switch: next_switch_at(&s.cfg, now),
             switch_count: s.switch_count,
             applied: s.applied,
+            next_switch_time: next_switch_time(&s.cfg, now),
+            next_switch_in: seconds_to_next_switch(&s.cfg, now).unwrap_or(-1),
+            server_time: now.format("%Y-%m-%d %H:%M:%S").to_string(),
         }
     }
 
     /// 即使当前未启用也要保持轮询：用户可能在 WebUI 里随时打开开关。
+    ///
+    /// 这个循环是**唯一**的调度入口，与浏览器、LuCI 页面完全无关：页面关掉、
+    /// 手机断网、没人登录，只要守护进程在跑，到点就切。
     pub async fn run(self: Arc<Self>) {
         loop {
-            let interval = {
+            /*
+             * 睡多久：取「检测间隔」与「距下一个切换点」的较小值。
+             *
+             * 只按检测间隔睡的话，间隔设成 1 小时就等于切换点最多晚 1 小时生效 ——
+             * 22:00 的配置 22:59 才下发，用户会认为「定时根本没生效」。
+             * 按切换点醒则保证到点后 1 秒内判定一次；期间仍按检测间隔做无服务巡检。
+             */
+            let wait = {
                 let s = self.state.read().await;
-                s.cfg.check_interval
+                let mut wait = s.cfg.check_interval;
+                if let Some(secs) = seconds_to_next_switch(&s.cfg, crate::nettime::now()) {
+                    // +1 秒跨过端点：正好落在 22:00:00 时 is_night 已按夜间算
+                    let to_boundary = Duration::from_secs(secs.max(0) as u64 + 1);
+                    if to_boundary < wait {
+                        wait = to_boundary;
+                    }
+                }
+                // 兜底下限：时钟回拨 / 端点刚过去时不要空转
+                wait.max(Duration::from_secs(1))
             };
-            if !sleep_ctx(&self.ctx, interval).await {
+            if !sleep_ctx(&self.ctx, wait).await {
                 return;
             }
 
             self.announce().await;
+
+            // 模组重连（USB 重枚举 / 模组复位）后锁频已丢，标记成「待下发」，
+            // 交给本轮 tick 重新走一遍；静默期内不重复，避免抖动引发 CFUN 反复切换。
+            self.note_reconnect().await;
+
             let (enabled, connected) = {
                 let s = self.state.read().await;
                 (s.cfg.enabled, self.client.connected())
@@ -112,7 +157,21 @@ impl Scheduler {
                 continue;
             }
 
-            self.safe_tick().await;
+            self.tick().await;
+        }
+    }
+
+    /// 记录 AT 连接代次；代次变化说明模组重连过，模组侧的锁频已被清空。
+    async fn note_reconnect(&self) {
+        let epoch = self.client.connect_epoch();
+        let mut s = self.state.write().await;
+        if epoch == s.connect_epoch {
+            return;
+        }
+        s.connect_epoch = epoch;
+        if s.applied && s.applied_at.elapsed() >= REAPPLY_AFTER_RECONNECT_QUIET {
+            log_info!("模组重连，按当前时段重新下发锁频");
+            s.applied = false;
         }
     }
 
@@ -138,10 +197,6 @@ impl Scheduler {
             s.cfg.night_end,
             enabled_text(s.cfg.day_enabled)
         );
-    }
-
-    async fn safe_tick(&self) {
-        self.tick().await;
     }
 
     async fn tick(&self) {
@@ -170,6 +225,7 @@ impl Scheduler {
                 s.current_mode = target.clone();
                 s.last_applied = want.clone();
                 s.applied = true;
+                s.applied_at = Instant::now();
             } else {
                 log_warn!("锁频下发失败，保持 applied=false 以便下周期重试");
             }
@@ -215,7 +271,7 @@ impl Scheduler {
     }
 
     /// 当前时刻应该使用的模式，"" 表示不锁频。
-    async fn target_mode(&self, now: chrono::DateTime<chrono::Local>) -> String {
+    async fn target_mode(&self, now: chrono::DateTime<crate::nettime::Tz>) -> String {
         let s = self.state.read().await;
         let night = is_night(&s.cfg, now);
         match (night && s.cfg.night_enabled, !night && s.cfg.day_enabled) {
@@ -246,7 +302,8 @@ impl Scheduler {
         false
     }
 
-    /// 下发一次完整的锁频切换。返回是否成功（全部实际下发的锁频命令均 OK）。
+    /// 下发一次完整的锁频切换。
+    /// 返回是否成功：至少下发一条锁频命令且均 OK；一条锁频命令都未下发时视为失败。
     async fn apply_lock(&self, cfg: &LockPair, mode: &str) -> bool {
         let switch_count = {
             let mut s = self.state.write().await;
@@ -317,9 +374,14 @@ impl Scheduler {
 
         let actions = if done.is_empty() { "未执行任何操作".to_string() } else { done.join("、") };
         let notifier = self.notifier.clone();
+        /*
+         * 正文里的时刻和 Notification.time 取同一次 now：原来各取一次，相差可达数秒，
+         * 用户拿推送列表和正文对时间会以为对不上。格式与 now_string 完全相同。
+         */
+        let now_text = crate::nettime::now_string();
         let content = format!(
-            "🔄 定时锁频切换\n时间: {}\n模式: {}\nLTE: {}\nNR: {}\n执行操作: {}\n切换次数: 第 {} 次\n结果: {}",
-            crate::nettime::now().format("%Y-%m-%d %H:%M:%S"),
+            "定时锁频切换\n时间：{}\n模式：{}\nLTE：{}\nNR：{}\n执行操作：{}\n切换次数：第 {} 次\n结果：{}",
+            now_text,
             mode,
             lock_summary("LTE", &cfg.lte),
             lock_summary("NR", &cfg.nr),
@@ -329,7 +391,7 @@ impl Scheduler {
         );
         tokio::spawn(async move {
             notifier
-                .notify(Notification { sender: SENDER_SIGNAL.into(), content, kind: NotifyKind::Signal, memory_full: false })
+                .notify(Notification { sender: SENDER_SIGNAL.into(), content, kind: NotifyKind::Signal, memory_full: false, time: now_text, qq_card: None })
                 .await;
         });
         log_info!("定时锁频切换完成: {}（{}）", actions, if lock_ok { "成功" } else { "失败" });
@@ -354,6 +416,11 @@ impl Scheduler {
         }
     }
 
+    /// 组装 `AT^LTEFREQLOCK=<operatetype>,<forbidFlag>,<num>,...`（手册 13.12）。
+    ///
+    /// `<forbidFlag>` 固定写 0：手册 13.12.3 定义 0=不允许重选和切换、1=允许，
+    /// 定时锁频的语义就是「到这个时间点必须驻留在指定频点/小区」，
+    /// 允许重选会让锁定形同虚设。
     async fn lte_command(&self, l: &BandLock) -> Option<(String, String)> {
         let sched = self.state.read().await.cfg.clone();
         if l.type_ <= 0 {
@@ -486,7 +553,13 @@ fn unlock_config() -> LockPair {
     LockPair { lte: BandLock { type_: 0, ..Default::default() }, nr: BandLock { type_: 0, ..Default::default() } }
 }
 
-fn is_night(cfg: &ScheduleConfig, now: chrono::DateTime<chrono::Local>) -> bool {
+/*
+ * 夜间时段判定。区间是**半开** `[start, end)`：`end` 那一分钟已算日间。
+ * 别和 `config::in_poll_window` 互相照抄 —— 那边是闭区间且「起止相等」按全天处理，
+ * 这里起止相等时 `cur >= start && cur < end` 恒为假，等于夜间档不生效。
+ * 两者各自成立：调度端点是模式切换时刻（不该重复命中），巡检窗口要含末分钟。
+ */
+fn is_night(cfg: &ScheduleConfig, now: chrono::DateTime<crate::nettime::Tz>) -> bool {
     let (Some(start), Some(end)) = (parse_hhmm(&cfg.night_start), parse_hhmm(&cfg.night_end)) else {
         log_warn!("夜间时段配置无法解析: {:?}-{:?}", cfg.night_start, cfg.night_end);
         return false;
@@ -577,7 +650,9 @@ fn lock_summary(kind: &str, l: &BandLock) -> String {
     }
 }
 
-pub async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
+/// 可被关闭信号打断的睡眠。返回 `false` 表示收到关闭信号，调用方应退出。
+/// 供定时锁频与定时轮询推送（signalwatch）共用。
+pub(crate) async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
     let mut ctx_c = ctx.clone();
     tokio::select! {
         _ = tokio::time::sleep(d) => true,

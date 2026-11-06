@@ -2,10 +2,10 @@
 //!
 //! # 为什么放在后端常驻进程里
 //!
-//! 早期的实现把累加逻辑放在 Web 层，由前端 `setInterval(sampleRate, 1000)`
-//! 每秒触发。那样做只在**页面开着**的时候才累加：关掉浏览器这期间的流量虽然
-//! 能靠「内核计数器单调累计」在下次打开时补记，但语义上终究是「前端打开才记录」，
-//! 且接口 flap 造成的计数器归零会直接丢掉那段增量。
+//! 早期的实现把累加逻辑放在 rpcd 的 ucode 插件（`netrateCall`）里，由前端
+//! `setInterval(sampleRate, 1000)` 每秒触发。那样做只在**页面开着**的时候才累加：
+//! 关掉浏览器这期间的流量虽然能靠「内核计数器单调累计」在下次打开时补记，但
+//! 语义上终究是「前端打开才记录」，且接口 flap 造成的计数器归零会直接丢掉那段增量。
 //!
 //! 现在由本模块在后端常驻进程里**独立周期采样**（默认 1 秒），与前端是否打开、
 //! 是否刷新完全无关；前端只通过 `usage` RPC 读取快照。
@@ -14,29 +14,47 @@
 //!
 //! | 场景 | 落点 | 重启后 |
 //! |:--|:--|:--|
-//! | 持久化关（默认） | `/tmp/mt5700-usage.json`（tmpfs，纯内存） | 丢失，从零开始 |
-//! | 持久化开 | 额外写 `/etc/at-webserver-usage.json`（overlay），每 10 分钟最多一次 | 恢复 |
+//! | 持久化关（默认） | `/tmp/mt5700-usage.json`（临时目录，重启即失） | 丢失，从零开始 |
+//! | 持久化开 | 额外写 `/etc/mt5700/usage.json`（磁盘，systemd 已放开该目录写权限），每 10 分钟最多一次 | 恢复 |
 //!
 //! - **清零按钮**：无论持久化开关状态如何，都强制重写两个文件（持久化开时把落盘
 //!   文件一并清零，持久化关时删掉落盘文件），不会留下旧值。
 //! - **文件大小上限**：状态文件是定长 schema 的 JSON，`MAX_USAGE_FILE_BYTES`
 //!   既是写入时的断言，也是读取时的准入线——超限的文件一律视为损坏并忽略，
 //!   避免异常大的文件被读进内存。
-//! - **自动清零**：`usage_reset_day`（**每月几号**，默认 1 号，用户可改）存在
-//!   配置里（`config.json` 扁平键），与「使用量是否持久化」解耦，否则关掉持久化
-//!   就连设置一起丢了。到点后由本模块自行清零并重新基线，不需要前端参与。
+//! - **自动清零**：`usage_reset_day`（**每月几号**，默认 1 号，用户可改）存在配置文件里，
+//!   与「使用量是否持久化」解耦，否则关掉持久化就连设置一起丢了。
+//!   到点后由本模块自行清零并重新基线，不需要前端参与。
 //!   日期判定（大小月 / 闰年 / 跨年 / 「31 号在小月按月末」）全部由
 //!   [`crate::monthly`] 负责，时刻取自 [`crate::nettime`]（NTP 优先、设备时钟兜底），
 //!   本模块只做「该不该清」这一句调用，不重复实现日历逻辑。
+//!
+//! # 统计来源（可手动切换）
+//!
+//! 配置键 `usage_source`（JSON 扁平键值，见 [`crate::configstore`]）决定累计用量的取值口径：
+//!
+//! | 取值 | 数据源 | AT 通道代价 |
+//! |:--|:--|:--|
+//! | `netdev`（默认） | 承载网口的 `/sys/class/net/<dev>/statistics/{rx,tx}_bytes` | 零 |
+//! | `modem` | 模组 `AT^DSFLOWQRY` 上报的 DS 累计收发字节 | 走已存在的状态缓存（2s 刷新） |
+//!
+//! 来源切换会改变 `device` 标签，[`accumulate`] 的「承载变了」分支会自动
+//! 重新基线：累计值保留、不把两套计数器的差值误记成一笔巨额流量。
+//!
+//! # 统计网卡口径（Debian）
+//!
+//! 与 main 分支（OpenWrt，按 `firewall` / `network` 的 WAN 区域解析物理网口）不同，
+//! Debian 上没有 `uci`，网卡按「配置 `netdev` → 环境变量 → USB 网卡 → `eth2`」确定，
+//! 由启动接线处通过 [`UsageTracker::set_device`] 注入配置值。读不到计数器时保持
+//! 累计值并重新探测，不补 0、不换用别的网卡顶替。
 //!
 //! # 边界处理
 //!
 //! - 计数器归零（接口 flap / 重新拨号）表现为负增量：**只重置基线、不累加**，
 //!   避免把一次归零误记成一笔巨额流量。
-//! - 承载网卡变了（`netdev` 配置改动 / 模组换了网口）：同样只重置基线，累计值保留。
+//! - 承载网卡变了（模组接口的物理绑定改动 / 模组换了网口）：同样只重置基线，累计值保留。
 //! - 峰值只在正常采样节拍内计算；采样间隔异常拉长（进程被阻塞）时跳过，
 //!   免得把一段长时间的低均值当成峰值。
-
 
 use crate::nettime;
 use crate::{log_debug, log_info, log_warn};
@@ -44,12 +62,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, Mutex, RwLock};
 
-/// 内存态状态文件（tmpfs，重启即失）。
+/// 内存态状态文件（临时目录，重启即失）。
 pub const USAGE_VOL_PATH: &str = "/tmp/mt5700-usage.json";
-/// 持久化状态文件（overlay，跨重启保留）。
-pub const USAGE_FLASH_PATH: &str = "/etc/at-webserver-usage.json";
+/// 持久化状态文件（磁盘，跨重启保留）。
+pub const USAGE_FLASH_PATH: &str = "/etc/mt5700/usage.json";
 
 /// 统计记录文件大小上限（字节）。
 ///
@@ -64,16 +82,37 @@ pub const MAX_USAGE_FILE_BYTES: u64 = 4096;
 /// 一秒的突发压成五分之一，显示出来的峰值会明显低于实际。
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
+/// 模组来源的采样间隔：与 `AT^DSFLOWQRY` 状态缓存的 2s 刷新周期对齐。
+///
+/// 若仍按 1s 采样，缓存未刷新的那一秒读到的还是旧值，速率会呈现
+/// 「一秒全额、一秒为零」的锯齿，峰值被算成实际的约两倍。
+const MODEM_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+
 /// 持久化落盘的最小间隔（秒）。
 ///
-/// 内存文件每秒都写（tmpfs，零磨损），闪存最多每 10 分钟写一次，
+/// 内存文件每秒都写（临时目录，不额外磨损磁盘），落盘最多每 10 分钟一次，
 /// 把闪存寿命影响压到最低；代价是重启后最多回退 10 分钟的用量。
 const FLASH_INTERVAL_SECS: i64 = 600;
 
+/// 统计来源：WAN 区域物理网口的 sysfs 计数器（默认，零 AT 负担）。
+pub const SOURCE_NETDEV: &str = "netdev";
+/// 统计来源：模组 `AT^DSFLOWQRY` 上报的 DS 累计流量。
+pub const SOURCE_MODEM: &str = "modem";
+/// 模组来源下返回给前端的 `device` 标签（不含具体网卡名）。
+const MODEM_DEVICE_LABEL: &str = "modem:^DSFLOWQRY";
+/// 模组 DS 累计流量查询指令（已在 `state_cfg` 的缓存白名单里，2s 刷新）。
+const DSFLOWQRY_CMD: &str = "AT^DSFLOWQRY";
+
+/// 配置取值归一化：只接受 `netdev` / `modem`，其它一律回落默认。
+pub fn normalize_usage_source(raw: &str) -> &'static str {
+    if raw.trim() == SOURCE_MODEM { SOURCE_MODEM } else { SOURCE_NETDEV }
+}
+
 /// 承载网卡探测的兜底名。
 ///
-/// 与 init.d / rpcd ucode 的探测链保持一致：UCI 指定接口 → sysfs 上挂在
-/// USB 总线上的网卡 → `network.MT5700M` 的 device → `eth2`。
+/// 与 Debian 安装脚本的探测链保持一致：环境变量 → sysfs 上挂在 USB 总线上的
+/// 网卡 → `eth2`。配置里的 `netdev` 由启动接线处注入（见
+/// [`UsageTracker::set_device`]）。
 const FALLBACK_NETDEV: &str = "eth2";
 
 /// 使用量状态（落盘的 schema）。
@@ -111,38 +150,36 @@ fn read_counter(path: &str) -> Option<u64> {
     raw.trim().parse::<u64>().ok()
 }
 
-/// 在 `/sys/class/net` 里找第一个挂在 USB 总线上的网卡。
-///
-/// 与 ucode 的 `detectUsbNetdev` 同口径：跳过 `lo` 与 `br-*`，要求存在
-/// `device` 链接且其真实路径含 `usb`。
-fn detect_usb_netdev() -> Option<String> {
-    let entries = std::fs::read_dir("/sys/class/net").ok()?;
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == "lo" || name.starts_with("br-") {
-            continue;
-        }
-        let device = entry.path().join("device");
-        let Ok(real) = std::fs::canonicalize(&device) else { continue };
-        if real.to_string_lossy().contains("usb") {
-            return Some(name);
-        }
-    }
-    None
-}
-
 /// 网卡是否存在且计数器可读。
 fn netdev_usable(dev: &str) -> bool {
     !dev.is_empty()
         && std::path::Path::new(&format!("/sys/class/net/{dev}/statistics/rx_bytes")).exists()
 }
 
-/// 解析承载网卡名：配置 `netdev` → 环境变量 → USB 网卡 → `eth2`。
+/// 在 `/sys/class/net` 里找第一个挂在 USB 总线上的网卡。
+///
+/// 与 ucode 的 `detectUsbNetdev` 同口径：跳过 `lo` 与 `br-*`，要求存在
+/// `device` 链接且其真实路径含 `usb`。
+fn detect_usb_netdev() -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir("/sys/class/net")
+        .ok()?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n != "lo" && !n.starts_with("br-"))
+        .collect();
+    names.sort();
+    names.into_iter().find(|name| {
+        std::fs::canonicalize(format!("/sys/class/net/{name}/device"))
+            .map(|p| p.to_string_lossy().contains("usb"))
+            .unwrap_or(false)
+    })
+}
+
+/// 解析承载网卡名：环境变量 → USB 网卡 → 兜底 `eth2`。
 ///
 /// Debian 侧没有 `uci`：配置里的 `netdev` 键由 [`crate::configstore`] 提供，
-/// 在本模块外（启动接线处）通过 [`UsageTracker::set_device`] 注入；
-/// 这里只处理环境变量、sysfs 探测与兜底。只在启动时与「当前网卡读不到计数」
-/// 时调用，不走热路径。
+/// 在启动接线处通过 [`UsageTracker::set_device`] 注入；这里只处理环境变量、
+/// sysfs 探测与兜底。只在启动时与「当前网卡读不到计数」时调用，不走热路径。
 fn detect_netdev() -> String {
     // 1) 环境变量显式指定（systemd Environment= 或手动导出）
     if let Ok(dev) = std::env::var("AT_WEBSERVER_NETDEV") {
@@ -159,6 +196,54 @@ fn detect_netdev() -> String {
     }
     // 3) 兜底
     FALLBACK_NETDEV.to_string()
+}
+
+/// 写一项配置并落盘；内存态的热更新由各调用方自己做。
+async fn write_config(key: &str, value: &str) -> Result<(), String> {
+    let mut patch = crate::configstore::ConfigMap::new();
+    patch.insert(key.to_string(), value.to_string());
+    crate::configstore::update(patch)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("写入 {key} 失败: {e}"))
+}
+
+/// 解析 `^DSFLOWQRY` 应答，取 DS 累计接收 / 发送字节数。
+///
+/// 手册 16.12：`^DSFLOWQRY: <last_ds_time>,<last_tx_flow>,<last_rx_flow>,
+/// <total_ds_time>,<total_tx_flow>,<total_rx_flow>`，流量字段是 **16 位十六进制**，
+/// 单位为字节。应答可能被拆成多行（含手册示例里的数值折行），因此把
+/// `^DSFLOWQRY:` 之后到终止行之前的文本无分隔拼接后再按逗号切分。
+pub fn parse_dsflowqry(text: &str) -> Option<(u64, u64)> {
+    const TAG: &str = "^DSFLOWQRY:";
+    let mut joined = String::new();
+    let mut found = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(pos) = line.find(TAG) {
+            found = true;
+            joined.push_str(line[pos + TAG.len()..].trim());
+            continue;
+        }
+        if !found {
+            continue;
+        }
+        let upper = line.to_ascii_uppercase();
+        if line == "OK" || upper.contains("ERROR") || line.starts_with('+') {
+            break;
+        }
+        joined.push_str(line);
+    }
+    if !found {
+        return None;
+    }
+    let parts: Vec<&str> = joined.split(',').collect();
+    if parts.len() < 6 {
+        return None;
+    }
+    let total_tx = u64::from_str_radix(parts[4].trim(), 16).ok()?;
+    let total_rx = u64::from_str_radix(parts[5].trim(), 16).ok()?;
+    Some((total_rx, total_tx))
 }
 
 /// 从磁盘加载状态：优先内存文件（最新），缺失时回退持久化文件（重启后）。
@@ -209,21 +294,32 @@ fn remove_file(path: &str) {
 /// 使用量后台统计器。
 pub struct UsageTracker {
     state: Mutex<UsageState>,
-    /// 自动清零日：每月几号（存 UCI，与使用量是否持久化解耦）。
+    /// 自动清零日：每月几号（存配置文件，与使用量是否持久化解耦）。
     reset_day: AtomicU32,
     /// 已解析的承载网卡；读不到计数时重新探测。
     device: Mutex<Option<String>>,
+    /// 统计来源（`netdev` / `modem`），可由前端热切换。
+    source: RwLock<String>,
+    /// 模组来源取数用的异步状态缓存；`netdev` 来源下完全不触碰。
+    cache: Option<Arc<crate::state::StateCache>>,
 }
 
 impl UsageTracker {
     /// 创建统计器并从磁盘恢复状态。
     ///
-    /// `reset_day` 为「每月几号清零」，非法值由 [`crate::monthly::normalize_day`] 夹取。
-    pub fn new(reset_day: u32) -> Arc<UsageTracker> {
+    /// `reset_day` 为「每月几号清零」，非法值由 [`crate::monthly::normalize_day`] 夹取；
+    /// `source` 由 [`normalize_usage_source`] 归一化，非法值一律回落 `netdev`。
+    pub fn new(
+        reset_day: u32,
+        source: &str,
+        cache: Arc<crate::state::StateCache>,
+    ) -> Arc<UsageTracker> {
         Arc::new(UsageTracker {
             state: Mutex::new(load_state()),
             reset_day: AtomicU32::new(crate::monthly::normalize_day(reset_day)),
             device: Mutex::new(None),
+            source: RwLock::new(normalize_usage_source(source).to_string()),
+            cache: Some(cache),
         })
     }
 
@@ -249,7 +345,12 @@ impl UsageTracker {
     pub async fn run(self: Arc<Self>, ctx: watch::Receiver<bool>) {
         let ctx_c = ctx;
         loop {
-            if !crate::schedule::sleep_ctx(&ctx_c, SAMPLE_INTERVAL).await {
+            let interval = if *self.source.read().await == *SOURCE_MODEM {
+                MODEM_SAMPLE_INTERVAL
+            } else {
+                SAMPLE_INTERVAL
+            };
+            if !crate::schedule::sleep_ctx(&ctx_c, interval).await {
                 return;
             }
             self.sample().await;
@@ -258,7 +359,7 @@ impl UsageTracker {
 
     /// 一次采样：读计数器 → 到期自动清零 → 累加 → 落盘。
     async fn sample(&self) {
-        let (dev, rx, tx) = match self.read_counters().await {
+        let (dev, rx, tx) = match self.counters().await {
             Some(v) => v,
             None => return,
         };
@@ -275,8 +376,21 @@ impl UsageTracker {
         self.persist(&snapshot, false).await;
     }
 
-    /// 读计数器；网卡变更或读不到时重新探测。
-    async fn read_counters(&self) -> Option<(String, u64, u64)> {
+    /// 当前来源下的计数器快照；后端 `netrate` RPC 与采样循环共用。
+    ///
+    /// 返回 `(device 标签, 累计 rx, 累计 tx)`；取不到时返回 None，
+    /// 调用方必须停止累加，绝不能用另一套计数器顶替。
+    pub async fn counters(&self) -> Option<(String, u64, u64)> {
+        let source = self.source.read().await.clone();
+        if source == SOURCE_MODEM {
+            self.read_counters_modem().await
+        } else {
+            self.read_counters_netdev().await
+        }
+    }
+
+    /// 物理网卡来源：配置 `netdev` 优先，其次自动探测（环境变量 → USB → 兜底）。
+    async fn read_counters_netdev(&self) -> Option<(String, u64, u64)> {
         let mut cached = self.device.lock().await;
         let mut dev = cached.clone().unwrap_or_default();
         if !netdev_usable(&dev) {
@@ -300,6 +414,17 @@ impl UsageTracker {
                 None
             }
         }
+    }
+
+    /// 模组来源：`AT^DSFLOWQRY` 的 DS 累计值，走已有的异步状态缓存。
+    ///
+    /// 该指令本来就在缓存白名单里（2s 刷新），这里只是读缓存，
+    /// 不额外增加 AT 通道压力；缓存拿不到就跳过本轮，不补 0。
+    async fn read_counters_modem(&self) -> Option<(String, u64, u64)> {
+        let cache = self.cache.as_ref()?;
+        let text = cache.resolve(DSFLOWQRY_CMD).await.ok().flatten()?;
+        let (rx, tx) = parse_dsflowqry(&text)?;
+        Some((MODEM_DEVICE_LABEL.to_string(), rx, tx))
     }
 
     /// 到「每月几号」则自动清零。
@@ -393,6 +518,7 @@ impl UsageTracker {
             persist: st.persist,
             reset_day: self.reset_day.load(Ordering::Relaxed),
             time_source: nettime::source_name().to_string(),
+            source: self.source.read().await.clone(),
         }
     }
 
@@ -401,7 +527,7 @@ impl UsageTracker {
     /// 持久化开着时把落盘文件一并清零（而不是只清内存），否则重启后旧值会回来。
     pub async fn reset(&self) -> UsageSnapshot {
         let now = nettime::now_ts();
-        let (dev, rx, tx) = self.read_counters().await.unwrap_or((String::new(), 0, 0));
+        let (dev, rx, tx) = self.counters().await.unwrap_or((String::new(), 0, 0));
         let mut st = self.state.lock().await;
         st.total_rx = 0;
         st.total_tx = 0;
@@ -436,14 +562,26 @@ impl UsageTracker {
     /// 修改自动清零日（每月几号）：写配置（跨重启生效）+ 热更新内存值。
     pub async fn set_reset_day(&self, day: u32) -> Result<u32, String> {
         let day = crate::monthly::normalize_day(day);
-        let mut patch = crate::configstore::ConfigMap::new();
-        patch.insert("usage_reset_day".to_string(), day.to_string());
-        crate::configstore::update(patch)
-            .await
-            .map_err(|e| format!("写入 usage_reset_day 失败: {e}"))?;
+        write_config("usage_reset_day", &day.to_string()).await?;
         self.reset_day.store(day, Ordering::Relaxed);
         log_info!("使用量自动清零已改为 {}", crate::monthly::describe(day));
         Ok(day)
+    }
+
+    /// 切换统计来源：写配置（跨重启生效）+ 热更新内存值。
+    ///
+    /// 只接受 `netdev` / `modem`；切换后 `device` 标签随之改变，
+    /// [`accumulate`] 会自动重新基线，累计值保留，不会把两套计数器的
+    /// 绝对差值误记成流量。
+    pub async fn set_source(&self, raw: &str) -> Result<UsageSnapshot, String> {
+        let source = normalize_usage_source(raw);
+        if source == SOURCE_MODEM && self.cache.is_none() {
+            return Err("模组数据来源不可用（状态缓存未初始化）".into());
+        }
+        write_config("usage_source", source).await?;
+        *self.source.write().await = source.to_string();
+        log_info!("使用量统计来源已切换为 {}", if source == SOURCE_MODEM { "模组 AT^DSFLOWQRY" } else { "WAN 物理网卡" });
+        Ok(self.snapshot().await)
     }
 }
 
@@ -521,6 +659,8 @@ pub struct UsageSnapshot {
     /// 时刻来源（`NTP` / `设备时钟`）：按日历清零强依赖时钟准确度，
     /// 回退到设备时钟时在日志页能一眼看出「日期可能不准」。
     pub time_source: String,
+    /// 当前统计来源（`netdev` / `modem`）。
+    pub source: String,
 }
 
 #[cfg(test)]
@@ -537,6 +677,33 @@ mod tests {
             start_ts: 100,
             ..UsageState::default()
         }
+    }
+
+    #[test]
+    fn dsflowqry_hex_fields_are_parsed() {
+        // 手册 16.12.5 示例（数值被折行，实际 AT 输出为单行）
+        let text = "^DSFLOWQRY:\r\n0000002D,0000000000019A01,0000000000736A52,0000002D,0000000000019A01,0000000000736A52\r\nOK\r\n";
+        assert_eq!(parse_dsflowqry(text), Some((0x736A52, 0x19A01)));
+        // 数值中间折行也要能拼回来
+        let wrapped = "^DSFLOWQRY: 1,2,3,4,00000000\r\n00000100,0000000000000200\r\nOK";
+        assert_eq!(parse_dsflowqry(wrapped), Some((0x200, 0x100)));
+    }
+
+    #[test]
+    fn dsflowqry_rejects_broken_responses() {
+        assert_eq!(parse_dsflowqry("OK"), None);
+        assert_eq!(parse_dsflowqry("^DSFLOWQRY: 1,2,3\r\nOK"), None);
+        assert_eq!(parse_dsflowqry("^DSFLOWQRY: 1,2,3,4,ZZ,6\r\nOK"), None);
+        assert_eq!(parse_dsflowqry("ERROR"), None);
+    }
+
+    #[test]
+    fn usage_source_is_normalized() {
+        assert_eq!(normalize_usage_source("modem"), SOURCE_MODEM);
+        assert_eq!(normalize_usage_source(" modem "), SOURCE_MODEM);
+        assert_eq!(normalize_usage_source("netdev"), SOURCE_NETDEV);
+        assert_eq!(normalize_usage_source("br-lan"), SOURCE_NETDEV);
+        assert_eq!(normalize_usage_source(""), SOURCE_NETDEV);
     }
 
     #[test]

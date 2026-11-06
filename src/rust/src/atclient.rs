@@ -3,13 +3,13 @@
 //! - 只有一个任务读取通道，命令应答与主动上报在同一处解复用；
 //! - 命令串行执行（100ms 最小间隔），2 秒超时，最多保留 2048 行；
 //! - 空闲期收到的数据视为主动上报（raw_data 推给前端）；
-//! - 有命令等待时，只把「绝不可能是查询结果」的行（^REJINFO/+CUSD 等）截出来；
+//! - 有命令等待时，只截取绝不可能出现在查询应答里的上报（来电 RING/+CLIP、
+//!   短信 +CMTI、通话 ^CEND 等）；^REJINFO/+CUSD/+CDSI 经 passthrough 一并纳入；
 //! - `abcd` 打断绕过命令锁直接写入（供扫频使用）。
 
 use crate::{log_debug, log_info, log_warn};
-use crate::at_queue::{AtPriority, PriLock};
+use crate::at_queue::{AtPriority, PriLock, SmsMode, SmsTransaction};
 use crate::config::AtConfig;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -18,12 +18,30 @@ use tokio::sync::{mpsc, Mutex, Notify};
 
 const COMMAND_GAP: Duration = Duration::from_millis(100);
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// 短信提交（`AT+CMGS=<长度>` 后面同一条命令里就带着 PDU，见
+/// [is_single_shot_cmgs]）的应答预算。
+///
+/// 为什么必须单独给：普通查询是「模组本地算一下就回」，2 秒足够；而提交短信要
+/// 把 TPDU 交给网络侧，`+CMGS` 的回执取决于信号与基站排队，实测弱信号下要好几秒
+/// 甚至十几秒。原来统一 2 秒，提交必然超时 —— 前端于是显示
+/// 「模组无响应（已等待 2000ms）」，而短信其实可能已经发出去了。
+///
+/// 40 秒的依据：3GPP 27.005 允许模组在网络侧排队较久；这里取一个既能容忍弱信号、
+/// 又不会让用户觉得「卡死」的值（前端另有同量级的上限）。
+pub const SMS_SUBMIT_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// 短信列表（`AT+CMGL=4`）与短信正文读取的应答预算。
+///
+/// 同样是短信链路，但比提交短得多：列全量短信时模组要一条条吐 PDU，几十条
+/// 时远超普通查询的 2 秒，又不需要像提交那样等网络侧回执。25 秒是实测留的余量。
+pub const SMS_LIST_TIMEOUT: Duration = Duration::from_secs(25);
 /// 等待命令锁的独立预算。
 ///
 /// 背景（AT 终端「只有 ATI 有回复」的根因）：
 /// 服务启动/重连时会先跑 `init_modem()` 的一串初始化和自动拨号对齐命令，
-/// 这些命令全程占着通道不释放。若超时从进入函数就开始计时，
-/// 用户的终端命令会把整个预算消耗在「排队等锁」上，
+/// 这些命令全程占着通道不释放。此前 `send_command_inner` 的超时是从进入函数
+/// 就开始计时的，于是用户的终端命令会把整个预算消耗在「排队等锁」上，
 /// 2 秒一到就返回「模组无响应」——而模组其实什么都没收到。
 /// 表现为：服务刚起或刚重连的那段时间，除最先发的一条外全都没有回复。
 ///
@@ -61,20 +79,25 @@ impl AtResponse {
 
 /// 从 `AT^SETAUTODIAL?` 的应答里取出「开关」与「拨号方式」。
 ///
-/// 手册回显形如 `^SETAUTODIAL: 1,1,"IP","cmnet","","",0`：
-///   字段 1 = 开关（0=关 / 1=开）
-///   字段 2 = 拨号方式（1=USB 网络接口 / 2=转网口模式）
-/// 部分固件只回 `^SETAUTODIAL: 1`，此时方式为 None（表示「无法判定」，不是「不匹配」）。
+/// 手册 16.18.1 给出两种应答形态，16.18.5 的实例是全字段那一种：
+///   `^SETAUTODIAL: 1,1,"IP","cmnet","","",0` → 字段 1 = 开关（0=关 / 1=开），
+///   字段 2 = 拨号方式（0=模组内部拨号 / 1=上位机 USB 数传 / 2=上位机 网口数传，16.18.3）
+///   `^SETAUTODIAL: 1`                        → 只有开关，方式为 None（「无法判定」，不是「不匹配」）
+/// 同一节的语法页还把全字段形态印作 `^SETAUTODAIL:`（DIA 与 DAI 顺序互换），
+/// 手册两处口径不一致，故两种拼写都接受，否则真机回这一种时会被当成「读不到」而反复重下配置。
 /// 解析失败返回 None，调用方据此决定是否直接下发设置。
 ///
 /// 为什么必须把方式一起解析出来：只看开关会造成
 /// 「开关已是 1、但方式停在 2（转网口模式）」时直接跳过下发，
 /// 而期望是 1（USB 网络接口）——USB 网口永远收不到模组下发的 DHCP，
 /// MT5700M 接口长期没有 IP。这是「模组在线却上不了网」的一条独立成因。
+///
+/// 方式只认 1/2：本插件的数据通道就是这两种，模组停在 0（内部拨号）时
+/// 按「无法判定」处理，走同一条重新对齐的路径。
 fn parse_autodial_state(text: &str) -> Option<(bool, Option<i64>)> {
     for line in text.replace('\r', "").lines() {
         let line = line.trim();
-        if !line.starts_with("^SETAUTODIAL:") {
+        if !line.starts_with("^SETAUTODIAL:") && !line.starts_with("^SETAUTODAIL:") {
             continue;
         }
         let payload = line[line.find(':')? + 1..].trim();
@@ -98,19 +121,33 @@ fn parse_autodial_state(text: &str) -> Option<(bool, Option<i64>)> {
     None
 }
 
-/// 从 `AT^NDISSTATQRY?` 应答取 USB 数据面状态（首字段 1=就绪）。
-/// 拿不到可判定字段时返回 None（表示无法判定，而不是「未就绪」）。
+/// 从 `AT^NDISSTATQRY?` 应答取 CID 1 的 USB 数据面连接状态。
+///
+/// 手册 16.4.1/16.4.5 的应答形如 `^NDISSTATQRY: 1,1,,,"IPV4",0,,,"IPV6"`，
+/// 结构是 `<cid>,<stat>[,<err>[,<wx_state>[,<PDP_type>]]] [<stat>,<err>,<wx_state>,<PDP_type>]`，
+/// 可以一次上报一组或两组（IPv4 / IPv6）状态。**首字段是 <cid>，不是连接状态**：
+/// 早先按「首字段 1=就绪」解析，只要模组回里带 CID 1 就永远判定为已连接 ——
+/// 数据面已经掉线（`1,0,,,"IPV4",...`）时拨号守护同样不再补拨，界面也显示已连接。
+/// <stat>：0=断开 1=已连接 2=连接中 3=断开中（后两个模组暂不上报，见 16.4.3）。
+/// 本插件的数据通道固定 CID 1，因此只看 CID 1 那一行的 IPv4 状态；
+/// 找不到该行或字段不可判定时返回 None（「无法判定」，不是「未就绪」）。
+/// 注意：带参数的 `AT^NDISSTATQRY=<cid>` 才是以 <ipv4_stat> 开头，插件只用 `?` 形式。
 fn parse_ndis_state(text: &str) -> Option<bool> {
     for line in text.replace('\r', "").lines() {
         let line = line.trim();
         if !line.starts_with("^NDISSTATQRY:") {
             continue;
         }
-        let payload = line[line.find(':')? + 1..].trim();
-        let first = payload.split(',').next()?.trim().trim_matches('"');
-        return match first {
-            "0" => Some(false),
+        let payload = &line[line.find(':')? + 1..];
+        let mut fields = payload.split(',').map(|f| f.trim().trim_matches('"'));
+        let cid = fields.next()?.trim();
+        let stat = fields.next()?.trim();
+        if cid != "1" {
+            continue;
+        }
+        return match stat {
             "1" => Some(true),
+            "0" | "2" | "3" => Some(false),
             _ => None,
         };
     }
@@ -175,20 +212,27 @@ pub struct PendingCmd {
     pub done: Arc<Notify>,
     /// 非空时每收到一行应答就回调一次（^CELLSCAN 边扫边显示用）。
     pub stream: Option<Box<dyn Fn(String) + Send + Sync>>,
+    /// true 时忽略 `> ` 输入提示符，必须等到真正的结束码。
+    ///
+    /// 仅用于「一次写完整条 `AT+CMGS=<长度>` + 分隔符 + `<PDU>`」的短信提交：
+    /// 这台模组的正常路径不给 `> ` 提示符（手册 9.14.1 的应答里也没有它），但裸 AT
+    /// 终端页的一次性写法仍可能先吃到一个 `> ` 再等回执。若把 `> ` 当成应答结束，
+    /// 命令会提前返回 success，而此刻短信可能压根没提交完。
+    pub ignore_prompt: bool,
 }
 
-#[allow(dead_code)] // describe 保留给诊断输出
 pub struct Connection {
     writer: Arc<Mutex<Box<dyn tokio::io::AsyncWrite + Unpin + Send>>>,
+    #[allow(dead_code)] // 仅构造时写入、从不读取；保留是为了不改动各处构造字面量的签名
     describe: String,
 }
 
 /// 进程单调时钟的毫秒数（自首次调用起）。
 ///
-/// 「长命令什么时候结束」是两个瞬时之间的**间隔**，不是墙上时间：
+/// 长命令「什么时候结束的」是两个瞬时之间的**间隔**，不是墙上时间：
 /// 必须用 `Instant` 这类单调时钟，否则 NTP 校正 / 手动改时间会让差值失真。
 /// `Instant` 没法塞进原子量，这里折算成「距进程起点的毫秒」再存。
-fn mono_ms() -> u64 {
+pub(crate) fn mono_ms() -> u64 {
     static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
     ORIGIN.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
@@ -199,6 +243,12 @@ pub struct AtClient {
     conn: Arc<Mutex<Option<Connection>>>,
     /// 连接标志（原子，供 Scheduler 等异步任务安全读取，替代阻塞式取锁）。
     connected_flag: Arc<AtomicBool>,
+    /// 连接代次：每成功建立一次链路 +1。
+    ///
+    /// 定时锁频靠它识别「模组重连过」——USB 重枚举或模组自复位会把已下发的
+    /// 锁频清掉，而 `connected_flag` 只是 true/false 两态，抖动一次再回来
+    /// 看不出区别。代次是单调递增的，重连一次就变一次，判断不会被时序吃掉。
+    connect_epoch: Arc<AtomicU64>,
     /// 扫频进行中标志：扫频期间数据面会被临时断开，autodial_watchdog 据此跳过对账，
     /// 避免把「扫频导致的未就绪」误判为拨号故障而抢先重拨（会与扫频恢复逻辑抢 CID）。
     scan_active: Arc<AtomicBool>,
@@ -207,6 +257,8 @@ pub struct AtClient {
     /// AT 通道的「唯一放行闸」：所有命令按优先级排队申请。
     /// 业务模块不能直接碰 TTY，只能经 send_command 走这个闸。
     gate: Arc<PriLock>,
+    /// 短信优先模式的暂停门：非短信命令在它的入口等待模式解除。
+    sms_mode: Arc<SmsMode>,
     long_cmd: Arc<AtomicI32>,
     long_cmd_end: Arc<AtomicU64>,
     last_cmd_at: Arc<Mutex<Instant>>,
@@ -214,20 +266,66 @@ pub struct AtClient {
     pending: Arc<Mutex<Option<PendingCmd>>>,
 }
 
+/// 非短信命令在短信优先模式下的等待预算：按优先级分级（issue #23）。
+///
+/// 旧实现对所有非短信命令一刀切等 30s：页面状态查询（Normal）与后台巡检
+/// （Low）一个待遇，短信中心开着的时候其它页面全部干等满 30s 才失败，
+/// 再叠加前端 14s 的 RPC 超时，表现为「整个界面卡死」。
+///
+/// 分级依据：
+///   - High（用户主动操作：AT 终端、强制刷新）：短等，坏了立刻给明确结论；
+///   - Normal（页面状态查询）：中短等，保证页面 5s 内必有确定结果；
+///   - Low / Background（后台巡检、缓存刷新）：零预算直接跳过本轮 ——
+///     错过一轮下一轮补上，不该占着 worker 干等。
+///
+/// 等待超时的错误文案带 `sms_busy:` 前缀（前端 rpc.js 据此 2s 退避自动重试），
+/// 零预算的跳过带 `sms_skip:` 前缀（后台任务，无需重试）。
+pub fn sms_mode_budget(prio: AtPriority) -> Duration {
+    match prio {
+        AtPriority::High => Duration::from_secs(3),
+        AtPriority::Normal => Duration::from_secs(5),
+        AtPriority::Low | AtPriority::Background | AtPriority::Sms => Duration::ZERO,
+    }
+}
+
+/// 短信事务协作让出阈值：持有超过这么久且门外有排队者时，让出一次通道，
+/// 让被挡住的交互命令插进来，再以 Sms 优先级抢回（issue #23）。
+///
+/// 让出只发生在**命令边界**：PDU 会话上下文不跨让出点，事务完整性不受影响。
+/// `sms.list` 的单条 `AT+CMGL=4` 无法中途让出（一条命令一个 RPC），那种场景
+/// 由分级预算兜底（High 3s 内得到明确结论 + 前端自动重试）。
+const SMS_TX_YIELD_AFTER: Duration = Duration::from_secs(5);
+
+/// 让出后的抢回等待：给 [GatePermit] Drop 的「释放 + 派发」留出执行窗口
+/// （Drop 内部是 spawn，不占当前任务，但需要一次调度才会真正让出）。
+const SMS_TX_YIELD_GRACE: Duration = Duration::from_millis(100);
+
 impl AtClient {
     pub fn new(cfg: AtConfig, urc_tx: mpsc::Sender<Unsolicited>) -> Arc<Self> {
         Arc::new(AtClient {
             cfg,
             conn: Arc::new(Mutex::new(None)),
             connected_flag: Arc::new(AtomicBool::new(false)),
+            connect_epoch: Arc::new(AtomicU64::new(0)),
             scan_active: Arc::new(AtomicBool::new(false)),
             urc_tx,
             gate: PriLock::new(),
+            sms_mode: SmsMode::new(),
             long_cmd: Arc::new(AtomicI32::new(0)),
             long_cmd_end: Arc::new(AtomicU64::new(0)),
             last_cmd_at: Arc::new(Mutex::new(Instant::now())),
             pending: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// 短信优先模式的句柄（供 RPC 层登记/释放会话租约）。
+    pub fn sms_mode(&self) -> Arc<SmsMode> {
+        self.sms_mode.clone()
+    }
+
+    /// 短信优先模式是否生效（供缓存刷新等后台任务避让，issue #23）。
+    pub async fn sms_mode_active(&self) -> bool {
+        self.sms_mode.active().await
     }
 
     pub fn connection_type(&self) -> &str {
@@ -237,6 +335,11 @@ impl AtClient {
     pub fn connected(&self) -> bool {
         // 纯原子读取：绝不能在这里取锁阻塞（Scheduler 在异步循环中调用）。
         self.connected_flag.load(Ordering::Relaxed)
+    }
+
+    /// 当前连接代次（每次成功建链 +1）。同样只做原子读取，不加锁。
+    pub fn connect_epoch(&self) -> u64 {
+        self.connect_epoch.load(Ordering::Relaxed)
     }
 
     /// 标记扫频进行中。true 时 autodial_watchdog 暂停对账，避免与扫频恢复逻辑抢 CID。
@@ -259,6 +362,14 @@ impl AtClient {
             let client = self.clone();
             let ctx_w = ctx.clone();
             tokio::spawn(async move { client.autodial_watchdog(ctx_w).await });
+        }
+
+        // 短信优先模式的租约清扫：即使前端没发释放请求，到期租约也会自动失效，
+        // 后台巡检不会被永久挡在门外。
+        {
+            let mode = self.sms_mode.clone();
+            let ctx_w = ctx.clone();
+            tokio::spawn(async move { mode.run(ctx_w).await });
         }
 
         while !*ctx.borrow() {
@@ -288,6 +399,7 @@ impl AtClient {
             };
             *self.conn.lock().await = Some(conn);
             self.connected_flag.store(true, Ordering::Relaxed);
+            self.connect_epoch.fetch_add(1, Ordering::Relaxed);
 
             // 初始化命令要在读循环起来之后发，否则等不到应答。
             let read_ctx = ctx.clone();
@@ -321,6 +433,10 @@ impl AtClient {
 
     async fn teardown(&self) {
         self.connected_flag.store(false, Ordering::Relaxed);
+        // 链路断开关对会造成影响：短信事务无法再完成，租约必须马上清掉，
+        // 否则后台巡检会在重连后整段地被挡住。
+        self.sms_mode.release_all().await;
+
         let mut guard = self.conn.lock().await;
         guard.take(); // drop transport → 读循环退出
         drop(guard);
@@ -342,8 +458,23 @@ impl AtClient {
             Ok(resp) => log_warn!("开启详细错误码未返回 OK: {}", resp.text()),
             Err(e) => log_warn!("开启详细错误码失败: {}", e),
         }
-        // 短信走 PDU 模式并开启新短信主动上报，来电开启号码显示。
-        // 查询失败或不含目标值时都要 SET，避免模组刚连上超时导致模式未启用。
+        /*
+         * AT+CNMI=2,1,0,2,0 —— 手册 8.3.3 的五个参数依次是 mode / mt / bm / ds / bfr：
+         *   mode=2  短信通知与状态报告都直接送 TE；送不出去时（例如 online data 模式）
+         *           先缓存在 ME，能发了再一次性补上。8.3.3 的说明还规定：mode=0 或 2
+         *           时 <mt> 不能取 2/3、<ds> 不能取 1，配错了模组直接报错。
+         *   mt=1    短信**存在 MT 里**并上报 `+CMTI: "<mem>",<index>`（8.4）。
+         *           这是本插件要的形状：列表、删除、容量都以存储里的真实条目为准；
+         *           mt=2/3 是把 PDU 甩成 `+CMT` 且不落盘，那样界面就没有可删的条目了。
+         *   bm=0    小区广播（CBM）不上报，本页不处理 CBS。
+         *   ds=2    短信回执存在 MT 里并上报 `+CDSI: "<mem>",<index>`（8.5）。
+         *           回执内容界面暂不展示，但这条上报必须被认成主动上报，
+         *           否则它会混进正在等待的那条命令的应答行里。
+         *   bfr=0   从 mode=0 切到 mode=1/2 后，把之前缓存的通知一次性发给 TE
+         *           （取 1 才是清空丢掉，用户会看不到断连期间来的短信）。
+         * 查询失败或应答不含目标值时都要重新 SET：手册 8.3.4 的掉电保存是 N，
+         * 8.3.2 也写明 MT 重启后 CNMI 会回到 0,0,0,0,0 —— 那样一条 +CMTI 都收不到。
+         */
         match self.send_command(ctx, "AT+CNMI?", COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.contains("+CNMI: 2,1,0,2,0") => {}
             _ => match self.send_command(ctx, "AT+CNMI=2,1,0,2,0", COMMAND_TIMEOUT, None).await {
@@ -366,7 +497,7 @@ impl AtClient {
             Err(e) => log_warn!("开启来电号码显示失败: {}", e),
         }
 
-        // 自动拨号默认开启（UCI autodial_enable 默认 1）。
+        // 自动拨号默认开启（配置 autodial_enable 默认 1）。
         // 放在最后：前面的设置类命令失败不应阻止拨号，否则设备会一直没有 IP。
         // 内部含退避重试，覆盖「AT 已通但驻网/PDP 尚未完成」的冷启动窗口。
         self.ensure_autodial(ctx).await;
@@ -379,7 +510,7 @@ impl AtClient {
     ///   模组不向 USB 网口下发 DHCP → eth2 一直是 NO-CARRIER/DHCP 无应答 →
     ///   netifd 的 MT5700M 接口没有 IP → 无法联网。
     ///
-    /// 两个容易踩的坑：
+    /// 两个容易踩的坑（此前各造成一类「长期无 IP」）：
     ///   1) 只比开关不比方式：模组停在方式 2（转网口）而期望方式 1（USB 网口）时会直接跳过；
     ///   2) 只对齐一次且失败只记日志：冷启动时 AT 通道往往早于驻网可用，
     ///      第一次下发失败后不再重试，链路一直稳定的话永远等不到自愈。
@@ -523,8 +654,9 @@ impl AtClient {
         true
     }
 
-    /// 数据面是否就绪。先看 USB 网口状态，再回退看 PDP 激活位；
-    /// 两条命令都给不出可判定信息时返回 true（宁可放过，也不要因判定工具缺失而反复下发）。
+    /// 数据面是否就绪。先看 USB 网口状态，再回退看 PDP 激活位。
+    /// 只要拿不到可判定的读数就**倾向放过**（含 NDISSTATQRY 报了未就绪、
+    /// 但 CGACT? 给不出行的组合）—— 宁可放过，也不要因判定工具缺失而反复下发。
     async fn pdp_ready(self: &Arc<Self>, ctx: &tokio::sync::watch::Receiver<bool>) -> bool {
         if let Ok(resp) = self.send_command(ctx, "AT^NDISSTATQRY?", COMMAND_TIMEOUT, None).await {
             if let Some(state) = parse_ndis_state(&resp.text()) {
@@ -548,6 +680,7 @@ impl AtClient {
     ///   2) 数据面未激活且自动拨号本就关闭时直接跳过（无卡扫描等场景不断不恢复）；
     ///   3) 先关自动拨号（防止模组在断开后自动重拨、与恢复逻辑争用 CID），再撤数据面；
     ///   4) 给模组 1.5s 收尾，避免紧随其后的 CELLSCAN 撞上 PDP 拆除。
+    ///
     /// 返回快照，扫频结束后必须用 [Self::restore_scan_data_plane] 成对恢复。
     pub async fn prepare_scan_data_plane(&self, ctx: &tokio::sync::watch::Receiver<bool>) -> ScanDataPrior {
         let mut prior = ScanDataPrior::default();
@@ -672,6 +805,7 @@ impl AtClient {
 
 
     /// 串行发送一条 AT 命令并等待结束码。普通优先级（状态查询 / 网络 / SIM 等）。
+    /// 注意：超时前若已收到任意行，返回 Ok 并携带这些部分行；仅当一行未收到时才返回超时错误。
     pub async fn send_command(
         &self,
         ctx: &tokio::sync::watch::Receiver<bool>,
@@ -724,10 +858,97 @@ impl AtClient {
         }
         let now = mono_ms();
         if now < end {
-            // 回拨（单调时钟理论上不会，兜底）：视为刚结束
+            // 回拨（理论上单调时钟不会，兜底）：视为刚结束
             return Some(Instant::now());
         }
         Instant::now().checked_sub(Duration::from_millis(now - end))
+    }
+
+    // ============= 短信事务：多步骤操作的通道独占 =============
+
+    /// 开启一次短信事务，返回独占通道的句柄。
+    ///
+    /// 事务内的所有命令通过 [Self::run_in_transaction] 下发，中间**不释放**通道，
+    /// 因此「长短信分片发送」「批量删除」「读列表 + 读正文」这类多步骤流程
+    /// 不会被任何其它 AT 命令从中间插进来。
+    ///
+    /// `label` 仅用于日志，便于在命令日志里看出某一串命令属于哪个事务。
+    pub async fn open_sms_transaction(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        label: &str,
+        wait: Duration,
+    ) -> Result<SmsTransaction, String> {
+        let permit = self.gate.acquire(AtPriority::Sms, ctx, wait).await?;
+        log_debug!("短信事务开始: {}", label);
+        Ok(SmsTransaction::new(permit, label.to_string()))
+    }
+
+    /// 在事务持有的通道上下发一条 AT 命令。
+    ///
+    /// 与 `send_command_pri` 的区别：不再申请闸（已持有），也不经过短信模式的
+    /// 暂停门（短信命令本就该优先）。短信提交类命令自动按一次完整提交处理：
+    /// `> ` 提示符不算应答结束，必须等到 `+CMGS:` / OK / ERROR。
+    pub async fn run_in_transaction(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        tx: &SmsTransaction,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<AtResponse, String> {
+        // 协作让出检查点（issue #23）：事务持有超过阈值且门外有排队者时，
+        // 主动交出通道一次，让页面查询 / AT 终端插进来，再以 Sms 优先级抢回。
+        // 分片发送、批量删除这类多步骤流程因此在步骤间形成天然让出点，
+        // 长事务不再无限期饿死交互命令。
+        if tx.held_since() >= SMS_TX_YIELD_AFTER && self.gate.has_waiters().await {
+            crate::log_debug!(
+                "短信事务 {} 已持有 {}s，门外有等待者，协作让出一次",
+                tx.label(),
+                tx.held_since().as_secs()
+            );
+            tx.relinquish().await;
+            tokio::time::sleep(SMS_TX_YIELD_GRACE).await;
+            let permit = self
+                .gate
+                .acquire(AtPriority::Sms, ctx, QUEUE_WAIT_TIMEOUT)
+                .await?;
+            tx.restore(permit).await;
+        }
+        if !tx.holds_channel().await {
+            return Err(format!("短信事务 {} 已失效，拒绝下发 {}", tx.label(), command.trim()));
+        }
+        let single_shot_submit = is_single_shot_cmgs(command) || is_cmgs_payload(command);
+        self.exec_locked(ctx, command, timeout, None, single_shot_submit).await
+    }
+
+    /// 以短信最高优先级发送单条命令（事务之外的短信读任务，例如 `+CMTI` 触发的 CMGR）。
+    ///
+    /// 它会越过短信模式的暂停门（否则短信自己把自己挡在门外），并以 Sms 优先级
+    /// 排在所有其它命令之前。
+    pub async fn send_sms_command(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<AtResponse, String> {
+        self.send_command_pri(ctx, AtPriority::Sms, command, timeout, None)
+            .await
+    }
+
+    /// 测试专用：把一条双向管道装成模组连接。
+    ///
+    /// 生产代码里连接只由 `run()` 建立，测试没有第二条通道可用，所以要留一个
+    /// 注入点。它不参与 release 构建。
+    #[cfg(test)]
+    pub(crate) async fn attach_test_channel(
+        &self,
+        writer: Box<dyn tokio::io::AsyncWrite + Unpin + Send>,
+    ) {
+        *self.conn.lock().await = Some(Connection {
+            writer: Arc::new(Mutex::new(writer)),
+            describe: "test-duplex".into(),
+        });
+        self.connected_flag.store(true, Ordering::Relaxed);
     }
 
     /// 绕过命令锁直接向模组写入原始字符串（打断扫频用）。
@@ -765,24 +986,55 @@ impl AtClient {
         timeout: Duration,
         stream: Option<Box<dyn Fn(String) + Send + Sync>>,
     ) -> Result<AtResponse, String> {
+        // 第 0 段预算：短信优先模式。
+        // 非短信命令在短信模式生效期间一律停在入口等待 —— 后台巡检、自动拨号对账、
+        // 缓存刷新此时不能产生新的 AT，否则会和正在进行的短信事务抢同一条 TTY。
+        // 等待本身有上限：超时给出明确文案，不会把命令硬塞进通道造成响应串线。
+        if !prio.is_sms() {
+            self.sms_mode
+                .wait_clear(ctx, sms_mode_budget(prio), command)
+                .await?;
+        }
+
         // 第一段预算：排队（按优先级申请放行闸 + 最小命令间隔）。
         // 这段不计入应答超时，否则初始化/重连期间用户的命令会被误判为「模组无响应」。
         // acquire 内部已处理 wait 超时与 ctx 取消，这里直接收其结果即可。
+        // 下划线前缀不是「不用」，而是「它唯一的用途就是活着」：
+        // permit 的存在期间即通道独占期间，Drop 才让出。
         let _gate_permit = self
             .gate
             .acquire(prio, ctx, QUEUE_WAIT_TIMEOUT)
             .await?;
 
+        // 一次性提交（长度与 PDU 同一条命令）与 PDU 载荷段不能被 `> ` 提示符提前
+        // 结束应答，判据与 [run_in_transaction] 完全一致 —— 否则裸 AT 终端页会
+        // 把「模组只给了个提示符」报成一次成功应答，而短信根本没提交完。
+        let single_shot_submit = is_single_shot_cmgs(command) || is_cmgs_payload(command);
+        self.exec_locked(ctx, command, timeout, stream, single_shot_submit)
+            .await
+    }
+
+    /// 通道已被本调用方持有时下发一条命令（不重复申请闸）。
+    ///
+    /// 调用方必须自己持有 [GatePermit]（直接地、或通过 [SmsTransaction] 间接地）
+    /// 并在整段 await 期间不释放它 —— 这就是「通道由谁独占」的唯一凭据。
+    ///
+    /// 短信提交相关的命令自动按「还没说完」处理：`> ` 输入提示符不算应答结束，
+    /// 必须等到 `+CMGS:` / OK / ERROR（例外情形见 [is_cmgs_payload] 的注释）。
+    async fn exec_locked(
+        &self,
+        ctx: &tokio::sync::watch::Receiver<bool>,
+        command: &str,
+        timeout: Duration,
+        stream: Option<Box<dyn Fn(String) + Send + Sync>>,
+        ignore_prompt: bool,
+    ) -> Result<AtResponse, String> {
         // 两条命令之间最小间隔。
         {
             let last = self.last_cmd_at.lock().await;
             let gap = COMMAND_GAP.saturating_sub(last.elapsed());
-            if !gap.is_zero() {
-                let mut ctx_c = ctx.clone();
-                tokio::select! {
-                    _ = tokio::time::sleep(gap) => {}
-                    _ = ctx_c.changed() => return Err("上下文取消".into()),
-                }
+            if !gap.is_zero() && !sleep_ctx(ctx, gap).await {
+                return Err("上下文取消".into());
             }
         }
 
@@ -805,6 +1057,9 @@ impl AtClient {
             lines: Vec::new(),
             done: done.clone(),
             stream,
+            // 单次提交的短信：`> ` 提示符不能当作应答结束，必须等到真正的
+            // `+CMGS:` / OK / ERROR，否则会重演「Modem 还在收 PDU，前端已报成功」。
+            ignore_prompt,
         };
         *self.pending.lock().await = Some(pending);
 
@@ -819,8 +1074,9 @@ impl AtClient {
             }
         }
         *self.last_cmd_at.lock().await = Instant::now();
-        // 方向标记：这里是**唯一**真正写串口的地方，内部命令（初始化、自动拨号对齐）
-        // 也走这条路径，所以在这一层记录才能完整反映"我们发给模组什么"。
+        // 方向标记：常规命令（含内部初始化、自动拨号对齐）都从这一行写出去，
+        // 在这层记录才最接近"我们发给模组什么"。唯一例外是 interrupt() 的 `abcd`
+        // 打断串——它刻意绕过命令锁直接 write_all，不走这条路径、也就不会出现在这里。
         log_debug!("发送 → 模组: {}", cmd.trim());
 
         let mut ctx_c = ctx.clone();
@@ -848,7 +1104,7 @@ impl AtClient {
             return Ok(AtResponse { lines });
         }
         if answered {
-            // 收到过结束码但没攒到任何内容（例如模组只回一个空结束码）。
+            // 极端情形：结束码行内容与命令回显相同而被过滤，于是有应答标记却无内容。
             Err(format!("模组未返回内容: {}", command.trim()))
         } else {
             Err(format!(
@@ -891,10 +1147,8 @@ impl AtClient {
                 if zero_reads >= ZERO_READ_RETRY_LIMIT {
                     return Ok(()); // 持续为 0：判定链路已断开，交给上层重连
                 }
-                let mut ctx_c = ctx.clone();
-                tokio::select! {
-                    _ = tokio::time::sleep(ZERO_READ_BACKOFF) => {}
-                    _ = ctx_c.changed() => return Ok(()),
+                if !sleep_ctx(ctx, ZERO_READ_BACKOFF).await {
+                    return Ok(());
                 }
                 continue;
             }
@@ -920,8 +1174,15 @@ impl AtClient {
         }
 
         // AT+CMGS 的输入提示符 "> " 后面没有换行，单独识别成一次应答结束。
+        // 单次提交（命令串里同带长度与 PDU）例外：必须等真正的结束码，
+        // 见 PendingCmd::ignore_prompt。
         if data.iter().all(|b| b.is_ascii_whitespace() || *b == b'>') && data.contains(&b'>') {
             let mut pending = self.pending.lock().await;
+            let ignore = pending.as_ref().map(|p| p.ignore_prompt).unwrap_or(false);
+            if ignore {
+                drop(pending);
+                return Vec::new();
+            }
             if let Some(p) = pending.as_mut() {
                 p.lines.push(">".into());
             }
@@ -995,13 +1256,41 @@ pub fn is_terminator(line: &str) -> bool {
     line.starts_with("+CMS ERROR:") || line.starts_with("+CME ERROR:")
 }
 
+/// 判断是否为「一次性写完整条提交串」的 `AT+CMGS`：长度与 PDU 在同一条命令里。
+///
+/// 两种分隔符都要认：
+///   - **字面的 `\r`**（反斜杠 + 字母 r 两个字符）—— 手册 9.14.5 举例与厂商 WebUI
+///     实际下发的形态，也是这台模组唯一认的形态（真 CR 那种只回显、不应答）；
+///     业务路径 `sms::send` 走的就是这一种。
+///   - 真实的 CR —— 裸 AT 终端页里用户手敲或脚本贴进来的形态。
+///
+/// 两种都不能被 `> ` 提示符提前结束应答：模组对这条形态是直接给 `+CMGS:` / OK，
+/// 把它当成「停在提示符上的一次普通命令」会把回执丢到下一条应答里。
+/// 只报长度的那一半（`AT+CMGS=14`，两种分隔符都没有）不算 —— 它确实要停在 `> ` 上。
+pub fn is_single_shot_cmgs(command: &str) -> bool {
+    command.starts_with("AT+CMGS=") && (command.contains('\r') || command.contains("\\r"))
+}
+
+/// 判断是否为「两段式提交里 PDU 那一半」：以 Ctrl+Z 结尾就是提交体，
+/// 不是新的一条 AT 命令。
+///
+/// 它同样不能被 `> ` 提示符结束（模组偶尔会在收完 PDU 前再提示一次），
+/// 必须等到真正的 `+CMGS:` / OK / ERROR。
+pub fn is_cmgs_payload(command: &str) -> bool {
+    command.ends_with('\u{1a}')
+}
+
 /// 只匹配不可能出现在查询应答里的主动上报。
 pub fn is_exclusive_urc(line: &str) -> bool {
     match line {
         "RING" | "IRING" | "^IRING" | "NO CARRIER" => return true,
         _ => {}
     }
+    // +CMTI（手册 8.4）与 +CDSI（8.5）都是纯上报：没有对应的读命令，永远不会
+    // 是某条命令的应答。CNMI 设成 mt=1、ds=2 后两者都会来，漏掉 +CDSI 就会被
+    // 塞进正在等待的那条命令的应答行里，打断「头行 + 下一行 PDU」的配对。
     if line.starts_with("+CMTI:")
+        || line.starts_with("+CDSI:")
         || line.starts_with("^CEND:")
         || line.starts_with("^SMMEMFULL")
         || line.contains("MEMORY FULL")
@@ -1021,37 +1310,30 @@ pub fn is_passthrough_urc(line: &str) -> bool {
     if line.starts_with("^REJINFO") {
         return true;
     }
+    // 状态报告索引本插件暂不解析（短信中心页面不展示送达回执），
+    // 但也不能让它安静地消失：原样推给前端，日志里看得见「模组报过回执」。
+    if line.starts_with("+CDSI:") {
+        return true;
+    }
     line.starts_with("+CUSD:") && line.contains(',')
 }
 
-/// 通知系统侧「拨号已就绪」，执行可配置的 on-uplink 钩子拉起承载接口。
+/// 通知系统侧「拨号已就绪」，由本包提供的钩子脚本拉起承载接口。
 ///
-/// 时序意义：接口侧无法知道模组何时真正拨号成功，
-/// 只能靠开机时抢跑 + 猜时间窗口，冷启动很容易错过（整条链路
+/// 时序意义：接口侧（init.d / hotplug）无法知道模组何时真正拨号成功，
+/// 只能靠开机时抢跑 + 猜时间窗口，冷启动很容易错过（实测整条链路
 /// USB 枚举→驻网→下发 DHCP 常见 30~60s）。
 /// 这个通知让「拨号完成 → ifup 要地址」变成确定顺序。
 ///
-/// 脚本不存在或执行失败都静默跳过：钩子路径可用 MT5700_UPLINK_HOOK 指定，
-/// 不存在或失败时静默跳过，缺了它功能仍然可用。
+/// 脚本不存在或执行失败都静默跳过：它是补充手段，兜底路径在 init.d 的重试
+/// 与 hotplug 钩子里，缺了它功能仍然可用。
 async fn notify_uplink_ready() {
-    /* Debian 分支：钩子路径可配置（MT5700_UPLINK_HOOK 环境变量优先），
-     * 依次探测发行包默认位置与旧 OpenWrt 位置，均不存在时静默跳过。 */
-    const HOOK_CANDIDATES: [&str; 3] = [
-        "/etc/mt5700/on-uplink.sh",
-        "/usr/libexec/at-webserver/on-uplink.sh",
-        "/usr/libexec/mt5700/on-uplink.sh",
-    ];
-    let hook = std::env::var("MT5700_UPLINK_HOOK")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .map(PathBuf::from)
-        .or_else(|| HOOK_CANDIDATES.iter().map(PathBuf::from).find(|p| p.exists()));
-    let hook = match hook {
-        Some(h) => h,
-        None => return,
-    };
-    match tokio::process::Command::new(&hook).status().await {
-        Ok(st) if st.success() => log_info!("已通知系统侧拉起模组接口（{}）", hook.display()),
+    const HOOK: &str = "/usr/libexec/at-webserver/on-uplink.sh";
+    if !std::path::Path::new(HOOK).exists() {
+        return;
+    }
+    match tokio::process::Command::new(HOOK).status().await {
+        Ok(st) if st.success() => log_info!("已通知系统侧拉起模组接口（{}）", HOOK),
         Ok(st) => log_warn!("拉起模组接口的钩子返回非零退出码: {:?}", st.code()),
         Err(e) => log_warn!("执行拉起模组接口的钩子失败: {}", e),
     }
@@ -1071,10 +1353,30 @@ pub fn humandur(d: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn sms_mode_budget_tiers_by_priority() {
+        // issue #23：分级预算，High 短等 / Normal 中短等 / 后台零预算直接跳过
+        assert_eq!(sms_mode_budget(AtPriority::High), Duration::from_secs(3));
+        assert_eq!(sms_mode_budget(AtPriority::Normal), Duration::from_secs(5));
+        assert_eq!(sms_mode_budget(AtPriority::Low), Duration::ZERO);
+        assert_eq!(sms_mode_budget(AtPriority::Background), Duration::ZERO);
+    }
     use super::*;
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tokio::io::{AsyncRead, ReadBuf};
+
+    /// 一次性提交的识别：字面 `\r`（业务路径与厂商形态）与真实 CR（终端页手敲）
+    /// 都要认，只报长度的那半步都不能认——它确实要停在 `> ` 提示符上。
+    #[test]
+    fn single_shot_cmgs_recognizes_both_separators() {
+        assert!(is_single_shot_cmgs("AT+CMGS=18\\r0015660B3108108300F00008FF04"));
+        assert!(is_single_shot_cmgs("AT+CMGS=18\r0015660B3108108300F00008FF04"));
+        assert!(!is_single_shot_cmgs("AT+CMGS=18"), "只报长度：要等提示符");
+        assert!(!is_single_shot_cmgs("AT+CMGS=18\n001566"), "LF 不是分隔符");
+        assert!(!is_single_shot_cmgs("AT+CMGF=0\\r"), "不是提交命令");
+    }
 
     /// 模拟「暂无数据时 read 返回 0 字节」的串口：先给若干次 0，再给出数据。
     struct ZeroThenData {
@@ -1143,6 +1445,16 @@ mod tests {
         assert_eq!(parse_autodial_state("^SETAUTODIAL: 1\r\nOK"), Some((true, None)));
         // 前导空白 / 多空格
         assert_eq!(parse_autodial_state("  ^SETAUTODIAL:  0  \r\nOK"), Some((false, None)));
+        // 手册 16.18.1 的语法页把同一行印作 ^SETAUTODAIL:（少一个 I），两种拼写都要认；
+        // 这里的 dial_mode=0（模组内部拨号）不在本插件的通道之内 → 方式为 None（需重新对齐）
+        assert_eq!(
+            parse_autodial_state("^SETAUTODAIL:1,0,\"IPV4V6\",\"\",\"\",\"\",0\r\nOK"),
+            Some((true, None))
+        );
+        assert_eq!(
+            parse_autodial_state("^SETAUTODAIL: 1,1\r\nOK"),
+            Some((true, Some(1)))
+        );
     }
 
     #[test]
@@ -1187,9 +1499,24 @@ mod tests {
     }
 
     #[test]
-    fn parse_ndis_state_reads_first_field() {
-        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1,1,0,0,0,0,0\r\nOK"), Some(true));
-        assert_eq!(parse_ndis_state("^NDISSTATQRY: 0,1,0,0,0,0,0\r\nOK"), Some(false));
+    fn parse_ndis_state_reads_cid_stat_pair() {
+        // 手册 16.4.5 举例：首字段是 CID，第二字段才是连接状态
+        assert_eq!(
+            parse_ndis_state("^NDISSTATQRY: 1,1,,,\"IPV4\",0,,,\"IPV6\"\r\nOK"),
+            Some(true)
+        );
+        // 同样带 CID 1，但状态是 0（断开）—— 旧实现读首字段会误判为「已连接」
+        assert_eq!(
+            parse_ndis_state("^NDISSTATQRY: 1,0,32,,\"IPV4\",,,,\"IPV6\"\r\nOK"),
+            Some(false)
+        );
+        // 多组上报：IPv6 组已连、IPv4 组断开 → 数据面（USB 网口按 IPv4 通道）未就绪
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1,0,,,\"IPV4\",1,,,\"IPV6\"\r\nOK"), Some(false));
+        // 只有 CID 2 的行：读不到本插件通道（CID 1）的状态 → 无法判定
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 2,1,,,\"IPV4\"\r\nOK"), None);
+        // 字段缺失 / 非数字 → 无法判定
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1\r\nOK"), None);
+        assert_eq!(parse_ndis_state("^NDISSTATQRY: 1,x,,,\"IPV4\"\r\nOK"), None);
         assert_eq!(parse_ndis_state("OK"), None);
     }
 
@@ -1321,5 +1648,155 @@ mod tests {
         );
 
         holder.abort();
+    }
+}
+
+/// 模拟模组的测试装置。
+///
+/// 目标是用**真实的 AtClient + 真实的读循环 + 真实的命令闸**跑短信流程，
+/// 只把「模组那一端」换成可编程的应答器。这样测出来的命令顺序、字节序列、
+/// 优先级行为才和实机一致 —— mock 掉太多层就只剩下自娱自乐。
+#[cfg(test)]
+pub(crate) mod testutil {
+    use super::AtClient;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// 一次应答的形态。
+    pub(crate) enum Reply {
+        /// 回若干行（每行自带结束码语义），例如 `vec!["+CMGS: 1".into(), "OK".into()]`。
+        Lines(Vec<String>),
+        /// 回 `> ` 输入提示符（**不带换行**），随后的一段被当作 PDU。
+        Prompt,
+        /// 什么都不回（模拟模组无响应，用于验证超时不被当成失败）。
+        Silent,
+    }
+
+    impl Reply {
+        pub(crate) fn ok(extra: &[&str]) -> Reply {
+            let mut v: Vec<String> = extra.iter().map(|s| s.to_string()).collect();
+            v.push("OK".into());
+            Reply::Lines(v)
+        }
+    }
+
+    /// 装好并返回记录器：`written` 是**原始写入字节**（字节级验证用），
+    /// `commands` 是按 `\r` 切出的命令段（顺序验证用）。
+    pub(crate) struct MockModem {
+        pub written: Arc<StdMutex<Vec<Vec<u8>>>>,
+        pub commands: Arc<StdMutex<Vec<String>>>,
+    }
+
+    impl MockModem {
+        /// 截至目前写入串口的全部字节（按写入批次拼接后的完整流）。
+        pub fn stream(&self) -> Vec<u8> {
+            let guard = self.written.lock().unwrap_or_else(|e| e.into_inner());
+            guard.iter().flatten().copied().collect()
+        }
+        pub fn cmds(&self) -> Vec<String> {
+            self.commands.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+    }
+
+    /// 把 `client` 接到一个可编程的模拟模组上，并启动读循环。
+    ///
+    /// `responder` 按「以 \r 结尾的一段」回调，返回该段的应答。
+    /// 对 `Reply::Prompt`，紧接着的下一段（PDU）自动回 `+CMGS` + OK，
+    /// 这与真实模组「先吐提示符、收到 PDU 后才给回执」的行为一致。
+    pub(crate) async fn attach_mock_modem(
+        client: Arc<AtClient>,
+        ctx: tokio::sync::watch::Receiver<bool>,
+        responder: impl Fn(&str) -> Reply + Send + Sync + 'static,
+    ) -> MockModem {
+        let (host, device) = tokio::io::duplex(8192);
+        let (mut dev_rd, mut dev_wr) = tokio::io::split(device);
+        let (host_rd, host_wr) = tokio::io::split(host);
+
+        client.attach_test_channel(Box::new(host_wr)).await;
+
+        let written: Arc<StdMutex<Vec<Vec<u8>>>> = Arc::new(StdMutex::new(Vec::new()));
+        let commands: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let w = written.clone();
+        let c = commands.clone();
+        tokio::spawn(async move {
+            let mut buf: Vec<u8> = Vec::new();
+            let mut tmp = [0u8; 1024];
+            let mut expect_pdu = false;
+            let mut silence = false;
+            let mut swallow = false;
+            loop {
+                match dev_rd.read(&mut tmp).await {
+                    Ok(0) => return,
+                    Ok(n) => {
+                        buf.extend_from_slice(&tmp[..n]);
+                        w.lock().unwrap_or_else(|e| e.into_inner()).push(tmp[..n].to_vec());
+                    }
+                    Err(_) => return,
+                }
+                while let Some(i) = buf.iter().position(|&b| b == b'\r') {
+                    let mut seg: Vec<u8> = buf.drain(..=i).collect();
+                    seg.pop(); // 去掉结尾的 \r
+                    let seg_str = String::from_utf8_lossy(&seg).to_string();
+                    c.lock().unwrap_or_else(|e| e.into_inner()).push(seg_str.clone());
+
+                    let is_cmd = seg_str.starts_with("AT");
+                    let out: String = if expect_pdu && !is_cmd {
+                        // 上一段回了 `> ` 提示符，这一段就是 PDU 载荷：
+                        // 真实模组在收完 PDU 之后才给出 +CMGS 回执。
+                        expect_pdu = false;
+                        if silence {
+                            String::new()
+                        } else {
+                            "+CMGS: 1\r\n\r\nOK\r\n".to_string()
+                        }
+                    } else if !is_cmd {
+                        // 既不是命令、也不是被期待的 PDU：真实模组会报错。
+                        // 早期版本这里一律回 OK，于是「模组其实没回话」的场景
+                        // 被误判成发送成功，测试完全失去了意义。
+                        if silence || swallow {
+                            swallow = false;
+                            String::new()
+                        } else {
+                            "ERROR\r\n".to_string()
+                        }
+                    } else {
+                        silence = false;
+                        match responder(&seg_str) {
+                            Reply::Lines(lines) => {
+                                // 一次性提交（`AT+CMGS=<len>\r<PDU>\r`）：模组把整串
+                                // 当作一次输入，紧随其后的 PDU 段已被消费，不再单独应答。
+                                swallow = seg_str.starts_with("AT+CMGS=");
+                                let mut s = String::new();
+                                for l in lines {
+                                    s.push_str(&l);
+                                    s.push_str("\r\n");
+                                }
+                                s
+                            }
+                            Reply::Prompt => {
+                                expect_pdu = true;
+                                "> ".to_string()
+                            }
+                            Reply::Silent => {
+                                // 模组彻底不回话：连随后的 PDU 也不应答
+                                silence = true;
+                                String::new()
+                            }
+                        }
+                    };
+                    if !out.is_empty() && dev_wr.write_all(out.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        // 启动唯一读循环（与生产路径同一份实现）。
+        let c2 = client.clone();
+        let ctx2 = ctx.clone();
+        tokio::spawn(async move { c2.read_loop(&ctx2, Box::new(host_rd)).await });
+
+        MockModem { written, commands }
     }
 }
