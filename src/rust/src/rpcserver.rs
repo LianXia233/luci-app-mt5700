@@ -452,6 +452,8 @@ impl RpcServer {
             }
             // 后端运行日志（含被级别过滤掉的 info）：拨号对齐、串口探测、接口拉起协作、
             // URC 分发等过程都在这里，是 syslog 看不到的部分（稳态级别是 Warn）。
+            // categories 一并下发：前端按它分栏渲染类别筛选按钮，于是后端新增一个
+            // 类别时界面自动多出一项，不必两边同时改（标签文案仍由前端持有，便于翻译）。
             "logs" => {
                 let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
                 let limit = req
@@ -460,8 +462,35 @@ impl RpcServer {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(300)
                     .min(1200) as usize;
-                let (seq, entries) = crate::logger::snapshot(since, limit);
-                serde_json::json!({ "id": id, "result": { "seq": seq, "entries": entries } })
+                // cats：可选的类别过滤，字符串（"sms,at"）或数组（["sms","at"]）都收。
+                // 过滤在 limit 之前生效，语义见 ringlog::snapshot_cats。
+                let cats = match req.params.get("cats") {
+                    Some(serde_json::Value::String(s)) => crate::logger::parse_cat_filter(s),
+                    // 数组形式先用逗号拼回一条再解析：去重与非法键丢弃都只由
+                    // `parse_cat_filter` 一处负责，避免两种入参形态语义不一致。
+                    Some(serde_json::Value::Array(items)) => {
+                        let joined = items
+                            .iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        crate::logger::parse_cat_filter(&joined)
+                    }
+                    _ => Vec::new(),
+                };
+                let (seq, entries) = crate::logger::snapshot_cats(since, limit, &cats);
+                let (file_on, file_path, file_cap) = crate::logger::plugin_file_info();
+                serde_json::json!({
+                    "id": id,
+                    "result": {
+                        "seq": seq,
+                        "entries": entries,
+                        "categories": crate::logcat::table(),
+                        // 插件日志文件的落点与上限，给日志页做「业务日志写在哪」的提示；
+                        // 关掉时 path 为空串，前端据此不显示这一行
+                        "plugin_file": { "enabled": file_on, "path": file_path, "max_bytes": file_cap }
+                    }
+                })
             }
             // 使用量统计快照：由后端常驻采样累加，与前端是否打开无关。
             "usage" => {

@@ -9,6 +9,7 @@ mod async_runtime;
 mod at_queue;
 mod atclient;
 mod config;
+mod logcat;
 mod logger;
 mod localtime;
 mod monthly;
@@ -85,6 +86,14 @@ async fn run(verbose: bool) -> Result<(), String> {
     crate::localtime::init();
 
     let cfg = config::load_config().await;
+    // 业务类日志（AT/短信/拨号/信号…）不进 syslog，落在这个插件自己的文件里。
+    // 必须紧跟 load_config：再往后的日志才有正确的落点与上限，
+    // 在此之前它们只进内存环形缓冲（见 logger 模块文档的取舍说明）。
+    crate::logger::init_plugin_file(
+        cfg.log.plugin_file_enabled,
+        &cfg.log.plugin_file,
+        cfg.log.plugin_file_max_bytes,
+    );
     if !cfg.enabled {
         log_warn!("服务在配置中被禁用，退出");
         return Ok(());
@@ -473,6 +482,18 @@ fn log_config(cfg: &Config) {
         "使用量统计: 后台常驻采样（1s），自动清零 {}（时间源 {}）",
         crate::monthly::describe(cfg.usage_reset_day),
         crate::nettime::source_name()
+    );
+
+    // 业务日志（AT/短信/拨号等）已不再进 syslog，落盘位置必须在启动时自报一次：
+    // 否则运维在 `logread` 里看不到业务痕迹，只会误判成「日志丢了」。
+    let (file_on, file_path, file_cap) = crate::logger::plugin_file_info();
+    log_info!(
+        "业务日志: {}",
+        if file_on {
+            format!("写入 {file_path}（上限 {} KiB，超限裁掉最旧）", file_cap / 1024)
+        } else {
+            "仅内存环形缓存（log_plugin_file_enabled=0，不落盘）".to_string()
+        }
     );
 }
 
