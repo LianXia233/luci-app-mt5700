@@ -8,6 +8,115 @@
 
 ---
 
+## 未发布
+
+### feat(log) 日志按 21 个类别细分，模组业务痕迹不再刷 syslog
+
+> 改动前所有日志只有一条路：入内存环形缓冲，再按级别 `eprintln!` 到 stderr，
+> 由 procd/logd 收进 syslog。结果是 `logread` 里混满 AT 收发原文与短信正文
+> （既刷屏又含隐私），而真正需要跨重启留存的业务痕迹反而留不住 —— 环形缓冲
+> 一满就被挤掉，后端被 procd 拉起后什么都查不到。现在按类别三路分流：
+> **运行时类**（软件自身运行情况）照旧走 syslog；**业务类**（模组与网络痕迹）
+> 只进内存环形缓冲与插件自己的文件，`ERR` 破例仍发 syslog，免得运维在
+> `logread` 里连「短信发送失败」这种硬故障都看不到。
+
+- **feat(log)** 新增 `src/rust/src/logcat.rs`：21 个日志类别分属两组。运行时组 7 类
+  （`RT` 进程运行时 / `CFG` 配置 / `RPC` 接口 / `TTY` 串口 / `TSK` 任务 / `STO` 存储 /
+  `MISC` 其他）；业务组 14 类（`AT` 通道 / `URC` 主动上报 / `DIAL` 拨号承载 /
+  `NET` 接口防火墙 / `SIG` 信号射频 / `SIM` / `SMS` 短信 / `CALL` 通话 /
+  `NTF` 通知推送 / `SCAN` 扫频 / `SCH` 锁频 / `FOTA` 模组升级 / `USAGE` 流量 /
+  `TIME` 时间）。每个类别自带 `key()`（小写稳定键，RPC 与前端筛选的契约）、
+  `code()`（行内短标签）、`group()`、`persists_to_file()`、`syslog_floor()`，
+  分流策略集中在这一个模块，不散落到各业务模块里。
+- **feat(log)** 分类对既有代码零成本：日志宏新增可选首参 `Cat::Xxx`，未显式指定时
+  用编译期常量 `module_path!()` 推导（`Category::from_module` 取模块路径第二段，
+  因此 `at_webserver::sms::tests` 仍归 `sms`）。238 处日志调用点里只有横跨多个业务
+  域的 98 处需要显式标注（`atclient.rs` 43 / `main.rs` 31 / `rpcserver.rs` 15 /
+  `urc.rs` 8 / `state.rs` 1），其余全部自动归类。
+- **note(log)** 宏的两条分支靠**首 token 是不是字面量 `Cat::`** 区分，不能写成
+  `$cat:expr,` —— `log_info!("发送: {}", cmd)` 里的格式串同样是 `expr`，会被前一条
+  分支抢先匹配、把格式串当类别用，报一个极难定位的类型错误。
+- **feat(log)** 三路分流在 `logger.rs` 落地：全部日志无条件入内存环形缓冲
+  （1200 条 / 512 KiB 双上限，**不受级别限制** —— 稳态级别是 Warn，若缓冲也看级别，
+  排障最需要的 info 级拨号与接口过程会整段消失）；业务类另写插件自有文件
+  `/tmp/at-webserver/plugin.log`（复用 `append_capped` 有界追加，默认 512 KiB，
+  裁剪只按行边界、绝不切半行；落在 tmpfs 上不磨闪存）；syslog 侧由
+  `syslog_allowed()` 的两道闸门把关（类别地板 + 全局级别）。
+- **feat(log)** 多行消息在落盘前压平为单行（`\n` / `\r` → 空格），否则「一行一条」
+  的文件结构与行边界裁剪都会错位；环形缓冲与 syslog 仍保留原文。
+- **feat(log)** `ringlog::Entry` 增加 `cat` 字段并计入 `weight()`（不把类别算进字节
+  上限会让实际占用悄悄超出设定值）；新增 `snapshot_cats()`，**先按类别过滤再截
+  `limit`** —— 反过来的话「最新 50 条里恰好是短信的那几条」在短信稀疏时几乎总是
+  空结果，是个只会让人以为「日志丢了」的坑。
+- **feat(log)** 插件日志落点可配：UCI 新增 `log_plugin_file_enabled` /
+  `log_plugin_file` / `log_plugin_max_bytes`，`root/etc/config/at-webserver` 同步给出
+  默认值与注释。上限低于 4096 或路径为空时回落默认（手填个 `1` 会让每条日志都触发
+  一次整文件裁剪）；目录创建失败只降级为「不写文件」，绝不影响另外两个去处。
+- **note(log)** 分流规则刻意**不做成配置项**：能把业务日志重新灌回 syslog 的开关
+  等于把这次改造关掉。`init_plugin_file` 之前的日志只进环形缓冲（那时还不知道用户
+  把路径配成了什么，先写默认路径再搬家会产生两个文件、也会绕过 `enabled=0`）。
+- **feat(log)** `logs` RPC 接受可选 `cats`（字符串 `"sms,at"` 或数组，逗号与空格
+  皆可分隔，非法键直接丢弃 —— 于是「只填了非法键」得到空结果而不是静默返回全部），
+  并回传 `categories` 目录与 `plugin_file` 落点信息；ucode 代理透传该参数。SSH 里
+  `ubus call mt5700 logs '{"cats":"sms"}'` 即可只看短信链路，不必把 1200 条全捞出来
+  再自己 grep。
+- **note(log)** 类别目录只下发结构（`key` / `code` / `group`），不含中文标签：
+  文案归前端所有，`po/` 翻译才有地方落，也避免出现第二份真相。
+- **feat(log)** rpcd ACL 增加 `/tmp/at-webserver` 的 `list` 与 `/tmp/at-webserver/*`
+  的 `read` / `stat`（刻意不放开整个 `/tmp`）。
+- **feat(log)** 后端启动时自报业务日志的落点与上限，`logread` 里能直接确认分流已生效。
+- **feat(ui)** 日志页新增第三路来源「插件文件」：路径只随 `logs` RPC 的
+  `plugin_file` 下发，因此读文件排在 RPC 之后（`logsTask.then(…)`）。按
+  `YYYY-MM-DD HH:MM:SS.mmm [LVL] [CODE] msg` 逐字段拆解后 `new Date(y, m-1, d, …)`，
+  **刻意不用** `Date.parse` / `new Date(字符串)`：这种不带时区标记的本地时间各浏览器
+  口径不一（有的按 UTC 解、有的直接 NaN），按 UTC 解会让整批条目平移一个时区，
+  排序与去重一起落空，表现为「同一句话出现两遍、时间还差几小时」。格式不符的行
+  一律跳过而不是猜 —— 猜错的时间戳会把整份排序带歪。
+- **feat(ui)** 类别筛选条由 7 项扩到 22 项（`全部` + 21 类），并按后端 `Group`
+  分成「软件运行 / 业务痕迹」两段渲染；顺序与分组以 RPC 下发的 `categories` 为准，
+  内置 `CAT_TABLE` 只在旧后端或 RPC 失败时兜底。类别条只在后端清单签名变化时重建，
+  否则 5 秒自动刷新会持续打断焦点与选中态；选中的类别若在新清单里消失则回落「全部」。
+- **feat(ui)** 类别不再由前端正则猜：`entriesFromBackend` 优先用后端的 `e.cat`
+  （且必须是已知键，`hasOwnProperty` 把关），缺席时才退回 `categorize()`。
+  `CATEGORY_RULES` 重写为 20 条、产出新键，兜底 `misc`；`+CMT` / `+CMTI` 归 `sms`
+  而非 `urc`（短信规则排在 urc 之前，理由写进注释）。
+- **feat(ui)** 三源合并去重：键为 `ts + '|' + msg`（文件行没有 `seq`，所以不能拿
+  `seq` 当键）；已见集只用环形缓冲的条目建立，文件里撞键的跳过，**重启前只存在于
+  文件里的历史照常保留**；合并后按 `ts` 排序。页脚在 `enabled && path` 时追加
+  「业务日志文件：<path>（上限 <KiB>）」；导出文本每行带 `[CODE]` 段与
+  `# 类别:` / `# 来源:` 头，便于按列扫与按 code grep。
+- **style(css)** 21 类徽章 × 明暗两套共 42 条规则（运行时组用中性低饱和、业务组用
+  高饱和，沿用既有 `rgba` 结构，无新增色值），新增 `.mt5700-logsrc-file` 来源徽章
+  与分组条样式；`≤768px` 下类别条改为**单行不换行 + 横向滚动**（`overflow-x: auto`
+  + `flex: 0 0 auto`），否则 22 个 chip 在竖屏会堆成三四排把首屏推走。
+  `MT5700_CSS_VERSION` 2.46.8 → 2.46.9。
+- **note(ui)** 通知记录页签逐字节未动（`renderNotify` / `notifyPath` / `clearNotify` /
+  `state.notify` 无任何改动行命中）。
+- **docs** README「运行日志」行改写为「三源统一入口 + 21 类 + 后端定类 + ERR 破例」口径。
+- **test** Rust 单测 345 → **370**（新增 25 例）：类别目录（含「main.rs 声明的 28 个
+  模块全部有归属」与「至少映射出 8 个不同类别」两条防退化断言 —— 后者把「细分」
+  变成可执行的指标）、模块推导与 `misc` 兜底、宏显式覆盖、缓冲不受级别限制、
+  业务与运行时的分流落盘、全类别落盘矩阵、上限裁剪不切半行、多行压平、
+  `syslog_allowed` 两道闸门（Warn 与 Debug 两种全局级别各测一遍）、类别地板与
+  「不进 syslog 就必须能落盘」的互斥性、`snapshot_cats` 过滤先于 limit、
+  `cat` 参与字节权重、`parse_cat_filter` 的分隔符与非法键处理。
+- **test** 新增 `tests/log-category-test.js`（**77** 项，零依赖）：**直接解析**
+  `src/rust/src/logcat.rs` 取 `key` / `code` / `group` 与 `ALL`（而不是硬编码一份副本），
+  再与 `logs.js` 的前端表逐项对账 —— 每个后端键都有标签与图标、无前端孤儿、
+  `code` 唯一、分组一致；另覆盖 CSS 42 条与窄屏横滚、版本递增、LF 与无尾随空白，
+  以及 `categorize` / `entriesFromBackend` 优先级 / 插件文件解析 / `fmtKiB` /
+  `dedupKey` / 去重方向性 / 页脚与导出接线的功能性检查；还钉住 `logs.js` 里
+  syslog 行样例注释的形状（级别括号 + 类别括号，且 code 必须是后端真实存在的），
+  防止注释再次腐烂。
+- **chore(test)** `tests/usage-source-test.js` 中「改了 CSS 必须递增
+  `MT5700_CSS_VERSION`」那条断言的期望值随本次样式改动 2.46.8 → 2.46.9。
+- **验证** `cargo test --release` **370 passed / 0 failed / 2 ignored**，
+  `cargo build --release` 零警告；`node tests/static-check.js` **4/4**，
+  21 个 `tests/*-test.js` **全部通过**。`cargo clippy` 未能执行：沙箱内 rustup
+  镜像返回 404、组件装不上，此项留待维护者本地补跑。
+- **note** 本次不发版：`PKG_VERSION` / `MT5700_UI_VERSION` 保持 1.32.5，
+  版本四件套与文档站徽标按 AGENTS.md 的发版流程另行处理。
+
 ## v1.32.5（2026-11-06）
 
 ### feat(ui) 窄屏（≤768px）把 Tab 菜单收进可展开的悬浮菜单
