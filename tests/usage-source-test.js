@@ -109,7 +109,7 @@ assert(viewCss.includes('background-color: transparent !important'),
 assert(viewCss.includes('border-radius: 4px !important') &&
 	viewCss.includes('min-width: 0 !important'),
 	'来源控件需为贴合文字的小方框，不设最小宽度');
-assert(skeletonJs.includes("MT5700_CSS_VERSION = '2.46.8'"),
+assert(skeletonJs.includes("MT5700_CSS_VERSION = '2.46.9'"),
 	'改 mt5700.css 必须递增 MT5700_CSS_VERSION');
 assert(compatJs.includes("MT5700_UI_VERSION = '1.32.5'") &&
 	makefile.includes('PKG_VERSION:=1.32.5'),
