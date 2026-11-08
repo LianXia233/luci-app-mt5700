@@ -83,7 +83,13 @@ async fn run(verbose: bool) -> Result<(), String> {
     // 并写回 TZ 环境变量，供后续 libc / 子进程一致使用。
     // 必须在任何会读时间/落日志的业务任务之前调用，故放在这里、而非各任务内部懒加载
     // （`#[tokio::main]` 已经建好运行时线程，靠的是启动顺序而非语言级保证）。
-    crate::localtime::init();
+    //
+    // 它内部要读 /etc/TZ 并 fork `uci get`，属阻塞调用；放到 blocking 池执行，
+    // 既保住「先于所有任务」的顺序，又不占用 reactor 线程。之后的 `offset()`
+    // 全部命中 OnceLock，不再产生任何 IO。
+    tokio::task::spawn_blocking(crate::localtime::init)
+        .await
+        .map_err(|e| format!("时区初始化任务失败: {e}"))?;
 
     let cfg = config::load_config().await;
     // 业务类日志（AT/短信/拨号/信号…）不进 syslog，落在这个插件自己的文件里。
@@ -113,7 +119,14 @@ async fn run(verbose: bool) -> Result<(), String> {
     let (urc_tx, urc_rx) = tokio::sync::mpsc::channel(256);
     let client = atclient::AtClient::new(cfg.at.clone(), urc_tx);
 
-    let (notifier, notif_rx) = Notifier::new(cfg.notification.clone());
+    // 通知器构造会创建日志目录并（QQ 通道开启时）fork 一次 `uci get network.lan.ipaddr`
+    // 推导管理页地址，都是阻塞调用；启动只付一次，交给 blocking 池，reactor 不参与。
+    let (notifier, notif_rx) = tokio::task::spawn_blocking({
+        let ncfg = cfg.notification.clone();
+        move || Notifier::new(ncfg)
+    })
+    .await
+    .map_err(|e| format!("通知模块初始化任务失败: {e}"))?;
     let notifier = Arc::new(notifier);
     let scheduler = Scheduler::new(cfg.schedule.clone(), client.clone(), notifier.clone(), ctx_rx.clone());
 
@@ -123,11 +136,16 @@ async fn run(verbose: bool) -> Result<(), String> {
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
     // 使用量后台统计：常驻周期采样，与前端是否打开无关。
     // 使用量来源可热切换：netdev 走 sysfs（零 AT），modem 复用状态缓存里的 AT^DSFLOWQRY。
-    let usage = crate::usage::UsageTracker::new(
-        cfg.usage_reset_day,
-        &cfg.usage_source,
-        cache.clone(),
-    );
+    // 构造时会从 /tmp 与闪存读回上次的累计用量（两次 metadata + read_to_string），
+    // 属阻塞 IO；同样只在启动发生一次，放 blocking 池。
+    let usage = tokio::task::spawn_blocking({
+        let day = cfg.usage_reset_day;
+        let src = cfg.usage_source.clone();
+        let cache = cache.clone();
+        move || crate::usage::UsageTracker::new(day, &src, cache)
+    })
+    .await
+    .map_err(|e| format!("使用量统计初始化任务失败: {e}"))?;
     // 短信业务：与 AT 客户端共用同一条通道，短信操作享有最高优先级。
     let sms = crate::sms::SmsService::new(client.clone(), ctx_rx.clone(), client.sms_mode());
     // 短信本地归档：发送成功与收到新短信时由后端落盘，
@@ -363,20 +381,27 @@ async fn run_qq_bind(
                 log_info!(Cat::Notify, "QQ 绑定结果已写回 UCI（qq_target_type/qq_target_id）");
             }
             let bind_tag = q.bind_qq.clone();
-            let sender = crate::qqpush::QqSender::from_config(&crate::config::QqNotifyConfig {
-                enabled: q.enabled,
-                app_id: q.app_id,
-                app_secret: q.app_secret,
-                target_type: target.target_type,
-                target_id: target.target_id,
-                bind_qq: q.bind_qq,
-                msg_format: q.msg_format,
-                keyboard_enabled: q.keyboard_enabled,
-                keyboard_url: q.keyboard_url,
-                menu_enabled: q.menu_enabled,
-                // 节流配置随绑定一起带过来：绑定前后是同一个通道，节奏不该变
-                max_per_minute: q.max_per_minute,
-            });
+            // from_config 在 keyboard_url 为空时会 fork `uci get network.lan.ipaddr`，
+            // 这里是 async 上下文，交给 blocking 池执行。
+            let sender = tokio::task::spawn_blocking(move || {
+                crate::qqpush::QqSender::from_config(&crate::config::QqNotifyConfig {
+                    enabled: q.enabled,
+                    app_id: q.app_id,
+                    app_secret: q.app_secret,
+                    target_type: target.target_type,
+                    target_id: target.target_id,
+                    bind_qq: q.bind_qq,
+                    msg_format: q.msg_format,
+                    keyboard_enabled: q.keyboard_enabled,
+                    keyboard_url: q.keyboard_url,
+                    menu_enabled: q.menu_enabled,
+                    // 节流配置随绑定一起带过来：绑定前后是同一个通道，节奏不该变
+                    max_per_minute: q.max_per_minute,
+                })
+            })
+            .await
+            .ok()
+            .flatten();
             if let Some(sender) = sender {
                 // 绑定成功后立即回一条确认消息，让用户知道后续通知会发到这里。
                 // 主动推送不依赖 WS 会话（run_bind 返回后 WS 已断开），失败仅记日志。

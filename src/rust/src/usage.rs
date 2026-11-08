@@ -490,6 +490,30 @@ fn remove_file(path: &str) {
     }
 }
 
+/// [`UsageTracker::read_counters_netdev`] 的阻塞实现，只在 blocking 池里运行。
+///
+/// 单独抽成自由函数是为了能整段交给 `spawn_blocking`：它不借用 `self`，
+/// 也不持有任何异步锁，从而不必为了「看起来异步」在锁内再包一层。
+fn read_counters_netdev_blocking() -> Option<(String, u64, u64)> {
+    let dev = match wan_netdev() {
+        Some(d) => d,
+        None => {
+            log_debug!("未识别到 WAN 区域网卡，本轮不采样（不回退 LAN/br-lan）");
+            return None;
+        }
+    };
+    let base = format!("/sys/class/net/{dev}/statistics");
+    let rx = read_counter(&format!("{base}/rx_bytes"));
+    let tx = read_counter(&format!("{base}/tx_bytes"));
+    match (rx, tx) {
+        (Some(rx), Some(tx)) => Some((dev, rx, tx)),
+        _ => {
+            log_debug!("读不到 WAN 网卡 {dev} 的计数器，下轮重新解析");
+            None
+        }
+    }
+}
+
 /// 使用量后台统计器。
 pub struct UsageTracker {
     state: Mutex<UsageState>,
@@ -568,21 +592,17 @@ impl UsageTracker {
     }
 
     /// 物理网卡来源：只认 WAN 区域自动识别出的模组网口。
+    ///
+    /// [`wan_netdev`] 要 fork 两次 `uci show` 并读 sysfs 与 `/proc/net/dev`，
+    /// 全是阻塞调用；本函数在常驻采样循环里每秒跑一次，留在 reactor 线程上
+    /// 会直接拖慢同一运行时里的 AT/RPC 任务调度，因此整段搬到 blocking 池。
     async fn read_counters_netdev(&self) -> Option<(String, u64, u64)> {
-        let dev = match wan_netdev() {
-            Some(d) => d,
-            None => {
-                log_debug!("未识别到 WAN 区域网卡，本轮不采样（不回退 LAN/br-lan）");
-                return None;
-            }
-        };
-        let base = format!("/sys/class/net/{dev}/statistics");
-        let rx = read_counter(&format!("{base}/rx_bytes"));
-        let tx = read_counter(&format!("{base}/tx_bytes"));
-        match (rx, tx) {
-            (Some(rx), Some(tx)) => Some((dev, rx, tx)),
-            _ => {
-                log_debug!("读不到 WAN 网卡 {dev} 的计数器，下轮重新解析");
+        match tokio::task::spawn_blocking(read_counters_netdev_blocking).await {
+            Ok(v) => v,
+            Err(e) => {
+                // blocking 任务 panic 才会走到这里：记一笔并按「本轮取不到」处理，
+                // 绝不能用 0 顶替，否则累计用量会被瞬间抹平。
+                log_warn!("WAN 网卡计数器采样任务失败: {e}");
                 None
             }
         }

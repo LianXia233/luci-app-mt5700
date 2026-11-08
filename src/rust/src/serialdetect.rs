@@ -422,7 +422,11 @@ fn list_serial_candidates() -> Vec<String> {
 
 /// 逐个探测候选串口，返回第一个能正常应答 AT 的设备。
 pub async fn detect_at_port(cfg: &SerialConfig) -> Result<Box<dyn Transport>, String> {
-    let candidates = list_serial_candidates();
+    // 枚举要遍历 /dev、/dev/serial/by-id 与每个候选口的 sysfs 描述符，
+    // 是一串同步 read_dir/read_to_string；放到 blocking 池，reactor 只等结果。
+    let candidates = tokio::task::spawn_blocking(list_serial_candidates)
+        .await
+        .map_err(|e| format!("串口枚举任务失败: {e}"))?;
     if candidates.is_empty() {
         return Err(format!(
             "没有找到任何候选串口（已尝试 {BY_ID_DIR} 稳定链接与 ttyUSB/ttyACM/ttyAP/ttyS/ttyAMA）"
