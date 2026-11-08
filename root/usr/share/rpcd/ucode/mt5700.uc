@@ -860,15 +860,31 @@ function backendErrorShape(err, msg) {
  * timeoutSec 可选：单次调用的 nc 硬超时覆盖（秒）。目前只有短信提交用到，
  * 其余调用维持 RPCCALL_TIMEOUT_SEC，避免后端真挂掉时每条命令都白等更久。
  */
-function rpcCall(method, params, timeoutSec) {
+
+/*
+ * 一次批量里最多允许几条命令。
+ *
+ * 上限不是为了省内存，而是限制「一条卡住、整批晚到」的最坏影响面：
+ * 批量是同一条连接上逐行串行处理的，某条超时会把整批的应答一起往后推。
+ * 32 条足够覆盖 status 页一轮的全部查询，又不会把单次等待放大到分钟级。
+ */
+const BATCH_RPC_TIMEOUT_SEC = 18;
+const BATCH_MAX_CMDS = 32;
+
+/*
+ * RPC 门禁：配置读取、nc/timeout 定位、熔断窗口、回环端口预检。
+ *
+ * 抽成独立函数的原因：批量接口（batch）必须与单条接口（at）走**完全相同**的门禁。
+ * 否则后端挂掉时批量路径会绕开熔断，一次批量把 rpcd worker 占住十几秒，
+ * 又回到「整个 LuCI 转圈」的老问题。
+ *
+ * 返回 { port, authKey, ncBin, timeoutBin, rid, err }；err 非 null 即为应直接
+ * 返回给前端的错误对象，调用方不必再往下走。
+ */
+function rpcGate(params) {
 	const rpcCfg = readRpcConfig();
 	const port = rpcCfg.port;
 	const authKey = rpcCfg.authKey;
-
-	const payload = { id: 1, method: method, params: params };
-	if (authKey != '') {
-		payload.params.auth_key = authKey;
-	}
 
 	/* 本固件 ucode fs 无 connect，经 busybox nc 管道访问回环 RPC。
 	 * 各固件的 busybox 未必编译 nc applet，因此先定位可执行文件：
@@ -876,11 +892,11 @@ function rpcCall(method, params, timeoutSec) {
 	 * 后者会让人误判成服务没起来，实际是装了插件却缺 nc。 */
 	const ncBin = findNcBin();
 	if (ncBin == '') {
-		return {
+		return { err: {
 			success: false,
 			error: '系统缺少 nc（busybox 未编译 nc applet），无法连接后端：请安装 netcat 后重试',
 			cause: 'no-nc'
-		};
+		} };
 	}
 	const timeoutBin = findTimeoutBin();
 
@@ -894,11 +910,11 @@ function rpcCall(method, params, timeoutSec) {
 	 */
 	let downRemain = backendDownRemain();
 	if (downRemain > 0) {
-		return {
+		return { err: {
 			success: false,
 			error: 'Rust 后端无应答，已暂停请求（约 ' + downRemain + 's 后自动恢复）',
 			cause: 'circuit-open'
-		};
+		} };
 	}
 
 	/*
@@ -909,17 +925,14 @@ function rpcCall(method, params, timeoutSec) {
 	 * 就是「页面转圈很久」。预检能把这个场景压到毫秒级返回，
 	 * 且**不生成临时文件、不起子进程、不占用后端 AT 通道**。
 	 *
-	 * 实现选型（本喵在实机上连续踩了两个坑后定的）：
+	 * 实现选型（在实机上连续踩了两个坑后定的）：
 	 *   - 不能用「nc 连一下看是否有应答」：busybox nc 在
 	 *     `</dev/null` 时无论端口通不通**都返回 1**，stdout 也都是空，
 	 *     两种情况完全不可区分（实测：已监听 rc=1、未监听 rc=1）。
-	 *     而 fs.popen 句柄又拿不到退出码。
 	 *   - 因此改为**纯文件读 /proc/net/tcp**：这是内核暴露的 TCP 表，
-	 *     行格式为 "sl local_address rem_address st ..."，
 	 *     监听态 st=0A，回环地址编码为 0100007F（小端 127.0.0.1），
 	 *     端口为十六进制大写。
-	 *     例：127.0.0.1:8765 → "0100007F:223D"（8765 = 0x223D）。
-	 *   全程零子进程、零副作用，uLinux/OpenWrt 一定存在该文件。
+	 *   全程零子进程、零副作用，Linux / OpenWrt 一定存在该文件。
 	 *
 	 * 判定失败时保守放行（继续走正常 RPC），宁可多走一次流程，
 	 * 也绝不误判成「服务没起来」——误判的代价是用户以为插件坏了。
@@ -936,25 +949,23 @@ function rpcCall(method, params, timeoutSec) {
 		portChecked = false;
 	}
 	if (portChecked && !portUp) {
-		/* 端口确实没监听：这是明确的「后端不在」，写下熔断标记，
+		/* 端口确实没监听：写明「后端不在」，并写熔断标记，
 		 * 让同一页面接下来几十个并发请求直接快速失败 */
 		noteBackendDown();
-		return {
+		return { err: {
 			success: false,
 			error: 'Rust 后端未运行（127.0.0.1:' + port + ' 未监听）：请确认 at-webserver 服务已启动',
 			cause: 'not-listening'
-		};
+		} };
 	}
-
-	const body = sprintf('%J', payload);
 
 	/*
 	 * 临时文件名必须唯一。
 	 *
 	 * 实测问题：原先固定为 /tmp/mt5700-rpc.json，而页面会**并发**发起多个 RPC
 	 * （日志页一次就发 3 个：后端日志 + syslog + 通知文件），多个请求写同一个
-	 * 文件、再各自读同一个文件，互相覆盖，表现为「RPC 返回空对象」这种极难排查的
-	 * 间歇性故障 —— 单独手动调用却完全正常。
+	 * 文件、再各自读同一个文件，互相覆盖，表现为「RPC 返回空对象」这种极难排查
+	 * 的间歇性故障 —— 单独手动调用却完全正常。
 	 *
 	 * 唯一性由调用方传入的 _rid 提供；没传时退化为「时间戳 + 自增」，
 	 * 同一秒内的多次调用也能区分（ucode 的 time() 只有秒级）。
@@ -963,43 +974,76 @@ function rpcCall(method, params, timeoutSec) {
 	if (rid == null) {
 		rid = sprintf('%d-%d', time(), rpcFallbackSeq++);
 	}
-	const tmp = '/tmp/mt5700-rpc-' + rid + '.json';
+	return { port: port, authKey: authKey, ncBin: ncBin, timeoutBin: timeoutBin, rid: rid, err: null };
+}
+
+/*
+ * 超时 / 无应答的文案。
+ *
+ * 返回 null 的三种可能，必须给出可区分的文案，避免用户误判：
+ * 1) 挂了 timeout → 后端在预算内没给出应答（长命令/正在重连）
+ * 2) 没挂 timeout 且 nc 连不上 → 服务未运行
+ * 3) nc 连上了但后端进程崩了/主动关闭 → 同上
+ *
+ * 无论哪种都要写熔断标记 —— 这正是对抗并发风暴的关键：
+ * 第一个请求花掉预算探明「后端不会应答」之后，其余并发请求不该再各自重复等。
+ */
+function timeoutReply(hasTimeoutBin, budgetSec, port) {
+	noteBackendDown();
+	if (hasTimeoutBin) {
+		return {
+			success: false,
+			error: 'Rust 后端应答超时（超过 ' + budgetSec
+				+ 's 未返回）：模组可能正在重连或执行长命令，请稍后重试',
+			cause: 'timeout'
+		};
+	}
+	return {
+		success: false,
+		error: 'Rust 后端无应答（服务未运行或端口 ' + port + ' 未监听）',
+		cause: 'no-reply'
+	};
+}
+
+/*
+ * 一行请求 = 一行应答地送进回环 RPC，读回原始应答行。
+ *
+ * 为什么可以一次送多行：回环 RPC 是「一行请求一行应答」的流式协议，
+ * 后端在**同一条连接**上循环读行、逐行应答并逐行写回，
+ * 因此把 N 条命令写进同一个临时文件、用**一个** nc 进程送过去，
+ * 语义与原来「N 次调用各起一个 nc」完全一致（顺序也一致，后端逐行串行处理）。
+ *
+ * 收益（实机 status 页，普通模式冷启动）：单条调用的桥开销实测 17ms
+ * （ucode 临时文件 + fork nc + rpcd 往返），一轮 25 条就是 400ms 以上；
+ * 合并成一次只付一次。
+ *
+ * 这也是整个插件**唯一的阻塞点**，必须封顶：nc 用 busybox timeout 包住，
+ * 超时后子进程被杀、管道关闭、read('line') 返回 null，把「永久阻塞」
+ * 降级为「有限等待 + 明确错误」。
+ *
+ * 返回 { lines: [...], complete: bool, err: 错误对象|null }。
+ */
+function rpcSendLines(payloads, budgetSec, gate) {
+	const tmp = '/tmp/mt5700-rpc-' + gate.rid + '.json';
 	let f;
 	try {
 		f = fs.open(tmp, 'w');
 	} catch (e) {
-		return { success: false, error: '无法写临时文件' };
+		return { lines: [], complete: false, err: { success: false, error: '无法写临时文件' } };
 	}
 	if (!f) {
-		return { success: false, error: '无法写临时文件' };
+		return { lines: [], complete: false, err: { success: false, error: '无法写临时文件' } };
 	}
-	f.write(body + '\n');
+	for (let i = 0; i < length(payloads); i++) {
+		f.write(sprintf('%J', payloads[i]) + '\n');
+	}
 	f.close();
 
-	/*
-	 * 这是整个插件的**唯一阻塞点必须封顶**之处。
-	 *
-	 * 原先的实现是裸 fs.popen(nc ...) + p.read('line')：read 没有超时语义，
-	 * nc 只要不退出（半开连接、后端 accept 后卡住不写回复、后端正在做长
-	 * AT 扫描等），这个 ucode 请求就永久挂在 rpcd 上下文里，
-	 * 后续所有 LuCI RPC 全部排队等待 —— 即用户看到的「整个页面卡死」。
-	 *
-	 * 改法：用 busybox timeout 给 nc 本身设硬上限，超时后 nc 被杀、
-	 * 管道关闭、read('line') 返回 null，我们在下面把这种 null 明确
-	 * 区分为「超时」而不是笼统的「无应答」，前端据此展示可读提示。
-	 *
-	 * 预算说明：后端 AT 命令最长 8s 排队 + 2s 执行，RPC 服务端自身
-	 * 还留了 3s 余量（见 rpcserver.rs），故这里取 12s —— 比后端预算
-	 * 略大，保证「后端确实在干活」的请求不会被误杀，同时把最坏耗时
-	 * 从「不可控」压缩到 12s。
-	 */
 	/* 重定向目标加单引号包裹（纵深防御：rid 已过白名单，这里再挡一层
 	 * 意外引入的空白/元字符拼接问题），busybox sh 支持单引号。 */
-	let raw = ncBin + " 127.0.0.1 " + port + " < '" + tmp + "'";
-	let timedOut = false;
-	const budgetSec = (timeoutSec != null && timeoutSec > 0) ? timeoutSec : RPCCALL_TIMEOUT_SEC;
-	if (timeoutBin != '') {
-		raw = timeoutBin + ' ' + budgetSec + ' ' + raw;
+	let raw = gate.ncBin + " 127.0.0.1 " + gate.port + " < '" + tmp + "'";
+	if (gate.timeoutBin != '') {
+		raw = gate.timeoutBin + ' ' + budgetSec + ' ' + raw;
 	}
 
 	let p;
@@ -1007,53 +1051,43 @@ function rpcCall(method, params, timeoutSec) {
 		p = fs.popen(raw, 'r');
 	} catch (e) {
 		try { fs.unlink(tmp); } catch (e2) { /* 清不掉不影响主流程 */ }
-		return { success: false, error: '无法连接 Rust 后端: ' + e.message, cause: 'spawn-failed' };
+		return { lines: [], complete: false, err: {
+			success: false, error: '无法连接 Rust 后端: ' + e.message, cause: 'spawn-failed'
+		} };
 	}
 	if (!p) {
 		try { fs.unlink(tmp); } catch (e2) { /* 清不掉不影响主流程 */ }
-		return { success: false, error: '无法连接 Rust 后端', cause: 'spawn-failed' };
+		return { lines: [], complete: false, err: {
+			success: false, error: '无法连接 Rust 后端', cause: 'spawn-failed'
+		} };
 	}
 
-	let line = p.read('line');
+	let lines = [];
+	while (length(lines) < length(payloads)) {
+		let l = p.read('line');
+		if (l == null || l == '') {
+			break;
+		}
+		lines[length(lines)] = l;
+	}
 	p.close();
 	/* 用完即删，避免每次 RPC 都在 /tmp 留一个文件 */
-	try {
-		fs.unlink(tmp);
-	} catch (e) {
-		/* 删不掉不影响主流程 */
-	}
+	try { fs.unlink(tmp); } catch (e) { /* 删不掉不影响主流程 */ }
 
-	if (!line) {
-		/*
-		 * 返回 null 的三种可能，给出可区分的文案，避免用户误判：
-		 * 1) 上面挂了 timeout → 后端在 12s 内没给出应答（长命令/正在重连）
-		 * 2) 没挂 timeout 且 nc 连不上 → 服务未运行
-		 * 3) nc 连上了但后端进程崩了/主动关闭 → 同上
-		 *
-		 * 无论哪种，都要写熔断标记 —— 这正是对抗并发风暴的关键：
-		 * 第一个请求花 12s 探明「后端不会应答」之后，同页面其余几十个
-		 * 并发请求就不该再各自重复这 12s（那会把 rpcd worker 耗尽，
-		 * 最终浏览器看到的是整个 LuCI 的 XHR 超时，而不是降级提示）。
-		 */
-		noteBackendDown();
-		if (timeoutBin != '') {
-			return {
-				success: false,
-				error: 'Rust 后端应答超时（超过 ' + budgetSec
-					+ 's 未返回）：模组可能正在重连或执行长命令，请稍后重试',
-				cause: 'timeout'
-			};
-		}
-		return {
-			success: false,
-			error: 'Rust 后端无应答（服务未运行或端口 ' + port + ' 未监听）',
-			cause: 'no-reply'
-		};
+	return { lines: lines, complete: (length(lines) == length(payloads)), err: null };
+}
+
+/*
+ * 把一行原始应答整形为前端契约对象，字段与改动前的单条接口完全一致。
+ * 返回 null 表示「这一行没有应答」，由调用方补超时/无应答文案。
+ */
+function shapeReply(line) {
+	if (line == null || line == '') {
+		return null;
 	}
 	if (substr(line, 0, 1) != '{') {
 		return { success: false, error: 'Rust 后端应答异常: ' + substr(line, 0, 160), cause: 'bad-reply' };
 	}
-
 	try {
 		let resp = jsonParse(line);
 		if (resp.error) {
@@ -1075,6 +1109,33 @@ function rpcCall(method, params, timeoutSec) {
 	} catch (e) {
 		return { success: false, error: '解析应答失败: ' + e.message, cause: 'parse-failed' };
 	}
+}
+
+function rpcCall(method, params, timeoutSec) {
+	const gate = rpcGate(params);
+	if (gate.err != null) {
+		return gate.err;
+	}
+
+	const payload = { id: 1, method: method, params: params };
+	if (gate.authKey != '') {
+		payload.params.auth_key = gate.authKey;
+	}
+
+	/* 预算说明：后端 AT 命令最长 8s 排队 + 2s 执行，RPC 服务端自身
+	 * 还留了 3s 余量（见 rpcserver.rs），故这里取 12s —— 比后端预算
+	 * 略大，保证「后端确实在干活」的请求不会被误杀，同时把最坏耗时
+	 * 从「不可控」压缩到 12s。 */
+	const budgetSec = (timeoutSec != null && timeoutSec > 0) ? timeoutSec : RPCCALL_TIMEOUT_SEC;
+	const sent = rpcSendLines([payload], budgetSec, gate);
+	if (sent.err != null) {
+		return sent.err;
+	}
+	const shaped = shapeReply(sent.lines[0]);
+	if (shaped != null) {
+		return shaped;
+	}
+	return timeoutReply(gate.timeoutBin != '', budgetSec, gate.port);
 }
 
 /* 取网络接口累计字节数（只读，不累加任何东西）。
@@ -1152,6 +1213,72 @@ return {
 					(index(cmd, '\\r') >= 0 || index(cmd, '\r') >= 0);
 				return rpcCall('at', { cmd: cmd, _rid: getStr(a, '_rid') },
 					smsSubmit ? SMS_RPC_TIMEOUT_SEC : null);
+			}
+		},
+
+		/*
+		 * 批量只读查询：一次 RPC 送达 N 条 AT 命令，按序执行、按序返回。
+		 *
+		 * 专治 status 页「一轮 25 条命令 = 25 次 ucode 临时文件 + 25 次 fork nc」。
+		 * 实机测得单条桥开销 17ms，一轮就是 400ms 以上的纯桥成本。
+		 *
+		 * 语义与逐条调用完全一致：后端在**同一条连接**上逐行处理（AT 通道仍然
+		 * 是单通道串行，互斥语义不变），每条命令的 success/data/error/cause
+		 * 原样透出并按 cmd 标注；任何一条失败都不影响其余命令。
+		 *
+		 * 超时按**整批**计（BATCH_RPC_TIMEOUT_SEC），已到达的行照常返回，
+		 * 未到达的条目给 timeout 文案 —— 与逐条超时的结果一致。
+		 *
+		 * cmd 走字符串校验、不做拼接，杜绝 AT 注入；含 IMEI 写得动的命令
+		 * 依旧由后端 run_command 内部的既有校验拦截，这里不额外放行。
+		 */
+		batch: {
+			args: { cmds: [], _rid: '' },
+			call: function (req) {
+				let a = req.args;
+				let list = (a == null) ? null : a['cmds'];
+				if (type(list) != 'array' || length(list) == 0) {
+					return { success: false, error: '缺少参数 cmds（需为命令数组）' };
+				}
+				if (length(list) > BATCH_MAX_CMDS) {
+					return { success: false, error: '一次最多 ' + BATCH_MAX_CMDS + ' 条命令' };
+				}
+				let cmds = [];
+				let payloads = [];
+				for (let i = 0; i < length(list); i++) {
+					let c = list[i];
+					if (type(c) != 'string' || c == '') {
+						return { success: false, error: 'cmds 第 ' + (i + 1) + ' 项不是合法命令' };
+					}
+					cmds[length(cmds)] = c;
+					payloads[length(payloads)] = { id: i + 1, method: 'at', params: { cmd: c } };
+				}
+
+				const gate = rpcGate(a);
+				if (gate.err != null) {
+					return gate.err;
+				}
+				if (gate.authKey != '') {
+					for (let i = 0; i < length(payloads); i++) {
+						payloads[i].params.auth_key = gate.authKey;
+					}
+				}
+
+				const sent = rpcSendLines(payloads, BATCH_RPC_TIMEOUT_SEC, gate);
+				if (sent.err != null) {
+					return sent.err;
+				}
+
+				let items = [];
+				for (let i = 0; i < length(cmds); i++) {
+					let one = shapeReply(sent.lines[i]);
+					if (one == null) {
+						one = timeoutReply(gate.timeoutBin != '', BATCH_RPC_TIMEOUT_SEC, gate.port);
+					}
+					one.cmd = cmds[i];
+					items[length(items)] = one;
+				}
+				return { success: true, items: items };
 			}
 		},
 		/*
