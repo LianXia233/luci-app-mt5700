@@ -8,6 +8,29 @@
 
 ---
 
+## v1.32.8（2026-11-08）
+
+### feat(rust) 后端自报版本改为构建期注入，与 PKG_VERSION 单一来源
+
+> 后端版本一直来自 `Cargo.toml`，此后每次发版都没有再动它：二进制 `--version`
+> 与启动日志打印的仍是 `1.29.0`，而包版本已是 `1.32.7`。该版本号只影响自报与
+> 日志，但排障时无法从日志判断设备上跑的是哪一版后端，也与前端/包版本对不上。
+
+- **feat(rust)** 顶层 `Makefile` 导出 `MT5700_VERSION := $(PKG_VERSION)`，
+  `src/Makefile` 把它作为环境变量传给 `cargo build`；`main.rs` 的 `VERSION`
+  改为优先读 `option_env!("MT5700_VERSION")`，缺失时回退 `CARGO_PKG_VERSION`，
+  本地 `cargo build` / `cargo test` 行为不变。
+- **feat(build)** `src/Makefile` 在拿不到 `MT5700_VERSION` 时（例如直接在 `src/`
+  下 `make compile`）从上级 `Makefile` 解析 `PKG_VERSION`，并把解析结果打印进
+  编译日志，避免子 make 取不到顶层变量时静默沿用旧值。
+- **chore(release)** `src/rust/Cargo.toml` 与 `Cargo.lock` 的 `version` 同步到 1.32.8，
+  包元数据与包版本对齐（展示口径已由注入决定，二者不会再分叉）。
+- **test** 新增 `tests/rust-version-test.js`：校验 `PKG_VERSION` 与 `Cargo.toml`
+  版本一致、`main.rs` 使用 `option_env!("MT5700_VERSION")` 且保留回退、
+  `src/Makefile` 与顶层 `Makefile` 的传参链路完整。
+- **docs(agents)** 发版版本一致性清单补入 `src/rust/Cargo.toml` 的 `version`，
+  并写明后端自报版本只由 `PKG_VERSION` 驱动，发版不需要再改 Rust 代码。
+
 ## v1.32.7（2026-11-08）
 
 ### perf(status) 状态页数据链路：静态项缓存 + 一轮查询合并为一次批量 RPC

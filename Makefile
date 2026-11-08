@@ -14,8 +14,13 @@ LUCI_DEPENDS:=
 LUCI_PKGARCH:=
 
 PKG_NAME:=luci-app-mt5700
-PKG_VERSION:=1.32.7
+PKG_VERSION:=1.32.8
 PKG_RELEASE:=1
+
+# Rust 后端版本号单一来源：把 PKG_VERSION 以环境变量导出，子 make
+# （luci.mk Build/Compile → src/Makefile）会继承它，再由 src/Makefile
+# 传给 cargo（见 src/Makefile）。发版只需改上面一行。
+export MT5700_VERSION:=$(PKG_VERSION)
 
 # 兼容旧版：已安装 at-webserver-rust 的系统升级到单包后，声明提供同名能力，
 # 避免残留依赖指向不存在的包。
