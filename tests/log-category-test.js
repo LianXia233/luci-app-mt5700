@@ -265,7 +265,7 @@ const catCases = [
 	['AT^FOTA: 升级包校验通过', 'firmware'],
 	['定时锁频任务已提交', 'schedule'],
 	['企业微信通知推送成功', 'notify'],
-	['服务已启动，版本 1.32.5', 'runtime'],
+	['服务已启动，版本 1.32.6', 'runtime'],
 	['zzz 42', 'misc']
 ];
 const catBad = catCases.filter(function (c) { return fe.categorize(c[0]) !== c[1]; });
