@@ -50,8 +50,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 
-/// 版本号取自 Cargo 包元数据，构建时编译进二进制。
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// 版本号：优先取构建期注入的 `MT5700_VERSION`（顶层 Makefile 的 `PKG_VERSION`，
+/// 经 `src/Makefile` 传给 cargo），让后端自报版本与包版本单一来源、不会各自漂移；
+/// 脱离 OpenWrt 构建（本地 `cargo build` / `cargo test`）时回退到 Cargo.toml 的
+/// version，保证任何宿主上都能编译且不报错。
+const VERSION: &str = match option_env!("MT5700_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 #[tokio::main]
 async fn main() {
