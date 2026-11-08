@@ -122,15 +122,19 @@ impl RingLog {
     /// 这个薄封装只给单测用。
     #[allow(dead_code)]
     pub fn snapshot(&self, since: u64, limit: usize) -> (u64, Vec<Entry>) {
-        self.snapshot_cats(since, limit, &[])
+        self.snapshot_cats(since, limit, None)
     }
 
-    /// 同 [`snapshot`](Self::snapshot)，但只保留 `cats` 里的类别；空列表表示不过滤。
+    /// 同 [`snapshot`](Self::snapshot)，但只保留 `cats` 里的类别。
     ///
-    /// 类别过滤发生在 `limit` 截断**之前**：`cats=["sms"]` + `limit=50` 拿到的是
+    /// `None` = 不过滤；`Some(&[])` = **筛过了但没有任何合法类别 → 空结果**。
+    /// 这两种情形不能合并：把「零命中」当成「不过滤」，拼错类别键的人会拿到全部
+    /// 日志，还以为自己筛对了（正是最难发现的那类静默错误）。
+    ///
+    /// 类别过滤发生在 `limit` 截断**之前**：`cats=Some(["sms"])` + `limit=50` 拿到的是
     /// 「最新 50 条短信日志」，而不是「最新 50 条里恰好是短信的那几条」。
     /// 后者在短信稀疏时会返回近乎空的结果，是个只会让人以为「日志丢了」的坑。
-    pub fn snapshot_cats(&self, since: u64, limit: usize, cats: &[String]) -> (u64, Vec<Entry>) {
+    pub fn snapshot_cats(&self, since: u64, limit: usize, cats: Option<&[String]>) -> (u64, Vec<Entry>) {
         let guard = match self.inner.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
@@ -139,7 +143,10 @@ impl RingLog {
         let mut out: Vec<Entry> = guard
             .iter()
             .filter(|e| e.seq > since)
-            .filter(|e| cats.is_empty() || cats.iter().any(|c| *c == e.cat))
+            .filter(|e| match cats {
+                None => true,
+                Some(list) => list.iter().any(|c| *c == e.cat),
+            })
             .cloned()
             .collect();
         if limit > 0 && out.len() > limit {
@@ -267,21 +274,27 @@ mod tests {
                 ring.push(i, "INF", "sms", &format!("sms-{i}"));
             }
         }
-        let (_, sms) = ring.snapshot_cats(0, 5, &["sms".to_string()]);
+        let (_, sms) = ring.snapshot_cats(0, 5, Some(&["sms".to_string()]));
         assert_eq!(sms.len(), 2, "只有 i=7 与 i=14 两条短信，实际 {:?}", sms);
         assert!(sms.iter().all(|e| e.cat == "sms"));
 
-        // 空列表 = 不过滤
-        let (_, all) = ring.snapshot_cats(0, 0, &[]);
+        // None = 不过滤
+        let (_, all) = ring.snapshot_cats(0, 0, None);
         assert_eq!(all.len(), 22);
 
         // 多类别是「或」关系
-        let (_, both) = ring.snapshot_cats(0, 0, &["sms".to_string(), "at".to_string()]);
+        let (_, both) = ring.snapshot_cats(0, 0, Some(&["sms".to_string(), "at".to_string()]));
         assert_eq!(both.len(), 22);
 
         // 不存在的类别 → 空结果（不是「回退成全部」）
-        let (_, none) = ring.snapshot_cats(0, 0, &["不存在的类别".to_string()]);
+        let (_, none) = ring.snapshot_cats(0, 0, Some(&["不存在的类别".to_string()]));
         assert!(none.is_empty(), "非法类别键应得到空结果，而不是静默返回全部");
+
+        // 筛过了但一个合法类别都没有（RPC 里 `cats` 全是拼错的键）→ 仍是空结果。
+        // 这一条与上一条的差别在于「空列表」曾经被当成不过滤，那正是要修掉的漏洞。
+        let empty_filter: Vec<String> = Vec::new();
+        let (_, zero) = ring.snapshot_cats(0, 0, Some(&empty_filter));
+        assert!(zero.is_empty(), "Some(&[]) 必须是空结果，不能退化成「不过滤」返回全部");
     }
 
     #[test]

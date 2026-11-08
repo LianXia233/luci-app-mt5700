@@ -18,7 +18,7 @@
  *   2) logs.js：每个后端键都有中文标签与图标；前端没有孤儿键；code / group / 顺序一致；
  *      `all` 只存在于前端芯片列表，不是后端类别；
  *   3) 正则兜底表 CATEGORY_RULES 能产出全部新键（misc 除外，它是兜底返回值）；
- *   4) 插件日志文件解析：本地时间文本按字段还原、code 反查类别、坏行跳过；
+ *   4) 插件日志文件解析：绝对毫秒优先、旧格式退回本地时间逐字段还原、code 反查类别、坏行跳过；
  *   5) mt5700.css：21 条浅色徽章配色 + 21 条 .at-dark 变体 + 分组类别条与文件来源徽章样式；
  *   6) MT5700_CSS_VERSION 已从 2.46.8 递增；
  *   7) 改动过的文件保持 LF、无行尾空白。
@@ -33,11 +33,13 @@ const root = path.join(__dirname, '..');
 const read = function (rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); };
 
 const LOGCAT_RS = 'src/rust/src/logcat.rs';
+const LOGGER_RS = 'src/rust/src/logger.rs';
 const LOGS_JS = 'htdocs/luci-static/resources/view/at-webserver/logs.js';
 const MT_CSS = 'htdocs/luci-static/resources/at-webserver/mt5700.css';
 const MT_JS = 'htdocs/luci-static/resources/at-webserver/mt5700.js';
 
 const logcatRs = read(LOGCAT_RS);
+const loggerRs = read(LOGGER_RS);
 const logsJs = read(LOGS_JS);
 const mtCss = read(MT_CSS);
 const mtJs = read(MT_JS);
@@ -280,25 +282,35 @@ check('后端给了合法 cat 就直接用（不再走正则猜）', be[0].cat =
 check('后端给了未知 cat 时退回正则兜底', be[1].cat === 'sms', be[1].cat);
 check('旧后端不给 cat 时退回正则兜底', be[2].cat === 'net', be[2].cat);
 
-/* 文件行样例取自 logcat.rs / logger.rs 的文档格式 */
-const sample = '2026-11-08 04:40:01.123 [INF] [SMS] 收到新短信，存储区: ME，索引: 3';
+/* 文件行样例取自 logger.rs::plugin_file_push 的文档格式：行首本地时间文本 +
+ * 括号里的绝对毫秒。第二行是**升级前写下的旧格式**（没有括号字段），
+ * 用来钉住「旧行仍能解析、只是退回本地时间重建」这条兼容路径。 */
+const sample = '2024-10-27 04:13:20.000 (1730000000000) [INF] [SMS] 收到新短信，存储区: ME，索引: 3';
 const parsed = fe.entriesFromPluginFile(sample + '\n'
 	+ '2026-11-08 04:40:02.007 [ERR] [DIAL] 自动拨号失败\n'
 	+ '半行被截断的 [INF] [SMS] 没有时间戳\n'
 	/* code 段按 logger.rs 是 [A-Z0-9]+，所以「没见过的码」也得是 ASCII；XYZ 未注册，只能靠正文猜 */
-	+ '2026-11-08 04:40:03.000 [INF] [XYZ] 收到新短信\n');
+	+ '2024-10-27 04:13:21.000 (1730000001000) [INF] [XYZ] 收到新短信\n');
 check('插件文件解析：合法行全部收进来，坏行跳过', parsed.length === 3, '实际 ' + parsed.length);
-if (parsed.length >= 1) {
-	/* 本地时间文本必须按字段还原，不能交给 Date.parse */
-	const want = new Date(2026, 10, 8, 4, 40, 1, 123).getTime();
-	check('插件文件解析：时间戳按本地时间逐字段还原（毫秒也在）', parsed[0].ts === want,
-		'得到 ' + parsed[0].ts + ' / 期望 ' + want);
+if (parsed.length === 3) {
+	/* 新格式必须直接用行内 epoch —— 这样浏览器与路由时区不同也不会平移一个时区 */
+	check('插件文件解析：优先用行内绝对毫秒（浏览器时区无关）', parsed[0].ts === 1730000000000,
+		'得到 ' + parsed[0].ts);
 	check('插件文件解析：级别、来源、正文都对', parsed[0].level === 'INF' && parsed[0].src === 'file'
 		&& parsed[0].msg === '收到新短信，存储区: ME，索引: 3', JSON.stringify(parsed[0]));
 	check('插件文件解析：大写 code 反查回类别键', parsed[0].cat === 'sms' && parsed[1].cat === 'dial',
 		parsed[0].cat + '/' + parsed[1].cat);
 	check('插件文件解析：文件行没有 seq', parsed[0].seq === 0);
+	/* 旧格式（无 epoch）退回本地时间文本逐字段还原 —— 不能交给 Date.parse */
+	const legacyWant = new Date(2026, 10, 8, 4, 40, 2, 7).getTime();
+	check('插件文件解析：旧格式无 epoch 时退回本地时间逐字段还原', parsed[1].ts === legacyWant,
+		'得到 ' + parsed[1].ts + ' / 期望 ' + legacyWant);
 }
+check('插件文件行正则接受带 epoch 与不带 epoch 两种形态',
+	fe.PLUGIN_LINE_RE.test(sample) && fe.PLUGIN_LINE_RE.test('2026-11-08 04:40:02.007 [ERR] [DIAL] 自动拨号失败'));
+check('后端在插件文件行里写入绝对毫秒（前端才可能摆脱浏览器时区）',
+	/\(\{ts\}\)/.test(loggerRs),
+	'logger.rs 的行格式里没找到 ({ts})');
 check('插件文件解析：未知 code 退回正则兜底', parsed.length === 3 && parsed[2].cat === 'sms',
 	parsed[2] ? parsed[2].cat : '未解析出第三行');
 check('不使用 Date.parse / new Date(字符串) 解析本地时间文本',

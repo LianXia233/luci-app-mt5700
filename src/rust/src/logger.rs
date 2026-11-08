@@ -69,10 +69,12 @@ pub fn level() -> Level {
     }
 }
 
-fn timestamp() -> String {
-    // 全仓库统一时间源（NTP 优先、设备时钟兜底）：日志时间必须和通知时间、
-    // 使用量按月清零判定在同一条时间线上，否则排障时对不上「这条日志到底是几号」。
-    let ms = crate::nettime::now_ms();
+/// 把毫秒时间戳格式化成**路由本地时区的可读文本**（秒 + 三位毫秒）。
+///
+/// 只给 `logread` 与插件日志文件的**行首**用，它本身不带时区标记，因此
+/// **不能当作机器口径**：浏览器按自己的时区解释这串数字会整体平移。
+/// 插件日志文件另行写入绝对毫秒（见 [`plugin_file_push`]），那次才用于跨源去重与排序。
+fn timestamp(ms: i64) -> String {
     // 系统时区（未配置时北京时间，见 localtime）格式化到秒，毫秒单独拼接。
     let dt = crate::localtime::from_unix(ms / 1000);
     format!("{}.{:03}", dt.format("%Y-%m-%d %H:%M:%S"), ms % 1000)
@@ -104,20 +106,23 @@ fn buffer_push(ts: i64, lv: Level, cat: Category, msg: &str) -> u64 {
 
 /// 取日志快照：返回 (当前最新 seq, seq > since 的记录，最多 limit 条)。
 ///
-/// `cats` 是类别键过滤，空列表表示不过滤；limit 超出时保留**最新**的部分
-/// （排障看最新的更有用）。过滤在 limit 之前生效，语义见
-/// [`crate::ringlog::RingLog::snapshot_cats`]。
+/// `cats` 是类别键过滤：`None` 表示不过滤；`Some(&[])` 表示「筛过了，但一个合法类别
+/// 都没有」→ **空结果**。两者必须分开，否则拼错类别键的人会静默拿到全部日志、
+/// 误以为自己筛对了。limit 超出时保留**最新**的部分（排障看最新的更有用）。
+/// 过滤在 limit 之前生效，语义见 [`crate::ringlog::RingLog::snapshot_cats`]。
 ///
 /// 给 `logs` RPC 用：从 SSH 里 `ubus call mt5700 logs '{"cats":"sms"}'`
 /// 只看短信链路，不必把 1200 条全捞出来再自己 grep。
-pub fn snapshot_cats(since: u64, limit: usize, cats: &[String]) -> (u64, Vec<LogRecord>) {
+pub fn snapshot_cats(since: u64, limit: usize, cats: Option<&[String]>) -> (u64, Vec<LogRecord>) {
     ring().snapshot_cats(since, limit, cats)
 }
 
 /// 把 RPC 传来的 `cats` 参数解析成合法类别键。
 ///
-/// 接受逗号或空格分隔；无法识别的键直接丢弃（于是「只填了非法键」会得到空结果，
-/// 而不是静默返回全部 —— 后者会让拼错参数的人以为自己筛对了）。
+/// 接受逗号或空格分隔；无法识别的键直接丢弃。返回值可能为空列表 —— 那表示
+/// 「筛过了但一个合法键都没有」，调用方必须传 `Some(&[])` 而不是 `None` 给
+/// [`snapshot_cats`]，这样拼错参数得到的是空结果，而不是静默返回全部日志
+/// （后者会让拼错的人以为自己筛对了）。
 pub fn parse_cat_filter(raw: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for part in raw.split([',', ' ', '\t']) {
@@ -207,7 +212,13 @@ pub fn plugin_file_info() -> (bool, String, u64) {
 }
 
 /// 追加一行到插件日志文件。未配置（`init_plugin_file` 之前或被关掉）时静默跳过。
-fn plugin_file_push(ts_text: &str, lv: Level, cat: Category, msg: &str) {
+///
+/// 行格式：`2026-11-08 04:40:01.123 (1762555201123) [INF] [SMS] 正文`。
+/// 行首是给人 `grep` / `less` 读的**路由本地时间文本**，括号里是**绝对毫秒** ——
+/// 机器口径只能认后者：浏览器与路由可能不在同一时区，靠文本解释会让整批文件条目
+/// 平移一个时区，与内存环形缓冲里同一条日志的去重键（`ts + 正文`）对不上，
+/// 页面表现为「同一句话出现两遍、时间还差几小时」。
+fn plugin_file_push(ts_text: &str, ts: i64, lv: Level, cat: Category, msg: &str) {
     if !cat.persists_to_file() {
         return;
     }
@@ -220,7 +231,7 @@ fn plugin_file_push(ts_text: &str, lv: Level, cat: Category, msg: &str) {
 
     let guard = lock_sink();
     let Some(f) = guard.as_ref() else { return };
-    let line = format!("{ts_text} [{}] [{}] {}\n", lv.tag(), cat.code(), flat);
+    let line = format!("{ts_text} ({ts}) [{}] [{}] {}\n", lv.tag(), cat.code(), flat);
     // 写失败不重试也不上报：日志落盘是尽力而为，为它再打一条日志只会放大故障
     let _ = crate::ringlog::append_capped(&f.path, &line, f.max_bytes);
 }
@@ -243,10 +254,14 @@ pub fn syslog_allowed(lv: Level, cat: Category) -> bool {
 /// 写一条日志。类别决定它去哪些通道，级别决定它能否越过 syslog 门槛。
 pub fn emit(lv: Level, cat: Category, args: std::fmt::Arguments) {
     let msg = format!("{}", args);
-    let ts_text = timestamp();
+    // 同一毫秒既进环形缓冲又写文件：两处的 ts 必须一模一样，
+    // 前端才能按 `ts + 正文` 把「内存里的那条」和「文件里的同一条」认成一条。
+    // 全仓库统一时间源（NTP 优先、设备时钟兜底），日志时间和通知时间同一条时间线。
+    let ts = now_ms();
+    let ts_text = timestamp(ts);
 
     // 1) 内存环形缓冲：**不受级别限制**，否则拨号/接口这类 info 日志在稳态下会完全消失
-    buffer_push(now_ms(), lv, cat, &msg);
+    buffer_push(ts, lv, cat, &msg);
 
     // 2) syslog：先过类别地板（业务类只有 ERR 放行），再过全局级别
     if syslog_allowed(lv, cat) {
@@ -254,7 +269,7 @@ pub fn emit(lv: Level, cat: Category, args: std::fmt::Arguments) {
     }
 
     // 3) 插件文件：仅业务类
-    plugin_file_push(&ts_text, lv, cat, &msg);
+    plugin_file_push(&ts_text, ts, lv, cat, &msg);
 }
 
 /// 按 `module_path!()` 自动定类的日志入口，四个级别宏的默认路径。
@@ -558,6 +573,23 @@ mod tests {
             assert!(
                 !text.contains("分流用例：服务已启动"),
                 "运行时类已进 syslog，不该再占 /tmp"
+            );
+        });
+    }
+
+    /// 文件行必须带**绝对毫秒**，且与环形缓冲里同一条记录的 `ts` 完全一致 ——
+    /// 前端按 `ts + 正文` 去重（见 logs.js::dedupKey），对不上就会把同一条日志显示两遍。
+    /// 只写本地时间文本的话，浏览器与路由不在同一时区时整批文件条目还会平移一个时区。
+    #[test]
+    fn plugin_file_line_carries_epoch_matching_ring_ts() {
+        with_plugin_file("epoch", 64 * 1024, |path| {
+            emit(Level::Info, Category::Sms, format_args!("epoch 用例：短信已发送"));
+            let text = std::fs::read_to_string(path).expect("业务日志应已落盘");
+            let e = find_in_ring("epoch 用例：短信已发送").expect("应能在缓冲里找到");
+            let want = format!("({})", e.ts);
+            assert!(
+                text.contains(&want),
+                "文件行必须带与环形缓冲相同的绝对毫秒 {want}，实际：{text}"
             );
         });
     }
