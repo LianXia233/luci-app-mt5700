@@ -8,7 +8,7 @@
 
 ---
 
-## 未发布
+## v1.32.7（2026-11-08）
 
 ### perf(status) 状态页数据链路：静态项缓存 + 一轮查询合并为一次批量 RPC
 
@@ -78,6 +78,24 @@
 - **note(backend)** 不改 ucode 桥：实测单次 RPC 往返约 5ms（`ubus call` 口径含
   客户端 fork），25 次合计约 125ms、占一轮 2141ms 的 5.8%；批量合批已在 PR #51
   落地，本分支再改同一段会产生硬冲突，故只在文档记录数据。
+
+### docs(agents) 新增 Rust/Tokio 后端健康规则
+
+> 本版已经把后端的阻塞调用收口了一遍，但「下次改动别把它改回去」此前只存在于
+> 评审讨论里，没有落到仓库规则上。现在写进 `AGENTS.md` 的强制章节，改后端必须逐条自查。
+
+- **docs(agents)** 新增「五、Rust/Tokio 后端健康规则」：`cargo test` 全绿（基线 356 通过 /
+  2 ignored）；`cargo clippy --all-targets` 生产段 0 warning；async 路径禁止
+  `std::process::Command` / `std::fs::*` / `std::net::TcpStream` / `std::thread::sleep` / `ureq`
+  等阻塞 API，无法异步化时整段走 `spawn_blocking` 并写明理由；跨 `await` 持锁必须用
+  `tokio::sync::Mutex`；`at_queue` 的 `PriLock` / `SmsTransaction` 单通道串行语义不得破坏；
+  `shutdown_signal()` 广播取消 + 5 秒 timeout 收尾路径不得回归；新增 `tokio::spawn` 必须能
+  回答「谁取消它 / 退出后谁 await / 失败是否被吞」三个问题。
+
+- **chore(release)** 发版：`PKG_VERSION` / `MT5700_UI_VERSION` 1.32.6 → 1.32.7；
+  `MT5700_CSS_VERSION` 保持 2.46.9（本版未改动样式文件）；`README.md` 头部徽标与
+  `docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 及四处
+  `releases/download/v1.32.7/…` 下载链接同步到 v1.32.7。
 
 ## v1.32.6（2026-11-08）
 
