@@ -342,19 +342,24 @@ function entriesFromSyslog(rawList) {
 }
 
 /* 插件自己的日志文件（logger.rs 写的第三路输出）行格式，一个字符都不能差：
- *   2026-11-08 04:40:01.123 [INF] [SMS] 收到新短信，存储区: ME，索引: 3
+ *   2026-11-08 04:40:01.123 (1762555201123) [INF] [SMS] 收到新短信，存储区: ME，索引: 3
+ *                          ^^^^^^^^^^^^^^^ 后端写入时刻的绝对毫秒，机器只认这一份
  * 业务痕迹不再刷 syslog，重启后内存环形缓冲也是空的，这个文件就是它们唯一的持久历史。
  *
- * 时间戳是**本地时间文本**，不是 epoch。必须自己按字段拆开再
- * new Date(y, m-1, d, H, M, S, ms)：`Date.parse` / `new Date(字符串)` 对这种
- * 「不带时区标记的本地时间」各浏览器口径不一致 —— 有的按 UTC 解、有的直接给 NaN。
- * 按 UTC 解会让整批文件条目平移一个时区，于是排序错位、与内存条目的去重全部落空，
- * 页面表现为「同一句话出现两遍、时间还差好几小时」，极难查。所以这里显式不用它。
+ * 时间戳有两份，用途不同：
+ *   - 行首是**路由本地时区的可读文本**，给人 grep / less 看，但**不带时区标记**；
+ *   - 括号里是**绝对毫秒**，跨源去重与排序只认它。
+ * 只用文本会出事：浏览器按自己的时区解释这串数字，浏览器与路由不在同一时区时整批
+ * 文件条目平移一个时区 —— 排序错位，且与内存里同一条日志的去重键（ts + '|' + 正文，
+ * 见 dedupKey）对不上，页面表现为「同一句话出现两遍、时间还差几小时」。
+ * 因此**有 epoch 就一律用 epoch**；`Date.parse` / `new Date(字符串)` 仍然不能用
+ * （对不带偏移的文本各浏览器口径不一，有的按 UTC 解、有的直接给 NaN），
+ * 只有旧格式（升级前写下、没有括号字段的行）才按字段拆开重建本地时间。
  *
  * 消息里的换行后端已经拍平成空格（见 logger.rs::plugin_file_push），
  * 因此「一行一条」是可信的；不匹配的行（追加到一半、被上限截断的头行、格式变更）
  * 一律跳过而不是猜 —— 猜出来的时间戳会把整份排序带歪。 */
-var PLUGIN_LINE_RE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3}) \[(DBG|INF|WRN|ERR)\] \[([A-Z0-9]+)\] ([\s\S]*)$/;
+var PLUGIN_LINE_RE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})(?: \((\d{10,})\))? \[(DBG|INF|WRN|ERR)\] \[([A-Z0-9]+)\] ([\s\S]*)$/;
 
 function entriesFromPluginFile(text, knownCodes) {
 	var codes = knownCodes || CATEGORY_CODE;
@@ -363,14 +368,20 @@ function entriesFromPluginFile(text, knownCodes) {
 	for (var i = 0; i < lines.length; i++) {
 		var m = lines[i].match(PLUGIN_LINE_RE);
 		if (!m) continue;
-		var msg = m[10].replace(/\s+$/, '');
+		var msg = m[11].replace(/\s+$/, '');
 		if (!msg) continue;
-		var ts = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
-			Number(m[4]), Number(m[5]), Number(m[6]), Number(m[7])).getTime();
+		/* 优先用行内的绝对毫秒；旧格式（没有括号字段）才按字段重建本地时间。
+		 * 两个分支都要留着：/tmp 不会因为升级重启服务就自动清空，
+		 * 升级前写下的行仍可能还在文件里。 */
+		var ts = m[8] ? Number(m[8]) : NaN;
+		if (!(ts > 0)) {
+			ts = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+				Number(m[4]), Number(m[5]), Number(m[6]), Number(m[7])).getTime();
+		}
 		if (isNaN(ts)) continue;
 		/* 文件里只有大写短标签（[SMS]），反查回类别键；查不到才退回正则兜底 */
-		var cat = knownCat(codes, m[9]) ? codes[m[9]] : categorize(msg);
-		out.push({ ts: ts, level: m[8], msg: msg, src: 'file', seq: 0, cat: cat });
+		var cat = knownCat(codes, m[10]) ? codes[m[10]] : categorize(msg);
+		out.push({ ts: ts, level: m[9], msg: msg, src: 'file', seq: 0, cat: cat });
 	}
 	return out;
 }

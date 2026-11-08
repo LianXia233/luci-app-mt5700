@@ -464,21 +464,30 @@ impl RpcServer {
                     .min(1200) as usize;
                 // cats：可选的类别过滤，字符串（"sms,at"）或数组（["sms","at"]）都收。
                 // 过滤在 limit 之前生效，语义见 ringlog::snapshot_cats。
-                let cats = match req.params.get("cats") {
-                    Some(serde_json::Value::String(s)) => crate::logger::parse_cat_filter(s),
+                // 三种情形必须分开：没传 / 空串 / 空数组 → None（不过滤）；
+                // 传了内容但全是非法键 → Some(空列表)，即「筛过了但零命中」。
+                // 把后者当成「不过滤」，拼错类别键的人会拿到全部日志还以为筛对了。
+                let cats: Option<Vec<String>> = match req.params.get("cats") {
+                    Some(serde_json::Value::String(s)) => {
+                        if s.trim().is_empty() {
+                            None
+                        } else {
+                            Some(crate::logger::parse_cat_filter(s))
+                        }
+                    }
                     // 数组形式先用逗号拼回一条再解析：去重与非法键丢弃都只由
                     // `parse_cat_filter` 一处负责，避免两种入参形态语义不一致。
-                    Some(serde_json::Value::Array(items)) => {
+                    Some(serde_json::Value::Array(items)) if !items.is_empty() => {
                         let joined = items
                             .iter()
                             .filter_map(|v| v.as_str())
                             .collect::<Vec<_>>()
                             .join(",");
-                        crate::logger::parse_cat_filter(&joined)
+                        Some(crate::logger::parse_cat_filter(&joined))
                     }
-                    _ => Vec::new(),
+                    _ => None,
                 };
-                let (seq, entries) = crate::logger::snapshot_cats(since, limit, &cats);
+                let (seq, entries) = crate::logger::snapshot_cats(since, limit, cats.as_deref());
                 let (file_on, file_path, file_cap) = crate::logger::plugin_file_info();
                 serde_json::json!({
                     "id": id,
