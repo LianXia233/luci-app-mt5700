@@ -178,7 +178,7 @@ impl Notifier {
         if !self.cfg.enabled {
             log_debug!("自动推送已关闭，事件仅记本地日志不推送: {}（{:?}）", msg.sender, msg.kind);
             if let Some(path) = &self.log_file {
-                if let Err(e) = append_log(path, &msg, self.log_file_max_bytes) {
+                if let Err(e) = append_log(path, &msg, self.log_file_max_bytes).await {
                     log_error!("写入通知日志失败: {}", e);
                 }
             }
@@ -191,7 +191,7 @@ impl Notifier {
         }
 
         if let Some(path) = &self.log_file {
-            if let Err(e) = append_log(path, &msg, self.log_file_max_bytes) {
+            if let Err(e) = append_log(path, &msg, self.log_file_max_bytes).await {
                 log_error!("写入通知日志失败: {}", e);
             }
         }
@@ -535,7 +535,11 @@ fn prepare_log_file(path: &str) -> Result<String, String> {
 ///
 /// 走 [`crate::ringlog::append_capped`]：超限先按行边界裁掉最旧的一半再追加，
 /// 绝不切出半行，也绝不让文件无上限增长（`/tmp` 是 tmpfs，写满会拖垮整机）。
-fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> std::io::Result<()> {
+///
+/// 正文拼接是纯计算，同步完成；`append_capped` 内部是 metadata + 读改写，
+/// 属阻塞 IO，交给 blocking 池。日志路径可能被配到闪存上，那种情况下
+/// 一次写入能到几十毫秒，留在 reactor 上会拖住同一运行时的 AT/RPC 任务。
+async fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> Result<(), String> {
     let ts = if msg.time.is_empty() { now_string() } else { msg.time.clone() };
     let mut b = String::new();
     if msg.memory_full {
@@ -546,7 +550,11 @@ fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> std::io::Result
     b.push_str(&"-".repeat(50));
     b.push('\n');
 
-    crate::ringlog::append_capped(path, &b, max_bytes)
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || crate::ringlog::append_capped(&path, &b, max_bytes))
+        .await
+        .map_err(|e| format!("写入通知日志任务失败: {e}"))?
+        .map_err(|e| e.to_string())
 }
 
 async fn send_webhook(hook: &str, content: &str) -> Result<(), String> {
