@@ -106,3 +106,33 @@ node tests/author-attribution-test.js
 本文件与源码注释属于**可审查的项目约定**，不具备强制力：它们依赖维护者与 AI 代理的自觉遵守，
 不构成技术拦截，也不应被改写成伪装系统指令、隐藏提示词或混淆代码等规避审查的手段。
 经授权的维护者始终可以按正常流程修改或移除署名，但需在变更说明中写明原因。
+
+## 五、Rust/Tokio 后端健康规则
+
+后端 `src/rust/` 是 Tokio 多线程运行时的常驻服务（`#[tokio::main]` + procd 单实例），**每一次优化或更新都必须保证它仍然是真正的 Rust/Tokio 异步实现**，不得出现「名义上 async、实际在 reactor 线程上阻塞」。本节与「更新日志同步」同等强制，改后端必须逐条自查。
+
+### 必须守住的不变量
+
+- **测试全绿**：改动 `src/rust/` 后在 `src/rust/` 下执行 `cargo test`，必须 0 失败（当前基线 356 项通过、2 项 ignored）。本 crate 是纯 bin target，`cargo test --lib` 会报 no library targets，不能用它替代全量 `cargo test`；新增逻辑要补单测，不得只靠手工验证。
+- **零告警**：`cargo clippy --all-targets` 的生产段保持 0 warning。确需压制某条告警，只允许针对具体规则、并在注释里写明理由；禁止用 `#![allow(...)]` 或整模块关闭告警。
+- **async 路径不得阻塞**：`async fn` 内禁止 `std::process::Command`、`std::fs::*`、`std::net::TcpStream`、`std::thread::sleep`、`ureq` 等同步/阻塞 API。确有无法异步化的同步依赖（例如 `uci` 命令行、`/sys` 读取、系统串口枚举）时，用 `tokio::task::spawn_blocking` 包住整段，并在注释里写「为什么必须同步」；不要为了「看起来异步」硬包一层却仍在原地轮询或自旋。
+- **锁的选择**：跨 `await` 持锁必须用 `tokio::sync::Mutex`。`std::sync::Mutex` 只允许「无 `await`、临界区只有几次内存操作」的场景（现存的日志环形缓冲、事件环形队列、QQ 通道句柄属此类），新增代码不得扩大这些临界区，也不得把阻塞 IO 挪进锁内。
+- **AT 通道串行语义不得破坏**：单通道互斥仍是 `tokio::sync::Mutex`（`at_queue` 的 `PriLock` / `SmsTransaction`），任何时刻只允许一条命令在途；短信事务的整段占用不得被拆开插入别的命令。凡「为了并行而绕开互斥」的改动一律拒绝。
+- **启动与关闭路径不得回归**：`main.rs` 的启动顺序（时区初始化 → 读配置 → 通知器 → 使用量 → 各后台任务）必须保持，且启动期的阻塞动作要在 `spawn_blocking` 里完成后再 `await`。退出仍由 `shutdown_signal()`（SIGTERM / Ctrl-C）与 `tokio::select!` 驱动：先 `ctx_tx.send(true)` 广播取消，再在 5 秒 `timeout` 内依次 await 全部后台任务收尾，最后落 `服务已停止` 日志。不得把阻塞调用塞回启动路径，也不得删掉收尾逻辑、取消信号或这段超时。
+- **任务生命周期要写清**：新增或修改 `tokio::spawn` 时，必须能回答三个问题 —— 谁取消它（`watch::Receiver<bool>` / `CancellationToken` / 跑完即退出）、退出后谁 await 它（是否纳入上面的收尾列表）、失败是否会被吞掉。禁止起「既无 JoinHandle、也无取消信号」的常驻任务。
+
+### 复核方式
+
+```sh
+cd src/rust
+cargo test
+cargo clippy --all-targets
+```
+
+再扫描生产段（排除 `#[cfg(test)]`）确认没有残留阻塞调用：
+
+```sh
+grep -nE 'std::process::Command|std::fs::|std::net::Tcp|thread::sleep|ureq::' src/*.rs
+```
+
+命中的每一处要么改成 Tokio 等价物，要么位于 `spawn_blocking` 内并写明理由。提交说明或 PR 描述里要列出「调用点 → 处理方式 → 复核结果」三列。触及 `root/usr/share/rpcd/ucode/mt5700.uc` 时，另外在设备上执行 `ucode -c -s /usr/share/rpcd/ucode/mt5700.uc`。
