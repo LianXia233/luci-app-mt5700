@@ -9,30 +9,143 @@
  * 运行日志页
  *
  * 两个顶层视图：
- *   1) 运行日志：后端内存 + syslog 合并，按类别细分（拨号/AT/短信/接口/系统/其他）
+ *   1) 运行日志：后端内存环形缓冲 + 插件日志文件 + syslog 三路合并，按 21 个类别细分
  *   2) 通知记录：通知文件（短信/来电/信号/存储），逻辑不变
+ *
+ * 类别分两组（与后端 logcat.rs 的 Group 一一对应）：
+ *   - 软件运行（Runtime）：进程/配置/RPC/串口/任务/存储/其他 —— 仍写 syslog；
+ *   - 业务痕迹（Business）：AT/URC/拨号/接口/信号/SIM/短信/通话/通知/扫频/锁频/
+ *     升级/流量/时间 —— **不再刷 syslog**，改由插件自己的有界文件承载，
+ *     所以这一组的持久历史只能从那个文件里读回来（见 entriesFromPluginFile）。
  *
  * 展示要点：等宽字体、级别配色与左色条、毫秒级时间列、关键词高亮、斑马纹、
  * 日期分组、类别徽章、长消息折叠、底部统计、可导出为文本。
  */
 
-/* 类别规则：有序正则表，先命中先归位。
+/* 类别表（前端副本）：key / code / group 与后端 src/rust/src/logcat.rs 对账，
+ * tests/log-category-test.js 会逐条比 —— 任何一边漏改都会挂测试。
+ * 后端 logs RPC 正常时会随结果下发 categories 清单，前端以它为准（顺序 + 分组），
+ * 这张内置表只在清单缺席时兜底（旧后端 / RPC 失败），并且是**标签与图标的唯一来源**：
+ * 后端刻意不下发中文文案（见 logcat.rs::table 的注释），文案只在前端存一份，才能走 po/ 翻译。
+ * 顺序照抄后端 ALL —— 兜底时也要跟后端一个顺序，否则两版界面的类别条会跳来跳去。 */
+var CAT_TABLE = [
+	{ key: 'runtime', code: 'RT', group: 'runtime', label: '进程运行时', icon: '🚀' },
+	{ key: 'config', code: 'CFG', group: 'runtime', label: '配置与 UCI', icon: '🧩' },
+	{ key: 'rpc', code: 'RPC', group: 'runtime', label: 'RPC 服务', icon: '🔗' },
+	{ key: 'serial', code: 'TTY', group: 'runtime', label: '串口与设备', icon: '🔌' },
+	{ key: 'task', code: 'TSK', group: 'runtime', label: '异步任务', icon: '🧵' },
+	{ key: 'storage', code: 'STO', group: 'runtime', label: '存储与文件', icon: '🗄️' },
+	{ key: 'misc', code: 'MISC', group: 'runtime', label: '其他', icon: '📦' },
+	{ key: 'at', code: 'AT', group: 'business', label: 'AT 通道', icon: '📟' },
+	{ key: 'urc', code: 'URC', group: 'business', label: '主动上报', icon: '📥' },
+	{ key: 'dial', code: 'DIAL', group: 'business', label: '拨号与承载', icon: '📡' },
+	{ key: 'net', code: 'NET', group: 'business', label: '接口与防火墙', icon: '🌐' },
+	{ key: 'signal', code: 'SIG', group: 'business', label: '信号与射频', icon: '📶' },
+	{ key: 'sim', code: 'SIM', group: 'business', label: 'SIM 卡', icon: '💳' },
+	{ key: 'sms', code: 'SMS', group: 'business', label: '短信', icon: '💬' },
+	{ key: 'call', code: 'CALL', group: 'business', label: '通话', icon: '📞' },
+	{ key: 'notify', code: 'NTF', group: 'business', label: '通知推送', icon: '🔔' },
+	{ key: 'scan', code: 'SCAN', group: 'business', label: '全网扫频', icon: '🔍' },
+	{ key: 'schedule', code: 'SCH', group: 'business', label: '定时锁频', icon: '⏰' },
+	{ key: 'firmware', code: 'FOTA', group: 'business', label: '模组升级', icon: '⬆️' },
+	{ key: 'usage', code: 'USAGE', group: 'business', label: '流量统计', icon: '📊' },
+	{ key: 'time', code: 'TIME', group: 'business', label: '时间与时区', icon: '🕒' }
+];
+
+/* 「全部」是纯前端概念：后端没有这个类别，它只是「不按类别过滤」的开关。
+ * 单独放一张卡而不塞进 CAT_TABLE —— 塞进去就会被当成真类别参与计数、配色与对账。 */
+var CAT_ALL = { key: 'all', code: 'ALL', group: 'all', label: '全部', icon: '📑' };
+
+/* 类别条的两栏标题：key 对应后端 Group::key()，顺序即自上而下的展示顺序 */
+var CAT_GROUP_DEFS = [
+	{ key: 'runtime', label: '软件运行', title: '软件自身运行情况：这些行仍写入 syslog' },
+	{ key: 'business', label: '业务痕迹', title: '模组业务痕迹：只进内存环形缓冲与插件日志文件，不再刷 syslog' }
+];
+
+/* key → 定义、大写 code → key 两张反查表。
+ * code 那张是给插件日志文件用的：文件行里只有 [SMS] 这种大写短标签（见 logger.rs），
+ * 得反查回 key 才能和内存条目对上号。 */
+var CATEGORY_DEFS = {};
+var CATEGORY_CODE = {};
+for (var _ci = 0; _ci < CAT_TABLE.length; _ci++) {
+	var _cd = CAT_TABLE[_ci];
+	CATEGORY_DEFS[_cd.key] = _cd;
+	CATEGORY_CODE[_cd.code] = _cd.key;
+}
+CATEGORY_DEFS[CAT_ALL.key] = CAT_ALL;
+
+/* 来源中文名：下拉、导出头、行尾徽章三处共用一份，免得三处措辞各写各的 */
+var SRC_LABEL = { all: '全部来源', backend: '后端内存', syslog: 'syslog', file: '插件文件' };
+
+/* 类别规则：有序正则表，先命中先归位。**只是兜底**——
+ * 新后端的每条日志都带服务端定类的 cat（logcat.rs），拿得到就直接用；
+ * 会走到这里的只有两种行：旧后端（没有 cat 字段）与 syslog 行（永远不带 cat）。
+ * 兜底只求「大致归位」，不承诺与后端逐条一致。
+ *
  * 顺序即优先级——sms 必须在 at 之前：AT 通道日志形如「发送 → 模组: AT+CMGS=...」，
  * 通道层措辞（发送/接收/模组）与 AT+ 前缀都会命中 at 规则，若 sms 排在后面
  * 所有短信收发痕迹都会被归进「AT 通道」；同时正则必须列全 CMGS/CMGL/CMGR/
  * CMGW/CMSS 这些短信命令名——「SM」子串匹配不到 CMGS（C-M-G-S）。
- * dial 在 net 之前，因为拨号过程里也含接口关键词。 */
+ * dial 在 net 之前，因为拨号过程里也含接口关键词。
+ *
+ * 类别从 6 个细分到 21 个之后，同一条理由又延长出几段：
+ *   - 窄口径的业务域（sms/call/sim/notify/scan/schedule/firmware/usage/time）必须排在
+ *     signal/dial/net/at 这几个宽口径规则之前：宽口径里全是「注册 / 接口 / AT+ / 超时」
+ *     这类过程词，几乎每条业务日志都沾得上，让它们先命中就把细分全吃回去了
+ *     —— 和上面「短信都进 AT 通道」是同一个坑，只是桶更多、更容易踩。
+ *   - dial 在 signal 之前，且 dial 规则里**不再**保留「信号」这个词：
+ *     拨号失败的日志几乎都会附一句信号如何，但它讲的是拨号；
+ *     若 signal 在前，这类行会全部跑去「信号与射频」，拨号链路反而看不出断点。
+ *   - sms 在 urc 之前：+CMT / +CMTI 这类短信主动上报形式上确实是 URC，但用户筛「短信」
+ *     时想找的正是这几条；urc 规则里的「+大写命令:」会把它们全兜走，所以让 sms 先命中。
+ *   - urc 在 dial/at 之前：主动上报走的也是 AT 通道，行里还常带 +CREG 这类注册 URC，
+ *     不先拦下来就会被 dial 按「注册」抢走。
+ *   - serial/rpc/task/storage/config/runtime 这组「软件自身」的规则排在最后：
+ *     它们的关键词（串口 / 任务 / 配置 / 服务…）在业务日志里常作为背景出现，
+ *     放到前面就会把业务痕迹错分成运行时。
+ *   - 全都不命中 → misc（Runtime 组），与后端一致：没被认出来的日志保持改造前的行为，
+ *     仍进 syslog，不会因为漏标而悄悄从系统日志里消失（见 logcat.rs 里 Misc 的注释）。 */
 var CATEGORY_RULES = [
-	{ key: 'sms', label: '短信',
-		re: /短信|SMS|PDU|长短信|收件|发件|短信中心|CPMS|CMGS|CMGL|CMGR|CMGW|CMSS|CMGD|归档|存储已满|SM/ },
-	{ key: 'dial', label: '拨号与网络',
-		re: /自动拨号|拨号|SETAUTODIAL|APN|PDP|CGACT|CGDCONT|NDIS|驻网|注册|CREG|CGREG|C5GREG|COPS|SETMODE|信号/ },
-	{ key: 'net', label: '接口与网络',
-		re: /接口|网口|ifup|ifdown|DHCP|地址|device|hotplug|MT5700M|eth\d|IPv4|IPv6|网关|路由|metric|防火墙|network/ },
-	{ key: 'at', label: 'AT 通道',
-		re: /AT\+|AT\^|前端请求|发送\s*(?:→|->)\s*模组|接收\s*(?:←|<-)\s*模组|URC|主动上报|串口|ttyUSB|ttyACM|AT通道|事务|超时|重试|CMEE|CNMI|CMGF|CLIP|回显/ },
-	{ key: 'sys', label: '系统与服务',
-		re: /服务|procd|守护|固件|FOTA|升级|重启|内存|CPU|温度|UCI|uci|配置|权限|证书|NTP|对时|时钟|时区|日志级别|Web|luci/ }
+	{ key: 'sms',
+		re: /短信|SMS|PDU|长短信|收件|发件|短信中心|CPMS|CMGS|CMGL|CMGR|CMGW|CMSS|CMGD|CMT|归档|存储已满|SM/ },
+	{ key: 'call',
+		re: /来电|通话|呼叫|接听|挂断|语音|CLIP|COLP/ },
+	{ key: 'sim',
+		re: /SIM|PIN|PUK|ICCID|IMSI|CPIN|卡槽|鉴权失败/ },
+	{ key: 'notify',
+		re: /通知|推送|企业微信|QQ|webhook|模板|节流/ },
+	{ key: 'scan',
+		re: /扫频|全网扫|频段扫描|CELLSCAN/ },
+	{ key: 'schedule',
+		re: /定时锁频|锁频|锁定频段|频点|定时任务|计划任务/ },
+	{ key: 'firmware',
+		re: /FOTA|固件升级|模组升级|升级包|刷写/ },
+	{ key: 'usage',
+		re: /流量|用量|月度|计费|DSFLOW/ },
+	{ key: 'time',
+		re: /NTP|对时|时区|时钟|时间同步|本地时间|CCLK/ },
+	{ key: 'urc',
+		re: /URC|主动上报|\+[A-Z]{3,}\s*[:：]/ },
+	{ key: 'dial',
+		re: /自动拨号|拨号|重拨|退避|SETAUTODIAL|APN|PDP|CGACT|CGDCONT|NDIS|驻网|注册|CREG|CGREG|C5GREG|COPS|SETMODE/ },
+	{ key: 'signal',
+		re: /信号|CSQ|HCSQ|RSRP|RSRQ|SINR|RSSI|载波聚合|多载波|芯片温度|温度|MONSC|MONNC/ },
+	{ key: 'net',
+		re: /接口|网口|ifup|ifdown|DHCP|地址|device|hotplug|MT5700M|eth\d|IPv4|IPv6|网关|路由|metric|防火墙|network|DNS/ },
+	{ key: 'at',
+		re: /AT\+|AT\^|前端请求|发送\s*(?:→|->)\s*模组|接收\s*(?:←|<-)\s*模组|AT\s?通道|事务|超时|重试|CMEE|CNMI|CMGF|回显/ },
+	{ key: 'serial',
+		re: /串口|ttyUSB|ttyACM|cdc-wdm|termios|设备节点|端口探测|拔插/ },
+	{ key: 'rpc',
+		re: /RPC|rpc|监听|鉴权|方法分发|回环|127\.0\.0\.1/ },
+	{ key: 'task',
+		re: /任务|异步|tokio|取消|并发|调度/ },
+	{ key: 'storage',
+		re: /文件|读写|配额|落盘|磁盘|存储|截断/ },
+	{ key: 'config',
+		re: /UCI|uci|配置|参数校验|热更新|权限|证书|选项/ },
+	{ key: 'runtime',
+		re: /启动|退出|版本|服务|procd|守护|重启|内存|CPU|日志级别|Web|luci|panic|SIGTERM|SIGINT|进程/ }
 ];
 
 /* 级别中文化：徽章显示中文，原始标识放 title 便于对照 */
@@ -135,16 +248,14 @@ function displayText(text) {
 	return s;
 }
 
-/* 类别判定：按 CATEGORY_RULES 有序匹配，都不命中归 other */
+/* 类别判定（正则兜底）：按 CATEGORY_RULES 有序匹配，都不命中归 misc。
+ * misc 是 Runtime 组的兜底类别，与后端 Category::Misc 同一个语义 —— 见上方规则表的注释。 */
 function categorize(msg) {
 	for (var i = 0; i < CATEGORY_RULES.length; i++) {
 		if (CATEGORY_RULES[i].re.test(msg)) return CATEGORY_RULES[i].key;
 	}
-	return 'other';
+	return 'misc';
 }
-
-/* 类别中文名查找 */
-var CATEGORY_LABEL = { all: '全部', dial: '拨号与网络', at: 'AT 通道', sms: '短信', net: '接口与网络', sys: '系统与服务', other: '其他' };
 
 function pad(n, w) {
 	var s = String(n);
@@ -168,20 +279,48 @@ function dateKey(ms) {
 	return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2);
 }
 
-/* 后端日志：msg 里已经带了业务信息；级别来自宏 */
-function entriesFromBackend(list) {
+/* 字节数按 KiB 显示：插件日志文件的上限（max_bytes）是字节，直接甩给用户没意义。
+ * 不足 1 KiB 时退回 B —— 否则小上限会显示成「0 KiB」，看着像没配。 */
+function fmtKiB(bytes) {
+	var n = Number(bytes) || 0;
+	if (n <= 0) return '0 KiB';
+	if (n < 1024) return n + ' B';
+	var k = n / 1024;
+	return (k >= 100 ? String(Math.round(k)) : String(Math.round(k * 10) / 10)) + ' KiB';
+}
+
+/* 只认自己登记过的键。用 hasOwnProperty 而不是直接取值：
+ * cat / code 都来自 RPC 与文件内容，万一传来 "constructor" 这种
+ * Object.prototype 上的名字，直接取值会拿到一个真值（函数），
+ * 于是被当成「已知类别」渲染出一个点不动、也没配色的芯片。 */
+function knownCat(map, key) {
+	return !!map && typeof key === 'string' && key !== '' &&
+		Object.prototype.hasOwnProperty.call(map, key);
+}
+
+/* 后端日志：msg 里已经带了业务信息；级别来自宏。
+ * 类别优先用后端定好的 cat（服务端在写日志那一刻就知道自己在哪个模块，比前端猜准得多）；
+ * cat 缺失或不是已知键（旧后端 / 拼错 / 前端表没跟上）才退回正则兜底，页面照样能分类。
+ * knownCats 传的是**当前生效**的类别索引（后端下发清单时会包含前端还没登记的键），
+ * 缺省用内置表，保证这个函数单独调用也不会崩。 */
+function entriesFromBackend(list, knownCats) {
+	var known = knownCats || CATEGORY_DEFS;
 	var out = [];
 	for (var i = 0; i < list.length; i++) {
 		var e = list[i];
-		out.push({ ts: Number(e.ts) || 0, level: String(e.level || 'INF'), msg: String(e.msg || ''), src: 'backend', seq: Number(e.seq) || 0 });
+		var msg = String(e.msg || '');
+		var cat = knownCat(known, e.cat) ? e.cat : categorize(msg);
+		out.push({ ts: Number(e.ts) || 0, level: String(e.level || 'INF'), msg: msg, src: 'backend', seq: Number(e.seq) || 0, cat: cat });
 	}
 	return out;
 }
 
 /* syslog 行：两种形态
- *   at-webserver-rust[pid]: 2026-09-18 08:14:35.326 [INF] 消息      （后端 stdout）
+ *   at-webserver-rust[pid]: 2026-09-18 08:14:35.326 [INF] [RT] 消息      （后端 stdout）
  *   at-webserver: 消息                                             （init.d 的 logger）
- * 后端那类已由内存日志提供，这里只取 init.d 那类，避免重复。 */
+ * 级别后面那个 [RT] 是类别短码 —— logger.rs 的 emit() 按「级别 + 类别」两个方括号打印，
+ * 与插件日志文件同一套形制。前端不去解析它：后端这类行已由内存环形缓冲提供同一条记录
+ * （还带正经的 cat，比短码可靠），所以照旧整段跳过，只取 init.d 那类，避免重复。 */
 function entriesFromSyslog(rawList) {
 	var out = [];
 	for (var i = 0; i < rawList.length; i++) {
@@ -197,9 +336,61 @@ function entriesFromSyslog(rawList) {
 
 		var lv = 'INF';
 		if (/警告|失败|错误|warn|error/i.test(text)) lv = /错误|失败|error/i.test(text) ? 'ERR' : 'WRN';
-		out.push({ ts: Number(r.time) || Date.now(), level: lv, msg: text, src: 'syslog', seq: 0 });
+		out.push({ ts: Number(r.time) || Date.now(), level: lv, msg: text, src: 'syslog', seq: 0, cat: categorize(text) });
 	}
 	return out;
+}
+
+/* 插件自己的日志文件（logger.rs 写的第三路输出）行格式，一个字符都不能差：
+ *   2026-11-08 04:40:01.123 (1762555201123) [INF] [SMS] 收到新短信，存储区: ME，索引: 3
+ *                          ^^^^^^^^^^^^^^^ 后端写入时刻的绝对毫秒，机器只认这一份
+ * 业务痕迹不再刷 syslog，重启后内存环形缓冲也是空的，这个文件就是它们唯一的持久历史。
+ *
+ * 时间戳有两份，用途不同：
+ *   - 行首是**路由本地时区的可读文本**，给人 grep / less 看，但**不带时区标记**；
+ *   - 括号里是**绝对毫秒**，跨源去重与排序只认它。
+ * 只用文本会出事：浏览器按自己的时区解释这串数字，浏览器与路由不在同一时区时整批
+ * 文件条目平移一个时区 —— 排序错位，且与内存里同一条日志的去重键（ts + '|' + 正文，
+ * 见 dedupKey）对不上，页面表现为「同一句话出现两遍、时间还差几小时」。
+ * 因此**有 epoch 就一律用 epoch**；`Date.parse` / `new Date(字符串)` 仍然不能用
+ * （对不带偏移的文本各浏览器口径不一，有的按 UTC 解、有的直接给 NaN），
+ * 只有旧格式（升级前写下、没有括号字段的行）才按字段拆开重建本地时间。
+ *
+ * 消息里的换行后端已经拍平成空格（见 logger.rs::plugin_file_push），
+ * 因此「一行一条」是可信的；不匹配的行（追加到一半、被上限截断的头行、格式变更）
+ * 一律跳过而不是猜 —— 猜出来的时间戳会把整份排序带歪。 */
+var PLUGIN_LINE_RE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})(?: \((\d{10,})\))? \[(DBG|INF|WRN|ERR)\] \[([A-Z0-9]+)\] ([\s\S]*)$/;
+
+function entriesFromPluginFile(text, knownCodes) {
+	var codes = knownCodes || CATEGORY_CODE;
+	var out = [];
+	var lines = String(text || '').split('\n');
+	for (var i = 0; i < lines.length; i++) {
+		var m = lines[i].match(PLUGIN_LINE_RE);
+		if (!m) continue;
+		var msg = m[11].replace(/\s+$/, '');
+		if (!msg) continue;
+		/* 优先用行内的绝对毫秒；旧格式（没有括号字段）才按字段重建本地时间。
+		 * 两个分支都要留着：/tmp 不会因为升级重启服务就自动清空，
+		 * 升级前写下的行仍可能还在文件里。 */
+		var ts = m[8] ? Number(m[8]) : NaN;
+		if (!(ts > 0)) {
+			ts = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+				Number(m[4]), Number(m[5]), Number(m[6]), Number(m[7])).getTime();
+		}
+		if (isNaN(ts)) continue;
+		/* 文件里只有大写短标签（[SMS]），反查回类别键；查不到才退回正则兜底 */
+		var cat = knownCat(codes, m[10]) ? codes[m[10]] : categorize(msg);
+		out.push({ ts: ts, level: m[9], msg: msg, src: 'file', seq: 0, cat: cat });
+	}
+	return out;
+}
+
+/* 去重键：时间戳 + 正文。后端一次 emit 会同时写内存环形缓冲与插件文件
+ * （见 logger.rs），两边的 ts 与 msg 逐字符一致，只有 seq 是内存那份独有的。
+ * 不用 seq 当键正是这个原因：文件行根本没有 seq。 */
+function dedupKey(e) {
+	return e.ts + '|' + e.msg;
 }
 
 return L.view.extend({
@@ -220,16 +411,21 @@ return L.view.extend({
 
 		var state = {
 			tab: 'runtime',      /* runtime | notify */
-			category: 'all',     /* all | dial | at | sms | net | sys | other */
+			category: 'all',     /* all | 类别键（见 CAT_TABLE，后端下发清单时以它为准） */
 			level: 'all',        /* all | DBG | INF | WRN | ERR | errwrn */
-			source: 'all',       /* all | backend | syslog */
+			source: 'all',       /* all | backend | syslog | file */
 			limit: 400,          /* 200 | 400 | 800 | 0(全部) */
 			query: '',
 			auto: true,
-			entries: [],         /* 后端+syslog 合并后的全量条目（已分类） */
+			entries: [],         /* 后端内存 + 插件文件 + syslog 合并去重后的全量条目（已分类） */
 			notify: '',
 			syslogOk: true,
-			loading: false
+			loading: false,
+			catList: [],         /* 当前生效的类别清单（顺序即展示顺序） */
+			catByKey: {},        /* key -> 类别定义 */
+			catByCode: {},       /* 大写 code -> key：解析插件日志文件用 */
+			catSig: '',          /* catList 的签名，变了才重建类别条 DOM */
+			pluginFile: null     /* logs RPC 下发的 {enabled, path, max_bytes} */
 		};
 
 		/* ---------------- 数据通道 ---------------- */
@@ -280,33 +476,115 @@ return L.view.extend({
 		});
 		body.appendChild(tabs);
 
-		/* ---------------- 类别条（仅运行日志 tab 下显示） ---------------- */
+		/* ---------------- 类别条（仅运行日志 tab 下显示） ----------------
+		 * 21 个类别分两栏：软件运行（Runtime 组，仍写 syslog）/ 业务痕迹（Business 组，
+		 * 只进内存缓冲与插件文件）。分栏不是为了好看 —— 它把「这次是软件出事了」
+		 * 和「模组在干活」两类完全不同的排障路径在视觉上切开，一屏扫过去就知道该看哪栏。
+		 * 「全部」独占最上面一行：它是「不按类别过滤」，不属于任何一个分组。 */
 		var catBar = E('div', { 'class': 'mt5700-logcatbar' });
-		var CAT_DEFS = [
-			{ key: 'all', icon: '📑' },
-			{ key: 'dial', icon: '📡' },
-			{ key: 'at', icon: '🔌' },
-			{ key: 'sms', icon: '💬' },
-			{ key: 'net', icon: '🌐' },
-			{ key: 'sys', icon: '⚙️' },
-			{ key: 'other', icon: '📦' }
-		];
 		var catBtns = {};
-		CAT_DEFS.forEach(function (c) {
+
+		/* 类别定义查找：优先当前生效清单（可能含后端新增、前端还没登记标签的键），
+		 * 再退回内置表；都没有就直接显示 key —— 宁可露出一个英文键，
+		 * 也不能让新类别的日志在界面上凭空消失（logcat.rs::table 的注释也是这个约定）。 */
+		function catDef(key) {
+			if (knownCat(state.catByKey, key)) return state.catByKey[key];
+			if (knownCat(CATEGORY_DEFS, key)) return CATEGORY_DEFS[key];
+			return { key: key, code: String(key).toUpperCase(), group: 'runtime', label: key, icon: '🏷️' };
+		}
+		function catLabel(key) { return catDef(key).label; }
+
+		function makeCatBtn(def) {
 			var btn = E('div', {
 				'class': 'mt5700-logcatbtn',
-				'data-cat': c.key,
+				'data-cat': def.key,
+				'data-group': def.group,
 				role: 'button',
-				tabindex: '0'
+				tabindex: '0',
+				title: def.label
 			}, [
-				E('span', { 'class': 'mt5700-logcatbtn-icon' }, c.icon),
-				E('span', { 'class': 'mt5700-logcatbtn-label' }, CATEGORY_LABEL[c.key]),
+				E('span', { 'class': 'mt5700-logcatbtn-icon' }, def.icon),
+				E('span', { 'class': 'mt5700-logcatbtn-label' }, def.label),
 				E('span', { 'class': 'mt5700-logcatbtn-count' }, '0')
 			]);
-			btn.addEventListener('click', function () { state.category = c.key; renderAll(); });
-			catBar.appendChild(btn);
-			catBtns[c.key] = btn;
-		});
+			btn.addEventListener('click', function () { state.category = def.key; renderAll(); });
+			return btn;
+		}
+
+		/* 整条重建。只在类别清单真的变了时调用（见 applyCatList）——
+		 * 自动刷新每 5s 一轮，每轮都重建会把用户正按住的芯片和键盘焦点一起冲掉。 */
+		function renderCatBar() {
+			catBar.innerHTML = '';
+			catBtns = {};
+
+			var allRow = E('div', { 'class': 'mt5700-logcatrow mt5700-logcatrow-all' });
+			var allBtn = makeCatBtn(CAT_ALL);
+			allRow.appendChild(allBtn);
+			catBar.appendChild(allRow);
+			catBtns[CAT_ALL.key] = allBtn;
+
+			for (var g = 0; g < CAT_GROUP_DEFS.length; g++) {
+				var grp = CAT_GROUP_DEFS[g];
+				var defs = [];
+				for (var i = 0; i < state.catList.length; i++) {
+					if (state.catList[i].group === grp.key) defs.push(state.catList[i]);
+				}
+				if (!defs.length) continue;   /* 该组一个类别都没有时不留空栏 */
+				var row = E('div', { 'class': 'mt5700-logcatrow' });
+				for (var j = 0; j < defs.length; j++) {
+					var btn = makeCatBtn(defs[j]);
+					row.appendChild(btn);
+					catBtns[defs[j].key] = btn;
+				}
+				catBar.appendChild(E('div', { 'class': 'mt5700-logcatgroup mt5700-logcatgroup-' + grp.key }, [
+					E('span', { 'class': 'mt5700-logcatgroup-label', title: grp.title }, grp.label),
+					row
+				]));
+			}
+		}
+
+		/* 换上新的类别清单，并重建两张反查表 */
+		function applyCatList(list) {
+			var sig = '';
+			for (var i = 0; i < list.length; i++) sig += list[i].key + '/' + list[i].group + ',';
+			if (sig === state.catSig) return;
+			state.catSig = sig;
+			state.catList = list;
+			state.catByKey = {};
+			state.catByCode = {};
+			for (var j = 0; j < list.length; j++) {
+				state.catByKey[list[j].key] = list[j];
+				state.catByCode[list[j].code] = list[j].key;
+			}
+			/* 选中的类别被后端摘掉时退回「全部」：否则列表会永远空着，
+			 * 而芯片栏里一个高亮都没有，用户看不出是筛选条件失效了。 */
+			if (state.category !== 'all' && !knownCat(state.catByKey, state.category)) state.category = 'all';
+			renderCatBar();
+		}
+
+		/* 后端下发的 categories → 展示用清单：顺序与分组以后端为准（它才知道自己有哪些类别），
+		 * 标签与图标取前端内置表（后端刻意不下发中文，见 logcat.rs::table）。 */
+		function catListFromBackend(list) {
+			var out = [];
+			for (var i = 0; i < list.length; i++) {
+				var c = list[i] || {};
+				var key = String(c.key || '');
+				if (!key || key === CAT_ALL.key) continue;   /* all 是前端概念，后端不该发；发了也当没有 */
+				var known = knownCat(CATEGORY_DEFS, key) ? CATEGORY_DEFS[key] : null;
+				var group = (c.group === 'runtime' || c.group === 'business')
+					? c.group : (known ? known.group : 'runtime');
+				out.push({
+					key: key,
+					code: String(c.code || (known ? known.code : key.toUpperCase())),
+					group: group,
+					label: known ? known.label : key,
+					icon: known ? known.icon : '🏷️'
+				});
+			}
+			return out;
+		}
+
+		applyCatList(CAT_TABLE.slice());
 		body.appendChild(catBar);
 
 		/* ---------------- 工具栏 ---------------- */
@@ -380,11 +658,13 @@ return L.view.extend({
 		});
 		var errWrnWrap = E('label', { 'class': 'mt5700-logerrwrn' }, [errWrnChk, E('span', {}, '仅错误+警告')]);
 
-		/* 来源下拉 */
+		/* 来源下拉：三路真实来源。插件文件那一路是业务痕迹的持久副本，
+		 * 重启后内存缓冲清空，只有它还留着历史（见 refresh 里的 readPluginFile）。 */
 		var srcSel = Mt5700.select([
-			{ label: '全部来源', value: 'all' },
-			{ label: '后端内存', value: 'backend' },
-			{ label: 'syslog', value: 'syslog' }
+			{ label: SRC_LABEL.all, value: 'all' },
+			{ label: SRC_LABEL.backend, value: 'backend' },
+			{ label: SRC_LABEL.syslog, value: 'syslog' },
+			{ label: SRC_LABEL.file, value: 'file' }
 		], 'all');
 		stylePurpleSelect(srcSel);
 		srcSel.addEventListener('change', function () { state.source = srcSel.value; renderList(); });
@@ -479,9 +759,13 @@ return L.view.extend({
 			return out;
 		}
 
-		/* 计算未过滤时的各类别总数 */
+		/* 计算未过滤时的各类别总数。
+		 * 桶按当前生效的类别清单开，而不是写死一份字面量：写死的话后端每加一个类别
+		 * 都得记着回来同步，漏改的表现是新类别芯片恒显示 0，
+		 * 看着像「这个类别没有日志」，而不是「计数没接上」。 */
 		function computeCategoryTotals(allEntries) {
-			var totals = { all: allEntries.length, dial: 0, at: 0, sms: 0, net: 0, sys: 0, other: 0 };
+			var totals = { all: allEntries.length };
+			for (var k = 0; k < state.catList.length; k++) totals[state.catList[k].key] = 0;
 			for (var i = 0; i < allEntries.length; i++) {
 				var c = allEntries[i].cat;
 				if (totals[c] !== undefined) totals[c]++;
@@ -536,8 +820,10 @@ return L.view.extend({
 					'暂无运行日志',
 					'服务连上模组后会自动记录拨号对齐、AT 通道交互、短信收发、接口拉起与系统事件。'));
 			} else if (!list.length) {
-				var catLabel = state.category === 'all' ? '' : '（' + CATEGORY_LABEL[state.category] + '）';
-				listEl.appendChild(emptyBox('没有匹配的日志' + catLabel, '试试清空关键词、切换类别，或把级别切回「全部级别」。'));
+				/* 局部变量不能叫 catLabel：那会盖掉同名的类别名查找函数，
+				 * 于是这里第一次调用就抛 "catLabel is not a function"，整个列表渲染中断。 */
+				var catName = state.category === 'all' ? '' : '（' + catLabel(state.category) + '）';
+				listEl.appendChild(emptyBox('没有匹配的日志' + catName, '试试清空关键词、切换类别，或把级别切回「全部级别」。'));
 			} else {
 				var frag = document.createDocumentFragment();
 				/* 条数上限 */
@@ -579,10 +865,13 @@ return L.view.extend({
 			renderFooter(all, list);
 		}
 
-		/* 更新类别条按钮的计数与激活状态 */
+		/* 更新类别条按钮的计数与激活状态。
+		 * 遍历的是「全部 + 当前生效类别清单」，与 renderCatBar 建芯片时同一份数据，
+		 * 两边不会各说各话（清单来自后端时更要如此）。 */
 		function updateCatBar(filteredCounts, totalCounts) {
 			var hasFilter = state.level !== 'all' || state.source !== 'all' || state.query !== '';
-			CAT_DEFS.forEach(function (c) {
+			var defs = [CAT_ALL].concat(state.catList);
+			defs.forEach(function (c) {
 				var btn = catBtns[c.key];
 				if (!btn) return;
 				var countEl = btn.querySelector('.mt5700-logcatbtn-count');
@@ -621,7 +910,7 @@ return L.view.extend({
 			var cls = lv === 'ERR' ? 'err' : (lv === 'WRN' ? 'warn' : (lv === 'DBG' ? 'dbg' : 'info'));
 			var row = E('div', {
 				'class': 'mt5700-logrow mt5700-logrow-' + cls,
-				'data-cat': e.cat || 'other',
+				'data-cat': e.cat || 'misc',
 				'data-level': lv,
 				'data-src': e.src || 'backend'
 			});
@@ -634,11 +923,11 @@ return L.view.extend({
 			row.appendChild(E('span', { 'class': 'mt5700-loglv', title: lv }, LEVEL_LABEL[lv] || lv));
 
 			/* 类别小徽章 */
-			var catKey = e.cat || 'other';
+			var catKey = e.cat || 'misc';
 			row.appendChild(E('span', {
 				'class': 'mt5700-logcat mt5700-logcat-' + catKey,
-				title: CATEGORY_LABEL[catKey] || catKey
-			}, CATEGORY_LABEL[catKey] || catKey));
+				title: catLabel(catKey)
+			}, catLabel(catKey)));
 
 			var dir = detectDirection(e.msg);
 			if (dir) {
@@ -674,7 +963,17 @@ return L.view.extend({
 			}
 
 			row.appendChild(msg);
-			if (e.src === 'syslog') row.appendChild(E('span', { 'class': 'mt5700-logsrc', title: '来自 syslog（init.d / 内核）' }, '系统'));
+			/* 行尾来源徽章：后端内存那一路不打徽章（它是默认来源，打了满屏都是噪声），
+			 * 另外两路都打 —— 看日志时「这行是系统日志里的、还是插件文件里翻出来的」
+			 * 直接决定它可不可信（syslog 行没有毫秒与类别，插件文件行可能来自上一次运行）。 */
+			if (e.src === 'syslog') {
+				row.appendChild(E('span', { 'class': 'mt5700-logsrc', title: '来自 syslog（init.d / 内核）' }, '系统'));
+			} else if (e.src === 'file') {
+				row.appendChild(E('span', {
+					'class': 'mt5700-logsrc mt5700-logsrc-file',
+					title: '来自插件日志文件（业务痕迹的持久副本，重启前的历史也在这里）'
+				}, '文件'));
+			}
 			return row;
 		}
 
@@ -708,6 +1007,12 @@ return L.view.extend({
 			var text = '共 ' + all.length + ' 条 · 错误 ' + errCount + ' · 警告 ' + wrnCount + ' · 信息 ' + infCount + ' · 调试 ' + dbgCount;
 			if (filtered.length !== all.length) text += ' · 过滤后 ' + filtered.length + ' 条';
 			if (state.limit > 0 && filtered.length > state.limit) text += ' · 仅显示最新 ' + state.limit + ' 条';
+			/* 业务日志的持久副本落在哪：syslog 里已经没有它们了，不写出路径与上限，
+			 * 用户面对「重启后历史还剩多少」只能靠猜。仅在后端确实在写这个文件时显示。 */
+			var pf = state.pluginFile;
+			if (pf && pf.enabled && pf.path) {
+				text += ' · 业务日志文件：' + pf.path + '（上限 ' + fmtKiB(pf.max_bytes) + '）';
+			}
 			if (!state.syslogOk) text += ' · syslog 不可读';
 
 			var footerStats = E('span', { 'class': 'mt5700-logfooter-text' }, text);
@@ -765,38 +1070,58 @@ return L.view.extend({
 			if (isNotify) {
 				hint.textContent = '通知文件内容（短信、来电、信号变化、存储告警）。';
 			} else {
-				hint.textContent = '后端内存日志与 syslog 合并：自动拨号对齐、AT 通道交互、短信收发、接口拉起、系统事件。按类别筛选，关键词按原文匹配。';
+				hint.textContent = '业务痕迹（AT 通道 / 短信 / 拨号 / 信号 / SIM …）来自后端内存环形缓冲 + 插件日志文件，不再写入 syslog；syslog 只剩 init.d 输出与后端自身的运行 / 错误行。按类别筛选，关键词按原文匹配。';
 			}
 
 			renderList();
 		}
 
 		/* ---------------- 取数 ---------------- */
+		/* 插件日志文件：业务痕迹的持久副本（syslog 里已经没有它们了）。
+		 * 用与通知文件同一套 readFile 机制（L.fs.read，无则退回 file RPC）。
+		 * 关掉或没给路径时直接跳过：既不发起读取，也不在界面上留一个空来源。 */
+		function readPluginFile() {
+			var pf = state.pluginFile;
+			if (!pf || !pf.enabled || !pf.path) {
+				state._fileEntries = [];
+				return Promise.resolve();
+			}
+			return readFile(pf.path).then(function (c) {
+				state._fileEntries = entriesFromPluginFile(c || '', state.catByCode);
+			}).catch(function () {
+				state._fileEntries = [];   /* 读不到（无权限 / 文件还没生成）＝没有历史，不是错误 */
+			});
+		}
+
 		function refresh(manual) {
 			if (state.loading) return Promise.resolve();
 			state.loading = true;
 
 			var tasks = [];
-			/* 后端内存日志：一次取全量（上限 1200），前端按类别分类 */
-			/* 三路取数**串行**执行：ucode 转发用的是临时文件，并发会互相覆盖。
+			/* 后端内存日志：一次取全量（上限 1200），类别优先用后端定好的 cat */
+			/* 各路取数**串行**执行：ucode 转发用的是临时文件，并发会互相覆盖。
 			 * 新版 ucode 已用唯一文件名解决，这里串行是为了兼容存量设备，双保险。 */
-			tasks.push(rpcLogs(0, 1200, newRid()).then(function (r) {
-				var entries = entriesFromBackend((r && r.entries) || []);
-				for (var i = 0; i < entries.length; i++) {
-					entries[i].cat = categorize(entries[i].msg);
-				}
-				state._backendEntries = entries;
+			var logsTask = rpcLogs(0, 1200, newRid()).then(function (r) {
+				/* 类别清单必须先落地：entriesFromBackend 要靠它判断 cat 是不是已知键，
+				 * 顺序反了会把后端新类别的日志统统丢回正则兜底去猜。 */
+				var cats = (r && r.categories) || [];
+				if (cats.length) applyCatList(catListFromBackend(cats));
+				state.pluginFile = (r && r.plugin_file) || null;
+				state._backendEntries = entriesFromBackend((r && r.entries) || [], state.catByKey);
 			}).catch(function (err) {
-				state._backendEntries = [{ ts: Date.now(), level: 'ERR', msg: '读取后端日志失败：' + ((err && err.message) || '未知错误'), cat: 'other', src: 'backend' }];
-			}));
+				state._backendEntries = [{ ts: Date.now(), level: 'ERR', msg: '读取后端日志失败：' + ((err && err.message) || '未知错误'), cat: 'misc', src: 'backend', seq: 0 }];
+				state.pluginFile = null;   /* 后端不在就别说「业务日志文件在哪」，那是假信息 */
+			});
+			tasks.push(logsTask);
+
+			/* 插件日志文件：路径只有拿到 logs 结果才知道，因此这一步挂在 logsTask 后面，
+			 * 不与它抢跑 —— 抢跑就得把路径硬编码在前端，配置一改就读错文件。 */
+			tasks.push(logsTask.then(function () { return readPluginFile(); }));
 
 			/* init.d 日志：走 syslog；无权限或不可用时降级，不影响其它视图 */
 			tasks.push(rpcSyslog(1500, false, true).then(function (r) {
-				var extra = entriesFromSyslog((r && r.log) || []);
-				for (var i = 0; i < extra.length; i++) {
-					extra[i].cat = categorize(extra[i].msg);
-				}
-				state._syslogEntries = extra;
+				/* syslog 行永远不带 cat（那是后端内存条目才有的字段），只能走正则兜底 */
+				state._syslogEntries = entriesFromSyslog((r && r.log) || []);
 				state.syslogOk = true;
 			}).catch(function () {
 				state._syslogEntries = [];
@@ -812,8 +1137,22 @@ return L.view.extend({
 
 			/* 串行执行（见上） */
 			return tasks.reduce(function (p, t) { return p.then(function () { return t; }); }, Promise.resolve()).then(function () {
-				/* 合并后端+syslog，按时间排序 */
-				var merged = (state._backendEntries || []).concat(state._syslogEntries || []);
+				/* 合并三路，按时间排序。
+				 * 文件条目要先过一道去重：后端一次 emit 同时写内存与文件（logger.rs），
+				 * 不去重就会看到每句话都出现两遍。键是 ts + '|' + msg（见 dedupKey），
+				 * 撞键时**留内存那份** —— 它有真实 seq。
+				 * 方向是单向的：只丢「文件条目撞上内存条目」，反过来绝不丢。
+				 * 文件独有的行正是重启前的历史，读这个文件的全部意义就在于此，
+				 * 把它们一并去重掉等于白读一趟。 */
+				var back = state._backendEntries || [];
+				var merged = back.concat(state._syslogEntries || []);
+				var seen = {};
+				for (var i = 0; i < back.length; i++) seen[dedupKey(back[i])] = true;
+				var fromFile = state._fileEntries || [];
+				for (var j = 0; j < fromFile.length; j++) {
+					if (seen[dedupKey(fromFile[j])]) continue;
+					merged.push(fromFile[j]);
+				}
 				merged.sort(function (a, b) { return a.ts - b.ts; });
 				state.entries = merged;
 				state.loading = false;
@@ -838,12 +1177,17 @@ return L.view.extend({
 			lines.push('# luci-app-mt5700 运行日志导出');
 			lines.push('# 视图: ' + state.tab + '  导出时间: ' + fmtFull(Date.now()));
 			if (state.tab === 'runtime') {
-				lines.push('# 类别: ' + (CATEGORY_LABEL[state.category] || state.category));
-				lines.push('# 来源: ' + (state.source === 'all' ? '全部来源' : (state.source === 'backend' ? '后端内存' : 'syslog')));
+				lines.push('# 类别: ' + catLabel(state.category));
+				lines.push('# 来源: ' + (SRC_LABEL[state.source] || state.source));
 			}
 			lines.push('');
 			for (var i = 0; i < list.length; i++) {
-				lines.push(fmtFull(list[i].ts) + ' [' + list[i].level + '] ' + list[i].msg);
+				var e = list[i];
+				/* 类别用大写短标签（[SMS]）而不是中文：与插件日志文件的行格式对齐
+				 * （见 logger.rs::plugin_file_push），导出的文本因此还能按列扫、按 code grep，
+				 * 也不随界面语言变。通知记录那一路没有类别概念，不加这一段（保持原样）。 */
+				var catSeg = e.cat ? ' [' + catDef(e.cat).code + ']' : '';
+				lines.push(fmtFull(e.ts) + ' [' + e.level + ']' + catSeg + ' ' + e.msg);
 			}
 			var blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
 			var url = URL.createObjectURL(blob);

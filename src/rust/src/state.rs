@@ -238,7 +238,7 @@ impl StateCache {
 
             let connected = self.client.connected();
             if !connected && loop_state.prev_connected {
-                log_warn!("模组连接断开，清空状态缓存");
+                log_warn!(Cat::At, "模组连接断开，清空状态缓存");
                 self.clear().await;
             }
             loop_state.prev_connected = connected;
