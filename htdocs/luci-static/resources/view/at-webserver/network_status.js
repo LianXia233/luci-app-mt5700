@@ -2425,9 +2425,9 @@ return L.view.extend({
 		function updateNetworkInfo() {
 			var serving = null;
 
-			return AtWs.client.sendCommand('AT^MONSC').then(function (monsc) {
+			return atCommand('AT^MONSC').then(function (monsc) {
 				serving = (monsc.success && monsc.data) ? AtWs.parseMONSC(monsc.data) : null;
-				return AtWs.client.sendCommand('AT^HFREQINFO?');
+				return atCommand('AT^HFREQINFO?');
 			}).then(function (hfreq) {
 				state.hfreqSuccess = hfreq.success;
 				state.rawHfreq = (hfreq.success && hfreq.data) ? AtWs.parseHFREQINFO(hfreq.data) : [];
@@ -2442,7 +2442,7 @@ return L.view.extend({
 				}
 				var needHcsq = state.cell.rsrp == null || state.cell.rsrq == null || state.cell.sinr == null;
 				if (!needHcsq) return null;
-				return AtWs.client.sendCommand('AT^HCSQ?').then(function (hcsq) {
+				return atCommand('AT^HCSQ?').then(function (hcsq) {
 					var hcsqData = (hcsq.success && hcsq.data) ? AtWs.parseHCSQ(hcsq.data) : null;
 					if (hcsqData) {
 						if (state.cell.rsrp == null) state.cell.rsrp = hcsqData.rsrp;
@@ -2499,12 +2499,12 @@ return L.view.extend({
 		}
 
 		function loadSecondary() {
-			return AtWs.client.sendCommand('AT^MONSSC').then(function (monssc) {
+			return atCommand('AT^MONSSC').then(function (monssc) {
 				state.secondaryNR = (monssc.success && monssc.data) ? Parse.parseMonsscAll(String(monssc.data)) : [];
 				state.secondarySuccess = monssc.success;
 				/* 记录 AT 终止状态：传输成功不等于 AT 命令成功（如 ERROR / NONE） */
 				state.secondaryATStatus.monssc = atStatusFromResult(monssc);
-				return AtWs.client.sendCommand('AT^CASCELLINFO?');
+				return atCommand('AT^CASCELLINFO?');
 			}).then(function (cascell) {
 				state.secondaryLTE = (cascell.success && cascell.data) ? Parse.parseCascellAll(String(cascell.data)) : [];
 				if (cascell.success) state.secondarySuccess = true;
@@ -2520,20 +2520,20 @@ return L.view.extend({
 		}
 
 		function loadDiagnostics() {
-			return AtWs.client.sendCommand('AT^LENDC?').then(function (lendc) {
+			return atCommand('AT^LENDC?').then(function (lendc) {
 				state.diag.endc = (lendc.success && lendc.data) ? Parse.parseLendc(lendc.data) : null;
-				return AtWs.client.sendCommand('AT+C5GREG?');
+				return atCommand('AT+C5GREG?');
 			}).then(function (c5g) {
 				state.diag.reg = (c5g.success && c5g.data) ? Parse.parseC5greg(c5g.data) : null;
-				return AtWs.client.sendCommand('AT^TXPOWER?');
+				return atCommand('AT^TXPOWER?');
 			}).then(function (txp) {
 				state.diag.tx = (txp.success && txp.data) ? Parse.parseTxPower(txp.data) : null;
 				/* NR 下 AT^TXPOWER? 恒返回 ERROR（该命令仅 GUL 有效），
 				 * 必须再查 AT^NTXPOWER?（NR 各信道发射功率）才能拿到数据 */
-				return AtWs.client.sendCommand('AT^NTXPOWER?');
+				return atCommand('AT^NTXPOWER?');
 			}).then(function (ntxp) {
 				state.diag.nrTx = (ntxp.success && ntxp.data) ? Parse.parseNrTxPower(ntxp.data) : [];
-				return AtWs.client.sendCommand('AT+CGPADDR');
+				return atCommand('AT+CGPADDR');
 			}).then(function (pdp) {
 				state.diag.addrs = (pdp.success && pdp.data) ? Parse.parseCgpaddr(pdp.data) : [];
 				renderDiagAdv();
@@ -2556,7 +2556,7 @@ return L.view.extend({
 			if (ssbPollTick % SSB_POLL_EVERY !== 1 && state.ssb.lastSuccessTime > 0) {
 				return Promise.resolve();
 			}
-			return AtWs.client.sendCommand('AT^NRSSBID?').then(function (res) {
+			return atCommand('AT^NRSSBID?').then(function (res) {
 				state.ssb.queried = true;
 				var parsed = (res && res.success && res.data) ? AtWs.parseNRSSBID(res.data) : null;
 				if (parsed && parsed.beams) {
@@ -2577,7 +2577,7 @@ return L.view.extend({
 		}
 
 		function getPSReg() {
-			return AtWs.client.sendCommand('AT+CGREG?').then(function (res) {
+			return atCommand('AT+CGREG?').then(function (res) {
 				if (res.success && res.data) {
 					var stat = null;
 					AtWs.extractATDataMultiline(res.data, '+CGREG').forEach(function (row) {
@@ -2600,7 +2600,7 @@ return L.view.extend({
 		}
 
 		function getDHCP() {
-			return AtWs.client.sendCommand('AT^DHCP?').then(function (v4) {
+			return atCommand('AT^DHCP?').then(function (v4) {
 				if (v4.success && v4.data) {
 					var str = AtWs.extractATData(v4.data, '^DHCP');
 					if (str) {
@@ -2620,7 +2620,7 @@ return L.view.extend({
 		}
 
 		function getFlow() {
-			return AtWs.client.sendCommand('AT^DSFLOWQRY').then(function (res) {
+			return atCommand('AT^DSFLOWQRY').then(function (res) {
 				if (res.success && res.data) {
 					var str = AtWs.extractATData(res.data, '^DSFLOWQRY');
 					if (str) {
@@ -2639,7 +2639,7 @@ return L.view.extend({
 		}
 
 		function getTemp() {
-			return AtWs.client.sendCommand('AT^CHIPTEMP?').then(function (res) {
+			return atCommand('AT^CHIPTEMP?').then(function (res) {
 				if (res.success && res.data) {
 					var parsed = Parse.parseCHIPTEMP(res.data);
 					if (parsed) {
@@ -2677,7 +2677,7 @@ return L.view.extend({
 		}
 
 		function getMCS() {
-			return AtWs.client.sendCommand('AT^MCS=1').then(function (resDl) {
+			return atCommand('AT^MCS=1').then(function (resDl) {
 				if (resDl && resDl.success && resDl.data) {
 					var e = pickMcsEntry(Parse.parseMCS(resDl.data));
 					if (e && e.carriers[0].mcs != null) {
@@ -2686,7 +2686,7 @@ return L.view.extend({
 						state.mcs.dlCw = Parse.mcsCodewords(e);
 					}
 				}
-				return AtWs.client.sendCommand('AT^MCS=0');
+				return atCommand('AT^MCS=0');
 			}).then(function (resUl) {
 				if (resUl && resUl.success && resUl.data) {
 					var e = pickMcsEntry(Parse.parseMCS(resUl.data));
@@ -2702,7 +2702,7 @@ return L.view.extend({
 					renderTabsUI();
 					return null;
 				}
-				return AtWs.client.sendCommand('AT^TRANSMODE?');
+				return atCommand('AT^TRANSMODE?');
 			}).then(function (resTm) {
 				var tm = resTm && resTm.success ? Parse.parseTransMode(resTm.data) : null;
 				state.mcs.tm = tm || '';
@@ -2802,7 +2802,7 @@ return L.view.extend({
 			if (ttl && hit && (Date.now() - hit.at) < ttl) {
 				return Promise.resolve(hit.res);
 			}
-			return AtWs.client.sendCommand(cmd).then(function (res) {
+			return atCommand(cmd).then(function (res) {
 				if (res && res.success) {
 					atTtlCache[cmd] = { at: Date.now(), res: res };
 				}
@@ -2810,6 +2810,85 @@ return L.view.extend({
 			});
 		}
 
+		/*
+		 * 本轮预取：把「一轮固定要问的只读命令」合成一次批量 RPC 取回。
+		 *
+		 * 依据（实机实测，普通模式冷启动）：单条 AT 调用里属于「桥」的开销
+		 * （ucode 写临时文件 + fork nc + rpcd 往返）是 17ms，与命令本身无关；
+		 * 一轮 24 条命令就白付 400ms 以上，另外任务之间的 Promise 串行空档
+		 * 还要 400ms 左右。合批后这两笔都只剩一次。
+		 *
+		 * 安全边界：
+		 *   - 只放**固定串**的只读查询；依赖本轮解析结果拼出来的
+		 *     AT^DSAMBR=<cid> / AT+C5GQOSRDP=<cid> 不预取，仍走逐条路径。
+		 *   - 批量整体失败（通道降级 / 熔断 / 超时）时 sendBatch 返回 null，
+		 *     本函数静默放弃，所有命令自然退回逐条 sendCommand，行为与改动前一致。
+		 *   - 已命中 TTL 缓存的命令不预取，避免白问一遍模组。
+		 *   - AT^TRANSMODE? 在纯 NR SA 下本来就不下发，这里同步跳过。
+		 */
+		var ROUND_CMDS = [
+			'AT^MONSC', 'AT^HFREQINFO?', 'AT^MONSSC', 'AT^CASCELLINFO?',
+			'ATI', 'AT+CPIN?', 'AT+CIMI', 'AT^ICCID?', 'AT+CGMR',
+			'AT+CGDCONT?', 'AT+CGREG?', 'AT^EONS=2', 'AT^DHCP?', 'AT^DSFLOWQRY',
+			'AT^CHIPTEMP?', 'AT^MCS=1', 'AT^MCS=0', 'AT^TRANSMODE?',
+			'AT^LENDC?', 'AT+C5GREG?', 'AT^TXPOWER?', 'AT^NTXPOWER?', 'AT+CGPADDR'
+		];
+		var prefetch = {};
+		/* 正在进行的预取。atCommand 命中不了 prefetch 时先等它落地再判断：
+		 * refreshAll 是同步起跑的，不等的话首轮每个任务都会抢在批量返回前
+		 * 各发一条单命令，同一批命令被问两遍、反而比不合批更慢。 */
+		var prefetchPending = null;
+		function prefetchRound() {
+			var cmds = [];
+			for (var i = 0; i < ROUND_CMDS.length; i++) {
+				var c = ROUND_CMDS[i];
+				var ttl = ttlFor(c);
+				var hit = atTtlCache[c];
+				if (ttl && hit && (Date.now() - hit.at) < ttl) continue;
+				if (c === 'AT^TRANSMODE?' && !tmQueryUseful()) continue;
+				cmds.push(c);
+			}
+			if (cmds.length < 2) return Promise.resolve();
+			var p = AtWs.client.sendBatch(cmds).then(function (items) {
+				if (!items) return;
+				for (var j = 0; j < items.length; j++) {
+					var it = items[j];
+					if (!it || !it.cmd) continue;
+					if (it.success) {
+						prefetch[it.cmd] = { success: true, data: it.data };
+					} else {
+						prefetch[it.cmd] = { success: false, error: it.error, cause: it.cause };
+					}
+				}
+			}).catch(function () {
+				/* 预取失败不影响主流程：下面逐条发送会拿到同样的错误 */
+			});
+			prefetchPending = p;
+			return p.then(function () {
+				if (prefetchPending === p) prefetchPending = null;
+			});
+		}
+
+		/* 本页所有 AT 查询的唯一入口：优先消费本轮预取结果，用掉即删，
+		 * 保证下一轮不会把上一轮的旧值当成新数据。 */
+		function atCommand(cmd) {
+			var hit = prefetch[cmd];
+			if (hit) {
+				delete prefetch[cmd];
+				return Promise.resolve(hit);
+			}
+			if (prefetchPending) {
+				return prefetchPending.then(function () {
+					var late = prefetch[cmd];
+					if (late) {
+						delete prefetch[cmd];
+						return late;
+					}
+					return AtWs.client.sendCommand(cmd);
+				});
+			}
+			return AtWs.client.sendCommand(cmd);
+		}
 
 		function loadDeviceInfo() {
 			return atCached('ATI').then(function (res) {
@@ -2825,7 +2904,7 @@ return L.view.extend({
 					if (mImei) state.modemInfo.imei = mImei[1].trim();
 				}
 				if (!state.modemInfo.model) {
-					return AtWs.client.sendCommand('AT+CGMM').then(function (res2) {
+					return atCommand('AT+CGMM').then(function (res2) {
 						if (res2 && res2.success && res2.data) {
 							var lines = String(res2.data).split('\n');
 							for (var i = 0; i < lines.length; i++) {
@@ -2848,7 +2927,7 @@ return L.view.extend({
 						state.simStatus = (st === 'READY') ? '正常 (READY)' : st;
 					}
 				}
-				return AtWs.client.sendCommand('AT+CGSN');
+				return atCommand('AT+CGSN');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
 					var m = String(res.data).match(/\b(\d{14,16})\b/);
@@ -3015,6 +3094,9 @@ return L.view.extend({
 		function refreshAll() {
 			if (refreshing) return Promise.resolve();
 			refreshing = true;
+			/* 先把本轮固定查询合成一次批量 RPC，再按原顺序跑各任务；
+			 * 各任务取数时会优先消费预取结果，因此顺序语义不变。 */
+			prefetchRound();
 
 			var tasks = [
 				updateNetworkInfo,
