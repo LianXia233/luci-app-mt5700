@@ -2666,14 +2666,20 @@ return L.view.extend({
 		 * AT^TRANSMODE? 只在 LTE / EN-DC 上有意义。
 		 * 实机验证（^MONSC 报 NR 的 SA 组网）：该命令固定返回 ERROR，
 		 * 且要耗掉 64~173ms 的串口往返；原逻辑此时把 state.mcs.tm 置 ''。
-		 * 因此纯 NR SA 下直接跳过下发、同样置 ''，显示结果完全一致，省一次往返。
+		 * 因此**已确认**为纯 NR SA 时直接跳过下发、同样置 ''，显示结果完全一致。
+		 *
+		 * 「已确认」是硬条件：首轮 getMCS 早于 loadDiagnostics（AT^LENDC? 还没发），
+		 * 或该命令失败时，endc 都是 null —— 那是「不知道」而不是「不是 EN-DC」。
+		 * 真 EN-DC 设备上把未知当 SA 会漏掉 TM 值（TM 会一直空到后续轮次），
+		 * 所以未知一律照常下发，宁可多付一次往返。
 		 */
 		function tmQueryUseful() {
 			if (state.mcs.tm) return true;
 			var rat = String((state.cell && state.cell.sysMode) || '').toUpperCase();
 			if (rat.indexOf('NR') !== 0) return true;
 			var e = state.diag.endc;
-			return !!(e && e.established);
+			if (!e) return true;
+			return !!e.established;
 		}
 
 		function getMCS() {
