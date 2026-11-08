@@ -14,6 +14,7 @@
 				],
 				"mt5700": [
 					"at",
+					"batch",
 					"events",
 					"netrate",
 					"usage",
@@ -59,6 +60,13 @@
 					"stat"
 				],
 				"/tmp/at-notifications.log": [
+					"read",
+					"stat"
+				],
+				"/tmp/at-webserver": [
+					"list"
+				],
+				"/tmp/at-webserver/*": [
 					"read",
 					"stat"
 				],

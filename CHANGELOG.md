@@ -8,6 +8,238 @@
 
 ---
 
+## v1.32.8（2026-11-08）
+
+### feat(rust) 后端自报版本改为构建期注入，与 PKG_VERSION 单一来源
+
+> 后端版本一直来自 `Cargo.toml`，此后每次发版都没有再动它：二进制 `--version`
+> 与启动日志打印的仍是 `1.29.0`，而包版本已是 `1.32.7`。该版本号只影响自报与
+> 日志，但排障时无法从日志判断设备上跑的是哪一版后端，也与前端/包版本对不上。
+
+- **feat(rust)** 顶层 `Makefile` 导出 `MT5700_VERSION := $(PKG_VERSION)`，
+  `src/Makefile` 把它作为环境变量传给 `cargo build`；`main.rs` 的 `VERSION`
+  改为优先读 `option_env!("MT5700_VERSION")`，缺失时回退 `CARGO_PKG_VERSION`，
+  本地 `cargo build` / `cargo test` 行为不变。
+- **feat(build)** `src/Makefile` 在拿不到 `MT5700_VERSION` 时（例如直接在 `src/`
+  下 `make compile`）从上级 `Makefile` 解析 `PKG_VERSION`，并把解析结果打印进
+  编译日志，避免子 make 取不到顶层变量时静默沿用旧值。
+- **chore(release)** `src/rust/Cargo.toml` 与 `Cargo.lock` 的 `version` 同步到 1.32.8，
+  包元数据与包版本对齐（展示口径已由注入决定，二者不会再分叉）。
+- **test** 新增 `tests/rust-version-test.js`：校验 `PKG_VERSION` 与 `Cargo.toml`
+  版本一致、`main.rs` 使用 `option_env!("MT5700_VERSION")` 且保留回退、
+  `src/Makefile` 与顶层 `Makefile` 的传参链路完整。
+- **docs(agents)** 发版版本一致性清单补入 `src/rust/Cargo.toml` 的 `version`，
+  并写明后端自报版本只由 `PKG_VERSION` 驱动，发版不需要再改 Rust 代码。
+
+## v1.32.7（2026-11-08）
+
+### perf(status) 状态页数据链路：静态项缓存 + 一轮查询合并为一次批量 RPC
+
+> 状态页每次刷新都要重新问模组一遍，其中既有「一轮内根本不会变」的型号、固件、
+> IMSI/ICCID、APN 上下文、运营商名称，也有 25 次各自独立的 RPC 往返。
+> 实机测得分段结论（192.168.88.1，v1.32.6，普通模式冷启动）：
+> 一轮 25 条 AT 命令跨时 2141ms，其中静态项 10 条合计 856ms（66%）；
+> 单次 `mt5700.at` 调用里 17ms 属于 ucode 桥（写临时文件 + fork `nc` + rpcd 往返），
+> 25 次就白付 425ms；各任务之间的 Promise 串行空档另有约 400ms。
+>
+> 三项改动叠加后（同一设备、同一无头浏览器、同一采集脚本，冷/热各一轮）：
+> **首轮**（冷启动，普通/精简）2141→1619ms、2325→1762ms（-21%~-25%）；
+> **稳态轮**（第 2 轮起）1959→362ms、2030→571ms（-72%~-82%）；
+> 一轮里含 AT 的 RPC 次数 25~26→1~5。两模式首屏文本行数、面板坐标、
+> 关键字段（运营商、IP、PCI、TAC、网络制式）与改动前逐项一致，无 404、无 console error。
+
+- **perf(status)** 静态信息按命令 TTL 缓存（型号/固件/IMSI/ICCID 60s，SIM 状态、
+  APN 上下文、运营商名称 15s），命中即跳过下发；`AT^EONS=2` 原本每轮重发，
+  并入 TTL 后自然去重（只影响运营商文案，语义不变）。`AT+CGSN`（IMEI）不进缓存。
+- **perf(status)** 纯 NR SA 下不再下发必然回 ERROR 的 `AT^TRANSMODE?`
+  （实机该命令固定失败却要占 64~173ms），`state.mcs.tm` 同样置空，显示一致；
+  LTE / EN-DC 行为不变。
+- **perf(status)** ucode 插件新增 `batch` 方法（一次写 N 行、一个 `nc`、读 N 行，
+  单项返回契约与 `at` 完全一致，32 条上限、整批 18s 硬超时），前端
+  `ATClient.sendBatch` + 视图本轮预取；依赖本轮解析值的 `AT^DSAMBR=<cid>` /
+  `AT^C5GQOSRDP=<cid>` 仍逐条下发，批量整体失败时全部退回逐条，行为与改动前一致。
+- **fix(acl)** read 侧 ACL 补 `batch` 方法名（rpcd 按方法名校验，缺项会被拒）。
+
+### perf(ui) 背景角色图只加载当前断点真正可见的那一张
+
+> 背景层同时挂载桌面与手机两张立绘（`character-pc-*.webp` 约 93 KB、
+> `character-mobile-*.webp` 约 107 KB），但 `mt5700.css` 的 768px 断点只让其中
+> 一张可见，另一张 `display:none` —— 浏览器不看 `display`，两张都会下载。
+> 现在节点挂载后只为可见的那张下发 `src`，跨断点时再按需补图；主题明暗切换
+> 与断点变化共用同一套重算逻辑，隐藏的那张已下载的不重下。
+> 实机实测（192.168.88.1，v1.32.6，冷缓存，同一批页面各测两次取同版本对照）：
+> 状态页 1.526 MB→1.424 MB、短信页 1.494 MB→1.402 MB、日志页 1.722 MB→1.631 MB（-4.9%~-6.7%）；
+> 首屏可交互 853→710 ms / 910→649 ms / 813→721 ms。极简模式本就不挂载背景层，
+> 该项对其无收益，逻辑保持原样（实测字节与可交互时间均落在噪声范围内）。
+
+- **perf(ui)** `mt5700.js` 背景层改为按 `matchMedia('(max-width: 768px)')` 下发 `src`，
+  未可见的一张不发起请求；断点变化或主题切换时统一由 `applyChars()` 重算。
+- **note(ui)** 顺带记录一处**不能做**的优化：`md3.css` 有 192 条规则，其中 35 条
+  （含右下角模式切换入口 `mt-uimode-fab` / `mt-uimode-panel` 与 `@keyframes`）
+  未绑定 `html[data-ui-mode="minimal"]`，普通模式同样依赖，因此不能按模式裁剪，
+  两模式继续都注入（裁剪会让普通模式设置面板从浮钮变成展开态，属可见回归）。
+
+### refactor(backend) 后端阻塞调用收口到 blocking 池 + 冗余清理
+
+> 后端是 Tokio 多线程运行时，但采样、串口枚举、通知落盘等路径仍在 async 上下文里
+> 直接 fork `uci`、读写文件。实机测得单次 `uci show` 约 2.7ms，流量采样每秒
+> 要跑两次（合计约 5.4ms/秒），这段 CPU + fork 全部压在 reactor 线程上；
+> 通知日志若被配到闪存，一次 `append_capped`（metadata + 读改写）可到几十毫秒。
+> 现在这些阻塞段一律搬进 `tokio::task::spawn_blocking`：实测采样一秒两次的
+> uci 开销不再占用 reactor，串口枚举与日志写入同理；启动期的时区探测、使用量
+> 回读、通知器构造也只付一次，改为在 blocking 池里完成后等待结果，顺序不变。
+> 厂家 ucode 桥的 fork 开销经测算后**本次不改**，理由见下。
+
+- **refactor(at)** `usage.rs` 的 `read_counters_netdev` 整段搬进 `spawn_blocking`
+  （内部是两次 `uci show` + sysfs 读取），常驻采样循环不再阻塞 reactor。
+- **refactor(backend)** `localtime::init`、`Notifier::new`、`UsageTracker::new`、
+  `QqSender::from_config`、`serialdetect::list_serial_candidates` 与通知日志写入
+  均收口到 `spawn_blocking`；AT 通道互斥仍是 `tokio::sync::Mutex`，单通道串行语义未变。
+- **refactor(backend)** 删除 `atclient` 里与 `schedule::sleep_ctx` 完全相同的
+  私有副本（6 行），改为一处公共实现；`ringlog` 的分类过滤改用 `contains`。
+- **refactor(ui)** 删除 `tabmenu.js` 中零调用的 `findTabContainer()`。
+- **note(backend)** 不改 ucode 桥：实测单次 RPC 往返约 5ms（`ubus call` 口径含
+  客户端 fork），25 次合计约 125ms、占一轮 2141ms 的 5.8%；批量合批已在 PR #51
+  落地，本分支再改同一段会产生硬冲突，故只在文档记录数据。
+
+### docs(agents) 新增 Rust/Tokio 后端健康规则
+
+> 本版已经把后端的阻塞调用收口了一遍，但「下次改动别把它改回去」此前只存在于
+> 评审讨论里，没有落到仓库规则上。现在写进 `AGENTS.md` 的强制章节，改后端必须逐条自查。
+
+- **docs(agents)** 新增「五、Rust/Tokio 后端健康规则」：`cargo test` 全绿（基线 356 通过 /
+  2 ignored）；`cargo clippy --all-targets` 生产段 0 warning；async 路径禁止
+  `std::process::Command` / `std::fs::*` / `std::net::TcpStream` / `std::thread::sleep` / `ureq`
+  等阻塞 API，无法异步化时整段走 `spawn_blocking` 并写明理由；跨 `await` 持锁必须用
+  `tokio::sync::Mutex`；`at_queue` 的 `PriLock` / `SmsTransaction` 单通道串行语义不得破坏；
+  `shutdown_signal()` 广播取消 + 5 秒 timeout 收尾路径不得回归；新增 `tokio::spawn` 必须能
+  回答「谁取消它 / 退出后谁 await / 失败是否被吞」三个问题。
+
+- **chore(release)** 发版：`PKG_VERSION` / `MT5700_UI_VERSION` 1.32.6 → 1.32.7；
+  `MT5700_CSS_VERSION` 保持 2.46.9（本版未改动样式文件）；`README.md` 头部徽标与
+  `docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 及四处
+  `releases/download/v1.32.7/…` 下载链接同步到 v1.32.7。
+
+## v1.32.6（2026-11-08）
+
+### feat(log) 日志按 21 个类别细分，模组业务痕迹不再刷 syslog
+
+> 改动前所有日志只有一条路：入内存环形缓冲，再按级别 `eprintln!` 到 stderr，
+> 由 procd/logd 收进 syslog。结果是 `logread` 里混满 AT 收发原文与短信正文
+> （既刷屏又含隐私），而真正需要跨重启留存的业务痕迹反而留不住 —— 环形缓冲
+> 一满就被挤掉，后端被 procd 拉起后什么都查不到。现在按类别三路分流：
+> **运行时类**（软件自身运行情况）照旧走 syslog；**业务类**（模组与网络痕迹）
+> 只进内存环形缓冲与插件自己的文件，`ERR` 破例仍发 syslog，免得运维在
+> `logread` 里连「短信发送失败」这种硬故障都看不到。
+
+- **feat(log)** 新增 `src/rust/src/logcat.rs`：21 个日志类别分属两组。运行时组 7 类
+  （`RT` 进程运行时 / `CFG` 配置 / `RPC` 接口 / `TTY` 串口 / `TSK` 任务 / `STO` 存储 /
+  `MISC` 其他）；业务组 14 类（`AT` 通道 / `URC` 主动上报 / `DIAL` 拨号承载 /
+  `NET` 接口防火墙 / `SIG` 信号射频 / `SIM` / `SMS` 短信 / `CALL` 通话 /
+  `NTF` 通知推送 / `SCAN` 扫频 / `SCH` 锁频 / `FOTA` 模组升级 / `USAGE` 流量 /
+  `TIME` 时间）。每个类别自带 `key()`（小写稳定键，RPC 与前端筛选的契约）、
+  `code()`（行内短标签）、`group()`、`persists_to_file()`、`syslog_floor()`，
+  分流策略集中在这一个模块，不散落到各业务模块里。
+- **feat(log)** 分类对既有代码零成本：日志宏新增可选首参 `Cat::Xxx`，未显式指定时
+  用编译期常量 `module_path!()` 推导（`Category::from_module` 取模块路径第二段，
+  因此 `at_webserver::sms::tests` 仍归 `sms`）。238 处日志调用点里只有横跨多个业务
+  域的 98 处需要显式标注（`atclient.rs` 43 / `main.rs` 31 / `rpcserver.rs` 15 /
+  `urc.rs` 8 / `state.rs` 1），其余全部自动归类。
+- **note(log)** 宏的两条分支靠**首 token 是不是字面量 `Cat::`** 区分，不能写成
+  `$cat:expr,` —— `log_info!("发送: {}", cmd)` 里的格式串同样是 `expr`，会被前一条
+  分支抢先匹配、把格式串当类别用，报一个极难定位的类型错误。
+- **feat(log)** 三路分流在 `logger.rs` 落地：全部日志无条件入内存环形缓冲
+  （1200 条 / 512 KiB 双上限，**不受级别限制** —— 稳态级别是 Warn，若缓冲也看级别，
+  排障最需要的 info 级拨号与接口过程会整段消失）；业务类另写插件自有文件
+  `/tmp/at-webserver/plugin.log`（复用 `append_capped` 有界追加，默认 512 KiB，
+  裁剪只按行边界、绝不切半行；落在 tmpfs 上不磨闪存）；syslog 侧由
+  `syslog_allowed()` 的两道闸门把关（类别地板 + 全局级别）。
+- **feat(log)** 多行消息在落盘前压平为单行（`\n` / `\r` → 空格），否则「一行一条」
+  的文件结构与行边界裁剪都会错位；环形缓冲与 syslog 仍保留原文。
+- **feat(log)** `ringlog::Entry` 增加 `cat` 字段并计入 `weight()`（不把类别算进字节
+  上限会让实际占用悄悄超出设定值）；新增 `snapshot_cats()`，**先按类别过滤再截
+  `limit`** —— 反过来的话「最新 50 条里恰好是短信的那几条」在短信稀疏时几乎总是
+  空结果，是个只会让人以为「日志丢了」的坑。
+- **feat(log)** 插件日志落点可配：UCI 新增 `log_plugin_file_enabled` /
+  `log_plugin_file` / `log_plugin_max_bytes`，`root/etc/config/at-webserver` 同步给出
+  默认值与注释。上限低于 4096 或路径为空时回落默认（手填个 `1` 会让每条日志都触发
+  一次整文件裁剪）；目录创建失败只降级为「不写文件」，绝不影响另外两个去处。
+- **note(log)** 分流规则刻意**不做成配置项**：能把业务日志重新灌回 syslog 的开关
+  等于把这次改造关掉。`init_plugin_file` 之前的日志只进环形缓冲（那时还不知道用户
+  把路径配成了什么，先写默认路径再搬家会产生两个文件、也会绕过 `enabled=0`）。
+- **feat(log)** `logs` RPC 接受可选 `cats`（字符串 `"sms,at"` 或数组，逗号与空格
+  皆可分隔，非法键直接丢弃）。语义分三种：**未传 / 空串 / 空数组** = 不过滤；
+  **传了内容但全是非法键** = 筛过了但零命中 → 空结果（不能静默返回全部，否则拼错
+  类别键的人会以为自己筛对了）。为此 `snapshot_cats()` 的过滤条件改成
+  `Option<&[String]>`，让「没筛」和「筛了没命中」在类型上就分得开。RPC 并回传
+  `categories` 目录与 `plugin_file` 落点信息；ucode 代理透传该参数。SSH 里
+  `ubus call mt5700 logs '{"cats":"sms"}'` 即可只看短信链路，不必把 1200 条全捞出来
+  再自己 grep。
+- **feat(log)** 插件日志行的行首时间文本后面补写**绝对毫秒**：
+  `2026-11-08 04:40:01.123 (1762555201123) [INF] [SMS] 正文`。行首文本是路由本地
+  时区、不带偏移，浏览器按自己的时区解释会让整批文件条目平移一个时区，还会与内存
+  里同一条日志的去重键（`ts + 正文`）对不上、页面显示成两条。前端**有 epoch 就一律
+  用 epoch**，旧格式（升级前写下、无括号字段）才退回逐字段重建本地时间，
+  `Date.parse` 仍然不用。
+- **note(log)** 类别目录只下发结构（`key` / `code` / `group`），不含中文标签：
+  文案归前端所有，`po/` 翻译才有地方落，也避免出现第二份真相。
+- **feat(log)** rpcd ACL 增加 `/tmp/at-webserver` 的 `list` 与 `/tmp/at-webserver/*`
+  的 `read` / `stat`（刻意不放开整个 `/tmp`）。
+- **feat(log)** 后端启动时自报业务日志的落点与上限，`logread` 里能直接确认分流已生效。
+- **feat(ui)** 日志页新增第三路来源「插件文件」：路径只随 `logs` RPC 的
+  `plugin_file` 下发，因此读文件排在 RPC 之后（`logsTask.then(…)`）。按
+  `YYYY-MM-DD HH:MM:SS.mmm [LVL] [CODE] msg` 逐字段拆解后 `new Date(y, m-1, d, …)`，
+  **刻意不用** `Date.parse` / `new Date(字符串)`：这种不带时区标记的本地时间各浏览器
+  口径不一（有的按 UTC 解、有的直接 NaN），按 UTC 解会让整批条目平移一个时区，
+  排序与去重一起落空，表现为「同一句话出现两遍、时间还差几小时」。格式不符的行
+  一律跳过而不是猜 —— 猜错的时间戳会把整份排序带歪。
+- **feat(ui)** 类别筛选条由 7 项扩到 22 项（`全部` + 21 类），并按后端 `Group`
+  分成「软件运行 / 业务痕迹」两段渲染；顺序与分组以 RPC 下发的 `categories` 为准，
+  内置 `CAT_TABLE` 只在旧后端或 RPC 失败时兜底。类别条只在后端清单签名变化时重建，
+  否则 5 秒自动刷新会持续打断焦点与选中态；选中的类别若在新清单里消失则回落「全部」。
+- **feat(ui)** 类别不再由前端正则猜：`entriesFromBackend` 优先用后端的 `e.cat`
+  （且必须是已知键，`hasOwnProperty` 把关），缺席时才退回 `categorize()`。
+  `CATEGORY_RULES` 重写为 20 条、产出新键，兜底 `misc`；`+CMT` / `+CMTI` 归 `sms`
+  而非 `urc`（短信规则排在 urc 之前，理由写进注释）。
+- **feat(ui)** 三源合并去重：键为 `ts + '|' + msg`（文件行没有 `seq`，所以不能拿
+  `seq` 当键）；已见集只用环形缓冲的条目建立，文件里撞键的跳过，**重启前只存在于
+  文件里的历史照常保留**；合并后按 `ts` 排序。页脚在 `enabled && path` 时追加
+  「业务日志文件：<path>（上限 <KiB>）」；导出文本每行带 `[CODE]` 段与
+  `# 类别:` / `# 来源:` 头，便于按列扫与按 code grep。
+- **style(css)** 21 类徽章 × 明暗两套共 42 条规则（运行时组用中性低饱和、业务组用
+  高饱和，沿用既有 `rgba` 结构，无新增色值），新增 `.mt5700-logsrc-file` 来源徽章
+  与分组条样式；`≤768px` 下类别条改为**单行不换行 + 横向滚动**（`overflow-x: auto`
+  + `flex: 0 0 auto`），否则 22 个 chip 在竖屏会堆成三四排把首屏推走。
+  `MT5700_CSS_VERSION` 2.46.8 → 2.46.9。
+- **note(ui)** 通知记录页签逐字节未动（`renderNotify` / `notifyPath` / `clearNotify` /
+  `state.notify` 无任何改动行命中）。
+- **docs** README「运行日志」行改写为「三源统一入口 + 21 类 + 后端定类 + ERR 破例」口径。
+- **test** Rust 单测覆盖本次新增（发版前实测 `cargo test` **356 passed / 0 failed /
+  2 ignored**）：类别目录（含「main.rs 声明的 28 个
+  模块全部有归属」与「至少映射出 8 个不同类别」两条防退化断言 —— 后者把「细分」
+  变成可执行的指标）、模块推导与 `misc` 兜底、宏显式覆盖、缓冲不受级别限制、
+  业务与运行时的分流落盘、全类别落盘矩阵、上限裁剪不切半行、多行压平、
+  `syslog_allowed` 两道闸门（Warn 与 Debug 两种全局级别各测一遍）、类别地板与
+  「不进 syslog 就必须能落盘」的互斥性、`snapshot_cats` 过滤先于 limit、
+  `cat` 参与字节权重、`parse_cat_filter` 的分隔符与非法键处理。
+- **test** 新增 `tests/log-category-test.js`（**80** 项，零依赖）：**直接解析**
+  `src/rust/src/logcat.rs` 取 `key` / `code` / `group` 与 `ALL`（而不是硬编码一份副本），
+  再与 `logs.js` 的前端表逐项对账 —— 每个后端键都有标签与图标、无前端孤儿、
+  `code` 唯一、分组一致；另覆盖 CSS 42 条与窄屏横滚、版本递增、LF 与无尾随空白，
+  以及 `categorize` / `entriesFromBackend` 优先级 / 插件文件解析 / `fmtKiB` /
+  `dedupKey` / 去重方向性 / 页脚与导出接线的功能性检查；还钉住 `logs.js` 里
+  syslog 行样例注释的形状（级别括号 + 类别括号，且 code 必须是后端真实存在的），
+  防止注释再次腐烂。
+- **chore(test)** `tests/usage-source-test.js` 中「改了 CSS 必须递增
+  `MT5700_CSS_VERSION`」那条断言的期望值随本次样式改动 2.46.8 → 2.46.9。
+- **验证** 发版前（合并后 main）本地实测 `cargo test` **356 passed / 0 failed /
+  2 ignored**；`node tests/static-check.js` **4/4**，22 个 `tests/*-test.js` **全部通过**；
+  PR #49 的 Checks 与合并后 main 的云编译 run 均以 CI 为准。`cargo clippy` 未执行：
+  本机 rustup 镜像返回 404、组件装不上，此项留待维护者本地补跑。
+- **chore** 发版：`PKG_VERSION` / `MT5700_UI_VERSION` 1.32.5 → 1.32.6；
+  `MT5700_CSS_VERSION` 保持 2.46.9（本版样式改动已在特性提交内递增），
+  README 徽标与 `docs/index.html` 版本徽标 / 下载链接同步到 v1.32.6。
+
 ## v1.32.5（2026-11-06）
 
 ### feat(ui) 窄屏（≤768px）把 Tab 菜单收进可展开的悬浮菜单

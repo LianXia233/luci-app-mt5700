@@ -10,6 +10,7 @@
 use crate::{log_debug, log_info, log_warn};
 use crate::at_queue::{AtPriority, PriLock, SmsMode, SmsTransaction};
 use crate::config::AtConfig;
+use crate::schedule::sleep_ctx;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -479,22 +480,22 @@ impl AtClient {
             Ok(resp) if resp.contains("+CNMI: 2,1,0,2,0") => {}
             _ => match self.send_command(ctx, "AT+CNMI=2,1,0,2,0", COMMAND_TIMEOUT, None).await {
                 Ok(resp) if resp.ok() => {}
-                Ok(resp) => log_warn!("设置短信上报模式未返回 OK: {}", resp.text()),
-                Err(e) => log_warn!("设置短信上报模式失败: {}", e),
+                Ok(resp) => log_warn!(Cat::Sms, "设置短信上报模式未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!(Cat::Sms, "设置短信上报模式失败: {}", e),
             },
         }
         match self.send_command(ctx, "AT+CMGF?", COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.contains("+CMGF: 0") => {}
             _ => match self.send_command(ctx, "AT+CMGF=0", COMMAND_TIMEOUT, None).await {
                 Ok(resp) if resp.ok() => {}
-                Ok(resp) => log_warn!("设置短信 PDU 模式未返回 OK: {}", resp.text()),
-                Err(e) => log_warn!("设置短信 PDU 模式失败: {}", e),
+                Ok(resp) => log_warn!(Cat::Sms, "设置短信 PDU 模式未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!(Cat::Sms, "设置短信 PDU 模式失败: {}", e),
             },
         }
         match self.send_command(ctx, "AT+CLIP=1", COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.ok() => {}
-            Ok(resp) => log_warn!("开启来电号码显示未返回 OK: {}", resp.text()),
-            Err(e) => log_warn!("开启来电号码显示失败: {}", e),
+            Ok(resp) => log_warn!(Cat::Call, "开启来电号码显示未返回 OK: {}", resp.text()),
+            Err(e) => log_warn!(Cat::Call, "开启来电号码显示失败: {}", e),
         }
 
         // 自动拨号默认开启（UCI autodial_enable 默认 1）。
@@ -537,15 +538,15 @@ impl AtClient {
             }
             if self.align_autodial_once(ctx, desired, mode).await {
                 if attempt > 0 {
-                    log_info!("自动拨号在第 {} 次尝试后达成期望状态", attempt + 1);
+                    log_info!(Cat::Dial, "自动拨号在第 {} 次尝试后达成期望状态", attempt + 1);
                 }
                 return;
             }
             if attempt + 1 < total {
-                log_warn!("自动拨号尚未达成期望状态（第 {} 次尝试），稍后重试", attempt + 1);
+                log_warn!(Cat::Dial, "自动拨号尚未达成期望状态（第 {} 次尝试），稍后重试", attempt + 1);
             }
         }
-        log_warn!(
+        log_warn!(Cat::Dial,
             "自动拨号连续 {} 次未能达成期望状态（enable={} mode={}），\
              交由周期对账或下一次链路重连继续处理；请检查模组是否已驻网",
             total,
@@ -565,7 +566,7 @@ impl AtClient {
         let current = match self.send_command(ctx, "AT^SETAUTODIAL?", COMMAND_TIMEOUT, None).await {
             Ok(resp) => parse_autodial_state(&resp.text()),
             Err(e) => {
-                log_warn!("查询自动拨号状态失败，将直接下发设置: {}", e);
+                log_warn!(Cat::Dial, "查询自动拨号状态失败，将直接下发设置: {}", e);
                 None
             }
         };
@@ -575,7 +576,7 @@ impl AtClient {
         if let Some((enable, cur_mode)) = current {
             let mode_ok = !desired || cur_mode.is_none() || cur_mode == Some(mode);
             if enable == desired && mode_ok {
-                log_info!(
+                log_info!(Cat::Dial,
                     "自动拨号已处于期望状态（enable={}, mode={:?}），不重复下发",
                     desired as i32,
                     cur_mode
@@ -584,7 +585,7 @@ impl AtClient {
                 return true;
             }
             if enable == desired && !mode_ok {
-                log_warn!(
+                log_warn!(Cat::Dial,
                     "自动拨号开关已开但拨号方式不符（实际 {:?}，期望 {}），将重新下发",
                     cur_mode,
                     mode
@@ -600,13 +601,13 @@ impl AtClient {
         };
         match self.send_command(ctx, &cmd, COMMAND_TIMEOUT, None).await {
             Ok(resp) if resp.ok() => {
-                log_info!("已{}自动拨号（{}）", if desired { "开启" } else { "关闭" }, cmd);
+                log_info!(Cat::Dial, "已{}自动拨号（{}）", if desired { "开启" } else { "关闭" }, cmd);
             }
             Ok(resp) => {
-                log_warn!("自动拨号设置未返回 OK: {}", resp.text());
+                log_warn!(Cat::Dial, "自动拨号设置未返回 OK: {}", resp.text());
             }
             Err(e) => {
-                log_warn!("自动拨号设置失败: {}（命令 {}）", e, cmd);
+                log_warn!(Cat::Dial, "自动拨号设置失败: {}（命令 {}）", e, cmd);
             }
         }
 
@@ -616,10 +617,10 @@ impl AtClient {
                 Some((enable, cur_mode)) => {
                     let mode_ok = !desired || cur_mode.is_none() || cur_mode == Some(mode);
                     if enable == desired && mode_ok {
-                        log_info!("自动拨号状态复核通过（enable={}, mode={:?}）", enable as i32, cur_mode);
+                        log_info!(Cat::Dial, "自动拨号状态复核通过（enable={}, mode={:?}）", enable as i32, cur_mode);
                         true
                     } else {
-                        log_warn!(
+                        log_warn!(Cat::Dial,
                             "自动拨号状态复核不一致：期望 enable={} mode={}，实际 enable={} mode={:?}",
                             desired as i32,
                             mode,
@@ -630,12 +631,12 @@ impl AtClient {
                     }
                 }
                 None => {
-                    log_warn!("自动拨号状态复核无法解析: {}", resp.text());
+                    log_warn!(Cat::Dial, "自动拨号状态复核无法解析: {}", resp.text());
                     false
                 }
             },
             Err(e) => {
-                log_warn!("自动拨号状态复核失败: {}", e);
+                log_warn!(Cat::Dial, "自动拨号状态复核失败: {}", e);
                 false
             }
         };
@@ -647,7 +648,7 @@ impl AtClient {
         //    仅 USB 网口模式（mode=1）才用数据面判定——转网口模式的数据面在以太网口侧，
         //    模组的 NDIS/PDP 状态不能代表有网，不做强判定以免误报。
         if desired && mode == 1 && !self.pdp_ready(ctx).await {
-            log_warn!("自动拨号已开启但数据面尚未就绪（PDP 未激活），将继续重试");
+            log_warn!(Cat::Dial, "自动拨号已开启但数据面尚未就绪（PDP 未激活），将继续重试");
             return false;
         }
         notify_uplink_ready().await;
@@ -692,9 +693,9 @@ impl AtClient {
                     prior.autodial_on = on;
                     prior.autodial_mode = mode;
                 }
-                None => log_warn!("扫频前查询自动拨号状态无法解析: {}", resp.text()),
+                None => log_warn!(Cat::Scan, "扫频前查询自动拨号状态无法解析: {}", resp.text()),
             },
-            Err(e) => log_warn!("扫频前查询自动拨号状态失败: {}", e),
+            Err(e) => log_warn!(Cat::Scan, "扫频前查询自动拨号状态失败: {}", e),
         }
         // 2) NDIS 数据面激活状态（无法判定按未激活处理，宁可多断一次也不要漏断）。
         if let Ok(resp) = self.send_command(ctx, "AT^NDISSTATQRY?", COMMAND_TIMEOUT, None).await {
@@ -703,22 +704,22 @@ impl AtClient {
 
         // 3) 本就无网：直接扫，无需断连与恢复。
         if !prior.autodial_on && !prior.ndis_active {
-            log_info!("扫频前数据面未激活，无需断连");
+            log_info!(Cat::Scan, "扫频前数据面未激活，无需断连");
             return prior;
         }
 
         // 4) 先关自动拨号再撤数据面。
         if prior.autodial_on {
             match self.send_command(ctx, "AT^SETAUTODIAL=0", COMMAND_TIMEOUT, None).await {
-                Ok(resp) if resp.ok() => log_info!("扫频前已关闭自动拨号"),
-                Ok(resp) => log_warn!("扫频前关闭自动拨号未返回 OK: {}", resp.text()),
-                Err(e) => log_warn!("扫频前关闭自动拨号失败: {}", e),
+                Ok(resp) if resp.ok() => log_info!(Cat::Scan, "扫频前已关闭自动拨号"),
+                Ok(resp) => log_warn!(Cat::Scan, "扫频前关闭自动拨号未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!(Cat::Scan, "扫频前关闭自动拨号失败: {}", e),
             }
         }
         match self.send_command(ctx, "AT^NDISDUP=1,0", COMMAND_TIMEOUT, None).await {
-            Ok(resp) if resp.ok() => log_info!("扫频前已断开蜂窝数据"),
-            Ok(resp) => log_warn!("扫频前断开蜂窝数据未返回 OK: {}", resp.text()),
-            Err(e) => log_warn!("扫频前断开蜂窝数据失败: {}", e),
+            Ok(resp) if resp.ok() => log_info!(Cat::Scan, "扫频前已断开蜂窝数据"),
+            Ok(resp) => log_warn!(Cat::Scan, "扫频前断开蜂窝数据未返回 OK: {}", resp.text()),
+            Err(e) => log_warn!(Cat::Scan, "扫频前断开蜂窝数据失败: {}", e),
         }
         prior.did_disconnect = true;
 
@@ -743,15 +744,15 @@ impl AtClient {
             let mode = prior.autodial_mode.unwrap_or_else(|| self.cfg.autodial_mode.clamp(1, 2));
             let cmd = format!("AT^SETAUTODIAL=1,{mode}");
             match self.send_command(ctx, &cmd, COMMAND_TIMEOUT, None).await {
-                Ok(resp) if resp.ok() => log_info!("扫频结束，已恢复自动拨号（{}）", cmd),
-                Ok(resp) => log_warn!("扫频结束，恢复自动拨号未返回 OK: {}", resp.text()),
-                Err(e) => log_warn!("扫频结束，恢复自动拨号失败: {}（周期对账将兜底）", e),
+                Ok(resp) if resp.ok() => log_info!(Cat::Scan, "扫频结束，已恢复自动拨号（{}）", cmd),
+                Ok(resp) => log_warn!(Cat::Scan, "扫频结束，恢复自动拨号未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!(Cat::Scan, "扫频结束，恢复自动拨号失败: {}（周期对账将兜底）", e),
             }
         } else if prior.ndis_active {
             match self.send_command(ctx, "AT^NDISDUP=1,1", COMMAND_TIMEOUT, None).await {
-                Ok(resp) if resp.ok() => log_info!("扫频结束，已恢复蜂窝数据连接"),
-                Ok(resp) => log_warn!("扫频结束，恢复蜂窝数据未返回 OK: {}", resp.text()),
-                Err(e) => log_warn!("扫频结束，恢复蜂窝数据失败: {}（周期对账将兜底）", e),
+                Ok(resp) if resp.ok() => log_info!(Cat::Scan, "扫频结束，已恢复蜂窝数据连接"),
+                Ok(resp) => log_warn!(Cat::Scan, "扫频结束，恢复蜂窝数据未返回 OK: {}", resp.text()),
+                Err(e) => log_warn!(Cat::Scan, "扫频结束，恢复蜂窝数据失败: {}（周期对账将兜底）", e),
             }
         }
     }
@@ -798,7 +799,7 @@ impl AtClient {
             if self.pdp_ready(&ctx).await {
                 continue;
             }
-            log_warn!("周期对账发现自动拨号数据面未就绪，重新对齐");
+            log_warn!(Cat::Dial, "周期对账发现自动拨号数据面未就绪，重新对齐");
             self.ensure_autodial(&ctx).await;
         }
     }
@@ -880,7 +881,7 @@ impl AtClient {
         wait: Duration,
     ) -> Result<SmsTransaction, String> {
         let permit = self.gate.acquire(AtPriority::Sms, ctx, wait).await?;
-        log_debug!("短信事务开始: {}", label);
+        log_debug!(Cat::Sms, "短信事务开始: {}", label);
         Ok(SmsTransaction::new(permit, label.to_string()))
     }
 
@@ -901,7 +902,7 @@ impl AtClient {
         // 分片发送、批量删除这类多步骤流程因此在步骤间形成天然让出点，
         // 长事务不再无限期饿死交互命令。
         if tx.held_since() >= SMS_TX_YIELD_AFTER && self.gate.has_waiters().await {
-            crate::log_debug!(
+            crate::log_debug!(Cat::Sms,
                 "短信事务 {} 已持有 {}s，门外有等待者，协作让出一次",
                 tx.label(),
                 tx.held_since().as_secs()
@@ -972,7 +973,7 @@ impl AtClient {
         }
         let mut w = writer.lock().await;
         w.write_all(payload.as_bytes()).await.map_err(|e| {
-            log_warn!("写入打断字符串失败: {}", e);
+            log_warn!(Cat::Scan, "写入打断字符串失败: {}", e);
             e.to_string()
         })?;
         Ok(())
@@ -1242,7 +1243,7 @@ impl AtClient {
         match self.urc_tx.try_send(u) {
             Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
             Err(mpsc::error::TrySendError::Full(_)) => {
-                log_warn!("URC 队列已满，丢弃一条主动上报");
+                log_warn!(Cat::Urc, "URC 队列已满，丢弃一条主动上报");
             }
         }
     }
@@ -1333,17 +1334,9 @@ async fn notify_uplink_ready() {
         return;
     }
     match tokio::process::Command::new(HOOK).status().await {
-        Ok(st) if st.success() => log_info!("已通知系统侧拉起模组接口（{}）", HOOK),
-        Ok(st) => log_warn!("拉起模组接口的钩子返回非零退出码: {:?}", st.code()),
-        Err(e) => log_warn!("执行拉起模组接口的钩子失败: {}", e),
-    }
-}
-
-async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
-    let mut ctx_c = ctx.clone();
-    tokio::select! {
-        _ = tokio::time::sleep(d) => true,
-        _ = ctx_c.changed() => false,
+        Ok(st) if st.success() => log_info!(Cat::Net, "已通知系统侧拉起模组接口（{}）", HOOK),
+        Ok(st) => log_warn!(Cat::Net, "拉起模组接口的钩子返回非零退出码: {:?}", st.code()),
+        Err(e) => log_warn!(Cat::Net, "执行拉起模组接口的钩子失败: {}", e),
     }
 }
 

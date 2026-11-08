@@ -2,6 +2,7 @@
 //! 键名与 LuCI 页面约定完全一致。
 
 use crate::{log_info, log_warn};
+use crate::logcat::Category;
 use crate::logger::{self, Level};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -405,11 +406,34 @@ pub struct ScheduleConfig {
     pub day_nr: BandLock,
 }
 
+/// 插件日志文件的落盘配置。
+///
+/// 业务类日志（AT/短信/拨号/信号…）不再进 syslog，改由这个文件承载，
+/// 因此它必须有界：默认落在 `/tmp`（tmpfs），达到上限后按行边界裁掉最旧的一半。
+/// 分流规则本身（哪些类别进文件、哪些进 syslog）是代码里的策略表，
+/// 见 [`crate::logcat`]，不做成可配置项 —— 让用户能把业务日志重新灌回 syslog
+/// 就等于把这次改造关掉。
+#[derive(Debug, Clone)]
+pub struct LogConfig {
+    /// 是否把业务类日志写入插件文件。关掉后业务日志只留内存环形缓冲。
+    pub plugin_file_enabled: bool,
+    /// 插件日志文件路径；留空用 [`crate::logger::DEFAULT_PLUGIN_LOG_PATH`]。
+    pub plugin_file: String,
+    /// 插件日志文件大小上限（字节），小于 4096 视为非法并回落默认。
+    pub plugin_file_max_bytes: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub enabled: bool,
     pub at: AtConfig,
     pub notification: NotificationConfig,
+    /// 日志落盘策略（业务类日志写哪个文件、上限多大）。
+    ///
+    /// 与 `notification.log_file` 是**两个不同的文件**：那个只装通知记录
+    /// （短信/来电/信号推送的留痕），这个装全部业务类运行痕迹
+    /// （AT 收发、拨号对账、接口拉起…）。分开放是因为两者的读者与清理时机都不同。
+    pub log: LogConfig,
     pub websocket: WebSocketConfig,
     pub schedule: ScheduleConfig,
     /// 使用量统计的自动清零日：**每月几号**（默认 1 号，范围 1~31）。
@@ -485,6 +509,12 @@ pub fn default_config() -> Config {
             poll: PollConfig::default(),
             signal_min_interval: Duration::from_secs(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60),
             templates: NotifyTemplates::default(),
+        },
+        log: LogConfig {
+            plugin_file_enabled: true,
+            // 留空 = 用 logger::DEFAULT_PLUGIN_LOG_PATH；这样改默认路径只需改一处
+            plugin_file: String::new(),
+            plugin_file_max_bytes: crate::logger::DEFAULT_PLUGIN_LOG_BYTES,
         },
         websocket: WebSocketConfig {
             port: 8765,
@@ -696,7 +726,7 @@ pub async fn load_config() -> Config {
     let values = match uci_values().await {
         Ok(v) => v,
         Err(e) => {
-            logger::emit(Level::Warn, "CFG", format_args!("读取 UCI 配置失败，使用默认配置: {e}"));
+            logger::emit(Level::Warn, Category::Config, format_args!("读取 UCI 配置失败，使用默认配置: {e}"));
             return cfg;
         }
     };
@@ -752,6 +782,16 @@ pub async fn load_config() -> Config {
         max_bytes as u64
     } else {
         crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES
+    };
+    // 插件日志文件（业务类日志的落盘去处，与上面的通知日志是两个文件）。
+    // 下限同样是 4096：用户手填一个「1」会让每条日志都触发一次整文件裁剪。
+    cfg.log.plugin_file_enabled = values.bool("log_plugin_file_enabled", true);
+    cfg.log.plugin_file = values.str("log_plugin_file", "");
+    let plugin_max = values.int("log_plugin_max_bytes", crate::logger::DEFAULT_PLUGIN_LOG_BYTES as i64);
+    cfg.log.plugin_file_max_bytes = if plugin_max >= 4096 {
+        plugin_max as u64
+    } else {
+        crate::logger::DEFAULT_PLUGIN_LOG_BYTES
     };
     cfg.notification.types = NotifyTypes {
         sms: values.bool("notify_sms", true),

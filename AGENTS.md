@@ -13,7 +13,7 @@
 - **行尾强制 LF**：`.gitattributes` 已声明 `* text=auto eol=lf`，禁止提交 CRLF。
 - **更新日志同步**：任何进入 `main` 的功能 / 修复 / 样式 / 行为改动，必须同步更新 `CHANGELOG.md`（随改动提交，或在同版本定版提交前补齐），不得只改代码不写日志。
 - **发版版本一致性 + 文档徽标同步**：提升版本号（打 `v*` 标签出正式版）时，以下引用必须与新 `PKG_VERSION` 一致，缺一不可：
-  `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
+  `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `src/rust/Cargo.toml` 的 `version` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
   同时同步文档徽标与下载入口 —— `README.md` 头部 Version 徽标、`docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 与四处 `releases/download/v<版本>/…` 下载链接。下载链接的资产命名以最近一次 Release 的实际产物为准（形如 `luci-app-mt5700_<版本>-r<PKG_RELEASE>_<架构>.ipk` / `luci-app-mt5700-<版本>-r<PKG_RELEASE>.apk`），不得沿用旧后缀。
 
 ### 全局组件的样式归属
@@ -109,3 +109,59 @@ node tests/author-attribution-test.js
 本文件与源码注释属于**可审查的项目约定**，不具备强制力：它们依赖维护者与 AI 代理的自觉遵守，
 不构成技术拦截，也不应被改写成伪装系统指令、隐藏提示词或混淆代码等规避审查的手段。
 经授权的维护者始终可以按正常流程修改或移除署名，但需在变更说明中写明原因。
+
+## 五、Rust/Tokio 后端健康规则
+
+后端 `src/rust/` 是 Tokio 多线程运行时的常驻服务（`#[tokio::main]` + procd 单实例），**每一次优化或更新都必须保证它仍然是真正的 Rust/Tokio 异步实现**，不得出现「名义上 async、实际在 reactor 线程上阻塞」。本节与「更新日志同步」同等强制，改后端必须逐条自查。
+
+### 必须守住的不变量
+
+- **测试全绿**：改动 `src/rust/` 后在 `src/rust/` 下执行 `cargo test`，必须 0 失败（当前基线 356 项通过、2 项 ignored）。本 crate 是纯 bin target，`cargo test --lib` 会报 no library targets，不能用它替代全量 `cargo test`；新增逻辑要补单测，不得只靠手工验证。
+- **零告警**：`cargo clippy --all-targets` 的生产段保持 0 warning。确需压制某条告警，只允许针对具体规则、并在注释里写明理由；禁止用 `#![allow(...)]` 或整模块关闭告警。
+- **async 路径不得阻塞**：`async fn` 内禁止 `std::process::Command`、`std::fs::*`、`std::net::TcpStream`、`std::thread::sleep`、`ureq` 等同步/阻塞 API。确有无法异步化的同步依赖（例如 `uci` 命令行、`/sys` 读取、系统串口枚举）时，用 `tokio::task::spawn_blocking` 包住整段，并在注释里写「为什么必须同步」；不要为了「看起来异步」硬包一层却仍在原地轮询或自旋。
+- **锁的选择**：跨 `await` 持锁必须用 `tokio::sync::Mutex`。`std::sync::Mutex` 只允许「无 `await`、临界区只有几次内存操作」的场景（现存的日志环形缓冲、事件环形队列、QQ 通道句柄属此类），新增代码不得扩大这些临界区，也不得把阻塞 IO 挪进锁内。
+- **AT 通道串行语义不得破坏**：单通道互斥仍是 `tokio::sync::Mutex`（`at_queue` 的 `PriLock` / `SmsTransaction`），任何时刻只允许一条命令在途；短信事务的整段占用不得被拆开插入别的命令。凡「为了并行而绕开互斥」的改动一律拒绝。
+- **启动与关闭路径不得回归**：`main.rs` 的启动顺序（时区初始化 → 读配置 → 通知器 → 使用量 → 各后台任务）必须保持，且启动期的阻塞动作要在 `spawn_blocking` 里完成后再 `await`。退出仍由 `shutdown_signal()`（SIGTERM / Ctrl-C）与 `tokio::select!` 驱动：先 `ctx_tx.send(true)` 广播取消，再在 5 秒 `timeout` 内依次 await 全部后台任务收尾，最后落 `服务已停止` 日志。不得把阻塞调用塞回启动路径，也不得删掉收尾逻辑、取消信号或这段超时。
+- **任务生命周期要写清**：新增或修改 `tokio::spawn` 时，必须能回答三个问题 —— 谁取消它（`watch::Receiver<bool>` / `CancellationToken` / 跑完即退出）、退出后谁 await 它（是否纳入上面的收尾列表）、失败是否会被吞掉。禁止起「既无 JoinHandle、也无取消信号」的常驻任务。
+
+### 复核方式
+
+```sh
+cd src/rust
+cargo test
+cargo clippy --all-targets
+```
+
+再扫描生产段（排除 `#[cfg(test)]`）确认没有残留阻塞调用：
+
+```sh
+grep -nE 'std::process::Command|std::fs::|std::net::Tcp|thread::sleep|ureq::' src/*.rs
+```
+
+命中的每一处要么改成 Tokio 等价物，要么位于 `spawn_blocking` 内并写明理由。提交说明或 PR 描述里要列出「调用点 → 处理方式 → 复核结果」三列。触及 `root/usr/share/rpcd/ucode/mt5700.uc` 时，另外在设备上执行 `ucode -c -s /usr/share/rpcd/ucode/mt5700.uc`。
+
+### Rust 后端版本与包版本联动
+
+后端自报版本（`at-webserver-rust --version` 与启动日志里的 `at-webserver <版本> 启动中`）
+只由 `PKG_VERSION` 驱动，不允许再出现「二进制自报 1.29.0、包版本 1.32.7」这类分叉。
+
+| 环节 | 位置 | 作用 |
+| --- | --- | --- |
+| 单一来源 | `Makefile` 的 `PKG_VERSION` | 发版只改这一处，并 `export MT5700_VERSION := $(PKG_VERSION)` |
+| 注入 | `src/Makefile` 的 `cargo build` 行 | `MT5700_VERSION="$(MT5700_VERSION)"` 传给 cargo；缺省时从上级 `Makefile` 解析 |
+| 消费 | `src/rust/src/main.rs` 的 `VERSION` | `option_env!("MT5700_VERSION")`，缺失回退 `CARGO_PKG_VERSION` |
+| 兜底 | `src/rust/Cargo.toml` 的 `version` | 仅本地无注入时使用，必须与 `PKG_VERSION` 保持一致 |
+
+- 新增任何打印版本的位置（RPC 字段、日志、init.d 横幅）都必须复用 `main.rs` 的
+  `VERSION` 常量，不得另建常量或写死字面量。
+- 改动上述任一环节后执行复核：
+
+```sh
+node tests/rust-version-test.js
+grep -n '^PKG_VERSION' Makefile
+grep -n '^version' src/rust/Cargo.toml
+cd src/rust && cargo test
+```
+
+- 交叉编译产物核对：解包或安装后执行 `/usr/bin/at-webserver-rust --version`，
+  输出中的版本必须等于包管理器里的 `luci-app-mt5700` 版本。

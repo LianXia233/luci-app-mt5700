@@ -9,6 +9,7 @@ mod async_runtime;
 mod at_queue;
 mod atclient;
 mod config;
+mod logcat;
 mod logger;
 mod localtime;
 mod monthly;
@@ -49,8 +50,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 
-/// 版本号取自 Cargo 包元数据，构建时编译进二进制。
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// 版本号：优先取构建期注入的 `MT5700_VERSION`（顶层 Makefile 的 `PKG_VERSION`，
+/// 经 `src/Makefile` 传给 cargo），让后端自报版本与包版本单一来源、不会各自漂移；
+/// 脱离 OpenWrt 构建（本地 `cargo build` / `cargo test`）时回退到 Cargo.toml 的
+/// version，保证任何宿主上都能编译且不报错。
+const VERSION: &str = match option_env!("MT5700_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 #[tokio::main]
 async fn main() {
@@ -82,15 +89,29 @@ async fn run(verbose: bool) -> Result<(), String> {
     // 并写回 TZ 环境变量，供后续 libc / 子进程一致使用。
     // 必须在任何会读时间/落日志的业务任务之前调用，故放在这里、而非各任务内部懒加载
     // （`#[tokio::main]` 已经建好运行时线程，靠的是启动顺序而非语言级保证）。
-    crate::localtime::init();
+    //
+    // 它内部要读 /etc/TZ 并 fork `uci get`，属阻塞调用；放到 blocking 池执行，
+    // 既保住「先于所有任务」的顺序，又不占用 reactor 线程。之后的 `offset()`
+    // 全部命中 OnceLock，不再产生任何 IO。
+    tokio::task::spawn_blocking(crate::localtime::init)
+        .await
+        .map_err(|e| format!("时区初始化任务失败: {e}"))?;
 
     let cfg = config::load_config().await;
+    // 业务类日志（AT/短信/拨号/信号…）不进 syslog，落在这个插件自己的文件里。
+    // 必须紧跟 load_config：再往后的日志才有正确的落点与上限，
+    // 在此之前它们只进内存环形缓冲（见 logger 模块文档的取舍说明）。
+    crate::logger::init_plugin_file(
+        cfg.log.plugin_file_enabled,
+        &cfg.log.plugin_file,
+        cfg.log.plugin_file_max_bytes,
+    );
     if !cfg.enabled {
-        log_warn!("服务在配置中被禁用，退出");
+        log_warn!(Cat::Config, "服务在配置中被禁用，退出");
         return Ok(());
     }
     log_config(&cfg);
-    log_info!(
+    log_info!(Cat::Time,
         "当前时间: {}（来源 {}，时区 {}）",
         crate::nettime::now().format("%Y-%m-%d %H:%M:%S"),
         crate::nettime::source_name(),
@@ -104,7 +125,14 @@ async fn run(verbose: bool) -> Result<(), String> {
     let (urc_tx, urc_rx) = tokio::sync::mpsc::channel(256);
     let client = atclient::AtClient::new(cfg.at.clone(), urc_tx);
 
-    let (notifier, notif_rx) = Notifier::new(cfg.notification.clone());
+    // 通知器构造会创建日志目录并（QQ 通道开启时）fork 一次 `uci get network.lan.ipaddr`
+    // 推导管理页地址，都是阻塞调用；启动只付一次，交给 blocking 池，reactor 不参与。
+    let (notifier, notif_rx) = tokio::task::spawn_blocking({
+        let ncfg = cfg.notification.clone();
+        move || Notifier::new(ncfg)
+    })
+    .await
+    .map_err(|e| format!("通知模块初始化任务失败: {e}"))?;
     let notifier = Arc::new(notifier);
     let scheduler = Scheduler::new(cfg.schedule.clone(), client.clone(), notifier.clone(), ctx_rx.clone());
 
@@ -114,11 +142,16 @@ async fn run(verbose: bool) -> Result<(), String> {
     let tasks = crate::async_runtime::TaskManager::with_cap(32);
     // 使用量后台统计：常驻周期采样，与前端是否打开无关。
     // 使用量来源可热切换：netdev 走 sysfs（零 AT），modem 复用状态缓存里的 AT^DSFLOWQRY。
-    let usage = crate::usage::UsageTracker::new(
-        cfg.usage_reset_day,
-        &cfg.usage_source,
-        cache.clone(),
-    );
+    // 构造时会从 /tmp 与闪存读回上次的累计用量（两次 metadata + read_to_string），
+    // 属阻塞 IO；同样只在启动发生一次，放 blocking 池。
+    let usage = tokio::task::spawn_blocking({
+        let day = cfg.usage_reset_day;
+        let src = cfg.usage_source.clone();
+        let cache = cache.clone();
+        move || crate::usage::UsageTracker::new(day, &src, cache)
+    })
+    .await
+    .map_err(|e| format!("使用量统计初始化任务失败: {e}"))?;
     // 短信业务：与 AT 客户端共用同一条通道，短信操作享有最高优先级。
     let sms = crate::sms::SmsService::new(client.clone(), ctx_rx.clone(), client.sms_mode());
     // 短信本地归档：发送成功与收到新短信时由后端落盘，
@@ -151,7 +184,7 @@ async fn run(verbose: bool) -> Result<(), String> {
     let hub = rpc.hub();
     let broadcaster: Broadcaster = Arc::new(move |v: serde_json::Value| hub.broadcast(&v));
 
-    log_info!("启动完成，LuCI RPC 127.0.0.1:{}（经 rpcd/ucode 代理，不对外暴露）", cfg.websocket.port);
+    log_info!(Cat::Rpc, "启动完成，LuCI RPC 127.0.0.1:{}（经 rpcd/ucode 代理，不对外暴露）", cfg.websocket.port);
     if !verbose {
         // 稳态只留警告和错误，避免刷满 procd 日志。
         crate::logger::set_level(crate::logger::Level::Warn);
@@ -174,12 +207,12 @@ async fn run(verbose: bool) -> Result<(), String> {
     if cfg.notification.qq.target_type == "bind" {
         let q = cfg.notification.qq.clone();
         if !q.enabled {
-            log_warn!("QQ 推送开关未开启（qq_enabled=0），跳过绑定");
+            log_warn!(Cat::Notify, "QQ 推送开关未开启（qq_enabled=0），跳过绑定");
         } else if q.app_id.is_empty() || q.app_secret.is_empty() {
-            log_error!("QQ 绑定模式缺少 AppID/AppSecret，跳过绑定");
+            log_error!(Cat::Notify, "QQ 绑定模式缺少 AppID/AppSecret，跳过绑定");
         } else {
             if q.bind_qq.trim().is_empty() {
-                log_warn!("QQ 绑定模式未填写 qq_bind_qq（QQ 号标签），仍可继续绑定");
+                log_warn!(Cat::Notify, "QQ 绑定模式未填写 qq_bind_qq（QQ 号标签），仍可继续绑定");
             }
             let notifier2 = notifier.clone();
             let ctx2 = ctx_rx.clone();
@@ -255,7 +288,7 @@ async fn run(verbose: bool) -> Result<(), String> {
             let mut waited = Duration::ZERO;
             while !client.connected() {
                 if waited >= SMS_STORAGE_WAIT_MAX {
-                    log_warn!(
+                    log_warn!(Cat::Sms,
                         "AT 通道 {}s 未就绪，跳过默认存储区应用（{}）",
                         SMS_STORAGE_WAIT_MAX.as_secs(),
                         want
@@ -269,9 +302,9 @@ async fn run(verbose: bool) -> Result<(), String> {
                 waited += Duration::from_secs(3);
             }
             match sms.apply_default_storage(&want).await {
-                Ok(true) => log_info!("默认存储区已应用：{}", want),
-                Ok(false) => log_debug!("存储区已是 {}，无需切换", want),
-                Err(e) => log_warn!("默认存储区应用失败（{}）：{}", want, e),
+                Ok(true) => log_info!(Cat::Sms, "默认存储区已应用：{}", want),
+                Ok(false) => log_debug!(Cat::Sms, "存储区已是 {}，无需切换", want),
+                Err(e) => log_warn!(Cat::Sms, "默认存储区应用失败（{}）：{}", want, e),
             }
         })
     };
@@ -308,7 +341,7 @@ async fn run(verbose: bool) -> Result<(), String> {
     let _ = ctx_tx.send(true);
 
     if let Some(Ok(Err(e))) = serve_result {
-        log_error!("LuCI RPC 服务异常退出: {}", e);
+        log_error!(Cat::Rpc, "LuCI RPC 服务异常退出: {}", e);
     }
 
     // 给后台任务一点时间优雅收尾。
@@ -343,31 +376,38 @@ async fn run_qq_bind(
     q: crate::config::QqNotifyConfig,
     ctx: watch::Receiver<bool>,
 ) {
-    log_info!("QQ 绑定模式启动（QQ 号标签: {}），等待用户给机器人发消息…", q.bind_qq);
+    log_info!(Cat::Notify, "QQ 绑定模式启动（QQ 号标签: {}），等待用户给机器人发消息…", q.bind_qq);
     match qqbind::run_bind_tracked(status, &q.app_id, &q.app_secret, ctx).await {
         Ok(target) => {
-            log_info!("QQ 绑定成功: type={} id={}", target.target_type, target.target_id);
+            log_info!(Cat::Notify, "QQ 绑定成功: type={} id={}", target.target_type, target.target_id);
             if let Err(e) = qqbind::persist_uci(&target).await {
                 // 写不进 UCI 也要热替换，保证本次运行内可用
-                log_error!("QQ 绑定结果写回 UCI 失败（本次运行内仍热生效）: {}", e);
+                log_error!(Cat::Notify, "QQ 绑定结果写回 UCI 失败（本次运行内仍热生效）: {}", e);
             } else {
-                log_info!("QQ 绑定结果已写回 UCI（qq_target_type/qq_target_id）");
+                log_info!(Cat::Notify, "QQ 绑定结果已写回 UCI（qq_target_type/qq_target_id）");
             }
             let bind_tag = q.bind_qq.clone();
-            let sender = crate::qqpush::QqSender::from_config(&crate::config::QqNotifyConfig {
-                enabled: q.enabled,
-                app_id: q.app_id,
-                app_secret: q.app_secret,
-                target_type: target.target_type,
-                target_id: target.target_id,
-                bind_qq: q.bind_qq,
-                msg_format: q.msg_format,
-                keyboard_enabled: q.keyboard_enabled,
-                keyboard_url: q.keyboard_url,
-                menu_enabled: q.menu_enabled,
-                // 节流配置随绑定一起带过来：绑定前后是同一个通道，节奏不该变
-                max_per_minute: q.max_per_minute,
-            });
+            // from_config 在 keyboard_url 为空时会 fork `uci get network.lan.ipaddr`，
+            // 这里是 async 上下文，交给 blocking 池执行。
+            let sender = tokio::task::spawn_blocking(move || {
+                crate::qqpush::QqSender::from_config(&crate::config::QqNotifyConfig {
+                    enabled: q.enabled,
+                    app_id: q.app_id,
+                    app_secret: q.app_secret,
+                    target_type: target.target_type,
+                    target_id: target.target_id,
+                    bind_qq: q.bind_qq,
+                    msg_format: q.msg_format,
+                    keyboard_enabled: q.keyboard_enabled,
+                    keyboard_url: q.keyboard_url,
+                    menu_enabled: q.menu_enabled,
+                    // 节流配置随绑定一起带过来：绑定前后是同一个通道，节奏不该变
+                    max_per_minute: q.max_per_minute,
+                })
+            })
+            .await
+            .ok()
+            .flatten();
             if let Some(sender) = sender {
                 // 绑定成功后立即回一条确认消息，让用户知道后续通知会发到这里。
                 // 主动推送不依赖 WS 会话（run_bind 返回后 WS 已断开），失败仅记日志。
@@ -379,18 +419,18 @@ async fn run_qq_bind(
                 // 绑定确认消息同样不携带插件名字样，保持与业务通知一致的观感
                 let content = format!("绑定成功{}：后续通知将推送到本会话", tag);
                 match sender.send(sender.build_message(&content, "")).await {
-                    Ok(()) => log_info!("QQ 绑定确认消息已发送"),
-                    Err(e) => log_error!("QQ 绑定确认消息发送失败（不影响绑定生效）: {}", e),
+                    Ok(()) => log_info!(Cat::Notify, "QQ 绑定确认消息已发送"),
+                    Err(e) => log_error!(Cat::Notify, "QQ 绑定确认消息发送失败（不影响绑定生效）: {}", e),
                 }
                 // 菜单启用时，绑定成功后立即配置一次（启动时通道尚未就绪，配置不了）
                 sender.apply_default_menu().await;
                 notifier.set_qq(Some(sender));
             } else {
                 // from_config 正常不会返回 None（凭据已校验），兜底防御
-                log_error!("QQ 绑定后构造发送器失败，跳过热替换");
+                log_error!(Cat::Notify, "QQ 绑定后构造发送器失败，跳过热替换");
             }
         }
-        Err(e) => log_error!("QQ 绑定失败: {}（下次服务重启会自动重试）", e),
+        Err(e) => log_error!(Cat::Notify, "QQ 绑定失败: {}（下次服务重启会自动重试）", e),
     }
 }
 
@@ -412,29 +452,29 @@ async fn shutdown_signal() {
 fn log_config(cfg: &Config) {
     if cfg.at.type_ == "SERIAL" {
         if cfg.at.serial.port == config::AUTO_SERIAL_PORT {
-            log_info!("AT 通道: 串口自动探测 @ {}", cfg.at.serial.baudrate);
+            log_info!(Cat::At, "AT 通道: 串口自动探测 @ {}", cfg.at.serial.baudrate);
         } else {
-            log_info!("AT 通道: 串口 {} @ {}", cfg.at.serial.port, cfg.at.serial.baudrate);
+            log_info!(Cat::At, "AT 通道: 串口 {} @ {}", cfg.at.serial.port, cfg.at.serial.baudrate);
         }
     } else {
-        log_info!("AT 通道: 网络 {}:{}", cfg.at.network.host, cfg.at.network.port);
+        log_info!(Cat::At, "AT 通道: 网络 {}:{}", cfg.at.network.host, cfg.at.network.port);
     }
 
-    log_info!(
+    log_info!(Cat::Rpc,
         "LuCI RPC: {}:{}，密钥: {}",
         cfg.websocket.bind,
         cfg.websocket.port,
         if cfg.websocket.auth_key.is_empty() { "未设置" } else { "已设置" }
     );
     if cfg.websocket.bind != "127.0.0.1" {
-        log_warn!(
+        log_warn!(Cat::Rpc,
             "RPC 对外监听 {}:{} —— 请确保防火墙已限制访问，并设置 websocket_auth_key",
             cfg.websocket.bind,
             cfg.websocket.port
         );
     }
 
-    log_info!(
+    log_info!(Cat::Notify,
         "自动推送: {}",
         if cfg.notification.enabled {
             "已开启（短信/来电/信号/存储满均实时直发，另有定时推送按间隔推送当前状态）"
@@ -442,7 +482,7 @@ fn log_config(cfg: &Config) {
             "已关闭（事件只写本地通知日志，不再外发）"
         }
     );
-    log_info!(
+    log_info!(Cat::Notify,
         "推送开关: 短信={} 来电={} 存储满={} 信号={}",
         on_off(cfg.notification.types.sms),
         on_off(cfg.notification.types.call),
@@ -457,7 +497,7 @@ fn log_config(cfg: &Config) {
             } else {
                 format!("仅变化 ≥{:.0} dB 时推送", p.delta)
             };
-            log_info!(
+            log_info!(Cat::Notify,
                 "信号轮询推送: {}~{} 每 {} 秒一次，{}",
                 p.start,
                 p.end,
@@ -465,14 +505,26 @@ fn log_config(cfg: &Config) {
                 strategy
             );
         } else {
-            log_info!("信号轮询推送: 未启用");
+            log_info!(Cat::Notify, "信号轮询推送: 未启用");
         }
     }
-    log_info!("定时锁频: {}", if cfg.schedule.enabled { "启用" } else { "禁用" });
-    log_info!(
+    log_info!(Cat::Schedule, "定时锁频: {}", if cfg.schedule.enabled { "启用" } else { "禁用" });
+    log_info!(Cat::Usage,
         "使用量统计: 后台常驻采样（1s），自动清零 {}（时间源 {}）",
         crate::monthly::describe(cfg.usage_reset_day),
         crate::nettime::source_name()
+    );
+
+    // 业务日志（AT/短信/拨号等）已不再进 syslog，落盘位置必须在启动时自报一次：
+    // 否则运维在 `logread` 里看不到业务痕迹，只会误判成「日志丢了」。
+    let (file_on, file_path, file_cap) = crate::logger::plugin_file_info();
+    log_info!(Cat::Config,
+        "业务日志: {}",
+        if file_on {
+            format!("写入 {file_path}（上限 {} KiB，超限裁掉最旧）", file_cap / 1024)
+        } else {
+            "仅内存环形缓存（log_plugin_file_enabled=0，不落盘）".to_string()
+        }
     );
 }
 

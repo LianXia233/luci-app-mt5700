@@ -11,6 +11,17 @@
 
 RUST_DIR := rust
 
+# ---- 版本号：与包版本单一来源 ----
+# 优先用顶层 Makefile 导出的 MT5700_VERSION（= PKG_VERSION）。直接在 src/ 下
+# 执行 `make compile` 时拿不到该变量（子 make 不继承未导出的变量），此时从
+# 上级 Makefile 解析 PKG_VERSION —— OpenWrt 的 Build/Prepare 会把包目录
+# （含顶层 Makefile）整份拷到 $(PKG_BUILD_DIR)，所以这条路在 SDK 构建里同样成立。
+# 两者都落空时不做兜底：交给 Rust 侧的 option_env! 回退 Cargo.toml 的 version。
+MT5700_VERSION := $(strip $(MT5700_VERSION))
+ifeq ($(MT5700_VERSION),)
+MT5700_VERSION := $(shell sed -n 's/^PKG_VERSION:=//p' "$(CURDIR)/../Makefile" 2>/dev/null | head -n 1)
+endif
+
 # ---- OpenWrt 架构 → Rust musl 目标三元组映射 ----
 #
 # 三种取值的优先级：调用方传入的 RUST_TRIPLE > ARCH_PACKAGES 精确匹配 > ARCH 基础名匹配。
@@ -82,9 +93,10 @@ BIN := $(CARGO_TARGET_DIR)/$(RUST_TARGET)/release/at-webserver
 all: compile
 
 compile:
-	@echo "==> [mt5700] cargo build: ARCH=$(ARCH) ARCH_PACKAGES=$(ARCH_PACKAGES) RUST_TARGET=$(RUST_TARGET)"
+	@echo "==> [mt5700] cargo build: ARCH=$(ARCH) ARCH_PACKAGES=$(ARCH_PACKAGES) RUST_TARGET=$(RUST_TARGET) MT5700_VERSION=$(MT5700_VERSION)"
 	cd $(RUST_DIR) && \
 		CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" \
+		MT5700_VERSION="$(MT5700_VERSION)" \
 		cargo build $(CARGO_BUILD_STD_FLAGS) --release --target $(RUST_TARGET)
 	test -x "$(BIN)" || { echo "ERROR: cargo 未产出 $(BIN)"; exit 1; }
 	@echo "==> [mt5700] 后端二进制就绪: $(BIN)"

@@ -30,6 +30,23 @@ var rpcAt = L.rpc.declare({
 	expect: {}
 });
 
+/*
+ * 批量 AT 查询：一次 RPC 送达多条约只读命令，按序执行、按序返回。
+ *
+ * 存在的理由（实机测得）：单条 `at` 调用的桥开销是 17ms（ucode 写临时文件
+ * + fork nc + rpcd 往返），status 页一轮 25 条命令就白付 400ms 以上。
+ * 合批后一轮只付一次桥开销，AT 通道仍然是单通道串行（互斥语义不变）。
+ *
+ * 返回 { success, items: [{cmd, success, data|error|cause}] }；
+ * 批量整体失败（后端不可用 / 熔断）时 success 为 false，调用方退回逐条发送。
+ */
+var rpcAtBatch = L.rpc.declare({
+	object: 'mt5700',
+	method: 'batch',
+	params: ['cmds'],
+	expect: {}
+});
+
 var rpcEvents = L.rpc.declare({
 	object: 'mt5700',
 	method: 'events',
@@ -509,6 +526,61 @@ ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
 		});
 	});
 	return this.commandQueue;
+};
+
+/*
+ * 批量只读查询（status 页一轮取数用）。
+ *
+ * 与 sendCommand 的关系：**不排队**、不改动命令队列 —— 批量本身就是一次
+ * 串行执行，由后端在一条连接上按序处理；再排进前端队列只会让整轮更晚开始。
+ * 但会尊重整体不可用 / 熔断状态，条件与 sendCommand 完全一致。
+ *
+ * 返回 Promise<数组|null>：
+ *   数组 —— 与入参顺序一致的 [{cmd, success, data?, error?, cause?}]；
+ *   null —— 批量整体不可用（通道降级 / 熔断 / 超时 / RPC 失败），
+ *           调用方应退回逐条 sendCommand，行为与改动前完全一致。
+ *
+ * 预算取 24000ms：ucode 侧整批硬超时是 18s，必须比它大，
+ * 才能先拿到后端/桥给的明确结论（哪几条超时），而不是浏览器先 abort。
+ */
+ATClient.prototype.sendBatch = function (commands, timeoutMs) {
+	var self = this;
+	if (self.state === 'degraded' || self.state === 'error' || self.state === 'disconnected') {
+		return Promise.resolve(null);
+	}
+	if (self.circuitOpenUntil > Date.now() || self.backendKnownDown) {
+		return Promise.resolve(null);
+	}
+	if (!commands || !commands.length) {
+		return Promise.resolve([]);
+	}
+	var budget = (typeof timeoutMs === 'number' && timeoutMs > 0) ? timeoutMs : 24000;
+	return withTimeout(rpcAtBatch(commands), budget, '批量查询超时').then(function (resp) {
+		resp = resp || {};
+		if (resp.success === false || !resp.items) {
+			if (resp.cause === 'circuit-open') {
+				self.markBackendDown('circuit-open', resp.error);
+			}
+			self.noteCommandFailure(resp.cause);
+			return null;
+		}
+		self.noteCommandSuccess();
+		self.markBackendUp();
+		var out = [];
+		for (var i = 0; i < resp.items.length; i++) {
+			var it = resp.items[i] || {};
+			out.push({
+				cmd: it.cmd || commands[i],
+				success: it.success !== false,
+				data: it.data,
+				error: it.error,
+				cause: it.cause
+			});
+		}
+		return out;
+	}).catch(function () {
+		return null;
+	});
 };
 
 /*
