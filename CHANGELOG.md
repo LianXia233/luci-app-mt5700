@@ -29,6 +29,29 @@
   未绑定 `html[data-ui-mode="minimal"]`，普通模式同样依赖，因此不能按模式裁剪，
   两模式继续都注入（裁剪会让普通模式设置面板从浮钮变成展开态，属可见回归）。
 
+### refactor(backend) 后端阻塞调用收口到 blocking 池 + 冗余清理
+
+> 后端是 Tokio 多线程运行时，但采样、串口枚举、通知落盘等路径仍在 async 上下文里
+> 直接 fork `uci`、读写文件。实机测得单次 `uci show` 约 2.7ms，流量采样每秒
+> 要跑两次（合计约 5.4ms/秒），这段 CPU + fork 全部压在 reactor 线程上；
+> 通知日志若被配到闪存，一次 `append_capped`（metadata + 读改写）可到几十毫秒。
+> 现在这些阻塞段一律搬进 `tokio::task::spawn_blocking`：实测采样一秒两次的
+> uci 开销不再占用 reactor，串口枚举与日志写入同理；启动期的时区探测、使用量
+> 回读、通知器构造也只付一次，改为在 blocking 池里完成后等待结果，顺序不变。
+> 厂家 ucode 桥的 fork 开销经测算后**本次不改**，理由见下。
+
+- **refactor(at)** `usage.rs` 的 `read_counters_netdev` 整段搬进 `spawn_blocking`
+  （内部是两次 `uci show` + sysfs 读取），常驻采样循环不再阻塞 reactor。
+- **refactor(backend)** `localtime::init`、`Notifier::new`、`UsageTracker::new`、
+  `QqSender::from_config`、`serialdetect::list_serial_candidates` 与通知日志写入
+  均收口到 `spawn_blocking`；AT 通道互斥仍是 `tokio::sync::Mutex`，单通道串行语义未变。
+- **refactor(backend)** 删除 `atclient` 里与 `schedule::sleep_ctx` 完全相同的
+  私有副本（6 行），改为一处公共实现；`ringlog` 的分类过滤改用 `contains`。
+- **refactor(ui)** 删除 `tabmenu.js` 中零调用的 `findTabContainer()`。
+- **note(backend)** 不改 ucode 桥：实测单次 RPC 往返约 5ms（`ubus call` 口径含
+  客户端 fork），25 次合计约 125ms、占一轮 2141ms 的 5.8%；批量合批已在 PR #51
+  落地，本分支再改同一段会产生硬冲突，故只在文档记录数据。
+
 ## v1.32.6（2026-11-08）
 
 ### feat(log) 日志按 21 个类别细分，模组业务痕迹不再刷 syslog
