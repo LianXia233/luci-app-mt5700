@@ -2590,7 +2590,7 @@ return L.view.extend({
 		}
 
 		function getOperator() {
-			return AtWs.client.sendCommand('AT^EONS=2').then(function (res) {
+			return atCached('AT^EONS=2').then(function (res) {
 				if (res.success && res.data) {
 					var str = AtWs.extractATData(res.data, '^EONS');
 					var code = str ? (str.split(',')[1] || '').trim().replace(/"/g, '') : '';
@@ -2737,8 +2737,62 @@ return L.view.extend({
 		}
 
 		/* 设备与 SIM 卡信息读取：实际获取模组 ATI, CGMM, CGSN, CPIN, CIMI, ICCID, CGMR, CGDCONT 上报 */
+		/*
+		 * 设备身份/签约类命令的短周期缓存（status 页专用，不外溢到其它页面）。
+		 *
+		 * 实机分解（v1.32.6，普通模式冷启动，60 组 XHR 计时，见 PR 说明）：
+		 *   首轮 25 条 AT 命令串行 1749ms，其中
+		 *   ATI / AT+CPIN? / AT+CIMI / AT^ICCID? / AT+CGMR / AT+CGDCONT? /
+		 *   AT^DSAMBR= / AT+C5GQOSRDP= / AT^EONS=2 这 9 条静态信息占 856ms（66%）。
+		 *   每条 60~175ms 全部是模组串口往返，而它们的取值只在换卡、改 APN、
+		 *   升级固件时才变，5 秒一轮重复下发没有意义。
+		 *
+		 * 分档依据「值会变的时间尺度」：身份/固件/SIM 标识 60s，SIM 状态 15s，
+		 * APN 与签约速率 15s，运营商 15s。只缓存**成功**的应答，失败的下轮照常重查，
+		 * 因此不会把一次超时冻住。
+		 *
+		 * 本页对上述命令只读不写，不存在「写完读到旧值」；改 APN 在拨号页完成，
+		 * 最迟 15s 后本页跟上，与原本 5s 的刷新间隔同一量级。
+		 * AT+CGSN（IMEI）与 AT+CGMM 兜底不缓存：IMEI 取值路径保持每轮刷新，行为不变。
+		 */
+		var TTL_ID = 60000;    // 型号/厂商/固件/IMSI/ICCID：换卡或升级才变
+		var TTL_SIM = 15000;   // SIM 状态：插拔卡要能及时看到
+		var TTL_APN = 15000;   // APN 上下文与签约速率：拨号页改完这里跟上
+		var TTL_OPER = 15000;  // 运营商名称：漫游切网时才变
+
+		/* 命令 → 缓存时长（0 表示不缓存）。预取与本轮取数共用这一张表，
+		 * 避免两处各写一遍导致「预取了却没人用」的浪费。 */
+		var TTL_BY_CMD = {
+			'ATI': TTL_ID, 'AT+CGMM': TTL_ID, 'AT+CIMI': TTL_ID,
+			'AT^ICCID?': TTL_ID, 'AT+CGMR': TTL_ID,
+			'AT+CPIN?': TTL_SIM,
+			'AT+CGDCONT?': TTL_APN, 'AT^EONS=2': TTL_OPER
+		};
+		function ttlFor(cmd) {
+			if (cmd.indexOf('AT^DSAMBR=') === 0 || cmd.indexOf('AT+C5GQOSRDP=') === 0) {
+				return TTL_APN;
+			}
+			return TTL_BY_CMD[cmd] || 0;
+		}
+
+		var atTtlCache = {};
+		function atCached(cmd) {
+			var ttl = ttlFor(cmd);
+			var hit = atTtlCache[cmd];
+			if (ttl && hit && (Date.now() - hit.at) < ttl) {
+				return Promise.resolve(hit.res);
+			}
+			return AtWs.client.sendCommand(cmd).then(function (res) {
+				if (res && res.success) {
+					atTtlCache[cmd] = { at: Date.now(), res: res };
+				}
+				return res;
+			});
+		}
+
+
 		function loadDeviceInfo() {
-			return AtWs.client.sendCommand('ATI').then(function (res) {
+			return atCached('ATI').then(function (res) {
 				if (res && res.success && res.data) {
 					var s = String(res.data);
 					var mModel = s.match(/Model:\s*([^\r\n]+)/i);
@@ -2765,7 +2819,7 @@ return L.view.extend({
 					});
 				}
 			}).then(function () {
-				return AtWs.client.sendCommand('AT+CPIN?');
+				return atCached('AT+CPIN?');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
 					var m = String(res.data).match(/\+CPIN:\s*([^\r\n]+)/);
@@ -2780,19 +2834,19 @@ return L.view.extend({
 					var m = String(res.data).match(/\b(\d{14,16})\b/);
 					if (m) state.modemInfo.imei = m[1];
 				}
-				return AtWs.client.sendCommand('AT+CIMI');
+				return atCached('AT+CIMI');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
 					var m = String(res.data).match(/\b(\d{14,16})\b/);
 					if (m) state.modemInfo.imsi = m[1];
 				}
-				return AtWs.client.sendCommand('AT^ICCID?');
+				return atCached('AT^ICCID?');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
 					var m = String(res.data).match(/(?:\^ICCID:\s*)?([0-9A-Za-z]{18,24})/);
 					if (m) state.modemInfo.iccid = m[1];
 				}
-				return AtWs.client.sendCommand('AT+CGMR');
+				return atCached('AT+CGMR');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
 					var lines = String(res.data).split('\n');
@@ -2804,7 +2858,7 @@ return L.view.extend({
 						}
 					}
 				}
-				return AtWs.client.sendCommand('AT+CGDCONT?');
+				return atCached('AT+CGDCONT?');
 			}).then(function (res) {
 				if (res && res.success && res.data) {
 					/* 只认数据通道：详见 pickDataContext 的说明 */
@@ -2825,7 +2879,7 @@ return L.view.extend({
 				 * 5QI/QCI 只有标准命令 AT+C5GQOSRDP 才报（issue #43），
 				 * 该命令的 Session-AMBR 同时作为签约速率的兜底来源。 */
 				var dataCid = state.apnCid || '1';
-				return AtWs.client.sendCommand('AT^DSAMBR=' + dataCid);
+				return atCached('AT^DSAMBR=' + dataCid);
 			}).then(function (res) {
 				/* 签约速率优先取 AT^DSAMBR，但它不报 5QI/QCI，
 				 * 所以无论这条是否成功都要再查一次 AT+C5GQOSRDP：
@@ -2837,7 +2891,7 @@ return L.view.extend({
 				} else {
 					state.subRate = null;
 				}
-				return AtWs.client.sendCommand('AT+C5GQOSRDP=' + (state.apnCid || '1'));
+				return atCached('AT+C5GQOSRDP=' + (state.apnCid || '1'));
 			}).then(function (res) {
 				var q2 = (res && res.success && res.data) ? Parse.parseC5gQosRdp(res.data) : null;
 				/* 只认应答 CID 与请求的数据 CID 一致的结果（PR #45 Codex P2）：
