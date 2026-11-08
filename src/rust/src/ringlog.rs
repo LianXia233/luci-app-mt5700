@@ -145,7 +145,7 @@ impl RingLog {
             .filter(|e| e.seq > since)
             .filter(|e| match cats {
                 None => true,
-                Some(list) => list.iter().any(|c| *c == e.cat),
+                Some(list) => list.contains(&e.cat),
             })
             .cloned()
             .collect();

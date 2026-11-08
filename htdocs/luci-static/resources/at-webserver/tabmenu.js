@@ -213,14 +213,6 @@ var AtTabmenu = (function () {
 
 	/* ================= 菜单定位（主题无关） ================= */
 
-	// bootstrap / material / argon / openwrt-2020 均为 #tabmenu > ul.(tabs|cbi-tabmenu)；
-	// 直接认容器，可同时覆盖主题递归渲染的多级页签。
-	function findTabContainer() {
-		var container = document.getElementById('tabmenu');
-		if (!container) return null;
-		return container.querySelector('li[class*="tabmenu-item-"]') ? container : null;
-	}
-
 	// 选中项识别：类名（active / cbi-tab）优先，href 与当前路径一致兜底
 	function isActiveLi(li, a) {
 		var cls = ' ' + (li.className || '') + ' ';
