@@ -10,6 +10,7 @@
 use crate::{log_debug, log_info, log_warn};
 use crate::at_queue::{AtPriority, PriLock, SmsMode, SmsTransaction};
 use crate::config::AtConfig;
+use crate::schedule::sleep_ctx;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1336,14 +1337,6 @@ async fn notify_uplink_ready() {
         Ok(st) if st.success() => log_info!(Cat::Net, "已通知系统侧拉起模组接口（{}）", HOOK),
         Ok(st) => log_warn!(Cat::Net, "拉起模组接口的钩子返回非零退出码: {:?}", st.code()),
         Err(e) => log_warn!(Cat::Net, "执行拉起模组接口的钩子失败: {}", e),
-    }
-}
-
-async fn sleep_ctx(ctx: &tokio::sync::watch::Receiver<bool>, d: Duration) -> bool {
-    let mut ctx_c = ctx.clone();
-    tokio::select! {
-        _ = tokio::time::sleep(d) => true,
-        _ = ctx_c.changed() => false,
     }
 }
 
