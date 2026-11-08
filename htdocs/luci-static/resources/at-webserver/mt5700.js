@@ -40,6 +40,7 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 (function () {
 	var base = '/luci-static/resources/at-webserver/bg/';
 	var themeBound = false;      // AtTheme.onChange 只注册一次，避免反复挂载导致监听器堆积
+	var viewportBound = false;   // 断点监听同样只注册一次
 	var wallpaperOn = true;
 	var wallpaperResolved = false;
 
@@ -47,11 +48,45 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 		return (window.AtTheme && typeof window.AtTheme.dark === 'function' && window.AtTheme.dark()) ? 'dark' : 'light';
 	}
 
-	function isMinimal() {
+	/* 当前断点下**真正会被 CSS 显示**的角色图：mt5700.css 里 <=768px 只显示
+	 * .mt-bg-mobile、>=769px 只显示 .mt-bg-pc。看不到的那张不设 src 就不发起
+	 * 下载（桌面端省 93 KB、手机端省 107 KB），跨断点时再按需补图，
+	 * 视觉与原来完全一致（隐藏的那张本来就是 display:none）。
+	 * 无 matchMedia 的老引擎返回 null → 退回旧行为（两张都加载）。 */
+	function visibleKind() {
 		try {
-			return !!(window.AtUimode && typeof window.AtUimode.current === 'function'
-				&& window.AtUimode.current() === 'minimal');
-		} catch (e) { return false; }
+			if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+				return window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'pc';
+			}
+		} catch (e) { /* 老引擎匹配不到就退回两张都加载 */ }
+		return null;
+	}
+
+	/* 主题明暗或断点变化后重算角色图地址；隐藏的那张保持原 src（已下载的不重下） */
+	function applyChars() {
+		var layer = document.getElementById('mt5700-global-bg');
+		if (!layer) return;
+		var v = variant();
+		var want = visibleKind();
+		var imgs = layer.querySelectorAll('.mt-bg-char');
+		for (var i = 0; i < imgs.length; i++) {
+			var kind = imgs[i].getAttribute('data-kind');
+			if (!kind) continue;
+			if (want && kind !== want) continue;
+			imgs[i].src = base + 'character-' + kind + '-' + v + '.webp';
+		}
+	}
+
+	/* 跨过 768px 断点时补上另一张（首次可见才下载） */
+	function bindViewport() {
+		if (viewportBound || typeof window === 'undefined'
+			|| typeof window.matchMedia !== 'function') return;
+		viewportBound = true;
+		try {
+			var mq = window.matchMedia('(max-width: 768px)');
+			if (mq.addEventListener) mq.addEventListener('change', applyChars);
+			else if (mq.addListener) mq.addListener(applyChars); /* Safari<14 */
+		} catch (e) { /* ignore */ }
 	}
 
 	/* 主题运行时切换（Aurora 顶部按钮等）→ 换对应明暗变体立绘。
@@ -59,21 +94,13 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 	function bindTheme() {
 		if (themeBound || !window.AtTheme || typeof window.AtTheme.onChange !== 'function') return;
 		themeBound = true;
-		window.AtTheme.onChange(function () {
-			var layer = document.getElementById('mt5700-global-bg');
-			if (!layer) return;
-			var v = variant();
-			var imgs = layer.querySelectorAll('.mt-bg-char');
-			for (var i = 0; i < imgs.length; i++) {
-				var kind = imgs[i].getAttribute('data-kind');
-				if (kind) imgs[i].src = base + 'character-' + kind + '-' + v + '.webp';
-			}
-		});
+		window.AtTheme.onChange(applyChars);
 	}
 
 	function mountGlobalBg() {
 		if (document.getElementById('mt5700-global-bg')) return;
 		bindTheme();
+		bindViewport();
 		var layer = document.createElement('div');
 		layer.id = 'mt5700-global-bg';
 
@@ -82,7 +109,7 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 			img.className = 'mt-bg-char ' + cls;
 			img.alt = '';
 			img.setAttribute('data-kind', kind);
-			img.src = base + 'character-' + kind + '-' + variant() + '.webp';
+			/* 不在这里写 src：先挂节点，再由 applyChars 只为当前断点那张下发地址 */
 			layer.appendChild(img);
 			return img;
 		};
@@ -103,6 +130,16 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 		}
 
 		(document.body || document.documentElement).appendChild(layer);
+		/* 节点已入 DOM，按当前断点只为可见的那张角色图下发 src */
+		applyChars();
+	}
+
+	/* 极简模式判定：背景层与看板娘都靠它决定是否真正卸载 */
+	function isMinimal() {
+		try {
+			return !!(window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal');
+		} catch (e) { return false; }
 	}
 
 	/* 极简模式是**真卸载**：移除整个 layer 节点，webP 不再发起请求、不再占内存；
