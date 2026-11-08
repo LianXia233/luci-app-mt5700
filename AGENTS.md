@@ -13,7 +13,7 @@
 - **行尾强制 LF**：`.gitattributes` 已声明 `* text=auto eol=lf`，禁止提交 CRLF。
 - **更新日志同步**：任何进入 `main` 的功能 / 修复 / 样式 / 行为改动，必须同步更新 `CHANGELOG.md`（随改动提交，或在同版本定版提交前补齐），不得只改代码不写日志。
 - **发版版本一致性 + 文档徽标同步**：提升版本号（打 `v*` 标签出正式版）时，以下引用必须与新 `PKG_VERSION` 一致，缺一不可：
-  `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
+  `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `src/rust/Cargo.toml` 的 `version` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
   同时同步文档徽标与下载入口 —— `README.md` 头部 Version 徽标、`docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 与四处 `releases/download/v<版本>/…` 下载链接。下载链接的资产命名以最近一次 Release 的实际产物为准（形如 `luci-app-mt5700_<版本>-r<PKG_RELEASE>_<架构>.ipk` / `luci-app-mt5700-<版本>-r<PKG_RELEASE>.apk`），不得沿用旧后缀。
 
 ### 全局组件的样式归属
@@ -136,3 +136,29 @@ grep -nE 'std::process::Command|std::fs::|std::net::Tcp|thread::sleep|ureq::' sr
 ```
 
 命中的每一处要么改成 Tokio 等价物，要么位于 `spawn_blocking` 内并写明理由。提交说明或 PR 描述里要列出「调用点 → 处理方式 → 复核结果」三列。触及 `root/usr/share/rpcd/ucode/mt5700.uc` 时，另外在设备上执行 `ucode -c -s /usr/share/rpcd/ucode/mt5700.uc`。
+
+### Rust 后端版本与包版本联动
+
+后端自报版本（`at-webserver-rust --version` 与启动日志里的 `at-webserver <版本> 启动中`）
+只由 `PKG_VERSION` 驱动，不允许再出现「二进制自报 1.29.0、包版本 1.32.7」这类分叉。
+
+| 环节 | 位置 | 作用 |
+| --- | --- | --- |
+| 单一来源 | `Makefile` 的 `PKG_VERSION` | 发版只改这一处，并 `export MT5700_VERSION := $(PKG_VERSION)` |
+| 注入 | `src/Makefile` 的 `cargo build` 行 | `MT5700_VERSION="$(MT5700_VERSION)"` 传给 cargo；缺省时从上级 `Makefile` 解析 |
+| 消费 | `src/rust/src/main.rs` 的 `VERSION` | `option_env!("MT5700_VERSION")`，缺失回退 `CARGO_PKG_VERSION` |
+| 兜底 | `src/rust/Cargo.toml` 的 `version` | 仅本地无注入时使用，必须与 `PKG_VERSION` 保持一致 |
+
+- 新增任何打印版本的位置（RPC 字段、日志、init.d 横幅）都必须复用 `main.rs` 的
+  `VERSION` 常量，不得另建常量或写死字面量。
+- 改动上述任一环节后执行复核：
+
+```sh
+node tests/rust-version-test.js
+grep -n '^PKG_VERSION' Makefile
+grep -n '^version' src/rust/Cargo.toml
+cd src/rust && cargo test
+```
+
+- 交叉编译产物核对：解包或安装后执行 `/usr/bin/at-webserver-rust --version`，
+  输出中的版本必须等于包管理器里的 `luci-app-mt5700` 版本。
