@@ -97,7 +97,7 @@ impl Dispatcher {
     ) {
         let Some(a) = self.archive.as_ref() else { return };
         if let Err(e) = a.append(vec![crate::sms::received_record(sender, content, time, index)]) {
-            log_warn!("写入短信本地归档失败（不影响收发）: {e}");
+            log_warn!(Cat::Sms, "写入短信本地归档失败（不影响收发）: {e}");
         }
     }
 
@@ -242,7 +242,7 @@ impl Dispatcher {
     // ============= 新短信 =============
 
     async fn handle_new_sms(&mut self, storage: String, index: String) {
-        log_info!("收到新短信，存储区: {}，索引: {}", storage, index);
+        log_info!(Cat::Sms, "收到新短信，存储区: {}，索引: {}", storage, index);
 
         // 先把读写介质对到上报的那个区。
         //
@@ -272,7 +272,7 @@ impl Dispatcher {
                     self.sms_mem = mem.clone();
                     tokio::time::sleep(crate::sms::CPMS_SWITCH_GAP).await;
                 }
-                other => log_warn!(
+                other => log_warn!(Cat::Sms,
                     "把读写介质切到 {mem} 没成功，仍按当前区读第 {index} 格：{}",
                     match other {
                         Ok(r) => r.text(),
@@ -295,7 +295,7 @@ impl Dispatcher {
         ).await {
             Ok(r) => r,
             Err(e) => {
-                log_warn!("读取短信 {} 失败: {}", index, e);
+                log_warn!(Cat::Sms, "读取短信 {} 失败: {}", index, e);
                 return;
             }
         };
@@ -347,7 +347,7 @@ impl Dispatcher {
         let mut to_delete: Vec<String> = Vec::new();
         for (k, v) in &self.partials {
             if now.duration_since(v.received) > PARTIAL_SMS_TTL {
-                log_warn!("清理过期的分段短信: {}", k);
+                log_warn!(Cat::Sms, "清理过期的分段短信: {}", k);
                 to_delete.push(k.clone());
             }
         }
@@ -362,7 +362,7 @@ impl Dispatcher {
                 .min_by(|a, b| a.1.received.cmp(&b.1.received))
                 .map(|(k, _)| k.clone());
             if let Some(k) = oldest_key {
-                log_warn!("分段短信缓存超限，删除最旧的: {}", k);
+                log_warn!(Cat::Sms, "分段短信缓存超限，删除最旧的: {}", k);
                 self.partials.remove(&k);
             }
         }
@@ -474,7 +474,7 @@ impl Dispatcher {
             Instant::now(),
             self.notifier.signal_min_interval(),
         ) {
-            log_debug!(
+            log_debug!(Cat::Signal,
                 "信号上报变化已达阈值（RSRP {:.0} dBm，制式{}），但距上次推送不足最小间隔（还需 {:.0} 分钟），不推送",
                 rsrp,
                 if mode_switched { "已切换" } else { "未变" },
@@ -692,7 +692,7 @@ fn parse_sms_response(resp: &AtResponse) -> Vec<Sms> {
             Ok(sms) => out.push(sms),
             // 本应用只收 SMS-DELIVER：状态报告（MTI=2）与其它类型走不到 out 里。
             // 文案点明这一点，否则日志看起来像「短信坏了」，其实是「这条不该由我们解」。
-            Err(e) => log_warn!("短信上报未采纳（非 SMS-DELIVER 或解析失败，已忽略）：{}", e),
+            Err(e) => log_warn!(Cat::Sms, "短信上报未采纳（非 SMS-DELIVER 或解析失败，已忽略）：{}", e),
         }
     }
     out

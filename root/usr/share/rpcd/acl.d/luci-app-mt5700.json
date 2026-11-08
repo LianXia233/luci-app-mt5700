@@ -62,6 +62,13 @@
 					"read",
 					"stat"
 				],
+				"/tmp/at-webserver": [
+					"list"
+				],
+				"/tmp/at-webserver/*": [
+					"read",
+					"stat"
+				],
 				"/var/log/at-notifications.log": [
 					"read",
 					"stat"

@@ -1322,7 +1322,7 @@ return {
 			}
 		},
 		logs: {
-			args: { since: 0, limit: 300, _rid: '' },
+			args: { since: 0, limit: 300, cats: '', _rid: '' },
 			call: function (req) {
 				let a = req.args;
 				let since = int(getStr(a, 'since')) || 0;
@@ -1333,7 +1333,16 @@ return {
 				if (limit <= 0 || limit > 1200) {
 					limit = 300;
 				}
-				return rpcCall('logs', { since: since, limit: limit, _rid: getStr(a, '_rid') });
+				let params = { since: since, limit: limit, _rid: getStr(a, '_rid') };
+				/* cats：可选的类别过滤，逗号分隔的类别键（如 "sms,at"），留空=不过滤。
+				 * 这里**不做白名单校验**：合法的类别表在后端 logcat.rs 里，抄一份到
+				 * ucode 只会两边漂移；非法键后端会直接丢弃（结果是空列表，而不是
+				 * 静默返回全部，拼错参数的人不会以为自己筛对了）。 */
+				let cats = getStr(a, 'cats');
+				if (cats != null && cats != '') {
+					params.cats = sprintf('%s', cats);
+				}
+				return rpcCall('logs', params);
 			}
 		}
 	}

@@ -2425,6 +2425,17 @@
   padding: 0 6px;
   background: rgba(139, 92, 246, 0.05);
   color: #8b5cf6;
+}/* 插件日志文件来源徽章：与 syslog 徽章同一套形制，只换色相 ——
+   两路都是「非内存实时」的历史，但出处不同（一个是系统日志，一个是插件自己的文件），
+   颜色一致会让人以为它们是同一路，进而误判这行有没有毫秒与类别。 */
+.mt5700-logsrc-file {
+  border-color: rgba(13, 148, 136, 0.35);
+  background: rgba(13, 148, 136, 0.08);
+  color: #0d9488;
+}.at-dark .mt5700-logsrc-file {
+  border-color: rgba(45, 212, 191, 0.4);
+  background: rgba(45, 212, 191, 0.12);
+  color: #2dd4bf;
 }/* 空状态 */
 .mt5700-logempty { padding: 46px 20px; text-align: center; }.mt5700-logempty-title { font-size: 14px; font-weight: 600; color: var(--mt5700-text, #1e1b4b); margin-bottom: 8px; }.at-dark .mt5700-logempty-title { color: var(--mt5700-text, #f1f5f9); }.mt5700-logempty-desc { font-size: 12.5px; line-height: 1.75; color: var(--mt5700-text-muted, #64748b); max-width: 520px; margin: 0 auto; }/* 搜索高亮 */
 .mt5700-loglist mark {
@@ -5634,12 +5645,37 @@ html.at-dark .mt-usage-cell.source .mt-usage-auto select.mt-usage-source option 
    原有 .mt5700-log* 规则一律复用，不改名。
    ========================================================================== */
 
-/* ---------- 类别条（横向胶囊，带实时计数） ---------- */
+/* ---------- 类别条（分两栏的胶囊组，带实时计数） ----------
+   v2.46.9：类别从 6 个细分到 21 个（与后端 logcat.rs 对账），
+   一条横排既铺不下也读不出层次，改成「全部」独占一行 + 两个带标题的分组行。
+   分组标题不是装饰：它把「软件自身运行」与「模组业务痕迹」切开 ——
+   这两类的排障路径完全不同（前者还能去 syslog 里查，后者只剩插件自己的文件）。 */
 .mt5700-logcatbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   margin: 0 0 12px;
+}.mt5700-logcatrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}.mt5700-logcatgroup {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}.mt5700-logcatgroup-label {
+  flex: 0 0 auto;
+  min-width: 62px;
+  padding-top: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #7c3aed;
+  white-space: nowrap;
+}.mt5700-logcatgroup-business .mt5700-logcatgroup-label {
+  color: #0d9488;
 }.mt5700-logcatbtn {
   display: inline-flex;
   align-items: center;
@@ -5713,7 +5749,57 @@ html.at-dark .mt-usage-cell.source .mt-usage-auto select.mt-usage-source option 
   border-radius: 5px;
   border: 1px solid transparent;
   white-space: nowrap;
-}.mt5700-logcat-dial { color: #0284c7; border-color: rgba(2, 132, 199, 0.3);  background: rgba(2, 132, 199, 0.1); }.mt5700-logcat-at { color: #7c3aed; border-color: rgba(124, 58, 237, 0.3);  background: rgba(124, 58, 237, 0.1); }.mt5700-logcat-sms { color: #059669; border-color: rgba(5, 150, 105, 0.3);   background: rgba(5, 150, 105, 0.1); }.mt5700-logcat-net { color: #0891b2; border-color: rgba(8, 145, 178, 0.3);   background: rgba(8, 145, 178, 0.1); }.mt5700-logcat-sys { color: #475569; border-color: rgba(71, 85, 105, 0.28);  background: rgba(71, 85, 105, 0.09); }.mt5700-logcat-other { color: #64748b; border-color: rgba(100, 116, 139, 0.28); background: rgba(100, 116, 139, 0.08); }/* ---------- 超长消息折叠 ----------
+}/* 类别徽章配色：21 个键与后端 src/rust/src/logcat.rs 的 key 一一对应
+   （tests/log-category-test.js 逐键校验，少一个就挂测试）。
+   Runtime 组一律走低饱和的灰蓝 / 石板 / 土褐系 —— 它们是「软件自己在说话」，
+   不该跟模组业务痕迹抢视线；Business 组用高饱和彩色，两栏扫一眼就分得开。
+   业务侧 14 个色相沿色轮均匀铺开，任何两个都不止差一点亮度。 */
+.mt5700-logcat-runtime { color: #64748b; border-color: rgba(100, 116, 139, 0.28); background: rgba(100, 116, 139, 0.08); }
+.mt5700-logcat-config { color: #7c6fae; border-color: rgba(124, 111, 174, 0.3); background: rgba(124, 111, 174, 0.1); }
+.mt5700-logcat-rpc { color: #4a7f9b; border-color: rgba(74, 127, 155, 0.3); background: rgba(74, 127, 155, 0.1); }
+.mt5700-logcat-serial { color: #8a6d3b; border-color: rgba(138, 109, 59, 0.3); background: rgba(138, 109, 59, 0.1); }
+.mt5700-logcat-task { color: #5f8a6a; border-color: rgba(95, 138, 106, 0.3); background: rgba(95, 138, 106, 0.1); }
+.mt5700-logcat-storage { color: #8a5f74; border-color: rgba(138, 95, 116, 0.3); background: rgba(138, 95, 116, 0.1); }
+.mt5700-logcat-misc { color: #78716c; border-color: rgba(120, 113, 108, 0.3); background: rgba(120, 113, 108, 0.1); }
+.mt5700-logcat-at { color: #7c3aed; border-color: rgba(124, 58, 237, 0.3); background: rgba(124, 58, 237, 0.1); }
+.mt5700-logcat-urc { color: #c026d3; border-color: rgba(192, 38, 211, 0.3); background: rgba(192, 38, 211, 0.1); }
+.mt5700-logcat-dial { color: #0284c7; border-color: rgba(2, 132, 199, 0.3); background: rgba(2, 132, 199, 0.1); }
+.mt5700-logcat-net { color: #0d9488; border-color: rgba(13, 148, 136, 0.3); background: rgba(13, 148, 136, 0.1); }
+.mt5700-logcat-signal { color: #d97706; border-color: rgba(217, 119, 6, 0.3); background: rgba(217, 119, 6, 0.1); }
+.mt5700-logcat-sim { color: #16a34a; border-color: rgba(22, 163, 74, 0.3); background: rgba(22, 163, 74, 0.1); }
+.mt5700-logcat-sms { color: #65a30d; border-color: rgba(101, 163, 13, 0.3); background: rgba(101, 163, 13, 0.1); }
+.mt5700-logcat-call { color: #dc2626; border-color: rgba(220, 38, 38, 0.3); background: rgba(220, 38, 38, 0.1); }
+.mt5700-logcat-notify { color: #db2777; border-color: rgba(219, 39, 119, 0.3); background: rgba(219, 39, 119, 0.1); }
+.mt5700-logcat-scan { color: #2563eb; border-color: rgba(37, 99, 235, 0.3); background: rgba(37, 99, 235, 0.1); }
+.mt5700-logcat-schedule { color: #9333ea; border-color: rgba(147, 51, 234, 0.3); background: rgba(147, 51, 234, 0.1); }
+.mt5700-logcat-firmware { color: #ea580c; border-color: rgba(234, 88, 12, 0.3); background: rgba(234, 88, 12, 0.1); }
+.mt5700-logcat-usage { color: #ca8a04; border-color: rgba(202, 138, 4, 0.3); background: rgba(202, 138, 4, 0.1); }
+.mt5700-logcat-time { color: #0891b2; border-color: rgba(8, 145, 178, 0.3); background: rgba(8, 145, 178, 0.1); }
+/* 暗色下同样 21 条：底色变深之后，浅色那批 500~600 级颜色会发闷
+   （尤其 #0d9488 / #64748b 这种本身就暗的），所以整体提到 400 级并加浓边框；
+   background 也一并给 —— 暗色下 0.1 的底色几乎看不见，徽章会只剩一圈孤零零的边框。 */
+.at-dark .mt5700-logcat-runtime { color: #94a3b8; border-color: rgba(148, 163, 184, 0.4); background: rgba(148, 163, 184, 0.16); }
+.at-dark .mt5700-logcat-config { color: #b7a9e8; border-color: rgba(183, 169, 232, 0.4); background: rgba(183, 169, 232, 0.16); }
+.at-dark .mt5700-logcat-rpc { color: #82b3cc; border-color: rgba(130, 179, 204, 0.4); background: rgba(130, 179, 204, 0.16); }
+.at-dark .mt5700-logcat-serial { color: #cfa86a; border-color: rgba(207, 168, 106, 0.4); background: rgba(207, 168, 106, 0.16); }
+.at-dark .mt5700-logcat-task { color: #93c3a0; border-color: rgba(147, 195, 160, 0.4); background: rgba(147, 195, 160, 0.16); }
+.at-dark .mt5700-logcat-storage { color: #d194b3; border-color: rgba(209, 148, 179, 0.4); background: rgba(209, 148, 179, 0.16); }
+.at-dark .mt5700-logcat-misc { color: #a8a29e; border-color: rgba(168, 162, 158, 0.4); background: rgba(168, 162, 158, 0.16); }
+.at-dark .mt5700-logcat-at { color: #a78bfa; border-color: rgba(167, 139, 250, 0.4); background: rgba(167, 139, 250, 0.16); }
+.at-dark .mt5700-logcat-urc { color: #e879f9; border-color: rgba(232, 121, 249, 0.4); background: rgba(232, 121, 249, 0.16); }
+.at-dark .mt5700-logcat-dial { color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.16); }
+.at-dark .mt5700-logcat-net { color: #2dd4bf; border-color: rgba(45, 212, 191, 0.4); background: rgba(45, 212, 191, 0.16); }
+.at-dark .mt5700-logcat-signal { color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.16); }
+.at-dark .mt5700-logcat-sim { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.16); }
+.at-dark .mt5700-logcat-sms { color: #a3e635; border-color: rgba(163, 230, 53, 0.4); background: rgba(163, 230, 53, 0.16); }
+.at-dark .mt5700-logcat-call { color: #f87171; border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.16); }
+.at-dark .mt5700-logcat-notify { color: #f472b6; border-color: rgba(244, 114, 182, 0.4); background: rgba(244, 114, 182, 0.16); }
+.at-dark .mt5700-logcat-scan { color: #60a5fa; border-color: rgba(96, 165, 250, 0.4); background: rgba(96, 165, 250, 0.16); }
+.at-dark .mt5700-logcat-schedule { color: #c084fc; border-color: rgba(192, 132, 252, 0.4); background: rgba(192, 132, 252, 0.16); }
+.at-dark .mt5700-logcat-firmware { color: #fb923c; border-color: rgba(251, 146, 60, 0.4); background: rgba(251, 146, 60, 0.16); }
+.at-dark .mt5700-logcat-usage { color: #facc15; border-color: rgba(250, 204, 21, 0.4); background: rgba(250, 204, 21, 0.16); }
+.at-dark .mt5700-logcat-time { color: #22d3ee; border-color: rgba(34, 211, 238, 0.4); background: rgba(34, 211, 238, 0.16); }
+/* ---------- 超长消息折叠 ----------
    折叠按钮由视图塞在 .mt5700-logmsg 内部末尾：折叠时把它绝对定位到
    右下角（带底色遮住底下的字），展开后回到行文里，两种状态都不挡内容 */
 .mt5700-logmsg {
@@ -5775,6 +5861,10 @@ html.at-dark .mt-usage-cell.source .mt-usage-auto select.mt-usage-source option 
 }.at-dark .mt5700-logcatbtn-count {
   background: rgba(139, 92, 246, 0.2);
   color: #c4b5fd;
+}.at-dark .mt5700-logcatgroup-label {
+  color: #c4b5fd;
+}.at-dark .mt5700-logcatgroup-business .mt5700-logcatgroup-label {
+  color: #5eead4;
 }.at-dark .mt5700-logday {
   background: rgba(139, 92, 246, 0.14);
   border-top-color: rgba(139, 92, 246, 0.24);
@@ -5795,6 +5885,33 @@ html.at-dark .mt-usage-cell.source .mt-usage-auto select.mt-usage-source option 
 @media (max-width: 768px) {.mt5700-logcatbar {
     gap: 6px;
     margin-bottom: 10px;
+  }/* 21 个胶囊在窄屏上换行会吃掉大半屏，把日志本体挤到看不见。
+     改成每组一条横向滚动带：标题在上、胶囊在下，滑一下翻完整组，
+     纵向只占两行多。nowrap + overflow-x 必须成对给 ——
+     只给 overflow-x 而仍允许换行，滚动条永远不会出现，芯片照样堆成七八行。 */
+  .mt5700-logcatgroup {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }.mt5700-logcatgroup-label {
+    min-width: 0;
+    padding-top: 0;
+  }.mt5700-logcatrow {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 3px;
+  }/* nowrap 之下胶囊默认还能被压缩（flex-shrink: 1），
+     压到比文字窄就溢出成一片糊字，所以这里钉死不缩。 */
+  .mt5700-logcatrow > .mt5700-logcatbtn {
+    flex: 0 0 auto;
+  }.mt5700-logcatrow::-webkit-scrollbar {
+    height: 4px;
+  }.mt5700-logcatrow::-webkit-scrollbar-thumb {
+    background: rgba(139, 92, 246, 0.25);
+    border-radius: 999px;
   }.mt5700-logcatbtn {
     padding: 5px 10px;
     font-size: 12px;

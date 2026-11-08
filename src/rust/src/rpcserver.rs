@@ -343,7 +343,7 @@ impl RpcServer {
                 // IMEI 写入防护：AT^PHYNUM=IMEI,<imei> 是「修改IMEI」功能的写入通道。
                 // 前端已做格式 + Luhn 校验，这里在后端再兜一层（防绕过 UI 直调 RPC）。
                 if let Err(reason) = validate_imei_write(cmd) {
-                    log_warn!("拒绝 IMEI 写入（{}）: {:?}", reason, cmd);
+                    log_warn!(Cat::At, "拒绝 IMEI 写入（{}）: {:?}", reason, cmd);
                     return serde_json::json!({ "id": id, "error": { "code": -32002, "message": format!("IMEI 校验失败：{reason}") } });
                 }
                 // 新旧一致检查：写入前回读当前 IMEI，相同则拒发（写同值只会白耗一次
@@ -353,7 +353,7 @@ impl RpcServer {
                     if cur.success {
                         if let Some(actual) = extract_imei15(cur.data.as_deref().unwrap_or("")) {
                             if actual == new_imei {
-                                log_warn!("拒绝 IMEI 写入（新 IMEI 与当前 IMEI 相同）: {:?}", cmd);
+                                log_warn!(Cat::At, "拒绝 IMEI 写入（新 IMEI 与当前 IMEI 相同）: {:?}", cmd);
                                 return serde_json::json!({ "id": id, "error": { "code": -32003, "message": "新 IMEI 与当前 IMEI 相同，无需修改" } });
                             }
                         }
@@ -452,6 +452,8 @@ impl RpcServer {
             }
             // 后端运行日志（含被级别过滤掉的 info）：拨号对齐、串口探测、接口拉起协作、
             // URC 分发等过程都在这里，是 syslog 看不到的部分（稳态级别是 Warn）。
+            // categories 一并下发：前端按它分栏渲染类别筛选按钮，于是后端新增一个
+            // 类别时界面自动多出一项，不必两边同时改（标签文案仍由前端持有，便于翻译）。
             "logs" => {
                 let since = req.params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
                 let limit = req
@@ -460,8 +462,44 @@ impl RpcServer {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(300)
                     .min(1200) as usize;
-                let (seq, entries) = crate::logger::snapshot(since, limit);
-                serde_json::json!({ "id": id, "result": { "seq": seq, "entries": entries } })
+                // cats：可选的类别过滤，字符串（"sms,at"）或数组（["sms","at"]）都收。
+                // 过滤在 limit 之前生效，语义见 ringlog::snapshot_cats。
+                // 三种情形必须分开：没传 / 空串 / 空数组 → None（不过滤）；
+                // 传了内容但全是非法键 → Some(空列表)，即「筛过了但零命中」。
+                // 把后者当成「不过滤」，拼错类别键的人会拿到全部日志还以为筛对了。
+                let cats: Option<Vec<String>> = match req.params.get("cats") {
+                    Some(serde_json::Value::String(s)) => {
+                        if s.trim().is_empty() {
+                            None
+                        } else {
+                            Some(crate::logger::parse_cat_filter(s))
+                        }
+                    }
+                    // 数组形式先用逗号拼回一条再解析：去重与非法键丢弃都只由
+                    // `parse_cat_filter` 一处负责，避免两种入参形态语义不一致。
+                    Some(serde_json::Value::Array(items)) if !items.is_empty() => {
+                        let joined = items
+                            .iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        Some(crate::logger::parse_cat_filter(&joined))
+                    }
+                    _ => None,
+                };
+                let (seq, entries) = crate::logger::snapshot_cats(since, limit, cats.as_deref());
+                let (file_on, file_path, file_cap) = crate::logger::plugin_file_info();
+                serde_json::json!({
+                    "id": id,
+                    "result": {
+                        "seq": seq,
+                        "entries": entries,
+                        "categories": crate::logcat::table(),
+                        // 插件日志文件的落点与上限，给日志页做「业务日志写在哪」的提示；
+                        // 关掉时 path 为空串，前端据此不显示这一行
+                        "plugin_file": { "enabled": file_on, "path": file_path, "max_bytes": file_cap }
+                    }
+                })
             }
             // 使用量统计快照：由后端常驻采样累加，与前端是否打开无关。
             "usage" => {
@@ -913,7 +951,7 @@ impl RpcServer {
 
     /// 把前端发来的字符串当作 AT 命令执行并整理成应答。
     pub async fn run_command(&self, command: &str) -> AtCommandResponse {
-        log_debug!("前端请求: {}", command.trim());
+        log_debug!(Cat::At, "前端请求: {}", command.trim());
 
         // AT+CONNECT? 不是真的 AT 命令，用来让前端知道当前走网络还是串口。
         if command.trim() == "AT+CONNECT?" {
@@ -941,7 +979,7 @@ impl RpcServer {
         // 刷新与断线失效都由缓存负责。miss / 非白名单 / 抓取失败一律走 live 路径，
         // 保证终端页手动执行同一条查询也能拿到真实结果。
         if let Ok(Some(text)) = self.cache.resolve(&command).await {
-            log_debug!("缓存命中: {}", command.trim());
+            log_debug!(Cat::At, "缓存命中: {}", command.trim());
             return ok_response(&text);
         }
 
@@ -962,7 +1000,7 @@ impl RpcServer {
             // 用 {:?} 而不是 {}：这条命令里可能同时出现字面 `\r`（两个字符）与真实
             // 控制字符（两段式的 Ctrl+Z），只有转义形式能区分「发出去了什么」。
             // 稳态日志级别是 Warn，所以这行不会刷满 prolog；排查时用 -verbose。
-            log_info!("短信提交：等待模组回执，预算 {}s，原始串 {:?}", cmd_timeout.as_secs(), command);
+            log_info!(Cat::Sms, "短信提交：等待模组回执，预算 {}s，原始串 {:?}", cmd_timeout.as_secs(), command);
         }
 
         // 外层超时 = 排队预算 + 应答预算 + 余量。
@@ -991,7 +1029,7 @@ impl RpcServer {
                 AtCommandResponse { success: true, data: Some(text), error: None, cause: None }
             }
             Ok(Err(e)) => {
-                log_debug!("AT 命令失败: {} -> {}", command.trim(), e);
+                log_debug!(Cat::At, "AT 命令失败: {} -> {}", command.trim(), e);
                 let cause = at_failure_cause(&e);
                 AtCommandResponse { success: false, data: None, error: Some(e), cause }
             }
@@ -1035,7 +1073,7 @@ impl RpcServer {
                 return Some(err_response(&e));
             }
             self.sched.set_config(dto_to_schedule(&dto)).await;
-            log_info!(
+            log_info!(Cat::Schedule,
                 "定时锁频配置已由 WebUI 更新: 启用={} 夜间={} 日间={}",
                 dto.enabled,
                 dto.night.enabled,
@@ -1135,7 +1173,7 @@ impl RpcServer {
         match self.client.interrupt(CELLSCAN_ABORT_TOKEN).await {
             Ok(()) => {
                 scan.aborted = true;
-                log_info!("已下发扫频打断字符串");
+                log_info!(Cat::Scan, "已下发扫频打断字符串");
                 ok_response("OK")
             }
             Err(e) => err_response(&format!("打断扫频失败: {e}")),
@@ -1152,7 +1190,7 @@ async fn run_cell_scan(
     command: String,
     timeout: Duration,
 ) -> Result<String, String> {
-    log_info!("开始扫频: {} (超时 {}s)", command, timeout.as_secs());
+    log_info!(Cat::Scan, "开始扫频: {} (超时 {}s)", command, timeout.as_secs());
 
     // 扫频前断开蜂窝数据：模组在数据业务激活时拒绝 ^CELLSCAN（+CME ERROR: operation not allowed）。
     // scan_active 置位让 autodial_watchdog 暂停对账，避免它把「扫频导致的未就绪」误判为故障抢先重拨、
@@ -1194,14 +1232,14 @@ async fn run_cell_scan(
         r = &mut outer => r,
         // 任务取消（task_cancel）：撤下 AT 打断字符串，让模组尽早停止扫频。
         _ = cancel.changed() => {
-            log_warn!("扫频被取消，下发打断字符串");
+            log_warn!(Cat::Scan, "扫频被取消，下发打断字符串");
             let _ = client.interrupt(CELLSCAN_ABORT_TOKEN).await;
             // 等待底层长命令收尾，尽量拿到已扫到的小区。
             outer.await
         }
         // 全局关闭：同样打断，避免扫频卡住优雅退出。
         _ = ctx_scan.changed() => {
-            log_warn!("服务退出，扫频中断");
+            log_warn!(Cat::Scan, "服务退出，扫频中断");
             let _ = client.interrupt(CELLSCAN_ABORT_TOKEN).await;
             outer.await
         }
@@ -1227,13 +1265,13 @@ async fn run_cell_scan(
     match result {
         Ok(Ok(resp)) if !resp.has_error() => {
             let state = if aborted { "aborted" } else { "done" };
-            log_info!("扫频结束({}): 共 {} 个小区", state, count);
+            log_info!(Cat::Scan, "扫频结束({}): 共 {} 个小区", state, count);
             hub.broadcast_json("cellscan", serde_json::json!({ "state": state, "lines": lines, "count": count }));
             Ok(format!("{state}:{}", count))
         }
         Ok(Ok(resp)) => {
             let text = resp.text();
-            log_warn!("扫频被模组拒绝: {}", text);
+            log_warn!(Cat::Scan, "扫频被模组拒绝: {}", text);
             hub.broadcast_json(
                 "cellscan",
                 serde_json::json!({ "state": "error", "error": text, "lines": lines, "count": count }),
@@ -1241,7 +1279,7 @@ async fn run_cell_scan(
             Err(text)
         }
         Ok(Err(e)) => {
-            log_warn!("扫频失败: {}", e);
+            log_warn!(Cat::Scan, "扫频失败: {}", e);
             hub.broadcast_json(
                 "cellscan",
                 serde_json::json!({ "state": "error", "error": e, "lines": lines, "count": count }),
@@ -1249,7 +1287,7 @@ async fn run_cell_scan(
             Err(e)
         }
         Err(_) => {
-            log_warn!("扫频超时");
+            log_warn!(Cat::Scan, "扫频超时");
             hub.broadcast_json(
                 "cellscan",
                 serde_json::json!({ "state": "error", "error": "扫频超时", "lines": lines, "count": count }),
