@@ -8,7 +8,7 @@
 
 ---
 
-## 未发布
+## v1.32.6（2026-11-08）
 
 ### feat(log) 日志按 21 个类别细分，模组业务痕迹不再刷 syslog
 
@@ -102,14 +102,15 @@
 - **note(ui)** 通知记录页签逐字节未动（`renderNotify` / `notifyPath` / `clearNotify` /
   `state.notify` 无任何改动行命中）。
 - **docs** README「运行日志」行改写为「三源统一入口 + 21 类 + 后端定类 + ERR 破例」口径。
-- **test** Rust 单测 345 → **370**（新增 25 例）：类别目录（含「main.rs 声明的 28 个
+- **test** Rust 单测覆盖本次新增（发版前实测 `cargo test` **356 passed / 0 failed /
+  2 ignored**）：类别目录（含「main.rs 声明的 28 个
   模块全部有归属」与「至少映射出 8 个不同类别」两条防退化断言 —— 后者把「细分」
   变成可执行的指标）、模块推导与 `misc` 兜底、宏显式覆盖、缓冲不受级别限制、
   业务与运行时的分流落盘、全类别落盘矩阵、上限裁剪不切半行、多行压平、
   `syslog_allowed` 两道闸门（Warn 与 Debug 两种全局级别各测一遍）、类别地板与
   「不进 syslog 就必须能落盘」的互斥性、`snapshot_cats` 过滤先于 limit、
   `cat` 参与字节权重、`parse_cat_filter` 的分隔符与非法键处理。
-- **test** 新增 `tests/log-category-test.js`（**77** 项，零依赖）：**直接解析**
+- **test** 新增 `tests/log-category-test.js`（**80** 项，零依赖）：**直接解析**
   `src/rust/src/logcat.rs` 取 `key` / `code` / `group` 与 `ALL`（而不是硬编码一份副本），
   再与 `logs.js` 的前端表逐项对账 —— 每个后端键都有标签与图标、无前端孤儿、
   `code` 唯一、分组一致；另覆盖 CSS 42 条与窄屏横滚、版本递增、LF 与无尾随空白，
@@ -119,12 +120,13 @@
   防止注释再次腐烂。
 - **chore(test)** `tests/usage-source-test.js` 中「改了 CSS 必须递增
   `MT5700_CSS_VERSION`」那条断言的期望值随本次样式改动 2.46.8 → 2.46.9。
-- **验证** `cargo test --release` **370 passed / 0 failed / 2 ignored**，
-  `cargo build --release` 零警告；`node tests/static-check.js` **4/4**，
-  21 个 `tests/*-test.js` **全部通过**。`cargo clippy` 未能执行：沙箱内 rustup
-  镜像返回 404、组件装不上，此项留待维护者本地补跑。
-- **note** 本次不发版：`PKG_VERSION` / `MT5700_UI_VERSION` 保持 1.32.5，
-  版本四件套与文档站徽标按 AGENTS.md 的发版流程另行处理。
+- **验证** 发版前（合并后 main）本地实测 `cargo test` **356 passed / 0 failed /
+  2 ignored**；`node tests/static-check.js` **4/4**，22 个 `tests/*-test.js` **全部通过**；
+  PR #49 的 Checks 与合并后 main 的云编译 run 均以 CI 为准。`cargo clippy` 未执行：
+  本机 rustup 镜像返回 404、组件装不上，此项留待维护者本地补跑。
+- **chore** 发版：`PKG_VERSION` / `MT5700_UI_VERSION` 1.32.5 → 1.32.6；
+  `MT5700_CSS_VERSION` 保持 2.46.9（本版样式改动已在特性提交内递增），
+  README 徽标与 `docs/index.html` 版本徽标 / 下载链接同步到 v1.32.6。
 
 ## v1.32.5（2026-11-06）
 
