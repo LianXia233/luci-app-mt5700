@@ -2662,6 +2662,20 @@ return L.view.extend({
 			return Parse.mcsEntry(parsed, want);
 		}
 
+		/*
+		 * AT^TRANSMODE? 只在 LTE / EN-DC 上有意义。
+		 * 实机验证（^MONSC 报 NR 的 SA 组网）：该命令固定返回 ERROR，
+		 * 且要耗掉 64~173ms 的串口往返；原逻辑此时把 state.mcs.tm 置 ''。
+		 * 因此纯 NR SA 下直接跳过下发、同样置 ''，显示结果完全一致，省一次往返。
+		 */
+		function tmQueryUseful() {
+			if (state.mcs.tm) return true;
+			var rat = String((state.cell && state.cell.sysMode) || '').toUpperCase();
+			if (rat.indexOf('NR') !== 0) return true;
+			var e = state.diag.endc;
+			return !!(e && e.established);
+		}
+
 		function getMCS() {
 			return AtWs.client.sendCommand('AT^MCS=1').then(function (resDl) {
 				if (resDl && resDl.success && resDl.data) {
@@ -2681,6 +2695,12 @@ return L.view.extend({
 						state.mcs.ulMod = Parse.mcsModulation(e.carriers[0].mcs) || state.mcs.ulMod;
 						state.mcs.ulCw = Parse.mcsCodewords(e);
 					}
+				}
+				if (!tmQueryUseful()) {
+					state.mcs.tm = '';
+					renderMcsAdv();
+					renderTabsUI();
+					return null;
 				}
 				return AtWs.client.sendCommand('AT^TRANSMODE?');
 			}).then(function (resTm) {
