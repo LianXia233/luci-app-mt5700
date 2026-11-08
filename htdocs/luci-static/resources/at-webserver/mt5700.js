@@ -213,24 +213,6 @@ var Mt5700 = (function () {
 		return el;
 	}
 
-	/* 看板娘由统一的模式钩子管理：极简模式下**不创建 img 节点**（不请求
-	 * mascot.png），切回普通模式再插入。只注册一次监听，切页不会累积闭包。 */
-	function syncMascots() {
-		if (typeof document === 'undefined' || !document.querySelectorAll
-			|| typeof api.mascot !== 'function') return;
-		var minimal = isMinimal();
-		var arts = document.querySelectorAll('.mt5700-hero-art');
-		for (var i = 0; i < arts.length; i++) {
-			var art = arts[i];
-			var existing = art.querySelector('.mt-mascot-speech-wrap');
-			if (minimal) {
-				if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
-			} else if (!existing) {
-				art.insertBefore(api.mascot().el, art.firstChild);
-			}
-		}
-	}
-
 	/* ---- hero 栏（页面标题卡）：极简模式真卸载 ----
 	 * hero 是装饰性标题卡（徽标 + 大标题 + 副标题 + 插画），页面身份已由 LuCI
 	 * 面包屑与菜单标题表达，极简模式下重复一遍只是占竖向空间。
@@ -280,7 +262,6 @@ var Mt5700 = (function () {
 					if (typeof document === 'undefined' || !document.querySelectorAll) return;
 					var pages = document.querySelectorAll('.mt5700-page');
 					for (var i = 0; i < pages.length; i++) syncHero(pages[i]);
-					syncMascots();
 				});
 			}
 		} catch (e) { /* ignore */ }
@@ -630,30 +611,6 @@ var Mt5700 = (function () {
 		return svg;
 	};
 
-	/*
-	 * 看板娘：保留头像本体（图片 + 悬浮动效），对话气泡功能已移除。
-	 * 之前的气泡会挤占英雄栏标题并在窄屏下遮挡内容，按需求不再提供。
-	 */
-	api.mascot = function () {
-		var wrap = E('div', { 'class': 'mt-mascot-speech-wrap' });
-
-		/* 极简模式：返回空容器，连 img 节点都不创建 —— 不发起 mascot.png 请求。
-		 * 普通模式下面这段原样保留，视觉零变化。 */
-		if (isMinimal()) return { el: wrap };
-
-		// 二次元蓝发猫耳看板娘头像图片，外圈带光环与悬浮动效
-		var avatar = E('div', { 'class': 'mt-mascot-avatar' });
-		var img = E('img', {
-			'class': 'mt-mascot-img',
-			'src': '/luci-static/resources/at-webserver/mascot.png?v=' + MT5700_CSS_VERSION,
-			'alt': '可可的看板娘'
-		});
-		avatar.appendChild(img);
-		wrap.appendChild(avatar);
-
-		return { el: wrap };
-	};
-
 	/* ================= 四格动态信号图标 (cellular signal) =================
 	 *
 	 * 移植自 cellular-signal-preview.html：状态由 data-state 属性驱动，
@@ -798,7 +755,6 @@ var Mt5700 = (function () {
 		/* hero 按模式创建/移除；bindMode() 有单例守卫，多页不会重复注册事件 */
 		bindMode();
 		syncHero(node);
-		syncMascots();
 
 		return node;
 	};
