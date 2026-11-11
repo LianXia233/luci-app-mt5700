@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 分级 + 分类日志器：按类别决定这条日志去内存环形缓存、插件文件还是 syslog。
 //!
 //! # 三个去处，不是一个

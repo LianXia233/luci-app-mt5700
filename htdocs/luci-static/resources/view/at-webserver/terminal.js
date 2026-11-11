@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 'use strict';
 'require at-webserver/rpc';
 'require at-webserver/ui';

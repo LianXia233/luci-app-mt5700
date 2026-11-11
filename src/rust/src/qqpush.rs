@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! QQ 机器人推送通道（官方 OpenAPI v2）—— 独立模块。
 //!
 //! 自 v1.28.0 起，所有 QQ 机器人相关能力（鉴权、发消息、富媒体组装、内嵌

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 定时推送：每隔 UCI `notify_timer_interval`（分钟）主动推一次「当前实际情况」。
 //!
 //! 与 [`crate::signalwatch`]（信号巡检）是**两条独立的周期线**，互不覆盖：

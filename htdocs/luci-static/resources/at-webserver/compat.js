@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 'use strict';
 /*
  * LuCI core 兼容垫片。

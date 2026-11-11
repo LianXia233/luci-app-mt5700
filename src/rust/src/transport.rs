@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 到模组的字节通道：TCP 网络口或 Linux 串口。
 //! 拆成独立的 reader / writer，读循环与命令写入可并发。
 

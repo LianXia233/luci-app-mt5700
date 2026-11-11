@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 状态缓存的白名单：只对「只读、高频、非 读后写」的 AT 查询启用缓存。
 //!
 //! 设计边界：

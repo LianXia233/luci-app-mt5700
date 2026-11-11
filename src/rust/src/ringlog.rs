@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 有界日志存储：内存环形缓存 + 带大小上限的文件写入。
 //!
 //! # 为什么单独成模块
