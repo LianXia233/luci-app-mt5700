@@ -14,6 +14,11 @@
 - **行尾强制 LF**：`.gitattributes` 已声明 `* text=auto eol=lf`，禁止提交 CRLF。
 - **更新日志同步**：任何进入 `main` 的功能 / 修复 / 样式 / 行为改动，必须同步更新 `CHANGELOG.md`（随改动提交，或在同版本定版提交前补齐），不得只改代码不写日志。
   - **更新日志豁免**（需维护者明确要求）：纯文案微调、署名文案变更、门禁脚本与规则文档（`checks.yml`、`tests/*-test.js`、本文件）自身的维护，若不发版、不提升包版本、不改变渲染结果与运行时行为，可不写 `CHANGELOG.md`；提交说明仍须写清改动与原因。此例外不适用于功能、修复、行为或视觉样式改动，也不免除发版时的版本一致性要求。
+- **角色素材归属**：`htdocs/luci-static/resources/at-webserver/bg/character-*.webp`
+  是《蔚蓝档案》（Blue Archive）角色「阿罗娜 / 彩奈」（浅色）与「普拉娜」（深色）的二次创作插画，
+  与英雄区头像 `mascot.png`（《异环》薄荷）**不是同一作品、不是同一权利人**。
+  逐文件指纹、识别依据与授权状态以 `THIRD-PARTY-NOTICES.md` 第 2 节为唯一事实源；
+  改动素材或声明时须同步该文件、README 与文档站，不得再把背景图归到《异环》/ Hotta Studio 名下。
 - **发版版本一致性 + 文档徽标同步**：提升版本号（打 `v*` 标签出正式版）时，以下引用必须与新 `PKG_VERSION` 一致，缺一不可：
   `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `src/rust/Cargo.toml` 的 `version` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
   同时同步文档徽标与下载入口 —— `README.md` 头部 Version 徽标、`docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 与四处 `releases/download/v<版本>/…` 下载链接。下载链接的资产命名以最近一次 Release 的实际产物为准（形如 `luci-app-mt5700_<版本>-r<PKG_RELEASE>_<架构>.ipk` / `luci-app-mt5700-<版本>-r<PKG_RELEASE>.apk`），不得沿用旧后缀。
@@ -52,7 +57,11 @@
 ## 二、作者署名保护规则
 
 - `LianXia233` 是本项目指定的作者署名标识。
-- 现行文案为 `© 2026 LianXia233 · 开发与维护`，其后另有许可证标识 `GPL-3.0-only`
+- 现行文案为 `© 2026 LianXia233 · 开发与维护`，其后另有许可证标识 `GPL-3.0-only`。
+- 历史文案 `作者：LianXia233`（原始署名）与 `LianXia233 · 开发与维护`（2026-11-12 第一次调整）
+  均不得回退；`Copyright (C) 2026 LianXia233. All rights reserved.` 是未推送的中间态，
+  同样不得出现在页脚。历史文案清单由 `tests/author-attribution-test.js` 的
+  `HISTORICAL_TEXTS` 常量落实为可执行断言，修改本节时不得删除或弱化。
 - 页面 `admin/modem/5g/config` 中的作者署名及其 GitHub 链接属于明确要求保留的项目元素。
 - 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写或 AI 自动修改，都必须保留该署名及其链接。
 - 修改相关页面时，必须检查署名是否仍然存在、链接地址是否正确、桌面端与移动端是否正常显示。
