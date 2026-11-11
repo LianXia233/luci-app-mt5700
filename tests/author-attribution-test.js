@@ -2,8 +2,11 @@
 /**
  * 作者署名回归检查（服务配置页 admin/modem/5g/config）
  *
- * 保护对象：页面底部「作者：LianXia233」署名及其指向主仓库的链接。
+ * 保护对象：页面底部「LianXia233 · 开发与维护」署名及其指向主仓库的链接。
  * 见仓库根目录 AGENTS.md「作者署名保护规则」。
+ *
+ * 文案以本文件的 AUTHOR_TEXT 常量为单一事实源；变更须同步 AGENTS.md
+ * 与 .github/workflows/checks.yml 的约定注释，不得为了修绿而删除断言。
  *
  * 覆盖：
  *   1) 视图 service.js 存在署名 DOM，且追加在底部操作栏之后；
@@ -27,7 +30,11 @@ const SERVICE_VIEW = path.join(viewDir, 'service.js');
 const CSS = path.join(libDir, 'mt5700.css');
 const AGENTS = path.join(root, 'AGENTS.md');
 
+const AUTHOR_NAME = 'LianXia233';
+const AUTHOR_ROLE = '开发与维护';
+const AUTHOR_TEXT = AUTHOR_NAME + ' · ' + AUTHOR_ROLE;
 const AUTHOR_URL = 'https://github.com/LianXia233/luci-app-mt5700';
+const LEGACY_LABEL = '作者：'; // 已移除的前缀标签，禁止回退
 
 const results = [];
 function check(name, ok) {
@@ -49,8 +56,14 @@ const returnIdx = view.lastIndexOf('return page;');
 check('service.js: 存在 .mt5700-author 容器', authorIdx > 0);
 check('service.js: 署名容器在底部操作栏之后', authorIdx > actionsIdx && actionsIdx > 0);
 check('service.js: 署名容器在 render 返回之前', authorIdx < returnIdx);
-check('service.js: 包含「作者：」文案', view.indexOf("'作者：'") > 0);
-check('service.js: 包含署名文本 LianXia233', view.indexOf("}, 'LianXia233')") > 0);
+check('service.js: 署名文案为「LianXia233 · 开发与维护」',
+	view.indexOf("}, '" + AUTHOR_TEXT + "')") > 0);
+check('service.js: 文案含作者标识', view.indexOf(AUTHOR_NAME) > 0);
+check('service.js: 文案含开发与维护角色说明', view.indexOf(AUTHOR_ROLE) > 0);
+check('service.js: 不再使用旧前缀标签',
+	view.indexOf("'" + LEGACY_LABEL + "'") < 0);
+check('service.js: 署名容器为单一链接（无残留 label 节点）',
+	view.indexOf("'mt5700-author-label'") < 0);
 check('service.js: 链接指向主仓库', view.indexOf("'href': '" + AUTHOR_URL + "'") > 0);
 check('service.js: 外链使用 _blank', view.indexOf("'target': '_blank'") > 0);
 check('service.js: 外链带 noopener noreferrer', view.indexOf("'rel': 'noopener noreferrer'") > 0);
@@ -100,6 +113,11 @@ check('AGENTS.md: 明确要求保留署名与链接',
 check('AGENTS.md: 明确维护者授权前提',
 	agents.indexOf('除非项目维护者明确授权') > 0);
 check('AGENTS.md: 记录署名实现位置', agents.indexOf('service.js') > 0 && agents.indexOf(AUTHOR_URL) > 0);
+check('AGENTS.md: 声明当前署名文案', agents.indexOf(AUTHOR_TEXT) > 0);
+check('AGENTS.md: 记录署名文案变更联动清单', agents.indexOf('署名文案变更联动清单') > 0);
+check('AGENTS.md: 含更新日志豁免条款', agents.indexOf('更新日志豁免') > 0);
+check('service.js 与 AGENTS.md 的署名文案一致',
+	view.indexOf(AUTHOR_TEXT) > 0 && agents.indexOf(AUTHOR_TEXT) > 0);
 
 /* ---------- 5) 行尾 ---------- */
 check('service.js: LF 行尾', view.indexOf('\r\n') < 0);

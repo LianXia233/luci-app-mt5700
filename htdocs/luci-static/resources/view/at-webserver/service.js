@@ -1356,15 +1356,16 @@ return L.view.extend({
 		 * project maintainer. 保护规则见仓库根目录 AGENTS.md「作者署名保护规则」。
 		 * 该元素为项目明确要求保留的项目元素：任何 UI 重构、样式调整、组件替换、
 		 * 模板重写都必须保留署名文案与其指向仓库的链接。
+		 * 2026-11-12 经项目维护者授权，文案调整为「LianXia233 · 开发与维护」，
+		 * 移除旧前缀标签；链接、target/rel 安全属性与容器类名保持不变。
 		 */
 		body.appendChild(E('div', { 'class': 'mt5700-author' }, [
-			E('span', { 'class': 'mt5700-author-label' }, '作者：'),
 			E('a', {
 				'class': 'mt5700-author-link',
 				'href': 'https://github.com/LianXia233/luci-app-mt5700',
 				'target': '_blank',
 				'rel': 'noopener noreferrer'
-			}, 'LianXia233')
+			}, 'LianXia233 · 开发与维护')
 		]));
 
 		// 任何表单控件变更都标记为「未保存」，与 CBI 表单行为对齐
