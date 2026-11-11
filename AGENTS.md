@@ -12,6 +12,7 @@
 - 单元测试：`node tests/<name>-test.js`（纯 Node 脚本，无外部依赖，不接入 CI）。
 - **行尾强制 LF**：`.gitattributes` 已声明 `* text=auto eol=lf`，禁止提交 CRLF。
 - **更新日志同步**：任何进入 `main` 的功能 / 修复 / 样式 / 行为改动，必须同步更新 `CHANGELOG.md`（随改动提交，或在同版本定版提交前补齐），不得只改代码不写日志。
+  - **更新日志豁免**（需维护者明确要求）：纯文案微调、署名文案变更、门禁脚本与规则文档（`checks.yml`、`tests/*-test.js`、本文件）自身的维护，若不发版、不提升包版本、不改变渲染结果与运行时行为，可不写 `CHANGELOG.md`；提交说明仍须写清改动与原因。此例外不适用于功能、修复、行为或视觉样式改动，也不免除发版时的版本一致性要求。
 - **发版版本一致性 + 文档徽标同步**：提升版本号（打 `v*` 标签出正式版）时，以下引用必须与新 `PKG_VERSION` 一致，缺一不可：
   `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `src/rust/Cargo.toml` 的 `version` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
   同时同步文档徽标与下载入口 —— `README.md` 头部 Version 徽标、`docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 与四处 `releases/download/v<版本>/…` 下载链接。下载链接的资产命名以最近一次 Release 的实际产物为准（形如 `luci-app-mt5700_<版本>-r<PKG_RELEASE>_<架构>.ipk` / `luci-app-mt5700-<版本>-r<PKG_RELEASE>.apk`），不得沿用旧后缀。
@@ -45,10 +46,12 @@
 - 不递增的后果是「代码已改、界面未变」：清理或调样式会被浏览器缓存整段吞掉，甚至与旧缓存拼出不存在的组合。
 - `MT5700_UI_VERSION` 会并入 `L.env.resource_version`，是**所有** `require` 的版本分量；它与 `PKG_VERSION` 脱节时，升级后用户仍会加载旧模块（曾落后 9 个版本）。
 - `MT5700_CSS_VERSION` 同时用于 `mascot.png?v=`，递增会让看板娘图片重新拉取一次，属预期副作用。
+- `.mt5700-author-label` 目前是占位选择器（视图已不再渲染该节点）；清理它属于样式改动，须递增 `MT5700_CSS_VERSION` 并同步 `tests/usage-source-test.js` 的基线断言。
 
 ## 二、作者署名保护规则
 
 - `LianXia233` 是本项目指定的作者署名标识。
+- 现行文案为 `LianXia233 · 开发与维护`（2026-11-12 经维护者授权，由旧文案调整而来：移除前缀标签，链接仍指向主仓库）；不得回退为旧文案。
 - 页面 `admin/modem/5g/config` 中的作者署名及其 GitHub 链接属于明确要求保留的项目元素。
 - 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写或 AI 自动修改，都必须保留该署名及其链接。
 - 修改相关页面时，必须检查署名是否仍然存在、链接地址是否正确、桌面端与移动端是否正常显示。
@@ -61,18 +64,35 @@
 
 | 组成 | 文件 | 说明 |
 | --- | --- | --- |
-| 署名 DOM | `htdocs/luci-static/resources/view/at-webserver/service.js` | 渲染函数末尾追加 `.mt5700-author`，追加在底部操作栏之后 |
+| 署名 DOM | `htdocs/luci-static/resources/view/at-webserver/service.js` | 渲染函数末尾追加 `.mt5700-author`，追加在底部操作栏之后；容器内为单个链接节点 |
 | 署名样式 | `htdocs/luci-static/resources/at-webserver/mt5700.css` | 文件末尾「作者署名」小节，仅引用既有主题变量 |
-| 静态校验 | `tests/author-attribution-test.js` | 存在性、链接目标、安全属性、样式与规则文档的回归检查 |
+| 静态校验 | `tests/author-attribution-test.js` | 以 `AUTHOR_TEXT` 常量为准，含旧标签防回退、文档一致性与链接/样式回归检查 |
 
-署名文案固定为 `作者：LianXia233`，链接固定指向
+署名文案固定为 `LianXia233 · 开发与维护`，链接固定指向
 `https://github.com/LianXia233/luci-app-mt5700`，并使用 `target="_blank"` +
-`rel="noopener noreferrer"`。
+`rel="noopener noreferrer"`。容器 `.mt5700-author` 内为单个链接节点，
+不再渲染旧前缀标签；`mt5700.css` 的 `.mt5700-author-label` 选择器保留为占位，
+不产生任何渲染效果。
+
+### 署名文案变更联动清单
+
+授权调整文案时，以下四处必须在同一提交内同步，缺一即会让门禁失败：
+
+| # | 位置 | 要改什么 |
+| --- | --- | --- |
+| 1 | `view/at-webserver/service.js` | `.mt5700-author` 容器内的链接文本 |
+| 2 | 本文件「作者署名保护规则」 | 文案声明、实现位置表与固定文案段 |
+| 3 | `tests/author-attribution-test.js` | `AUTHOR_TEXT` / `AUTHOR_ROLE` 常量（门禁唯一事实源） |
+| 4 | `.github/workflows/checks.yml` | 检查项说明与约定 4 的文案 |
+
+禁令：不得为了「修绿」而删断言、跳过测试或把常量改回旧文案；调整后必须保留
+同等或更强的覆盖范围（`checks.yml` 约定 2）。
 
 改动署名相关文件后执行：
 
 ```sh
 node tests/author-attribution-test.js
+node tests/dual-ui-mode-test.js
 ```
 
 ## 三、推送前脱敏检查规则
