@@ -8,6 +8,11 @@
 
 ---
 
+## Unreleased
+
+- **ci(build)** 正式构建前由独立 job 生成 Rust 第三方依赖许可证清单，并注入 APK/IPK 安装树的 `/usr/share/licenses/luci-app-mt5700/RUST-DEPENDENCIES.md`；安装包不再只依赖 Actions Summary 提供许可证文本。
+- **license** 为 `webpki-roots` 的 Mozilla CA 根证书数据补充 `CDLA-Permissive-2.0` 完整协议文本，并随软件包安装；许可证审计白名单与回归测试同步更新。
+
 ## v1.32.8（2026-11-08）
 
 ### feat(rust) 后端自报版本改为构建期注入，与 PKG_VERSION 单一来源
