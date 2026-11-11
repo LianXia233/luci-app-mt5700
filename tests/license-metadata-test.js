@@ -120,6 +120,12 @@ assert.ok(buildWorkflow.includes('third-party-license-report'));
 assert.ok(buildWorkflow.includes('RUST-DEPENDENCIES.md'));
 assert.ok(buildWorkflow.includes('root/usr/share/licenses/luci-app-mt5700'));
 
+assert.doesNotMatch(readme, /仅以聚合形式用于非商业个人开源项目/,
+  'README must not imply that non-commercial use or aggregation grants permission');
+assert.match(readme, /尚未取得权利人的书面许可/);
+assert.match(readme, /RUST-DEPENDENCIES\\.md/);
+assert.match(notices, /character-pc-\\*\\.webp/);
+assert.match(notices, /character-mobile-\\*\\.webp/);
 assert.match(readme, /^## 📄 许可证与开源声明$/m,
   'THIRD-PARTY-NOTICES must point to the current README section title');
 assert.match(notices, /cargo-deny/);

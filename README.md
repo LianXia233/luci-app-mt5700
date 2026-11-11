@@ -457,7 +457,13 @@ MT5700M 模组只有一个主控制 AT 串口（PC UI）。QModem 与本插件�
 
 本项目界面中引用的看板娘角色「薄荷」（Mint）为游戏《异环》（NTE / Neverness to Everness）的登场角色：
 - **版权所有**：苏州幻塔网络科技有限公司（Hotta Studio）/ 完美世界游戏；
-- **使用边界**：相关素材仅以聚合形式用于非商业个人开源项目的界面交互点缀，本项目不主张任何角色形象权利。完整素材指纹与权利说明见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
+- **授权状态**：本仓库尚未取得权利人的书面许可，也未留存可核验的官方开放许可；项目开源或非商业使用的描述均不构成权利人的授权。
+- **使用与分发风险**：不能仅凭素材与 GPL 代码同包分发，就断言其属于 GPLv3 所称的独立聚合。该角色素材能否继续公开展示及随固件分发仍未解决；在取得可核验授权前，发布者应考虑从发布包移除或替换为原创 / 明确许可的素材。
+- **完整清单**：包含头像、PC / 移动端背景及文档截图，具体路径与处置要求见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
+
+### 第三方软件依赖与许可证
+
+Rust 后端依赖各自保留上游许可证。正式 APK / IPK 会附带逐项依赖清单及许可证全文，安装后位于 `/usr/share/licenses/luci-app-mt5700/RUST-DEPENDENCIES.md`；Mozilla CA 根证书数据所用的 `CDLA-Permissive-2.0` 完整协议也会一并安装。项目代码的 GPL-3.0-only 不会覆盖第三方依赖或角色素材。更多细节见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
 
 ### 商标与指称使用
 

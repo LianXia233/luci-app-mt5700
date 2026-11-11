@@ -37,6 +37,8 @@
 | 文件 | 尺寸 / 格式 | 用途 | SHA-256（前 16 位） |
 |:--|:--|:--|:--|
 | `htdocs/luci-static/resources/at-webserver/mascot.png` | 320×320，PNG RGBA | 移动端英雄卡片圆形头像 | `b3b74e811f954d71` |
+| `htdocs/luci-static/resources/at-webserver/bg/character-pc-dark.webp` / `character-pc-light.webp` | WebP；PC 深色 / 浅色背景 | 普通模式桌面背景 | 待复核 |
+| `htdocs/luci-static/resources/at-webserver/bg/character-mobile-dark.webp` / `character-mobile-light.webp` | WebP；移动端深色 / 浅色背景 | 普通模式移动端背景 | 待复核 |
 | `docs/images/*.png` | 界面截图 | README 与 Release 说明中的界面展示（含该角色形象） | 随截图更新 |
 
 ### 2.3 授权状态与来源
