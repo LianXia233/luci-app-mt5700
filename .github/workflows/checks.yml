@@ -163,6 +163,7 @@ jobs:
         run: |
           cargo deny check licenses
           cargo deny check sources
+          cargo deny check bans
 
       - name: 生成逐项许可证报告
         working-directory: src/rust
