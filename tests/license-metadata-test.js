@@ -16,6 +16,7 @@ const deny = read('deny.toml');
 const about = read('src/rust/about.toml');
 const template = read('src/rust/about.hbs');
 const license = read('LICENSE');
+const cdlaLicense = read('root/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt');
 const readme = read('README.md');
 const agents = read('AGENTS.md');
 const notices = read('THIRD-PARTY-NOTICES.md');
@@ -69,6 +70,7 @@ const expectedLicenses = [
   'Unicode-3.0',
   'BSL-1.0',
   'CC0-1.0',
+  'CDLA-Permissive-2.0',
   'GPL-3.0-only',
 ].sort();
 const denyAllowed = readStringArray(deny, /^allow\s*=\s*\[([\s\S]*?)\]/m,
@@ -86,6 +88,14 @@ assert.match(about, /license\s*=\s*"ISC AND MIT AND OpenSSL"/,
   'ring clarification must retain its complete license expression');
 assert.match(about, /checksum\s*=\s*'[a-f0-9]{64}'/,
   'ring clarification must pin the SHA-256 of the upstream license file');
+assert.match(cdlaLicense, /Community Data License Agreement - Permissive - Version 2\.0/,
+  'the complete CDLA-Permissive-2.0 text must ship with the package');
+assert.match(cdlaLicense, /2\.1\. A Data Recipient may share Data[\s\S]*makes available the text of this agreement/,
+  'the packaged CDLA license must retain its data-sharing condition');
+assert.match(lock, /name = "webpki-roots"\nversion = "0\.26\.11"/,
+  'the legacy webpki-roots data package must remain auditable');
+assert.match(lock, /name = "webpki-roots"\nversion = "1\.0\.9"/,
+  'the current webpki-roots data package must remain auditable');
 assert.match(template, /\{\{\{text\}\}\}/,
   'license text must be rendered without HTML escaping');
 
@@ -93,6 +103,8 @@ assert.match(agents, /第三方依赖许可证与来源规则/);
 assert.match(agents, /cargo deny check licenses/);
 assert.match(agents, /cargo deny check sources/);
 assert.match(agents, /cargo deny check bans/);
+assert.match(agents, /CDLA-Permissive-2\.0/);
+assert.match(agents, /root\/usr\/share\/licenses\/luci-app-mt5700/);
 assert.match(workflow, /cargo deny check licenses/);
 assert.match(workflow, /cargo deny check sources/);
 assert.match(workflow, /cargo deny check bans/);
@@ -105,6 +117,8 @@ assert.match(readme, /^## 📄 许可证与开源声明$/m,
   'THIRD-PARTY-NOTICES must point to the current README section title');
 assert.match(notices, /cargo-deny/);
 assert.match(notices, /cargo-about/);
+assert.match(notices, /webpki-roots.*0\.26\.11.*1\.0\.9.*CDLA-Permissive-2\.0/s);
+assert.match(notices, /CDLA-Permissive-2\.0\.txt/);
 assert.match(notices, /ws.*8\.21\.3.*MIT/s);
 assert.match(notices, /mock-modem.*ISC/s);
 assert.match(notices, /不构成.*授权/);
