@@ -14,7 +14,7 @@ LUCI_DEPENDS:=
 LUCI_PKGARCH:=
 
 PKG_NAME:=luci-app-mt5700
-PKG_VERSION:=1.32.8
+PKG_VERSION:=1.32.9
 PKG_RELEASE:=1
 
 # Rust 后端版本号单一来源：把 PKG_VERSION 以环境变量导出，子 make

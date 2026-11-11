@@ -39,8 +39,14 @@ name: OpenWrt 软件包云编译（apk + ipk）
 # Makefile 的 PKG_RELEASE（正式版资产停在 r3 时，main 上已经是 r8 就很常见）。
 # 预览版用 preview- 前缀带来两个额外好处：
 #   ① 与正式版在 Releases 页面自然分开，各自标注；
-#   ② 不匹配下方「清理历史 Release」的 ^v[0-9] 规则，因此发布预览版
-#      **不会**把正式版挤出保留名额（这条是硬保护，不是靠配置约定）。
+#   ② 清理按通道分组：预览版发布只会清掉旧 preview-*，正式版 v* 组始终
+#      保留最新一个（硬保护，不依赖计数或 latest 标记）。
+#
+# 旧产物清理（每次编译只保留最新的一个）：
+#   发布成功后执行「清理旧产物」：v* 与 preview-* 两组各自只保留组内最新
+#   一个，其余 Release 与资产一律删除；不再提供保留数输入，也无法被
+#   latest 标志或创建顺序绕过。debian-v* 属于另一条发布线（Debian 客户端
+#   deb 包），不是本工作流的编译产物，不参与清理；git tag 一律保留。
 #
 # 构建日志：不向仓库写入（不再产出 ci-logs-* 分支），仅保留在 Actions 运行日志中
 #           （保留期由 GitHub 侧控制）
@@ -58,16 +64,8 @@ on:
         options:
           - preview
           - stable
-      keep_releases:
-        description: '正式版：发布后保留最近几个 v* Release，更早的自动删除（仅清理 Release 与资产，不动 git tag）'
-        required: false
-        default: '1'
-        type: string
-      keep_previews:
-        description: '预览版：固定为 1（发布前已清空全部历史 preview-*，此值仅作兜底，小于 1 按 1 处理）'
-        required: false
-        default: '1'
-        type: string
+# 清理策略固定为「只保留最新一个」，不再暴露保留数输入：可配置的 KEEP_*
+# 曾被填成 >1 导致旧产物堆积，也让「每次编译都删旧」变成可选项。
 
 permissions:
   contents: write
@@ -310,8 +308,9 @@ jobs:
           name: ${{ matrix.fmt }}-${{ matrix.arch }}
           path: out/
           if-no-files-found: error
-          # 构件只在一次发布内流转（release job 立刻下载并发布），留 90 天是白占存储
-          retention-days: 7
+          # 构件只在一次发布内流转（release job 立刻下载并发布）；1 天后自动过期，
+          # 避免每次 6 组矩阵共约 9 MB 的临时产物在仓库里堆积。
+          retention-days: 1
 
   # ---- 统一发布：每次编译成功后运行一次，汇总全部架构产物并上传 Release ----
   # 不能放在 build job 内：多个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
@@ -745,60 +744,57 @@ jobs:
           fi
           echo "==> Release ${TAG} 已发布（通道 ${CHANNEL}），资产 ${#FILES[@]} 个"
 
-      # 每个版本 13 个资产、约 9 MB，历史 Release 会一路堆积。
-      # 只删 **Release 与其资产**，不动 git tag —— tag 指向提交，删了会让
-      # 「某版本对应哪次提交」无从追溯，而 Release 只是可重发的下载入口。
-      # （预览版的 tag 例外：它是提交短 SHA，由发布前的「清空历史预览版」步骤
-      #   连同 Release 一起清掉，避免 tag 列表随每次构建线性膨胀。）
-      # 分**两组独立**清理，互不计入对方名额：
-      #   正式版：tag 形如 v1.29.0，只保留最近 KEEP_RELEASES 个；
-      #   预览版：tag 形如 preview-99425b0，只保留最近 KEEP_PREVIEWS 个（默认且至少 1）。
-      # 两组正则各自只匹配本组（^v[0-9] 匹配不到 preview- 前缀），因此
-      # **发布预览版永远不会把正式版挤出保留名额** —— 这是硬保护，不是靠配置约定。
-      # 两组共用两条保护：① 只认本组前缀（debian-v2.0.1 这类另一条发布线的产物不参与）；
-      #                   ② latest 那个即使超出保留数也保留（它可能不是时间上最新的）。
-      # 预览版实际上在发布前已被清空，这里只是幂等兜底：万一有并发/残留，
-      # 也保证最终只剩 1 个。
-      - name: 清理历史 Release（正式版保留若干个 / 预览版只保留 1 个）
+      # 每次编译只保留最新一个（硬保证）。
+      #
+      # 触发时机：发布成功后。构建失败时 release job 不会运行，旧版产物仍在，
+      # 用户不至于因为一次失败编译而失去可下载的包。
+      #
+      # 规则（不依赖输入、latest 标记、创建顺序）：
+      #   1) 按 ^v[0-9] / ^preview- 分成两组，各自只保留组内最新一个；
+      #      「最新」= 本次发布的 tag 落在该组时就是本次 tag，否则按 createdAt 取最新；
+      #   2) 组内其余 Release 与资产一律删除，没有任何保留豁免；
+      #   3) 预览通道发布前另有「清空历史预览版」步骤，会连同 git tag 一起清理；
+      #      这里对 preview-* 也带 --cleanup-tag，兜底处理并发/残留；
+      #   4) debian-v* 是另一条发布线（Debian 客户端 deb 包），不是本工作流产物，
+      #      不匹配上述两组正则，不参与清理；所有 git tag 中仅旧 preview-* 会被清。
+      # 结果：正式版发布后 v* 组只剩本次一个；预览版发布后正式版组仍保留
+      #       最新一个稳定版，预览组只剩本次一个 —— 两组互不挤出。
+      - name: 清理旧产物（每次编译只保留最新一个）
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEEP_RELEASES: ${{ github.event.inputs.keep_releases || '1' }}
-          KEEP_PREVIEWS: ${{ github.event.inputs.keep_previews || '1' }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -e
-          # 预览版硬下限：无论输入填什么（0 / 空 / 负数 / 非数字），都按 1 处理。
-          # 传 0 会把刚发布的包立刻删掉，属于不可接受的操作。
-          case "${KEEP_PREVIEWS}" in
-            ''|*[!0-9]*) KEEP_PREVIEWS=1 ;;
-            *) [ "${KEEP_PREVIEWS}" -ge 1 ] || KEEP_PREVIEWS=1 ;;
-          esac
-          echo "==> 保留数：正式版=${KEEP_RELEASES} / 预览版=${KEEP_PREVIEWS}"
-          cleanup_group() {
-            local regex="$1" keep="$2" label="$3"
-            mapfile -t ROWS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
-              --json tagName,isLatest,createdAt \
-              --jq "map(select(.tagName | test(\"${regex}\")))
-                    | sort_by(.createdAt) | reverse
-                    | .[] | \"\(.tagName)\t\(.isLatest)\"")
-            echo "==> ${label} 现有 ${#ROWS[@]} 个，本轮保留最近 ${keep} 个"
-            local idx=0
-            for row in "${ROWS[@]}"; do
-              idx=$((idx + 1))
-              tag="${row%%$'\t'*}"
-              is_latest="${row##*$'\t'}"
-              if [ "$idx" -le "$keep" ]; then
-                echo "  [保留] ${tag}（第 ${idx} 新的，在保留数内）"
+          purge_group() {
+            local regex="$1" label="$2"
+            mapfile -t TAGS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
+              --json tagName,createdAt \
+              --jq "map(select(.tagName | test(\"${regex}\"))) | sort_by(.createdAt) | reverse | .[].tagName")
+            if [ "${#TAGS[@]}" -eq 0 ]; then
+              echo "==> ${label}: 无 Release，跳过"
+              return 0
+            fi
+            # 本次 tag 属于该组 → 保留它；否则保留组内创建时间最新的一个
+            local keep=""
+            case "${TAG}" in
+              v[0-9]*) if [ "${regex}" = '^v[0-9]' ]; then keep="${TAG}"; fi ;;
+              preview-*) if [ "${regex}" = '^preview-' ]; then keep="${TAG}"; fi ;;
+            esac
+            if [ -z "${keep}" ]; then keep="${TAGS[0]}"; fi
+            echo "==> ${label}: 共 ${#TAGS[@]} 个，只保留 ${keep}"
+            for t in "${TAGS[@]}"; do
+              if [ "${t}" = "${keep}" ]; then
+                echo "  [保留] ${t}"
                 continue
               fi
-              if [ "$is_latest" = "true" ]; then
-                echo "  [保留] ${tag}（当前 latest，即使超出保留数）"
-                continue
-              fi
-              echo "  [删除] ${tag}"
-              gh release delete "$tag" --yes --repo "${GITHUB_REPOSITORY}" \
-                || echo "::warning::删除 ${tag} 失败，已跳过不影响发布"
+              echo "  [删除] ${t}"
+              local flags=(--yes --repo "${GITHUB_REPOSITORY}")
+              if [ "${regex}" = '^preview-' ]; then flags+=(--cleanup-tag); fi
+              gh release delete "${t}" "${flags[@]}" \
+                || echo "::warning::删除 ${t} 失败（不影响本次发布）"
             done
           }
-          cleanup_group '^v[0-9]' "$KEEP_RELEASES" '正式版 v* Release'
-          cleanup_group '^preview-' "$KEEP_PREVIEWS" '预览版 preview-* Release'
+          purge_group '^v[0-9]' '正式版 v* Release'
+          purge_group '^preview-' '预览版 preview-* Release'
+          echo "==> 清理完成：编译产物只保留最新一个"
