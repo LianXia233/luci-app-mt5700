@@ -2,7 +2,7 @@
 
 本文件是 [`README.md`](README.md) 「许可证与版权声明」一节的逐项展开，用于记录 `luci-app-mt5700` 仓库中**不属于项目原创代码**的内容及其权利归属与取证信息。
 
-> 适用对象：仓库 `main` 分支当前状态。新增、替换或移除第三方素材时，须同步更新本文件与 README 对应章节。
+> 适用对象：仓库 `main` 分支当前状态。新增、替换或移除第三方依赖、素材时，须同步更新本文件及相应的自动化审计配置。
 
 ---
 
@@ -11,7 +11,7 @@
 | 项目 | 内容 |
 |:--|:--|
 | 覆盖范围 | `Makefile`、`src/`（Rust / Tokio 后端）、`root/`、`htdocs/`（`at-webserver/mascot.png` 除外）、`po/`、`scripts/`、`tests/`，以及 `docs/` 中的原创文字 |
-| 许可证 | GNU General Public License v3.0 |
+| 许可证 | GNU General Public License v3.0 only |
 | SPDX 标识 | `GPL-3.0-only`（依据：`LICENSE` 为 GPLv3 全文；源码头未声明「or any later version」，按 GPLv3 第 14 条锁定为 v3.0） |
 | 版权 | `Copyright (C) 2026 LianXia233` |
 | 完整条款 | [`LICENSE`](LICENSE) |
@@ -20,7 +20,7 @@
 
 ---
 
-## 2. 角色素材（不在 GPL-3.0 范围内）
+## 2. 角色素材（不在 GPL-3.0-only 范围内）
 
 ### 2.1 权利归属
 
@@ -87,20 +87,22 @@
 
 ### 6.1 Rust 依赖
 
-- Rust 后端的直接依赖及其精确版本由 [`src/rust/Cargo.toml`](src/rust/Cargo.toml) 和 [`src/rust/Cargo.lock`](src/rust/Cargo.lock) 记录。
-- `Cargo.lock` 中包含传递依赖，以及仅在特定操作系统或目标架构下使用的条件依赖；锁定包数量不等于最终固件中实际包含的依赖数量。
-- 每个第三方 crate 的许可证应以对应锁定版本发布的 crate 元数据及其随包提供的许可证文本为准。不得仅凭 crate 名称、常见许可或项目自身的 GPL 声明推断。
-- 本文件目前**没有声称已穷尽列出所有 Rust crate 的许可证文本**。新增、升级或替换依赖时，应重新审计锁定版本的许可证表达式、许可证文件及再分发义务，并将审计结果纳入本文件。
+- Rust 后端的直接依赖及精确版本由 [`src/rust/Cargo.toml`](src/rust/Cargo.toml) 和 [`src/rust/Cargo.lock`](src/rust/Cargo.lock) 锁定。
+- 当前锁文件包含 131 个 package 条目，其中 1 个是本项目自身，另有 130 个第三方锁定条目；其中可能包含仅用于特定操作系统、架构或构建条件的依赖，**不等于最终固件实际打包的依赖数量**。
+- [`deny.toml`](deny.toml) 是依赖许可证策略的检查入口。CI 分别执行 cargo-deny 的 `licenses` 与 `sources` 检查：仅允许明确列出的许可证表达式和 crates.io registry，未知许可证、未知 registry 或未知 Git 来源会使检查失败；新增许可证或来源必须先核实再加入策略。
+- [`src/rust/about.toml`](src/rust/about.toml) 与 [`src/rust/about.hbs`](src/rust/about.hbs) 用于生成逐项依赖许可证报告。每次 CI 会根据当前锁定依赖生成报告，并写入对应 GitHub Actions run 的 **Summary**，包含许可证文本及使用该许可证的 crate / 版本。
+- 自动化结果是审计辅助依据，不代表已对每个上游项目完成法律审查。分发前仍须核对对应锁定版本的上游许可证、版权声明、NOTICE 文件及再分发义务；不得把项目自身 GPL 声明套用到第三方依赖。
 
 ### 6.2 Node.js 测试工具
 
 - `tests/mock-modem/package.json` 是独立测试工具的包清单，其自身声明许可证为 `ISC`。
-- 该测试工具依赖 `ws`；`ws` 的许可证属于该第三方依赖自身，不能由测试工具的 `ISC` 声明代替。
+- 锁文件将 `ws` 固定为 `8.21.3`，其锁定元数据声明许可证为 `MIT`；该许可证属于 `ws` 本身，不能由测试工具的 `ISC` 声明代替。上游版权声明与许可证全文见 [`ws@8.21.3/LICENSE`](https://github.com/websockets/ws/blob/8.21.3/LICENSE)。
+- npm tarball 使用官方 `registry.npmjs.org` 地址，并保留锁文件中的完整性校验值。
 - `tests/mock-modem/` 不属于 Rust 后端的 Cargo 依赖图，也不应据此改变主项目的 `GPL-3.0-only` 声明。
 
 ### 6.3 许可证审计边界
 
-自动化许可证检查可用于发现未声明许可证、未知许可证表达式和不在允许清单中的依赖，但不能代替对实际源码、素材、许可证全文及分发方式的人工核查。检查结果应对应当前锁定版本；不得把“检查通过”表述为不存在任何版权或授权风险。
+cargo-deny 会依据依赖元数据和配置检查许可证表达式与来源；cargo-about 会生成依赖及许可证文本清单。自动化工具无法穷尽检查每个 crate 的全部源码，也不能替代人工核对上游许可证、NOTICE、素材权利与实际分发方式。不得把「CI 通过」表述为不存在任何版权或授权风险。
 
 ---
 
@@ -109,3 +111,4 @@
 | 日期 | 变更 |
 |:--|:--|
 | 2026-10-20 | 初版：建立代码 / 角色素材 / 商标三段式清单，补充素材指纹与来源说明 |
+| 2026-11-12 | 增加 Rust / Node.js 依赖许可证审计入口、自动报告及分发审查边界 |
