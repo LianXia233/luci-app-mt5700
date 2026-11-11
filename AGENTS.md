@@ -193,3 +193,34 @@ cd src/rust && cargo test
 
 - 交叉编译产物核对：解包或安装后执行 `/usr/bin/at-webserver-rust --version`，
   输出中的版本必须等于包管理器里的 `luci-app-mt5700` 版本。
+
+
+## 六、第三方依赖许可证与来源规则
+
+项目自有代码固定采用 `GPL-3.0-only`。该声明不改变任何第三方依赖、测试工具、字体、图标、角色素材或其他资产各自的许可证与权利归属。
+
+### Rust 依赖
+
+- 新增、删除、升级或替换 Cargo 依赖时，必须同步审查 `src/rust/Cargo.toml`、`src/rust/Cargo.lock` 与上游对应版本的许可证元数据及许可证文件。
+- `deny.toml` 是 cargo-deny 的许可证与来源策略。许可证白名单必须保持明确、最小化；不得使用通配符或一揽子允许未知许可证。只有核实许可证文本、表达式及与 GPL-3.0-only 项目的兼容性后，才可新增许可标识。
+- `src/rust/about.toml` 与 `src/rust/about.hbs` 负责生成逐项依赖许可证报告。CI 的「第三方依赖许可证审计」job 必须执行 `cargo deny check licenses`，并将 cargo-about 生成的 crate、版本、许可证及许可证文本写入 GitHub Actions Summary。
+- 遇到许可证缺失、识别置信度不足、非 SPDX 表达式或许可证文件与元数据不一致时，先核对上游发布包；不得为了让 CI 通过而直接放宽阈值、扩大白名单或忽略整个 crate。
+- 自动化报告不替代人工审查。对外分发前，仍须核对上游版权声明、NOTICE、许可证全文及其要求的再分发义务。
+
+### Node.js 测试依赖
+
+- `tests/mock-modem/package.json` 是独立测试工具，当前自身许可证为 `ISC`。
+- `tests/mock-modem/package-lock.json` 锁定 `ws@8.21.3`，当前锁定元数据声明为 `MIT`；不得将其许可证与 mock-modem 自身的 ISC 混为一谈。
+- npm 锁文件使用官方 `registry.npmjs.org` 地址并保留 integrity 校验。升级依赖时必须同步核对包版本、许可证字段、来源地址与完整性哈希。
+
+### 复核命令
+
+```sh
+node tests/license-metadata-test.js
+cd src/rust
+cargo deny check licenses
+cargo deny check sources
+cargo about generate about.hbs
+```
+
+新增或升级依赖后，必须审查完整报告；未知许可证或未知来源未解决前，不得合并或发布。

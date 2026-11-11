@@ -1,0 +1,26 @@
+# Explicitly accepted license choices for the generated dependency report.
+# AND expressions require every license; OR expressions select one accepted option.
+accepted = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "ISC",
+  "OpenSSL",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "Zlib",
+  "Unicode-3.0",
+  "BSL-1.0",
+  "CC0-1.0",
+  "GPL-3.0-only",
+]
+
+[ring.clarify]
+license = "ISC AND MIT AND OpenSSL"
+
+[[ring.clarify.files]]
+path = "LICENSE"
+license = "OpenSSL"
+checksum = "53552a9b197cd0db29bd085d81253e67097eedd713706e8cd2a3cc6c29850ceb"
+start = '/* ===================================================================='
+end = '\n * Hudson (tjh@cryptsoft.com).\n *\n */'

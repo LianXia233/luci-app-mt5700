@@ -1,9 +1,9 @@
 #
-# 静态检查与单元测试（轻量、零依赖、不参与构建与发布）
+# 静态检查、单元测试与第三方许可证审计（不参与固件构建与发布）
 #
-# 定位：build-openwrt.yml 只在打 v* 标签或手动触发时编译固件，日常提交没有
-#      任何前置校验。本工作流补上「合并前的快速门禁」，全部步骤为纯 Node
-#      脚本，无 npm 依赖、无第三方 action，单次运行通常在 30 秒内完成。
+# 定位：build-openwrt.yml 只在打 v* 标签或手动触发时编译固件。本工作流提供
+#      日常合并前门禁：Node 静态检查、Rust 单测与第三方依赖许可证审计。
+#      不引入 npm 依赖或第三方 GitHub Action；许可证工具使用固定版本的 Cargo CLI。
 #
 # 检查项：
 #   1) tests/static-check.js —— JS 语法（node --check）、JSON 合法性、
@@ -15,7 +15,7 @@
 #      target/rel 安全属性、字号与居中、窄屏换行、未扩散到其他视图、历史文案
 #      不得回退、AGENTS.md 规则与文案一致。
 #   3) src/rust —— `cargo test --locked`（Rust 后端单测，独立 job 计时）；
-#      CI 原先只跑 Node，Rust 改动无法在合并前被编译校验。
+#      确保 Rust 后端改动也能在合并前通过编译与单元测试。
 #
 # 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
 #      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
@@ -141,3 +141,35 @@ jobs:
       - name: 单元测试（cargo test --locked）
         working-directory: src/rust
         run: cargo test --locked
+
+  license-audit:
+    name: 第三方依赖许可证审计
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 准备 Rust 工具链
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: 安装许可证审计工具
+        run: |
+          cargo install --locked --version 0.20.2 cargo-deny
+          cargo install --locked --version 0.9.3 --features cli cargo-about
+
+      - name: 检查依赖许可证与来源
+        working-directory: src/rust
+        run: |
+          cargo deny check licenses
+          cargo deny check sources
+
+      - name: 生成逐项许可证报告
+        working-directory: src/rust
+        run: |
+          cargo about generate about.hbs > "$RUNNER_TEMP/rust-third-party-licenses.md"
+          {
+            echo "## Rust 第三方依赖许可证报告"
+            echo
+            cat "$RUNNER_TEMP/rust-third-party-licenses.md"
+          } >> "$GITHUB_STEP_SUMMARY"
