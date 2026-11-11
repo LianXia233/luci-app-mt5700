@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! QQ 机器人 openid 自动绑定。
 //!
 //! 背景：QQ 开放平台出于隐私设计，不提供「QQ 号 → openid」的转换接口，

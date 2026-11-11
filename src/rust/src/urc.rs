@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 主动上报分发：raw_data 广播、来电、新短信、存储满、信号变化、PDCP 统计。
 
 use crate::{log_debug, log_info, log_warn};

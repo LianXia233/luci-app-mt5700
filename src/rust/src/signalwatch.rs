@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 定时轮询推送：在用户指定的时段内，由后端定期读取信号并按策略推送。
 //!
 //! 为什么需要这个模块：本模组（TDTECH / Fibocom 系）**不会主动上报** `^HCSQ` /

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 通知：短信/来电/信号/内存满四类事件，经企业微信 webhook、QQ 机器人
 //! （[`crate::qqpush`]，官方 API v2）与本地日志文件输出
 //! （可配置定时推送间隔、重试 3 次）。

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 日志类别（细分）与「这条日志该往哪儿写」的策略表。
 //!
 //! # 为什么需要这一层

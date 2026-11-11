@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! at-webserver —— MT5700M 5G 模组 AT 服务（Rust 实现）。
 //!
 //! 完整业务逻辑迁移：

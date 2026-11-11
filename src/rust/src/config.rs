@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
 //! 键名与 LuCI 页面约定完全一致。
 

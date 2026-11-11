@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! AT 客户端：维护到模组的唯一连接。
 //!
 //! - 只有一个任务读取通道，命令应答与主动上报在同一处解复用；

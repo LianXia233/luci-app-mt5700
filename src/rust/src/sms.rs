@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 短信业务层：列表/发送/删除/容量/存储/短信中心。
 //!
 //! 三条硬性约束（也是本次重构要解决的问题）：

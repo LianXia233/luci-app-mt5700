@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 自动探测 AT 口：按优先级逐个试探候选串口，第一个能应答 AT 的即选用。
 //!
 //! 候选与优先级设计（对应两类实机故障）：

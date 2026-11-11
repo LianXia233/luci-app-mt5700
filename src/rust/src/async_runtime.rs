@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 统一任务管理器（Async Task Manager）与取消令牌（CancellationToken）。
 //!
 //! 对应异步化架构的「后台任务异步化 / 任务生命周期管理 / 取消机制 / 超时」：
