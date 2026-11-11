@@ -6,6 +6,7 @@
 ## 一、仓库基本约定
 
 - 主仓库：<https://github.com/LianXia233/luci-app-mt5700>（CNB 为镜像）。
+- 许可证：SPDX `GPL-3.0-only`（与 `README.md` 的声明一致），完整条款见根目录 `LICENSE`；页脚以纯文本标识展示，不得改成 `GPL-3.0-or-later` 或其他表达式。
 - 前端视图：`htdocs/luci-static/resources/view/at-webserver/*.js`；公共 UI 与样式：
   `htdocs/luci-static/resources/at-webserver/mt5700.js`、`mt5700.css`。
 - 菜单与路由映射：`root/usr/share/luci/menu.d/luci-app-mt5700.json`。
@@ -51,7 +52,7 @@
 ## 二、作者署名保护规则
 
 - `LianXia233` 是本项目指定的作者署名标识。
-- 现行文案为 `LianXia233 · 开发与维护`（2026-11-12 经维护者授权，由旧文案调整而来：移除前缀标签，链接仍指向主仓库）；不得回退为旧文案。
+- 现行文案为 `© 2026 LianXia233 · 开发与维护`，其后另有许可证标识 `GPL-3.0-only`（2026-11-12 经维护者授权调整：移除前缀标签，改用 © 版权写法并补出 SPDX 标识；链接仍指向主仓库）。历史文案 `作者：LianXia233`、`LianXia233 · 开发与维护` 均不得回退。
 - 页面 `admin/modem/5g/config` 中的作者署名及其 GitHub 链接属于明确要求保留的项目元素。
 - 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写或 AI 自动修改，都必须保留该署名及其链接。
 - 修改相关页面时，必须检查署名是否仍然存在、链接地址是否正确、桌面端与移动端是否正常显示。
@@ -64,11 +65,13 @@
 
 | 组成 | 文件 | 说明 |
 | --- | --- | --- |
-| 署名 DOM | `htdocs/luci-static/resources/view/at-webserver/service.js` | 渲染函数末尾追加 `.mt5700-author`，追加在底部操作栏之后；容器内为单个链接节点 |
+| 署名 DOM | `htdocs/luci-static/resources/view/at-webserver/service.js` | 渲染函数末尾追加 `.mt5700-author`，追加在底部操作栏之后；容器内为 1 个主链接 + 1 个许可证 span |
+| 许可证标识 | 同上 | `.mt5700-author-license` 纯文本 `GPL-3.0-only`，复用容器排版，不新增 CSS 规则 |
 | 署名样式 | `htdocs/luci-static/resources/at-webserver/mt5700.css` | 文件末尾「作者署名」小节，仅引用既有主题变量 |
 | 静态校验 | `tests/author-attribution-test.js` | 以 `AUTHOR_TEXT` 常量为准，含旧标签防回退、文档一致性与链接/样式回归检查 |
 
-署名文案固定为 `LianXia233 · 开发与维护`，链接固定指向
+署名文案固定为 `© 2026 LianXia233 · 开发与维护`，许可证标识固定为
+`GPL-3.0-only`，链接固定指向
 `https://github.com/LianXia233/luci-app-mt5700`，并使用 `target="_blank"` +
 `rel="noopener noreferrer"`。容器 `.mt5700-author` 内为单个链接节点，
 不再渲染旧前缀标签；`mt5700.css` 的 `.mt5700-author-label` 选择器保留为占位，
@@ -82,11 +85,19 @@
 | --- | --- | --- |
 | 1 | `view/at-webserver/service.js` | `.mt5700-author` 容器内的链接文本 |
 | 2 | 本文件「作者署名保护规则」 | 文案声明、实现位置表与固定文案段 |
-| 3 | `tests/author-attribution-test.js` | `AUTHOR_TEXT` / `AUTHOR_ROLE` 常量（门禁唯一事实源） |
+| 3 | `tests/author-attribution-test.js` | `AUTHOR_TEXT` / `AUTHOR_LICENSE` 常量（门禁唯一事实源，含历史文案防回退清单） |
 | 4 | `.github/workflows/checks.yml` | 检查项说明与约定 4 的文案 |
 
-禁令：不得为了「修绿」而删断言、跳过测试或把常量改回旧文案；调整后必须保留
-同等或更强的覆盖范围（`checks.yml` 约定 2）。
+禁令：不得为了「修绿」而删断言、跳过测试或把常量改回旧文案；门禁会分别校验
+视图 DOM、AGENTS.md、`checks.yml` 与常量四处一致，并禁止 DOM 内出现任一历史
+文案（按完整字符串字面量比对，避免 "© 2026 …" 与 "… · 开发与维护" 的子串误判）。
+调整后必须保留同等或更强的覆盖范围（`checks.yml` 约定 2）。
+另：`Copyright (C)` 写法仅为未推送的中间态，不得出现在页脚 DOM 中。
+
+样式边界：`.mt5700-author-license` 目前**没有专门 CSS 规则**，继承容器的
+`gap: 0 0.2em`、`flex-wrap: wrap`、居中与 xs 字号；这三项不得移除，否则窄屏下
+长文案会溢出。若以后要为许可证标识单独排版，改 `mt5700.css` 即须递增
+`MT5700_CSS_VERSION` 并同步 `tests/usage-source-test.js` 的基线断言。
 
 改动署名相关文件后执行：
 

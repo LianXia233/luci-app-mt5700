@@ -10,8 +10,9 @@
 #      行尾 LF、menu.d 中 view 路由是否存在对应视图文件；
 #   2) tests/*-test.js —— 仓库内的零依赖单元测试脚本（逐个执行，任一失败即中止）。
 #      其中 tests/author-attribution-test.js 负责校验作者信息：署名文案
-#      「LianXia233 · 开发与维护」（以脚本内 AUTHOR_TEXT 常量为准）、链接指向
-#      主仓库、target/rel 安全属性、字号与居中、未扩散到其他视图、旧前缀标签
+#      「© 2026 LianXia233 · 开发与维护」与 SPDX 标识「GPL-3.0-only」
+#      （以脚本内 AUTHOR_TEXT / AUTHOR_LICENSE 常量为准）、链接指向主仓库、
+#      target/rel 安全属性、字号与居中、窄屏换行、未扩散到其他视图、历史文案
 #      不得回退、AGENTS.md 规则与文案一致。
 #   3) src/rust —— `cargo test --locked`（Rust 后端单测，独立 job 计时）；
 #      CI 原先只跑 Node，Rust 改动无法在合并前被编译校验。
@@ -39,7 +40,8 @@
 #
 #   4) 作者署名约定：`LianXia233` 是本项目指定的作者署名标识。
 #      · 页面 `admin/modem/5g/config`（视图 view/at-webserver/service.js）底部的
-#        署名「LianXia233 · 开发与维护」及其 GitHub 链接
+#        署名「© 2026 LianXia233 · 开发与维护」、许可证标识
+#        「GPL-3.0-only」及其 GitHub 链接
 #        https://github.com/LianXia233/luci-app-mt5700 属于明确要求保留的页面元素；
 #      · 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写、去重或 AI 自动修改，
 #        都必须保留该署名与链接，不得删除、隐藏、替换或破坏；
@@ -48,8 +50,10 @@
 #      · 仅当项目维护者明确授权时方可删除或修改署名，且须在授权范围内最小化改动；
 #      · 本节由 tests/author-attribution-test.js 落实为可执行断言，随检查项 2 在每次
 #        push / PR 时运行，署名缺失或链接变更会直接使 CI 失败。完整条款见 AGENTS.md。
-#      · 文案变更须四处同步：视图 DOM、AGENTS.md「作者署名保护规则」、本节的
-#        约定注释、门禁脚本的 AUTHOR_TEXT 常量；不得为修绿删除断言或改回旧文案。
+#      · 文案 / 许可证标识变更须四处同步：视图 DOM、AGENTS.md「作者署名保护
+#        规则」、本节的约定注释、门禁脚本的 AUTHOR_TEXT / AUTHOR_LICENSE 常量；
+#        门禁会校验四处一致并禁止 DOM 回退到任一历史文案。不得为修绿删除断言
+#        或改回旧文案。
 #
 #   5) 项目维护规则：改动视图、样式、菜单或测试之前，先读仓库根目录 AGENTS.md。
 #      其中列有必须保留的页面元素清单与改动后的检查要求；不得以重构、去重、
