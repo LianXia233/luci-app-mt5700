@@ -115,10 +115,10 @@ assert.match(workflow, /--version 0\.20\.2 cargo-deny/);
 assert.match(workflow, /--version 0\.9\.3 --features cli cargo-about/);
 assert.match(buildWorkflow, /license-report:/);
 assert.match(buildWorkflow, /needs: license-report/);
-assert.match(buildWorkflow, /cargo about generate about\\.hbs/);
-assert.match(buildWorkflow, /third-party-license-report/);
-assert.match(buildWorkflow, /RUST-DEPENDENCIES\\.md/);
-assert.match(buildWorkflow, /root\\/usr\\/share\\/licenses\\/luci-app-mt5700/);
+assert.ok(buildWorkflow.includes('cargo about generate about.hbs'));
+assert.ok(buildWorkflow.includes('third-party-license-report'));
+assert.ok(buildWorkflow.includes('RUST-DEPENDENCIES.md'));
+assert.ok(buildWorkflow.includes('root/usr/share/licenses/luci-app-mt5700'));
 
 assert.match(readme, /^## 📄 许可证与开源声明$/m,
   'THIRD-PARTY-NOTICES must point to the current README section title');
