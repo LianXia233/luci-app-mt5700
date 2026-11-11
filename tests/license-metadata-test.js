@@ -107,7 +107,7 @@ assert.match(notices, /cargo-deny/);
 assert.match(notices, /cargo-about/);
 assert.match(notices, /ws.*8\.21\.3.*MIT/s);
 assert.match(notices, /mock-modem.*ISC/s);
-assert.match(notices, /不构成授权/);
+assert.match(notices, /不构成.*授权/);
 assert.doesNotMatch(notices, /131 个 package 条目/,
   'dependency counts must not be hard-coded because Cargo.lock changes over time');
 

@@ -16,6 +16,8 @@
 #      不得回退、AGENTS.md 规则与文案一致。
 #   3) src/rust —— `cargo test --locked`（Rust 后端单测，独立 job 计时）；
 #      确保 Rust 后端改动也能在合并前通过编译与单元测试。
+#   4) Rust 依赖 —— cargo-deny 检查许可证、来源、通配符与重复版本策略；
+#      cargo-about 生成逐项许可证文本并写入 GitHub Actions Summary。
 #
 # 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
 #      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
