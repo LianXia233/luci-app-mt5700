@@ -463,6 +463,21 @@ MT5700M 模组只有一个主控制 AT 串口（PC UI）。QModem 与本插件�
 
 `OpenWrt`、`ImmortalWrt`、`LuCI`、`MT5700M` 等商标与标识均归各自权利人所有。本仓库中对相关名称的引用仅用于客观指示运行平台、系统组件及硬件型号，不代表任何形式的官方背书或授权合作。
 
-### 项目维护者
+### 项目版权与维护
 
-**Copyright (C) 2026 [LianXia233](https://github.com/LianXia233/luci-app-mt5700)**. All rights reserved.
+项目代码版权归 **LianXia233** 所有。
+
+```text
+Copyright (C) 2026 LianXia233
+SPDX-License-Identifier: GPL-3.0-only
+```
+
+本项目代码依据 **GNU General Public License v3.0 only** 授权。你可以在许可证规定的范围内使用、研究、修改和再分发本项目；具体权利与义务以根目录 [LICENSE](LICENSE) 的完整条款为准。请勿将本项目的 GPL 授权误解为对第三方角色素材、商标或其他独立资产的授权。
+
+<div align="center">
+
+**LianXia233 · 开发与维护**
+
+[GitHub](https://github.com/LianXia233) · [项目仓库](https://github.com/LianXia233/luci-app-mt5700) · [提交 Issue](https://github.com/LianXia233/luci-app-mt5700/issues)
+
+</div>
