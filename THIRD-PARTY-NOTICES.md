@@ -92,7 +92,9 @@
 - Rust 后端的直接依赖及精确版本由 [`src/rust/Cargo.toml`](src/rust/Cargo.toml) 和 [`src/rust/Cargo.lock`](src/rust/Cargo.lock) 锁定。
 - 依赖条目数量随 `Cargo.toml`、目标平台、功能特性和传递依赖变化；请以当前 `Cargo.lock` 与 CI 生成的许可证报告为准，不在此处维护容易过期的固定数量。锁定图可能包含仅用于特定操作系统、架构或构建条件的依赖，**不等于最终固件实际打包的依赖数量**。
 - [`deny.toml`](deny.toml) 是依赖策略的检查入口。CI 执行 cargo-deny 的 `licenses`、`sources` 与 `bans` 检查：仅允许明确列出的许可证表达式和 crates.io registry，未知许可证、未知 registry 或未知 Git 来源会使检查失败；通配符依赖会被拒绝，重复版本会产生审查警告。新增许可证或来源必须先核实再加入策略。
+- `webpki-roots` `0.26.11` 与 `1.0.9` 携带 Mozilla CA 根证书数据，锁定元数据声明为 `CDLA-Permissive-2.0`；它们由 `tokio-tungstenite` 与 `ureq` 的 TLS 根证书功能引入。该协议第 2.1 条要求分享数据时一并提供协议文本，因此完整协议已随本包安装到 `/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt`。
 - [`src/rust/about.toml`](src/rust/about.toml) 与 [`src/rust/about.hbs`](src/rust/about.hbs) 用于生成逐项依赖许可证报告。每次 CI 会根据当前锁定依赖生成报告，并写入对应 GitHub Actions run 的 **Summary**，包含许可证文本及使用该许可证的 crate / 版本。
+- `CDLA-Permissive-2.0` 属于数据许可，不应误记为项目源代码许可证；其完整文本保存在 `root/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt`，并随 OpenWrt 软件包安装。
 - 自动化结果是审计辅助依据，不代表已对每个上游项目完成法律审查。分发前仍须核对对应锁定版本的上游许可证、版权声明、NOTICE 文件及再分发义务；不得把项目自身 GPL 声明套用到第三方依赖。
 
 ### 6.2 Node.js 测试工具
