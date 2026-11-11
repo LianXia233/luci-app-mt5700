@@ -86,7 +86,7 @@ assert.match(about, /\[ring\.clarify\]/,
   'ring license split must be clarified against its upstream license file');
 assert.match(about, /license\s*=\s*"ISC AND MIT AND OpenSSL"/,
   'ring clarification must retain its complete license expression');
-assert.match(about, /checksum\s*=\s*'[a-f0-9]{64}'/,
+assert.match(about, /checksum\s*=\s*["'][a-f0-9]{64}["']/,
   'ring clarification must pin the SHA-256 of the upstream license file');
 assert.match(cdlaLicense, /Community Data License Agreement - Permissive - Version 2\.0/,
   'the complete CDLA-Permissive-2.0 text must ship with the package');
