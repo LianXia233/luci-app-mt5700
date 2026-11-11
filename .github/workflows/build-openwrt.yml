@@ -83,7 +83,7 @@ jobs:
   license-report:
     name: 生成 Rust 第三方依赖许可证清单
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -92,6 +92,16 @@ jobs:
 
       - name: 准备 Rust 工具链
         run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: 安装 cargo-deny
+        run: cargo install --locked --version 0.20.2 cargo-deny
+
+      - name: 检查依赖许可证、来源与版本策略
+        working-directory: src/rust
+        run: |
+          cargo deny check licenses
+          cargo deny check sources
+          cargo deny check bans
 
       - name: 安装 cargo-about
         run: cargo install --locked --version 0.9.3 --features cli cargo-about
