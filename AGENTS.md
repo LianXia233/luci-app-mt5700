@@ -204,7 +204,7 @@ cd src/rust && cargo test
 - 新增、删除、升级或替换 Cargo 依赖时，必须同步审查 `src/rust/Cargo.toml`、`src/rust/Cargo.lock` 与上游对应版本的许可证元数据及许可证文件。
 - `deny.toml` 是 cargo-deny 的许可证与来源策略。许可证白名单必须保持明确、最小化；不得使用通配符或一揽子允许未知许可证。只有核实许可证文本、表达式及与 GPL-3.0-only 项目的兼容性后，才可新增许可标识。
 - `webpki-roots` 的 Mozilla CA 根证书数据使用 `CDLA-Permissive-2.0`；完整协议必须保留在 `root/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt`，确保固件软件包分发数据时同时提供协议文本。不得仅将该许可证写入 CI 报告而遗漏安装包。
-- `src/rust/about.toml` 与 `src/rust/about.hbs` 负责生成逐项依赖许可证报告。CI 的「第三方依赖许可证审计」job 必须执行 `cargo deny check licenses`、`cargo deny check sources` 与 `cargo deny check bans`，并将 cargo-about 生成的 crate、版本、许可证及许可证文本写入 GitHub Actions Summary。
+- `src/rust/about.toml` 与 `src/rust/about.hbs` 负责生成逐项依赖许可证报告。发布工作流必须先生成 `RUST-DEPENDENCIES.md`，再将其注入 `root/usr/share/licenses/luci-app-mt5700/` 后编译 APK/IPK；正式包必须包含逐项 crate、版本、许可证及许可证文本。CI 的「第三方依赖许可证审计」job 必须执行 `cargo deny check licenses`、`cargo deny check sources` 与 `cargo deny check bans`，并将 cargo-about 生成的 crate、版本、许可证及许可证文本写入 GitHub Actions Summary。
 - 遇到许可证缺失、识别置信度不足、非 SPDX 表达式或许可证文件与元数据不一致时，先核对上游发布包；不得为了让 CI 通过而直接放宽阈值、扩大白名单或忽略整个 crate。
 - 自动化报告不替代人工审查。对外分发前，仍须核对上游版权声明、NOTICE、许可证全文及其要求的再分发义务。
 

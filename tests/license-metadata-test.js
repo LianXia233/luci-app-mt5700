@@ -21,6 +21,7 @@ const readme = read('README.md');
 const agents = read('AGENTS.md');
 const notices = read('THIRD-PARTY-NOTICES.md');
 const workflow = read('.github/workflows/checks.yml');
+const buildWorkflow = read('.github/workflows/build-openwrt.yml');
 const packageJson = JSON.parse(read('tests/mock-modem/package.json'));
 const packageLock = JSON.parse(read('tests/mock-modem/package-lock.json'));
 
