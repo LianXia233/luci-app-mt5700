@@ -48,6 +48,11 @@ name: OpenWrt 软件包云编译（apk + ipk）
 #   latest 标志或创建顺序绕过。debian-v* 属于另一条发布线（Debian 客户端
 #   deb 包），不是本工作流的编译产物，不参与清理；git tag 一律保留。
 #
+# Actions 构件（artifacts）同样每次编译都清理：独立的 purge-artifacts job
+# 在编译触发时删除所有「非本次 run、非运行中 run」的历史构件，只保留本次
+# 编译产出的一组；构件 retention-days 也已压到 1 天。这样 Release、构件
+# 两条线都不会随版本堆积。
+#
 # 构建日志：不向仓库写入（不再产出 ci-logs-* 分支），仅保留在 Actions 运行日志中
 #           （保留期由 GitHub 侧控制）
 
@@ -78,6 +83,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ---- 每次编译先清旧构件：与 build/release 并行，需 actions: write ----
+  # 只保留「本次 run」与「仍在排队/运行中的 run」的构件，其余历史构件一律删除。
+  # 循环内逐条容错，清理失败不阻断编译与发布（清理是优化，不是发布前置条件）。
+  purge-artifacts:
+    name: 清理旧构建构件（每次编译只保留本次）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: 删除历史 Actions 构件
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          CUR="${GITHUB_RUN_ID}"
+          # 正在排队 / 运行中的 run 不能删，避免并发编译互相踩踏
+          mapfile -t LIVE < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100&status=in_progress" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100&status=queued" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true
+          )
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false) | [.id, .workflow_run.id, .name] | @tsv' \
+            > /tmp/artifacts.tsv 2>/dev/null || true
+          total=0; deleted=0; kept=0; failed=0
+          while IFS=$'\t' read -r id rid name; do
+            [ -z "${id}" ] && continue
+            total=$((total + 1))
+            if [ "${rid}" = "${CUR}" ]; then
+              kept=$((kept + 1)); continue
+            fi
+            skip=0
+            for live in "${LIVE[@]}"; do
+              if [ "${rid}" = "${live}" ]; then skip=1; break; fi
+            done
+            if [ "${skip}" = "1" ]; then
+              kept=$((kept + 1)); continue
+            fi
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+              deleted=$((deleted + 1))
+            else
+              failed=$((failed + 1))
+              echo "::warning::构件 ${name} (${id}) 删除失败，留待下次编译重试"
+            fi
+          done < /tmp/artifacts.tsv
+          echo "==> 构件清理：共 ${total} 个，删除 ${deleted} 个，保留 ${kept} 个，失败 ${failed} 个"
+
   license-report:
     name: 生成 Rust 第三方依赖许可证清单
     runs-on: ubuntu-latest
