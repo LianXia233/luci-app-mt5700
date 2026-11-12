@@ -1,4 +1,6 @@
 #!/bin/sh
+# Copyright (C) 2026 LianXia233
+# SPDX-License-Identifier: GPL-3.0-only
 # 由 Rust 后端在「自动拨号达成期望状态」时调用。
 #
 # 为什么用独立脚本而不是在后端里直接 ifup：

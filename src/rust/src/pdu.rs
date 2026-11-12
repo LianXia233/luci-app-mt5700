@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! SMS PDU 编解码。
 //!
 //! 解码侧负责 SMS-DELIVER（模组收进来、我们用 `AT+CMGR` / `AT+CMGL` 读出来的东西）：

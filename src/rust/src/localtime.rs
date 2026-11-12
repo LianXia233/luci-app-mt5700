@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 统一时间源：**以 OpenWrt 系统设置的时区为准，解析不出来时回落北京时间（UTC+8）**。
 //!
 //! # 为什么不能用 `chrono::Local`

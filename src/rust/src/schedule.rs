@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 定时锁频调度器：按时段切换 LTE/NR 锁频，可选切换飞行模式；
 //! 长时间无服务时自动解锁恢复，并推送通知。
 

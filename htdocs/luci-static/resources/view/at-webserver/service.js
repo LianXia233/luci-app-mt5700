@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 'use strict';
 'require at-webserver/rpc';
 'require at-webserver/mt5700';
@@ -1356,15 +1359,21 @@ return L.view.extend({
 		 * project maintainer. 保护规则见仓库根目录 AGENTS.md「作者署名保护规则」。
 		 * 该元素为项目明确要求保留的项目元素：任何 UI 重构、样式调整、组件替换、
 		 * 模板重写都必须保留署名文案与其指向仓库的链接。
+                 * 当前页面署名为「我是挖洋镐的」，并在其后保留 SPDX 许可证标识
+		 * 「GPL-3.0-only」（纯文本 span，复用容器排版，不新增 CSS 规则）。
+		 * 主链接、target/rel 安全属性与容器类名保持不变。
 		 */
 		body.appendChild(E('div', { 'class': 'mt5700-author' }, [
-			E('span', { 'class': 'mt5700-author-label' }, '作者：'),
 			E('a', {
 				'class': 'mt5700-author-link',
 				'href': 'https://github.com/qqzwqq/luci-app-mt5700',
 				'target': '_blank',
 				'rel': 'noopener noreferrer'
-			}, '我是挖洋镐的')
+                        }, '我是挖洋镐的'),
+                        E('span', {
+                                'class': 'mt5700-author-license',
+                                'title': 'GNU General Public License v3.0 only'
+                        }, 'GPL-3.0-only')
 		]));
 
 		// 任何表单控件变更都标记为「未保存」，与 CBI 表单行为对齐

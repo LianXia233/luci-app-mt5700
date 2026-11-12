@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! AT 请求优先级门（Priority Gate）与短信优先调度。
 //!
 //! 所有业务模块（RPC、缓存刷新、定时任务、自动拨号等）都通过这里申请独占模组通道的

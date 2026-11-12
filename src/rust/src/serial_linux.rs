@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! Linux 串口传输（termios raw 模式）。
 //! 打开后经 termios raw 配置，拆成读写两半，均由 tokio AsyncFd 事件驱动
 //! （fd 置 O_NONBLOCK），空闲不占 CPU。

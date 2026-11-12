@@ -1,0 +1,22 @@
+# Rust third-party dependency licenses
+
+This report is generated from the resolved Cargo dependency graph by cargo-about.
+It is not a substitute for reviewing each upstream license and distribution obligations.
+
+{{#each licenses}}
+## {{name}} ({{id}})
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}
+{{/each}}
+
+<details>
+<summary>License text</summary>
+
+```text
+{{{text}}}
+```
+</details>
+
+{{/each}}

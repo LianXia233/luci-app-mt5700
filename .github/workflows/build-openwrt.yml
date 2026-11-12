@@ -39,8 +39,19 @@ name: OpenWrt 软件包云编译（apk + ipk）
 # Makefile 的 PKG_RELEASE（正式版资产停在 r3 时，main 上已经是 r8 就很常见）。
 # 预览版用 preview- 前缀带来两个额外好处：
 #   ① 与正式版在 Releases 页面自然分开，各自标注；
-#   ② 不匹配下方「清理历史 Release」的 ^v[0-9] 规则，因此发布预览版
-#      **不会**把正式版挤出保留名额（这条是硬保护，不是靠配置约定）。
+#   ② 清理按通道分组：预览版发布只会清掉旧 preview-*，正式版 v* 组始终
+#      保留最新一个（硬保护，不依赖计数或 latest 标记）。
+#
+# 旧产物清理（每次编译只保留最新的一个）：
+#   发布成功后执行「清理旧产物」：v* 与 preview-* 两组各自只保留组内最新
+#   一个，其余 Release 与资产一律删除；不再提供保留数输入，也无法被
+#   latest 标志或创建顺序绕过。debian-v* 属于另一条发布线（Debian 客户端
+#   deb 包），不是本工作流的编译产物，不参与清理；git tag 一律保留。
+#
+# Actions 构件（artifacts）同样每次编译都清理：独立的 purge-artifacts job
+# 在编译触发时删除所有「非本次 run、非运行中 run」的历史构件，只保留本次
+# 编译产出的一组；构件 retention-days 也已压到 1 天。这样 Release、构件
+# 两条线都不会随版本堆积。
 #
 # 构建日志：不向仓库写入（不再产出 ci-logs-* 分支），仅保留在 Actions 运行日志中
 #           （保留期由 GitHub 侧控制）
@@ -58,16 +69,8 @@ on:
         options:
           - preview
           - stable
-      keep_releases:
-        description: '正式版：发布后保留最近几个 v* Release，更早的自动删除（仅清理 Release 与资产，不动 git tag）'
-        required: false
-        default: '1'
-        type: string
-      keep_previews:
-        description: '预览版：固定为 1（发布前已清空全部历史 preview-*，此值仅作兜底，小于 1 按 1 处理）'
-        required: false
-        default: '1'
-        type: string
+# 清理策略固定为「只保留最新一个」，不再暴露保留数输入：可配置的 KEEP_*
+# 曾被填成 >1 导致旧产物堆积，也让「每次编译都删旧」变成可选项。
 
 permissions:
   contents: write
@@ -80,9 +83,101 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ---- 每次编译先清旧构件：与 build/release 并行，需 actions: write ----
+  # 只保留「本次 run」与「仍在排队/运行中的 run」的构件，其余历史构件一律删除。
+  # 循环内逐条容错，清理失败不阻断编译与发布（清理是优化，不是发布前置条件）。
+  purge-artifacts:
+    name: 清理旧构建构件（每次编译只保留本次）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: 删除历史 Actions 构件
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          CUR="${GITHUB_RUN_ID}"
+          # 正在排队 / 运行中的 run 不能删，避免并发编译互相踩踏
+          mapfile -t LIVE < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100&status=in_progress" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100&status=queued" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true
+          )
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false) | [.id, .workflow_run.id, .name] | @tsv' \
+            > /tmp/artifacts.tsv 2>/dev/null || true
+          total=0; deleted=0; kept=0; failed=0
+          while IFS=$'\t' read -r id rid name; do
+            [ -z "${id}" ] && continue
+            total=$((total + 1))
+            if [ "${rid}" = "${CUR}" ]; then
+              kept=$((kept + 1)); continue
+            fi
+            skip=0
+            for live in "${LIVE[@]}"; do
+              if [ "${rid}" = "${live}" ]; then skip=1; break; fi
+            done
+            if [ "${skip}" = "1" ]; then
+              kept=$((kept + 1)); continue
+            fi
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+              deleted=$((deleted + 1))
+            else
+              failed=$((failed + 1))
+              echo "::warning::构件 ${name} (${id}) 删除失败，留待下次编译重试"
+            fi
+          done < /tmp/artifacts.tsv
+          echo "==> 构件清理：共 ${total} 个，删除 ${deleted} 个，保留 ${kept} 个，失败 ${failed} 个"
+
+  license-report:
+    name: 生成 Rust 第三方依赖许可证清单
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 准备 Rust 工具链
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: 安装 cargo-deny
+        run: cargo install --locked --version 0.20.2 cargo-deny
+
+      - name: 检查依赖许可证、来源与版本策略
+        working-directory: src/rust
+        run: |
+          cargo deny check licenses
+          cargo deny check sources
+          cargo deny check bans
+
+      - name: 安装 cargo-about
+        run: cargo install --locked --version 0.9.3 --features cli cargo-about
+
+      - name: 生成依赖许可证清单
+        working-directory: src/rust
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cargo about generate about.hbs > "$GITHUB_WORKSPACE/dist/RUST-DEPENDENCIES.md"
+          test -s "$GITHUB_WORKSPACE/dist/RUST-DEPENDENCIES.md"
+
+      - name: 上传许可证清单构件
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: third-party-license-report
+          path: dist/RUST-DEPENDENCIES.md
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: 编译构建（${{ matrix.fmt }} · ${{ matrix.arch }}）
     runs-on: ubuntu-latest
+    needs: license-report
     # stale=true 表示「本次提交已被后续提交取代」，供 release job 判断是否跳过。
     outputs:
       stale: ${{ steps.stale.outputs.stale }}
@@ -133,6 +228,12 @@ jobs:
       - name: 检出仓库代码
         # v7.0.1：runs.using = node24（v5 为 node20，同样会触发 Node 20 弃用告警）
         uses: actions/checkout@v7.0.1
+
+      - name: 下载第三方许可证清单（并入安装包）
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: third-party-license-report
+          path: root/usr/share/licenses/luci-app-mt5700
 
       - name: 环境准备（输出目录与构建参数）
         run: |
@@ -262,8 +363,9 @@ jobs:
           name: ${{ matrix.fmt }}-${{ matrix.arch }}
           path: out/
           if-no-files-found: error
-          # 构件只在一次发布内流转（release job 立刻下载并发布），留 90 天是白占存储
-          retention-days: 7
+          # 构件只在一次发布内流转（release job 立刻下载并发布）；1 天后自动过期，
+          # 避免每次 6 组矩阵共约 9 MB 的临时产物在仓库里堆积。
+          retention-days: 1
 
   # ---- 统一发布：每次编译成功后运行一次，汇总全部架构产物并上传 Release ----
   # 不能放在 build job 内：多个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
@@ -697,21 +799,23 @@ jobs:
           fi
           echo "==> Release ${TAG} 已发布（通道 ${CHANNEL}），资产 ${#FILES[@]} 个"
 
-      # 每个版本 13 个资产、约 9 MB，历史 Release 会一路堆积。
-      # 只删 **Release 与其资产**，不动 git tag —— tag 指向提交，删了会让
-      # 「某版本对应哪次提交」无从追溯，而 Release 只是可重发的下载入口。
-      # （预览版的 tag 例外：它是提交短 SHA，由发布前的「清空历史预览版」步骤
-      #   连同 Release 一起清掉，避免 tag 列表随每次构建线性膨胀。）
-      # 分**两组独立**清理，互不计入对方名额：
-      #   正式版：tag 形如 v1.29.0，只保留最近 KEEP_RELEASES 个；
-      #   预览版：tag 形如 preview-99425b0，只保留最近 KEEP_PREVIEWS 个（默认且至少 1）。
-      # 两组正则各自只匹配本组（^v[0-9] 匹配不到 preview- 前缀），因此
-      # **发布预览版永远不会把正式版挤出保留名额** —— 这是硬保护，不是靠配置约定。
-      # 两组共用两条保护：① 只认本组前缀（debian-v2.0.1 这类另一条发布线的产物不参与）；
-      #                   ② latest 那个即使超出保留数也保留（它可能不是时间上最新的）。
-      # 预览版实际上在发布前已被清空，这里只是幂等兜底：万一有并发/残留，
-      # 也保证最终只剩 1 个。
-      - name: 清理历史 Release（正式版保留若干个 / 预览版只保留 1 个）
+      # 每次编译只保留最新一个（硬保证）。
+      #
+      # 触发时机：发布成功后。构建失败时 release job 不会运行，旧版产物仍在，
+      # 用户不至于因为一次失败编译而失去可下载的包。
+      #
+      # 规则（不依赖输入、latest 标记、创建顺序）：
+      #   1) 按 ^v[0-9] / ^preview- 分成两组，各自只保留组内最新一个；
+      #      「最新」= 本次发布的 tag 落在该组时就是本次 tag，否则按 createdAt 取最新；
+      #   2) 组内其余 Release 与资产一律删除，没有任何保留豁免；
+      #   3) 预览通道发布前另有「清空历史预览版」步骤，会连同 git tag 一起清理；
+      #      这里对 preview-* 也带 --cleanup-tag，兜底处理并发/残留；
+      #   4) debian-v* 是另一条发布线（Debian 客户端 deb 包），不是本工作流产物，
+      #      不匹配上述两组正则，不参与清理；所有 git tag 中仅旧 preview-* 会被清。
+      # 结果：正式版发布后 v* 组只剩本次一个；预览版发布后正式版组仍保留
+      #       最新一个稳定版，预览组只剩本次一个 —— 两组互不挤出。
+
+      - name: 清理旧产物（按设置保留正式版和预览版）
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -719,43 +823,61 @@ jobs:
           KEEP_PREVIEWS: ${{ github.event.inputs.keep_previews || '1' }}
         run: |
           set -e
-          # 正式版硬下限：无论输入填什么（空 / 负数 / 非数字），都至少保留 1 个。
+
           case "${KEEP_RELEASES}" in
             ''|*[!0-9]*) KEEP_RELEASES=1 ;;
             *) [ "${KEEP_RELEASES}" -ge 1 ] || KEEP_RELEASES=1 ;;
           esac
-          # 预览版硬下限：无论输入填什么（0 / 空 / 负数 / 非数字），都按 1 处理。
-          # 传 0 会把刚发布的包立刻删掉，属于不可接受的操作。
+
           case "${KEEP_PREVIEWS}" in
             ''|*[!0-9]*) KEEP_PREVIEWS=1 ;;
             *) [ "${KEEP_PREVIEWS}" -ge 1 ] || KEEP_PREVIEWS=1 ;;
           esac
-          echo "==> 保留数：正式版=${KEEP_RELEASES} / 预览版=${KEEP_PREVIEWS}"
+
+          echo "==> Retention: releases=${KEEP_RELEASES}, previews=${KEEP_PREVIEWS}"
+
           cleanup_group() {
-            local regex="$1" keep="$2" label="$3"
-            mapfile -t ROWS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
-              --json tagName,isLatest,createdAt \
-              --jq "map(select(.tagName | test(\"${regex}\")))
-                    | sort_by(.createdAt) | reverse
-                    | .[] | \"\(.tagName)\t\(.isLatest)\"")
-            echo "==> ${label} 现有 ${#ROWS[@]} 个，本轮保留最近 ${keep} 个"
+            local regex="$1"
+            local keep="$2"
+            local label="$3"
+
+            mapfile -t ROWS < <(
+              gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
+                --json tagName,isLatest,createdAt \
+                --jq "map(select(.tagName | test(\"${regex}\")))
+                      | sort_by(.createdAt) | reverse
+                      | .[] | \"\(.tagName)\t\(.isLatest)\""
+            )
+
+            echo "==> ${label}: found ${#ROWS[@]}, keeping ${keep}"
+
             local idx=0
+            local tag
+            local is_latest
+
             for row in "${ROWS[@]}"; do
               idx=$((idx + 1))
               tag="${row%%$'\t'*}"
               is_latest="${row##*$'\t'}"
+
               if [ "$idx" -le "$keep" ]; then
-                echo "  [保留] ${tag}（第 ${idx} 新的，在保留数内）"
+                echo "  [KEEP] ${tag}"
                 continue
               fi
+
               if [ "$is_latest" = "true" ]; then
-                echo "  [保留] ${tag}（当前 latest，即使超出保留数）"
+                echo "  [KEEP] ${tag} (GitHub latest)"
                 continue
               fi
-              echo "  [删除] ${tag}"
+
+              echo "  [DELETE] ${tag}"
+
               gh release delete "$tag" --yes --repo "${GITHUB_REPOSITORY}" \
-                || echo "::warning::删除 ${tag} 失败，已跳过不影响发布"
+                || echo "::warning::Failed to delete ${tag}; continuing"
             done
           }
-          cleanup_group '^v[0-9]' "$KEEP_RELEASES" '正式版 v* Release'
-          cleanup_group '^preview-' "$KEEP_PREVIEWS" '预览版 preview-* Release'
+
+          cleanup_group '^v[0-9]' "$KEEP_RELEASES" 'Formal releases'
+          cleanup_group '^preview-' "$KEEP_PREVIEWS" 'Preview releases'
+
+          echo "==> Release cleanup completed"

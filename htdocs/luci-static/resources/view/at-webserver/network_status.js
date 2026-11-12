@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 /*
  * network_status.js - MT5700 实时网络状态与硬件遥测
  * 柔和二次元风 · LuCI 插件界面重构

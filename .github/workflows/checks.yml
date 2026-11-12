@@ -1,19 +1,23 @@
 #
-# 静态检查与单元测试（轻量、零依赖、不参与构建与发布）
+# 静态检查、单元测试与第三方许可证审计（不参与固件构建与发布）
 #
-# 定位：build-openwrt.yml 只在打 v* 标签或手动触发时编译固件，日常提交没有
-#      任何前置校验。本工作流补上「合并前的快速门禁」，全部步骤为纯 Node
-#      脚本，无 npm 依赖、无第三方 action，单次运行通常在 30 秒内完成。
+# 定位：build-openwrt.yml 只在打 v* 标签或手动触发时编译固件。本工作流提供
+#      日常合并前门禁：Node 静态检查、Rust 单测与第三方依赖许可证审计。
+#      不引入 npm 依赖或第三方 GitHub Action；许可证工具使用固定版本的 Cargo CLI。
 #
 # 检查项：
 #   1) tests/static-check.js —— JS 语法（node --check）、JSON 合法性、
 #      行尾 LF、menu.d 中 view 路由是否存在对应视图文件；
 #   2) tests/*-test.js —— 仓库内的零依赖单元测试脚本（逐个执行，任一失败即中止）。
 #      其中 tests/author-attribution-test.js 负责校验作者信息：署名文案
-#      「作者：LianXia233」、链接指向主仓库、target/rel 安全属性、字号与居中、
-#      未扩散到其他视图、AGENTS.md 规则仍在。
+#      「我是挖洋镐的」与 SPDX 标识「GPL-3.0-only」
+#      （以脚本内 AUTHOR_TEXT / AUTHOR_LICENSE 常量为准）、链接指向主仓库、
+#      target/rel 安全属性、字号与居中、窄屏换行、未扩散到其他视图、历史文案
+#      不得回退、AGENTS.md 规则与文案一致。
 #   3) src/rust —— `cargo test --locked`（Rust 后端单测，独立 job 计时）；
-#      CI 原先只跑 Node，Rust 改动无法在合并前被编译校验。
+#      确保 Rust 后端改动也能在合并前通过编译与单元测试。
+#   4) Rust 依赖 —— cargo-deny 检查许可证、来源、通配符与重复版本策略；
+#      cargo-about 生成逐项许可证文本并写入 GitHub Actions Summary。
 #
 # 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
 #      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
@@ -36,17 +40,20 @@
 #      文件名须以 -test.js 结尾，且保持零依赖（不得 require 第三方包，也不得
 #      依赖网络、设备或特定操作系统）。
 #
-#   4) 作者署名约定：`LianXia233` 是本项目指定的作者署名标识。
-#      · 页面 `admin/modem/5g/config`（视图 view/at-webserver/service.js）底部的
-#        署名「作者：LianXia233」及其 GitHub 链接
-#        https://github.com/LianXia233/luci-app-mt5700 属于明确要求保留的页面元素；
-#      · 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写、去重或 AI 自动修改，
-#        都必须保留该署名与链接，不得删除、隐藏、替换或破坏；
-#      · 改动该页面后须自查：署名是否仍在、链接地址是否正确、桌面端与移动端是否
-#        正常显示、是否与表单/按钮/状态提示重叠；
+#   4) 作者署名约定：本项目当前页面署名为「我是挖洋镐的」。
+#      · 页面 admin/modem/5g/config 底部显示当前署名及许可证标识「GPL-3.0-only」，
+#        作者链接指向 https://github.com/qqzwqq/luci-app-mt5700；
+#      · 上游来源为 LianXia233，仓库 https://github.com/LianXia233/luci-app-mt5700，
+#        上游来源信息不得被误写为本仓库当前页面署名；
+#      · 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写或 AI 自动修改，
+#        都必须保留当前署名与链接，不得删除、隐藏、替换或破坏；
+#      · 改动该页面后须自查署名、链接、许可证及桌面端和移动端显示；
 #      · 仅当项目维护者明确授权时方可删除或修改署名，且须在授权范围内最小化改动；
 #      · 本节由 tests/author-attribution-test.js 落实为可执行断言，随检查项 2 在每次
-#        push / PR 时运行，署名缺失或链接变更会直接使 CI 失败。完整条款见 AGENTS.md。
+#        push / PR 时运行；完整条款见 AGENTS.md；
+#      · 文案 / 许可证标识变更须四处同步：视图 DOM、AGENTS.md、checks.yml、
+#        门禁脚本的 AUTHOR_TEXT / AUTHOR_LICENSE 常量；不得为修绿删除断言
+#        或改回旧文案。
 #
 #   5) 项目维护规则：改动视图、样式、菜单或测试之前，先读仓库根目录 AGENTS.md。
 #      其中列有必须保留的页面元素清单与改动后的检查要求；不得以重构、去重、
@@ -62,6 +69,11 @@
 #
 #   8) 权限边界：本工作流只读仓库，不得为其申请 contents: write；打包、发布、
 #      Release 清理等写操作一律留在 build-openwrt.yml，由 tag 或手动触发。
+#
+#   9) 更新日志豁免：纯署名文案、门禁脚本与规则文档（AGENTS.md、checks.yml、
+#      tests/*-test.js）自身的维护，若不发版、不提升包版本、不改变渲染结果与
+#      运行时行为，经维护者要求可不写 CHANGELOG.md；提交说明仍须写清改动与
+#      原因。功能 / 修复 / 行为 / 视觉样式改动不在此列，边界见 AGENTS.md 第一章。
 #
 #   维护提示：本文件属于 GitHub 工作流，推送对它的修改需要具备 workflow 作用域
 #   的凭据；仅有 repo 作用的 token 会被 GitHub 拒绝（refusing to allow an OAuth
@@ -129,3 +141,36 @@ jobs:
       - name: 单元测试（cargo test --locked）
         working-directory: src/rust
         run: cargo test --locked
+
+  license-audit:
+    name: 第三方依赖许可证审计
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 准备 Rust 工具链
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: 安装许可证审计工具
+        run: |
+          cargo install --locked --version 0.20.2 cargo-deny
+          cargo install --locked --version 0.9.3 --features cli cargo-about
+
+      - name: 检查依赖许可证与来源
+        working-directory: src/rust
+        run: |
+          cargo deny check licenses
+          cargo deny check sources
+          cargo deny check bans
+
+      - name: 生成逐项许可证报告
+        working-directory: src/rust
+        run: |
+          cargo about generate about.hbs > "$RUNNER_TEMP/rust-third-party-licenses.md"
+          {
+            echo "## Rust 第三方依赖许可证报告"
+            echo
+            cat "$RUNNER_TEMP/rust-third-party-licenses.md"
+          } >> "$GITHUB_STEP_SUMMARY"

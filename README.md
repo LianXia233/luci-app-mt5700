@@ -6,7 +6,7 @@
 
 **适用于 OpenWrt / ImmortalWrt 平台的 MT5700M 5G 模组全功能控制中心与常驻守护套件**
 
-[![Version](https://img.shields.io/badge/Version-v1.32.8-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v1.32.9-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
 [![OpenWrt CI](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/build-openwrt.yml?branch=main&label=Build%20OpenWrt&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/build-openwrt.yml)
 [![Static Checks](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/checks.yml?branch=main&label=Checks&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/checks.yml)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square&logo=gnu&logoColor=white)](LICENSE)
@@ -455,14 +455,41 @@ MT5700M 模组只有一个主控制 AT 串口（PC UI）。QModem 与本插件�
 
 ### 角色素材与知识产权声明
 
-本项目界面中引用的看板娘角色「薄荷」（Mint）为游戏《异环》（NTE / Neverness to Everness）的登场角色：
-- **版权所有**：苏州幻塔网络科技有限公司（Hotta Studio）/ 完美世界游戏；
-- **使用边界**：相关素材仅以聚合形式用于非商业个人开源项目的界面交互点缀，本项目不主张任何角色形象权利。完整素材指纹与权利说明见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
+本项目界面引用了**两部不同作品**的角色形象，均不在 GPL-3.0-only 授权范围内：
+
+- **英雄区头像**（`mascot.png`）：《异环》（NTE / Neverness to Everness）的「薄荷」（Mint），
+  著作权归苏州幻塔网络科技有限公司（Hotta Studio）/ 完美世界游戏。
+- **PC / 移动端背景**（`bg/character-{pc,mobile}-{dark,light}.webp`）：《蔚蓝档案》（Blue Archive）
+  的「阿罗娜 / 彩奈」（Arona，浅色）与「普拉娜」（Plana，深色），
+  权利标注 `© NEXON Games Co., Ltd. & Yostar, Inc.`（国服含上海悠星网络科技有限公司）。
+
+- **授权状态**：本仓库尚未取得权利人的书面许可，也未留存可核验的官方开放许可；项目开源或非商业使用的描述均不构成权利人的授权。
+- **使用与分发风险**：不能仅凭素材与 GPL 代码同包分发，就断言其属于 GPLv3 所称的独立聚合。该角色素材能否继续公开展示及随固件分发仍未解决；在取得可核验授权前，发布者应考虑从发布包移除或替换为原创 / 明确许可的素材。
+- **完整清单**：逐文件尺寸与 SHA-256 指纹、角色识别依据、图稿性质、授权状态与处置要求见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) 第 2 节。背景图为二次创作插画，绘师与原始出处未在仓库内留存，角色身份识别未经权利人确认。
+
+### 第三方软件依赖与许可证
+
+Rust 后端依赖各自保留上游许可证。正式 APK / IPK 会附带逐项依赖清单及许可证全文，安装后位于 `/usr/share/licenses/luci-app-mt5700/RUST-DEPENDENCIES.md`；Mozilla CA 根证书数据所用的 `CDLA-Permissive-2.0` 完整协议也会一并安装。项目代码的 GPL-3.0-only 不会覆盖第三方依赖或角色素材。更多细节见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
 
 ### 商标与指称使用
 
 `OpenWrt`、`ImmortalWrt`、`LuCI`、`MT5700M` 等商标与标识均归各自权利人所有。本仓库中对相关名称的引用仅用于客观指示运行平台、系统组件及硬件型号，不代表任何形式的官方背书或授权合作。
 
-### 项目维护者
+### 项目版权与维护
 
-**Copyright (C) 2026 [LianXia233](https://github.com/LianXia233/luci-app-mt5700)**. All rights reserved.
+项目代码版权归 **LianXia233** 所有。
+
+```text
+Copyright (C) 2026 LianXia233
+SPDX-License-Identifier: GPL-3.0-only
+```
+
+本项目代码依据 **GNU General Public License v3.0 only** 授权。你可以在许可证规定的范围内使用、研究、修改和再分发本项目；具体权利与义务以根目录 [LICENSE](LICENSE) 的完整条款为准。请勿将本项目的 GPL 授权误解为对第三方角色素材、商标或其他独立资产的授权。
+
+<div align="center">
+
+**LianXia233 · 开发与维护**
+
+[GitHub](https://github.com/LianXia233) · [项目仓库](https://github.com/LianXia233/luci-app-mt5700) · [提交 Issue](https://github.com/LianXia233/luci-app-mt5700/issues)
+
+</div>

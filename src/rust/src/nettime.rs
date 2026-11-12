@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 网络时间源（NTP）：**优先从 NTP 服务器取时间，取不到就退回设备时钟**。
 //!
 //! # 为什么单独成模块

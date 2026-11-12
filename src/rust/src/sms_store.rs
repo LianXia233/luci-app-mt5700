@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 短信本地归档（SMS Archive）。
 //!
 //! # 为什么要在路由器本地另存一份

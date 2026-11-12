@@ -8,6 +8,40 @@
 
 ---
 
+## Unreleased
+
+- **ci(build)** 正式构建前由独立 job 执行 cargo-deny 许可证 / 来源 / 依赖策略门禁，生成 Rust 第三方依赖许可证清单，并注入 APK/IPK 安装树的 `/usr/share/licenses/luci-app-mt5700/RUST-DEPENDENCIES.md`；安装包不再只依赖 Actions Summary 提供许可证文本。
+- **license** 为 `webpki-roots` 的 Mozilla CA 根证书数据补充 `CDLA-Permissive-2.0` 完整协议文本，并随软件包安装；许可证审计白名单与回归测试同步更新。
+- **docs(license)** 修正 README 对角色素材的授权表述，并补齐 PC / 移动端角色背景图的第三方素材清单；未取得书面授权的风险继续明确标记，不把 GPL 或非商业用途误写成素材授权。
+
+## v1.32.9（2026-11-12）
+
+### feat(ui) 服务配置页页脚改为版权署名与 SPDX 许可证标识
+
+> 页脚文案由「作者：LianXia233」调整为「© 2026 LianXia233 · 开发与维护」，
+> 并追加纯文本 `GPL-3.0-only` 标识；链接仍指向 GitHub 主仓库。
+
+- **feat(ui)** `view/at-webserver/service.js` 的 `.mt5700-author` 容器内为
+  1 个主链接 + 1 个许可证 span，沿用 `target="_blank"` + `rel="noopener noreferrer"`；
+  许可证节点复用容器排版、未新增 CSS 规则，故不递增 `MT5700_CSS_VERSION`。
+- **test** `tests/author-attribution-test.js` 断言由 29 项扩到 50 项：文案 / SPDX
+  由常量驱动，新增 © 写法、许可证节点结构、历史文案防回退（按完整字符串字面量
+  比对，避免「© 2026 …」包含旧文案子串时误判）、窄屏换行与 gap、四处文案与 SPDX
+  一致性、`checks.yml` LF 等检查。
+- **docs(agents)** AGENTS.md 补 SPDX 声明、署名实现位置表、「署名文案变更联动清单」
+  与「更新日志豁免」条款；`.github/workflows/checks.yml` 的检查项说明与约定同步。
+
+### ci(release) 每次编译只保留最新一个产物
+
+- **ci(release)** 删除 `keep_releases` / `keep_previews` 两个派发输入，清理策略固定为
+  「每次发布成功后，v* 与 preview-* 两组各自只保留组内最新一个，其余 Release 与
+  资产一律删除」；不再受保留数、latest 标记或创建顺序影响。
+- **ci(release)** 预览通道发布前仍清空全部历史 preview-* Release 与对应 git tag；
+  两条通道互不挤出，`debian-v*` 另一条发布线与全部 git tag 不参与清理。
+- **chore(release)** 版本号 1.32.8 → 1.32.9，按 AGENTS.md「发版版本一致性」同步
+  `Makefile`、`compat.js`、`Cargo.toml`、`Cargo.lock`、README 徽标、文档下载入口、
+  `tests/usage-source-test.js` 基线断言，并新增本版发布说明。
+
 ## v1.32.8（2026-11-08）
 
 ### feat(rust) 后端自报版本改为构建期注入，与 PKG_VERSION 单一来源

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 流量使用量**后台统计**。
 //!
 //! # 为什么放在后端常驻进程里

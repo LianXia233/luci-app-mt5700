@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 'use strict';
 /*
  * LuCI core 兼容垫片。
@@ -59,7 +62,7 @@
 
 /* 插件 UI 整体版本：与 Makefile 的 PKG_VERSION 同步 bump，
  * 作为 resource_version 的插件分量驱动所有 JS 模块的缓存失效。 */
-var MT5700_UI_VERSION = '1.32.8';
+var MT5700_UI_VERSION = '1.32.9';
 
 var AtCompat = (function () {
 	var api = {};
