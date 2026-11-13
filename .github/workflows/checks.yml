@@ -7,7 +7,8 @@
 #
 # 检查项：
 #   1) tests/static-check.js —— JS 语法（node --check）、JSON 合法性、
-#      行尾 LF、menu.d 中 view 路由是否存在对应视图文件；
+#      行尾 LF、menu.d 中 view 路由是否存在对应视图文件、核心脚本
+#      100755 执行权限位（防止 Windows 侧编辑后提交丢失 +x）；
 #   2) tests/*-test.js —— 仓库内的零依赖单元测试脚本（逐个执行，任一失败即中止）。
 #      其中 tests/author-attribution-test.js 负责校验作者信息：署名文案
 #      「© 2026 LianXia233 · 开发与维护」与 SPDX 标识「GPL-3.0-only」
@@ -19,8 +20,9 @@
 #   4) Rust 依赖 —— cargo-deny 检查许可证、来源、通配符与重复版本策略；
 #      cargo-about 生成逐项许可证文本并写入 GitHub Actions Summary。
 #
-# 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
-#      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
+# 不含：tests/mock-modem/ 与 tests/iface/ 的执行（前者依赖 ws 与
+#      node_modules 安装，后者依赖目标设备环境），避免为一次静态检查引入依赖安装；
+#      但 tests/iface/interface-selection.sh 的权限位与 Shebang 仍由 static-check 校验。
 #
 # 本工作流只读仓库，不需要 contents: write；与构建工作流互不干扰。
 #
@@ -33,7 +35,7 @@
 #        for f in tests/*-test.js; do node "$f" || exit 1; done
 #
 #   2) 检查项只增不减：不得为了「修绿」而删除、注释掉、跳过或弱化既有检查步骤
-#      （static-check 的四项检查、测试脚本的逐个执行，含作者信息检查）。确需调整时，
+#      （static-check 的五项检查、测试脚本的逐个执行，含作者信息检查）。确需调整时，
 #      必须在同一提交内说明原因，并保留同等或更强的覆盖范围。
 #
 #   3) 测试脚本自动纳入：新增 tests/*-test.js 会被自动执行，无需修改本文件；
