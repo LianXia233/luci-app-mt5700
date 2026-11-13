@@ -35,9 +35,22 @@ const REQUIRED_EXECUTABLES = [
  */
 const SHEBANG_RE = /^#!\s*\/bin\/(?:sh|bash)(?=\s|$)/;
 
+/* UTF-8 BOM：字符串形态是 U+FEFF，字节形态是 EF BB BF */
+function hasUtf8Bom(input) {
+	if (typeof input === 'string') return input.charCodeAt(0) === 0xFEFF;
+	return input[0] === 0xEF && input[1] === 0xBB && input[2] === 0xBF;
+}
+
+/*
+ * 内核只认文件头两字节的 `#!`，所以首行不能 trim：BOM 与前导空格/Tab 都会
+ * 让 execve 返回 ENOEXEC（hotplug / uci-defaults 由 procd 直接 execve，即失败），
+ * 而 trim 会把它们吃掉造成假阴性。BOM+LF 不含 \r\n，行尾检查也拦不住。
+ * `#! /bin/sh` 这种解释器路径前的空格内核是允许的，故保留 \s*；只去掉行尾 CR。
+ */
 function isValidShebang(content) {
-	const firstLine = String(content).split('\n')[0].trim();
-	return SHEBANG_RE.test(firstLine);
+	const s = String(content);
+	if (hasUtf8Bom(s)) return false;
+	return SHEBANG_RE.test(s.split('\n')[0].replace(/\r$/, ''));
 }
 
 /*
@@ -126,6 +139,7 @@ function collectModeProblems(files) {
 module.exports = {
 	ROOT: ROOT,
 	REQUIRED_EXECUTABLES: REQUIRED_EXECUTABLES,
+	hasUtf8Bom: hasUtf8Bom,
 	isValidShebang: isValidShebang,
 	readIndexModes: readIndexModes,
 	collectModeProblems: collectModeProblems

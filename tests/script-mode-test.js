@@ -11,7 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { REQUIRED_EXECUTABLES, isValidShebang, collectModeProblems } = require('./lib/exec-mode');
+const { REQUIRED_EXECUTABLES, isValidShebang, collectModeProblems, hasUtf8Bom } = require('./lib/exec-mode');
 
 const root = path.join(__dirname, '..');
 
@@ -30,7 +30,7 @@ const modeBad = collectModeProblems();
 assert('核心脚本均可执行（' + REQUIRED_EXECUTABLES.length + ' 个文件为 100755）',
 	modeBad.length === 0, modeBad.join('\n        '));
 
-console.log('\n==> 校验核心脚本 Shebang 与 LF 换行');
+console.log('\n==> 校验核心脚本 Shebang、LF 换行与 BOM');
 REQUIRED_EXECUTABLES.forEach(function (file) {
 	const fullPath = path.join(root, file);
 	assert(file + ' 文件存在', fs.existsSync(fullPath));
@@ -38,8 +38,10 @@ REQUIRED_EXECUTABLES.forEach(function (file) {
 
 	const content = fs.readFileSync(fullPath, 'utf8');
 	assert(file + ' 无 CRLF 换行', content.indexOf('\r\n') === -1);
+	assert(file + ' 无 UTF-8 BOM', !hasUtf8Bom(content));
+	/* 诊断输出用 JSON.stringify：trim 会把 BOM 与前导空白藏起来，看不出失败原因 */
 	assert(file + ' 具有合法 Shebang（#!/bin/sh 或 #!/bin/bash）',
-		isValidShebang(content), '第一行: ' + content.split('\n')[0].trim());
+		isValidShebang(content), '第一行: ' + JSON.stringify(content.split('\n')[0]));
 });
 
 if (failed) {
