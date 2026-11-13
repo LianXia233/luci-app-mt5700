@@ -41,22 +41,42 @@ function isValidShebang(content) {
 }
 
 /*
+ * git ls-files 的统一入口。-z 以 NUL 分隔记录且路径原样输出，不做 C 转义：
+ * 默认 core.quotePath 会把非 ASCII 路径写成 \346\226\207 形式，与清单字面量
+ * 对不上而误报「未跟踪」；按行解析再 trim 还会吃掉路径的尾随空格。
+ * 失败时保留 stderr / error 供调用方告警，不静默吞掉原因。
+ */
+let gitError = null;
+
+function gitLsFiles(args) {
+	const r = spawnSync('git', ['ls-files', '-z'].concat(args), {
+		cwd: ROOT,
+		encoding: 'utf8',
+		stdio: ['ignore', 'pipe', 'pipe']
+	});
+	if (r.error || r.status !== 0 || typeof r.stdout !== 'string') {
+		gitError = (r.error && r.error.message) ||
+			(r.stderr || '').trim() || ('git 退出码 ' + r.status);
+		return null;
+	}
+	gitError = null;
+	return r.stdout.split('\0').filter(Boolean);
+}
+
+/*
  * 读取 git 索引权限位，返回 { 路径: 模式 }；无 git 命令或当前目录不是 git 仓库时
  * 返回 null，由调用方降级处理。用 spawnSync 传参数组，避免 Windows cmd 与 POSIX sh
  * 的引号差异，也避免路径被 shell 二次解释。
  */
 function readIndexModes(files) {
-	const r = spawnSync('git', ['ls-files', '-s'].concat(files), {
-		cwd: ROOT,
-		encoding: 'utf8',
-		stdio: ['ignore', 'pipe', 'ignore']
-	});
-	if (r.status !== 0 || typeof r.stdout !== 'string') return null;
+	const records = gitLsFiles(['-s', '--'].concat(files));
+	if (!records) return null;
 
 	const entries = {};
-	r.stdout.split('\n').filter(Boolean).forEach(function (line) {
-		const m = /^(\d{6})\s+\S+\s+\d+\t(.+)$/.exec(line.trim());
-		if (m) entries[m[2]] = m[1];
+	records.forEach(function (rec) {
+		const m = /^(\d{6}) \S+ (\d+)\t([\s\S]+)$/.exec(rec);
+		/* 只认 stage 0：合并冲突态下同一路径会有 1/2/3 三条，不能任取一条 */
+		if (m && m[2] === '0') entries[m[3]] = m[1];
 	});
 	return entries;
 }
@@ -65,16 +85,23 @@ function readIndexModes(files) {
  * 返回不符合 100755 的条目说明数组（空数组代表全部通过）。
  * 优先信任 git 索引：Windows 工作区没有可执行位概念，只有索引模式能反映真实提交内容；
  * 无 git 时在 POSIX 上退回文件系统模式，Windows 则不做断言（CI 始终有 git）。
+ * 降级必须出声：否则本地 Windows 无 git 时门禁会变成显示 PASS 的空操作。
  */
 function collectModeProblems(files) {
 	const list = files || REQUIRED_EXECUTABLES;
 	const modes = readIndexModes(list);
 	const bad = [];
+	const skipWin = !modes && process.platform === 'win32';
+
+	if (!modes) {
+		console.warn('  warn  未能读取 git 索引（' + gitError + '），权限位校验降级' +
+			(skipWin ? '：Windows 无可执行位概念，本轮不做权限断言' : '：退回文件系统模式'));
+	}
 
 	list.forEach(function (f) {
 		if (modes) {
 			if (!modes[f]) {
-				bad.push(f + ' -> git 未跟踪或文件不存在（git add 后重试）');
+				bad.push(f + ' -> git 索引无 stage 0 条目（未跟踪、已删除或处于合并冲突态）');
 			} else if (modes[f] !== '100755') {
 				bad.push(f + ' -> 权限位为 ' + modes[f] +
 					'（必须为 100755；执行 git update-index --chmod=+x ' + f + ' 修复）');
@@ -87,7 +114,7 @@ function collectModeProblems(files) {
 			bad.push(f + ' -> 文件不存在');
 			return;
 		}
-		if (process.platform === 'win32') return;
+		if (skipWin) return;
 		if ((fs.statSync(full).mode & 0o111) === 0) {
 			bad.push(f + ' -> 文件缺少执行权限位 (+x)');
 		}
