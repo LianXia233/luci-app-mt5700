@@ -13,9 +13,11 @@ const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..', '..');
 
 /*
- * 这些脚本由 procd（init.d）、uci-defaults、hotplug、CI 构建入口或按路径直接调用，
- * 一旦在 git 索引里丢失 100755 就会 Permission denied（曾发生：跨平台补 SPDX 头时
- * 把 on-uplink.sh 提交成 100644）。新增同类脚本时必须登记到这里。
+ * 这些脚本由 procd（init.d）、uci-defaults、hotplug、CI 构建入口、测试 harness
+ * 或按路径直接调用，一旦在 git 索引里丢失 100755 就会 Permission denied
+ * （曾发生：跨平台补 SPDX 头时把 on-uplink.sh 提交成 100644）。
+ * 覆盖仓库全部 100755 入口；执行入口目录内的新增文件由 EXEC_ONLY_DIRS
+ * 反向断言强制登记，不依赖人工自觉。
  */
 const REQUIRED_EXECUTABLES = [
 	'root/etc/init.d/at-webserver',
@@ -24,7 +26,42 @@ const REQUIRED_EXECUTABLES = [
 	'root/etc/hotplug.d/usb/99-at-webserver',
 	'root/usr/libexec/at-webserver/on-uplink.sh',
 	'scripts/sdk-build.sh',
-	'tests/iface/interface-selection.sh'
+	'tests/iface/interface-selection.sh',
+	'tests/mock-modem/e2e-test.js',
+	'tests/mock-modem/mock-modem.js',
+	'tests/mock-modem/mock-uci',
+	'tests/mock-modem/run-e2e.sh',
+	'tests/mock-modem/run-sim.sh'
+];
+
+/*
+ * 清单中不由 /bin/sh|bash 解释的入口：这两个走 #!/usr/bin/env node。
+ * 权限位同样必须保住，但不能用 shell 的 shebang 规则去判它们——否则
+ * 「必须可执行」与「必须是 shell」两个职责耦合成一份清单，非 shell 入口
+ * 就永远无法登记。新增非 shell 可执行文件时在此登记，漏登记会被 shebang
+ * 断言直接判失败（fail loud，不会静默放过）。
+ */
+const NON_SHELL_EXECUTABLES = [
+	'tests/mock-modem/e2e-test.js',
+	'tests/mock-modem/mock-modem.js'
+];
+
+const SHELL_SCRIPTS = REQUIRED_EXECUTABLES.filter(function (f) {
+	return NON_SHELL_EXECUTABLES.indexOf(f) < 0;
+});
+
+/*
+ * 这些目录下的文件按定义就是执行入口（procd init.d / uci-defaults 首次配置 /
+ * hotplug / libexec 调用脚本）。反向断言：目录内每个 git blob 都必须登记进
+ * REQUIRED_EXECUTABLES。本仓库执行位回退已发生多次（init.d 两次、on-uplink.sh
+ * 一次），「新增时记得登记」的注释约束正是历史上失效的那种，因此把登记完整性
+ * 本身也变成断言：新增同类脚本忘记登记会直接失败，而不是静默漏过。
+ */
+const EXEC_ONLY_DIRS = [
+	'root/etc/init.d',
+	'root/etc/uci-defaults',
+	'root/etc/hotplug.d',
+	'root/usr/libexec'
 ];
 
 /*
@@ -136,11 +173,35 @@ function collectModeProblems(files) {
 	return bad;
 }
 
+/*
+ * 反向断言：EXEC_ONLY_DIRS 内所有 git blob 都必须已登记。返回未登记路径说明
+ * 数组（空数组代表全部通过）。无 git 时无法枚举，出声告警后跳过。
+ */
+function collectUnregisteredProblems() {
+	const records = gitLsFiles(['--'].concat(EXEC_ONLY_DIRS));
+	if (!records) {
+		console.warn('  warn  未能枚举执行入口目录（' + gitError + '），登记完整性断言跳过');
+		return [];
+	}
+
+	const bad = [];
+	records.forEach(function (p) {
+		if (REQUIRED_EXECUTABLES.indexOf(p) < 0) {
+			bad.push(p + ' -> 位于必须可执行的目录但未登记到 REQUIRED_EXECUTABLES' +
+				'（登记后才会校验其 100755 与 Shebang）');
+		}
+	});
+	return bad;
+}
+
 module.exports = {
 	ROOT: ROOT,
 	REQUIRED_EXECUTABLES: REQUIRED_EXECUTABLES,
+	SHELL_SCRIPTS: SHELL_SCRIPTS,
+	EXEC_ONLY_DIRS: EXEC_ONLY_DIRS,
 	hasUtf8Bom: hasUtf8Bom,
 	isValidShebang: isValidShebang,
 	readIndexModes: readIndexModes,
-	collectModeProblems: collectModeProblems
+	collectModeProblems: collectModeProblems,
+	collectUnregisteredProblems: collectUnregisteredProblems
 };
