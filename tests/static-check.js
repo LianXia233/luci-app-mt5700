@@ -7,7 +7,8 @@
  *   2) 数据：所有 *.json 可被 JSON.parse（menu.d / acl.d / package.json）；
  *   3) 行尾：文本文件统一 LF（CRLF 会导致 BusyBox ash / procd 侧异常）；
  *   4) 路由：menu.d 中 action.type = "view" 的路径必须存在对应视图文件
- *      （避免改动菜单或重命名视图后出现 404 页面）。
+ *      （避免改动菜单或重命名视图后出现 404 页面）；
+ *   5) 权限：核心服务与调用脚本在 git 树中必须持有 100755 执行权限位。
  *
  * 运行：node tests/static-check.js
  */
@@ -118,6 +119,51 @@ if (fs.existsSync(MENU_DIR)) {
 	});
 }
 check('菜单路由视图存在（' + routes.length + ' 条）', routeBad.length === 0, routeBad.join('\n        '));
+
+/* ---------- 5) 核心脚本执行权限位（100755）---------- */
+const REQUIRED_EXECUTABLES = [
+	'root/etc/init.d/at-webserver',
+	'root/etc/uci-defaults/at-webserver',
+	'root/etc/hotplug.d/iface/99-at-webserver',
+	'root/etc/hotplug.d/usb/99-at-webserver',
+	'root/usr/libexec/at-webserver/on-uplink.sh',
+	'tests/iface/interface-selection.sh'
+];
+
+const modeBad = [];
+try {
+	const out = execSync('git ls-files -s ' + REQUIRED_EXECUTABLES.join(' '), {
+		cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']
+	});
+	const entries = {};
+	out.trim().split('\n').filter(Boolean).forEach(function (line) {
+		const parts = line.trim().split(/\s+/);
+		if (parts.length >= 4) {
+			entries[parts[3]] = parts[0];
+		}
+	});
+	REQUIRED_EXECUTABLES.forEach(function (f) {
+		const mode = entries[f];
+		if (!mode) {
+			modeBad.push(f + ' -> git 未跟踪或文件不存在');
+		} else if (mode !== '100755') {
+			modeBad.push(f + ' -> 权限位为 ' + mode + '（必须为 100755，执行 git update-index --chmod=+x 修复）');
+		}
+	});
+} catch (e) {
+	REQUIRED_EXECUTABLES.forEach(function (f) {
+		const p = path.join(root, f);
+		try {
+			const stat = fs.statSync(p);
+			if (process.platform !== 'win32' && (stat.mode & 0o111) === 0) {
+				modeBad.push(f + ' -> 文件缺少执行权限位 (+x)');
+			}
+		} catch (err) {
+			modeBad.push(f + ' -> 文件不存在');
+		}
+	});
+}
+check('核心脚本执行权限位（' + REQUIRED_EXECUTABLES.length + ' 个文件为 100755）', modeBad.length === 0, modeBad.join('\n        '));
 
 /* ---------- 汇总 ---------- */
 const failed = results.filter(function (r) { return !r.ok; });
