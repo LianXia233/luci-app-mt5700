@@ -8,11 +8,40 @@
 
 ---
 
-## Unreleased
+## v1.32.10（2026-11-14）
 
-- **ci(build)** 正式构建前由独立 job 执行 cargo-deny 许可证 / 来源 / 依赖策略门禁，生成 Rust 第三方依赖许可证清单，并注入 APK/IPK 安装树的 `/usr/share/licenses/luci-app-mt5700/RUST-DEPENDENCIES.md`；安装包不再只依赖 Actions Summary 提供许可证文本。
-- **license** 为 `webpki-roots` 的 Mozilla CA 根证书数据补充 `CDLA-Permissive-2.0` 完整协议文本，并随软件包安装；许可证审计白名单与回归测试同步更新。
-- **docs(license)** 修正 README 对角色素材的授权表述，并补齐 PC / 移动端角色背景图的第三方素材清单；未取得书面授权的风险继续明确标记，不把 GPL 或非商业用途误写成素材授权。
+> 承接 v1.32.9 之后 main 上的权限门禁加固与素材授权文档修正。本版只涉及 CI 门禁、
+> 测试脚本、文档与一个测试脚本的执行位，不改运行时脚本、渲染结果与用户可见行为。
+
+- **test(ci)** 修复权限门禁的 BOM 假阴性：`isValidShebang` 不再 trim 首行，显式拒绝
+  UTF-8 BOM 与前导空白（内核只认文件头两字节 `#!`，BOM+LF 会让 procd 直接
+  execve 返回 ENOEXEC），保留 `#! /bin/sh` 解释器前空格；`static-check` 第 3 项
+  强化为「LF 且无 UTF-8 BOM」，覆盖全部 353 个文本文件；诊断改用 JSON.stringify
+  输出原始首行。
+- **test(ci)** 权限清单与仓库真实可执行面对齐：补齐 `tests/mock-modem/` 下 4 个
+  100755 入口与恢复执行位的 `run-sim.sh`，共 12 项；新增 `EXEC_ONLY_DIRS`
+  反向断言，`init.d` / `uci-defaults` / `hotplug.d` / `libexec` 内每个 git blob
+  都必须登记，新增同类脚本忘记登记会直接失败；`static-check` 第 5 项同步纳入
+  登记完整性，检查项仍为五项。
+- **test(ci)** 拆分「必须 100755」与「必须 /bin/sh|bash」两份清单：`NON_SHELL_EXECUTABLES`
+  标出两个 `#!/usr/bin/env node` 入口，`SHELL_SCRIPTS` 由主清单派生，非 shell
+  可执行文件不再被 shebang 断言误判。
+- **fix(test)** `git ls-files` 改用 `-z` 与 `--` 分隔符，NUL 分隔不再受
+  `core.quotePath` octal 转义影响（中文路径不再误报未跟踪），去掉整行 trim、
+  只认 stage 0 条目；读不到 git 索引时改为 `console.warn` 说明降级范围，
+  Windows 无 git 不再静默显示 PASS。
+- **fix(perms)** 恢复 `tests/mock-modem/run-sim.sh` 与
+  `root/usr/libexec/at-webserver/on-uplink.sh` 的 100755 执行位。
+- **docs(ci)** 修正 `checks.yml` 中 Shebang 校验归属与 BOM 口径，明确
+  `tests/lib/` 辅助模块与 `tests/mock-modem/uci` 符号链接不纳入清单。
+- **docs(assets)** 更正角色背景图权属表述并补齐 PC / 移动端素材清单，
+  未取得书面授权的风险继续明确标记。
+- **chore(release)** 版本号 1.32.9 → 1.32.10，按 AGENTS.md「发版版本一致性」
+  同步 `Makefile`、`compat.js`、`Cargo.toml`、`Cargo.lock`、README 徽标、
+  文档下载入口、`tests/usage-source-test.js` 基线断言，并新增本版发布说明。
+- **note(license)** 原 `## Unreleased` 中登记的 cargo-deny 许可证门禁与
+  `CDLA-Permissive-2.0` 协议文本已随 v1.32.9 发布（见该版发布说明），
+  本版不再重复计入。
 
 ## v1.32.9（2026-11-12）
 

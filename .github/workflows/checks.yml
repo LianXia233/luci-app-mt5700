@@ -7,7 +7,9 @@
 #
 # 检查项：
 #   1) tests/static-check.js —— JS 语法（node --check）、JSON 合法性、
-#      行尾 LF、menu.d 中 view 路由是否存在对应视图文件；
+#      行尾 LF 且无 UTF-8 BOM、menu.d 中 view 路由是否存在对应视图文件、
+#      核心脚本 100755 执行权限位与登记完整性（防止 Windows 侧编辑后提交
+#      丢失 +x，以及新增执行入口脚本忘记登记）；
 #   2) tests/*-test.js —— 仓库内的零依赖单元测试脚本（逐个执行，任一失败即中止）。
 #      其中 tests/author-attribution-test.js 负责校验作者信息：署名文案
 #      「我是挖洋镐的」与 SPDX 标识「GPL-3.0-only」
@@ -19,8 +21,12 @@
 #   4) Rust 依赖 —— cargo-deny 检查许可证、来源、通配符与重复版本策略；
 #      cargo-about 生成逐项许可证文本并写入 GitHub Actions Summary。
 #
-# 不含：tests/mock-modem/ 与 tests/iface/（前者依赖 ws 与 node_modules 安装，
-#      后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
+# 不含：tests/mock-modem/ 与 tests/iface/ 的执行（前者依赖 ws 与
+#      node_modules 安装，后者依赖目标设备环境），避免为一次静态检查引入依赖安装。
+#      但两者的入口脚本仍受门禁约束，且职责分工明确：权限位与登记完整性由
+#      static-check 第 5 项校验；Shebang / LF / BOM 由 tests/script-mode-test.js
+#      校验（static-check 不做 Shebang 判定）。tests/mock-modem/uci 是指向
+#      mock-uci 的符号链接（120000），由 run-e2e.sh 运行时重建，不纳入 100755 清单。
 #
 # 本工作流只读仓库，不需要 contents: write；与构建工作流互不干扰。
 #
@@ -33,12 +39,13 @@
 #        for f in tests/*-test.js; do node "$f" || exit 1; done
 #
 #   2) 检查项只增不减：不得为了「修绿」而删除、注释掉、跳过或弱化既有检查步骤
-#      （static-check 的四项检查、测试脚本的逐个执行，含作者信息检查）。确需调整时，
+#      （static-check 的五项检查、测试脚本的逐个执行，含作者信息检查）。确需调整时，
 #      必须在同一提交内说明原因，并保留同等或更强的覆盖范围。
 #
 #   3) 测试脚本自动纳入：新增 tests/*-test.js 会被自动执行，无需修改本文件；
 #      文件名须以 -test.js 结尾，且保持零依赖（不得 require 第三方包，也不得
-#      依赖网络、设备或特定操作系统）。
+#      依赖网络、设备或特定操作系统）。tests/lib/ 存放被多个门禁共用的零依赖
+#      辅助模块（如 exec-mode.js），不匹配 *-test.js，不会被直接执行。
 #
 #   4) 作者署名约定：本项目当前页面署名为「我是挖洋镐的」。
 #      · 页面 admin/modem/5g/config 底部显示当前署名及许可证标识「GPL-3.0-only」，
@@ -59,9 +66,11 @@
 #      其中列有必须保留的页面元素清单与改动后的检查要求；不得以重构、去重、
 #      风格统一或自动化清理为由移除清单内的元素。
 #
-#   6) 行尾强制 LF：Shell、Python、配置与本工作流一律 LF。CRLF 会导致 BusyBox
-#      ash 与 procd 侧脚本失败；仓库已用 .gitattributes 强制 eol=lf，static-check
-#      的行尾校验会在 CI 中兜底拦截。
+#   6) 行尾强制 LF、禁止 UTF-8 BOM：Shell、Python、配置与本工作流一律 LF。
+#      CRLF 会导致 BusyBox ash 与 procd 侧脚本失败；BOM 会顶掉文件头两字节的
+#      `#!`，使 execve 返回 ENOEXEC（hotplug / uci-defaults 直接 execve 即失败）。
+#      仓库已用 .gitattributes 强制 eol=lf，static-check 第 3 项对全部文本文件
+#      兜底拦截 CRLF 与 BOM。
 #
 #   7) 依赖与时长：不引入 npm 依赖与第三方 action；静态与 Node 门禁控制在
 #      1 分钟内，Rust job 独立计时（15 分钟超时）；新增检查优先写成 tests/
@@ -110,7 +119,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 静态检查（语法 / JSON / 行尾 / 路由）
+      - name: 静态检查（语法 / JSON / 行尾与 BOM / 路由 / 权限位）
         run: node tests/static-check.js
 
       - name: 单元测试（零依赖脚本）

@@ -5,9 +5,12 @@
  * 覆盖：
  *   1) 语法：所有 *.js 通过 `node --check`（视图、公共库、脚本、测试）；
  *   2) 数据：所有 *.json 可被 JSON.parse（menu.d / acl.d / package.json）；
- *   3) 行尾：文本文件统一 LF（CRLF 会导致 BusyBox ash / procd 侧异常）；
+ *   3) 行尾：文本文件统一 LF 且无 UTF-8 BOM（CRLF 会让 BusyBox ash / procd 侧
+ *      异常；BOM 会顶掉文件头两字节的 `#!`，使 execve 返回 ENOEXEC）；
  *   4) 路由：menu.d 中 action.type = "view" 的路径必须存在对应视图文件
- *      （避免改动菜单或重命名视图后出现 404 页面）。
+ *      （避免改动菜单或重命名视图后出现 404 页面）；
+ *   5) 权限：核心服务与调用脚本在 git 树中必须持有 100755 执行权限位；
+ *      且 init.d / uci-defaults / hotplug.d / libexec 内不得有未登记的新脚本。
  *
  * 运行：node tests/static-check.js
  */
@@ -15,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync, execSync } = require('child_process');
+const { REQUIRED_EXECUTABLES, collectModeProblems, collectUnregisteredProblems, hasUtf8Bom } = require('./lib/exec-mode');
 
 const root = path.join(__dirname, '..');
 
@@ -85,11 +89,16 @@ jsonFiles.forEach(function (f) {
 });
 check('JSON 合法性（' + jsonFiles.length + ' 个文件）', jsonBad.length === 0, jsonBad.join('\n        '));
 
-/* ---------- 3) 行尾 LF ---------- */
-const crlfBad = textFiles.filter(function (f) {
-	return fs.readFileSync(path.join(root, f)).indexOf('\r\n') >= 0;
+/* ---------- 3) 行尾 LF 与 UTF-8 BOM ---------- */
+const eolBad = [];
+textFiles.forEach(function (f) {
+	const buf = fs.readFileSync(path.join(root, f));
+	const problems = [];
+	if (buf.indexOf('\r\n') >= 0) problems.push('CRLF');
+	if (hasUtf8Bom(buf)) problems.push('UTF-8 BOM');
+	if (problems.length) eolBad.push(f + '（' + problems.join(' + ') + '）');
 });
-check('行尾统一 LF（' + textFiles.length + ' 个文本文件）', crlfBad.length === 0, crlfBad.join(', '));
+check('行尾统一 LF 且无 UTF-8 BOM（' + textFiles.length + ' 个文本文件）', eolBad.length === 0, eolBad.join(', '));
 
 /* ---------- 4) 菜单路由 → 视图文件 ---------- */
 const MENU_DIR = path.join(root, 'root', 'usr', 'share', 'luci', 'menu.d');
@@ -118,6 +127,11 @@ if (fs.existsSync(MENU_DIR)) {
 	});
 }
 check('菜单路由视图存在（' + routes.length + ' 条）', routeBad.length === 0, routeBad.join('\n        '));
+
+/* ---------- 5) 核心脚本执行权限位（100755）与登记完整性 ---------- */
+const modeBad = collectModeProblems().concat(collectUnregisteredProblems());
+check('核心脚本执行权限位与登记完整性（' + REQUIRED_EXECUTABLES.length + ' 个文件为 100755）',
+	modeBad.length === 0, modeBad.join('\n        '));
 
 /* ---------- 汇总 ---------- */
 const failed = results.filter(function (r) { return !r.ok; });
