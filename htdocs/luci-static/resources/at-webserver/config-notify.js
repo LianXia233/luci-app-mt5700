@@ -21,10 +21,10 @@ var MtConfigNotify = (function () {
 
 	/* 四种类型门控的元数据：UCI 前缀、标题、说明 */
 	var GATE_KINDS = [
-		{ key: 'sms', label: '新短信', prefix: 'notify_limit_sms' },
-		{ key: 'call', label: '来电', prefix: 'notify_limit_call' },
-		{ key: 'memory', label: '短信存储满', prefix: 'notify_limit_memory' },
-		{ key: 'signal', label: '信号变化', prefix: 'notify_limit_signal' }
+		{ key: 'sms', label: '新短信', prefix: 'notify_limit_sms', defAction: 'defer' },
+		{ key: 'call', label: '来电', prefix: 'notify_limit_call', defAction: 'defer' },
+		{ key: 'memory', label: '短信存储满', prefix: 'notify_limit_memory', defAction: 'drop' },
+		{ key: 'signal', label: '信号变化', prefix: 'notify_limit_signal', defAction: 'drop' }
 	];
 
 	function build(bodyEl, ctx) {
@@ -213,7 +213,9 @@ var MtConfigNotify = (function () {
 		gateBox.appendChild(E('div', { 'class': 'mt5700-cfg-title' }, '分类型推送频率与时段（独立控制）'));
 		gateBox.appendChild(E('div', { 'class': 'mt5700-hint' },
 			'四类事件各有独立的频率与时段限制，互不影响。频率：同类两条之间的最小间隔（0=不限）；'
-			+ '时段：仅在该时段内投递，起点>终点可跨零点，窗外可选延迟补发或丢弃。默认全关，与改造前行为一致。'));
+			+ '时段：仅在该时段内投递，起点>终点可跨零点。窗外策略默认按类型区分：信号/存储满默认丢弃'
+			+ '（只推送当前时段内产生的消息，不补发陈旧事件），短信/来电默认延迟补发。'
+			+ '开关默认全关，与改造前行为一致。'));
 		var gateCtrls = {};
 		GATE_KINDS.forEach(function (g) {
 			var sub = E('div', { 'class': 'mt5700-cfg-box' });
@@ -228,7 +230,7 @@ var MtConfigNotify = (function () {
 			var wAction = Mt5700.select([
 				{ label: '延迟到窗口开启后补发（同类只留最新一条）', value: 'defer' },
 				{ label: '直接丢弃窗外事件', value: 'drop' }
-			], 'defer');
+			], g.defAction);
 			gg.appendChild(Mt5700.formGroup('启用频率限制', rateOn.wrap));
 			gg.appendChild(Mt5700.formGroup('最小间隔（分钟，0=不限）', minInt, '范围 0-10080'));
 			gg.appendChild(Mt5700.formGroup('启用推送时段', winOn.wrap));
@@ -237,7 +239,10 @@ var MtConfigNotify = (function () {
 			var wrg = Mt5700.formGroup('允许时段', wr, '起点>终点=跨零点；两端相同=全天');
 			wrg.classList.add('mt5700-cfg-span2');
 			gg.appendChild(wrg);
-			gg.appendChild(Mt5700.formGroup('窗外策略', wAction));
+			gg.appendChild(Mt5700.formGroup('窗外策略', wAction,
+				g.defAction === 'drop'
+					? '默认丢弃：只推送当前时段内产生的消息，不补发陈旧事件'
+					: '默认延迟补发；短信/来电为实时事件，时段开关默认关闭不受影响'));
 			sub.appendChild(gg);
 			gateBox.appendChild(sub);
 			gateCtrls[g.key] = { rateOn: rateOn.input, minInt: minInt, winOn: winOn.input, wStart: wStart, wEnd: wEnd, wAction: wAction };
@@ -431,7 +436,8 @@ var MtConfigNotify = (function () {
 				c.winOn.checked = C.get(p + '_window_enabled', '0') === '1';
 				C.setTimeInput(c.wStart, C.get(p + '_window_start', '00:00'), '00:00');
 				C.setTimeInput(c.wEnd, C.get(p + '_window_end', '23:59'), '23:59');
-				c.wAction.value = C.get(p + '_window_action', 'defer') === 'drop' ? 'drop' : 'defer';
+				var wa = C.get(p + '_window_action', g.defAction);
+				c.wAction.value = (wa === 'defer' || wa === 'drop') ? wa : g.defAction;
 			});
 			syncNotifyState();
 			baseline = snap();

@@ -166,7 +166,9 @@ option dns_exclusive '1'
 	#   *_window_enabled  1=启用该类推送时段，0=全天可推（默认 0）
 	#   *_window_start    允许时段起点 HH:MM（含）
 	#   *_window_end      允许时段终点 HH:MM（含）；起点>终点=跨零点（如 22:00→06:00），相等=全天
-	#   *_window_action   窗外策略：defer=延迟到窗口开启后补发（同类只留最新一条）/ drop=直接丢弃
+	#   *_window_action   窗外策略：defer=延迟到窗口开启后补发（同类只留最新一条）/ drop=直接丢弃。
+	#                     默认按类型区分：短信/来电 defer（实时事件不受影响）；
+	#                     信号/存储满 drop——开启时段后只推送当前时段内产生的消息，不补发陈旧事件
 	# 四类前缀（统一 notify_limit_*，与既有键完全隔离）：
 	#   notify_limit_sms / notify_limit_call / notify_limit_memory / notify_limit_signal。
 	# 时区：一律用本机系统时区（见上方「时间口径」），时刻取自 NTP 同步后的系统时钟。
@@ -189,13 +191,13 @@ option dns_exclusive '1'
 	option notify_limit_memory_window_enabled '0'
 	option notify_limit_memory_window_start '00:00'
 	option notify_limit_memory_window_end '23:59'
-	option notify_limit_memory_window_action 'defer'
+	option notify_limit_memory_window_action 'drop'
 	option notify_limit_signal_rate_enabled '0'
 	option notify_limit_signal_min_interval '60'
 	option notify_limit_signal_window_enabled '0'
 	option notify_limit_signal_window_start '00:00'
 	option notify_limit_signal_window_end '23:59'
-	option notify_limit_signal_window_action 'defer'
+	option notify_limit_signal_window_action 'drop'
 
 	# 自定义推送文案。留空 = 使用内置默认文案（升级后未被改动的项仍跟随版本更新）。
 	# UCI 的 option 值是单行的，多行文案统一写成 \n 转义，LuCI 页面会自动转换；
