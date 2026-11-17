@@ -97,19 +97,23 @@ impl NotifyGate {
         i64::from(n.hour()) * 60 + i64::from(n.minute())
     }
 
-    /// 裁决一条事件是否可以投递，并**原子地**为放行事件预约发送槽位。
+    /// 裁决一条事件是否可以投递，并**原子地**完成放行预约或延迟入队。
     ///
     /// 关键（Codex P2）：频率检查与 `last_sent` 刷新必须在**同一把锁**内完成。
     /// 如果先检查放行、释放锁、再在别处刷新，那么并发到达的同类事件会读到同一个
     /// 旧基线、双双通过闸门，在最小间隔内连发两条。把「检查 + 预约」合成一步，
     /// 后到者看到的基线已被前者推进，自然被压住。
     ///
-    /// 时段判定在前且不加状态：窗外只决定 defer / drop，绝不触碰频率基线，避免
-    /// 两类限制互相污染。Pass 时顺带清掉该类的延迟副本，防止同一事件既实时发出、
-    /// 又在窗口补发时重复一遍。
-    fn admit(&self, kind: NotifyKind, now: Instant, minute: i64) -> GateDecision {
+    /// 同理，Deferred 的入队也必须在这把锁内完成：若裁决与入队拆成两步，
+    /// 窗口分钟边界处并发的同类 Pass 清掉副本后，旧事件的迟到入队会把陈旧
+    /// 副本写回队列，窗口补发时再发一遍；并发两条 Deferred 也可能旧覆新。
+    ///
+    /// 时段判定不触碰频率基线，避免两类限制互相污染。Pass 时顺带清掉该类的
+    /// 延迟副本，防止同一事件既实时发出、又在窗口补发时重复一遍。
+    fn admit(&self, kind: NotifyKind, now: Instant, minute: i64, msg: &Notification) -> GateDecision {
         let i = kind.index();
         let limit = &self.limits[i];
+        let mut states = self.states.lock().unwrap();
 
         // 先判时段：窗外直接决定 defer / drop，不预留频率基线。
         if limit.window_enabled
@@ -117,30 +121,25 @@ impl NotifyGate {
         {
             return match limit.out_of_window {
                 crate::config::OutOfWindowAction::Drop => GateDecision::Dropped,
-                crate::config::OutOfWindowAction::Defer => GateDecision::Deferred,
+                crate::config::OutOfWindowAction::Defer => {
+                    // 同类只保留最新一条；入队与裁决同锁，杜绝旧覆新/陈旧写回。
+                    states[i].pending = Some(msg.clone());
+                    GateDecision::Deferred
+                }
             };
         }
 
         // 再判频率 + 原子预约：整段在一把锁内，杜绝并发下双双通过。
         // 被压住（Held）时不刷新 last_sent —— 与生产者侧「限频不刷新基线」语义一致，
         // 这样紧凑到达的事件不会把窗口无限往后推。
+        if limit.rate_enabled && !limit.min_interval.is_zero()
+            && min_interval_hold(states[i].last_sent, now, limit.min_interval).is_some()
         {
-            let mut states = self.states.lock().unwrap();
-            if limit.rate_enabled && !limit.min_interval.is_zero()
-                && min_interval_hold(states[i].last_sent, now, limit.min_interval).is_some()
-            {
-                return GateDecision::Held;
-            }
-            states[i].last_sent = Some(now);
-            states[i].pending = None;
+            return GateDecision::Held;
         }
+        states[i].last_sent = Some(now);
+        states[i].pending = None;
         GateDecision::Pass
-    }
-
-    /// 暂存一条窗外事件（defer）。同类只保留最新一条。
-    fn defer(&self, kind: NotifyKind, msg: Notification) {
-        let mut states = self.states.lock().unwrap();
-        states[kind.index()].pending = Some(msg);
     }
 
     /// 对某一类的待补发事件做「取出 + 裁决 + 预约」，整段在**同一把锁**内完成。
@@ -413,7 +412,7 @@ impl Notifier {
     fn deliver(&self, msg: &Notification) {
         let now = Instant::now();
         let minute = NotifyGate::minute_of_day();
-        match self.gate.admit(msg.kind, now, minute) {
+        match self.gate.admit(msg.kind, now, minute, msg) {
             GateDecision::Pass => self.send_realtime(msg),
             GateDecision::Held => {
                 log_debug!(
@@ -426,9 +425,9 @@ impl Notifier {
                     "推送门控：{:?} 类当前不在允许时段，延迟到窗口开启后补发",
                     msg.kind
                 );
-                self.gate.defer(msg.kind, msg.clone());
-                // Codex P2：defer 后必须唤醒 run() 的扫描分支，否则 sweep 定时器
-                // 在 has_deferred 为 false 时不会挂起，窗口到了也永远不补发。
+                // 入队已在 admit 的临界区内完成。这里只负责唤醒 run() 的扫描
+                // 分支，否则 sweep 定时器在 has_deferred 为 false 时不会挂起，
+                // 窗口到了也永远不补发（Codex P2）。
                 self.wake.notify_one();
             }
             GateDecision::Dropped => {
@@ -714,15 +713,23 @@ impl Notifier {
             return Err("没有已启用的推送通道（企业微信 WebHook 或 QQ 机器人）".into());
         }
 
-        self.notify(Notification {
+        // 测试推送**绕过频率/时段门控**直发：这是用户显式验证通道的动作，
+        // 若走 notify()→deliver()，开启限频/时段后测试会被静默压住或延迟，
+        // 而 RPC 仍返回 Ok，界面显示「已发送」手机却毫无动静 —— 假成功。
+        let msg = Notification {
             sender,
             content,
             kind,
             memory_full: false,
             qq_card: None,
             time: now_string(),
-        })
-        .await;
+        };
+        if let Some(path) = &self.log_file {
+            if let Err(e) = append_log(path, &msg, self.log_file_max_bytes).await {
+                log_error!("写入通知日志失败: {}", e);
+            }
+        }
+        self.send_realtime(&msg);
         Ok(())
     }
 
@@ -838,12 +845,21 @@ async fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> Result<()
 /// `body` 的第一行不是 `键：值` 时视为标题单独成行，其余行作为正文。
 fn split_wechat_kv(line: &str) -> Option<(&str, &str)> {
     for sep in ["：", ": ", ":"] {
-        if let Some(pos) = line.find(sep) {
+        let mut from = 0;
+        while let Some(rel) = line[from..].find(sep) {
+            let pos = from + rel;
+            // 裸冒号兜底不能把 URL 的 scheme 冒号（https://…）当键值分隔，
+            // 否则链接行会被拆成「**https**：//…」的坏排版。
+            if sep == ":" && line[pos..].starts_with("://") {
+                from = pos + 1;
+                continue;
+            }
             let k = line[..pos].trim();
             let v = line[pos + sep.len()..].trim();
             if !k.is_empty() && !v.is_empty() {
                 return Some((k, v));
             }
+            break;
         }
     }
     None
@@ -1156,6 +1172,14 @@ mod tests {
     use super::*;
     use crate::config::QqNotifyConfig;
 
+    impl NotifyGate {
+        /// 测试辅助：直接暂存一条窗外事件（生产路径的入队已并入 `admit`）。
+        fn defer(&self, kind: NotifyKind, msg: Notification) {
+            let mut states = self.states.lock().unwrap();
+            states[kind.index()].pending = Some(msg);
+        }
+    }
+
     fn sms(sender: &str, content: &str) -> Notification {
         Notification {
             sender: sender.into(),
@@ -1178,7 +1202,7 @@ mod tests {
         let now = Instant::now();
         for i in 0..4 {
             let kind = match i { 0 => NotifyKind::Sms, 1 => NotifyKind::Call, 2 => NotifyKind::MemoryFull, _ => NotifyKind::Signal };
-            assert_eq!(gate.admit(kind, now, 12 * 60), GateDecision::Pass);
+            assert_eq!(gate.admit(kind, now, 12 * 60, &sms("10086", "t")), GateDecision::Pass);
         }
     }
 
@@ -1194,13 +1218,13 @@ mod tests {
         let gate = NotifyGate::new(limits);
         let base = Instant::now();
         // admit 放行即在临界区内预留基线 base（并发安全的 check+reserve）
-        assert_eq!(gate.admit(NotifyKind::Sms, base, 12 * 60), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, base, 12 * 60, &sms("10086", "t")), GateDecision::Pass);
         // 59 分钟后同类被压住
-        assert_eq!(gate.admit(NotifyKind::Sms, base + Duration::from_secs(59 * 60), 13 * 60), GateDecision::Held);
+        assert_eq!(gate.admit(NotifyKind::Sms, base + Duration::from_secs(59 * 60), 13 * 60, &sms("10086", "t")), GateDecision::Held);
         // 来电类没有限频，照常放行
-        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(59 * 60), 13 * 60), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(59 * 60), 13 * 60, &sms("10086", "t")), GateDecision::Pass);
         // 满 60 分钟后同类恢复放行
-        assert_eq!(gate.admit(NotifyKind::Sms, base + Duration::from_secs(60 * 60), 13 * 60), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, base + Duration::from_secs(60 * 60), 13 * 60, &sms("10086", "t")), GateDecision::Pass);
     }
 
     /// 被频率压住时 last_sent 不刷新：基线不被污染，到点立即放行。
@@ -1215,11 +1239,11 @@ mod tests {
         let gate = NotifyGate::new(limits);
         let base = Instant::now();
         // 首次放行预留基线 base
-        assert_eq!(gate.admit(NotifyKind::Call, base, 0), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Call, base, 0, &sms("10086", "t")), GateDecision::Pass);
         // 被压住：admit 不刷新基线
-        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(600), 1 * 60), GateDecision::Held);
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(600), 1 * 60, &sms("10086", "t")), GateDecision::Held);
         // 基线仍是 base，因此 t=3601 时放行
-        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(3601), 2 * 60), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(3601), 2 * 60, &sms("10086", "t")), GateDecision::Pass);
     }
 
     /// 时段（跨午夜）内放行、窗外按 defer / drop 分流。
@@ -1243,11 +1267,11 @@ mod tests {
         let gate = NotifyGate::new(limits);
         let now = Instant::now();
         // 23:30 / 02:00 在段内
-        assert_eq!(gate.admit(NotifyKind::Sms, now, 23 * 60 + 30), GateDecision::Pass);
-        assert_eq!(gate.admit(NotifyKind::Sms, now, 2 * 60), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 23 * 60 + 30, &sms("10086", "t")), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 2 * 60, &sms("10086", "t")), GateDecision::Pass);
         // 12:00 窗外 → defer / drop
-        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60), GateDecision::Deferred);
-        assert_eq!(gate.admit(NotifyKind::Call, now, 12 * 60), GateDecision::Dropped);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("10086", "t")), GateDecision::Deferred);
+        assert_eq!(gate.admit(NotifyKind::Call, now, 12 * 60, &sms("10086", "t")), GateDecision::Dropped);
     }
 
     /// 延迟队列按类型去重：同类只保留最新一条，窗口开启后一次性补发。
@@ -1281,7 +1305,7 @@ mod tests {
         gate.defer(NotifyKind::Sms, sms("A", "deferred"));
 
         // 实时事件先放行：admit 在锁内清掉延迟副本，补发侧必须拿不到任何东西。
-        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("10086", "t")), GateDecision::Pass);
         assert!(
             gate.admit_due(NotifyKind::Sms, now, 12 * 60).is_none(),
             "实时事件已投递并清掉副本，补发不得再发出陈旧副本"
@@ -1317,7 +1341,7 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 let now = Instant::now();
                 barrier.wait();
-                if gate.admit(NotifyKind::Sms, now, 12 * 60) == GateDecision::Pass {
+                if gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("10086", "t")) == GateDecision::Pass {
                     passed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
             }));
@@ -2022,5 +2046,136 @@ mod tests {
             .await
             .expect_err("信号不应支持类型化测试推送");
         assert!(err.contains("不支持测试推送"), "错误应说明类型不受支持: {err}");
+    }
+
+    /// 全 PR 审查回归：Deferred 的入队必须与裁决同锁。
+    /// 旧实现 admit 返回 Deferred 后在锁外 defer：窗口分钟边界处并发的
+    /// 同类 Pass 清掉副本后，旧事件的迟到入队会把陈旧副本写回队列。
+    #[test]
+    fn gate_defer_is_atomic_with_live_pass() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            out_of_window: crate::config::OutOfWindowAction::Defer,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let now = Instant::now();
+        // 窗外：裁决即入队（同一临界区）
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("A", "old")), GateDecision::Deferred);
+        assert!(gate.has_pending());
+        // 窗口开启后实时事件放行：副本在同锁内被清掉，补发拿不到任何东西
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 23 * 60, &sms("B", "new")), GateDecision::Pass);
+        assert!(gate.admit_due(NotifyKind::Sms, now, 23 * 60).is_none());
+        // 并发两条 Deferred：同锁入队保证保留最新一条，不会旧覆新
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("C", "older")), GateDecision::Deferred);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("D", "newer")), GateDecision::Deferred);
+        let (_, msg) = gate.admit_due(NotifyKind::Sms, now, 23 * 60).unwrap();
+        assert_eq!(msg.content, "newer");
+    }
+
+    /// admit_due 的 Held / Dropped 分支：副本取出后丢弃，不再排队。
+    #[test]
+    fn gate_admit_due_held_and_dropped() {
+        // Held：窗口已开但频率未满足
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(3600),
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let base = Instant::now();
+        assert_eq!(gate.admit(NotifyKind::Sms, base, 12 * 60, &sms("A", "live")), GateDecision::Pass);
+        gate.defer(NotifyKind::Sms, sms("B", "deferred"));
+        let (decision, _) = gate.admit_due(NotifyKind::Sms, base + Duration::from_secs(60), 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Held);
+        assert!(!gate.has_pending(), "Held 的副本应被丢弃而非留队");
+
+        // Dropped：仍在窗外且策略已改为 drop
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Call.index()] = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            out_of_window: crate::config::OutOfWindowAction::Drop,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        gate.defer(NotifyKind::Call, sms("C", "stale"));
+        let (decision, _) = gate.admit_due(NotifyKind::Call, Instant::now(), 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Dropped);
+        assert!(!gate.has_pending());
+        // 窗外 + defer 策略：原地保留（None），等下轮
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Signal.index()] = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            out_of_window: crate::config::OutOfWindowAction::Defer,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        gate.defer(NotifyKind::Signal, sms("D", "wait"));
+        assert!(gate.admit_due(NotifyKind::Signal, Instant::now(), 12 * 60).is_none());
+        assert!(gate.has_pending());
+    }
+
+    /// rate_enabled 但 min_interval=0：等效不限频，照常放行。
+    #[test]
+    fn gate_rate_enabled_zero_interval_passes() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::ZERO,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let now = Instant::now();
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("A", "1")), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("A", "2")), GateDecision::Pass);
+    }
+
+    /// 裸 URL 行不能被裸冒号兜底拆成「**https**：//…」的坏键值排版。
+    #[test]
+    fn wechat_markdown_keeps_bare_url_intact() {
+        assert!(split_wechat_kv("https://example.com/a").is_none());
+        assert!(split_wechat_kv("http://x.cn").is_none());
+        // 正常键值与「键: URL」仍要识别
+        assert_eq!(split_wechat_kv("链接: https://x.cn"), Some(("链接", "https://x.cn")));
+        assert_eq!(split_wechat_kv("号码：10086"), Some(("号码", "10086")));
+        let md = build_wechat_markdown("https://example.com/a", "", false);
+        assert!(md.contains("https://example.com/a"), "URL 应原样保留: {md}");
+        assert!(!md.contains("**https**"), "不得把 scheme 拆成键名: {md}");
+    }
+
+    /// 全 PR 审查回归：测试推送绕过频率门控直发。
+    /// 旧实现走 notify()→deliver()：开启限频后第二次测试被 Held 静默吞掉，
+    /// RPC 仍返回 Ok，界面显示「已发送」手机却毫无动静（假成功）。
+    #[tokio::test]
+    async fn test_event_bypasses_rate_gate() {
+        let (port1, server1) = one_shot_webhook().await;
+        let mut cfg = webhook_only_cfg(port1);
+        cfg.types.sms = true;
+        cfg.limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(3600),
+            ..Default::default()
+        };
+        let (mut notifier, _rx) = Notifier::new(cfg);
+        notifier.notify_test_event(NotifyKind::Sms).await.expect("第一次测试应成功");
+        let req1 = tokio::time::timeout(Duration::from_secs(5), server1).await
+            .expect("第一次测试应到达 WebHook").expect("任务应完成");
+        assert!(req1.contains("测试消息"), "应发送测试内容");
+
+        // 第二次测试指向新服务器：若被限频压住，5 秒内不会有任何请求
+        let (port2, server2) = one_shot_webhook().await;
+        notifier.cfg.wechat_webhook = format!("http://127.0.0.1:{port2}/hook");
+        notifier.notify_test_event(NotifyKind::Sms).await.expect("第二次测试应成功");
+        let req2 = tokio::time::timeout(Duration::from_secs(5), server2).await
+            .expect("限频开启时测试推送仍必须直发（绕过门控）").expect("任务应完成");
+        assert!(req2.contains("测试消息"));
     }
 }

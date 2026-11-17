@@ -853,7 +853,8 @@ fn type_limit_from(values: &UciReader, prefix: &str) -> TypePushLimit {
         }
     };
 
-    // 时段：格式非法时回落「全天」，与巡检时段口径一致（笔误不至于让推送彻底静默）。
+    // 时段：格式非法时逐字段回落默认值（00:00 / 23:59），双端均非法时等效全天，
+    // 与巡检时段口径一致（笔误不至于让推送彻底静默；单端非法只影响该端）。
     let start_key = format!("{prefix}_window_start");
     let end_key = format!("{prefix}_window_end");
     let raw_start = values.str(&start_key, &d.window_start);

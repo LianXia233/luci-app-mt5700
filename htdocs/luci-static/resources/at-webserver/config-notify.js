@@ -28,6 +28,7 @@ var MtConfigNotify = (function () {
 	];
 
 	function build(bodyEl, ctx) {
+		C.ensureFormStyles();
 		var baseline = {};
 		var all = {}; // 所有需要 dirty 比对的控件
 
@@ -108,7 +109,8 @@ var MtConfigNotify = (function () {
 		all.qqFormat = qqFormat; all.qqRate = qqRate; all.qqKb = qqKb.input;
 		all.qqKbUrl = qqKbUrl; all.qqMenu = qqMenu.input;
 
-		var QQ_RATE_TAIL = '。QQ 平台频控：群 30~60 条/分钟、单聊 20 条/分钟，超限的消息会被平台直接丢弃。';
+		var QQ_RATE_TAIL = '。QQ 平台频控：群 30~60 条/分钟、单聊 20 条/分钟，超限的消息会被平台直接丢弃。'
+			+ '此节流同时约束企业微信通道；短信/来电为实时事件，豁免节流立即直发。';
 		function qqRateText(n) {
 			if (isNaN(n) || n < 0) return '当前值为空或非法，保存后按默认 10 条/分钟处理' + QQ_RATE_TAIL;
 			if (n === 0) return '不节流：按事件发生顺序立即发送' + QQ_RATE_TAIL;
@@ -135,6 +137,8 @@ var MtConfigNotify = (function () {
 		timerQuick.addEventListener('change', function () {
 			if (timerQuick.value) timerInput.value = timerQuick.value;
 		});
+		// 与重构前 timerSync 一致：手动输入同步快捷下拉，避免脏快照假阳性
+		timerInput.addEventListener('input', function () { timerQuick.value = timerInput.value; });
 		var timerGrid = E('div', { 'class': 'mt5700-cfg-grid' });
 		timerGrid.appendChild(Mt5700.formGroup('定时推送间隔（分钟）', timerInput,
 			'范围 1-1440，默认 10。到点主动推送当前实际情况，与下面信号巡检是两条独立周期线。'));
@@ -192,7 +196,12 @@ var MtConfigNotify = (function () {
 			if (rateQuick.value) rateMin.value = rateQuick.value;
 			rateHuman.textContent = C.rateText(rateMin.value);
 		});
-		rateMin.addEventListener('input', function () { rateHuman.textContent = C.rateText(rateMin.value); });
+		rateMin.addEventListener('input', function () {
+			// 与重构前 rateSync 一致：手动输入同步快捷下拉，
+			// 否则 rateQuick 停留在旧选项，isDirty 快照出现假阳性。
+			rateQuick.value = rateMin.value;
+			rateHuman.textContent = C.rateText(rateMin.value);
+		});
 		rateBox.appendChild(Mt5700.formGroup('信号类最小间隔（分钟）', rateMin,
 			'范围 0-10080，默认 60；0=不限频。只约束信号类巡检与 URC 上报；短信来电与定时推送不受限。'));
 		rateBox.appendChild(Mt5700.formGroup('快捷间隔', rateQuick, rateHuman));
@@ -374,7 +383,13 @@ var MtConfigNotify = (function () {
 			notifyMem.input.checked = C.get('notify_memory_full', '1') === '1';
 			wechat.input.checked = C.get('wechat_enabled', '0') === '1';
 			webhook.value = String(C.get('wechat_webhook', ''));
-			wechatFmt.value = String(C.get('wechat_msg_format', 'text'));
+			// 后端接受的别名（md / v2 等，手改 UCI 场景）归一化到下拉选项，
+			// 否则 select 落空、保存时静默回落 text。
+			var fmt = String(C.get('wechat_msg_format', 'text'));
+			if (fmt === 'md') fmt = 'markdown';
+			else if (fmt === 'markdown-v2' || fmt === 'md_v2' || fmt === 'mdv2' || fmt === 'v2') fmt = 'markdown_v2';
+			else if (fmt !== 'markdown' && fmt !== 'markdown_v2') fmt = 'text';
+			wechatFmt.value = fmt;
 			qq.input.checked = C.get('qq_enabled', '0') === '1';
 			qqAppId.value = String(C.get('qq_app_id', ''));
 			qqSecret.value = String(C.get('qq_app_secret', ''));

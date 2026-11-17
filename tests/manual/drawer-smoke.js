@@ -35,17 +35,23 @@ function E(tag, attrs, text) {
 	return el;
 }
 
-let markDirtyCalled = 0, clearDirtyCalled = 0, uciSaveResolve = true, dirtyFlag = false;
+let markDirtyCalled = 0, clearDirtyCalled = 0, uciSaveResolve = true, dirtyFlag = false, uciSaveFailCommitted = false;
 const AtWs = {
 	uci: {
 		markDirty() { markDirtyCalled++; dirtyFlag = true; },
 		clearDirty() { clearDirtyCalled++; dirtyFlag = false; },
 		isDirty() { return dirtyFlag; },
-		uciSave() { return uciSaveResolve ? Promise.resolve({ applied: true }) : Promise.reject(new Error('写入失败 XYZ')); }
+		uciSave() {
+			if (uciSaveResolve) return Promise.resolve({ applied: true });
+			const e = new Error('写入失败 XYZ');
+			if (uciSaveFailCommitted) e.uciSaveResult = { saved: true, applied: false };
+			return Promise.reject(e);
+		}
 	}
 };
 // 带状态的 UCI mock：get/set/unset 操作同一份暂存值，供回滚断言使用
 const uciValues = {};
+let uciDiskSaveCalled = 0;
 const L = {
 	Class: {
 		extend(obj) { function C() { Object.assign(this, obj); } C.prototype = obj; return C; }
@@ -53,7 +59,8 @@ const L = {
 	uci: {
 		set(pkg, sec, k, v) { uciValues[k] = v; },
 		unset(pkg, sec, k) { delete uciValues[k]; },
-		get(pkg, sec, k) { return Object.prototype.hasOwnProperty.call(uciValues, k) ? uciValues[k] : null; }
+		get(pkg, sec, k) { return Object.prototype.hasOwnProperty.call(uciValues, k) ? uciValues[k] : null; },
+		save() { uciDiskSaveCalled++; return Promise.resolve(); }
 	}
 };
 const Mt5700 = {
@@ -218,6 +225,33 @@ function makeController(state) {
 	click(giveUp3);
 	check('打开前已有的页面脏状态被保留', dirtyFlag === true);
 	dirtyFlag = false;
+
+	// 12. 全 PR 审查（四轮）：save 已落盘但 apply 失败 → 放弃时回滚值重新落盘
+	uciValues.opt_committed = 'orig';
+	uciSaveResolve = false; uciSaveFailCommitted = true; uciDiskSaveCalled = 0; dirtyFlag = false;
+	st = { dirty: true };
+	d = Drawer.open({ title: '落盘回滚测试', render(body) {
+		body.appendChild(E('input', { type: 'text' }));
+		const c = makeController(st);
+		c.save = function (set) { set('opt_committed', 'changed'); };
+		return c;
+	} });
+	const saveBtn5 = Array.from(document.querySelectorAll('.mt5700-drawer-foot button')).find(b => b.textContent === '保存');
+	click(saveBtn5);
+	await new Promise(r => setTimeout(r, 20));
+	esc();
+	const giveUp4 = Array.from(document.querySelectorAll('.mt5700-drawer-confirm button')).find(b => b.textContent === '放弃修改');
+	click(giveUp4);
+	check('已落盘的失败保存：放弃时回滚原值', uciValues.opt_committed === 'orig');
+	check('已落盘的失败保存：回滚值重新 save 到磁盘', uciDiskSaveCalled === 1);
+	uciSaveFailCommitted = false; uciSaveResolve = true;
+
+	// 13. render 抛异常：显示错误且可直接关闭，不卡死
+	st = {};
+	d = Drawer.open({ title: '渲染异常', render() { throw new Error('render boom'); } });
+	check('render 异常显示初始化错误', document.querySelector('.mt5700-drawer-err').textContent.indexOf('render boom') >= 0);
+	esc();
+	check('render 异常后 ESC 可直接关闭', !document.querySelector('.mt5700-drawer-mask'));
 
 	console.log('\n===== 抽屉交互冒烟: ' + pass + '/' + (pass + fail) + ' 通过 =====');
 	process.exit(fail ? 1 : 0);

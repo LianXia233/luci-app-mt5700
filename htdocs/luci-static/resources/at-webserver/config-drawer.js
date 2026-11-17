@@ -4,7 +4,8 @@
 'use strict';
 'require at-webserver/mt5700';
 'require at-webserver/ui';
-/* global L, E, Mt5700, Ui */
+'require at-webserver/rpc';
+/* global L, E, Mt5700, Ui, AtWs */
 
 /*
  * 统一响应式配置弹窗：PC 右侧抽屉（Right Drawer）/ 移动端底部面板（Bottom Sheet）。
@@ -130,14 +131,25 @@ var MtConfigDrawer = (function () {
 		// 保存失败后用户选择「放弃修改」时按此回滚，避免被放弃的值被后续
 		// 其它模块的成功保存连带 commit（Codex P2）。
 		var stagedBackup = {};
+		// 最近一次保存失败是否发生在「save 已落盘、apply 失败」阶段：
+		// 此时被放弃的值已在磁盘上，回滚不能只改内存暂存，还要重新 save。
+		var saveCommitted = false;
 
 		function revertStaged() {
-			Object.keys(stagedBackup).forEach(function (key) {
+			var keys = Object.keys(stagedBackup);
+			if (!keys.length) return;
+			keys.forEach(function (key) {
 				var v = stagedBackup[key];
 				if (v == null) L.uci.unset('at-webserver', 'config', key);
 				else L.uci.set('at-webserver', 'config', key, v);
 			});
 			stagedBackup = {};
+			if (saveCommitted) {
+				// 变更已 commit 到磁盘：把回滚后的原值也落盘，恢复保存前状态。
+				// 不 apply——失败的 apply 本就没让运行时重载，保持现状即可。
+				L.uci.save('at-webserver').catch(function () { /* 落盘失败时内存暂存仍是原值，下次保存会带上 */ });
+				saveCommitted = false;
+			}
 		}
 
 		function showConfirm() {
@@ -210,7 +222,13 @@ var MtConfigDrawer = (function () {
 				});
 				if (!nodes.length) return;
 				var first = nodes[0], last = nodes[nodes.length - 1];
-				if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+				// 焦点已在弹窗外（如点击遮罩后落到 body）：拉回弹窗内，
+				// 否则 Tab 会聚焦到背景页面，aria-modal 形同虚设。
+				if (!panel.contains(document.activeElement)) {
+					e.preventDefault();
+					(e.shiftKey ? last : first).focus();
+				}
+				else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
 				else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 			}
 		}
@@ -247,7 +265,11 @@ var MtConfigDrawer = (function () {
 				saved = true;
 				// 已成功落盘：原值备份作废，之后的关闭不再回滚。
 				stagedBackup = {};
-				if (typeof opts.onSaved === 'function') opts.onSaved();
+				saveCommitted = false;
+				if (typeof opts.onSaved === 'function') {
+					// 回调异常（如刷新状态失败）不能误报成「保存失败」
+					try { opts.onSaved(); } catch (e) { /* ignore */ }
+				}
 				// 成功：即使 isDirty 也不再询问（保存后基线已同步）
 				if (controller && typeof controller.onClose === 'function') controller.onClose();
 				document.removeEventListener('keydown', onKey, true);
@@ -259,7 +281,9 @@ var MtConfigDrawer = (function () {
 				if (prevFocus && typeof prevFocus.focus === 'function') { try { prevFocus.focus(); } catch (e) {} }
 				if (typeof opts.onClose === 'function') opts.onClose(true);
 			}).catch(function (err) {
-				// 失败：保留用户已填数据，仅关闭提交锁，显示具体错误
+				// 失败：保留用户已填数据，仅关闭提交锁，显示具体错误。
+				// 记录失败阶段：save 已落盘时，放弃修改需要把回滚值重新落盘。
+				saveCommitted = !!(err && err.uciSaveResult && err.uciSaveResult.saved);
 				errEl.textContent = '保存失败：' + ((err && err.message) || '写入配置失败，请重试');
 				AtWs.uci.markDirty();
 			}).then(function () {
@@ -307,10 +331,16 @@ var MtConfigDrawer = (function () {
 			window.visualViewport.addEventListener('resize', vvHandler);
 		}
 
-		controller = (typeof opts.render === 'function') ? opts.render(bodyEl, api) : {};
-		if (controller && typeof controller.load === 'function') controller.load();
-		// 焦点：优先首个输入控件，其次关闭按钮
-		var firstFocus = panel.querySelector(FOCUSABLE);
+		try {
+			controller = (typeof opts.render === 'function') ? opts.render(bodyEl, api) : {};
+			if (controller && typeof controller.load === 'function') controller.load();
+		} catch (e) {
+			// 渲染/回填异常不能让抽屉卡死：显示错误并允许直接关闭
+			controller = {};
+			errEl.textContent = '配置界面初始化失败：' + ((e && e.message) || '未知错误');
+		}
+		// 焦点：优先内容区首个输入控件，其次面板内首个可聚焦控件（关闭按钮）
+		var firstFocus = bodyEl.querySelector(FOCUSABLE) || panel.querySelector(FOCUSABLE);
 		if (firstFocus && typeof firstFocus.focus === 'function') { try { firstFocus.focus(); } catch (e) {} }
 
 		return api;

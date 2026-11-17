@@ -889,6 +889,12 @@ var AtUci = {
 				}
 				throw err;
 			});
+		}).catch(function (err) {
+			// 把阶段性结果附在错误上：调用方（配置抽屉）据此区分
+			// 「save 已落盘但 apply 失败」与「尚未落盘」，放弃修改时
+			// 前者需要把回滚后的原值重新 save 到磁盘，不能只回滚内存暂存。
+			if (err && typeof err === 'object') err.uciSaveResult = result;
+			throw err;
 		});
 	}
 };
