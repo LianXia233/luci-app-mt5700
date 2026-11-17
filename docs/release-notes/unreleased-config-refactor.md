@@ -153,3 +153,36 @@
 ## 10. 构建产物与安装包
 
 本次为**开发中提交**，未提升版本号、未打标签、未生成 `.ipk`/`.apk` 安装包。按 AGENTS.md，正式安装包应在发版流程中由 SDK/CI 生成，并同步全部版本引用与下载链接资产名。本地已完成源码级全部质量门禁（见第 8 节）。
+
+## 11. Codex Review 修复与通道增强（第二轮）
+
+PR #57 的 Codex Review 提出两条 P2 并发缺陷，一并修复；并按用户要求新增通道能力。
+
+### 11.1 修复：频率闸门 check+reserve 非原子（P2）
+- 旧实现：`decide()` 读到旧 `last_sent` 后释放锁，别处 `mark_sent()` 才刷新；并发同类事件会双双通过，在最小间隔内连发两条。
+- 新实现：`NotifyGate::admit()` 在**同一把 Mutex 临界区**内完成「频率判定 + 预约 `last_sent` + 清延迟副本」。后到者看到已被推进的基线，自然被压住。
+- 补发路径 `flush_deferred()` 同样经 `admit()` 裁决，与实时事件共用一把锁，天然互斥不重复。
+- 新增回归测试 `gate_admit_is_atomic_under_concurrency`：8 线程Barrier 同时 admit，断言恰好 1 条放行。
+
+### 11.2 修复：延迟事件入队未唤醒 sweeper（P2）
+- 旧实现：`deliver()` defer 事件后，若 `run()` 的 `select!` 因 `has_deferred==false` 未挂 sweep 定时器，窗口到了也永不补发。
+- 新实现：`Notifier` 持有 `tokio::sync::Notify`；defer 时 `notify_one()`，run 的 `select!` 增加 `wake.notified()` 分支立即重算并重挂定时器。`Notify` 的 permit 语义保证即使消息早于进入 select 到达也不会丢失唤醒。
+
+### 11.3 新增：企业微信 Markdown 格式（text / markdown / markdown_v2）
+- UCI 新增 `wechat_msg_format`（默认 `text`，升级行为不变），前端 config-notify.js 新增下拉。
+- 依企业微信官方文档（path/99110）：
+  - `markdown`：标题 `##`、键值行用引用 + `<font color="comment">` 灰键名（该版本**无列表语法**），兼容旧客户端；
+  - `markdown_v2`：标题 `#`、键值行用 `**键**：值` 无序列表（该版本**无字体颜色**），旧客户端显示纯文本。
+- 按字节裁剪（text 2048 / markdown 4096），`truncate_utf8_bytes` 保证不切断多字节汉字。
+- 端到端测试 `webhook_markdown_payload_is_correct` 校验 msgtype 与嵌套对象。
+
+### 11.4 新增：企业微信与 QQ 共享通道节流 + 实时事件豁免
+- 把 QQ 的预约制节流抽成 `ChannelThrottle`（`qqpush.rs`），QQ 与企业微信各持一实例，均读 `qq_max_per_minute`——**一个设置同步约束两个通道**，节奏算法完全一致（共享同步）。
+- **短信/来电实时事件豁免通道节流**：`dispatch_body()` 按 `NotifyKind` 判定，`Sms`/`Call` 跳过 `pace_throttle`（企业微信）与走 `send_with_throttle(msg, false)`（QQ），保持实时到达；信号/存储满照常节流。逐类 NotifyGate 限频开关仍独立可用。
+- QQ 新增 `send_with_throttle(msg, bool)`，`send()` 保留为走节流的默认入口，现有调用点零改动。
+
+### 11.5 验证
+- `cargo test` 385 passed（第二轮新增 6 个单测：并发原子、3 个 Markdown/格式解析、UTF-8 截断、payload 端到端）。
+- Node 门禁 24/24；`push-rate-test` 55/55（新增 8 条接线断言）；抽屉冒烟 22/22。
+- `cargo clippy` 本次改动段 0 新告警。
+- 新增改动文件：`src/rust/src/qqpush.rs`（抽取 ChannelThrottle、send_with_throttle）。
