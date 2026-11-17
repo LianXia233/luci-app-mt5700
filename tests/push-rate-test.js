@@ -97,10 +97,10 @@ check('执行层门控按类型隔离（四类各有独立 last_sent 状态、�
 	/struct GateState\s*\{/.test(notifyProdCode(notifyRs))
 	&& /states:\s*std::sync::Mutex<\[GateState; 4\]>/.test(notifyProdCode(notifyRs))
 	&& /fn index\(self\)/.test(notifyProdCode(notifyRs))
-	&& /self\.gate\.decide\(msg\.kind/.test(notifyProdCode(notifyRs)),
+	&& /self\.gate\.admit\(msg\.kind/.test(notifyProdCode(notifyRs)),
 	'per-kind gate');
 check('门控落在真实投递路径（deliver 在 send_realtime 前裁决）',
-	/self\.gate\.decide\(msg\.kind[\s\S]{0,500}self\.send_realtime\(msg\)/.test(notifyProdCode(notifyRs)),
+	/self\.gate\.admit\(msg\.kind[\s\S]{0,500}self\.send_realtime\(msg\)/.test(notifyProdCode(notifyRs)),
 	'执行层生效');
 check('时段限制支持跨零点 + defer/drop 两种策略 + 延迟队列去重',
 	/in_poll_window\(&limit\.window_start, &limit\.window_end, minute\)/.test(notifyProdCode(notifyRs))
@@ -226,6 +226,38 @@ check('每类门控都有频率开关/间隔/时段开关/起止/窗外策略六
 check('模块化：通知逻辑从 service.js 拆出且 service.js 仍为入口',
 	serviceJs.indexOf("'require at-webserver/config-notify'") >= 0
 	&& notifyJs.indexOf('MtConfigNotify =') >= 0, '解耦');
+
+/* ---------- 8. 企业微信 Markdown + 通道节流同步 + 实时事件豁免（本次新增） ---------- */
+check('企业微信消息格式 UCI 默认 text（升级行为不变）',
+	/^\s*option\s+wechat_msg_format\s+'text'\s*$/m.test(uciDefaults), 'wechat_msg_format=text');
+check('后端 WechatMsgFormat 解析 text/markdown/markdown_v2 三档',
+	/enum WechatMsgFormat/.test(configRs)
+	&& /"markdown_v2"\s*\|\s*"markdown-v2"/.test(configRs)
+	&& /WechatMsgFormat::from_uci/.test(configRs), '三档解析');
+check('企业微信 payload 按格式输出 msgtype（text/markdown/markdown_v2）',
+	/"markdown_v2"/.test(notifyRs)
+	&& /"markdown"/.test(notifyRs)
+	&& /let \(msgtype, body\) = match fmt/.test(notifyRs)
+	&& /"msgtype": msgtype/.test(notifyRs), 'msgtype');
+check('markdown 内容按企业微信文档裁剪到 4096 字节（字符边界）',
+	/WECHAT_MAX_BYTES:\s*usize\s*=\s*4096/.test(notifyRs)
+	&& /fn truncate_utf8_bytes/.test(notifyRs), '4096 字节');
+check('通道节流器在 QQ 与企业微信间共享（ChannelThrottle + 同一配置值）',
+	/struct ChannelThrottle/.test(qqpushRs)
+	&& /pub\(crate\) async fn pace_throttle/.test(qqpushRs)
+	&& /ChannelThrottle::new\(cfg\.qq\.max_per_minute\)/.test(notifyRs), '共享节流');
+check('实时事件（短信/来电）豁免通道节流',
+	/throttled\s*=\s*!matches!\(kind,\s*NotifyKind::Sms\s*\|\s*NotifyKind::Call\)/.test(notifyRs)
+	&& /qq\.send_with_throttle\(msg, throttled\)/.test(notifyRs)
+	&& /pace_throttle\(&throttle\)\.await/.test(notifyRs), '实时豁免');
+check('Codex P2 修复：频率 check+reserve 原子化 + 延迟事件唤醒 sweeper',
+	/fn admit\(&self[\s\S]{0,1200}states\[i\]\.last_sent = Some\(now\)/.test(notifyRs)
+	&& /self\.wake\.notify_one\(\)/.test(notifyRs)
+	&& /_ = self\.wake\.notified\(\)/.test(notifyRs), '并发修复');
+check('前端提供企业微信消息格式下拉并读写 UCI',
+	/Mt5700\.select\(\[[\s\S]{0,300}markdown_v2/.test(notifyJs)
+	&& /set\('wechat_msg_format', wechatFmt\.value\)/.test(notifyJs)
+	&& /C\.get\('wechat_msg_format', 'text'\)/.test(notifyJs), '前端接线');
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));
 }

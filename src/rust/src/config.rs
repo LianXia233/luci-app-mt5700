@@ -191,6 +191,37 @@ impl OutOfWindowAction {
     }
 }
 
+/// 企业微信 webhook 消息格式（UCI `wechat_msg_format`）。
+///
+/// 默认 `Text` 保持升级前行为不变。企业微信文档（path/99110）支持：
+/// - `markdown`：标题/加粗/链接/引用/三种字体颜色（`info`/`comment`/`warning`），兼容旧客户端；
+/// - `markdown_v2`：额外支持表格/列表/图片/代码块，但不支持颜色与 @，旧客户端显示纯文本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WechatMsgFormat {
+    Text,
+    Markdown,
+    MarkdownV2,
+}
+
+impl WechatMsgFormat {
+    /// 解析 UCI 值；未知值回落 `Text`（保持兼容），大小写不敏感。
+    pub fn from_uci(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "markdown" | "md" => WechatMsgFormat::Markdown,
+            "markdown_v2" | "markdown-v2" | "md_v2" | "mdv2" | "v2" => WechatMsgFormat::MarkdownV2,
+            _ => WechatMsgFormat::Text,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WechatMsgFormat::Text => "text",
+            WechatMsgFormat::Markdown => "markdown",
+            WechatMsgFormat::MarkdownV2 => "markdown_v2",
+        }
+    }
+}
+
 /// 单种推送类型的门控配置（频率 + 时段），四类各一份、互不共享状态。
 #[derive(Debug, Clone)]
 pub struct TypePushLimit {
@@ -390,6 +421,8 @@ pub struct NotificationConfig {
     /// 与 `wechat_webhook` 是「AND」关系：开关关闭或地址为空都不发。
     pub wechat_enabled: bool,
     pub wechat_webhook: String,
+    /// 企业微信消息格式（text / markdown / markdown_v2），默认 text 保持兼容。
+    pub wechat_msg_format: WechatMsgFormat,
     pub log_file: String,
     /// 通知日志文件的大小上限（字节）。
     ///
@@ -551,6 +584,7 @@ pub fn default_config() -> Config {
             enabled: true,
             wechat_enabled: false,
             wechat_webhook: String::new(),
+            wechat_msg_format: WechatMsgFormat::Text,
             log_file: String::new(),
             log_file_max_bytes: crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES,
             types: NotifyTypes {
@@ -904,6 +938,7 @@ pub async fn load_config() -> Config {
     // 现在改为显式开关，默认关，与 QQ 各自独立。
     cfg.notification.wechat_enabled = values.bool("wechat_enabled", false);
     cfg.notification.wechat_webhook = values.str("wechat_webhook", "");
+    cfg.notification.wechat_msg_format = WechatMsgFormat::from_uci(&values.str("wechat_msg_format", "text"));
     cfg.notification.log_file = values.str("log_file", "");
     // 通知日志文件上限：默认 256 KiB；填 0/负数/过小值都回落到默认，
     // 避免用户手填一个「1」把日志直接废掉。

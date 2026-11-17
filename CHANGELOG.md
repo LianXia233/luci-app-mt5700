@@ -8,7 +8,10 @@
 | :-- | :-- | :-- | :-- |
 | 88 | 2026-09-15 → 2026-11-14（60 天） | `v1.32.10` | 2026-11-14 |
 
-> **开发中（未发版，尚无版本号）**：Config 页面功能解耦与通知系统重构。完整说明见
+> **开发中（未发版，尚无版本号）**：Config 页面功能解耦与通知系统重构；并据 Codex
+> Review 修复两处并发缺陷（频率闸门原子化、延迟补发唤醒），新增企业微信 Markdown
+> 格式（text / markdown / markdown_v2）、企业微信与 QQ 共享通道节流、短信/来电实时
+> 事件豁免通道节流。完整说明见
 > [`docs/release-notes/unreleased-config-refactor.md`](docs/release-notes/unreleased-config-refactor.md)。
 > 尚未提升 `PKG_VERSION`、未打标签、未生成安装包；正式发版时按 AGENTS.md
 > 「发版版本一致性 + 文档徽标同步」一次性对齐全部版本引用。

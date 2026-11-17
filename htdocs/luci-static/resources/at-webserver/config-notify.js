@@ -56,7 +56,14 @@ var MtConfigNotify = (function () {
 		bodyEl.appendChild(Mt5700.formGroup('企业微信推送', wechat.wrap,
 			'独立开关，默认关闭；与 QQ 推送互不影响。'));
 		bodyEl.appendChild(Mt5700.formGroup('企业微信 WebHook', webhook, '通知将推送到该 WebHook 地址'));
-		all.wechat = wechat.input; all.webhook = webhook;
+		var wechatFmt = Mt5700.select([
+			{ label: '纯文本（text，兼容性最好）', value: 'text' },
+			{ label: 'Markdown（标题/加粗/引用/3色字体，兼容旧客户端）', value: 'markdown' },
+			{ label: 'Markdown V2（列表/表格/图片，旧客户端显示纯文本）', value: 'markdown_v2' }
+		], 'text');
+		bodyEl.appendChild(Mt5700.formGroup('企业微信消息格式', wechatFmt,
+			'Markdown 语法按企业微信官方文档；通道节流与 QQ 共享下方「QQ 通道节流」设置。'));
+		all.wechat = wechat.input; all.webhook = webhook; all.wechatFmt = wechatFmt;
 
 		var qq = C.mkCheck();
 		var qqAppId = Mt5700.input('text', 'QQ 开放平台 AppID（纯数字）', '');
@@ -367,6 +374,7 @@ var MtConfigNotify = (function () {
 			notifyMem.input.checked = C.get('notify_memory_full', '1') === '1';
 			wechat.input.checked = C.get('wechat_enabled', '0') === '1';
 			webhook.value = String(C.get('wechat_webhook', ''));
+			wechatFmt.value = String(C.get('wechat_msg_format', 'text'));
 			qq.input.checked = C.get('qq_enabled', '0') === '1';
 			qqAppId.value = String(C.get('qq_app_id', ''));
 			qqSecret.value = String(C.get('qq_app_secret', ''));
@@ -422,6 +430,7 @@ var MtConfigNotify = (function () {
 			set('notify_memory_full', notifyMem.input.checked ? '1' : '0');
 			set('wechat_enabled', wechat.input.checked ? '1' : '0');
 			set('wechat_webhook', webhook.value.trim());
+			set('wechat_msg_format', wechatFmt.value);
 			set('qq_enabled', qq.input.checked ? '1' : '0');
 			set('qq_app_id', qqAppId.value.trim());
 			set('qq_app_secret', qqSecret.value.trim());
