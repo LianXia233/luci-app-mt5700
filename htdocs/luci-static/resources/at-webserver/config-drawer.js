@@ -123,6 +123,22 @@ var MtConfigDrawer = (function () {
 		var prevOverflow = document.body.style.overflow;
 		var vv = window.visualViewport;
 		var vvHandler = null;
+		// 打开前页面是否已有未保存更改：放弃关闭时只清除本抽屉引入的脏标记，
+		// 不能把打开前就存在的页面级脏状态一并清掉。
+		var prevDirty = AtWs.uci.isDirty();
+		// 本抽屉经 L.uci.set 暂存过的键 → 首次写入前的原值（null=原本不存在）。
+		// 保存失败后用户选择「放弃修改」时按此回滚，避免被放弃的值被后续
+		// 其它模块的成功保存连带 commit（Codex P2）。
+		var stagedBackup = {};
+
+		function revertStaged() {
+			Object.keys(stagedBackup).forEach(function (key) {
+				var v = stagedBackup[key];
+				if (v == null) L.uci.unset('at-webserver', 'config', key);
+				else L.uci.set('at-webserver', 'config', key, v);
+			});
+			stagedBackup = {};
+		}
 
 		function showConfirm() {
 			confirmOpen = true;
@@ -152,6 +168,12 @@ var MtConfigDrawer = (function () {
 			forceClose();
 		}
 		function forceClose() {
+			// 放弃关闭：回滚本抽屉暂存过、但未成功保存的 UCI 键（Codex P2）。
+			// 否则保存失败后选择「放弃修改」，这些被放弃的值仍留在暂存区，
+			// 之后任何模块的一次成功保存都会把它们连带 commit。
+			revertStaged();
+			// 本抽屉引入的脏标记随之清除（打开前页面已有的脏状态保留）。
+			if (!prevDirty) AtWs.uci.clearDirty();
 			// 无条件通知模块清理自身资源（如通知模块的绑定进度轮询定时器），
 			// 与是否保存无关；否则取消/放弃时定时器会随 DOM 销毁变成孤儿轮询。
 			if (controller && typeof controller.onClose === 'function') controller.onClose();
@@ -205,7 +227,13 @@ var MtConfigDrawer = (function () {
 			closeBtn.disabled = true;
 			var ok = false;
 			try {
-				controller.save(function (key, value) { L.uci.set('at-webserver', 'config', key, value); });
+				controller.save(function (key, value) {
+					// 首次触碰的键记录写入前的原值，供放弃时回滚（含多次失败重试）。
+					if (!Object.prototype.hasOwnProperty.call(stagedBackup, key)) {
+						stagedBackup[key] = L.uci.get('at-webserver', 'config', key);
+					}
+					L.uci.set('at-webserver', 'config', key, value);
+				});
 				ok = true;
 			} catch (e) {
 				errEl.textContent = '保存失败：' + ((e && e.message) || '未知错误');
@@ -217,6 +245,8 @@ var MtConfigDrawer = (function () {
 			AtWs.uci.uciSave('at-webserver').then(function () {
 				AtWs.uci.clearDirty();
 				saved = true;
+				// 已成功落盘：原值备份作废，之后的关闭不再回滚。
+				stagedBackup = {};
 				if (typeof opts.onSaved === 'function') opts.onSaved();
 				// 成功：即使 isDirty 也不再询问（保存后基线已同步）
 				if (controller && typeof controller.onClose === 'function') controller.onClose();
@@ -253,6 +283,12 @@ var MtConfigDrawer = (function () {
 			}
 		});
 		closeBtn.addEventListener('click', function () { requestClose(true); });
+
+		// 抽屉挂在 body 下、不在 .mt5700-page 内，页面的 input/change 脏标记
+		// 监听覆盖不到这里：必须自行接线，否则编辑后直接刷新/关页会静默丢改动
+		// （Codex P2，与 service.js 页面级行为对齐）。
+		panel.addEventListener('input', function () { AtWs.uci.markDirty(); });
+		panel.addEventListener('change', function () { AtWs.uci.markDirty(); });
 
 		// 挂载并初始化
 		document.body.appendChild(mask);

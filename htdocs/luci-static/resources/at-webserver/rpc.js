@@ -818,6 +818,11 @@ var AtUci = {
 	_dirty: false,
 	_beforeUnload: null,
 
+	// 查询脏标记（抽屉打开时记录基线，放弃关闭时据此决定是否清除）
+	isDirty: function () {
+		return this._dirty;
+	},
+
 	// 标记当前页面存在未保存更改，并在离开时提示（等价 LuCI 自带行为）
 	markDirty: function () {
 		if (this._dirty) return;
