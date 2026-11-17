@@ -143,37 +143,46 @@ impl NotifyGate {
         states[kind.index()].pending = Some(msg);
     }
 
-    /// 扫描所有类别的待补发事件：窗口已开启的取出并返回，交给调用方投递。
+    /// 对某一类的待补发事件做「取出 + 裁决 + 预约」，整段在**同一把锁**内完成。
     ///
-    /// 这里**只做窗口判定、不预留频率基线**：取出的消息还要由串行的
-    /// [`Notifier::flush_deferred`] 用 [`NotifyGate::admit`] 做最终的原子裁决与
-    /// 预约。这样「通道暂时不可用而放回」时不会留下一个把自己压住的基线。
-    /// 仍在窗外的条目原地保留，等下一次扫描。
-    fn take_due(&self, minute: i64) -> Vec<(NotifyKind, Notification)> {
-        let mut out = Vec::new();
+    /// 关键（Codex P2）：出队与裁决不能拆成两步。若先 `take` 出队、释放锁、再
+    /// `admit`，那么在两步之间到达的同类实时事件会看不到延迟副本（`admit` 的
+    /// 「Pass 清副本」去重失效）；频率闸门关闭时两条都放行，同一事件先发新、
+    /// 再补发陈旧副本，造成重复推送。合成一步后，实时事件与补发在锁上串行：
+    /// 要么实时先到并清掉副本（这里返回 `None`），要么副本先合法补发。
+    ///
+    /// 返回值：
+    /// - `None`：无待补发事件，或仍在窗外且策略为 defer —— 副本原地保留；
+    /// - `Some((Pass, msg))`：已预约基线并取出副本，调用方直接投递；
+    /// - `Some((Held | Dropped, msg))`：副本已取出，调用方丢弃（不再排队）。
+    fn admit_due(&self, kind: NotifyKind, now: Instant, minute: i64) -> Option<(GateDecision, Notification)> {
+        let i = kind.index();
+        let limit = &self.limits[i];
         let mut states = self.states.lock().unwrap();
-        for i in 0..4 {
-            if states[i].pending.is_none() {
-                continue;
-            }
-            let kind = match i {
-                0 => NotifyKind::Sms,
-                1 => NotifyKind::Call,
-                2 => NotifyKind::MemoryFull,
-                _ => NotifyKind::Signal,
-            };
-            let limit = &self.limits[i];
-            let in_window = !limit.window_enabled
-                || crate::config::in_poll_window(&limit.window_start, &limit.window_end, minute);
-            if !in_window {
-                continue; // 仍在窗外，留到下一次扫描
-            }
-            // 窗口已开：取出这一条。频率裁决 + 基线预约交给调用方的 admit 完成，
-            // 那里与实时事件共用同一把锁，天然互斥、不会重复推送。
-            let msg = states[i].pending.take().unwrap();
-            out.push((kind, msg));
+        if states[i].pending.is_none() {
+            return None;
         }
-        out
+        if limit.window_enabled
+            && !crate::config::in_poll_window(&limit.window_start, &limit.window_end, minute)
+        {
+            return match limit.out_of_window {
+                // 仍在窗外：defer 原地保留等下轮；策略已改成 drop 则取出丢弃。
+                crate::config::OutOfWindowAction::Defer => None,
+                crate::config::OutOfWindowAction::Drop => {
+                    Some((GateDecision::Dropped, states[i].pending.take().unwrap()))
+                }
+            };
+        }
+        // 窗口已开：频率裁决 + 基线预约 + 出队，与实时 admit 共用同一把锁。
+        if limit.rate_enabled && !limit.min_interval.is_zero()
+            && min_interval_hold(states[i].last_sent, now, limit.min_interval).is_some()
+        {
+            // 已等到窗口开启仍被限频压住：丢弃，不无限排队。
+            return Some((GateDecision::Held, states[i].pending.take().unwrap()));
+        }
+        states[i].last_sent = Some(now);
+        let msg = states[i].pending.take().unwrap();
+        Some((GateDecision::Pass, msg))
     }
 
     /// 是否还有待补发事件（供 run() 决定是否挂 SWEEP 定时器）。
@@ -429,31 +438,30 @@ impl Notifier {
     }
 
     /// 扫描并补发到期的延迟事件（由 run() 周期性调用，单任务串行）。
+    ///
+    /// Codex P2：出队与裁决由 [`NotifyGate::admit_due`] 在同一把锁内原子完成，
+    /// 与实时事件的 `admit` 串行互斥 —— 实时事件先到会清掉延迟副本（这里拿到
+    /// `None`），不会出现「新事件已实时发出、陈旧副本又补发一遍」的重复推送。
     fn flush_deferred(&self) {
-        let due = self.gate.take_due(NotifyGate::minute_of_day());
-        for (kind, msg) in due {
-            if !self.has_channel() || !self.cfg.enabled {
-                // 通道暂时不可用/总开关关闭：放回等下轮，不丢消息。
-                // 此时尚未经过 admit，没有预留基线，放回不会把自己压住。
-                self.gate.defer(kind, msg);
-                continue;
-            }
-            // 补发也要走与实时事件同样的原子裁决：通过即预留基线，避免与
-            // 并发到达的同类实时事件重复推送；Held 则丢弃（它已等到窗口，
-            // 不再无限排队）；窗口期间又关了（Deferred）则放回下轮。
+        if !self.has_channel() || !self.cfg.enabled {
+            // 通道暂时不可用/总开关关闭：不出队、不裁决，整批留待下轮，不丢消息。
+            return;
+        }
+        for kind in [NotifyKind::Sms, NotifyKind::Call, NotifyKind::MemoryFull, NotifyKind::Signal] {
             let now = Instant::now();
-            match self.gate.admit(kind, now, NotifyGate::minute_of_day()) {
-                GateDecision::Pass => {
+            match self.gate.admit_due(kind, now, NotifyGate::minute_of_day()) {
+                None => {} // 无副本，或仍在窗外（defer）：原地保留
+                Some((GateDecision::Pass, msg)) => {
                     log_info!("推送门控：{:?} 类进入允许时段，补发延迟事件", kind);
                     self.send_realtime(&msg);
                 }
-                GateDecision::Deferred => self.gate.defer(kind, msg),
-                GateDecision::Held => {
+                Some((GateDecision::Held, _)) => {
                     log_debug!("推送门控：{:?} 类补发时频率仍未满足，丢弃本条", kind);
                 }
-                GateDecision::Dropped => {
+                Some((GateDecision::Dropped, _)) => {
                     log_debug!("推送门控：{:?} 类补发时窗口策略变为 drop，丢弃本条", kind);
                 }
+                Some((GateDecision::Deferred, _)) => unreachable!("admit_due 不返回 Deferred"),
             }
         }
     }
@@ -585,7 +593,7 @@ impl Notifier {
             self.drain_pending(&mut pending);
             // 时段延迟队列：窗口开启后补发同类最新的那一条（去重）。
             // 不依赖 has_pending 快照——admit 放行后 pending 已清空，这里直接调用
-            // 让 take_due 自行判断；它内部对空队列是无操作。
+            // 让 admit_due 自行判断；它内部对空队列是无操作。
             self.flush_deferred();
         }
     }
@@ -1251,11 +1259,41 @@ mod tests {
         gate.defer(NotifyKind::Call, sms("C", "call"));
         assert!(gate.has_pending());
         // 全部时段关闭（全天）→ 全部到期
-        let due = gate.take_due(12 * 60);
-        assert_eq!(due.len(), 2, "短信同类去重只补发最新一条 + 来电一条");
-        let sms_msg = due.iter().find(|(k, _)| *k == NotifyKind::Sms).unwrap().1.clone();
+        let now = Instant::now();
+        let (decision, sms_msg) = gate.admit_due(NotifyKind::Sms, now, 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Pass);
         assert_eq!(sms_msg.content, "new", "应保留最新一条");
+        let (decision, _) = gate.admit_due(NotifyKind::Call, now, 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Pass);
+        assert!(gate.admit_due(NotifyKind::MemoryFull, now, 12 * 60).is_none());
+        assert!(gate.admit_due(NotifyKind::Signal, now, 12 * 60).is_none());
         assert!(!gate.has_pending());
+    }
+
+    /// Codex P2 回归：补发的「出队 + 裁决」必须与实时投递在同一把锁内串行。
+    /// 旧实现先 take_due 出队、再 admit 裁决：两步之间同类实时事件放行时
+    /// 看不到已出队的副本，频率闸门关闭（默认）时新旧两条都发出 —— 重复且陈旧。
+    #[test]
+    fn gate_due_flush_serialized_with_live_admit() {
+        // 频率闸门关闭、时段全天：旧实现里实时与补发都能通过的配置。
+        let gate = NotifyGate::new(limits_all_off());
+        let now = Instant::now();
+        gate.defer(NotifyKind::Sms, sms("A", "deferred"));
+
+        // 实时事件先放行：admit 在锁内清掉延迟副本，补发侧必须拿不到任何东西。
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60), GateDecision::Pass);
+        assert!(
+            gate.admit_due(NotifyKind::Sms, now, 12 * 60).is_none(),
+            "实时事件已投递并清掉副本，补发不得再发出陈旧副本"
+        );
+        assert!(!gate.has_pending());
+
+        // 反序：补发先在锁内完成出队+预约，副本合法发出且只发一次。
+        gate.defer(NotifyKind::Sms, sms("B", "deferred2"));
+        let (decision, msg) = gate.admit_due(NotifyKind::Sms, now, 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Pass);
+        assert_eq!(msg.content, "deferred2");
+        assert!(gate.admit_due(NotifyKind::Sms, now, 12 * 60).is_none());
     }
 
     /// Codex P2 回归：并发同类事件只有一个能通过频率闸门。

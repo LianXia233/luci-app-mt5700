@@ -11,7 +11,9 @@
 > **开发中（未发版，尚无版本号）**：Config 页面功能解耦与通知系统重构；并据 Codex
 > Review 修复两处并发缺陷（频率闸门原子化、延迟补发唤醒），新增企业微信 Markdown
 > 格式（text / markdown / markdown_v2）、企业微信与 QQ 共享通道节流、短信/来电实时
-> 事件豁免通道节流。完整说明见
+> 事件豁免通道节流。第三轮再按 PR #58 Codex Review 修复三处 P2：配置抽屉输入即标记
+> 未保存（刷新/关页有守护）、保存失败后「放弃修改」回滚已暂存 UCI 键并清理脏标记、
+> 延迟补发出队与裁决原子化（与实时投递串行，杜绝重复/陈旧推送）。完整说明见
 > [`docs/release-notes/unreleased-config-refactor.md`](docs/release-notes/unreleased-config-refactor.md)。
 > 尚未提升 `PKG_VERSION`、未打标签、未生成安装包；正式发版时按 AGENTS.md
 > 「发版版本一致性 + 文档徽标同步」一次性对齐全部版本引用。

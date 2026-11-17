@@ -35,19 +35,26 @@ function E(tag, attrs, text) {
 	return el;
 }
 
-let markDirtyCalled = 0, clearDirtyCalled = 0, uciSaveResolve = true;
+let markDirtyCalled = 0, clearDirtyCalled = 0, uciSaveResolve = true, dirtyFlag = false;
 const AtWs = {
 	uci: {
-		markDirty() { markDirtyCalled++; },
-		clearDirty() { clearDirtyCalled++; },
+		markDirty() { markDirtyCalled++; dirtyFlag = true; },
+		clearDirty() { clearDirtyCalled++; dirtyFlag = false; },
+		isDirty() { return dirtyFlag; },
 		uciSave() { return uciSaveResolve ? Promise.resolve({ applied: true }) : Promise.reject(new Error('写入失败 XYZ')); }
 	}
 };
+// 带状态的 UCI mock：get/set/unset 操作同一份暂存值，供回滚断言使用
+const uciValues = {};
 const L = {
 	Class: {
 		extend(obj) { function C() { Object.assign(this, obj); } C.prototype = obj; return C; }
 	},
-	uci: { set() {} }
+	uci: {
+		set(pkg, sec, k, v) { uciValues[k] = v; },
+		unset(pkg, sec, k) { delete uciValues[k]; },
+		get(pkg, sec, k) { return Object.prototype.hasOwnProperty.call(uciValues, k) ? uciValues[k] : null; }
+	}
 };
 const Mt5700 = {
 	button(label, onClick, variant) {
@@ -166,6 +173,51 @@ function makeController(state) {
 	click(saveBtn3);
 	check('validate 失败阻止保存', document.querySelector('.mt5700-drawer-err').textContent.indexOf('输入非法') >= 0);
 	check('validate 失败不关闭', !!document.querySelector('.mt5700-drawer-mask'));
+	esc(); // 无脏数据，直接关闭
+
+	// 9. Codex P2：抽屉内输入即标记脏（beforeunload 守护），不依赖页面级监听
+	dirtyFlag = false; markDirtyCalled = 0;
+	st = { dirty: false };
+	d = Drawer.open({ title: '脏标记测试', render(body) { body.appendChild(E('input', { type: 'text' })); return makeController(st); } });
+	const dirtyInput = document.querySelector('.mt5700-drawer-body input');
+	dirtyInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+	check('抽屉内 input 事件触发 markDirty', markDirtyCalled >= 1 && dirtyFlag === true);
+	dirtyInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+	check('抽屉内 change 事件触发 markDirty', markDirtyCalled >= 2);
+	esc();
+	check('放弃关闭清除抽屉引入的脏标记', dirtyFlag === false);
+
+	// 10. Codex P2：保存失败后「放弃修改」回滚已暂存的 UCI 键
+	uciValues.opt_existing = 'orig';
+	delete uciValues.opt_new;
+	uciSaveResolve = false; dirtyFlag = false; clearDirtyCalled = 0;
+	st = { dirty: true };
+	d = Drawer.open({ title: '回滚测试', render(body) {
+		body.appendChild(E('input', { type: 'text' }));
+		const c = makeController(st);
+		c.save = function (set) { set('opt_existing', 'changed'); set('opt_new', 'added'); };
+		return c;
+	} });
+	const saveBtn4 = Array.from(document.querySelectorAll('.mt5700-drawer-foot button')).find(b => b.textContent === '保存');
+	click(saveBtn4);
+	await new Promise(r => setTimeout(r, 20));
+	check('保存失败后暂存区已被写入', uciValues.opt_existing === 'changed' && uciValues.opt_new === 'added');
+	esc(); // 弹二次确认
+	const giveUp2 = Array.from(document.querySelectorAll('.mt5700-drawer-confirm button')).find(b => b.textContent === '放弃修改');
+	click(giveUp2);
+	check('放弃修改回滚已有键的原值', uciValues.opt_existing === 'orig');
+	check('放弃修改删除原本不存在的新键', !Object.prototype.hasOwnProperty.call(uciValues, 'opt_new'));
+	check('放弃修改清除脏标记', dirtyFlag === false);
+
+	// 11. 打开前页面已脏：放弃关闭不得清掉页面级脏状态
+	dirtyFlag = true;
+	st = { dirty: true };
+	d = Drawer.open({ title: '页面脏基线', render(body) { body.appendChild(E('input', { type: 'text' })); return makeController(st); } });
+	esc();
+	const giveUp3 = Array.from(document.querySelectorAll('.mt5700-drawer-confirm button')).find(b => b.textContent === '放弃修改');
+	click(giveUp3);
+	check('打开前已有的页面脏状态被保留', dirtyFlag === true);
+	dirtyFlag = false;
 
 	console.log('\n===== 抽屉交互冒烟: ' + pass + '/' + (pass + fail) + ' 通过 =====');
 	process.exit(fail ? 1 : 0);

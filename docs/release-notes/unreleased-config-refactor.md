@@ -122,7 +122,7 @@
 | Rust clippy | `cargo clippy --all-targets` | 生产段 0 warning；18 条均为 baseline 测试段常量断言 |
 | Node 门禁（24 项） | `for f in tests/*-test.js; do node $f; done` | **24/24 通过** |
 | 推送频率门禁 | `node tests/push-rate-test.js` | **47/47 通过**（含 5 条新增门控接线断言） |
-| 抽屉交互冒烟 | `node tests/manual/drawer-smoke.js`（jsdom） | **22/22 通过** |
+| 抽屉交互冒烟 | `node tests/manual/drawer-smoke.js`（jsdom） | **30/30 通过** |
 | JS 语法 | `node --check` 全部新模块 + service.js | 全部通过 |
 | 模块导出一致性 | require / window 全局 / L.Class 导出 | 一致 |
 
@@ -161,7 +161,7 @@ PR #57 的 Codex Review 提出两条 P2 并发缺陷，一并修复；并按用�
 ### 11.1 修复：频率闸门 check+reserve 非原子（P2）
 - 旧实现：`decide()` 读到旧 `last_sent` 后释放锁，别处 `mark_sent()` 才刷新；并发同类事件会双双通过，在最小间隔内连发两条。
 - 新实现：`NotifyGate::admit()` 在**同一把 Mutex 临界区**内完成「频率判定 + 预约 `last_sent` + 清延迟副本」。后到者看到已被推进的基线，自然被压住。
-- 补发路径 `flush_deferred()` 同样经 `admit()` 裁决，与实时事件共用一把锁，天然互斥不重复。
+- 补发路径 `flush_deferred()` 同样经闸门裁决，与实时事件共用一把锁（第三轮进一步把「出队 + 裁决」也原子化，见 12.3）。
 - 新增回归测试 `gate_admit_is_atomic_under_concurrency`：8 线程Barrier 同时 admit，断言恰好 1 条放行。
 
 ### 11.2 修复：延迟事件入队未唤醒 sweeper（P2）
@@ -186,3 +186,25 @@ PR #57 的 Codex Review 提出两条 P2 并发缺陷，一并修复；并按用�
 - Node 门禁 24/24；`push-rate-test` 55/55（新增 8 条接线断言）；抽屉冒烟 22/22。
 - `cargo clippy` 本次改动段 0 新告警。
 - 新增改动文件：`src/rust/src/qqpush.rs`（抽取 ChannelThrottle、send_with_throttle）。
+
+## 12. Codex Review 修复（第三轮，PR #58）
+
+PR #58 的 Codex Review 提出三条 P2，全部修复。
+
+### 12.1 修复：抽屉字段编辑不触发脏标记（P2，config-drawer.js）
+- 问题：抽屉挂在 `body` 下、不在 `.mt5700-page` 内，页面级 `input/change → markDirty` 监听覆盖不到抽屉控件；只有点保存/重置才标记脏。用户编辑后直接刷新/关页，改动静默丢失（无 `beforeunload` 守护）。
+- 修复：抽屉面板自行把 `input/change` 接到 `AtWs.uci.markDirty()`，与 service.js 页面级行为对齐；`rpc.js` 的 `AtUci` 新增 `isDirty()` 查询，抽屉打开时记录页面脏基线 `prevDirty`。
+
+### 12.2 修复：保存失败后「放弃修改」不回滚暂存 UCI（P2，config-drawer.js）
+- 问题：`controller.save()` 经 `L.uci.set` 暂存键后 `uciSave` 失败，用户选「放弃修改」只关抽屉；被放弃的值仍留在暂存区，之后其它模块的一次成功保存会把它们连带 commit。
+- 修复：setter 首次触碰某键时先 `L.uci.get` 备份原值（`null`=原本不存在）；`forceClose()` 先 `revertStaged()` 回滚（原值存在则 `set`、否则 `unset`），再按 `prevDirty` 基线清除本抽屉引入的脏标记（打开前页面已有的脏状态保留）；保存成功后备份作废。
+
+### 12.3 修复：延迟补发出队与裁决非原子（P2，notify.rs）
+- 问题：`flush_deferred()` 先 `take_due()` 出队、再 `admit()` 裁决。两步之间同类实时事件放行时看不到已出队的副本（`admit` 的「Pass 清副本」去重失效）；频率闸门关闭（默认，仅开时段窗口即如此）时新旧两条都发出——重复且陈旧的推送。
+- 修复：`take_due` 重构为 `NotifyGate::admit_due(kind, now, minute)`，「取出 + 时段/频率裁决 + 基线预约」在**同一把 Mutex 临界区**内完成，与实时 `admit` 串行互斥：实时先到则清掉副本（补发拿到 `None`），补发先到则合法发出且仅一次。通道不可用/总开关关闭时整批不出队，留待下轮。
+- 新增回归测试 `gate_due_flush_serialized_with_live_admit`（实时先到/补发先到两个方向）；`gate_defer_dedups_per_kind` 迁移到 `admit_due`。
+
+### 12.4 验证
+- `cargo test` 386 passed（第三轮净增 1 个单测）。
+- Node 门禁 25/25（新增 `tests/config-drawer-test.js` 7 条接线断言）；`push-rate-test` 56/56（新增 1 条补发串行断言）；抽屉冒烟 30/30（新增脏标记、回滚、页面脏基线 8 条行为断言）。
+- 改动文件：`config-drawer.js`、`rpc.js`（AtUci.isDirty）、`notify.rs`、`tests/config-drawer-test.js`（新增）、`tests/push-rate-test.js`、`tests/manual/drawer-smoke.js`、`CHANGELOG.md`、本文。

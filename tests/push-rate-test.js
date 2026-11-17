@@ -254,6 +254,10 @@ check('Codex P2 修复：频率 check+reserve 原子化 + 延迟事件唤醒 swe
 	/fn admit\(&self[\s\S]{0,1200}states\[i\]\.last_sent = Some\(now\)/.test(notifyRs)
 	&& /self\.wake\.notify_one\(\)/.test(notifyRs)
 	&& /_ = self\.wake\.notified\(\)/.test(notifyRs), '并发修复');
+check('Codex P2 修复（二轮）：补发出队+裁决在同一把锁内与实时投递串行',
+	/fn admit_due\(&self[\s\S]{0,1800}states\[i\]\.last_sent = Some\(now\);[\s\S]{0,120}states\[i\]\.pending\.take\(\)/.test(notifyRs)
+	&& /self\.gate\.admit_due\(kind, now, NotifyGate::minute_of_day\(\)\)/.test(notifyRs)
+	&& !/fn take_due/.test(notifyRs), '出队不再与裁决拆成两步');
 check('前端提供企业微信消息格式下拉并读写 UCI',
 	/Mt5700\.select\(\[[\s\S]{0,300}markdown_v2/.test(notifyJs)
 	&& /set\('wechat_msg_format', wechatFmt\.value\)/.test(notifyJs)
