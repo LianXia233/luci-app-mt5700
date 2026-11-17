@@ -243,3 +243,22 @@ PR #58 的 Codex Review 提出三条 P2，全部修复。
 ### 13.6 验证
 - `cargo test` 391 passed（第四轮净增 5 个单测）。
 - Node 门禁 25/25：`config-drawer-test` 14/14（+7）、`push-rate-test` 59/59（+3）；抽屉冒烟 34/34（+4）。
+
+## 14. 窗外默认策略按类型区分（第五轮，需求变更）
+
+需求：默认只推送当前时段内产生的消息，不补发陈旧事件；**电话/短信不受影响**。
+
+- **信号 / 存储满**（非实时事件）：`*_window_action` 默认由 `defer` 改为 **`drop`**。
+  用户开启推送时段后，窗外事件直接丢弃，窗口开启时不再补发之前的陈旧消息。
+- **短信 / 来电**（实时事件）：默认保持 `defer` 不变；时段开关本就默认关闭，
+  实时直发行为完全不受影响。
+- 时段/频率开关仍默认全关，**升级后默认行为不变**；本改动只影响「开启时段后」
+  的默认窗外策略。已显式配置过 `defer`/`drop` 的用户不受影响（显式值优先）。
+- 非法 `*_window_action` 值由一刀切回落 defer 改为回落**本类**默认
+  （`OutOfWindowAction::parse_with_default`）。
+- 三层同步：UCI 出厂默认（memory/signal → 'drop'）、`config.rs`
+  `default_limit_for(prefix)`（default_config 与 UCI 解析同源）、前端
+  `GATE_KINDS[].defAction`（下拉初值、缺省回填、非法值归一）与文案提示。
+- 验证：`cargo test` 392 passed（新增 `window_action_defaults_are_per_kind`：
+  四类默认、default_config 同源、显式优先、非法值按类回落）；Node 门禁 25/25
+  （push-rate-test 60/60，新增三层默认一致断言）；抽屉冒烟 34/34。

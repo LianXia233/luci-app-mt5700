@@ -265,6 +265,15 @@ check('全 PR 审查（四轮）：测试推送绕过门控直发（不再假成
 	/fn notify_test_event[\s\S]{0,2600}self\.send_realtime\(&msg\);[\s\S]{0,40}Ok\(\(\)\)/.test(notifyRs), 'test_event 直发');
 check('全 PR 审查（四轮）：企业微信 markdown 裸 URL 不被拆成键值',
 	/starts_with\(":\/\/"\)/.test(notifyRs), 'scheme 冒号豁免');
+check('窗外默认策略按类型区分：信号/存储满 drop（只推当前时段），短信/来电 defer 不受影响',
+	/option notify_limit_sms_window_action 'defer'/.test(uciDefaults)
+	&& /option notify_limit_call_window_action 'defer'/.test(uciDefaults)
+	&& /option notify_limit_memory_window_action 'drop'/.test(uciDefaults)
+	&& /option notify_limit_signal_window_action 'drop'/.test(uciDefaults)
+	&& /fn default_limit_for\(prefix: &str\)[\s\S]{0,300}OutOfWindowAction::Drop/.test(configRs)
+	&& /defAction: 'defer'[\s\S]{0,200}defAction: 'defer'[\s\S]{0,200}defAction: 'drop'[\s\S]{0,200}defAction: 'drop'/.test(notifyJs)
+	&& /C\.get\(p \+ '_window_action', g\.defAction\)/.test(notifyJs),
+	'三层默认一致');
 check('前端提供企业微信消息格式下拉并读写 UCI',
 	/Mt5700\.select\(\[[\s\S]{0,300}markdown_v2/.test(notifyJs)
 	&& /set\('wechat_msg_format', wechatFmt\.value\)/.test(notifyJs)

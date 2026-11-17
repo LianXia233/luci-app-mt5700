@@ -183,8 +183,11 @@ pub enum OutOfWindowAction {
 }
 
 impl OutOfWindowAction {
-    fn from_str(s: &str) -> OutOfWindowAction {
-        if s.eq_ignore_ascii_case("drop") { OutOfWindowAction::Drop } else { OutOfWindowAction::Defer }
+    /// 解析 UCI 值；非法/未知字符串回落 `default`（各类默认策略不同）。
+    fn parse_with_default(s: &str, default: OutOfWindowAction) -> OutOfWindowAction {
+        if s.eq_ignore_ascii_case("drop") { OutOfWindowAction::Drop }
+        else if s.eq_ignore_ascii_case("defer") { OutOfWindowAction::Defer }
+        else { default }
     }
     pub fn as_str(self) -> &'static str {
         match self { OutOfWindowAction::Defer => "defer", OutOfWindowAction::Drop => "drop" }
@@ -235,7 +238,8 @@ pub struct TypePushLimit {
     pub window_start: String,
     /// 允许时段终点 HH:MM（含）；小于起点表示跨零点，相等表示全天。
     pub window_end: String,
-    /// 窗外策略：延迟（defer）/ 丢弃（drop）。
+    /// 窗外策略：延迟（defer）/ 丢弃（drop）。默认按类型区分：
+    /// 短信/来电 defer，信号/存储满 drop（只推送当前时段的消息）。
     pub out_of_window: OutOfWindowAction,
 }
 
@@ -609,7 +613,12 @@ pub fn default_config() -> Config {
             timer_interval: Duration::from_secs(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN * 60),
             poll: PollConfig::default(),
             signal_min_interval: Duration::from_secs(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60),
-            limits: core::array::from_fn(|_| TypePushLimit::default()),
+            limits: [
+                default_limit_for("notify_limit_sms"),
+                default_limit_for("notify_limit_call"),
+                default_limit_for("notify_limit_memory"),
+                default_limit_for("notify_limit_signal"),
+            ],
             templates: NotifyTemplates::default(),
         },
         log: LogConfig {
@@ -822,15 +831,27 @@ fn signal_min_interval_from(values: &UciReader) -> Duration {
     Duration::from_secs(minutes.min(MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN) * 60)
 }
 
+/// 各类事件的默认门控：在 [`TypePushLimit::default`]（全关）基础上按类型区分
+/// 窗外默认策略——信号/存储满是非实时事件，默认 **drop**：开启时段后只推送
+/// 当前时段内产生的消息，不补发陈旧事件；短信/来电是实时事件，保持 defer
+/// 默认，行为不受影响（时段开关本身仍默认关闭，升级后行为不变）。
+fn default_limit_for(prefix: &str) -> TypePushLimit {
+    let mut d = TypePushLimit::default();
+    if prefix.ends_with("_memory") || prefix.ends_with("_signal") {
+        d.out_of_window = OutOfWindowAction::Drop;
+    }
+    d
+}
+
 /// 解析某一类推送的独立门控配置。
 ///
 /// `prefix` 形如 `notify_limit_sms` / `notify_limit_call` / `notify_limit_memory` /
 /// `notify_limit_signal`，对应六项 UCI：`{prefix}_rate_enabled`、`{prefix}_min_interval`、
 /// `{prefix}_window_enabled`、`{prefix}_window_start`、`{prefix}_window_end`、
-/// `{prefix}_window_action`。缺省时全部回落 [`TypePushLimit::default`]（全关），
-/// 保证升级后既有行为不变。
+/// `{prefix}_window_action`。缺省时回落 [`default_limit_for`]（开关全关；
+/// 窗外策略按类型区分），保证升级后既有行为不变。
 fn type_limit_from(values: &UciReader, prefix: &str) -> TypePushLimit {
-    let d = TypePushLimit::default();
+    let d = default_limit_for(prefix);
     let rate_enabled = values.bool(&format!("{prefix}_rate_enabled"), d.rate_enabled);
     let window_enabled = values.bool(&format!("{prefix}_window_enabled"), d.window_enabled);
 
@@ -873,7 +894,10 @@ fn type_limit_from(values: &UciReader, prefix: &str) -> TypePushLimit {
     };
 
     let action_key = format!("{prefix}_window_action");
-    let out_of_window = OutOfWindowAction::from_str(&values.str(&action_key, d.out_of_window.as_str()));
+    let out_of_window = OutOfWindowAction::parse_with_default(
+        &values.str(&action_key, d.out_of_window.as_str()),
+        d.out_of_window,
+    );
 
     TypePushLimit {
         rate_enabled,
@@ -1243,6 +1267,43 @@ mod tests {
         assert_eq!(l.window_start, "00:00");
         assert_eq!(l.window_end, "23:59");
         assert_eq!(l.out_of_window, OutOfWindowAction::Defer);
+    }
+
+    /// 窗外默认策略按类型区分：信号/存储满默认 drop（只推送当前时段的消息，
+    /// 不补发陈旧事件）；短信/来电保持 defer，实时行为不受影响。
+    #[test]
+    fn window_action_defaults_are_per_kind() {
+        use OutOfWindowAction::*;
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_sms").out_of_window, Defer);
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_call").out_of_window, Defer);
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_memory").out_of_window, Drop);
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_signal").out_of_window, Drop);
+
+        // default_config 与 UCI 解析同源：索引顺序 Sms/Call/MemoryFull/Signal
+        let cfg = default_config();
+        assert_eq!(cfg.notification.limits[0].out_of_window, Defer);
+        assert_eq!(cfg.notification.limits[1].out_of_window, Defer);
+        assert_eq!(cfg.notification.limits[2].out_of_window, Drop);
+        assert_eq!(cfg.notification.limits[3].out_of_window, Drop);
+        // 开关仍默认全关：升级后行为不变
+        assert!(cfg.notification.limits.iter().all(|l| !l.rate_enabled && !l.window_enabled));
+
+        // 显式配置优先于默认；非法值回落**本类**默认而非一刀切 defer
+        let explicit = type_limit_from(
+            &uci_of(&[("notify_limit_signal_window_action", "defer")]),
+            "notify_limit_signal",
+        );
+        assert_eq!(explicit.out_of_window, Defer);
+        let garbage = type_limit_from(
+            &uci_of(&[("notify_limit_signal_window_action", "xx")]),
+            "notify_limit_signal",
+        );
+        assert_eq!(garbage.out_of_window, Drop);
+        let garbage_sms = type_limit_from(
+            &uci_of(&[("notify_limit_sms_window_action", "xx")]),
+            "notify_limit_sms",
+        );
+        assert_eq!(garbage_sms.out_of_window, Defer);
     }
 
     #[test]
