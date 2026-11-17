@@ -22,6 +22,10 @@ const root = path.join(__dirname, '..');
 const read = function (p) { return fs.readFileSync(path.join(root, p), 'utf8'); };
 
 const serviceJs = read(path.join('htdocs', 'luci-static', 'resources', 'view', 'at-webserver', 'service.js'));
+// v1.33 重构：文案与读写逻辑从 service.js 拆到公共模块，测试事实源随之迁移。
+const libDir = path.join('htdocs', 'luci-static', 'resources', 'at-webserver');
+const commonJs = read(path.join(libDir, 'config-common.js'));
+const notifyJs = read(path.join(libDir, 'config-notify.js'));
 const uciDefaults = read(path.join('root', 'etc', 'config', 'at-webserver'));
 const configRs = read(path.join('src', 'rust', 'src', 'config.rs'));
 const notifyRs = read(path.join('src', 'rust', 'src', 'notify.rs'));
@@ -85,9 +89,24 @@ function notifyProdCode(src) {
 	return i < 0 ? src : src.slice(0, i);
 }
 
-check('闸门不作用于短信/来电分发（notify.rs 生产代码里只定义、不调用）',
-	(notifyProdCode(notifyRs).match(/\bmin_interval_hold\(/g) || []).length === 1,
-	'仅定义处一次');
+check('旧信号限频仅在生产者侧（signalwatch/urc），不进入通用分发路径',
+	/\bmin_interval_hold\(/.test(signalwatchRs) && /\bmin_interval_hold\(/.test(urcRs)
+	&& !/fn send_realtime[\s\S]{0,400}min_interval_hold\(/.test(notifyProdCode(notifyRs)),
+	'生产者限频');
+check('执行层门控按类型隔离（四类各有独立 last_sent 状态、互不干扰）',
+	/struct GateState\s*\{/.test(notifyProdCode(notifyRs))
+	&& /states:\s*std::sync::Mutex<\[GateState; 4\]>/.test(notifyProdCode(notifyRs))
+	&& /fn index\(self\)/.test(notifyProdCode(notifyRs))
+	&& /self\.gate\.decide\(msg\.kind/.test(notifyProdCode(notifyRs)),
+	'per-kind gate');
+check('门控落在真实投递路径（deliver 在 send_realtime 前裁决）',
+	/self\.gate\.decide\(msg\.kind[\s\S]{0,500}self\.send_realtime\(msg\)/.test(notifyProdCode(notifyRs)),
+	'执行层生效');
+check('时段限制支持跨零点 + defer/drop 两种策略 + 延迟队列去重',
+	/in_poll_window\(&limit\.window_start, &limit\.window_end, minute\)/.test(notifyProdCode(notifyRs))
+	&& /OutOfWindowAction::Drop/.test(notifyProdCode(notifyRs))
+	&& /pending\s*=\s*Some\(msg\)/.test(notifyProdCode(notifyRs)),
+	'时段门控');
 check('signalwatch.rs 被压住的那轮不刷新基线（到点后累计变化能立即补推）',
 	(() => {
 		const i = signalwatchRs.indexOf('Decision::Held(rest) =>');
@@ -120,10 +139,19 @@ function extractFn(code, name, nextMarker) {
 	return code.slice(start, end);
 }
 
-const rateSrc = extractFn(serviceJs, 'rateText', '\t\tfunction rateSync');
-const qqRateSrc = extractFn(serviceJs, 'qqRateText', '\t\tqqRateInput.addEventListener');
-const tailStart = serviceJs.indexOf('var QQ_RATE_TAIL');
-const tailSrc = tailStart < 0 ? '' : serviceJs.slice(tailStart, serviceJs.indexOf('function qqRateText'));
+// rateText 在 config-common.js，写作 `api.rateText = function (min) {...};`
+// 取到函数体末尾并还原成 `function rateText(...)` 供 new Function 执行。
+const commonRateStart = commonJs.indexOf('api.rateText = function');
+const rateSrc = commonRateStart < 0 ? null
+	: (function () {
+		var s = commonRateStart + 'api.rateText = function'.length; // 指向 ' (min)...'
+		var e = commonJs.indexOf('\n\t};', s);
+		if (e < 0) return null;
+		return 'function rateText' + commonJs.slice(s, e + 4); // function rateText (min){...};
+	})();
+const qqRateSrc = extractFn(notifyJs, 'qqRateText', '\t\tqqRate.addEventListener');
+const tailStart = notifyJs.indexOf('var QQ_RATE_TAIL');
+const tailSrc = tailStart < 0 ? '' : notifyJs.slice(tailStart, notifyJs.indexOf('function qqRateText'));
 
 check('service.js 能定位 rateText（页面文案逻辑可测）', rateSrc !== null, 'rateText');
 check('service.js 能定位 qqRateText 与其平台频控常量', qqRateSrc !== null && tailSrc !== '', 'qqRateText');
@@ -166,24 +194,38 @@ if (qqRateText) {
 		/最多 60 条\/分钟/.test(qqRateText(75)), '75');
 }
 
-/* ---------- 6. 页面读写接线 ---------- */
-check('service.js 载入时读取两个新键',
-	/get\('notify_signal_min_interval',\s*'60'\)/.test(serviceJs)
-	&& /get\('qq_max_per_minute',\s*'10'\)/.test(serviceJs), 'get');
-check('service.js 保存时写入两个新键',
-	/set\('notify_signal_min_interval',/.test(serviceJs)
-	&& /set\('qq_max_per_minute',/.test(serviceJs), 'set');
-check('service.js 保存时夹取到各自上限（10080 / 60）',
-	/Math\.min\(10080, rateMin\)/.test(serviceJs) && /Math\.min\(60, qqRate\)/.test(serviceJs), '夹取');
-check('service.js 对 0 值不做 || 兜底（0 是合法的「不限频」）',
-	!/rateMinInput\.value, 10\)\s*\|\|/.test(serviceJs)
-	&& !/qqRateInput\.value, 10\)\s*\|\|/.test(serviceJs), '0 值');
-check('service.js 频率控件随「信号变化通知」开关联动置灰',
-	/var rateOn = notifyMaster\.input\.checked && notifySignal\.input\.checked/.test(serviceJs)
-	&& /rateMinInput\.disabled = !rateOn/.test(serviceJs), '联动');
-check('service.js 默认值与后端常量一致（页面不会显示一个后端不认的默认）',
-	/Mt5700\.input\('number', '60', ''\)/.test(serviceJs)
-	&& /Mt5700\.input\('number', '10', ''\)/.test(serviceJs), '60 / 10');
+/* ---------- 6. 页面读写接线（v1.33 起在 config-notify.js 模块） ---------- */
+check('通知模块载入时读取两个新键',
+	/C\.get\('notify_signal_min_interval',\s*'60'\)/.test(notifyJs)
+	&& /C\.get\('qq_max_per_minute',\s*'10'\)/.test(notifyJs), 'get');
+check('通知模块保存时写入两个新键',
+	/set\('notify_signal_min_interval',/.test(notifyJs)
+	&& /set\('qq_max_per_minute',/.test(notifyJs), 'set');
+check('通知模块保存时夹取到各自上限（10080 / 60）',
+	/Math\.min\(10080, isNaN\(rn\)/.test(notifyJs) && /Math\.min\(60, isNaN\(qn\)/.test(notifyJs), '夹取');
+check('通知模块对 0 值不做 || 兜底（0 是合法的「不限频」）',
+	!/rateMin\.value, 10\)\s*\|\|/.test(notifyJs)
+	&& !/qqRate\.value, 10\)\s*\|\|/.test(notifyJs), '0 值');
+check('通知模块频率控件随「信号变化通知」开关联动置灰',
+	/var rateOn = master\.input\.checked && notifySignal\.input\.checked/.test(notifyJs)
+	&& /rateMin\.disabled = !rateOn/.test(notifyJs), '联动');
+check('通知模块默认值与后端常量一致（页面不会显示一个后端不认的默认）',
+	/Mt5700\.input\('number', '60', ''\)/.test(notifyJs)
+	&& /Mt5700\.input\('number', '10', ''\)/.test(notifyJs), '60 / 10');
+
+/* ---------- 7. 分类型频率/时段门控的前端接线（本次新增） ---------- */
+check('四类推送各自的门控 UCI 前缀并存（notify_limit_*）',
+	['sms', 'call', 'memory', 'signal'].every(function (k) {
+		return notifyJs.indexOf("'notify_limit_" + k + "'") >= 0
+			|| notifyJs.indexOf("prefix: 'notify_limit_" + k + "'") >= 0;
+	}), '四类前缀');
+check('每类门控都有频率开关/间隔/时段开关/起止/窗外策略六项',
+	/_rate_enabled'/.test(notifyJs) && /_min_interval'/.test(notifyJs)
+	&& /_window_enabled'/.test(notifyJs) && /_window_start'/.test(notifyJs)
+	&& /_window_end'/.test(notifyJs) && /_window_action'/.test(notifyJs), '六项');
+check('模块化：通知逻辑从 service.js 拆出且 service.js 仍为入口',
+	serviceJs.indexOf("'require at-webserver/config-notify'") >= 0
+	&& notifyJs.indexOf('MtConfigNotify =') >= 0, '解耦');
 } catch (e) {
 	check('单测执行', false, String((e && e.stack) || e));
 }
