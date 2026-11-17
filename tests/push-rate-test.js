@@ -105,7 +105,7 @@ check('门控落在真实投递路径（deliver 在 send_realtime 前裁决）',
 check('时段限制支持跨零点 + defer/drop 两种策略 + 延迟队列去重',
 	/in_poll_window\(&limit\.window_start, &limit\.window_end, minute\)/.test(notifyProdCode(notifyRs))
 	&& /OutOfWindowAction::Drop/.test(notifyProdCode(notifyRs))
-	&& /pending\s*=\s*Some\(msg\)/.test(notifyProdCode(notifyRs)),
+	&& /pending\s*=\s*Some\(msg(\.clone\(\))?\)/.test(notifyProdCode(notifyRs)),
 	'时段门控');
 check('signalwatch.rs 被压住的那轮不刷新基线（到点后累计变化能立即补推）',
 	(() => {
@@ -258,6 +258,13 @@ check('Codex P2 修复（二轮）：补发出队+裁决在同一把锁内与实
 	/fn admit_due\(&self[\s\S]{0,1800}states\[i\]\.last_sent = Some\(now\);[\s\S]{0,120}states\[i\]\.pending\.take\(\)/.test(notifyRs)
 	&& /self\.gate\.admit_due\(kind, now, NotifyGate::minute_of_day\(\)\)/.test(notifyRs)
 	&& !/fn take_due/.test(notifyRs), '出队不再与裁决拆成两步');
+check('全 PR 审查（四轮）：Deferred 入队并入 admit 临界区（杜绝陈旧写回/旧覆新）',
+	/fn admit\(&self, kind: NotifyKind, now: Instant, minute: i64, msg: &Notification\)[\s\S]{0,1200}states\[i\]\.pending = Some\(msg\.clone\(\)\)/.test(notifyRs)
+	&& !/self\.gate\.defer\(msg\.kind/.test(notifyProdCode(notifyRs)), '裁决即入队');
+check('全 PR 审查（四轮）：测试推送绕过门控直发（不再假成功）',
+	/fn notify_test_event[\s\S]{0,2600}self\.send_realtime\(&msg\);[\s\S]{0,40}Ok\(\(\)\)/.test(notifyRs), 'test_event 直发');
+check('全 PR 审查（四轮）：企业微信 markdown 裸 URL 不被拆成键值',
+	/starts_with\(":\/\/"\)/.test(notifyRs), 'scheme 冒号豁免');
 check('前端提供企业微信消息格式下拉并读写 UCI',
 	/Mt5700\.select\(\[[\s\S]{0,300}markdown_v2/.test(notifyJs)
 	&& /set\('wechat_msg_format', wechatFmt\.value\)/.test(notifyJs)

@@ -23,6 +23,9 @@ const read = function (p) { return fs.readFileSync(path.join(root, p), 'utf8'); 
 const libDir = path.join('htdocs', 'luci-static', 'resources', 'at-webserver');
 const drawerJs = read(path.join(libDir, 'config-drawer.js'));
 const rpcJs = read(path.join(libDir, 'rpc.js'));
+const serviceJs = read(path.join('htdocs', 'luci-static', 'resources', 'view', 'at-webserver', 'service.js'));
+const moduleJs = ['config-connection.js', 'config-network.js', 'config-notify.js', 'config-templates.js']
+	.map(function (f) { return read(path.join(libDir, f)); });
 
 let results = [];
 function check(name, cond, detail) {
@@ -55,6 +58,32 @@ check('forceClose 先回滚暂存再清理（放弃修改不遗留脏值）',
 check('保存成功后备份作废（不再回滚已 commit 的值）',
 	/AtWs\.uci\.clearDirty\(\);\s*saved = true;[\s\S]{0,120}stagedBackup = \{\}/.test(drawerJs),
 	'成功清备份');
+
+/* ---------- 3. 全 PR 审查修复（第四轮） ---------- */
+check('抽屉显式 require rpc 并声明 AtWs 全局（不靠 ui.js 传递依赖）',
+	/'require at-webserver\/rpc';/.test(drawerJs) && /\/\* global[^*]*AtWs/.test(drawerJs),
+	'require + global');
+check('save 已落盘但 apply 失败：错误携带阶段结果，放弃时回滚值重新落盘',
+	/err\.uciSaveResult = result/.test(rpcJs)
+	&& /saveCommitted = !!\(err && err\.uciSaveResult && err\.uciSaveResult\.saved\)/.test(drawerJs)
+	&& /if \(saveCommitted\) \{[\s\S]{0,300}L\.uci\.save\('at-webserver'\)/.test(drawerJs),
+	'区分落盘阶段');
+check('焦点在弹窗外时 Tab 拉回弹窗内（焦点陷阱不逃逸）',
+	/if \(!panel\.contains\(document\.activeElement\)\) \{\s*e\.preventDefault\(\);/.test(drawerJs),
+	'Tab 逃逸防护');
+check('初始焦点优先内容区首个输入控件（而非关闭按钮）',
+	/var firstFocus = bodyEl\.querySelector\(FOCUSABLE\) \|\| panel\.querySelector\(FOCUSABLE\)/.test(drawerJs),
+	'焦点顺序');
+check('onSaved 回调异常不误报保存失败；render/load 异常不卡死抽屉',
+	/try \{ opts\.onSaved\(\); \} catch/.test(drawerJs)
+	&& /配置界面初始化失败/.test(drawerJs),
+	'异常隔离');
+check('保存成功后重载服务即时生效（与重构前行为一致）',
+	/onSaved: function \(\) \{ reloadService\(\); \}/.test(serviceJs),
+	'onSaved → reloadService');
+check('四个配置模块 build 均注入表单样式（不依赖先开过文案模块）',
+	moduleJs.every(function (src) { return /C\.ensureFormStyles\(\);/.test(src); }),
+	'ensureFormStyles ×4');
 
 const fails = results.filter(function (r) { return !r.ok; });
 console.log('\n===== 结果: ' + (results.length - fails.length) + '/' + results.length + ' 通过 =====');

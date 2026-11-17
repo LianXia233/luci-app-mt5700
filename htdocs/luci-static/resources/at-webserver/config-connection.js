@@ -16,6 +16,7 @@ var MtConfigConnection = (function () {
 	var C = MtConfigCommon;
 
 	function build(bodyEl, ctx) {
+		C.ensureFormStyles();
 		var state = ctx.data || {};
 		var controls = {};
 		var baseline = {};
@@ -114,12 +115,6 @@ var MtConfigConnection = (function () {
 		var authKey = Mt5700.input('text', '留空表示无需认证', '');
 		grid2.appendChild(Mt5700.formGroup('认证密钥', authKey, 'ucode 代理自动附带；LuCI 登录态由 rpcd 会话保证'));
 
-		var fields = {
-			connection_type: connTypeSel, network_host: hostInput, network_port: netPortInput,
-			serial_port: serialSel, serial_custom: serialCustom, serial_baudrate: baudInput,
-			manage_interface: manageIface.input, iface_v4: v4, iface_v6: v6,
-			websocket_port: wsPort, websocket_bind: wsBind, websocket_auth_key: authKey
-		};
 		function snap() {
 			return {
 				connection_type: connTypeSel.value,

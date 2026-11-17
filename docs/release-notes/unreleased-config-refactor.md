@@ -85,7 +85,7 @@
 - **频率**：`min_interval_hold` 判定；间隔内重复被抑制且**不刷新基线**（累计变化到点即补推，不漏报）。
 - **时段**：复用 `in_poll_window`（支持跨零点、相等=全天、非法=全天）；窗外按 defer（延迟到窗口开启后补发）/ drop（丢弃）处理。延迟队列每类只保留**最新一条**，窗口开启时一次性补发，避免重复轰炸。
 - **并发正确**：门控状态用 `std::sync::Mutex`，临界区只有内存操作、无 `.await`（符合 AGENTS.md 锁要求）；`run()` 循环按 10s 扫描延迟队列，通道未就绪/总开关关闭时放回队列，保证不丢消息。
-- **不越权**：原有信号限频（`notify_signal_min_interval`）仍在生产者侧 signalwatch/urc 生效；新增执行层门控四类默认全关，不与其叠加。定时推送（timerpush）由独立节奏控制，不受门控干扰。
+- **不越权**：原有信号限频（`notify_signal_min_interval`）仍在生产者侧 signalwatch/urc 生效，定时推送（timerpush）豁免该生产者侧限频；新增执行层门控四类默认全关，升级后行为不变。注意：执行层门控作用于**所有**即将投递的同类事件——开启「信号」类频率/时段后，定时推送的快照同样按「信号」类被裁决（可能被抑制或延迟到窗口），这是投递层统一门控的既定语义；两层限制各自独立开关，同时开启时效果叠加。
 
 ### 5.3 默认值策略
 四类默认全关，**升级后行为完全不变**。用户按需为短信/来电/存储满/信号分别开启频率与时段。合理的差异化默认（如信号 60 分钟、QQ 10 条/分钟）沿用既有常量。
@@ -208,3 +208,38 @@ PR #58 的 Codex Review 提出三条 P2，全部修复。
 - `cargo test` 386 passed（第三轮净增 1 个单测）。
 - Node 门禁 25/25（新增 `tests/config-drawer-test.js` 7 条接线断言）；`push-rate-test` 56/56（新增 1 条补发串行断言）；抽屉冒烟 30/30（新增脏标记、回滚、页面脏基线 8 条行为断言）。
 - 改动文件：`config-drawer.js`、`rpc.js`（AtUci.isDirty）、`notify.rs`、`tests/config-drawer-test.js`（新增）、`tests/push-rate-test.js`、`tests/manual/drawer-smoke.js`、`CHANGELOG.md`、本文。
+
+## 13. 全 PR 审查修复（第四轮）
+
+对 PR 全部三个提交做前端 / Rust / 跨层一致性三路审查后，修复以下确认缺陷。
+
+### 13.1 前端（P2）
+- **保存后丢失重载副作用**：旧 service.js 保存成功后无条件 `reloadService()`（含服务停止/未注册时的自启自愈与状态复核）；拆分后抽屉只走 `uciSave`。修复：模块入口统一传 `onSaved: reloadService`，恢复「保存即生效」。
+- **已落盘失败保存的回滚不彻底**：`L.uci.save` 成功但 `apply` 失败时变更已在磁盘，「放弃修改」只回滚内存暂存。修复：`uciSave` 把阶段结果附在错误上（`err.uciSaveResult`），抽屉据此在放弃时把回滚后的原值重新 `L.uci.save` 落盘（不 apply）。
+- **焦点陷阱逃逸**：点击遮罩后焦点落 body，Tab 可聚焦背景页面。修复：焦点在面板外时 Tab/Shift+Tab 拉回面板内。
+- **表单样式注入遗漏**：`ensureFormStyles` 只有文案模块调用，connection/network/notify 抽屉的 `.mt5700-cfg-*` 布局在先开其它模块时退化。修复：四个模块 build 均调用。
+
+### 13.2 Rust（P2/P3）
+- **测试推送假成功（P2）**：`notify_test_event` 走 `notify()→deliver()` 门控，开启限频/时段后测试被静默压住但 RPC 返回 Ok。修复：测试推送绕过门控直发（保留本地日志），新增 `test_event_bypasses_rate_gate` 回归。
+- **Deferred 入队两步竞态（P3）**：admit 裁决与 defer 入队拆两步，窗口分钟边界处并发 Pass 清副本后旧事件迟到入队写回陈旧副本，并发 Deferred 也可能旧覆新。修复：入队并入 admit 同一临界区（签名携带消息），`defer()` 降为测试辅助；新增 `gate_defer_is_atomic_with_live_pass` 回归。
+- **企业微信 markdown 裸 URL 拆坏（P3）**：`split_wechat_kv` 裸冒号兜底把 `https://…` 拆成「**https**：//…」。修复：跳过 scheme 冒号（`://`），新增 URL 回归测试。
+- 补齐 `admit_due` Held/Dropped/窗外保留分支与 `rate_enabled+min_interval=0` 的单测；修正 config.rs 时段回退注释（逐字段回落默认，双端非法才等效全天）。
+
+### 13.3 前端细节（P3）
+- 抽屉显式 `require at-webserver/rpc` 并声明 AtWs 全局；初始焦点优先内容区首个输入控件；`onSaved`/render/load 异常隔离（不误报保存失败、不卡死抽屉）。
+- 恢复重构前的 rateSync/timerSync：手动输入同步快捷下拉，消除 isDirty 快照假阳性。
+- `wechat_msg_format` 后端别名（md/v2 等）加载时归一化到下拉选项，不再静默回落 text。
+- 删除 config-connection.js 死代码 `fields`；修正「已禁用」提示指向（重载按钮在页面底部）；QQ 节流文案与 UCI 注释补充「同时约束企业微信、短信/来电豁免」。
+
+### 13.4 文档口径修正
+- 「定时推送不受门控干扰」表述有误：timerpush 快照按「信号」类经过执行层门控（开启信号类频率/时段后同样被约束）；生产者侧 `notify_signal_min_interval` 仍豁免定时推送。已按实际语义改写第 5.2 节。
+
+### 13.5 审查结论中保留不改的事项（设计决策/既有行为）
+- `qq_max_per_minute` 上限 60 高于企业微信 20 条/分硬限（默认 10 安全；上限是否收紧待维护者决策）。
+- `PACE_MAX_WAIT=120s` 截断使深积压齐发（既有算法，本 PR 扩展到企业微信）。
+- 延迟队列/在途发送为内存态，服务 reload 即丢（既有模式）。
+- 抽屉/表单样式走 JS 注入而非 global.css（本 PR 既定模式，是否迁移待维护者决策）。
+
+### 13.6 验证
+- `cargo test` 391 passed（第四轮净增 5 个单测）。
+- Node 门禁 25/25：`config-drawer-test` 14/14（+7）、`push-rate-test` 59/59（+3）；抽屉冒烟 34/34（+4）。

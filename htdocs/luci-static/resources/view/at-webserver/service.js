@@ -95,7 +95,7 @@ function resolveStatus(state) {
 	if (!enabled) {
 		return {
 			label: '已禁用', variant: 'neutral', pid: null,
-			hint: '配置中 enabled=0，服务被刻意关闭。需要启动请在「服务状态」卡片执行重载，或执行 uci set at-webserver.config.enabled=1。'
+			hint: '配置中 enabled=0，服务被刻意关闭。需要启动请点击页面底部「重载服务」，或执行 uci set at-webserver.config.enabled=1。'
 		};
 	}
 	if (!binExists) {
@@ -240,7 +240,10 @@ return L.view.extend({
 						subtitle: m.desc,
 						render: function (bodyEl) {
 							return mod.build(bodyEl, { data: state });
-						}
+						},
+						// 与重构前一致：保存成功后重载服务让配置即时生效
+						//（含服务停止/未注册时的自启自愈），并刷新状态卡。
+						onSaved: function () { reloadService(); }
 					});
 				}, 'primary')
 			));

@@ -19,6 +19,7 @@ var MtConfigNetwork = (function () {
 	};
 
 	function build(bodyEl, ctx) {
+		C.ensureFormStyles();
 		var baseline = {};
 
 		bodyEl.appendChild(E('div', { 'class': 'mt5700-cfg-title' }, '默认 DNS 下发'));
