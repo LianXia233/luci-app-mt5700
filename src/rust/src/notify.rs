@@ -21,6 +21,7 @@
 use crate::qqpush::{QqMessage, QqMsgFormat, QqSender};
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::{NotificationConfig, NotifyTemplates};
+use chrono::Timelike;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -34,6 +35,147 @@ pub enum NotifyKind {
     Call,
     MemoryFull,
     Signal,
+}
+
+impl NotifyKind {
+    /// 与 config.rs 的 `NotifyLimits` 数组顺序一致：Sms/Call/MemoryFull/Signal。
+    pub fn index(self) -> usize {
+        match self {
+            NotifyKind::Sms => 0,
+            NotifyKind::Call => 1,
+            NotifyKind::MemoryFull => 2,
+            NotifyKind::Signal => 3,
+        }
+    }
+}
+
+/// 门控裁决结果：一条事件到达推送执行层后该如何处理。
+#[derive(Debug, PartialEq, Eq)]
+pub enum GateDecision {
+    /// 放行：立即投递。
+    Pass,
+    /// 被频率闸门压住：本条丢弃，且**不刷新基线**（累计状态由生产者保留）。
+    Held,
+    /// 落在允许时段之外且策略为 defer：延迟到窗口开启后补发。
+    Deferred,
+    /// 落在允许时段之外且策略为 drop：直接丢弃。
+    Dropped,
+}
+
+/// 单类推送的门控运行态：上次实际投递时刻 + 一条待补发的延迟事件。
+///
+/// `std::sync::Mutex` 是安全的：所有方法都是同步的、临界区内只有几次内存操作，
+/// 不含任何 `.await`（AGENTS.md 对锁的要求）。延迟队列每类只保留**最新一条**，
+/// 窗口补发时不会重复轰炸，也不会发出一堆陈旧消息。
+#[derive(Default)]
+struct GateState {
+    last_sent: Option<Instant>,
+    pending: Option<Notification>,
+}
+
+/// 推送执行层门控器：按类型独立执行「频率限制 + 推送时段」。
+///
+/// 每类Event有独立的 [`GateState`]，一类被限频/限时不影响其它类。时段判定复用
+/// [`crate::config::in_poll_window`]（支持跨零点、相等视为全天、非法回落全天），
+/// 时刻取 [`crate::nettime`]（NTP 优先、系统时钟兜底，时区走系统设置）。
+pub struct NotifyGate {
+    limits: crate::config::NotifyLimits,
+    states: std::sync::Mutex<[GateState; 4]>,
+}
+
+impl NotifyGate {
+    pub fn new(limits: crate::config::NotifyLimits) -> Self {
+        NotifyGate {
+            limits,
+            states: std::sync::Mutex::new(core::array::from_fn(|_| GateState::default())),
+        }
+    }
+
+    /// 当前时刻（本地墙上时间的「当天分钟数」）。单独成函数便于测试注入。
+    fn minute_of_day() -> i64 {
+        let n = crate::nettime::now();
+        i64::from(n.hour()) * 60 + i64::from(n.minute())
+    }
+
+    /// 裁决一条事件是否可以投递。纯判定，不修改状态。
+    fn decide(&self, kind: NotifyKind, now: Instant, minute: i64) -> GateDecision {
+        let i = kind.index();
+        let limit = &self.limits[i];
+
+        // 先判时段：窗外直接决定 defer / drop，不与频率状态互相污染。
+        if limit.window_enabled
+            && !crate::config::in_poll_window(&limit.window_start, &limit.window_end, minute)
+        {
+            return match limit.out_of_window {
+                crate::config::OutOfWindowAction::Drop => GateDecision::Dropped,
+                crate::config::OutOfWindowAction::Defer => GateDecision::Deferred,
+            };
+        }
+
+        // 再判频率：间隔内的重复被压住，且不刷新 last_sent（与生产者侧语义一致）。
+        if limit.rate_enabled && !limit.min_interval.is_zero() {
+            let states = self.states.lock().unwrap();
+            if min_interval_hold(states[i].last_sent, now, limit.min_interval).is_some() {
+                return GateDecision::Held;
+            }
+        }
+        GateDecision::Pass
+    }
+
+    /// 记录一次成功投递：刷新该类的 last_sent，并清掉可能存在的延迟副本
+    /// （避免同一事件既实时发出、又在窗口补发时重复一遍）。
+    fn mark_sent(&self, kind: NotifyKind, now: Instant) {
+        let mut states = self.states.lock().unwrap();
+        let st = &mut states[kind.index()];
+        st.last_sent = Some(now);
+        st.pending = None;
+    }
+
+    /// 暂存一条窗外事件（defer）。同类只保留最新一条。
+    fn defer(&self, kind: NotifyKind, msg: Notification) {
+        let mut states = self.states.lock().unwrap();
+        states[kind.index()].pending = Some(msg);
+    }
+
+    /// 扫描所有类别的待补发事件：对每一条重新裁决，窗口已开启则放行并返回。
+    /// 返回 (kind, msg) 列表由调用方投递；投递后调用方应 [`mark_sent`]。
+    /// 被丢弃（drop 策略或频率仍压住）的条目在这里就地清除，避免永久滞留。
+    fn take_due(&self, now: Instant, minute: i64) -> Vec<(NotifyKind, Notification)> {
+        let mut out = Vec::new();
+        let mut states = self.states.lock().unwrap();
+        for i in 0..4 {
+            if states[i].pending.is_none() {
+                continue;
+            }
+            let kind = match i {
+                0 => NotifyKind::Sms,
+                1 => NotifyKind::Call,
+                2 => NotifyKind::MemoryFull,
+                _ => NotifyKind::Signal,
+            };
+            let limit = &self.limits[i];
+            let in_window = !limit.window_enabled
+                || crate::config::in_poll_window(&limit.window_start, &limit.window_end, minute);
+            if !in_window {
+                continue; // 仍在窗外，留到下一次扫描
+            }
+            let msg = states[i].pending.take().unwrap();
+            // 延迟补发也要过频率闸门；压住就丢弃这条（它已经等到了窗口，不能无限排队）。
+            if limit.rate_enabled
+                && !limit.min_interval.is_zero()
+                && min_interval_hold(states[i].last_sent, now, limit.min_interval).is_some()
+            {
+                continue;
+            }
+            out.push((kind, msg));
+        }
+        out
+    }
+
+    /// 是否还有待补发事件（供 run() 决定是否挂 SWEEP 定时器）。
+    fn has_pending(&self) -> bool {
+        self.states.lock().unwrap().iter().any(|s| s.pending.is_some())
+    }
 }
 
 /// 两个特殊发送方名字，用于区分事件来源。
@@ -79,6 +221,8 @@ pub fn kind_label(kind: NotifyKind) -> &'static str {
 
 pub struct Notifier {
     cfg: NotificationConfig,
+    /// 推送执行层门控：按类型独立执行频率/时段限制，状态与延迟队列在内部维护。
+    gate: NotifyGate,
     /// QQ 机器人通道；未启用（AppID/Secret/目标缺失）或处于绑定模式时为 None。
     /// RwLock 支持「自动绑定」完成后热替换，无需重启服务。
     qq: std::sync::RwLock<Option<std::sync::Arc<QqSender>>>,
@@ -129,10 +273,12 @@ impl Notifier {
             "定时推送间隔: {} 分钟（周期性推送当前实际情况；信号巡检另有一套间隔）",
             cfg.timer_interval.as_secs() / 60
         );
+        let gate = NotifyGate::new(cfg.limits.clone());
 
         (
             Notifier {
                 cfg,
+                gate,
                 qq: std::sync::RwLock::new(qq),
                 tx,
                 log_file,
@@ -203,10 +349,11 @@ impl Notifier {
             return;
         }
 
-        // 有可用通道 → 立刻渲染并投递。**所有事件类型都直发**，不再攒合并窗口：
+        // 有可用通道 → 经过执行层门控后投递。**所有事件类型都直发**，不再攒合并窗口：
         // 短信/来电的实时性自不必说，信号与存储满也没有理由被压着等到窗口结束。
+        // 门控（频率/时段）在这里统一裁决，四类各有独立状态、互不干扰。
         if self.has_channel() {
-            self.send_realtime(&msg);
+            self.deliver(&msg);
             return;
         }
 
@@ -225,6 +372,53 @@ impl Notifier {
                     log_error!("通知补发任务未在运行，事件已丢弃: {}（{:?}）", sender, kind)
                 }
             }
+        }
+    }
+
+    /// 推送执行层的统一入口：先经门控裁决，再决定是否实时投递。
+    ///
+    /// 门控按事件类型独立执行频率/时段限制。放行时刷新该类基线并直发；
+    /// 被频率闸门压住时丢弃本条（不刷新基线）；落在时段外时按策略延迟或丢弃。
+    /// 这样限制真正落在「即将投递」这一刻，前端开关只是配置入口。
+    fn deliver(&self, msg: &Notification) {
+        let now = Instant::now();
+        let minute = NotifyGate::minute_of_day();
+        match self.gate.decide(msg.kind, now, minute) {
+            GateDecision::Pass => {
+                self.gate.mark_sent(msg.kind, now);
+                self.send_realtime(msg);
+            }
+            GateDecision::Held => {
+                log_debug!(
+                    "推送门控：{:?} 类距上次投递不足最小间隔，抑制本条（不刷新基线）",
+                    msg.kind
+                );
+            }
+            GateDecision::Deferred => {
+                log_debug!(
+                    "推送门控：{:?} 类当前不在允许时段，延迟到窗口开启后补发",
+                    msg.kind
+                );
+                self.gate.defer(msg.kind, msg.clone());
+            }
+            GateDecision::Dropped => {
+                log_debug!("推送门控：{:?} 类当前不在允许时段，按 drop 策略丢弃", msg.kind);
+            }
+        }
+    }
+
+    /// 扫描并补发到期的延迟事件（由 run() 周期性调用）。
+    fn flush_deferred(&self) {
+        let due = self.gate.take_due(Instant::now(), NotifyGate::minute_of_day());
+        for (kind, msg) in due {
+            if !self.has_channel() || !self.cfg.enabled {
+                // 通道暂时不可用/总开关关闭：放回队首等下轮，不丢消息。
+                self.gate.defer(kind, msg);
+                continue;
+            }
+            log_info!("推送门控：{:?} 类进入允许时段，补发延迟事件", kind);
+            self.gate.mark_sent(kind, Instant::now());
+            self.send_realtime(&msg);
         }
     }
 
@@ -300,11 +494,12 @@ impl Notifier {
     /// 被丢弃，此后 `notify()` 的 `try_send` 会全部失败——那就是
     /// 「绑定成功却收不到任何推送数据」这个老缺陷。
     pub async fn run(&self, mut rx: mpsc::Receiver<Notification>, mut ctx: tokio::sync::watch::Receiver<bool>) {
-        /// 补发扫描周期：仅在有待发事件时才挂这个定时器。
+        /// 补发扫描周期：仅在有待发事件（通道暂存或时段延迟）时才挂这个定时器。
         const SWEEP: Duration = Duration::from_secs(10);
         let mut pending: Vec<Notification> = Vec::new();
 
         loop {
+            let has_deferred = self.gate.has_pending();
             tokio::select! {
                 _ = ctx.changed() => {
                     self.drain_pending(&mut pending);
@@ -325,11 +520,15 @@ impl Notifier {
                         }
                     }
                 }
-                _ = tokio::time::sleep(SWEEP), if !pending.is_empty() => {}
+                _ = tokio::time::sleep(SWEEP), if !pending.is_empty() || has_deferred => {}
             }
             // 无论被哪个分支唤醒都尝试补发一次：新事件到达与定时扫描都会走到这里，
             // 通道一旦就绪就把积压事件按原顺序逐条发出。
             self.drain_pending(&mut pending);
+            // 时段延迟队列：窗口开启后补发同类最新的那一条（去重）。
+            if self.gate.has_pending() {
+                self.flush_deferred();
+            }
         }
     }
 
@@ -354,7 +553,8 @@ impl Notifier {
         let taken = std::mem::take(pending);
         log_info!("推送通道已就绪，补发 {} 条暂存事件", taken.len());
         for msg in &taken {
-            self.send_realtime(msg);
+            // 绑定期间暂存的事件同样要过门控，否则会绕过频率/时段限制。
+            self.deliver(msg);
         }
     }
 
@@ -751,11 +951,12 @@ pub fn render_prefix_str(tpl: &NotifyTemplates, count: usize) -> String {
 /// 把一批事件渲染为最终推送文本（单条即只渲染该条）。
 ///
 /// 单条：直接套用该事件类型的模板。
-/// 多条：`{batch}` 标题 + 分隔线 + 逐条「序号 + 该事件类型的模板渲染结果」。
+/// 多条：分隔线 + 逐条「序号 + 该事件类型的模板渲染结果」。
 /// 两种形态都会在最前面加全局前缀（若配置了）。
 ///
 /// **生产路径不会走多条分支**：v1.14.20 起事件一律逐条实时直发，
-/// 攒批（合并窗口）已经移除，`{batch}` 模板键保留只为兼容已有配置。
+/// 攒批（合并窗口）已经移除。原来的「批量汇总标题」（UCI `notify_tpl_batch`）
+/// 已随合并窗口一起删除，多条分支不再拼任何自定义标题。
 /// 之所以还留着这个函数，是因为它是「模板渲染 + 前缀拼接」的唯一端到端
 /// 断言入口 —— 单测靠它覆盖占位符替换、未知占位符保留、存储满兜底文案、
 /// 前缀 `{count}`/`{time}` 取值这些规则。删掉它，这些规则就只剩分散的
@@ -772,16 +973,14 @@ pub fn combine_messages(msgs: &[Notification], tpl: &NotifyTemplates) -> String 
         render_template(template_for(tpl, m.kind), m, 1, &now)
     } else {
         let mut b = String::new();
-        b.push_str(&tpl.batch);
-        b.push('\n');
-        b.push_str(&"=".repeat(20));
-        b.push('\n');
         for (i, m) in msgs.iter().enumerate() {
-            b.push('\n');
+            if i > 0 {
+                b.push('\n');
+                b.push_str(&"-".repeat(20));
+                b.push('\n');
+            }
             b.push_str(&format!("{}. ", i + 1));
             b.push_str(&render_template(template_for(tpl, m.kind), m, msgs.len(), &now));
-            b.push('\n');
-            b.push_str(&"-".repeat(20));
         }
         b
     };
@@ -803,6 +1002,104 @@ mod tests {
             qq_card: None,
             time: "2026-10-11 12:00:00".into(),
         }
+    }
+
+    fn limits_all_off() -> crate::config::NotifyLimits {
+        core::array::from_fn(|_| crate::config::TypePushLimit::default())
+    }
+
+    /// 默认配置（全关）下任何事件都放行 —— 升级后行为不变的关键回归。
+    #[test]
+    fn gate_default_all_pass() {
+        let gate = NotifyGate::new(limits_all_off());
+        let now = Instant::now();
+        for i in 0..4 {
+            let kind = match i { 0 => NotifyKind::Sms, 1 => NotifyKind::Call, 2 => NotifyKind::MemoryFull, _ => NotifyKind::Signal };
+            assert_eq!(gate.decide(kind, now, 12 * 60), GateDecision::Pass);
+        }
+    }
+
+    /// 频率限制只约束本类：短信限频不影响来电。
+    #[test]
+    fn gate_rate_is_per_kind_and_holds_repeats() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(60 * 60),
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let base = Instant::now();
+        assert_eq!(gate.decide(NotifyKind::Sms, base, 12 * 60), GateDecision::Pass);
+        gate.mark_sent(NotifyKind::Sms, base);
+        // 59 分钟后同类被压住
+        assert_eq!(gate.decide(NotifyKind::Sms, base + Duration::from_secs(59 * 60), 13 * 60), GateDecision::Held);
+        // 来电类没有限频，照常放行
+        assert_eq!(gate.decide(NotifyKind::Call, base + Duration::from_secs(59 * 60), 13 * 60), GateDecision::Pass);
+        // 满 60 分钟后同类恢复放行
+        assert_eq!(gate.decide(NotifyKind::Sms, base + Duration::from_secs(60 * 60), 13 * 60), GateDecision::Pass);
+    }
+
+    /// 被频率压住时 last_sent 不刷新：基线不被污染，到点立即放行。
+    #[test]
+    fn gate_held_does_not_refresh_baseline() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Call.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(3600),
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let base = Instant::now();
+        gate.mark_sent(NotifyKind::Call, base);
+        // 仅 decision，不 mark_sent —— 模拟被压住
+        assert_eq!(gate.decide(NotifyKind::Call, base + Duration::from_secs(600), 1 * 60), GateDecision::Held);
+        // 基线仍是 base，因此 t=3601 时放行
+        assert_eq!(gate.decide(NotifyKind::Call, base + Duration::from_secs(3601), 2 * 60), GateDecision::Pass);
+    }
+
+    /// 时段（跨午夜）内放行、窗外按 defer / drop 分流。
+    #[test]
+    fn gate_window_cross_midnight_and_actions() {
+        let mut limits = limits_all_off();
+        let common = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            ..Default::default()
+        };
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            out_of_window: crate::config::OutOfWindowAction::Defer,
+            ..common.clone()
+        };
+        limits[NotifyKind::Call.index()] = crate::config::TypePushLimit {
+            out_of_window: crate::config::OutOfWindowAction::Drop,
+            ..common
+        };
+        let gate = NotifyGate::new(limits);
+        let now = Instant::now();
+        // 23:30 / 02:00 在段内
+        assert_eq!(gate.decide(NotifyKind::Sms, now, 23 * 60 + 30), GateDecision::Pass);
+        assert_eq!(gate.decide(NotifyKind::Sms, now, 2 * 60), GateDecision::Pass);
+        // 12:00 窗外 → defer / drop
+        assert_eq!(gate.decide(NotifyKind::Sms, now, 12 * 60), GateDecision::Deferred);
+        assert_eq!(gate.decide(NotifyKind::Call, now, 12 * 60), GateDecision::Dropped);
+    }
+
+    /// 延迟队列按类型去重：同类只保留最新一条，窗口开启后一次性补发。
+    #[test]
+    fn gate_defer_dedups_per_kind() {
+        let gate = NotifyGate::new(limits_all_off());
+        gate.defer(NotifyKind::Sms, sms("A", "old"));
+        gate.defer(NotifyKind::Sms, sms("B", "new"));
+        gate.defer(NotifyKind::Call, sms("C", "call"));
+        assert!(gate.has_pending());
+        // 全部时段关闭（全天）→ 全部到期
+        let due = gate.take_due(Instant::now(), 12 * 60);
+        assert_eq!(due.len(), 2, "短信同类去重只补发最新一条 + 来电一条");
+        let sms_msg = due.iter().find(|(k, _)| *k == NotifyKind::Sms).unwrap().1.clone();
+        assert_eq!(sms_msg.content, "new", "应保留最新一条");
+        assert!(!gate.has_pending());
     }
 
     /// 号码归一化的规则必须与前端 `Parse.normalizePhoneNumber` 完全一致：
@@ -960,15 +1257,14 @@ mod tests {
     }
 
     #[test]
-    fn batch_uses_header_index_and_template() {
+    fn batch_uses_index_and_template() {
         let mut tpl = NotifyTemplates::default();
         tpl.prefix = String::new();
-        tpl.batch = "汇总".into();
         tpl.sms = "S:{content}".into();
         let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
-        assert!(out.starts_with("汇总\n====================\n"));
-        assert!(out.contains("1. S:1"));
+        assert!(out.starts_with("1. S:1"), "实际: {out}");
         assert!(out.contains("2. S:2"));
+        assert!(!out.contains("批量汇总"), "批量汇总标题已删除，不应再出现: {out}");
     }
 
     #[test]
