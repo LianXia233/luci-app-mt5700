@@ -111,9 +111,11 @@ check('menu.d 标题均在 zh_Hans 中（' + titles.length + ' 条）',
 
 /* ---------- 共享组件必须走 tr() ---------- */
 const ui = fs.readFileSync(uiPath, 'utf8');
-check('mt5700.js 定义 tr() 且兼容无 LuCI 的 Node 环境',
-	/function tr\(s\)/.test(ui) && /typeof _ === 'function'/.test(ui),
-	'缺少 tr() 或全局 _ 的类型保护');
+check('mt5700.js 定义 trText() 且兼容无 LuCI 的 Node 环境',
+	/function trText\(s\)/.test(ui) && /typeof _ === 'function'/.test(ui),
+	'缺少 trText() 或全局 _ 的类型保护');
+check('trText 未被局部变量遮蔽（避免 tr is not a function）',
+	!/\bvar\s+trText\b/.test(ui), '存在 var trText，可能遮蔽翻译函数');
 
 const components = [
 	'api.page', 'api.card', 'api.button', 'api.formGroup',
@@ -123,9 +125,9 @@ const notWrapped = components.filter(function (name) {
 	const idx = ui.indexOf(name + ' = function');
 	if (idx < 0) return true;
 	const body = ui.slice(idx, idx + 1200);
-	return body.indexOf('tr(') < 0;
+	return body.indexOf('trText(') < 0;
 });
-check('共享组件文案经过 tr()（' + components.length + ' 个）',
+check('共享组件文案经过 trText()（' + components.length + ' 个）',
 	notWrapped.length === 0,
 	'未接入: ' + notWrapped.join(', '));
 
