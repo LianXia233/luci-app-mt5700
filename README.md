@@ -162,25 +162,25 @@ ubus call service list '{"name":"at-webserver"}'
 
 ```mermaid
 flowchart TD
-    Start(["🔍 1. 设备架构查询<br/><code>cat /etc/apk/arch</code> 或 <code>grep OPENWRT_ARCH</code>"]) --> Check{"系统声明的基础架构及变体"}
+    Start(["🔍 1. 查询目标设备架构<br/><code>cat /etc/apk/arch</code> 或 <code>grep OPENWRT_ARCH</code>"]) --> Check{"匹配固件声明架构"}
 
-    Check -->|"aarch64_cortex-a53"| A53["📦 下载 <code>aarch64_cortex-a53-luci-app-mt5700-*</code><br/><i>(常见来源: MT7986 / Qualcommax 等声明 CPU_TYPE 的固件)</i>"]
-    Check -->|"aarch64_generic"| Generic["📦 下载 <code>aarch64_generic-luci-app-mt5700-*</code><br/><i>(常见来源: armsr / iStoreOS 25.x 等通用 ARMv8 固件)</i>"]
-    Check -->|"x86_64"| X86["📦 下载 <code>x86_64-luci-app-mt5700-*</code><br/><i>(常见来源: PC 软路由 / PVE / ESXi 虚拟机)</i>"]
+    Check -->|"aarch64_cortex-a53"| A53["📦 <b>aarch64_cortex-a53</b><br/>MediaTek MT7981 / MT7986 / Qualcommax 等"]
+    Check -->|"aarch64_generic"| Generic["📦 <b>aarch64_generic</b><br/>armsr / 通用 ARMv8 / iStoreOS 25.x 等"]
+    Check -->|"x86_64"| X86["📦 <b>x86_64</b><br/>PC 软路由 / PVE / ESXi / Hyper-V 虚拟机"]
 
     A53 --> PreCheck["💡 2. 安装前零风险预演验证<br/><code>apk add --simulate --allow-untrusted ./包名.apk</code>"]
     Generic --> PreCheck
     X86 --> PreCheck
 
-    PreCheck --> Pass{"输出 (1/1) Installing ?"}
-    Pass -->|通过| Install(["🚀 3. 正式执行安装并自动启动服务"])
-    Pass -->|报错| ErrorFix["⚠️ 常见报错排查对照处理"]
+    PreCheck --> Pass{"预演输出是否包含<br/><code>(1/1) Installing ?</code>"}
+    Pass -->|"✅ 验证通过"| Install(["🚀 3. 正式执行安装<br/>服务自动注册并拉起启动"])
+    Pass -->|"❌ 报错拦截"| ErrorFix["⚠️ 对照下方错误速查表修复<br/><i>(如架构声明不一致/语言包架构别名)</i>"]
 
-    classDef check fill:#EAECEE,stroke:#5D6D7E,stroke-width:2px,color:#1B2631;
-    classDef pack fill:#E8F8F5,stroke:#1ABC9C,stroke-width:2px,color:#0E6251;
-    classDef pre fill:#FEFDE8,stroke:#F1C40F,stroke-width:2px,color:#7D6608;
-    classDef ok fill:#E8F6F3,stroke:#27AE60,stroke-width:2px,color:#1E8449;
-    classDef err fill:#FDEDEC,stroke:#E74C3C,stroke-width:2px,color:#78281F;
+    classDef check fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#0369a1;
+    classDef pack fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#15803d;
+    classDef pre fill:#fefce8,stroke:#ca8a04,stroke-width:1.5px,color:#a16207;
+    classDef ok fill:#ecfdf5,stroke:#059669,stroke-width:1.5px,color:#047857;
+    classDef err fill:#fef2f2,stroke:#dc2626,stroke-width:1.5px,color:#b91c1c;
 
     class Start,Check check;
     class A53,Generic,X86 pack;
@@ -218,23 +218,173 @@ service at-webserver restart
 
 ## 🏗️ 系统拓扑与数据链路
 
-整个系统采用清晰的三层解耦架构设计，确保 Web 响应敏捷、串口调度无冲突：
+系统严格遵循分层解耦与职责单一原则，实现 **Web 响应毫秒级、串口调度独占互斥、数据转发硬件线速**：
+
+```mermaid
+flowchart TB
+    subgraph UI ["🌐 表现层 · LuCI WebUI"]
+        direction TB
+        Views["<b>12 个现代化管理视图</b><br/>状态 / 扫频 / 锁频 / 短信 / 终端 / 拨号 / 模组..."]
+        RPCClient["<b>前端通信总线 (rpc.js)</b><br/><code>L.rpc.declare</code> · 轮询 <code>events(since)</code>"]
+        Views <--> RPCClient
+    end
+
+    subgraph OS ["⚡ 中介与代理层 · OpenWrt rpcd / ucode"]
+        direction TB
+        RPCD["<b>系统 RPC 守护 (rpcd)</b><br/>Session 鉴权 · ACL 权限控制"]
+        Ucode["<b>ucode 业务代理 (mt5700.uc)</b><br/>端口监听预检 (/proc/net/tcp) · 熔断保护"]
+        SysfsDirect["<b>零 AT 旁路读取 (sysfs)</b><br/>实时速率 (netrate) · USB 设备发现"]
+        RPCD <--> Ucode
+        Ucode -.->|"sysfs 直读 (零串口开销)"| SysfsDirect
+    end
+
+    subgraph CORE ["🦀 核心守护层 · Rust / Tokio 后端 (at-webserver-rust)"]
+        direction TB
+        RpcServer["<b>本地 RPC 服务 (127.0.0.1:8765)</b><br/>newline-JSON 内部通讯 · 任务分发与状态同步"]
+
+        subgraph Modules ["业务引擎与状态机"]
+            direction LR
+            Dialer["<b>自动拨号对账</b><br/>双判决 + 指数退避"]
+            StateCache["<b>状态预热缓存</b><br/>射频/温度毫秒级返回"]
+            SmsEngine["<b>短信与安全存储</b><br/>PDU解码 + ChaCha20归档"]
+            Notifier["<b>多通道告警</b><br/>企微 Webhook + QQ 机器人"]
+            UsageTracker["<b>流量统计</b><br/>sysfs/DS双源 + 月度清零"]
+            Scheduler["<b>定时锁频</b><br/>频段/EARFCN/PCI 轮转"]
+        end
+
+        subgraph Queue ["AT 调度与独占控制"]
+            PriLock["<b>优先级独占调度器 (PriLock)</b><br/>Sms > High > Normal > Low > Background<br/><i>单通道互斥持锁，杜绝多进程抢占 TTY 冲突</i>"]
+            URCHub["<b>URC 事件分发总线</b><br/>新短信 (+CMTI) / 来电 (RING) / 存储满"]
+        end
+
+        RpcServer <--> Modules
+        Modules --> PriLock
+        URCHub -.->|"事件上报"| RpcServer
+    end
+
+    subgraph HARDWARE ["📡 硬件与蜂窝链路 · MT5700M 5G 模组"]
+        direction TB
+        ModemAT["<b>PCUI 串口通道</b><br/><code>/dev/serial/by-id/*</code> (<code>/dev/ttyUSB*</code>)<br/><b>AT 控制面 (独占互斥)</b>"]
+        ModemBaseband["<b>5G 基带核心</b><br/>SA / NSA 驻网 · 载波聚合 (CA) · PDP 激活"]
+        ModemNet["<b>USB 虚拟网卡</b><br/>NDIS / NCM / RNDIS 驱动<br/><b>网络数据面 (高速吞吐)</b>"]
+        ModemAT <--> ModemBaseband
+        ModemBaseband <--> ModemNet
+    end
+
+    subgraph NETWORK ["🛡️ 路由器网络面 · Linux / OpenWrt 协议栈"]
+        direction TB
+        Netifd["<b>网络接口管理 (netifd)</b><br/><code>MT5700M</code> (IPv4) / <code>MT5700Mv6</code> (IPv6)<br/>自动 DHCP 客户端 · DNS 动态下发"]
+        Hooks["<b>自愈拉起钩子</b><br/><code>on-uplink.sh</code> · <code>init.d</code> · <code>hotplug.d</code>"]
+        Firewall["<b>防火墙与 NAT (fw4 / nftables)</b><br/><code>wan</code> 区域绑定 · <code>lan ➔ wan</code> 伪装转发"]
+        Clients["<b>局域网终端</b><br/>LAN 有线客户端 / Wi-Fi 无线终端"]
+
+        Hooks -->|"触发拉起 (ifup)"| Netifd
+        Netifd --> Firewall
+        Firewall <--> Clients
+    end
+
+    %% 控制面与数据面跨层链路
+    RPCClient -->|"① JSON-RPC 鉴权请求"| RPCD
+    Ucode -->|"② 本地 TCP Socket (nc 管道)"| RpcServer
+    PriLock <-->|"③ 独占调度 AT 事务"| ModemAT
+    ModemAT -.->|"④ 异步 URC 上报"| URCHub
+    Dialer -->|"⑤ 拨号就绪回调"| Hooks
+    ModemNet <-->|"⑥ 数据面 IP 报文"| Netifd
+    SysfsDirect -.->|"⑦ 真实速率采样"| ModemNet
+
+    classDef ui fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#0369a1;
+    classDef os fill:#f3e8ff,stroke:#7e22ce,stroke-width:1.5px,color:#6b21a8;
+    classDef rust fill:#ffedd5,stroke:#ea580c,stroke-width:1.5px,color:#c2410c;
+    classDef hw fill:#ecfdf5,stroke:#059669,stroke-width:1.5px,color:#047857;
+    classDef net fill:#f1f5f9,stroke:#475569,stroke-width:1.5px,color:#334155;
+    classDef sub fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#1e293b;
+
+    class Views,RPCClient ui;
+    class RPCD,Ucode,SysfsDirect os;
+    class RpcServer,PriLock,URCHub rust;
+    class Dialer,StateCache,SmsEngine,Notifier,UsageTracker,Scheduler sub;
+    class ModemAT,ModemBaseband,ModemNet hw;
+    class Netifd,Hooks,Firewall,Clients net;
+```
+
+<details>
+<summary><b>🖼️ 查看高精度全景架构海报（点击展开）</b></summary>
 
 <div align="center">
-  <img src="docs/topology.png" alt="系统拓扑与数据链路：LuCI WebUI 经 rpcd ucode 代理至 Rust/Tokio 常驻后端，独占管控 MT5700M 模组" width="880" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" />
+  <img src="docs/topology.png" alt="系统拓扑与数据链路：LuCI WebUI 经 rpcd ucode 代理至 Rust/Tokio 常驻后端，独占管控 MT5700M 模组" width="880" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-top: 10px;" />
 </div>
 
-1. **表现层 (LuCI WebUI)**：基于原生 JS (ES6) 与标准 LuCI 组件开发，纯 DOM / 矢量 SVG 驱动，不依赖重型框架；
-2. **中间通信层 (rpcd ucode 代理)**：通过 `/usr/share/rpcd/ucode/mt5700.uc` 挂载至系统 rpcd，发布 `luci.mt5700.*` 接口，提供微秒级本地 IPC 转发与鉴权；
-3. **核心守护层 (Rust/Tokio 常驻后端)**：`/usr/bin/at-webserver-rust` 独占控制串口设备，以异步事件循环处理 AT 交互、流量统计、自动拨号对账与事件推送。
+</details>
 
-### 自动拨号与全链路协同机制
+### ⚡ 核心设计原则与通信机制
 
-数据面连通需经历从底层 AT 握手到操作系统网络协议栈的逐级对齐：
+1. **表现层 (LuCI WebUI)**：基于原生 ES6 与 LuCI 组件开发，纯 DOM / 矢量 SVG 驱动，不依赖重型框架；通过 `rpc.js` 统一封装 JSON-RPC 调用与 `events(since)` 事件轮询。
+2. **中间通信层 (rpcd ucode 代理)**：挂载至系统 rpcd 发布 `luci.mt5700.*` 接口。内置 `/proc/net/tcp` 回环端口预检（零子进程、毫秒级快速失败）与 15s 熔断保护；流量速率 (`netrate`) 与硬件识别走 **sysfs 直读旁路**，全程不下发 AT，零串口开销。
+3. **核心守护层 (Rust/Tokio 常驻后端)**：`/usr/bin/at-webserver-rust` 单实例常驻（内存仅数十 KiB），监听 `127.0.0.1:8765` newline-JSON 协议。通过 `StateCache` 异步预热只读状态，RPC 查询毫秒级返回，避免前端并发查询阻塞串口。
+4. **模组控制层 (AT 事务独占持锁)**：所有 AT 交互统一经过 `PriLock` 优先级队列调度，独占持有模组 PCUI 串口，彻底杜绝多进程抢占 TTY 引起的数据截断与指令挂死。
+
+#### AT 事务优先级调度等级 (PriLock)
+
+| 优先级等级 | 业务场景 | 调度策略与典型命令 |
+|:---|:---|:---|
+| **P0 · Sms (最高)** | 短信发送、实时读取、批量删除 | **抢占最高优先级**，独占持锁完成整段 PDU 交互，避免短信长指令被普通查询打断 |
+| **P1 · High (优先)** | Web AT 终端交互、紧急故障恢复 | 用户主动调试与应急自愈操作，享受次高通道调度 |
+| **P2 · Normal (常规)** | 射频状态查询、网络模式配置、SIM 切换 | `AT^HCSQ`、`AT^MONSC`、`AT+CPIN?` 等标准业务读写 |
+| **P3 · Low (低优先)** | 芯片温度监控、周期巡检采样 | `AT^CHIPTEMP?` 等周期性低频监控任务 |
+| **P4 · Background (后台)** | 全网邻区扫频、深度频段分析 | `AT^FREQLOCK` 扫描等耗时长达数秒至数十秒的重型任务，不阻塞高优先业务 |
+
+---
+
+### 🔄 自动拨号与全链路协同机制
+
+数据面连通需经历从底层硬件枚举、AT 握手到操作系统网络协议栈的逐级对齐：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Terminal as 📱 局域网终端 (LAN / Wi-Fi)
+    participant FW as 🛡️ 防火墙 (fw4)
+    participant Netifd as 🌐 网络管理 (netifd)
+    participant InitD as ⚙️ 接入自愈 (init.d / hotplug)
+    participant Rust as 🦀 常驻后端 (Rust / Tokio)
+    participant Modem as 📡 MT5700M 5G 模组
+
+    Note over Modem,InitD: 【阶段 1 · 硬件枚举】模组接入与 USB 总线识别
+    Modem->>InitD: USB 硬件枚举就绪 (VID 3466 / MT5700M)
+    InitD-->>Rust: hotplug.d/usb 捕获事件，准备联动
+
+    Note over Rust,Modem: 【阶段 2 · 状态对齐】PCUI 串口持锁与自动拨号对齐
+    Rust->>Modem: 自动探测 PCUI 端口并获取 PriLock 互斥锁
+    Rust->>Modem: 下发 AT^SETAUTODIAL=1,1 (对齐拨号开关与工作模式)
+    Modem-->>Rust: 返回 OK (基站注册就绪，蜂窝网驻网成功)
+
+    rect rgb(240, 248, 255)
+    Note over Rust,Modem: 【阶段 3 · 双判决对账】联合健康校验 (5 分钟定时巡检 / 失败指数退避)
+    Rust->>Modem: 联合轮询 AT^NDISSTATQRY? 与 AT+CGACT?
+    Modem-->>Rust: 确认 NDIS 与 PDP 数据承载双双处于激活状态
+    end
+
+    Note over Rust,InitD: 【阶段 4 · 链路拉起】承载接口纳管与防火墙对齐
+    Rust->>InitD: 触发完成回调: /usr/libexec/at-webserver/on-uplink.sh
+    InitD->>Netifd: 检查并自动创建 MT5700M / MT5700Mv6 接口 (proto=dhcp)
+    InitD->>Netifd: 下发运营商 / 指定 DNS 伺服配置
+    InitD->>FW: 将承载接口登记至 wan 区域并热重载 fw4 (NAT)
+    InitD->>Netifd: 调用 ifup 拉起网络承载
+
+    Note over Netifd,Terminal: 【阶段 5 · 寻址连通】DHCP 握手与外网全链路打通
+    Netifd->>Modem: USB 虚拟网卡 (NDIS) 发起 DHCP 请求
+    Modem-->>Netifd: 分配 IPv4 / IPv6 公网地址、网关与默认路由
+    FW-->>Terminal: NAT 伪装规则生效，局域网终端顺畅访问互联网
+```
+
+<details>
+<summary><b>🖼️ 查看高精度时序流程海报（点击展开）</b></summary>
 
 <div align="center">
-  <img src="docs/auto-dial-sequence.png" alt="MT5700M 5G 模组自动拨号与网络接入时序图" width="880" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" />
+  <img src="docs/auto-dial-sequence.png" alt="MT5700M 5G 模组自动拨号与网络接入时序图" width="880" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-top: 10px;" />
 </div>
+
+</details>
 
 #### 各环节协同机制与容灾方案
 
