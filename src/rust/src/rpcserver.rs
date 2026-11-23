@@ -1385,7 +1385,7 @@ fn validate_imei_write(cmd: &str) -> Result<(), String> {
         }
         sum += d;
     }
-    if sum % 10 != 0 {
+    if !sum.is_multiple_of(10) {
         return Err("末位校验位未通过 Luhn 校验".into());
     }
     Ok(())

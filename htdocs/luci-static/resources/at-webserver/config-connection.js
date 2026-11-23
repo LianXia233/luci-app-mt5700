@@ -109,9 +109,9 @@ var MtConfigConnection = (function () {
 		grid2.appendChild(Mt5700.formGroup('RPC 端口', wsPort, '默认 8765'));
 		var wsBind = Mt5700.select([
 			{ label: '仅本机（127.0.0.1，经 rpcd 代理）', value: '127.0.0.1' },
-			{ label: '所有接口（0.0.0.0，可被外部访问）', value: '0.0.0.0' }
+			{ label: '所有接口（0.0.0.0，放行 LAN 访问）', value: '0.0.0.0' }
 		], '127.0.0.1');
-		grid2.appendChild(Mt5700.formGroup('RPC 监听范围', wsBind, '对外监听时请务必设置认证密钥'));
+		grid2.appendChild(Mt5700.formGroup('RPC 监听范围', wsBind, '仅在需要从局域网直连 RPC 时开启；务必设置认证密钥（WAN 仍需手动放行）'));
 		var authKey = Mt5700.input('text', '留空表示无需认证', '');
 		grid2.appendChild(Mt5700.formGroup('认证密钥', authKey, 'ucode 代理自动附带；LuCI 登录态由 rpcd 会话保证'));
 

@@ -391,8 +391,10 @@ mod tests {
 
     #[test]
     fn defaults_are_sane() {
-        assert!(DEFAULT_RING_ENTRIES > 0);
-        assert!(DEFAULT_RING_BYTES > DEFAULT_RING_ENTRIES, "字节上限要容得下满额短消息");
-        assert!(DEFAULT_MAX_LOG_FILE_BYTES >= 4096, "至少要能放下几十条通知");
+        const { assert!(DEFAULT_RING_ENTRIES > 0) };
+        // 字节上限要容得下满额短消息
+        const { assert!(DEFAULT_RING_BYTES > DEFAULT_RING_ENTRIES) };
+        // 至少要能放下几十条通知
+        const { assert!(DEFAULT_MAX_LOG_FILE_BYTES >= 4096) };
     }
 }

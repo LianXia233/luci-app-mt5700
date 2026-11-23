@@ -158,9 +158,8 @@ impl NotifyGate {
         let i = kind.index();
         let limit = &self.limits[i];
         let mut states = self.states.lock().unwrap();
-        if states[i].pending.is_none() {
-            return None;
-        }
+        // 无待补发副本时直接返回；用 `?` 表达「不存在即退出」。
+        states[i].pending.as_ref()?;
         if limit.window_enabled
             && !crate::config::in_poll_window(&limit.window_start, &limit.window_end, minute)
         {
@@ -1241,9 +1240,9 @@ mod tests {
         // 首次放行预留基线 base
         assert_eq!(gate.admit(NotifyKind::Call, base, 0, &sms("10086", "t")), GateDecision::Pass);
         // 被压住：admit 不刷新基线
-        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(600), 1 * 60, &sms("10086", "t")), GateDecision::Held);
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(600), 60, &sms("10086", "t")), GateDecision::Held);
         // 基线仍是 base，因此 t=3601 时放行
-        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(3601), 2 * 60, &sms("10086", "t")), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(3601), 120, &sms("10086", "t")), GateDecision::Pass);
     }
 
     /// 时段（跨午夜）内放行、窗外按 defer / drop 分流。
@@ -1520,26 +1519,32 @@ mod tests {
 
     #[test]
     fn custom_template_renders_all_placeholders() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = "[监控]".into();
-        tpl.sms = "来自 {sender} 的{kind}（{time}）：{content}".into();
+        let tpl = NotifyTemplates {
+            prefix: "[监控]".into(),
+            sms: "来自 {sender} 的{kind}（{time}）：{content}".into(),
+            ..NotifyTemplates::default()
+        };
         let out = combine_messages(&[sms("10086", "hi")], &tpl);
         assert_eq!(out, "[监控]\n来自 10086 的新短信（2026-10-11 12:00:00）：hi");
     }
 
     #[test]
     fn unknown_placeholder_is_preserved() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = String::new();
-        tpl.sms = "{sender}/{unknown}".into();
+        let tpl = NotifyTemplates {
+            prefix: String::new(),
+            sms: "{sender}/{unknown}".into(),
+            ..NotifyTemplates::default()
+        };
         assert_eq!(combine_messages(&[sms("A", "B")], &tpl), "A/{unknown}");
     }
 
     #[test]
     fn memory_full_content_falls_back_to_readable_text() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = String::new();
-        tpl.memory_full = "{content}".into();
+        let tpl = NotifyTemplates {
+            prefix: String::new(),
+            memory_full: "{content}".into(),
+            ..NotifyTemplates::default()
+        };
         let m = Notification {
             sender: String::new(),
             content: String::new(),
@@ -1553,9 +1558,11 @@ mod tests {
 
     #[test]
     fn batch_uses_index_and_template() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = String::new();
-        tpl.sms = "S:{content}".into();
+        let tpl = NotifyTemplates {
+            prefix: String::new(),
+            sms: "S:{content}".into(),
+            ..NotifyTemplates::default()
+        };
         let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
         assert!(out.starts_with("1. S:1"), "实际: {out}");
         assert!(out.contains("2. S:2"));
@@ -1564,8 +1571,10 @@ mod tests {
 
     #[test]
     fn prefix_supports_count_and_time() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = "共 {count} 条".into();
+        let tpl = NotifyTemplates {
+            prefix: "共 {count} 条".into(),
+            ..NotifyTemplates::default()
+        };
         let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
         assert!(out.starts_with("共 2 条\n"), "实际: {out}");
     }

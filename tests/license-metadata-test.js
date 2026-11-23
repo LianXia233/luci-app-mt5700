@@ -17,11 +17,13 @@ const about = read('src/rust/about.toml');
 const template = read('src/rust/about.hbs');
 const license = read('LICENSE');
 const cdlaLicense = read('root/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt');
+const artworkNotice = read('root/usr/share/licenses/luci-app-mt5700/ARTWORK-NOTICE.txt');
 const readme = read('README.md');
 const agents = read('AGENTS.md');
 const notices = read('THIRD-PARTY-NOTICES.md');
 const workflow = read('.github/workflows/checks.yml');
 const buildWorkflow = read('.github/workflows/build-openwrt.yml');
+const sdkBuild = read('scripts/sdk-build.sh');
 const packageJson = JSON.parse(read('tests/mock-modem/package.json'));
 const packageLock = JSON.parse(read('tests/mock-modem/package-lock.json'));
 
@@ -93,6 +95,30 @@ assert.match(cdlaLicense, /Community Data License Agreement - Permissive - Versi
   'the complete CDLA-Permissive-2.0 text must ship with the package');
 assert.match(cdlaLicense, /2\.1\. A Data Recipient may share Data[\s\S]*makes available the text of this agreement/,
   'the packaged CDLA license must retain its data-sharing condition');
+assert.match(artworkNotice, /character-pc-dark\.webp/,
+  'packaged artwork notice must list character-pc-dark.webp');
+assert.match(artworkNotice, /character-pc-light\.webp/,
+  'packaged artwork notice must list character-pc-light.webp');
+assert.match(artworkNotice, /character-mobile-dark\.webp/,
+  'packaged artwork notice must list character-mobile-dark.webp');
+assert.match(artworkNotice, /character-mobile-light\.webp/,
+  'packaged artwork notice must list character-mobile-light.webp');
+assert.match(artworkNotice, /mascot\.png/,
+  'packaged artwork notice must list mascot.png');
+assert.match(artworkNotice, /NEXON Games Co\., Ltd\. & Yostar, Inc\./,
+  'packaged artwork notice must identify the Blue Archive rights holders');
+assert.match(artworkNotice, /苏州幻塔网络科技有限公司/,
+  'packaged artwork notice must identify the NTE rights holder');
+assert.match(artworkNotice, /不在 GPL-3\.0-only 的授权范围内/,
+  'packaged artwork notice must state that artwork is outside the project license');
+assert.match(artworkNotice, /未取得权利人的书面许可/,
+  'packaged artwork notice must state the missing written permission');
+assert.match(artworkNotice, /THIRD-PARTY-NOTICES\.md/,
+  'packaged artwork notice must point at the full third-party notice');
+assert.ok(sdkBuild.includes('cp "$WORK_DIR/LICENSE" package/luci-app-mt5700/LICENSE'),
+  'the GPL text must be staged into the package source at build time');
+assert.ok(read('Makefile').includes('licenses/luci-app-mt5700/LICENSE'),
+  'direct make builds must also install the GPL text into the package');
 assert.match(lock, /name = "webpki-roots"\nversion = "0\.26\.11"/,
   'the legacy webpki-roots data package must remain auditable');
 assert.match(lock, /name = "webpki-roots"\nversion = "1\.0\.9"/,

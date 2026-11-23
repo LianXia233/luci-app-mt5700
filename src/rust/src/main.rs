@@ -187,7 +187,7 @@ async fn run(verbose: bool) -> Result<(), String> {
     let hub = rpc.hub();
     let broadcaster: Broadcaster = Arc::new(move |v: serde_json::Value| hub.broadcast(&v));
 
-    log_info!(Cat::Rpc, "启动完成，LuCI RPC 127.0.0.1:{}（经 rpcd/ucode 代理，不对外暴露）", cfg.websocket.port);
+    log_info!(Cat::Rpc, "启动完成，LuCI RPC {}:{}（经 rpcd/ucode 代理）", cfg.websocket.bind, cfg.websocket.port);
     if !verbose {
         // 稳态只留警告和错误，避免刷满 procd 日志。
         crate::logger::set_level(crate::logger::Level::Warn);
