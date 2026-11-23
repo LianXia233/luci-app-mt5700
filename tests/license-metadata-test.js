@@ -17,13 +17,13 @@ const about = read('src/rust/about.toml');
 const template = read('src/rust/about.hbs');
 const license = read('LICENSE');
 const cdlaLicense = read('root/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt');
+const packagedLicense = read('root/usr/share/licenses/luci-app-mt5700/LICENSE');
 const artworkNotice = read('root/usr/share/licenses/luci-app-mt5700/ARTWORK-NOTICE.txt');
 const readme = read('README.md');
 const agents = read('AGENTS.md');
 const notices = read('THIRD-PARTY-NOTICES.md');
 const workflow = read('.github/workflows/checks.yml');
 const buildWorkflow = read('.github/workflows/build-openwrt.yml');
-const sdkBuild = read('scripts/sdk-build.sh');
 const packageJson = JSON.parse(read('tests/mock-modem/package.json'));
 const packageLock = JSON.parse(read('tests/mock-modem/package-lock.json'));
 
@@ -115,10 +115,10 @@ assert.match(artworkNotice, /未取得权利人的书面许可/,
   'packaged artwork notice must state the missing written permission');
 assert.match(artworkNotice, /THIRD-PARTY-NOTICES\.md/,
   'packaged artwork notice must point at the full third-party notice');
-assert.ok(sdkBuild.includes('cp "$WORK_DIR/LICENSE" package/luci-app-mt5700/LICENSE'),
-  'the GPL text must be staged into the package source at build time');
-assert.ok(read('Makefile').includes('licenses/luci-app-mt5700/LICENSE'),
-  'direct make builds must also install the GPL text into the package');
+assert.equal(packagedLicense, license,
+  'the packaged GPL text must be byte-identical to the repository LICENSE');
+assert.match(packagedLicense, /GNU GENERAL PUBLIC LICENSE\s+Version 3/,
+  'the packaged GPL text must contain the complete GPLv3 text');
 assert.match(lock, /name = "webpki-roots"\nversion = "0\.26\.11"/,
   'the legacy webpki-roots data package must remain auditable');
 assert.match(lock, /name = "webpki-roots"\nversion = "1\.0\.9"/,

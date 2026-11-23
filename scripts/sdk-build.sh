@@ -288,9 +288,6 @@ echo "==> 【构建执行 2/5】放入软件包源码到 buildroot"
 rm -rf package/luci-app-mt5700
 mkdir -p package/luci-app-mt5700
 cp -r "$WORK_DIR"/Makefile "$WORK_DIR"/htdocs "$WORK_DIR"/po "$WORK_DIR"/root "$WORK_DIR"/src package/luci-app-mt5700/
-# GPL-3.0 全文随二进制包安装：Makefile 的 Build/Prepare 会把它复制到
-# root/usr/share/licenses/luci-app-mt5700/LICENSE；这里先把源文件放进包目录。
-cp "$WORK_DIR/LICENSE" package/luci-app-mt5700/LICENSE
 # 确保 init.d / uci-defaults / hotplug / libexec 可执行（cp -r 在部分环境可能丢 +x）
 chmod 0755 package/luci-app-mt5700/root/etc/init.d/at-webserver
 chmod 0755 package/luci-app-mt5700/root/etc/uci-defaults/at-webserver

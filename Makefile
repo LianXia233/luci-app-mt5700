@@ -35,9 +35,6 @@ define Build/Prepare
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/iface/99-at-webserver 2>/dev/null || true
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/usb/99-at-webserver 2>/dev/null || true
 	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/at-webserver/on-uplink.sh 2>/dev/null || true
-	# GPL-3.0 全文随包安装（直接 make 与 sdk-build.sh 两条构建路径都要覆盖）
-	mkdir -p $(PKG_BUILD_DIR)/root/usr/share/licenses/luci-app-mt5700
-	cp $(CURDIR)/LICENSE $(PKG_BUILD_DIR)/root/usr/share/licenses/luci-app-mt5700/LICENSE
 endef
 
 # 安装/升级完成后强制注册开机自启并拉起服务。
