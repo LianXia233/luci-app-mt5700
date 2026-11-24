@@ -83,7 +83,7 @@ jobs:
     steps:
       # ---------- 1 ----------
       - name: 检出仓库代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       # ---------- 2 ----------
       - name: 环境准备（校验 runner 架构与构建参数）
@@ -128,20 +128,37 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          # dpkg（提供 dpkg-deb）、binutils（objdump/readelf）、build-essential、curl
-          sudo apt-get install -y -qq dpkg-dev binutils build-essential curl ca-certificates
-          # Rust 工具链
-          if ! command -v cargo >/dev/null 2>&1; then
-            echo "==> 安装 rustup（minimal profile）"
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --profile minimal --default-toolchain stable
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y -qq dpkg-dev binutils build-essential ca-certificates
+          # 版本单一来源：本地、main CI、Debian CI 都读 src/rust/rust-toolchain.toml
+          TOOLCHAIN=$(grep "^channel" src/rust/rust-toolchain.toml | head -1 | cut -d'"' -f2)
+          test -n "$TOOLCHAIN"
+          rustup toolchain install "$TOOLCHAIN" --profile minimal --component clippy
+          rustup default "$TOOLCHAIN"
           rustc --version
           cargo --version
           dpkg-deb --version | head -1
 
+      - name: 仓库与 WebUI 同步门禁
+        if: steps.stale.outputs.stale != 'true'
+        run: |
+          set -euo pipefail
+          node tests/static-check.js
+          for f in tests/*-test.js; do
+            echo "::group::${f}"
+            node "$f"
+            echo "::endgroup::"
+          done
+          (cd src/rust && cargo test --locked && cargo clippy --all-targets -- -D warnings)
+
       # ---------- 4 ----------
+      - name: 生成 Rust 依赖许可证清单
+        if: steps.stale.outputs.stale != 'true'
+        run: |
+          set -euo pipefail
+          cargo install --locked --version 0.9.3 --features cli cargo-about
+          (cd src/rust && cargo about generate about.hbs > "$GITHUB_WORKSPACE/RUST-DEPENDENCIES.md")
+          test -s "$GITHUB_WORKSPACE/RUST-DEPENDENCIES.md"
+
       - name: 构建执行（原生 cargo release）
         if: steps.stale.outputs.stale != 'true'
         run: |
@@ -229,7 +246,7 @@ jobs:
       # ---------- 8 ----------
       - name: 产物归档（上传 Actions 构件）
         if: steps.stale.outputs.stale != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: at-webserver-deb-${{ matrix.deb_arch }}
           path: dist/*.deb
@@ -244,11 +261,11 @@ jobs:
     steps:
       # ---------- 9 ----------
       - name: 检出仓库代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       # ---------- 10 ----------
       - name: 下载全部架构产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: at-webserver-deb-*
           path: dist-collected
@@ -320,8 +337,15 @@ jobs:
             echo "- 服务默认已 \`systemctl enable\`；未接模组时自动启动可能失败，属预期，"
             echo "  接入模组后执行 \`systemctl restart at-webserver\` 即可。"
             echo "- 完整变更说明见仓库 \`docs/release-notes/\`。"
+            echo "- 下载后可用 `sha256sum -c SHA256SUMS` 校验。"
           } > release-notes.md
           cat release-notes.md
+
+      - name: 生成 SHA256SUMS
+        run: |
+          set -euo pipefail
+          (cd dist-collected && sha256sum *.deb > SHA256SUMS)
+          cat dist-collected/SHA256SUMS
 
       # ---------- 14 ----------
       - name: 发布 Release
@@ -339,7 +363,8 @@ jobs:
             --target "${GITHUB_SHA}" \
             --title "at-webserver $TAG（Debian deb 包）" \
             --notes-file release-notes.md \
-            dist-collected/*.deb
+            dist-collected/*.deb \
+            dist-collected/SHA256SUMS
           echo "==> Release 已发布：$TAG"
           gh release view "$TAG" --json tagName,name --jq '"  标签: " + .tagName + "\n  名称: " + .name'
 

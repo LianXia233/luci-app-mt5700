@@ -228,34 +228,15 @@ pub async fn run_bind(
     }
 }
 
-/// 把绑定结果写回 UCI 并 commit；返回是否全部成功。
-pub async fn persist_uci(target: &BindTarget) -> Result<(), String> {
-    let cmds: [(&str, &str); 2] = [
-        ("qq_target_type", &target.target_type),
-        ("qq_target_id", &target.target_id),
-    ];
-    for (k, v) in cmds {
-        run_cmd("uci", &["set", &format!("at-webserver.config.{k}={v}")]).await?;
-    }
-    run_cmd("uci", &["commit", "at-webserver"]).await?;
-    Ok(())
-}
-
-pub(crate) async fn run_cmd(prog: &str, args: &[&str]) -> Result<(), String> {
-    let out = tokio::process::Command::new(prog)
-        .args(args)
-        .output()
+/// 把绑定结果写回 JSON 配置并落盘（Debian 分支没有 uci）。
+pub async fn persist_config(target: &BindTarget) -> Result<(), String> {
+    let mut patch = crate::configstore::ConfigMap::new();
+    patch.insert("qq_target_type".to_string(), target.target_type.clone());
+    patch.insert("qq_target_id".to_string(), target.target_id.clone());
+    crate::configstore::update(patch)
         .await
-        .map_err(|e| format!("执行 {prog} {args:?} 失败: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "{prog} {args:?} 退出码 {:?}: {}",
-            out.status.code(),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ))
-    }
+        .map(|_| ())
+        .map_err(|e| format!("写入 QQ 绑定结果失败: {e}"))
 }
 
 async fn fetch_gateway(token: &str) -> Result<String, String> {

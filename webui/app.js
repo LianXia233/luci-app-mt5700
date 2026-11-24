@@ -44,8 +44,18 @@
 		'at-webserver/tabmenu',
 		'at-webserver/rpc',
 		'at-webserver/mt5700',
-		'at-webserver/ui'
+		'at-webserver/ui',
+		// Config 页面在 main 1.32.11 后拆成六个模块，必须全部预加载。
+		'at-webserver/config-common',
+		'at-webserver/config-drawer',
+		'at-webserver/config-connection',
+		'at-webserver/config-network',
+		'at-webserver/config-notify',
+		'at-webserver/config-templates'
 	];
+
+	/* 静态资源版本戳：独立版没有 rpcd 的 resource_version，手动跟随 main 发布版本。 */
+	var RESOURCE_VERSION = '1.32.13';
 
 	/* LuCI 内置模块 → 垫片导出。main 的模块用 'require baseclass'/'rpc'/
 	 * 'uci'/'fs' 引用内置能力；'poll'/'ui' 等本项目未用到的内置暂不提供，
@@ -70,9 +80,16 @@
 
 	/* LuCI require 别名约定：'a/b/c' 缺省别名取最后一段 c */
 	function requireAlias(name, explicit) {
-		if (explicit) return explicit;
-		var i = name.lastIndexOf('/');
-		return i >= 0 ? name.slice(i + 1) : name;
+		var a = explicit || (function () {
+			var i = name.lastIndexOf('/');
+			return i >= 0 ? name.slice(i + 1) : name;
+		})();
+		/* Function() 的参数名必须是合法 JS 标识符：config-common / config-drawer
+		 * 这类带连字符的模块名不能直接当参数，否则抛
+		 * "Arg string terminates parameters early"。 */
+		a = String(a).replace(/[^A-Za-z0-9_$]/g, '_');
+		if (!a || /^[0-9]/.test(a)) a = '_' + a;
+		return a;
 	}
 
 	function resolveRequire(name) {
@@ -81,6 +98,7 @@
 	}
 
 	function evalModule(url) {
+		if (url.indexOf('?') < 0) url += '?v=' + RESOURCE_VERSION;
 		return fetch(url).then(function (resp) {
 			if (!resp.ok) throw new Error('加载模块失败: ' + url + ' (HTTP ' + resp.status + ')');
 			return resp.text();

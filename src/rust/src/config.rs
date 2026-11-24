@@ -1,9 +1,10 @@
 // Copyright (C) 2026 LianXia233
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
-//! 键名与 LuCI 页面约定完全一致。
+//! 配置读取（Debian）：从 JSON 扁平键值配置文件（默认 `/etc/mt5700/config.json`，
+//! 可用 `MT5700_CONFIG` 覆盖）读取整个配置。键名与 main 分支的 UCI 语义保持一致。
 
+use crate::configstore;
 use crate::{log_info, log_warn};
 use crate::logcat::Category;
 use crate::logger::{self, Level};
@@ -488,9 +489,25 @@ pub struct WebSocketConfig {
     pub allow_wan: bool,
     /// RPC 监听地址：websocket_bind 显式值优先；否则 allow_wan=1 → 0.0.0.0，默认 127.0.0.1
     pub bind: String,
-    /// 一次 ^CELLSCAN 允许跑多久；读 UCI cellscan_timeout，下限 10s，默认 180s
+    /// 一次 ^CELLSCAN 允许跑多久；读 cellscan_timeout，下限 10s，默认 180s
     pub scan_timeout: Duration,
 }
+
+/// 独立 WebUI 的 HTTP 服务配置（Debian 分支新增）。
+#[derive(Debug, Clone)]
+pub struct HttpConfig {
+    /// HTTP API + WebUI 监听端口，默认 9000
+    pub port: u16,
+    /// 监听地址，默认 0.0.0.0（开箱即用：浏览器直访 http://<设备IP>:9000）
+    pub bind: String,
+    /// 静态 WebUI 根目录；留空用 [`DEFAULT_WEB_ROOT`]
+    pub web_root: String,
+    /// 访问密钥；为空表示不启用认证
+    pub auth_key: String,
+}
+
+/// WebUI 静态根目录默认值（发行包安装到 /usr/share/mt5700/webui）。
+pub const DEFAULT_WEB_ROOT: &str = "/usr/share/mt5700/webui";
 
 #[derive(Debug, Clone)]
 pub struct ScheduleConfig {
@@ -541,6 +558,8 @@ pub struct Config {
     /// （AT 收发、拨号对账、接口拉起…）。分开放是因为两者的读者与清理时机都不同。
     pub log: LogConfig,
     pub websocket: WebSocketConfig,
+    /// 独立 WebUI 的 HTTP 服务（Debian 分支保留，main 分支没有这一段）
+    pub http: HttpConfig,
     pub schedule: ScheduleConfig,
     /// 使用量统计的自动清零日：**每月几号**（默认 1 号，范围 1~31）。
     ///
@@ -636,6 +655,12 @@ pub fn default_config() -> Config {
             bind: "127.0.0.1".into(),
             scan_timeout: Duration::from_secs(180),
         },
+        http: HttpConfig {
+            port: 9000,
+            bind: "0.0.0.0".into(),
+            web_root: String::new(),
+            auth_key: String::new(),
+        },
         schedule: ScheduleConfig {
             enabled: false,
             check_interval: Duration::from_secs(60),
@@ -667,19 +692,14 @@ pub fn normalize_sms_storage(raw: &str) -> String {
     }
 }
 
-/// 还原 uci show 的单引号包裹，包括 '\'' 的内嵌引号转义。
-fn unquote_uci(raw: &str) -> String {
-    let raw = raw.trim();
-    if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
-        raw[1..raw.len() - 1].replace("'\\''", "'")
-    } else {
-        raw.to_string()
-    }
-}
-
 pub struct UciReader(HashMap<String, String>);
 
 impl UciReader {
+    /// 从 JSON 配置存储的扁平键值映射构造。
+    fn from_map(map: configstore::ConfigMap) -> UciReader {
+        UciReader(map.into_iter().collect())
+    }
+
     pub fn str(&self, key: &str, def: &str) -> String {
         match self.0.get(key) {
             Some(v) if !v.is_empty() => v.clone(),
@@ -732,37 +752,6 @@ impl UciReader {
 /// 读取环境变量（trim 后为空视为未设置）。
 fn env_nonempty(key: &str) -> String {
     std::env::var(key).unwrap_or_default().trim().to_string()
-}
-
-/// 用一次 `uci show at-webserver` 取回整个配置段。
-pub async fn uci_values() -> Result<UciReader, String> {
-    // 加 5s 超时，避免 uci 命令异常挂起卡死启动。
-    let out = tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::process::Command::new("uci")
-            .args(["show", "at-webserver"])
-            .output(),
-    )
-    .await
-    .map_err(|_| "uci show 超时".to_string())?
-    .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("uci show 退出码 {}", out.status));
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let prefix = "at-webserver.config.";
-    let mut values = HashMap::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(eq) = line.find('=') {
-            let key = &line[..eq];
-            let raw = &line[eq + 1..];
-            if let Some(name) = key.strip_prefix(prefix) {
-                values.insert(name.to_string(), unquote_uci(raw));
-            }
-        }
-    }
-    Ok(UciReader(values))
 }
 
 /// 解析定时推送间隔：UCI 以**分钟**为单位，内部换算成 [`Duration`]。
@@ -911,13 +900,13 @@ fn type_limit_from(values: &UciReader, prefix: &str) -> TypePushLimit {
     }
 }
 
-/// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
+/// 从配置文件读取配置；读取失败时返回默认配置，让服务仍能起来。
 pub async fn load_config() -> Config {
     let mut cfg = default_config();
-    let values = match uci_values().await {
-        Ok(v) => v,
+    let values = match configstore::read_map().await {
+        Ok(map) => UciReader::from_map(map),
         Err(e) => {
-            logger::emit(Level::Warn, Category::Config, format_args!("读取 UCI 配置失败，使用默认配置: {e}"));
+            logger::emit(Level::Warn, Category::Config, format_args!("读取配置文件失败，使用默认配置: {e}"));
             return cfg;
         }
     };
@@ -959,6 +948,26 @@ pub async fn load_config() -> Config {
     };
     // 下限 10 秒而不是默认 3 分钟：用户配置的小于 3 分钟的值不能被悄悄抬回。
     cfg.websocket.scan_timeout = values.seconds("cellscan_timeout", cfg.websocket.scan_timeout, Duration::from_secs(10));
+
+    // 独立 WebUI 的 HTTP 服务（Debian）：默认 9000 端口对外监听，开箱即用。
+    cfg.http.port = values.int("http_port", 9000).clamp(1, 65535) as u16;
+    cfg.http.bind = {
+        let b = values.str("http_bind", "0.0.0.0");
+        if b.is_empty() { "0.0.0.0".to_string() } else { b }
+    };
+    cfg.http.web_root = {
+        let w = values.str("web_root", "");
+        if w.is_empty() {
+            std::env::var("MT5700_WEBROOT").unwrap_or_else(|_| DEFAULT_WEB_ROOT.to_string())
+        } else {
+            w
+        }
+    };
+    // 认证密钥：auth_key（Debian 新键）与 websocket_auth_key（兼容旧键）取其一
+    {
+        let k = values.str("auth_key", "");
+        cfg.http.auth_key = if k.is_empty() { values.str("websocket_auth_key", "") } else { k };
+    }
 
     // 企业微信推送开关：默认关闭。历史上「webhook 非空即启用」曾把脏数据
     // （值里带引号字符的伪 URL）当成已配置地址，每次通知都白跑三轮重试。

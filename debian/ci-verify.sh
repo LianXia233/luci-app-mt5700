@@ -3,7 +3,7 @@
 # 目的：在推送 GitHub 之前发现脚本级错误（架构判定、打包调用、闸门）。
 set -euo pipefail
 
-cd /root/mt5700-build/mt5700-build
+cd "$(dirname "$0")/.."
 TARGET="$1"          # x86_64-unknown-linux-gnu | aarch64-unknown-linux-gnu
 DEB_ARCH_EXPECT="$2" # amd64 | arm64
 

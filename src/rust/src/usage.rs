@@ -18,7 +18,7 @@
 //! | 场景 | 落点 | 重启后 |
 //! |:--|:--|:--|
 //! | 持久化关（默认） | `/tmp/mt5700-usage.json`（tmpfs，纯内存） | 丢失，从零开始 |
-//! | 持久化开 | 额外写 `/etc/at-webserver-usage.json`（overlay），每 10 分钟最多一次 | 恢复 |
+//! | 持久化开 | 额外写 `/var/lib/mt5700/usage.json`，每 10 分钟最多一次 | 恢复 |
 //!
 //! - **清零按钮**：无论持久化开关状态如何，都强制重写两个文件（持久化开时把落盘
 //!   文件一并清零，持久化关时删掉落盘文件），不会留下旧值。
@@ -70,7 +70,7 @@ use tokio::sync::{watch, Mutex, RwLock};
 /// 内存态状态文件（tmpfs，重启即失）。
 pub const USAGE_VOL_PATH: &str = "/tmp/mt5700-usage.json";
 /// 持久化状态文件（overlay，跨重启保留）。
-pub const USAGE_FLASH_PATH: &str = "/etc/at-webserver-usage.json";
+pub const USAGE_FLASH_PATH: &str = "/var/lib/mt5700/usage.json";
 
 /// 统计记录文件大小上限（字节）。
 ///
@@ -377,28 +377,6 @@ fn uci_show(pkg: &str) -> String {
         .unwrap_or_default()
 }
 
-/// 写一项 UCI 配置并提交；内存态的热更新由各调用方自己做。
-async fn uci_set_config(key: &str, value: &str) -> Result<(), String> {
-    let arg = format!("{key}={value}");
-    let out = tokio::process::Command::new("uci")
-        .args(["set", &arg])
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("写入 {key} 失败: {}", String::from_utf8_lossy(&out.stderr)));
-    }
-    let out = tokio::process::Command::new("uci")
-        .args(["commit", "at-webserver"])
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("提交配置失败: {}", String::from_utf8_lossy(&out.stderr)));
-    }
-    Ok(())
-}
-
 /// 设备侧入口：每次采样重新解析，用户改动接口绑定后下一轮即生效。
 fn wan_netdev() -> Option<String> {
     let usb = usb_netdev();
@@ -493,15 +471,36 @@ fn remove_file(path: &str) {
     }
 }
 
+/// Debian 承载网卡选择：配置 netdev → 环境变量 → USB 网卡 → OpenWrt WAN 区域兜底。
+fn resolve_debian_netdev(manual: &str) -> Option<String> {
+    if netdev_usable(manual) {
+        return Some(manual.to_string());
+    }
+    if let Ok(env) = std::env::var("MT5700_NETDEV") {
+        let env = env.trim();
+        if netdev_usable(env) {
+            return Some(env.to_string());
+        }
+    }
+    if let Some(dev) = usb_netdev() {
+        return Some(dev);
+    }
+    // 仅 OpenWrt 有 uci；Debian 上直接跳过，避免每秒 fork 两个必然失败的命令。
+    if std::path::Path::new("/etc/openwrt_release").exists() {
+        return wan_netdev();
+    }
+    None
+}
+
 /// [`UsageTracker::read_counters_netdev`] 的阻塞实现，只在 blocking 池里运行。
 ///
 /// 单独抽成自由函数是为了能整段交给 `spawn_blocking`：它不借用 `self`，
 /// 也不持有任何异步锁，从而不必为了「看起来异步」在锁内再包一层。
-fn read_counters_netdev_blocking() -> Option<(String, u64, u64)> {
-    let dev = match wan_netdev() {
+fn read_counters_netdev_blocking(manual: &str) -> Option<(String, u64, u64)> {
+    let dev = match resolve_debian_netdev(manual) {
         Some(d) => d,
         None => {
-            log_debug!("未识别到 WAN 区域网卡，本轮不采样（不回退 LAN/br-lan）");
+            log_debug!("未识别到承载网卡，本轮不采样（不回退 LAN/br-lan）");
             return None;
         }
     };
@@ -524,6 +523,8 @@ pub struct UsageTracker {
     reset_day: AtomicU32,
     /// 统计来源（`netdev` / `modem`），可由前端热切换。
     source: RwLock<String>,
+    /// Debian：配置里显式指定的承载网卡；空串表示自动探测。
+    manual_device: RwLock<String>,
     /// 模组来源取数用的异步状态缓存；`netdev` 来源下完全不触碰。
     cache: Option<Arc<crate::state::StateCache>>,
 }
@@ -542,8 +543,25 @@ impl UsageTracker {
             state: Mutex::new(load_state()),
             reset_day: AtomicU32::new(crate::monthly::normalize_day(reset_day)),
             source: RwLock::new(normalize_usage_source(source).to_string()),
+            manual_device: RwLock::new(String::new()),
             cache: Some(cache),
         })
+    }
+
+    /// 注入配置里的承载网卡（Debian 无 uci，由启动接线处调用）。
+    ///
+    /// 网卡不可用（名字错 / 尚未枚举）时保留自动探测，避免一处配置错误让统计永久停摆。
+    pub async fn set_device(&self, dev: &str) {
+        let dev = dev.trim();
+        let chosen = if dev.is_empty() {
+            String::new()
+        } else if netdev_usable(dev) {
+            dev.to_string()
+        } else {
+            log_warn!("配置的 netdev={dev} 不可用，使用量统计将自动探测");
+            String::new()
+        };
+        *self.manual_device.write().await = chosen;
     }
 
     /// 常驻采样循环：与前端是否打开无关。
@@ -600,7 +618,8 @@ impl UsageTracker {
     /// 全是阻塞调用；本函数在常驻采样循环里每秒跑一次，留在 reactor 线程上
     /// 会直接拖慢同一运行时里的 AT/RPC 任务调度，因此整段搬到 blocking 池。
     async fn read_counters_netdev(&self) -> Option<(String, u64, u64)> {
-        match tokio::task::spawn_blocking(read_counters_netdev_blocking).await {
+        let manual = self.manual_device.read().await.clone();
+        match tokio::task::spawn_blocking(move || read_counters_netdev_blocking(&manual)).await {
             Ok(v) => v,
             Err(e) => {
                 // blocking 任务 panic 才会走到这里：记一笔并按「本轮取不到」处理，
@@ -757,7 +776,11 @@ impl UsageTracker {
     /// 修改自动清零日（每月几号）：写 UCI（跨重启生效）+ 热更新内存值。
     pub async fn set_reset_day(&self, day: u32) -> Result<u32, String> {
         let day = crate::monthly::normalize_day(day);
-        uci_set_config("at-webserver.config.usage_reset_day", &day.to_string()).await?;
+        {
+        let mut patch = crate::configstore::ConfigMap::new();
+        patch.insert("usage_reset_day".to_string(), day.to_string());
+        crate::configstore::update(patch).await?;
+    }
         self.reset_day.store(day, Ordering::Relaxed);
         log_info!("使用量自动清零已改为 {}", crate::monthly::describe(day));
         Ok(day)
@@ -773,7 +796,11 @@ impl UsageTracker {
         if source == SOURCE_MODEM && self.cache.is_none() {
             return Err("模组数据来源不可用（状态缓存未初始化）".into());
         }
-        uci_set_config("at-webserver.config.usage_source", source).await?;
+        {
+        let mut patch = crate::configstore::ConfigMap::new();
+        patch.insert("usage_source".to_string(), source.to_string());
+        crate::configstore::update(patch).await?;
+    }
         *self.source.write().await = source.to_string();
         log_info!("使用量统计来源已切换为 {}", if source == SOURCE_MODEM { "模组 AT^DSFLOWQRY" } else { "WAN 物理网卡" });
         Ok(self.snapshot().await)

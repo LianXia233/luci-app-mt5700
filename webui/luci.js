@@ -143,8 +143,9 @@
 						return (v == null) ? expect[expectKey] : v;
 					}
 					if (expectKey === '') {
-						var v2 = result ? result[''] : undefined;
-						return (v2 == null) ? expect[''] : v2;
+						/* LuCI 约定：expect: { '': default } 表示「返回整个结果对象」，
+						 * 不是取 result['']。service.list 等依赖这个语义。 */
+						return (result == null) ? expect[''] : result;
 					}
 					return result;
 				});
@@ -157,6 +158,13 @@
 		if (object === 'mt5700') {
 			if (method === 'at') return httpJson('/api/at', { method: 'POST', body: { cmd: params.cmd } });
 			if (method === 'events') return httpJson('/api/events?since=' + encodeURIComponent(params.since || 0));
+			if (method === 'logs') {
+				var q = 'since=' + encodeURIComponent(params.since || 0) + '&limit=' + encodeURIComponent(params.limit || 300);
+				/* cats 可能是数组（新前端）或字符串（手工调用）；后端按逗号分隔解析。 */
+				if (Array.isArray(params.cats)) q += '&cats=' + encodeURIComponent(params.cats.join(','));
+				else if (params.cats) q += '&cats=' + encodeURIComponent(params.cats);
+				return httpJson('/api/logs?' + q);
+			}
 			if (method === 'logs') return httpJson('/api/logs?since=' + encodeURIComponent(params.since || 0) + '&limit=' + encodeURIComponent(params.limit || 300));
 			if (method === 'netrate') return httpJson('/api/netrate?device=' + encodeURIComponent(params.device || ''));
 			if (method === 'usb') return httpJson('/api/usb');
@@ -179,6 +187,12 @@
 		if (object === 'file' && method === 'write') {
 			return httpJson('/api/file/write', { method: 'POST', body: { path: params.path, data: params.data } });
 		}
+		if (object === 'file' && method === 'list') {
+			return httpJson('/api/file/list?path=' + encodeURIComponent(params.path || ''));
+		}
+		if (object === 'file' && method === 'stat') {
+			return httpJson('/api/file/stat?path=' + encodeURIComponent(params.path || ''));
+		}
 		/* 其它对象走通用 RPC 转发端点 */
 		return httpJson('/api/rpc/' + encodeURIComponent(object) + '/' + encodeURIComponent(method), {
 			method: 'POST', body: params
@@ -190,6 +204,18 @@
 	var uciCache = {};      /* 最近一次从后端拉到的键值 */
 	var uciStaged = {};     /* set() 暂存、待 save() 落盘 */
 	var uciLoaded = {};
+
+	/* main 的服务配置页沿用 OpenWrt 的 websocket_* 键；Debian 独立版实际是
+	 * HTTP 服务，配置键为 http_port/http_bind/auth_key。这里做双向映射，
+	 * 页面无需改代码就能读写正确的 Debian 配置。 */
+	var UCI_KEY_MAP = {
+		websocket_port: 'http_port',
+		websocket_bind: 'http_bind',
+		websocket_auth_key: 'auth_key'
+	};
+	function mapKey(k) {
+		return UCI_KEY_MAP[k] || k;
+	}
 
 	function normalizeVal(v) {
 		return (v == null) ? null : String(v);
@@ -205,25 +231,28 @@
 		},
 		get: function (conf, section, option) {
 			void conf; void section; /* Debian 后端为扁平键值，等价 config 段 */
-			var k = option;
+			var k = mapKey(option);
 			if (uciStaged.hasOwnProperty(k)) return normalizeVal(uciStaged[k]);
 			if (uciCache.hasOwnProperty(k)) return normalizeVal(uciCache[k]);
 			return null;
 		},
 		set: function (conf, section, option, value) {
 			void conf; void section;
-			uciStaged[option] = normalizeVal(value);
+			uciStaged[mapKey(option)] = normalizeVal(value);
 			return Promise.resolve(true);
 		},
 		unset: function (conf, section, option) {
 			void conf; void section;
-			delete uciStaged[option];
+			delete uciStaged[mapKey(option)];
 			return Promise.resolve(true);
 		},
 		changes: function () {
 			var keys = Object.keys(uciStaged);
 			return Promise.resolve(keys.map(function (k) { return { key: k }; }));
 		},
+		/* 独立版配置是扁平键值，没有 UCI section；网络接口下拉由 /dev 与内置空表兜底。 */
+		sections: function () { return []; },
+		delete: function (conf, section, option) { return this.unset(conf, section, option); },
 		save: function () {
 			if (!Object.keys(uciStaged).length) {
 				return Promise.resolve(true);
@@ -269,6 +298,10 @@
 
 	/* ---------- 组装 L ---------- */
 
+	// main 分支的共享组件通过 LuCI 全局 `_()` 翻译；独立版源语言就是简体中文，
+	// 这里提供 identity 实现，保证 trText() 在浏览器里可用。
+	window._ = function (s) { return s; };
+
 	var L = {
 		Class: { extend: function (members) { return classExtend(members, null); } },
 		view: {
@@ -277,7 +310,7 @@
 		rpc: rpc,
 		uci: uci,
 		fs: fsApi,
-		env: {},
+		env: { resource_version: 'debian-1.32.13' },
 		url: function (path) { return path; },
 		resolveDefault: function (v, def) { return (v == null) ? def : v; },
 		bind: function (fn, ctx) {

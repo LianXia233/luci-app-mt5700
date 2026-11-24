@@ -1332,7 +1332,8 @@ pub fn is_passthrough_urc(line: &str) -> bool {
 /// 脚本不存在或执行失败都静默跳过：它是补充手段，兜底路径在 init.d 的重试
 /// 与 hotplug 钩子里，缺了它功能仍然可用。
 async fn notify_uplink_ready() {
-    const HOOK: &str = "/usr/libexec/at-webserver/on-uplink.sh";
+    // Debian 独立版没有 OpenWrt 的 /usr/libexec 布局；发行包把钩子装在 /etc/mt5700。
+    const HOOK: &str = "/etc/mt5700/on-uplink.sh";
     if !std::path::Path::new(HOOK).exists() {
         return;
     }

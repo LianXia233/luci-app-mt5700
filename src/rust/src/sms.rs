@@ -45,12 +45,14 @@ pub const SMS_SEND_TOTAL_BUDGET: Duration = Duration::from_secs(60);
 /// 续租粒度更细，正常使用无感。
 pub const SMS_MODE_LEASE: Duration = Duration::from_secs(30);
 
-/// 把存储区选择写回 UCI 并 commit（开机默认值的来源，界面保存时同路）。
-async fn persist_storage_uci(mem: &str) -> Result<(), String> {
-    let arg = format!("at-webserver.config.sms_storage={mem}");
-    crate::qqbind::run_cmd("uci", &["set", arg.as_str()]).await?;
-    crate::qqbind::run_cmd("uci", &["commit", "at-webserver"]).await?;
-    Ok(())
+/// 把存储区选择写回 JSON 配置并落盘（Debian 没有 uci）。
+async fn persist_storage_config(mem: &str) -> Result<(), String> {
+    let mut patch = crate::configstore::ConfigMap::new();
+    patch.insert("sms_storage".to_string(), mem.to_string());
+    crate::configstore::update(patch)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("写入短信存储区失败: {e}"))
 }
 
 /// `AT+CFUN=1` 的应答预算。
@@ -957,7 +959,7 @@ impl SmsService {
         drop(tx);
         // 写回 UCI：这个选择同时是「开机默认存储区」，不落盘的话模组复位 /
         // 换卡回 SM 后，用户每次重启都要重设一次。写失败不影响本次生效，留痕即可。
-        if let Err(e) = persist_storage_uci(mem).await {
+        if let Err(e) = persist_storage_config(mem).await {
             log_warn!("存储区已生效但写回 UCI 失败（{mem}）：{e}");
         }
         info

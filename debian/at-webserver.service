@@ -20,7 +20,7 @@ TimeoutStopSec=10
 # 资源与安全基线（不干扰 USB 设备访问所需的最小权限集）
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/etc/mt5700 /tmp
+ReadWritePaths=/etc/mt5700 /etc/at-webserver /var/lib/mt5700 /tmp
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectControlGroups=true

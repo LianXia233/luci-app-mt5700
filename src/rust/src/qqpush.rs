@@ -684,21 +684,40 @@ fn md_to_plain(md: &str) -> String {
     out.join("\n")
 }
 
-/// 从 LAN IP 推导管理页地址（`uci get network.lan.ipaddr`）。
+/// 从本机地址与 WebUI 端口推导管理页地址（Debian 无 uci）。
 fn derive_admin_url() -> Option<String> {
-    let out = std::process::Command::new("uci")
-        .args(["get", "network.lan.ipaddr"])
+    let map = crate::configstore::read_map_sync();
+    let port = map
+        .get("http_port")
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(9000);
+    let ip = local_ip()?;
+    if port == 80 {
+        Some(format!("http://{ip}/"))
+    } else {
+        Some(format!("http://{ip}:{port}/"))
+    }
+}
+
+/// 默认路由的源地址（等价于旧口径的 `network.lan.ipaddr`）。
+fn local_ip() -> Option<String> {
+    let out = std::process::Command::new("ip")
+        .args(["-4", "route", "get", "1.1.1.1"])
         .output()
         .ok()?;
     if !out.status.success() {
         return None;
     }
-    let ip = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if ip.is_empty() {
-        None
-    } else {
-        Some(format!("http://{ip}/"))
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut it = text.split_whitespace();
+    while let Some(tok) = it.next() {
+        if tok == "src" {
+            if let Some(ip) = it.next() {
+                return Some(ip.to_string());
+            }
+        }
     }
+    None
 }
 
 /// 目标类型归一化：识别常见别名与 bind 模式，其余未知值回落群聊。

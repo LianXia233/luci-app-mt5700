@@ -65,13 +65,14 @@ fi
 # ---------- 3. 安装 ----------
 echo "==> 安装二进制与 WebUI"
 install -m 0755 "$BIN" /usr/bin/at-webserver
+ln -sf at-webserver /usr/bin/at-webserver-rust
 mkdir -p /usr/share/mt5700
 cp -r "$REPO_ROOT/webui" /usr/share/mt5700/webui
 find /usr/share/mt5700/webui -type d -exec chmod 0755 {} +
 find /usr/share/mt5700/webui -type f -exec chmod 0644 {} +
 
 echo "==> 安装配置（已存在的 config.json 保留不覆盖）"
-mkdir -p /etc/mt5700
+mkdir -p /etc/mt5700 /etc/at-webserver /var/lib/mt5700
 if [ ! -f /etc/mt5700/config.json ]; then
     install -m 0644 "$REPO_ROOT/debian/config.json" /etc/mt5700/config.json
 fi

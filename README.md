@@ -6,6 +6,9 @@ OpenWrt 专属组件的全部依赖。
 
 原 OpenWrt/LuCI 版本保留在 `main` 分支，本分支不回改其任何代码。
 
+> **当前基线：`main` v1.32.13（2026-11-24）**。本分支已按「先同步、再重移植」流程
+> 全量同步 main 1.32.13，并重新移植 JSON 配置、HTTP/WebSocket 服务与独立 WebUI 外壳。
+
 变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 功能
@@ -342,38 +345,68 @@ usage 清零日每月 1 号、服务运行时长正常渲染（`AtWs.formatDurat
 **保持同源同步**：`main` 的纯前端 UI 改动可直接同步到本分支对应路径，改动随下次
 `install.sh` 部署即生效，无需打包或构建。
 
-**v2.3.0 已整包同步至 `main` v1.32.5**（v1.25~v1.32 全量特性，含 QCI/5QI 展示、短信页夜间模式、
-窄屏 Tab 悬浮菜单），同步策略为逐文件决策：
+**v1.32.13 已整包同步至 `main` v1.32.13**（含看板娘修复、i18n 重构、CI 门禁、供应链校验与
+素材声明），同步策略为「资源整包同步 + 外壳适配」：
 
 | 类别 | 文件 | 处理方式 |
 | --- | --- | --- |
-| 主线原样采用 | `main` 的 `htdocs/luci-static/resources/**` 共 176 个文件 —— `at.css` / `mt5700.css` / `mt5700.js` / `parse.js` / `ui.js` / `compat.js` / `theme.js` / `uimode.js` / `icons.js` / `tabmenu.js` / `global.css` / `md3.css`、`bg/` 6 张 WebP、`icons/minimal` 与 `icons/normal` 92 个 SVG、双头像 PNG + 11 个视图（`service.js` 除外） | 直接取主线版 |
-| 保留本分支版 | `view/at-webserver/service.js` | systemd 服务管理为本分支独有（主线走 init.d）；推送入口（通知总开关、定时推送、信号巡检、QQ）由本分支自行补齐，走 `/api/config` |
-| 适配重贴 | `at-webserver/rpc.js` 的 `loadConfig` | 主线读 UCI `websocket_port/bind/auth_key`；本分支为同源部署，连接信息取当前站点地址 |
-| 适配重贴 | `webui/app.js` 的模块加载器 | 主线视图顶层用裸标识符（`view.extend` / `rpc.` / `uci.` / `fs.` / `ui.`）与 `'require xxx'` 头，本分支 loader 改为按名注入依赖并扩到 9 个预加载模块 |
-| 适配重贴 | `webui/luci.js` 垫片 | 补 `fs` / `ui` 内置模块导出，`mt5700.sms` / `usage` / `usage_ctl` 映射到 `/api/rpc/mt5700/*` |
-| 不引入 | `main` 的 `MT5700_UI_VERSION` | 该常量属 LuCI 加载器的 `resource_version` 缓存机制，本分支无此加载器；`compat.js` 只保留 `String.prototype.format` 垫片 |
-| 一并删除 | `at-webserver/smsEncode.js` | `main` v1.25 起已删除（编码并入 `rpc.js`），本分支 v2.3.1 同步删除并从预加载列表移除 |
+| 主线原样采用 | `main` 的 `htdocs/luci-static/resources/**` 全部文件（`at-webserver/*` 与 `view/at-webserver/*`） | 由 `debian/sync-webui.sh` 整包同步，`tests/debian-webui-test.js` 逐字节校验 |
+| 保留本分支版 | `webui/luci.js` / `webui/app.js` / `webui/shell.css` / `webui/index.html` / `debian/**` | 独立 WebUI 外壳、HTTP 加载器、systemd/deb 打包与 Debian 文档 |
+| 适配层 | `webui/luci.js` 垫片 | `_()` identity、`L.env.resource_version`、`uci.sections`、`websocket_*`→`http_*` 键映射、`expect {'': …}` 返回整个结果 |
+| 适配层 | `webui/app.js` 加载器 | 预加载 15 个模块（含 `config-*` 六件套）、模块别名清洗、`?v=1.32.13` 缓存戳 |
 
 以下文件为 Debian 独立实现，**同步时必须保留本分支版本，不得用 `main` 覆盖**：
 
 | 文件 | 独立实现的原因 |
 | --- | --- |
-| `at-webserver/rpc.js` | `main` 走 LuCI RPC（`L.rpc.declare` + rpcd/ucode 代理）；本分支映射到后端 HTTP API（`/api/*`），含鉴权头注入、401 → `REQUIRE_AUTH_KEY` 流程。仅 `loadConfig` 一节按上表适配重贴，其余（usage RPC 声明、URC 解析、熔断器）主线原样 |
-| `view/at-webserver/service.js` | `main` 经 init.d 管理服务；本分支经 systemd，管理 `/api/service/status|restart` 与 `/dev` 串口扫描，保存流程改为 `/api/config` + `/api/config/apply` 热应用 |
+| `webui/luci.js` | LuCI API 垫片：`L.Class/L.view/L.rpc/L.uci/L.fs` 映射到 HTTP API 与 JSON 配置；含 `_()`、认证头、401 流程 |
+| `webui/app.js` | 独立模块加载器 + hash 路由；按 `'require xxx'` 解析依赖并注入 |
+| `webui/shell.css` / `webui/index.html` | 独立版侧栏/主区布局与入口 |
+| `debian/**` | systemd 服务、deb 打包、JSON 配置样例、on-uplink 钩子、CI 校验 |
 
-`main` 侧的 `Makefile`、`scripts/sdk-build.sh`、`.github/workflows/` 属 OpenWrt 构建
-体系，本分支无对应物，不做移植。
+`main` 侧的 `Makefile`、`scripts/sdk-build.sh`、`build-openwrt.yml` 属 OpenWrt 构建
+体系，本分支不参与打包；`src/rust`、`tests`、`htdocs`、`root` 随 main 同步保留，
+其中 `src/rust` 是 Debian 后端的直接源码。
 
 ## 更新日志
 
 本分支的变更记录见 [`CHANGELOG.md`](CHANGELOG.md)，逐版本的设计说明与实测记录见
 [`docs/release-notes/`](docs/release-notes/)。
 
-版本号与 `main` 分支**完全独立**（本分支后端版本即 deb 包版本，当前 `2.3.1`，
-Release 标签前缀 `debian-v*`），不对应 `main` 的 v1.x 编号；`main` 侧的变更记录见
-`main` 分支的 `CHANGELOG.md`。
+自 v1.32.13 起，本分支后端版本与 `main` 版本号对齐（当前 `1.32.13`，Release 标签
+`debian-v1.32.13`）；历史 v2.x 版本号保留在 CHANGELOG 中。
+
+## 📄 许可证与开源声明
+
+本项目代码采用 **GNU General Public License v3.0 only**（SPDX：`GPL-3.0-only`）发布，
+完整条款见仓库根目录 [`LICENSE`](LICENSE)。Debian 安装包会把 GPL 全文安装到
+`/usr/share/doc/at-webserver/copyright`。
+
+### 角色素材与知识产权声明
+
+界面保留了两部作品的二次创作角色素材，**不在 GPL-3.0-only 授权范围内**：
+
+- 英雄区头像 `mascot.png`：《异环》（NTE）「薄荷」，著作权归苏州幻塔网络科技有限公司
+  （Hotta Studio）/ 完美世界游戏。
+- PC / 移动端背景 `bg/character-{pc,mobile}-{dark,light}.webp`：《蔚蓝档案》
+  「阿罗娜 / 彩奈」（浅色）与「普拉娜」（深色），权利标注
+  `© NEXON Games Co., Ltd. & Yostar, Inc.`。
+
+- **授权状态**：本仓库尚未取得权利人的书面许可，也未留存可核验的官方开放许可；
+  项目开源或非商业使用的描述均不构成权利人的授权。
+- **保留决定与分发风险**：按维护者决定，素材继续保留在 WebUI 与 deb 包内作装饰用途。
+  这不是权利人的授权；若权利人提出异议，将移除或替换。包内同时安装
+  `/usr/share/doc/at-webserver/ARTWORK-NOTICE.txt` 说明权属。
+- **完整清单**：逐文件指纹、识别依据与处置要求见
+  [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) 第 2 节。
+
+### 第三方软件依赖
+
+Rust 后端依赖各自保留上游许可证。Debian 包会附带逐项依赖清单
+`/usr/share/doc/at-webserver/RUST-DEPENDENCIES.md`（由 cargo-about 在发布构建中生成）；
+Mozilla CA 根证书数据使用的 `CDLA-Permissive-2.0` 全文随包安装到
+`/usr/share/doc/at-webserver/`。项目 GPL-3.0-only 不覆盖第三方依赖或角色素材。
 
 ## 许可
 
-GPL-3.0，与上游一致。
+GPL-3.0-only，与上游一致。

@@ -2,15 +2,37 @@
 
 本文件记录 **`Debian` 分支**的变更。
 
-> **与 `main` 分支的关系**：`main` 是 OpenWrt/LuCI 插件（v1.x 线，产物为 ipk/apk），
-> 变更记录见 `main` 分支的 `CHANGELOG.md`。本分支自 `76d1f82` 起脱离 LuCI 体系独立演进，
-> 版本号与 `main` **完全独立**，不对应 `main` 的 v1.x 编号。
+> **与 `main` 分支的关系**：`main` 是 OpenWrt/LuCI 插件（产物为 ipk/apk），
+> 变更记录见 `main` 分支的 `CHANGELOG.md`。自 v1.32.13 起，本分支与 `main` 版本号对齐；
+> 历史 v2.x 记录保留在下方。
 >
-> **版本号来源**：后端 `src/rust/Cargo.toml` 的 `version` 即 deb 包版本（`2.3.1`），
+> **版本号来源**：后端 `src/rust/Cargo.toml` 的 `version` 即 deb 包版本（当前 `1.32.13`），
 > 由 `debian/build-deb.sh` 单点读取；Release 标签统一用 `debian-v*` 前缀
-> （当前已发布：`debian-v2.3.1`，含 amd64 / arm64 两个 deb）。
+> （当前发布：`debian-v1.32.13`，含 amd64 / arm64 两个 deb）。
 >
 > **详细说明**：逐版本的完整设计说明与实测记录见 `docs/release-notes/`。
+
+## v1.32.13 (2026-11-24)
+
+### 全量同步 main 1.32.13 并重新移植 Debian 层
+
+先按维护者要求把 Debian 分支代码树直接同步到 `main` 1.32.13，再重新移植独立运行所需的
+JSON 配置、HTTP/WebSocket 服务与 WebUI 外壳。
+
+- **sync** 代码树（`src/rust`、`tests`、`htdocs`、`root`、`po`、构建脚本）整体切到 main 1.32.13，
+  保留 `debian/`、`webui/` 与 v2 发布说明。
+- **port(backend)** 恢复 `configstore.rs`（JSON 扁平键值配置）与 `httpserver.rs`（HTTP API +
+  WebSocket + 静态 WebUI），接入当前 `RpcServer`、`UsageTracker`、`Notifier`。
+- **port(backend)** 无 uci 环境适配：时区读 `/etc/timezone`、usage 承载网卡取配置 `netdev`/
+  USB 自动探测、QQ 绑定与短信存储区写 JSON 配置、上行钩子改 `/etc/mt5700/on-uplink.sh`。
+- **port(frontend)** `htdocs` 资源整包同步到 `webui/`；loader 支持 `config-*` 六件套、
+  清洗模块别名、`?v=1.32.13` 缓存戳；shim 补 `_()`、`L.env`、`uci.sections`、
+  `websocket_*`→`http_*` 映射与 `expect {'': …}` 语义。
+- **fix(webui)** 看板娘随 `syncMascots(root)` 修复恢复；12 视图与 mascot 已用无头浏览器验证。
+- **feat(service)** systemd 服务增加 `/etc/at-webserver` 与 usage 文件写权限；
+  包内安装 `/usr/bin/at-webserver-rust` 兼容链接。
+- **test(ci)** 新增 `debian/sync-webui.sh`、`tests/debian-webui-test.js`；Debian CI 增加
+  static/Node/Rust/clippy 门禁、固定工具链与 `SHA256SUMS`。
 
 ## v2.3.1 (2026-11-06)
 

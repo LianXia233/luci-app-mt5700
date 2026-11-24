@@ -166,6 +166,8 @@ log "组装文件树"
 # 数据文件（与 install.sh 的安装路径保持一致）
 install -d "$PKG_ROOT/usr/bin"
 install -m 0755 "$BIN" "$PKG_ROOT/usr/bin/at-webserver"
+# 兼容 main 前端的服务页自检路径（/usr/bin/at-webserver-rust）。
+ln -sf at-webserver "$PKG_ROOT/usr/bin/at-webserver-rust"
 
 install -d "$PKG_ROOT/usr/share/mt5700"
 cp -r "$REPO_ROOT/webui" "$PKG_ROOT/usr/share/mt5700/webui"
@@ -173,6 +175,8 @@ find "$PKG_ROOT/usr/share/mt5700/webui" -type d -exec chmod 0755 {} +
 find "$PKG_ROOT/usr/share/mt5700/webui" -type f -exec chmod 0644 {} +
 
 install -d "$PKG_ROOT/etc/mt5700"
+# 运行期可写目录：短信归档 / 使用量持久化（systemd ReadWritePaths 要求目录存在）
+install -d "$PKG_ROOT/etc/at-webserver" "$PKG_ROOT/var/lib/mt5700"
 # config.json 作为 conffile（用户配置，升级时保留）
 install -m 0644 "$REPO_ROOT/debian/config.json" "$PKG_ROOT/etc/mt5700/config.json"
 install -m 0755 "$REPO_ROOT/debian/on-uplink.sh" "$PKG_ROOT/etc/mt5700/on-uplink.sh"
@@ -189,6 +193,18 @@ if [ -f "$REPO_ROOT/README.md" ]; then
 fi
 if [ -f "$REPO_ROOT/LICENSE" ]; then
     install -m 0644 "$REPO_ROOT/LICENSE" "$PKG_ROOT/usr/share/doc/at-webserver/copyright"
+fi
+if [ -f "$REPO_ROOT/THIRD-PARTY-NOTICES.md" ]; then
+    install -m 0644 "$REPO_ROOT/THIRD-PARTY-NOTICES.md" "$PKG_ROOT/usr/share/doc/at-webserver/THIRD-PARTY-NOTICES.md"
+fi
+if [ -f "$REPO_ROOT/root/usr/share/licenses/luci-app-mt5700/ARTWORK-NOTICE.txt" ]; then
+    install -m 0644 "$REPO_ROOT/root/usr/share/licenses/luci-app-mt5700/ARTWORK-NOTICE.txt" "$PKG_ROOT/usr/share/doc/at-webserver/ARTWORK-NOTICE.txt"
+fi
+if [ -f "$REPO_ROOT/RUST-DEPENDENCIES.md" ]; then
+    install -m 0644 "$REPO_ROOT/RUST-DEPENDENCIES.md" "$PKG_ROOT/usr/share/doc/at-webserver/RUST-DEPENDENCIES.md"
+fi
+if [ -f "$REPO_ROOT/root/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt" ]; then
+    install -m 0644 "$REPO_ROOT/root/usr/share/licenses/luci-app-mt5700/CDLA-Permissive-2.0.txt" "$PKG_ROOT/usr/share/doc/at-webserver/CDLA-Permissive-2.0.txt"
 fi
 # 安装后的自检提示，避免用户装完不知道访问地址
 cat > "$PKG_ROOT/usr/share/doc/at-webserver/README.Debian" <<'EOF'

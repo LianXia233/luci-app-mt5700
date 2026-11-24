@@ -12,6 +12,8 @@ mod async_runtime;
 mod at_queue;
 mod atclient;
 mod config;
+mod configstore;
+mod httpserver;
 mod logcat;
 mod logger;
 mod localtime;
@@ -155,6 +157,10 @@ async fn run(verbose: bool) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("使用量统计初始化任务失败: {e}"))?;
+    // Debian 没有 uci/WAN 防火墙区域：承载网卡优先用配置里的 netdev，
+    // 留空时由 UsageTracker 自动探测 USB 网卡。
+    let netdev = configstore::get_str("netdev", "").await;
+    usage.set_device(&netdev).await;
     // 短信业务：与 AT 客户端共用同一条通道，短信操作享有最高优先级。
     let sms = crate::sms::SmsService::new(client.clone(), ctx_rx.clone(), client.sms_mode());
     // 短信本地归档：发送成功与收到新短信时由后端落盘，
@@ -187,7 +193,14 @@ async fn run(verbose: bool) -> Result<(), String> {
     let hub = rpc.hub();
     let broadcaster: Broadcaster = Arc::new(move |v: serde_json::Value| hub.broadcast(&v));
 
-    log_info!(Cat::Rpc, "启动完成，LuCI RPC {}:{}（经 rpcd/ucode 代理）", cfg.websocket.bind, cfg.websocket.port);
+    log_info!(
+        Cat::Rpc,
+        "启动完成：WebUI/HTTP API {}:{}；LuCI RPC 兼容通道 {}:{}",
+        cfg.http.bind,
+        cfg.http.port,
+        cfg.websocket.bind,
+        cfg.websocket.port
+    );
     if !verbose {
         // 稳态只留警告和错误，避免刷满 procd 日志。
         crate::logger::set_level(crate::logger::Level::Warn);
@@ -333,18 +346,50 @@ async fn run(verbose: bool) -> Result<(), String> {
         async move { rpc.serve(port, &bind).await }
     });
 
-    // 等待退出信号或服务异常。
+    // 独立 WebUI / HTTP API（Debian 主入口）。
+    // LuCI RPC 兼容通道保留，供 mock-modem e2e 与本地调试使用。
+    let cur_map = configstore::read_map().await.unwrap_or_default();
+    let cfg_snapshot = Arc::new(tokio::sync::RwLock::new(cfg.clone()));
+    let http_task = tokio::spawn({
+        let http = httpserver::HttpServer::new(
+            rpc.clone(),
+            cfg_snapshot,
+            cur_map,
+            usage.clone(),
+            notifier.clone(),
+            ctx_rx.clone(),
+        );
+        let port = cfg.http.port;
+        let bind = cfg.http.bind.clone();
+        async move { http.serve(&bind, port).await }
+    });
+
+    // 等待退出信号或任一服务异常。
     let mut serve_handle = serve_task;
+    let mut http_handle = http_task;
+    let mut serve_failed = false;
+    let mut http_failed = false;
     let serve_result = tokio::select! {
         _ = shutdown_signal() => None,
-        r = &mut serve_handle => Some(r),
+        r = &mut serve_handle => {
+            serve_failed = true;
+            Some((false, r))
+        },
+        r = &mut http_handle => {
+            http_failed = true;
+            Some((true, r))
+        },
     };
 
     // 触发优雅关闭。
     let _ = ctx_tx.send(true);
 
-    if let Some(Ok(Err(e))) = serve_result {
-        log_error!(Cat::Rpc, "LuCI RPC 服务异常退出: {}", e);
+    if let Some((is_http, Ok(Err(e)))) = serve_result {
+        if is_http {
+            log_error!(Cat::Rpc, "WebUI/HTTP 服务异常退出: {}", e);
+        } else {
+            log_error!(Cat::Rpc, "LuCI RPC 兼容通道异常退出: {}", e);
+        }
     }
 
     // 给后台任务一点时间优雅收尾。
@@ -360,7 +405,13 @@ async fn run(verbose: bool) -> Result<(), String> {
         let _ = nettime_task.await;
         let _ = task_cleanup_task.await;
         let _ = sms_storage_task.await;
-        let _ = serve_handle.await;
+        // select 已经收走的分支不再重复 await（JoinHandle 只能 poll 到一次完成）
+        if !serve_failed {
+            let _ = serve_handle.await;
+        }
+        if !http_failed {
+            let _ = http_handle.await;
+        }
     })
     .await;
 
@@ -372,7 +423,7 @@ async fn run(verbose: bool) -> Result<(), String> {
 /// 默认存储区兜底任务等 AT 通道就绪的上限（弱信号 / 模组慢启动时别干等）。
 const SMS_STORAGE_WAIT_MAX: Duration = Duration::from_secs(180);
 
-/// QQ 绑定模式任务：监听 → 写 UCI → 热替换通道。
+/// QQ 绑定模式任务：监听 → 写配置 → 热替换通道。
 async fn run_qq_bind(
     notifier: Arc<Notifier>,
     status: std::sync::Arc<crate::qqbind::BindStatus>,
@@ -383,11 +434,11 @@ async fn run_qq_bind(
     match qqbind::run_bind_tracked(status, &q.app_id, &q.app_secret, ctx).await {
         Ok(target) => {
             log_info!(Cat::Notify, "QQ 绑定成功: type={} id={}", target.target_type, target.target_id);
-            if let Err(e) = qqbind::persist_uci(&target).await {
-                // 写不进 UCI 也要热替换，保证本次运行内可用
-                log_error!(Cat::Notify, "QQ 绑定结果写回 UCI 失败（本次运行内仍热生效）: {}", e);
+            if let Err(e) = qqbind::persist_config(&target).await {
+                // 写不进配置也要热替换，保证本次运行内可用
+                log_error!(Cat::Notify, "QQ 绑定结果写回配置失败（本次运行内仍热生效）: {}", e);
             } else {
-                log_info!(Cat::Notify, "QQ 绑定结果已写回 UCI（qq_target_type/qq_target_id）");
+                log_info!(Cat::Notify, "QQ 绑定结果已写回配置（qq_target_type/qq_target_id）");
             }
             let bind_tag = q.bind_qq.clone();
             // from_config 在 keyboard_url 为空时会 fork `uci get network.lan.ipaddr`，
@@ -463,17 +514,25 @@ fn log_config(cfg: &Config) {
         log_info!(Cat::At, "AT 通道: 网络 {}:{}", cfg.at.network.host, cfg.at.network.port);
     }
 
-    log_info!(Cat::Rpc,
-        "LuCI RPC: {}:{}，密钥: {}",
-        cfg.websocket.bind,
-        cfg.websocket.port,
-        if cfg.websocket.auth_key.is_empty() { "未设置" } else { "已设置" }
+    log_info!(
+        Cat::Config,
+        "WebUI/HTTP API: {}:{}，密钥: {}",
+        cfg.http.bind,
+        cfg.http.port,
+        if cfg.http.auth_key.is_empty() { "未设置" } else { "已设置" }
     );
-    if cfg.websocket.bind != "127.0.0.1" {
-        log_warn!(Cat::Rpc,
-            "RPC 对外监听 {}:{} —— 请确保防火墙已限制访问，并设置 websocket_auth_key",
-            cfg.websocket.bind,
-            cfg.websocket.port
+    log_info!(
+        Cat::Rpc,
+        "LuCI RPC 兼容通道: {}:{}（本地调试/e2e 用）",
+        cfg.websocket.bind,
+        cfg.websocket.port
+    );
+    if cfg.http.bind != "127.0.0.1" {
+        log_warn!(
+            Cat::Config,
+            "HTTP 对外监听 {}:{} —— 请确认部署网络可信，必要时设置 auth_key",
+            cfg.http.bind,
+            cfg.http.port
         );
     }
 

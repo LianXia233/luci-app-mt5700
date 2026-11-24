@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 'use strict';
 'require baseclass';
 'require at-webserver/compat';
@@ -12,7 +15,7 @@
  */
 
 // 注入新样式
-var MT5700_CSS_VERSION = '2.47.0';
+var MT5700_CSS_VERSION = '2.46.9';
 // 全局视觉修订层：弹窗文字可见性 + 后端未就绪提示条。
 // 这两项是**插件级组件**，不属于某个页面；本模块被 12 个视图全部 require，
 // 因此在这里注入即可一次覆盖所有页面（含只依赖 mt5700 的服务配置页）。
@@ -40,6 +43,7 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 (function () {
 	var base = '/luci-static/resources/at-webserver/bg/';
 	var themeBound = false;      // AtTheme.onChange 只注册一次，避免反复挂载导致监听器堆积
+	var viewportBound = false;   // 断点监听同样只注册一次
 	var wallpaperOn = true;
 	var wallpaperResolved = false;
 
@@ -47,11 +51,45 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 		return (window.AtTheme && typeof window.AtTheme.dark === 'function' && window.AtTheme.dark()) ? 'dark' : 'light';
 	}
 
-	function isMinimal() {
+	/* 当前断点下**真正会被 CSS 显示**的角色图：mt5700.css 里 <=768px 只显示
+	 * .mt-bg-mobile、>=769px 只显示 .mt-bg-pc。看不到的那张不设 src 就不发起
+	 * 下载（桌面端省 93 KB、手机端省 107 KB），跨断点时再按需补图，
+	 * 视觉与原来完全一致（隐藏的那张本来就是 display:none）。
+	 * 无 matchMedia 的老引擎返回 null → 退回旧行为（两张都加载）。 */
+	function visibleKind() {
 		try {
-			return !!(window.AtUimode && typeof window.AtUimode.current === 'function'
-				&& window.AtUimode.current() === 'minimal');
-		} catch (e) { return false; }
+			if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+				return window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'pc';
+			}
+		} catch (e) { /* 老引擎匹配不到就退回两张都加载 */ }
+		return null;
+	}
+
+	/* 主题明暗或断点变化后重算角色图地址；隐藏的那张保持原 src（已下载的不重下） */
+	function applyChars() {
+		var layer = document.getElementById('mt5700-global-bg');
+		if (!layer) return;
+		var v = variant();
+		var want = visibleKind();
+		var imgs = layer.querySelectorAll('.mt-bg-char');
+		for (var i = 0; i < imgs.length; i++) {
+			var kind = imgs[i].getAttribute('data-kind');
+			if (!kind) continue;
+			if (want && kind !== want) continue;
+			imgs[i].src = base + 'character-' + kind + '-' + v + '.webp';
+		}
+	}
+
+	/* 跨过 768px 断点时补上另一张（首次可见才下载） */
+	function bindViewport() {
+		if (viewportBound || typeof window === 'undefined'
+			|| typeof window.matchMedia !== 'function') return;
+		viewportBound = true;
+		try {
+			var mq = window.matchMedia('(max-width: 768px)');
+			if (mq.addEventListener) mq.addEventListener('change', applyChars);
+			else if (mq.addListener) mq.addListener(applyChars); /* Safari<14 */
+		} catch (e) { /* ignore */ }
 	}
 
 	/* 主题运行时切换（Aurora 顶部按钮等）→ 换对应明暗变体立绘。
@@ -59,21 +97,13 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 	function bindTheme() {
 		if (themeBound || !window.AtTheme || typeof window.AtTheme.onChange !== 'function') return;
 		themeBound = true;
-		window.AtTheme.onChange(function () {
-			var layer = document.getElementById('mt5700-global-bg');
-			if (!layer) return;
-			var v = variant();
-			var imgs = layer.querySelectorAll('.mt-bg-char');
-			for (var i = 0; i < imgs.length; i++) {
-				var kind = imgs[i].getAttribute('data-kind');
-				if (kind) imgs[i].src = base + 'character-' + kind + '-' + v + '.webp';
-			}
-		});
+		window.AtTheme.onChange(applyChars);
 	}
 
 	function mountGlobalBg() {
 		if (document.getElementById('mt5700-global-bg')) return;
 		bindTheme();
+		bindViewport();
 		var layer = document.createElement('div');
 		layer.id = 'mt5700-global-bg';
 
@@ -82,7 +112,7 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 			img.className = 'mt-bg-char ' + cls;
 			img.alt = '';
 			img.setAttribute('data-kind', kind);
-			img.src = base + 'character-' + kind + '-' + variant() + '.webp';
+			/* 不在这里写 src：先挂节点，再由 applyChars 只为当前断点那张下发地址 */
 			layer.appendChild(img);
 			return img;
 		};
@@ -103,6 +133,16 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 		}
 
 		(document.body || document.documentElement).appendChild(layer);
+		/* 节点已入 DOM，按当前断点只为可见的那张角色图下发 src */
+		applyChars();
+	}
+
+	/* 极简模式判定：背景层与看板娘都靠它决定是否真正卸载 */
+	function isMinimal() {
+		try {
+			return !!(window.AtUimode && typeof window.AtUimode.current === 'function'
+				&& window.AtUimode.current() === 'minimal');
+		} catch (e) { return false; }
 	}
 
 	/* 极简模式是**真卸载**：移除整个 layer 节点，webP 不再发起请求、不再占内存；
@@ -153,6 +193,29 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 var Mt5700 = (function () {
 	var api = {};
 
+	/*
+	 * UI 文案统一翻译入口。
+	 *
+	 * LuCI 在浏览器里提供全局 `_()`；页面正文仍以中文为源串，po/ 目前只维护
+	 * zh_Hans（identity）。这里把共享组件（页面标题、卡片、按钮、表单标签、
+	 * 提示/空态/下拉选项）的文案统一过一遍 `_()`，后续新增语言只需补 po，
+	 * 不必再逐个改 12 个视图。Node 单测/离线环境没有 `_` 时原样返回。
+	 *
+	 * 不翻译业务数据：短信正文、AT 原文、号码、后端错误串都不经过这里。
+	 *
+	 * 命名注意：不要缩成 `tr`。api.table 里有局部 `var tr = E('tr')`，
+	 * `var` 是函数作用域，会把同名的翻译函数整个遮蔽掉，调用时表现为
+	 * “tr is not a function”。这里固定用 trText，避免再被表格行变量撞名。
+	 */
+	function trText(s) {
+		if (typeof s !== 'string' || s === '') return s;
+		if (typeof _ === 'function') {
+			try { return _(s); } catch (e) { return s; }
+		}
+		return s;
+	}
+	api.tr = trText;
+
 	/* ================= 双 UI 模式：视觉层钩子（业务逻辑零改动） =================
 	 * 全部判断只依赖全局 AtUimode 单例；未加载 / 异常一律按普通模式兜底，
 	 * 保证普通模式在任何情况下都走原有代码路径。
@@ -177,12 +240,17 @@ var Mt5700 = (function () {
 	}
 
 	/* 看板娘由统一的模式钩子管理：极简模式下**不创建 img 节点**（不请求
-	 * mascot.png），切回普通模式再插入。只注册一次监听，切页不会累积闭包。 */
-	function syncMascots() {
-		if (typeof document === 'undefined' || !document.querySelectorAll
+	 * mascot.png），切回普通模式再插入。只注册一次监听，切页不会累积闭包。
+	 *
+	 * root：可选的作用域。`api.page()` 里页面节点尚未挂到 document，
+	 * 必须把 node 传进来才能在挂载前找到它自己的 `.mt5700-hero-art`；
+	 * 否则 `document.querySelectorAll` 什么也找不到，看板娘永远不会插入。 */
+	function syncMascots(root) {
+		var scope = root || document;
+		if (typeof document === 'undefined' || !scope.querySelectorAll
 			|| typeof api.mascot !== 'function') return;
 		var minimal = isMinimal();
-		var arts = document.querySelectorAll('.mt5700-hero-art');
+		var arts = scope.querySelectorAll('.mt5700-hero-art');
 		for (var i = 0; i < arts.length; i++) {
 			var art = arts[i];
 			var existing = art.querySelector('.mt-mascot-speech-wrap');
@@ -742,7 +810,7 @@ var Mt5700 = (function () {
 
 		/* pageKey/badgeText 由各视图显式传入（路由映射见 menu.d）；
 		 * hero 参数先存起来：极简模式不创建 hero，切回普通模式时按原样重建。 */
-		node._heroArgs = { title: title, subtitle: subtitle, badge: badgeText };
+		node._heroArgs = { title: trText(title), subtitle: trText(subtitle), badge: trText(badgeText) };
 
 		/* 全局界面设置入口（齿轮按钮 → 模式面板）：挂在 document.body 右下角。
 		 * 1) 12 个视图的骨架都由 Mt5700.page 生成，这里调一次即可全页可用；
@@ -761,7 +829,7 @@ var Mt5700 = (function () {
 		/* hero 按模式创建/移除；bindMode() 有单例守卫，多页不会重复注册事件 */
 		bindMode();
 		syncHero(node);
-		syncMascots();
+		syncMascots(node);
 
 		return node;
 	};
@@ -771,8 +839,8 @@ var Mt5700 = (function () {
 	api.card = function (title, subtitle, extra) {
 		var card = E('div', { 'class': 'mt5700-card' });
 		var header = E('div', { 'class': 'mt5700-card-header' });
-		header.appendChild(E('h3', { 'class': 'mt5700-card-title' }, title || ''));
-		if (subtitle) header.appendChild(E('p', { 'class': 'mt5700-card-subtitle' }, subtitle));
+		header.appendChild(E('h3', { 'class': 'mt5700-card-title' }, trText(title || '')));
+		if (subtitle) header.appendChild(E('p', { 'class': 'mt5700-card-subtitle' }, trText(subtitle)));
 		if (extra) {
 			var ex = E('div', { 'class': 'mt5700-card-extra' });
 			ex.appendChild(extra);
@@ -872,7 +940,7 @@ var Mt5700 = (function () {
 
 	api.button = function (label, onClick, variant) {
 		variant = variant || 'secondary';
-		var btn = E('button', { 'class': 'mt5700-btn mt5700-btn-' + variant }, label);
+		var btn = E('button', { 'class': 'mt5700-btn mt5700-btn-' + variant }, trText(label));
 		if (onClick) btn.addEventListener('click', onClick);
 		return btn;
 	};
@@ -894,7 +962,7 @@ var Mt5700 = (function () {
 
 	api.badge = function (text, variant) {
 		variant = variant || 'neutral';
-		return E('span', { 'class': 'mt5700-badge mt5700-badge-' + variant }, text);
+		return E('span', { 'class': 'mt5700-badge mt5700-badge-' + variant }, trText(text));
 	};
 
 
@@ -903,7 +971,7 @@ var Mt5700 = (function () {
 	api.confirm = function (message, onOk, okText) {
 		var mask = E('div', { 'class': 'mt5700-modal-mask' });
 		var box = E('div', { 'class': 'mt5700-modal' });
-		var text = E('div', { 'class': 'mt5700-modal-body' }, message);
+		var text = E('div', { 'class': 'mt5700-modal-body' }, trText(message));
 		var actions = E('div', { 'class': 'mt5700-modal-footer' });
 		var cancel = api.ghostButton('取消', function () {
 			if (mask.parentNode) mask.parentNode.removeChild(mask);
@@ -930,7 +998,7 @@ var Mt5700 = (function () {
 
 	api.toast = function (message, type) {
 		type = type || 'info';
-		var t = E('div', { 'class': 'mt5700-toast mt5700-toast-' + type }, message);
+		var t = E('div', { 'class': 'mt5700-toast mt5700-toast-' + type }, trText(message));
 		decorate(t);
 		document.body.appendChild(t);
 		setTimeout(function () { t.classList.add('mt5700-toast-hide'); }, 3000);
@@ -988,14 +1056,14 @@ var Mt5700 = (function () {
 		sp.appendChild(svg);
 		el.appendChild(sp);
 		el.appendChild(E('div', { 'class': 'mt5700-loading-text' },
-			text || (minimal ? '正在加载…' : '正在全力加载中喵~ ♡')));
+			trText(text || (minimal ? '正在加载…' : '正在全力加载中喵~ ♡'))));
 		return decorate(el);
 	};
 
 	api.empty = function (text) {
 		var el = E('div', { 'class': 'mt5700-empty' });
 		el.appendChild(E('div', { 'class': 'mt5700-empty-text' },
-			text || (isMinimal() ? '暂无数据' : '暂无数据喵~')));
+			trText(text || (isMinimal() ? '暂无数据' : '暂无数据喵~'))));
 		return decorate(el);
 	};
 
@@ -1015,7 +1083,7 @@ var Mt5700 = (function () {
 		 */
 		var labelOf = function (i) {
 			var h = headers[i];
-			return (h == null) ? '' : String(h);
+			return (h == null) ? '' : trText(String(h));
 		};
 
 		/*
@@ -1031,7 +1099,7 @@ var Mt5700 = (function () {
 		var thead = E('thead');
 		var tr = E('tr');
 		headers.forEach(function (h) {
-			tr.appendChild(E('th', {}, h));
+			tr.appendChild(E('th', {}, typeof h === 'string' ? trText(h) : h));
 		});
 		thead.appendChild(tr);
 		table.appendChild(thead);
@@ -1040,7 +1108,7 @@ var Mt5700 = (function () {
 		var tbody = E('tbody');
 		if (!rows || !rows.length) {
 			var tr0 = E('tr');
-			tr0.appendChild(E('td', { colspan: headers.length, 'class': 'mt5700-empty' }, '暂无数据'));
+			tr0.appendChild(E('td', { colspan: headers.length, 'class': 'mt5700-empty' }, trText('暂无数据')));
 			tbody.appendChild(tr0);
 		} else {
 			rows.forEach(function (row) {
@@ -1069,16 +1137,16 @@ var Mt5700 = (function () {
 
 	api.formGroup = function (label, input, hint, required) {
 		var group = E('div', { 'class': 'mt5700-form-group' });
-		var lbl = E('label', { 'class': 'mt5700-label' + (required ? ' mt5700-label-required' : '') }, label);
+		var lbl = E('label', { 'class': 'mt5700-label' + (required ? ' mt5700-label-required' : '') }, trText(label));
 		group.appendChild(lbl);
 		group.appendChild(input);
-		if (hint) group.appendChild(E('div', { 'class': 'mt5700-hint' }, hint));
+		if (hint) group.appendChild(E('div', { 'class': 'mt5700-hint' }, trText(hint)));
 		return group;
 	};
 
 	api.input = function (type, placeholder, value) {
 		var input = E('input', { 'class': 'mt5700-input', type: type || 'text' });
-		if (placeholder) input.placeholder = placeholder;
+		if (placeholder) input.placeholder = trText(placeholder);
 		if (value != null) input.value = value;
 		return input;
 	};
@@ -1086,7 +1154,7 @@ var Mt5700 = (function () {
 	api.select = function (options, value) {
 		var sel = E('select', { 'class': 'mt5700-input mt5700-select' });
 		options.forEach(function (opt) {
-			var o = E('option', { value: opt.value }, opt.label);
+			var o = E('option', { value: opt.value }, trText(opt.label));
 			if (opt.value === value) o.selected = true;
 			sel.appendChild(o);
 		});

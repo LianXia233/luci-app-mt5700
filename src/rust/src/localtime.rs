@@ -231,8 +231,15 @@ fn system_tz_string() -> (Option<String>, &'static str) {
     if let Some(v) = read_etc_tz() {
         return (Some(v), "/etc/TZ");
     }
-    if let Some(v) = read_uci_timezone() {
-        return (Some(v), "uci system.@system[0].timezone");
+    // Debian / 通用 Linux：/etc/timezone 存 IANA 名称（如 Asia/Shanghai）。
+    if let Some(v) = read_etc_timezone() {
+        return (Some(v), "/etc/timezone");
+    }
+    // OpenWrt 专有路径；Debian 上没有 uci，跳过子进程调用。
+    if std::path::Path::new("/etc/openwrt_release").exists() {
+        if let Some(v) = read_uci_timezone() {
+            return (Some(v), "uci system.@system[0].timezone");
+        }
     }
     (None, "无任何时区配置")
 }
@@ -247,6 +254,14 @@ fn read_etc_tz() -> Option<String> {
     } else {
         Some(first)
     }
+}
+
+
+/// 读 Debian 的 `/etc/timezone`（IANA 名称，如 `Asia/Shanghai`）。
+fn read_etc_timezone() -> Option<String> {
+    let raw = std::fs::read_to_string("/etc/timezone").ok()?;
+    let first = raw.lines().next().unwrap_or("").trim().to_string();
+    if first.is_empty() { None } else { Some(first) }
 }
 
 /// `uci get system.@system[0].timezone`。找不到 uci 或选项为空时返回 `None`。
