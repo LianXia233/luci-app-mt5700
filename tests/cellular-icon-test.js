@@ -13,8 +13,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'webui', 'luci-static', 'resources', 'at-webserver');
-const viewDir = path.join(__dirname, '..', 'webui', 'luci-static', 'resources', 'view', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
 
 /* ---------- 最小 DOM 桩（够 E / svgEl / cellularSignal 用） ---------- */
 

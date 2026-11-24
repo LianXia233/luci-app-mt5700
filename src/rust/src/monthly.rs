@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 按月（每月固定几号）触发的周期计算。
 //!
 //! # 为什么单独成模块

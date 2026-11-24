@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 通知：短信/来电/信号/内存满四类事件，经企业微信 webhook、QQ 机器人
 //! （[`crate::qqpush`]，官方 API v2）与本地日志文件输出
 //! （可配置定时推送间隔、重试 3 次）。
@@ -8,7 +11,7 @@
 //!     → 企业微信 webhook / QQ 机器人（`QqSender`）
 //!
 //! **没有合并窗口**：v1.14.20 起「推送频率」改为「定时推送间隔」
-//! （配置 `notify_timer_interval`，分钟），由 `timerpush.rs` 按它周期性推送
+//! （UCI `notify_timer_interval`，分钟），由 `timerpush.rs` 按它周期性推送
 //! **当前实际情况**；事件到达时一律即刻发送，不再攒成批量。
 //!
 //! 队列只保留一个用途：**通道尚未就绪时暂存**。QQ「绑定模式」下绑定完成前没有
@@ -18,8 +21,9 @@
 use crate::qqpush::{QqMessage, QqMsgFormat, QqSender};
 use crate::{log_debug, log_error, log_info, log_warn};
 use crate::config::{NotificationConfig, NotifyTemplates};
+use chrono::Timelike;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 const NOTIFY_QUEUE_SIZE: usize = 256;
 const NOTIFY_MAX_PENDING: usize = 1000;
@@ -31,6 +35,158 @@ pub enum NotifyKind {
     Call,
     MemoryFull,
     Signal,
+}
+
+impl NotifyKind {
+    /// 与 config.rs 的 `NotifyLimits` 数组顺序一致：Sms/Call/MemoryFull/Signal。
+    pub fn index(self) -> usize {
+        match self {
+            NotifyKind::Sms => 0,
+            NotifyKind::Call => 1,
+            NotifyKind::MemoryFull => 2,
+            NotifyKind::Signal => 3,
+        }
+    }
+}
+
+/// 门控裁决结果：一条事件到达推送执行层后该如何处理。
+#[derive(Debug, PartialEq, Eq)]
+pub enum GateDecision {
+    /// 放行：立即投递。
+    Pass,
+    /// 被频率闸门压住：本条丢弃，且**不刷新基线**（累计状态由生产者保留）。
+    Held,
+    /// 落在允许时段之外且策略为 defer：延迟到窗口开启后补发。
+    Deferred,
+    /// 落在允许时段之外且策略为 drop：直接丢弃。
+    Dropped,
+}
+
+/// 单类推送的门控运行态：上次实际投递时刻 + 一条待补发的延迟事件。
+///
+/// `std::sync::Mutex` 是安全的：所有方法都是同步的、临界区内只有几次内存操作，
+/// 不含任何 `.await`（AGENTS.md 对锁的要求）。延迟队列每类只保留**最新一条**，
+/// 窗口补发时不会重复轰炸，也不会发出一堆陈旧消息。
+#[derive(Default)]
+struct GateState {
+    last_sent: Option<Instant>,
+    pending: Option<Notification>,
+}
+
+/// 推送执行层门控器：按类型独立执行「频率限制 + 推送时段」。
+///
+/// 每类Event有独立的 [`GateState`]，一类被限频/限时不影响其它类。时段判定复用
+/// [`crate::config::in_poll_window`]（支持跨零点、相等视为全天、非法回落全天），
+/// 时刻取 [`crate::nettime`]（NTP 优先、系统时钟兜底，时区走系统设置）。
+pub struct NotifyGate {
+    limits: crate::config::NotifyLimits,
+    states: std::sync::Mutex<[GateState; 4]>,
+}
+
+impl NotifyGate {
+    pub fn new(limits: crate::config::NotifyLimits) -> Self {
+        NotifyGate {
+            limits,
+            states: std::sync::Mutex::new(core::array::from_fn(|_| GateState::default())),
+        }
+    }
+
+    /// 当前时刻（本地墙上时间的「当天分钟数」）。单独成函数便于测试注入。
+    fn minute_of_day() -> i64 {
+        let n = crate::nettime::now();
+        i64::from(n.hour()) * 60 + i64::from(n.minute())
+    }
+
+    /// 裁决一条事件是否可以投递，并**原子地**完成放行预约或延迟入队。
+    ///
+    /// 关键（Codex P2）：频率检查与 `last_sent` 刷新必须在**同一把锁**内完成。
+    /// 如果先检查放行、释放锁、再在别处刷新，那么并发到达的同类事件会读到同一个
+    /// 旧基线、双双通过闸门，在最小间隔内连发两条。把「检查 + 预约」合成一步，
+    /// 后到者看到的基线已被前者推进，自然被压住。
+    ///
+    /// 同理，Deferred 的入队也必须在这把锁内完成：若裁决与入队拆成两步，
+    /// 窗口分钟边界处并发的同类 Pass 清掉副本后，旧事件的迟到入队会把陈旧
+    /// 副本写回队列，窗口补发时再发一遍；并发两条 Deferred 也可能旧覆新。
+    ///
+    /// 时段判定不触碰频率基线，避免两类限制互相污染。Pass 时顺带清掉该类的
+    /// 延迟副本，防止同一事件既实时发出、又在窗口补发时重复一遍。
+    fn admit(&self, kind: NotifyKind, now: Instant, minute: i64, msg: &Notification) -> GateDecision {
+        let i = kind.index();
+        let limit = &self.limits[i];
+        let mut states = self.states.lock().unwrap();
+
+        // 先判时段：窗外直接决定 defer / drop，不预留频率基线。
+        if limit.window_enabled
+            && !crate::config::in_poll_window(&limit.window_start, &limit.window_end, minute)
+        {
+            return match limit.out_of_window {
+                crate::config::OutOfWindowAction::Drop => GateDecision::Dropped,
+                crate::config::OutOfWindowAction::Defer => {
+                    // 同类只保留最新一条；入队与裁决同锁，杜绝旧覆新/陈旧写回。
+                    states[i].pending = Some(msg.clone());
+                    GateDecision::Deferred
+                }
+            };
+        }
+
+        // 再判频率 + 原子预约：整段在一把锁内，杜绝并发下双双通过。
+        // 被压住（Held）时不刷新 last_sent —— 与生产者侧「限频不刷新基线」语义一致，
+        // 这样紧凑到达的事件不会把窗口无限往后推。
+        if limit.rate_enabled && !limit.min_interval.is_zero()
+            && min_interval_hold(states[i].last_sent, now, limit.min_interval).is_some()
+        {
+            return GateDecision::Held;
+        }
+        states[i].last_sent = Some(now);
+        states[i].pending = None;
+        GateDecision::Pass
+    }
+
+    /// 对某一类的待补发事件做「取出 + 裁决 + 预约」，整段在**同一把锁**内完成。
+    ///
+    /// 关键（Codex P2）：出队与裁决不能拆成两步。若先 `take` 出队、释放锁、再
+    /// `admit`，那么在两步之间到达的同类实时事件会看不到延迟副本（`admit` 的
+    /// 「Pass 清副本」去重失效）；频率闸门关闭时两条都放行，同一事件先发新、
+    /// 再补发陈旧副本，造成重复推送。合成一步后，实时事件与补发在锁上串行：
+    /// 要么实时先到并清掉副本（这里返回 `None`），要么副本先合法补发。
+    ///
+    /// 返回值：
+    /// - `None`：无待补发事件，或仍在窗外且策略为 defer —— 副本原地保留；
+    /// - `Some((Pass, msg))`：已预约基线并取出副本，调用方直接投递；
+    /// - `Some((Held | Dropped, msg))`：副本已取出，调用方丢弃（不再排队）。
+    fn admit_due(&self, kind: NotifyKind, now: Instant, minute: i64) -> Option<(GateDecision, Notification)> {
+        let i = kind.index();
+        let limit = &self.limits[i];
+        let mut states = self.states.lock().unwrap();
+        // 无待补发副本时直接返回；用 `?` 表达「不存在即退出」。
+        states[i].pending.as_ref()?;
+        if limit.window_enabled
+            && !crate::config::in_poll_window(&limit.window_start, &limit.window_end, minute)
+        {
+            return match limit.out_of_window {
+                // 仍在窗外：defer 原地保留等下轮；策略已改成 drop 则取出丢弃。
+                crate::config::OutOfWindowAction::Defer => None,
+                crate::config::OutOfWindowAction::Drop => {
+                    Some((GateDecision::Dropped, states[i].pending.take().unwrap()))
+                }
+            };
+        }
+        // 窗口已开：频率裁决 + 基线预约 + 出队，与实时 admit 共用同一把锁。
+        if limit.rate_enabled && !limit.min_interval.is_zero()
+            && min_interval_hold(states[i].last_sent, now, limit.min_interval).is_some()
+        {
+            // 已等到窗口开启仍被限频压住：丢弃，不无限排队。
+            return Some((GateDecision::Held, states[i].pending.take().unwrap()));
+        }
+        states[i].last_sent = Some(now);
+        let msg = states[i].pending.take().unwrap();
+        Some((GateDecision::Pass, msg))
+    }
+
+    /// 是否还有待补发事件（供 run() 决定是否挂 SWEEP 定时器）。
+    fn has_pending(&self) -> bool {
+        self.states.lock().unwrap().iter().any(|s| s.pending.is_some())
+    }
 }
 
 /// 两个特殊发送方名字，用于区分事件来源。
@@ -76,6 +232,12 @@ pub fn kind_label(kind: NotifyKind) -> &'static str {
 
 pub struct Notifier {
     cfg: NotificationConfig,
+    /// 企业微信 WebHook 发送节流器。条/分钟来自 UCI `qq_max_per_minute`，
+    /// 与 QQ 通道共用同一配置值、同一节奏算法（共享同步）。独立于门控：
+    /// 这是**通道级**配额，防止撞企业微信 20 条/分钟的硬限制。
+    wechat_throttle: std::sync::Arc<crate::qqpush::ChannelThrottle>,
+    /// 推送执行层门控：按类型独立执行频率/时段限制，状态与延迟队列在内部维护。
+    gate: NotifyGate,
     /// QQ 机器人通道；未启用（AppID/Secret/目标缺失）或处于绑定模式时为 None。
     /// RwLock 支持「自动绑定」完成后热替换，无需重启服务。
     qq: std::sync::RwLock<Option<std::sync::Arc<QqSender>>>,
@@ -86,6 +248,10 @@ pub struct Notifier {
     /// 本进程启动时处于 QQ「绑定模式」：绑定完成前通道为空，但事件必须照常入队，
     /// 否则绑定成功后拿不到任何后续推送（通道变了，队列入口却已关闭）。
     qq_bind_pending: bool,
+    /// 延迟补发唤醒器（Codex P2）：`deliver()` 把事件 defer 后调用 `notify_one()`，
+    /// 让 run() 的 select 立即重算 has_deferred 并挂上 sweep 定时器，避免窗口到了
+    /// 却因定时器从未挂起而永久不补发。
+    wake: Notify,
 }
 
 impl Notifier {
@@ -108,7 +274,11 @@ impl Notifier {
         };
 
         if !cfg.wechat_webhook.is_empty() {
-            log_info!("企业微信推送已启用");
+            log_info!(
+                "企业微信推送已启用（消息格式: {}，通道节流: {} 条/分钟）",
+                cfg.wechat_msg_format.as_str(),
+                cfg.qq.max_per_minute
+            );
         }
 
         let qq = QqSender::from_config(&cfg.qq);
@@ -126,15 +296,21 @@ impl Notifier {
             "定时推送间隔: {} 分钟（周期性推送当前实际情况；信号巡检另有一套间隔）",
             cfg.timer_interval.as_secs() / 60
         );
+        let gate = NotifyGate::new(cfg.limits.clone());
+        // 企业微信与 QQ 共享同一配置值（qq_max_per_minute），同步节奏。
+        let wechat_throttle = std::sync::Arc::new(crate::qqpush::ChannelThrottle::new(cfg.qq.max_per_minute));
 
         (
             Notifier {
                 cfg,
+                wechat_throttle,
+                gate,
                 qq: std::sync::RwLock::new(qq),
                 tx,
                 log_file,
                 qq_bind_pending,
                 log_file_max_bytes,
+                wake: Notify::new(),
             },
             rx,
         )
@@ -178,7 +354,7 @@ impl Notifier {
         if !self.cfg.enabled {
             log_debug!("自动推送已关闭，事件仅记本地日志不推送: {}（{:?}）", msg.sender, msg.kind);
             if let Some(path) = &self.log_file {
-                if let Err(e) = append_log(path, &msg, self.log_file_max_bytes) {
+                if let Err(e) = append_log(path, &msg, self.log_file_max_bytes).await {
                     log_error!("写入通知日志失败: {}", e);
                 }
             }
@@ -191,7 +367,7 @@ impl Notifier {
         }
 
         if let Some(path) = &self.log_file {
-            if let Err(e) = append_log(path, &msg, self.log_file_max_bytes) {
+            if let Err(e) = append_log(path, &msg, self.log_file_max_bytes).await {
                 log_error!("写入通知日志失败: {}", e);
             }
         }
@@ -200,10 +376,11 @@ impl Notifier {
             return;
         }
 
-        // 有可用通道 → 立刻渲染并投递。**所有事件类型都直发**，不再攒合并窗口：
+        // 有可用通道 → 经过执行层门控后投递。**所有事件类型都直发**，不再攒合并窗口：
         // 短信/来电的实时性自不必说，信号与存储满也没有理由被压着等到窗口结束。
+        // 门控（频率/时段）在这里统一裁决，四类各有独立状态、互不干扰。
         if self.has_channel() {
-            self.send_realtime(&msg);
+            self.deliver(&msg);
             return;
         }
 
@@ -225,6 +402,68 @@ impl Notifier {
         }
     }
 
+    /// 推送执行层的统一入口：先经门控裁决，再决定是否实时投递。
+    ///
+    /// 门控按事件类型独立执行频率/时段限制。`admit` 在放行时已**原子**刷新该类
+    /// 基线（与并发同类事件互斥）；被频率闸门压住时丢弃本条（不刷新基线）；
+    /// 落在时段外时按策略延迟或丢弃。这样限制真正落在「即将投递」这一刻，
+    /// 前端开关只是配置入口。
+    fn deliver(&self, msg: &Notification) {
+        let now = Instant::now();
+        let minute = NotifyGate::minute_of_day();
+        match self.gate.admit(msg.kind, now, minute, msg) {
+            GateDecision::Pass => self.send_realtime(msg),
+            GateDecision::Held => {
+                log_debug!(
+                    "推送门控：{:?} 类距上次投递不足最小间隔，抑制本条（不刷新基线）",
+                    msg.kind
+                );
+            }
+            GateDecision::Deferred => {
+                log_debug!(
+                    "推送门控：{:?} 类当前不在允许时段，延迟到窗口开启后补发",
+                    msg.kind
+                );
+                // 入队已在 admit 的临界区内完成。这里只负责唤醒 run() 的扫描
+                // 分支，否则 sweep 定时器在 has_deferred 为 false 时不会挂起，
+                // 窗口到了也永远不补发（Codex P2）。
+                self.wake.notify_one();
+            }
+            GateDecision::Dropped => {
+                log_debug!("推送门控：{:?} 类当前不在允许时段，按 drop 策略丢弃", msg.kind);
+            }
+        }
+    }
+
+    /// 扫描并补发到期的延迟事件（由 run() 周期性调用，单任务串行）。
+    ///
+    /// Codex P2：出队与裁决由 [`NotifyGate::admit_due`] 在同一把锁内原子完成，
+    /// 与实时事件的 `admit` 串行互斥 —— 实时事件先到会清掉延迟副本（这里拿到
+    /// `None`），不会出现「新事件已实时发出、陈旧副本又补发一遍」的重复推送。
+    fn flush_deferred(&self) {
+        if !self.has_channel() || !self.cfg.enabled {
+            // 通道暂时不可用/总开关关闭：不出队、不裁决，整批留待下轮，不丢消息。
+            return;
+        }
+        for kind in [NotifyKind::Sms, NotifyKind::Call, NotifyKind::MemoryFull, NotifyKind::Signal] {
+            let now = Instant::now();
+            match self.gate.admit_due(kind, now, NotifyGate::minute_of_day()) {
+                None => {} // 无副本，或仍在窗外（defer）：原地保留
+                Some((GateDecision::Pass, msg)) => {
+                    log_info!("推送门控：{:?} 类进入允许时段，补发延迟事件", kind);
+                    self.send_realtime(&msg);
+                }
+                Some((GateDecision::Held, _)) => {
+                    log_debug!("推送门控：{:?} 类补发时频率仍未满足，丢弃本条", kind);
+                }
+                Some((GateDecision::Dropped, _)) => {
+                    log_debug!("推送门控：{:?} 类补发时窗口策略变为 drop，丢弃本条", kind);
+                }
+                Some((GateDecision::Deferred, _)) => unreachable!("admit_due 不返回 Deferred"),
+            }
+        }
+    }
+
     /// 实时直发：单条事件立即渲染并投递到所有通道，不经过任何攒批。
     fn send_realtime(&self, msg: &Notification) {
         let body = render_body(msg, &self.cfg.templates);
@@ -237,7 +476,7 @@ impl Notifier {
             Some(card) => log_debug!("推送内容（QQ 富文本卡片）: {}", card),
             None => log_debug!("推送内容（实时直发）: {}", combined),
         }
-        self.dispatch_body(&combined, &body, &prefix, qq_card.as_deref());
+        self.dispatch_body(msg.kind, &combined, &body, &prefix, qq_card.as_deref());
     }
 
     /// 生产者未预渲染卡片时，按事件类型自动套用对应的 QQ 富文本模板。
@@ -256,17 +495,35 @@ impl Notifier {
     /// 通道可用性在此刻同步判定、发送异步进行：投递失败由各自的重试与日志负责，
     /// 不阻塞调用方（URC 分发循环与定时推送都跑在关键路径上）。
     ///
-    /// 三个入参的分工：`combined` 是「前缀 + 正文」的纯文本（企业微信用）；
-    /// `body` / `prefix` 分开传是给 QQ 通道的 —— [`crate::qqpush`] 需要它们
+    /// 入参分工：`combined` 是「前缀 + 正文」的纯文本（企业微信 text 格式用）；
+    /// `body` / `prefix` 分开传是给 QQ 与企业微信 Markdown 通道的 —— 需要它们
     /// 分别组装 Markdown（正文进标题与列表，前缀进引用行）。
-    fn dispatch_body(&self, combined: &str, body: &str, prefix: &str, qq_card: Option<&str>) {
+    ///
+    /// 通道级节流：短信/来电是实时事件，豁免节流（用户明确要求实时到达）；
+    /// 信号/存储满走预约制节流，与企业微信/QQ 共享 `qq_max_per_minute` 节奏。
+    fn dispatch_body(&self, kind: NotifyKind, combined: &str, body: &str, prefix: &str, qq_card: Option<&str>) {
+        // 实时事件（短信/来电）豁免通道节流；其余事件走通道节流。
+        let throttled = !matches!(kind, NotifyKind::Sms | NotifyKind::Call);
         let wechat = self.wechat_enabled();
         let qq = self.current_qq();
+
         if wechat {
             let hook = self.cfg.wechat_webhook.clone();
+            let fmt = self.cfg.wechat_msg_format;
             let text = combined.to_string();
+            let body_owned = body.to_string();
+            let prefix_owned = prefix.to_string();
+            let throttle = std::sync::Arc::clone(&self.wechat_throttle);
             tokio::spawn(async move {
-                let _ = send_webhook(&hook, &text).await;
+                if throttled {
+                    crate::qqpush::pace_throttle(&throttle).await;
+                }
+                let content = match fmt {
+                    crate::config::WechatMsgFormat::Text => text,
+                    crate::config::WechatMsgFormat::Markdown => build_wechat_markdown(&body_owned, &prefix_owned, false),
+                    crate::config::WechatMsgFormat::MarkdownV2 => build_wechat_markdown(&body_owned, &prefix_owned, true),
+                };
+                let _ = send_webhook(&hook, &content, fmt).await;
             });
         }
         if let Some(qq) = qq {
@@ -278,7 +535,7 @@ impl Notifier {
                 _ => qq.build_message(body, prefix),
             };
             tokio::spawn(async move {
-                let _ = qq.send(msg).await;
+                let _ = qq.send_with_throttle(msg, throttled).await;
             });
         }
     }
@@ -297,11 +554,12 @@ impl Notifier {
     /// 被丢弃，此后 `notify()` 的 `try_send` 会全部失败——那就是
     /// 「绑定成功却收不到任何推送数据」这个老缺陷。
     pub async fn run(&self, mut rx: mpsc::Receiver<Notification>, mut ctx: tokio::sync::watch::Receiver<bool>) {
-        /// 补发扫描周期：仅在有待发事件时才挂这个定时器。
+        /// 补发扫描周期：仅在有待发事件（通道暂存或时段延迟）时才挂这个定时器。
         const SWEEP: Duration = Duration::from_secs(10);
         let mut pending: Vec<Notification> = Vec::new();
 
         loop {
+            let has_deferred = self.gate.has_pending();
             tokio::select! {
                 _ = ctx.changed() => {
                     self.drain_pending(&mut pending);
@@ -322,11 +580,19 @@ impl Notifier {
                         }
                     }
                 }
-                _ = tokio::time::sleep(SWEEP), if !pending.is_empty() => {}
+                _ = self.wake.notified() => {
+                    // deliver() 刚 defer 了一条事件：跳到循环底部立即尝试补发，
+                    // 并让下一轮循环重算 has_deferred 挂上 sweep 定时器。
+                }
+                _ = tokio::time::sleep(SWEEP), if !pending.is_empty() || has_deferred => {}
             }
-            // 无论被哪个分支唤醒都尝试补发一次：新事件到达与定时扫描都会走到这里，
-            // 通道一旦就绪就把积压事件按原顺序逐条发出。
+            // 无论被哪个分支唤醒都尝试补发一次：新事件到达、定时扫描、defer 唤醒
+            // 都会走到这里，通道一旦就绪就把积压事件按原顺序逐条发出。
             self.drain_pending(&mut pending);
+            // 时段延迟队列：窗口开启后补发同类最新的那一条（去重）。
+            // 不依赖 has_pending 快照——admit 放行后 pending 已清空，这里直接调用
+            // 让 admit_due 自行判断；它内部对空队列是无操作。
+            self.flush_deferred();
         }
     }
 
@@ -351,7 +617,8 @@ impl Notifier {
         let taken = std::mem::take(pending);
         log_info!("推送通道已就绪，补发 {} 条暂存事件", taken.len());
         for msg in &taken {
-            self.send_realtime(msg);
+            // 绑定期间暂存的事件同样要过门控，否则会绕过频率/时段限制。
+            self.deliver(msg);
         }
     }
 
@@ -360,13 +627,13 @@ impl Notifier {
         self.cfg.enabled
     }
 
-    /// 信号类通知的最小推送间隔（配置 `notify_signal_min_interval`，分钟；ZERO=不限频）。
+    /// 信号类通知的最小推送间隔（UCI `notify_signal_min_interval`，分钟；ZERO=不限频）。
     ///
     /// 门控由**事件生产者**执行（[`crate::signalwatch`] 巡检、[`crate::urc`] 的
     /// 信号上报），不在这里拦：Notifier 收到的「信号事件」既包括巡检推来的突变
     /// 通知，也包括 [`crate::timerpush`] 到点推的状态快照，两者同为
     /// [`NotifyKind::Signal`]，在枢纽处一刀切会把用户自己设定的定时推送节奏也夹掉。
-    /// 配置挂在 Notifier 上，只是让两个生产者共用同一份取值而不各读一次配置文件。
+    /// 配置挂在 Notifier 上，只是让两个生产者共用同一份取值而不各读一次 UCI。
     pub fn signal_min_interval(&self) -> Duration {
         self.cfg.signal_min_interval
     }
@@ -393,7 +660,8 @@ impl Notifier {
                 if self.cfg.wechat_webhook.trim().is_empty() {
                     return Err("企业微信推送开关已开启，但 WebHook 地址为空".into());
                 }
-                send_webhook(&self.cfg.wechat_webhook.clone(), &combine_body(base, &prefix)).await
+                // 测试通道只验证连通性，固定用 text，不受用户消息格式配置影响。
+                send_webhook(&self.cfg.wechat_webhook.clone(), &combine_body(base, &prefix), crate::config::WechatMsgFormat::Text).await
             }
             other => Err(format!("未知通道: {other}")),
         }
@@ -444,15 +712,23 @@ impl Notifier {
             return Err("没有已启用的推送通道（企业微信 WebHook 或 QQ 机器人）".into());
         }
 
-        self.notify(Notification {
+        // 测试推送**绕过频率/时段门控**直发：这是用户显式验证通道的动作，
+        // 若走 notify()→deliver()，开启限频/时段后测试会被静默压住或延迟，
+        // 而 RPC 仍返回 Ok，界面显示「已发送」手机却毫无动静 —— 假成功。
+        let msg = Notification {
             sender,
             content,
             kind,
             memory_full: false,
             qq_card: None,
             time: now_string(),
-        })
-        .await;
+        };
+        if let Some(path) = &self.log_file {
+            if let Err(e) = append_log(path, &msg, self.log_file_max_bytes).await {
+                log_error!("写入通知日志失败: {}", e);
+            }
+        }
+        self.send_realtime(&msg);
         Ok(())
     }
 
@@ -535,7 +811,11 @@ fn prepare_log_file(path: &str) -> Result<String, String> {
 ///
 /// 走 [`crate::ringlog::append_capped`]：超限先按行边界裁掉最旧的一半再追加，
 /// 绝不切出半行，也绝不让文件无上限增长（`/tmp` 是 tmpfs，写满会拖垮整机）。
-fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> std::io::Result<()> {
+///
+/// 正文拼接是纯计算，同步完成；`append_capped` 内部是 metadata + 读改写，
+/// 属阻塞 IO，交给 blocking 池。日志路径可能被配到闪存上，那种情况下
+/// 一次写入能到几十毫秒，留在 reactor 上会拖住同一运行时的 AT/RPC 任务。
+async fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> Result<(), String> {
     let ts = if msg.time.is_empty() { now_string() } else { msg.time.clone() };
     let mut b = String::new();
     if msg.memory_full {
@@ -546,13 +826,122 @@ fn append_log(path: &str, msg: &Notification, max_bytes: u64) -> std::io::Result
     b.push_str(&"-".repeat(50));
     b.push('\n');
 
-    crate::ringlog::append_capped(path, &b, max_bytes)
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || crate::ringlog::append_capped(&path, &b, max_bytes))
+        .await
+        .map_err(|e| format!("写入通知日志任务失败: {e}"))?
+        .map_err(|e| e.to_string())
 }
 
-async fn send_webhook(hook: &str, content: &str) -> Result<(), String> {
+/// 把「首行标题 + 其余正文」组装成企业微信 Markdown。
+///
+/// 企业微信两个 Markdown 版本的语法子集不同（文档 path/99110）：
+/// - v1（`markdown`）：支持标题/加粗/链接/行内代码/引用/三种字体颜色，
+///   **不支持列表**；因此 `键：值` 用「加粗键名 + 引用行」表达，键名染 comment 灰。
+/// - v2（`markdown_v2`）：支持标准列表/表格/代码块，但不支持字体颜色；
+///   `键：值` 用无序列表 `**键**：值` 表达（与 QQ Markdown 风格一致）。
+///
+/// `body` 的第一行不是 `键：值` 时视为标题单独成行，其余行作为正文。
+fn split_wechat_kv(line: &str) -> Option<(&str, &str)> {
+    for sep in ["：", ": ", ":"] {
+        let mut from = 0;
+        while let Some(rel) = line[from..].find(sep) {
+            let pos = from + rel;
+            // 裸冒号兜底不能把 URL 的 scheme 冒号（https://…）当键值分隔，
+            // 否则链接行会被拆成「**https**：//…」的坏排版。
+            if sep == ":" && line[pos..].starts_with("://") {
+                from = pos + 1;
+                continue;
+            }
+            let k = line[..pos].trim();
+            let v = line[pos + sep.len()..].trim();
+            if !k.is_empty() && !v.is_empty() {
+                return Some((k, v));
+            }
+            break;
+        }
+    }
+    None
+}
+
+fn build_wechat_markdown(body: &str, prefix: &str, v2: bool) -> String {
+    let mut lines: Vec<&str> = body.lines().collect();
+    while lines.first().is_some_and(|l| l.trim().is_empty()) { lines.remove(0); }
+    while lines.last().is_some_and(|l| l.trim().is_empty()) { lines.pop(); }
+    if lines.is_empty() {
+        return prefix.trim().to_string();
+    }
+
+    let mut out = String::new();
+    let first = lines[0].trim();
+    let mut rest: &[&str] = &lines[1..];
+    if split_wechat_kv(first).is_none() {
+        // 首行是标题：v2 用 #（更醒目），v1 用 ##（文档推荐层级）
+        out.push_str(&format!("{} {}\n", if v2 { "#" } else { "##" }, first));
+    } else {
+        rest = &lines[..];
+    }
+    if !prefix.trim().is_empty() {
+        out.push_str(&format!("> {}\n", prefix.trim()));
+    }
+    if !rest.is_empty() {
+        out.push('\n');
+    }
+    for line in rest {
+        let t = line.trim();
+        if t.is_empty() {
+            out.push('\n');
+            continue;
+        }
+        if let Some((k, v)) = split_wechat_kv(t) {
+            if v2 {
+                out.push_str(&format!("- **{k}**：{v}\n"));
+            } else {
+                // v1 无列表：引用行 + comment 灰键名
+                out.push_str(&format!("> <font color=\"comment\">{k}</font>：{v}\n"));
+            }
+        } else {
+            out.push_str(t);
+            out.push('\n');
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// 企业微信 webhook 消息体最大 4096 字节（text 为 2048，Markdown/v2 为 4096）。
+/// 按 UTF-8 字节在字符边界裁剪，避免把多字节汉字切成非法序列。
+const WECHAT_MAX_BYTES: usize = 4096;
+
+fn truncate_utf8_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+async fn send_webhook(hook: &str, content: &str, fmt: crate::config::WechatMsgFormat) -> Result<(), String> {
+    use crate::config::WechatMsgFormat;
+    let (msgtype, body) = match fmt {
+        WechatMsgFormat::Text => {
+            // text 上限 2048 字节，比 markdown 更严，单独裁剪
+            ("text", serde_json::json!({ "content": truncate_utf8_bytes(content, 2048) }))
+        }
+        WechatMsgFormat::Markdown => (
+            "markdown",
+            serde_json::json!({ "content": truncate_utf8_bytes(content, WECHAT_MAX_BYTES) }),
+        ),
+        WechatMsgFormat::MarkdownV2 => (
+            "markdown_v2",
+            serde_json::json!({ "content": truncate_utf8_bytes(content, WECHAT_MAX_BYTES) }),
+        ),
+    };
     let payload = serde_json::json!({
-        "msgtype": "text",
-        "text": { "content": content }
+        "msgtype": msgtype,
+        msgtype: body
     });
 
     for attempt in 1..=NOTIFY_MAX_RETRIES {
@@ -629,7 +1018,7 @@ pub fn min_interval_hold(last: Option<Instant>, now: Instant, min: Duration) -> 
 /// [`Notification::time`]，保证推送文案里的 `{time}` 是事件时刻而非推送时刻。
 ///
 /// 时刻取 [`crate::nettime`]（NTP 优先、设备时钟兜底），时区沿用系统设置
-/// （见 [`crate::nettime`]，取不到时北京时间）—— **系统怎么设就怎么显示**。
+/// （见 [`crate::localtime`]，取不到时北京时间）—— **系统怎么设就怎么显示**。
 /// 此处曾经直接用 `chrono::Local`，在无 tzdata 的固件上静默变成 UTC，
 /// 推送时间比现实早 8 小时。
 pub fn now_string() -> String {
@@ -740,11 +1129,12 @@ pub fn render_prefix_str(tpl: &NotifyTemplates, count: usize) -> String {
 /// 把一批事件渲染为最终推送文本（单条即只渲染该条）。
 ///
 /// 单条：直接套用该事件类型的模板。
-/// 多条：`{batch}` 标题 + 分隔线 + 逐条「序号 + 该事件类型的模板渲染结果」。
+/// 多条：分隔线 + 逐条「序号 + 该事件类型的模板渲染结果」。
 /// 两种形态都会在最前面加全局前缀（若配置了）。
 ///
 /// **生产路径不会走多条分支**：v1.14.20 起事件一律逐条实时直发，
-/// 攒批（合并窗口）已经移除，`{batch}` 模板键保留只为兼容已有配置。
+/// 攒批（合并窗口）已经移除。原来的「批量汇总标题」（UCI `notify_tpl_batch`）
+/// 已随合并窗口一起删除，多条分支不再拼任何自定义标题。
 /// 之所以还留着这个函数，是因为它是「模板渲染 + 前缀拼接」的唯一端到端
 /// 断言入口 —— 单测靠它覆盖占位符替换、未知占位符保留、存储满兜底文案、
 /// 前缀 `{count}`/`{time}` 取值这些规则。删掉它，这些规则就只剩分散的
@@ -761,16 +1151,14 @@ pub fn combine_messages(msgs: &[Notification], tpl: &NotifyTemplates) -> String 
         render_template(template_for(tpl, m.kind), m, 1, &now)
     } else {
         let mut b = String::new();
-        b.push_str(&tpl.batch);
-        b.push('\n');
-        b.push_str(&"=".repeat(20));
-        b.push('\n');
         for (i, m) in msgs.iter().enumerate() {
-            b.push('\n');
+            if i > 0 {
+                b.push('\n');
+                b.push_str(&"-".repeat(20));
+                b.push('\n');
+            }
             b.push_str(&format!("{}. ", i + 1));
             b.push_str(&render_template(template_for(tpl, m.kind), m, msgs.len(), &now));
-            b.push('\n');
-            b.push_str(&"-".repeat(20));
         }
         b
     };
@@ -783,6 +1171,14 @@ mod tests {
     use super::*;
     use crate::config::QqNotifyConfig;
 
+    impl NotifyGate {
+        /// 测试辅助：直接暂存一条窗外事件（生产路径的入队已并入 `admit`）。
+        fn defer(&self, kind: NotifyKind, msg: Notification) {
+            let mut states = self.states.lock().unwrap();
+            states[kind.index()].pending = Some(msg);
+        }
+    }
+
     fn sms(sender: &str, content: &str) -> Notification {
         Notification {
             sender: sender.into(),
@@ -792,6 +1188,169 @@ mod tests {
             qq_card: None,
             time: "2026-10-11 12:00:00".into(),
         }
+    }
+
+    fn limits_all_off() -> crate::config::NotifyLimits {
+        core::array::from_fn(|_| crate::config::TypePushLimit::default())
+    }
+
+    /// 默认配置（全关）下任何事件都放行 —— 升级后行为不变的关键回归。
+    #[test]
+    fn gate_default_all_pass() {
+        let gate = NotifyGate::new(limits_all_off());
+        let now = Instant::now();
+        for i in 0..4 {
+            let kind = match i { 0 => NotifyKind::Sms, 1 => NotifyKind::Call, 2 => NotifyKind::MemoryFull, _ => NotifyKind::Signal };
+            assert_eq!(gate.admit(kind, now, 12 * 60, &sms("10086", "t")), GateDecision::Pass);
+        }
+    }
+
+    /// 频率限制只约束本类：短信限频不影响来电。
+    #[test]
+    fn gate_rate_is_per_kind_and_holds_repeats() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(60 * 60),
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let base = Instant::now();
+        // admit 放行即在临界区内预留基线 base（并发安全的 check+reserve）
+        assert_eq!(gate.admit(NotifyKind::Sms, base, 12 * 60, &sms("10086", "t")), GateDecision::Pass);
+        // 59 分钟后同类被压住
+        assert_eq!(gate.admit(NotifyKind::Sms, base + Duration::from_secs(59 * 60), 13 * 60, &sms("10086", "t")), GateDecision::Held);
+        // 来电类没有限频，照常放行
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(59 * 60), 13 * 60, &sms("10086", "t")), GateDecision::Pass);
+        // 满 60 分钟后同类恢复放行
+        assert_eq!(gate.admit(NotifyKind::Sms, base + Duration::from_secs(60 * 60), 13 * 60, &sms("10086", "t")), GateDecision::Pass);
+    }
+
+    /// 被频率压住时 last_sent 不刷新：基线不被污染，到点立即放行。
+    #[test]
+    fn gate_held_does_not_refresh_baseline() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Call.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(3600),
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let base = Instant::now();
+        // 首次放行预留基线 base
+        assert_eq!(gate.admit(NotifyKind::Call, base, 0, &sms("10086", "t")), GateDecision::Pass);
+        // 被压住：admit 不刷新基线
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(600), 60, &sms("10086", "t")), GateDecision::Held);
+        // 基线仍是 base，因此 t=3601 时放行
+        assert_eq!(gate.admit(NotifyKind::Call, base + Duration::from_secs(3601), 120, &sms("10086", "t")), GateDecision::Pass);
+    }
+
+    /// 时段（跨午夜）内放行、窗外按 defer / drop 分流。
+    #[test]
+    fn gate_window_cross_midnight_and_actions() {
+        let mut limits = limits_all_off();
+        let common = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            ..Default::default()
+        };
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            out_of_window: crate::config::OutOfWindowAction::Defer,
+            ..common.clone()
+        };
+        limits[NotifyKind::Call.index()] = crate::config::TypePushLimit {
+            out_of_window: crate::config::OutOfWindowAction::Drop,
+            ..common
+        };
+        let gate = NotifyGate::new(limits);
+        let now = Instant::now();
+        // 23:30 / 02:00 在段内
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 23 * 60 + 30, &sms("10086", "t")), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 2 * 60, &sms("10086", "t")), GateDecision::Pass);
+        // 12:00 窗外 → defer / drop
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("10086", "t")), GateDecision::Deferred);
+        assert_eq!(gate.admit(NotifyKind::Call, now, 12 * 60, &sms("10086", "t")), GateDecision::Dropped);
+    }
+
+    /// 延迟队列按类型去重：同类只保留最新一条，窗口开启后一次性补发。
+    #[test]
+    fn gate_defer_dedups_per_kind() {
+        let gate = NotifyGate::new(limits_all_off());
+        gate.defer(NotifyKind::Sms, sms("A", "old"));
+        gate.defer(NotifyKind::Sms, sms("B", "new"));
+        gate.defer(NotifyKind::Call, sms("C", "call"));
+        assert!(gate.has_pending());
+        // 全部时段关闭（全天）→ 全部到期
+        let now = Instant::now();
+        let (decision, sms_msg) = gate.admit_due(NotifyKind::Sms, now, 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Pass);
+        assert_eq!(sms_msg.content, "new", "应保留最新一条");
+        let (decision, _) = gate.admit_due(NotifyKind::Call, now, 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Pass);
+        assert!(gate.admit_due(NotifyKind::MemoryFull, now, 12 * 60).is_none());
+        assert!(gate.admit_due(NotifyKind::Signal, now, 12 * 60).is_none());
+        assert!(!gate.has_pending());
+    }
+
+    /// Codex P2 回归：补发的「出队 + 裁决」必须与实时投递在同一把锁内串行。
+    /// 旧实现先 take_due 出队、再 admit 裁决：两步之间同类实时事件放行时
+    /// 看不到已出队的副本，频率闸门关闭（默认）时新旧两条都发出 —— 重复且陈旧。
+    #[test]
+    fn gate_due_flush_serialized_with_live_admit() {
+        // 频率闸门关闭、时段全天：旧实现里实时与补发都能通过的配置。
+        let gate = NotifyGate::new(limits_all_off());
+        let now = Instant::now();
+        gate.defer(NotifyKind::Sms, sms("A", "deferred"));
+
+        // 实时事件先放行：admit 在锁内清掉延迟副本，补发侧必须拿不到任何东西。
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("10086", "t")), GateDecision::Pass);
+        assert!(
+            gate.admit_due(NotifyKind::Sms, now, 12 * 60).is_none(),
+            "实时事件已投递并清掉副本，补发不得再发出陈旧副本"
+        );
+        assert!(!gate.has_pending());
+
+        // 反序：补发先在锁内完成出队+预约，副本合法发出且只发一次。
+        gate.defer(NotifyKind::Sms, sms("B", "deferred2"));
+        let (decision, msg) = gate.admit_due(NotifyKind::Sms, now, 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Pass);
+        assert_eq!(msg.content, "deferred2");
+        assert!(gate.admit_due(NotifyKind::Sms, now, 12 * 60).is_none());
+    }
+
+    /// Codex P2 回归：并发同类事件只有一个能通过频率闸门。
+    /// check 与 reserve 必须原子，否则 N 个并发调用都读到同一旧基线、全部放行。
+    #[test]
+    fn gate_admit_is_atomic_under_concurrency() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(3600),
+            ..Default::default()
+        };
+        let gate = std::sync::Arc::new(NotifyGate::new(limits));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let passed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let gate = std::sync::Arc::clone(&gate);
+            let barrier = std::sync::Arc::clone(&barrier);
+            let passed = std::sync::Arc::clone(&passed);
+            handles.push(std::thread::spawn(move || {
+                let now = Instant::now();
+                barrier.wait();
+                if gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("10086", "t")) == GateDecision::Pass {
+                    passed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }));
+        }
+        for h in handles { h.join().unwrap(); }
+        assert_eq!(
+            passed.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "8 个并发同类事件在 1 小时间隔内应恰好放行 1 条"
+        );
     }
 
     /// 号码归一化的规则必须与前端 `Parse.normalizePhoneNumber` 完全一致：
@@ -889,6 +1448,49 @@ mod tests {
         assert!(card.contains("验证码 1234"), "正文缺失: {card}");
     }
 
+    // ---------- 企业微信 Markdown 格式 ----------
+
+    #[test]
+    fn wechat_msg_format_from_uci_is_compatible() {
+        use crate::config::WechatMsgFormat as F;
+        assert_eq!(F::from_uci("text"), F::Text);
+        assert_eq!(F::from_uci("markdown"), F::Markdown);
+        assert_eq!(F::from_uci("md"), F::Markdown);
+        assert_eq!(F::from_uci("markdown_v2"), F::MarkdownV2);
+        assert_eq!(F::from_uci("v2"), F::MarkdownV2);
+        assert_eq!(F::from_uci("MARKDOWN"), F::Markdown, "大小写不敏感");
+        assert_eq!(F::from_uci("乱值"), F::Text, "未知值回落 text 保持兼容");
+        assert_eq!(F::from_uci(""), F::Text);
+    }
+
+    #[test]
+    fn wechat_markdown_v1_uses_font_color_and_no_list() {
+        let body = "新短信提醒\n发送者：13800138000\n内容：验证码 1234";
+        let out = build_wechat_markdown(body, "[时间 14:00]", false);
+        assert!(out.starts_with("## 新短信提醒"), "v1 标题用 ##: {out}");
+        assert!(out.contains("> [时间 14:00]"), "前缀作引用: {out}");
+        assert!(out.contains("<font color=\"comment\">发送者</font>：13800138000"), "键名染色: {out}");
+        assert!(!out.contains("- **"), "v1 不支持无序列表: {out}");
+    }
+
+    #[test]
+    fn wechat_markdown_v2_uses_lists_and_no_font_color() {
+        let body = "新短信提醒\n发送者：13800138000\n内容：验证码 1234";
+        let out = build_wechat_markdown(body, "", true);
+        assert!(out.starts_with("# 新短信提醒"), "v2 标题用 #: {out}");
+        assert!(out.contains("- **发送者**：13800138000"), "v2 用列表: {out}");
+        assert!(!out.contains("<font"), "v2 不支持字体颜色: {out}");
+    }
+
+    #[test]
+    fn truncate_utf8_bytes_keeps_char_boundaries() {
+        let s = "一二三四五"; // 每字 3 字节，共 15
+        assert_eq!(truncate_utf8_bytes(s, 7), "一二", "7 字节只放得下 2 个汉字");
+        assert_eq!(truncate_utf8_bytes(s, 6), "一二");
+        assert_eq!(truncate_utf8_bytes(s, 100), s, "未超限原样返回");
+        assert_eq!(truncate_utf8_bytes("abc", 3), "abc");
+    }
+
     #[test]
     fn qq_card_template_empty_or_body_means_generic() {
         let m = sms("10086", "hi");
@@ -917,26 +1519,32 @@ mod tests {
 
     #[test]
     fn custom_template_renders_all_placeholders() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = "[监控]".into();
-        tpl.sms = "来自 {sender} 的{kind}（{time}）：{content}".into();
+        let tpl = NotifyTemplates {
+            prefix: "[监控]".into(),
+            sms: "来自 {sender} 的{kind}（{time}）：{content}".into(),
+            ..NotifyTemplates::default()
+        };
         let out = combine_messages(&[sms("10086", "hi")], &tpl);
         assert_eq!(out, "[监控]\n来自 10086 的新短信（2026-10-11 12:00:00）：hi");
     }
 
     #[test]
     fn unknown_placeholder_is_preserved() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = String::new();
-        tpl.sms = "{sender}/{unknown}".into();
+        let tpl = NotifyTemplates {
+            prefix: String::new(),
+            sms: "{sender}/{unknown}".into(),
+            ..NotifyTemplates::default()
+        };
         assert_eq!(combine_messages(&[sms("A", "B")], &tpl), "A/{unknown}");
     }
 
     #[test]
     fn memory_full_content_falls_back_to_readable_text() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = String::new();
-        tpl.memory_full = "{content}".into();
+        let tpl = NotifyTemplates {
+            prefix: String::new(),
+            memory_full: "{content}".into(),
+            ..NotifyTemplates::default()
+        };
         let m = Notification {
             sender: String::new(),
             content: String::new(),
@@ -949,21 +1557,24 @@ mod tests {
     }
 
     #[test]
-    fn batch_uses_header_index_and_template() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = String::new();
-        tpl.batch = "汇总".into();
-        tpl.sms = "S:{content}".into();
+    fn batch_uses_index_and_template() {
+        let tpl = NotifyTemplates {
+            prefix: String::new(),
+            sms: "S:{content}".into(),
+            ..NotifyTemplates::default()
+        };
         let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
-        assert!(out.starts_with("汇总\n====================\n"));
-        assert!(out.contains("1. S:1"));
+        assert!(out.starts_with("1. S:1"), "实际: {out}");
         assert!(out.contains("2. S:2"));
+        assert!(!out.contains("批量汇总"), "批量汇总标题已删除，不应再出现: {out}");
     }
 
     #[test]
     fn prefix_supports_count_and_time() {
-        let mut tpl = NotifyTemplates::default();
-        tpl.prefix = "共 {count} 条".into();
+        let tpl = NotifyTemplates {
+            prefix: "共 {count} 条".into(),
+            ..NotifyTemplates::default()
+        };
         let out = combine_messages(&[sms("A", "1"), sms("B", "2")], &tpl);
         assert!(out.starts_with("共 2 条\n"), "实际: {out}");
     }
@@ -1079,6 +1690,25 @@ mod tests {
             "合并推送未按自定义模板渲染（占位符未替换或文案未生效）: {raw}"
         );
         assert!(raw.contains("[测试]"), "全局前缀未出现在推送内容中: {raw}");
+    }
+
+    /// 端到端：markdown 格式应产出 msgtype=markdown 且嵌套 markdown.content。
+    #[tokio::test]
+    async fn webhook_markdown_payload_is_correct() {
+        use crate::config::WechatMsgFormat as F;
+        let (port, server) = one_shot_webhook().await;
+        let hook = format!("http://127.0.0.1:{port}/hook");
+        send_webhook(&hook, "## 标题\n正文", F::Markdown).await.unwrap();
+        let raw = tokio::time::timeout(Duration::from_secs(5), server).await.unwrap().unwrap();
+        assert!(raw.contains(r#""msgtype":"markdown""#), "报文类型错误: {raw}");
+        assert!(raw.contains(r#""markdown":{"content""#), "缺 markdown 嵌套对象: {raw}");
+
+        let (port, server) = one_shot_webhook().await;
+        let hook = format!("http://127.0.0.1:{port}/hook");
+        send_webhook(&hook, "# 标题", F::MarkdownV2).await.unwrap();
+        let raw = tokio::time::timeout(Duration::from_secs(5), server).await.unwrap().unwrap();
+        assert!(raw.contains(r#""msgtype":"markdown_v2""#), "报文类型错误: {raw}");
+        assert!(raw.contains(r#""markdown_v2":{"content""#), "缺 markdown_v2 嵌套对象: {raw}");
     }
 
     /// 起一个「只接收一次请求」的本地 WebHook 接收端。
@@ -1425,5 +2055,136 @@ mod tests {
             .await
             .expect_err("信号不应支持类型化测试推送");
         assert!(err.contains("不支持测试推送"), "错误应说明类型不受支持: {err}");
+    }
+
+    /// 全 PR 审查回归：Deferred 的入队必须与裁决同锁。
+    /// 旧实现 admit 返回 Deferred 后在锁外 defer：窗口分钟边界处并发的
+    /// 同类 Pass 清掉副本后，旧事件的迟到入队会把陈旧副本写回队列。
+    #[test]
+    fn gate_defer_is_atomic_with_live_pass() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            out_of_window: crate::config::OutOfWindowAction::Defer,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let now = Instant::now();
+        // 窗外：裁决即入队（同一临界区）
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("A", "old")), GateDecision::Deferred);
+        assert!(gate.has_pending());
+        // 窗口开启后实时事件放行：副本在同锁内被清掉，补发拿不到任何东西
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 23 * 60, &sms("B", "new")), GateDecision::Pass);
+        assert!(gate.admit_due(NotifyKind::Sms, now, 23 * 60).is_none());
+        // 并发两条 Deferred：同锁入队保证保留最新一条，不会旧覆新
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("C", "older")), GateDecision::Deferred);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("D", "newer")), GateDecision::Deferred);
+        let (_, msg) = gate.admit_due(NotifyKind::Sms, now, 23 * 60).unwrap();
+        assert_eq!(msg.content, "newer");
+    }
+
+    /// admit_due 的 Held / Dropped 分支：副本取出后丢弃，不再排队。
+    #[test]
+    fn gate_admit_due_held_and_dropped() {
+        // Held：窗口已开但频率未满足
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(3600),
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let base = Instant::now();
+        assert_eq!(gate.admit(NotifyKind::Sms, base, 12 * 60, &sms("A", "live")), GateDecision::Pass);
+        gate.defer(NotifyKind::Sms, sms("B", "deferred"));
+        let (decision, _) = gate.admit_due(NotifyKind::Sms, base + Duration::from_secs(60), 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Held);
+        assert!(!gate.has_pending(), "Held 的副本应被丢弃而非留队");
+
+        // Dropped：仍在窗外且策略已改为 drop
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Call.index()] = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            out_of_window: crate::config::OutOfWindowAction::Drop,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        gate.defer(NotifyKind::Call, sms("C", "stale"));
+        let (decision, _) = gate.admit_due(NotifyKind::Call, Instant::now(), 12 * 60).unwrap();
+        assert_eq!(decision, GateDecision::Dropped);
+        assert!(!gate.has_pending());
+        // 窗外 + defer 策略：原地保留（None），等下轮
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Signal.index()] = crate::config::TypePushLimit {
+            window_enabled: true,
+            window_start: "22:00".into(),
+            window_end: "06:00".into(),
+            out_of_window: crate::config::OutOfWindowAction::Defer,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        gate.defer(NotifyKind::Signal, sms("D", "wait"));
+        assert!(gate.admit_due(NotifyKind::Signal, Instant::now(), 12 * 60).is_none());
+        assert!(gate.has_pending());
+    }
+
+    /// rate_enabled 但 min_interval=0：等效不限频，照常放行。
+    #[test]
+    fn gate_rate_enabled_zero_interval_passes() {
+        let mut limits = limits_all_off();
+        limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::ZERO,
+            ..Default::default()
+        };
+        let gate = NotifyGate::new(limits);
+        let now = Instant::now();
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("A", "1")), GateDecision::Pass);
+        assert_eq!(gate.admit(NotifyKind::Sms, now, 12 * 60, &sms("A", "2")), GateDecision::Pass);
+    }
+
+    /// 裸 URL 行不能被裸冒号兜底拆成「**https**：//…」的坏键值排版。
+    #[test]
+    fn wechat_markdown_keeps_bare_url_intact() {
+        assert!(split_wechat_kv("https://example.com/a").is_none());
+        assert!(split_wechat_kv("http://x.cn").is_none());
+        // 正常键值与「键: URL」仍要识别
+        assert_eq!(split_wechat_kv("链接: https://x.cn"), Some(("链接", "https://x.cn")));
+        assert_eq!(split_wechat_kv("号码：10086"), Some(("号码", "10086")));
+        let md = build_wechat_markdown("https://example.com/a", "", false);
+        assert!(md.contains("https://example.com/a"), "URL 应原样保留: {md}");
+        assert!(!md.contains("**https**"), "不得把 scheme 拆成键名: {md}");
+    }
+
+    /// 全 PR 审查回归：测试推送绕过频率门控直发。
+    /// 旧实现走 notify()→deliver()：开启限频后第二次测试被 Held 静默吞掉，
+    /// RPC 仍返回 Ok，界面显示「已发送」手机却毫无动静（假成功）。
+    #[tokio::test]
+    async fn test_event_bypasses_rate_gate() {
+        let (port1, server1) = one_shot_webhook().await;
+        let mut cfg = webhook_only_cfg(port1);
+        cfg.types.sms = true;
+        cfg.limits[NotifyKind::Sms.index()] = crate::config::TypePushLimit {
+            rate_enabled: true,
+            min_interval: Duration::from_secs(3600),
+            ..Default::default()
+        };
+        let (mut notifier, _rx) = Notifier::new(cfg);
+        notifier.notify_test_event(NotifyKind::Sms).await.expect("第一次测试应成功");
+        let req1 = tokio::time::timeout(Duration::from_secs(5), server1).await
+            .expect("第一次测试应到达 WebHook").expect("任务应完成");
+        assert!(req1.contains("测试消息"), "应发送测试内容");
+
+        // 第二次测试指向新服务器：若被限频压住，5 秒内不会有任何请求
+        let (port2, server2) = one_shot_webhook().await;
+        notifier.cfg.wechat_webhook = format!("http://127.0.0.1:{port2}/hook");
+        notifier.notify_test_event(NotifyKind::Sms).await.expect("第二次测试应成功");
+        let req2 = tokio::time::timeout(Duration::from_secs(5), server2).await
+            .expect("限频开启时测试推送仍必须直发（绕过门控）").expect("任务应完成");
+        assert!(req2.contains("测试消息"));
     }
 }

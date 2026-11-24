@@ -1,0 +1,879 @@
+name: OpenWrt 软件包云编译（apk + ipk）
+
+# 云编译 OpenWrt 软件包：
+#   - 25.12.x（当前稳定版，包管理器 apk）  → 产出 .apk
+#   - 24.10.x（长期支持，opkg 包管理器）    → 产出 .ipk
+#
+# 架构矩阵（三档，覆盖两类 aarch64 命名）：
+#   x86_64               x86/64           （软路由 / 虚拟机）
+#   aarch64_cortex-a53   mediatek/filogic （MT798x；ARCH_PACKAGES 由 CPU_TYPE=cortex-a53 得出）
+#   aarch64_generic      armsr/armv8      （CPU_TYPE 未定义；iStoreOS 25.x、Arm SystemReady 及
+#                                          其它把 aarch64 命名为 generic 的固件）
+#
+# 为什么必须同时出 cortex-a53 与 generic：
+#   apk 的架构是 <base>[_<variant>] 模型，variant 参与严格匹配。同一颗 Cortex-A53，
+#   OpenWrt 目标里 CPU_TYPE=cortex-a53 时 ARCH_PACKAGES=aarch64_cortex-a53，
+#   而 CPU_TYPE 未定义（如 armsr/armv8）时 ARCH_PACKAGES=aarch64_generic。
+#   aarch64_cortex-a53 的包装到声明 aarch64_generic 的固件上会被 apk 拒绝：
+#     error: uninstallable arch: aarch64_cortex-a53
+#   反之亦然。这不是 CPU 不兼容（两者都是 ARMv8-A 指令集），而是元数据不匹配。
+#
+# 触发：push v* 标签、或手动 workflow_dispatch（预览版仅手动，不再随 main 推送自动构建）
+# 产物：每次编译成功后自动发布 GitHub Release，分**两条互不干扰**的通道
+#   - 正式版（stable）：push 标签 v*，或手动派发时选 stable → tag 用标签名
+#     （如 v1.29.0），同名则覆盖更新；会成为 GitHub 的 latest。
+#   - 预览版（preview）：**仅手动派发**（workflow_dispatch 选 preview，默认）→
+#     tag 为 preview-<提交短SHA>（如 preview-99425b0），带 Pre-release 标记。
+#     **不会**触碰正式版 Release，也不会抢占 latest。
+#     预览版本 tag 不含 v<PKG_VERSION>-r<PKG_RELEASE>：版本号与正式版完全分开，
+#     避免「preview-v1.30.12-r1」这种看起来就是正式版版本号的名称造成误装。
+#     预览通道**全局只保留一个**：发布前先删掉所有历史 preview-* Release，
+#     不依赖保留数排序，任何时刻 Releases 列表里最多一个测试包。
+#
+# 为什么预览版改为仅手动：main 上每次 push 都自动编译，开发中的小改动静很大
+# （6 个矩阵各跑一遍 SDK），产物也随每次提交堆积；改为手动后，需要出验证包时
+# 在 Actions 页面点一次 Run workflow 即可，main 推送不再产生构建。
+#
+# 为什么要分通道：此前 main 上每次 push 都会触发编译，若沿用「main 推送 → 覆盖 v<VERSION>」，
+# 开发中的中间产物会直接盖掉用户正在用的正式版 —— 而正式版的资产版本往往落后于
+# Makefile 的 PKG_RELEASE（正式版资产停在 r3 时，main 上已经是 r8 就很常见）。
+# 预览版用 preview- 前缀带来两个额外好处：
+#   ① 与正式版在 Releases 页面自然分开，各自标注；
+#   ② 清理按通道分组：预览版发布只会清掉旧 preview-*，正式版 v* 组始终
+#      保留最新一个（硬保护，不依赖计数或 latest 标记）。
+#
+# 旧产物清理（每次编译只保留最新的一个）：
+#   发布成功后执行「清理旧产物」：v* 与 preview-* 两组各自只保留组内最新
+#   一个，其余 Release 与资产一律删除；不再提供保留数输入，也无法被
+#   latest 标志或创建顺序绕过。debian-v* 属于另一条发布线（Debian 客户端
+#   deb 包），不是本工作流的编译产物，不参与清理；git tag 一律保留。
+#
+# Actions 构件（artifacts）同样每次编译都清理：独立的 purge-artifacts job
+# 在编译触发时删除所有「非本次 run、非运行中 run」的历史构件，只保留本次
+# 编译产出的一组；构件 retention-days 也已压到 1 天。这样 Release、构件
+# 两条线都不会随版本堆积。
+#
+# 构建日志：不向仓库写入（不再产出 ci-logs-* 分支），仅保留在 Actions 运行日志中
+#           （保留期由 GitHub 侧控制）
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: '发布通道：preview=预览版（不影响正式版，默认）；stable=正式版（覆盖同名 v<版本>）'
+        required: false
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - stable
+# 清理策略固定为「只保留最新一个」，不再暴露保留数输入：可配置的 KEEP_*
+# 曾被填成 >1 导致旧产物堆积，也让「每次编译都删旧」变成可选项。
+
+permissions:
+  contents: write
+
+# 一次发布会同时触发两个 run（main 分支 push + tag push），两者 sha 相同。
+# 并发会导致：① release job 对同一 tag 并发 delete+create 互相踩踏。
+# 按 sha 归入同一并发组并排队（不取消），两个 run 串行执行即可消除竞争。
+concurrency:
+  group: build-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- 每次编译先清旧构件：与 build/release 并行，需 actions: write ----
+  # 只保留「本次 run」与「仍在排队/运行中的 run」的构件，其余历史构件一律删除。
+  # 循环内逐条容错，清理失败不阻断编译与发布（清理是优化，不是发布前置条件）。
+  purge-artifacts:
+    name: 清理旧构建构件（每次编译只保留本次）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: 删除历史 Actions 构件
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          CUR="${GITHUB_RUN_ID}"
+          # 正在排队 / 运行中的 run 不能删，避免并发编译互相踩踏
+          mapfile -t LIVE < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100&status=in_progress" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100&status=queued" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true
+          )
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false) | [.id, .workflow_run.id, .name] | @tsv' \
+            > /tmp/artifacts.tsv 2>/dev/null || true
+          total=0; deleted=0; kept=0; failed=0
+          while IFS=$'\t' read -r id rid name; do
+            [ -z "${id}" ] && continue
+            total=$((total + 1))
+            if [ "${rid}" = "${CUR}" ]; then
+              kept=$((kept + 1)); continue
+            fi
+            skip=0
+            for live in "${LIVE[@]}"; do
+              if [ "${rid}" = "${live}" ]; then skip=1; break; fi
+            done
+            if [ "${skip}" = "1" ]; then
+              kept=$((kept + 1)); continue
+            fi
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+              deleted=$((deleted + 1))
+            else
+              failed=$((failed + 1))
+              echo "::warning::构件 ${name} (${id}) 删除失败，留待下次编译重试"
+            fi
+          done < /tmp/artifacts.tsv
+          echo "==> 构件清理：共 ${total} 个，删除 ${deleted} 个，保留 ${kept} 个，失败 ${failed} 个"
+
+  license-report:
+    name: 生成 Rust 第三方依赖许可证清单
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 准备 Rust 工具链
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: 安装 cargo-deny
+        run: cargo install --locked --version 0.20.2 cargo-deny
+
+      - name: 检查依赖许可证、来源与版本策略
+        working-directory: src/rust
+        run: |
+          cargo deny check licenses
+          cargo deny check sources
+          cargo deny check bans
+
+      - name: 安装 cargo-about
+        run: cargo install --locked --version 0.9.3 --features cli cargo-about
+
+      - name: 生成依赖许可证清单
+        working-directory: src/rust
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cargo about generate about.hbs > "$GITHUB_WORKSPACE/dist/RUST-DEPENDENCIES.md"
+          test -s "$GITHUB_WORKSPACE/dist/RUST-DEPENDENCIES.md"
+
+      - name: 上传许可证清单构件
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: third-party-license-report
+          path: dist/RUST-DEPENDENCIES.md
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: 编译构建（${{ matrix.fmt }} · ${{ matrix.arch }}）
+    runs-on: ubuntu-latest
+    needs: license-report
+    # stale=true 表示「本次提交已被后续提交取代」，供 release job 判断是否跳过。
+    outputs:
+      stale: ${{ steps.stale.outputs.stale }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ---- 25.12.x（apk，当前稳定版）----
+          - image: x86_64-25.12.5
+            arch: x86_64
+            rust: x86_64-unknown-linux-musl
+            ver: '25.12.5'
+            target: x86/64
+            fmt: apk
+          - image: aarch64_cortex-a53-25.12.5
+            arch: aarch64_cortex-a53
+            rust: aarch64-unknown-linux-musl
+            ver: '25.12.5'
+            target: mediatek/filogic
+            fmt: apk
+          - image: aarch64_generic-25.12.5
+            arch: aarch64_generic
+            rust: aarch64-unknown-linux-musl
+            ver: '25.12.5'
+            target: armsr/armv8
+            fmt: apk
+          # ---- 24.10.x（opkg/ipk，长期支持）----
+          - image: x86_64-24.10.8
+            arch: x86_64
+            rust: x86_64-unknown-linux-musl
+            ver: '24.10.8'
+            target: x86/64
+            fmt: ipk
+          - image: aarch64_cortex-a53-24.10.8
+            arch: aarch64_cortex-a53
+            rust: aarch64-unknown-linux-musl
+            ver: '24.10.8'
+            target: mediatek/filogic
+            fmt: ipk
+          - image: aarch64_generic-24.10.8
+            arch: aarch64_generic
+            rust: aarch64-unknown-linux-musl
+            ver: '24.10.8'
+            target: armsr/armv8
+            fmt: ipk
+
+    steps:
+      - name: 检出仓库代码
+        # v7.0.1：runs.using = node24（v5 为 node20，同样会触发 Node 20 弃用告警）
+        uses: actions/checkout@v7.0.1
+
+      - name: 下载第三方许可证清单（并入安装包）
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: third-party-license-report
+          path: root/usr/share/licenses/luci-app-mt5700
+
+      - name: 环境准备（输出目录与构建参数）
+        run: |
+          mkdir -p out
+          echo "==> 构建参数：OpenWrt ${{ matrix.ver }} / 架构 ${{ matrix.arch }} / 包格式 ${{ matrix.fmt }} / 目标 ${{ matrix.target }}"
+          echo "==> Rust 目标三元组：${{ matrix.rust }}"
+          echo "==> 工作目录：$(pwd)，SDK 镜像：openwrt/sdk:${{ matrix.image }}"
+
+      # ------------------------------------------------------------------
+      # 陈旧提交检查：连续推送会为每个中间 commit 各起一个 run
+      #
+      # 注意：预览版改为仅手动派发后，分支 push 已不触发本工作流，此检查
+      # 目前不会命中（tag 推送与手动 dispatch 都不是 branch push）——保留
+      # 作为防御：若将来重新放开分支 push 触发，它自动恢复作用。
+      #
+      # 背景（真实故障）：批量改动用「一次一个文件」的方式推送时，每个文件都是
+      # 一个独立 commit，push 事件逐 commit 触发 —— 24 个 run 排队，其中
+      # 「改了一半」的中间 commit（例如删掉了 localtime::now_string 但调用方还没
+      # 改成 nettime）编译必然失败，白白占用 6 个架构矩阵各跑一遍 SDK 编译。
+      # 这些失败的红叉不是代码问题，纯粹是中间态。
+      #
+      # 处理：只有「仍是分支最新」的提交才真正构建；被后续提交取代的直接跳过。
+      # tag 推送与手动 dispatch 不受影响（它们本来就是终态）。
+      # ------------------------------------------------------------------
+      - name: 陈旧提交检查（已被后续提交取代则跳过构建）
+        id: stale
+        run: |
+          stale=false
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "branch" ]; then
+            head=$(git ls-remote https://github.com/${{ github.repository }} "refs/heads/${{ github.ref_name }}" 2>/dev/null | cut -f1)
+            if [ -n "$head" ] && [ "$head" != "${{ github.sha }}" ]; then
+              stale=true
+              echo "==> 本提交已被 ${head} 取代，跳过构建（避免为中间态 commit 白跑一遍）"
+            fi
+          fi
+          echo "stale=$stale" >> "$GITHUB_OUTPUT"
+
+      # 依赖安装与构建执行分为两个 SDK 容器运行：
+      #   依赖安装阶段把 Rust 工具链与 zig 装进工具链卷（宿主机 .ci-toolchain 目录，
+      #   容器内 TOOLCHAIN_DIR=/opt），构建执行阶段复用同一卷，无需重复下载工具链。
+      # 注意：/opt 是脚本认得的「兜底」位，别把它当唯一约定——CNB 侧传的是
+      # TOOLCHAIN_DIR=/work/.toolchain/<任务名>、OUT_DIR=/work/out/<任务名>。
+      - name: 依赖安装（Rust 工具链 + zig 交叉链接器，SDK 容器内）
+        if: steps.stale.outputs.stale != 'true'
+        run: |
+          set +e
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v "$PWD/.ci-toolchain:/opt" \
+            -e TOOLCHAIN_DIR=/opt \
+            -e SDK_BUILD_PHASE=deps \
+            openwrt/sdk:${{ matrix.image }} \
+            /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}" 2>&1 | tee deps.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "==> 依赖安装退出码: $rc"
+          exit $rc
+
+      - name: 构建执行（OpenWrt SDK 编译 LuCI 前端 + Rust 后端）
+        if: steps.stale.outputs.stale != 'true'
+        run: |
+          set +e
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v "$PWD/.ci-toolchain:/opt" \
+            -v "$PWD/out:/out" \
+            -e OUT_DIR=/out \
+            -e TOOLCHAIN_DIR=/opt \
+            -e SDK_BUILD_PHASE=build \
+            openwrt/sdk:${{ matrix.image }} \
+            /work/scripts/sdk-build.sh "${{ matrix.arch }}" "${{ matrix.rust }}" "${{ matrix.ver }}" "${{ matrix.target }}" 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "==> 构建执行退出码: $rc"
+          exit $rc
+
+      # 架构一致性闸门：脚本按 SDK 实际报告的 ARCH_PACKAGES 输出到 out/<真实架构>/，
+      # 因此若 out/<矩阵期望架构>/ 不存在，说明镜像 tag 与矩阵登记不符。
+      # 这一步把「发错架构的包」从「用户装不上」提前到「CI 直接失败」。
+      - name: 产物校验（架构一致性闸门）
+        if: steps.stale.outputs.stale != 'true'
+        run: |
+          set -e
+          echo "==> out 目录实际结构："
+          find out -maxdepth 2 -type f | sort || true
+          if [ ! -f "out/${{ matrix.arch }}/ARCH.txt" ]; then
+            echo "::error::SDK 实际架构与矩阵期望（${{ matrix.arch }}）不一致，拒绝继续"
+            find out -mindepth 2 -name 'ARCH.txt' | while read -r f; do
+              echo "  $(dirname "$f") -> $(cat "$f")"
+            done
+            exit 1
+          fi
+          echo "==> 架构核对通过："
+          cat "out/${{ matrix.arch }}/ARCH.txt"
+
+      - name: 产物校验（单包完整性与后端二进制闸门）
+        if: steps.stale.outputs.stale != 'true'
+        run: |
+          set -e
+          if [ -z "$(find "out/${{ matrix.arch }}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)" ]; then
+            echo "::error::缺少 luci-app-mt5700 主包（arch=${{ matrix.arch }} fmt=${{ matrix.fmt }}）"
+            exit 1
+          fi
+          echo "==> out/${{ matrix.arch }} 产物："
+          ls -la "out/${{ matrix.arch }}/"
+
+          # 单包必须自带后端。OpenWrt apk 非标准 tar，workflow 侧做体积闸门：
+          # 纯前端约 100-200KB，含 Rust 后端约 1MB+
+          PKG=$(find "out/${{ matrix.arch }}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
+          SZ=$(wc -c < "$PKG")
+          echo "==> 主包 $(basename "$PKG") 大小 ${SZ} bytes"
+          if [ "$SZ" -lt 500000 ]; then
+            echo "::error::主包过小 (${SZ}B)，可能未并入 Rust 后端"
+            exit 1
+          fi
+          echo "==> 体积校验通过（单包策略）"
+
+      - name: 产物归档（上传 Actions 构件）
+        if: steps.stale.outputs.stale != 'true'
+        # v7：runs.using = node24。此前 v5 声明的是 node20，runner 已弃用 Node 20，
+        # 每个 job 都会打印「Node.js 20 is deprecated … being forced to run on Node.js 24」
+        # 告警。v6 起正式支持 node24（v7 为当前最新，仅追加了单文件直传能力，
+        # name / path / if-no-files-found / retention-days 的输入语义不变）。
+        # 与 download-artifact@v8 配套使用——两者的大版本号不同步，以各自 release 为准。
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ${{ matrix.fmt }}-${{ matrix.arch }}
+          path: out/
+          if-no-files-found: error
+          # 构件只在一次发布内流转（release job 立刻下载并发布）；1 天后自动过期，
+          # 避免每次 6 组矩阵共约 9 MB 的临时产物在仓库里堆积。
+          retention-days: 1
+
+  # ---- 统一发布：每次编译成功后运行一次，汇总全部架构产物并上传 Release ----
+  # 不能放在 build job 内：多个矩阵 job 并发发布同一 tag 的 Release 会 API 竞态，
+  # 导致 Release 创建失败或资产互相覆盖。这里由 release job 串行汇总后再发布。
+  # 资产统一加 <架构>- 前缀：不同架构的依赖包 basename 相同（如 libc-1.2.6-r5.apk），
+  # 同名文件在同一 Release 内必然冲突。用 gh CLI 替代 softprops 避免元数据更新 404 竞态。
+  release:
+    name: 统一发布（汇总全部架构产物并发布 Release）
+    needs: build
+    # 构建被「陈旧提交」跳过时不能发布：没有产物，发布步骤必然失败
+    if: needs.build.outputs.stale != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 检出仓库代码（读取版本号）
+        # v7.0.1：runs.using = node24，与 build job 保持一致
+        uses: actions/checkout@v7.0.1
+
+      - name: 解析发布版本号与通道
+        id: ver
+        env:
+          CHANNEL_INPUT: ${{ github.event.inputs.channel || '' }}
+        run: |
+          set -e
+          VER=$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -1 | tr -d '[:space:]')
+          REL=$(sed -n 's/^PKG_RELEASE:=//p' Makefile | head -1 | tr -d '[:space:]')
+          [ -n "$VER" ] || VER="0.0.0-dev"
+          [ -n "$REL" ] || REL="0"
+
+          # 通道判定：tag 推送恒为正式版；手动派发按输入选择（默认 preview）。
+          # 预览版已改为仅手动派发（见文件头），最后的 else 分支只是防御性兜底，
+          # 正常不会再有第三种事件走到那里。
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            CHANNEL=stable
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            CHANNEL="${CHANNEL_INPUT:-preview}"
+          else
+            CHANNEL=preview
+          fi
+
+          if [ "$CHANNEL" = "stable" ]; then
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v${VER}"; fi
+            PRERELEASE=false
+          else
+            # 预览版 tag 必须与正式版**彻底区分**：不再复用 v<PKG_VERSION>-r<PKG_RELEASE>。
+            # 旧命名 preview-v1.30.12-r1 里直接带「v1.30.12」，在 Releases 列表上和正式版
+            # 只差一个前缀，用户极易把测试包当成正式版安装。改用提交短 SHA 作为唯一标识：
+            #   ① 与正式版 tag（v1.30.12）不共享任何版本号片段；
+            #   ② 天然唯一且可追溯 —— 同一次提交重跑是覆盖重建，不同提交不会撞名；
+            #   ③ 源码版本写在 Release 标题与说明表格里，不塞进 tag。
+            SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+            TAG="preview-${SHORT_SHA}"
+            PRERELEASE=true
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "release=${REL}" >> "$GITHUB_OUTPUT"
+          echo "==> 发布通道: ${CHANNEL} / tag: ${TAG} / pre-release: ${PRERELEASE} (ref=${GITHUB_REF})"
+
+      - name: 下载全部构建产物
+        # v8：runs.using = node24，与 upload-artifact@v7 同为 Node 24 运行时。
+        # pattern / merge-multiple / path 三个输入在 v8 中语义不变。
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: '*'
+          path: out/
+          merge-multiple: true
+
+      - name: 产物平铺（附加架构前缀重命名）
+        run: |
+          mkdir -p dist
+          while IFS= read -r f; do
+            arch=$(basename "$(dirname "$f")")
+            cp "$f" "dist/${arch}-$(basename "$f")"
+          done < <(find out -type f \( -name '*.apk' -o -name '*.ipk' \) | sort)
+          echo "==> 待发布文件："
+          find dist -type f | sort
+
+      # 发布一份架构选择指南：让用户可自行核对设备架构再选包，
+      # 避免「架构看起来一致但装不上」这类问题反复出现。
+      - name: 生成架构选择指南
+        run: |
+          cat > dist/ARCH-GUIDE.txt <<'EOF'
+          luci-app-mt5700 架构选择指南
+          ================================
+
+          一、先确认设备声明的有效架构（不是 CPU 型号，也不是 apk --print-arch）
+
+            apk 系统（OpenWrt 25.x / ImmortalWrt SNAPSHOT / iStoreOS 25.x 等）:
+                cat /etc/apk/arch
+
+            opkg 系统（OpenWrt 24.10 及更早）:
+                cat /etc/openwrt_release | grep OPENWRT_ARCH
+                opkg print-architecture
+
+          注意：apk --print-arch 输出的是 apk 二进制自带的默认架构（常见为 aarch64），
+          与 /etc/apk/arch 里用于安装校验的架构列表不是一回事。以 /etc/apk/arch 为准。
+
+          二、按 /etc/apk/arch 的第一行选包
+
+            aarch64_cortex-a53  ->  aarch64_cortex-a53-luci-app-mt5700-*.apk
+            aarch64_generic     ->  aarch64_generic-luci-app-mt5700-*.apk
+            x86_64              ->  x86_64-luci-app-mt5700-*.apk
+
+          两者都是 ARMv8-A 指令集，二进制互相兼容；装不上只是元数据里的
+          <variant> 不匹配，不是 CPU 不支持。
+
+          三、常见报错对照
+
+            error: uninstallable arch: aarch64_cortex-a53
+              -> 设备声明的是 aarch64_generic，请改下 aarch64_generic 的包。
+                 临时方案：把这行加进 /etc/apk/arch 后再安装（sysupgrade 后失效）：
+                     echo aarch64_cortex-a53 >> /etc/apk/arch
+
+            error: uninstallable arch: aarch64_generic
+              -> 设备声明的是 aarch64_cortex-a53（如 ImmortalWrt 的 mediatek/filogic），
+                 请改下 aarch64_cortex-a53 的包。
+
+            error: uninstallable arch: all
+              -> 语言包（PKGARCH=all）在极少数固件上才会遇到。实测 apk-tools 3.0.5
+                 已把 OpenWrt 的 all 当作兼容架构，通常不会出现；确实遇到时补一行：
+                     echo all >> /etc/apk/arch
+
+            luci-app-mt5700 (no such package): required by: luci-i18n-mt5700-zh-cn[...]
+              -> 不是架构问题：语言包声明依赖主包，必须与主包在同一条命令里一起安装。
+
+          四、安装命令
+
+            主包与语言包必须一起装（语言包声明依赖主包）：
+
+            apk:
+                apk add --allow-untrusted \
+                    ./<arch>-luci-app-mt5700-*.apk \
+                    ./<arch>-luci-i18n-mt5700-zh-cn-*.apk
+
+            opkg:
+                opkg install ./<arch>-luci-app-mt5700_*.ipk \
+                             ./<arch>-luci-i18n-mt5700-zh-cn_*.ipk
+
+            语言包仅为简体中文；只需要中文界面时主包与语言包一起装即可。
+            主包不依赖语言包，单独安装也能跑，只是界面文案沿用源码中文。
+
+          五、校验下载完整性
+
+            每个 Release 都附带 SHA256SUMS。下载主包/语言包与 SHA256SUMS 后：
+
+                grep -E 'luci-app-mt5700|luci-i18n' SHA256SUMS | sha256sum -c -
+
+            全部显示 OK 再安装。安装包未由 OpenWrt 官方密钥签名，
+            apk/opkg 的 --allow-untrusted 只跳过签名校验，不校验内容哈希。
+
+          六、安装前可先做零风险预演
+
+            用 apk --simulate 走完整架构与依赖求解，但不真正安装：
+
+                apk add --simulate --allow-untrusted ./<arch>-luci-app-mt5700-*.apk
+
+            输出形如 "(1/1) Installing luci-app-mt5700 (1.12.5-r1)" 即表示
+            架构与依赖都已通过；若报 uninstallable arch 则说明选错了架构。
+          EOF
+          # 去掉 heredoc 缩进，保持文本左对齐
+          sed -i 's/^          //' dist/ARCH-GUIDE.txt
+          cat dist/ARCH-GUIDE.txt
+
+      - name: 生成 SHA256SUMS
+        # 安装包未由 OpenWrt 官方密钥签名，用户只能靠哈希核对下载完整性。
+        # 必须在 ARCH-GUIDE 生成之后执行，保证校验和覆盖全部发布资产。
+        run: |
+          set -e
+          (
+            cd dist
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
+              | LC_ALL=C sort \
+              | xargs -r sha256sum > SHA256SUMS
+          )
+          echo "==> SHA256SUMS："
+          cat dist/SHA256SUMS
+
+      - name: 发布完整性校验（6 组合主包 + 架构覆盖）
+        run: |
+          set -e
+          ARCHES="x86_64 aarch64_cortex-a53 aarch64_generic"
+          # 主包（前端+后端合一）必须覆盖全部 6 个构建组合（3 架构 × apk/ipk）
+          count=$(find dist -type f -name '*-luci-app-mt5700*' -not -name '*luci-i18n*' | wc -l)
+          echo "==> luci-app-mt5700 主包: ${count} 个"
+          if [ "$count" -lt 6 ]; then
+            echo "::error::主包仅有 ${count} 个（期望 6 个：3 架构 × apk/ipk），拒绝发布不完整的 Release"
+            find dist -type f | sort
+            exit 1
+          fi
+          # 架构覆盖：单包内含二进制，必须每个架构都有；apk 与 ipk 都要有
+          for arch in $ARCHES; do
+            for fmt in apk ipk; do
+              f=$(find dist -type f -name "${arch}-luci-app-mt5700*.${fmt}" -not -name '*luci-i18n*' -print -quit)
+              [ -n "$f" ] || { echo "::error::缺少 ${arch}-${fmt} 主包"; exit 1; }
+              echo "==> 已覆盖 ${arch}/${fmt}: $(basename "$f")"
+            done
+          done
+          # 语言包（PKGARCH=all）也应三架构齐备
+          for arch in $ARCHES; do
+            f=$(find dist -type f -name "${arch}-luci-i18n-mt5700-*.apk" -print -quit)
+            [ -n "$f" ] || echo "::warning::缺少 ${arch} 的 apk 语言包"
+          done
+
+      - name: 清理同名旧 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          if gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --repo "${GITHUB_REPOSITORY}"
+            echo "==> 已清理旧 Release ${TAG}，将重建"
+          fi
+
+      # 预览通道**全局只保留一个**：发布前把所有历史 preview-* Release 清掉。
+      # 不依赖 keep_previews 计数，也不依赖 createdAt 排序 —— 只要不是本次 tag 一律删除，
+      # 所以「任何时刻 Releases 里最多一个测试包」是硬保证，而不是保留数凑出来的结果。
+      # 只删 Release 与对应远端 git tag（--cleanup-tag），不动正式版 v* 与 debian-v* 线。
+      - name: 清空历史预览版（预览通道只保留本次）
+        if: steps.ver.outputs.channel == 'preview'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -e
+          mapfile -t OLD < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 200 \
+            --json tagName --jq '.[] | select(.tagName | test("^preview-")) | .tagName')
+          if [ "${#OLD[@]}" -eq 0 ]; then
+            echo "==> 当前没有历史预览版"
+            exit 0
+          fi
+          echo "==> 历史预览版 ${#OLD[@]} 个，全部清理（本次 tag=${TAG}）"
+          for t in "${OLD[@]}"; do
+            if [ "$t" = "$TAG" ]; then
+              echo "  [跳过] ${t}（本次要重建的 tag，已在上一步删除）"
+              continue
+            fi
+            echo "  [删除] ${t}"
+            gh release delete "$t" --yes --cleanup-tag --repo "${GITHUB_REPOSITORY}" \
+              || echo "::warning::删除 ${t} 失败，已跳过不影响发布"
+          done
+
+      # Release 简介的取用顺序：
+      #   1) docs/release-notes/<tag>.md —— 手写、简明，发版时顺手补一个小文件；
+      #   2) CHANGELOG 该版本段落的裁剪版（只留分类小标题 + 每条首句）；
+      #   3) GitHub 自动生成的提交列表。
+      # 不用 --generate-notes 作首选：那只是提交列表，对使用者几乎没有信息量。
+      - name: 撰写发布说明
+        id: notes
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
+          PKG_REL: ${{ steps.ver.outputs.release }}
+        run: |
+          set -e
+          VER=$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -1 | tr -d '[:space:]')
+          # 三段式拼装：HEADER（预览版专属说明） + BODY（变更摘要 + 安装命令） → NOTES。
+          # 拆开是为了让预览版说明恒定排在最前，而不必改动下面已有的摘要生成逻辑。
+          NOTES=/tmp/release-notes.md
+          BODY=/tmp/release-body.md
+          HEADER=/tmp/release-header.md
+          : > "$BODY"
+          : > "$HEADER"
+          HANDWRITTEN="docs/release-notes/${TAG}.md"
+
+          if [ -f "$HANDWRITTEN" ]; then
+            echo "==> 使用手写发布摘要：$HANDWRITTEN"
+            cp "$HANDWRITTEN" "$BODY"
+          else
+            SECTION=/tmp/changelog-section.md
+            awk -v ver="$VER" '
+              $0 ~ "^## v" ver "($| )" { flag = 1; next }
+              flag && /^## / { exit }
+              flag { print }
+            ' CHANGELOG.md > "$SECTION"
+
+            if [ -s "$SECTION" ]; then
+              echo "::warning::未找到 $HANDWRITTEN，改用 CHANGELOG 裁剪摘要"
+              grep -E '^(### |- )' "$SECTION" \
+                | sed -E 's/^(- \*\*[^*]+\*\*: [^。]*。).*$/\1/' \
+                | head -12 > "$BODY"
+              echo "" >> "$BODY"
+              echo "完整变更记录见 [CHANGELOG.md](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)。" >> "$BODY"
+            else
+              echo "::warning::既无 $HANDWRITTEN 也无 CHANGELOG 段落，回退为自动生成的提交列表"
+              rm -f "$BODY"
+            fi
+          fi
+
+          if [ -s "$BODY" ]; then
+            # 自动生成「当前版本 + 当前架构」的完整安装命令，URL 已经拼好可直接执行。
+            # 默认给国内加速地址（前缀 https://gh.acg2.mom/），并说明如何还原为直连。
+            RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+            MIRROR="https://gh.acg2.mom"
+            MIRRORED="${MIRROR}/${RELEASE_URL}"
+            {
+              echo ""
+              echo "---"
+              echo ""
+              echo "## 安装（复制即用，${TAG}）"
+              echo ""
+              echo '先确认设备架构：`cat /etc/apk/arch`；opkg 系统用 `grep OPENWRT_ARCH /etc/openwrt_release`。'
+              echo ""
+              # 同一架构给出两套完整命令：国内加速版与直连版，按网络情况任选一条
+              emit_cmd() {
+                cbase="$1"; cmain="$2"; ci18n="$3"
+                if [ -n "$ci18n" ]; then
+                  echo "wget -O /tmp/mt5700.apk \"${cbase}/${cmain##*/}\" \\"
+                  echo "  && wget -O /tmp/mt5700-i18n.apk \"${cbase}/${ci18n##*/}\" \\"
+                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk /tmp/mt5700-i18n.apk"
+                else
+                  echo "wget -O /tmp/mt5700.apk \"${cbase}/${cmain##*/}\" \\"
+                  echo "  && apk add --allow-untrusted /tmp/mt5700.apk"
+                fi
+              }
+              for a in x86_64 aarch64_cortex-a53 aarch64_generic; do
+                MAIN=$(find dist -maxdepth 1 -type f -name "${a}-luci-app-mt5700-*.apk" -print -quit)
+                [ -n "$MAIN" ] || continue
+                I18N=$(find dist -maxdepth 1 -type f -name "${a}-luci-i18n-mt5700-*.apk" -print -quit)
+                case "$a" in
+                  x86_64) NOTE="x86 软路由 / 虚拟机" ;;
+                  aarch64_cortex-a53) NOTE="ImmortalWrt、OpenWrt mediatek-filogic" ;;
+                  aarch64_generic) NOTE="iStoreOS 25.x、Arm SystemReady 等" ;;
+                  *) NOTE="" ;;
+                esac
+                echo "### ${a}（${NOTE}）"
+                echo ""
+                echo "**国内加速（推荐，前缀 \`${MIRROR}/\`）**"
+                echo ""
+                echo '```sh'
+                emit_cmd "$MIRRORED" "$MAIN" "$I18N"
+                echo '```'
+                echo ""
+                echo "**直连（不带前缀）**"
+                echo ""
+                echo '```sh'
+                emit_cmd "$RELEASE_URL" "$MAIN" "$I18N"
+                echo '```'
+                echo ""
+              done
+              echo "> 以上两套命令效果相同，按网络情况任选一条；加速版只是把 GitHub 原始 URL 前置了 \`${MIRROR}/\`。"
+              echo ""
+              echo "### 全部软件包下载链接"
+              echo ""
+              echo "每个架构都有 4 个包（主包 / 语言包 × apk / ipk），全部列出："
+              echo ""
+              echo "| 架构 | 包 | apk（加速 / 直连） | ipk（加速 / 直连） |"
+              echo "|:--|:--|:--|:--|"
+              for a in x86_64 aarch64_cortex-a53 aarch64_generic; do
+                for pair in "luci-app-mt5700:主包" "luci-i18n-mt5700:语言包"; do
+                  p="${pair%%:*}"
+                  label="${pair##*:}"
+                  APK=$(find dist -maxdepth 1 -type f -name "${a}-${p}*.apk" -print -quit)
+                  IPK=$(find dist -maxdepth 1 -type f -name "${a}-${p}*.ipk" -print -quit)
+                  acell="-"
+                  icell="-"
+                  [ -n "$APK" ] && acell="[加速](${MIRRORED}/${APK##*/}) · [直连](${RELEASE_URL}/${APK##*/})"
+                  [ -n "$IPK" ] && icell="[加速](${MIRRORED}/${IPK##*/}) · [直连](${RELEASE_URL}/${IPK##*/})"
+                  echo "| ${a} | ${label} | ${acell} | ${icell} |"
+                done
+              done
+              echo ""
+              echo "另有 \`ARCH-GUIDE.txt\`（架构选择与报错对照）。"
+              echo "> opkg 系统（OpenWrt 24.10 及更早）：把 \`.apk\` 换成 \`.ipk\`，命令改为 \`opkg install\`。"
+              echo "> 只想先验证不安装：在 \`apk add\` 后加 \`--simulate\`。报错对照见资产 \`ARCH-GUIDE.txt\`。"
+            } >> "$BODY"
+          fi
+
+          # ---- 头部：预览版专属说明（正式版为空，摘要格式与原先完全一致）----
+          # 这段是预览版唯一「必须醒目」的信息：把「这是测试版本、别拿去生产」放在
+          # Releases 页面的第一行，避免用户把自动构建产物当成正式版装到在网设备上。
+          if [ "$CHANNEL" = "preview" ]; then
+            SHORT_SHA="${GITHUB_SHA:0:7}"
+            {
+              echo "> ## ⚠️ 测试版本 · 仅供验证，请勿用于生产环境"
+              echo ">"
+              echo "> 本预览版由 **手动派发**（Run workflow）构建，**不是**正式发布版本：可能包含未完成的改动、"
+              echo "> 尚未实机验证的修复，也可能被下一次构建随时取代。"
+              echo ">"
+              echo "> - **适用**：验证最新改动、复现问题、给开发反馈。"
+              echo "> - **不适用**：生产环境 / 长期运行的设备。要稳定版本请用正式版"
+              echo ">   [\`v${VER}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${VER})。"
+              echo "> - 本预览版**不会**替换正式版，也**不会**成为仓库的 latest。"
+              echo ">"
+              echo "> ### 构建信息"
+              echo ">"
+              echo "> | 项 | 值 |"
+              echo "> |:--|:--|"
+              echo "> | 来源分支 | \`${GITHUB_REF_NAME}\` |"
+              echo "> | 来源提交 | [\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) |"
+              echo "> | 版本 | \`PKG_VERSION=${VER}\` / \`PKG_RELEASE=${PKG_REL}\` |"
+              echo "> | 构建时间 | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+              echo "> | 构建矩阵 | 3 架构 ×（apk · OpenWrt 25.12.5 / ipk · OpenWrt 24.10.8） |"
+              echo ">"
+              echo "> ⚠️ 装之前请先备份配置（\`sysupgrade -b\`）；测试版不建议直接覆盖在网设备。"
+              echo "> 安装方式与正式版完全相同（见下方「安装」）。"
+              echo ""
+            } >> "$HEADER"
+          fi
+
+          # ---- 拼装：有摘要时 HEADER+BODY；只有头部时也要保留头部（预览版标识不能丢）----
+          if [ -s "$BODY" ]; then
+            cat "$HEADER" "$BODY" > "$NOTES"
+            echo "body_file=$NOTES" >> "$GITHUB_OUTPUT"
+          elif [ -s "$HEADER" ]; then
+            cp "$HEADER" "$NOTES"
+            echo "本次构建的提交列表见 [Actions 运行日志](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})。" >> "$NOTES"
+            echo "body_file=$NOTES" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f "$NOTES" ]; then
+            echo "==> Release 简介（$(wc -l < "$NOTES") 行）："
+            cat "$NOTES"
+          fi
+
+      - name: 发布 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          mapfile -t FILES < <(find dist -type f | sort)
+          BODY="${{ steps.notes.outputs.body_file }}"
+          # 预览版加 --prerelease：Releases 页面单独打 Pre-release 标记，而且
+          # **不会抢占 latest** —— latest 只认最新的「非草稿且非预发布」Release，
+          # 所以正式版 v<VERSION> 的 latest 身份在这里是天然受保护的。
+          # --target 必须显式给：预览 tag（preview-<短SHA>）在发布前刚被清理掉，
+          # 此刻 tag 并不存在，gh 会用「默认分支的最新提交」现场创建它 —— 而本次
+          # 构建的源码是 GITHUB_SHA（可能是 feature 分支），两者一旦不同，
+          # checkout preview-<sha> 拿到的就不是被构建的那份代码。正式版通道传的是
+          # 已存在的 tag，gh 会忽略该参数，因此统一加没有副作用。
+          FLAGS=(--repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}")
+          TITLE="AT WebServer ${TAG}"
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS+=(--prerelease)
+            # 标题承担「版本号」职责：tag 本身只是提交短 SHA，不含 PKG_VERSION，
+            # 因此这里必须写清源码版本，否则测试包无法与 Makefile 对应。
+            # 同时保留警示，Releases 列表页一眼能看出这是测试版。
+            TITLE="⚠️ 预览版 ${TAG}（源码 v${{ steps.ver.outputs.version }}-r${{ steps.ver.outputs.release }} · 仅供验证）"
+          fi
+          if [ -n "$BODY" ] && [ -s "$BODY" ]; then
+            gh release create "$TAG" "${FILES[@]}" \
+              "${FLAGS[@]}" \
+              --notes-file "$BODY" \
+              --title "${TITLE}"
+          else
+            gh release create "$TAG" "${FILES[@]}" \
+              "${FLAGS[@]}" \
+              --generate-notes \
+              --title "${TITLE}"
+          fi
+          echo "==> Release ${TAG} 已发布（通道 ${CHANNEL}），资产 ${#FILES[@]} 个"
+
+      # 每次编译只保留最新一个（硬保证）。
+      #
+      # 触发时机：发布成功后。构建失败时 release job 不会运行，旧版产物仍在，
+      # 用户不至于因为一次失败编译而失去可下载的包。
+      #
+      # 规则（不依赖输入、latest 标记、创建顺序）：
+      #   1) 按 ^v[0-9] / ^preview- 分成两组，各自只保留组内最新一个；
+      #      「最新」= 本次发布的 tag 落在该组时就是本次 tag，否则按 createdAt 取最新；
+      #   2) 组内其余 Release 与资产一律删除，没有任何保留豁免；
+      #   3) 预览通道发布前另有「清空历史预览版」步骤，会连同 git tag 一起清理；
+      #      这里对 preview-* 也带 --cleanup-tag，兜底处理并发/残留；
+      #   4) debian-v* 是另一条发布线（Debian 客户端 deb 包），不是本工作流产物，
+      #      不匹配上述两组正则，不参与清理；所有 git tag 中仅旧 preview-* 会被清。
+      # 结果：正式版发布后 v* 组只剩本次一个；预览版发布后正式版组仍保留
+      #       最新一个稳定版，预览组只剩本次一个 —— 两组互不挤出。
+      - name: 清理旧产物（每次编译只保留最新一个）
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -e
+          purge_group() {
+            local regex="$1" label="$2"
+            mapfile -t TAGS < <(gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
+              --json tagName,createdAt \
+              --jq "map(select(.tagName | test(\"${regex}\"))) | sort_by(.createdAt) | reverse | .[].tagName")
+            if [ "${#TAGS[@]}" -eq 0 ]; then
+              echo "==> ${label}: 无 Release，跳过"
+              return 0
+            fi
+            # 本次 tag 属于该组 → 保留它；否则保留组内创建时间最新的一个
+            local keep=""
+            case "${TAG}" in
+              v[0-9]*) if [ "${regex}" = '^v[0-9]' ]; then keep="${TAG}"; fi ;;
+              preview-*) if [ "${regex}" = '^preview-' ]; then keep="${TAG}"; fi ;;
+            esac
+            if [ -z "${keep}" ]; then keep="${TAGS[0]}"; fi
+            echo "==> ${label}: 共 ${#TAGS[@]} 个，只保留 ${keep}"
+            for t in "${TAGS[@]}"; do
+              if [ "${t}" = "${keep}" ]; then
+                echo "  [保留] ${t}"
+                continue
+              fi
+              echo "  [删除] ${t}"
+              local flags=(--yes --repo "${GITHUB_REPOSITORY}")
+              if [ "${regex}" = '^preview-' ]; then flags+=(--cleanup-tag); fi
+              gh release delete "${t}" "${flags[@]}" \
+                || echo "::warning::删除 ${t} 失败（不影响本次发布）"
+            done
+          }
+          purge_group '^v[0-9]' '正式版 v* Release'
+          purge_group '^preview-' '预览版 preview-* Release'
+          echo "==> 清理完成：编译产物只保留最新一个"

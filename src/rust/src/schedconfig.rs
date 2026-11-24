@@ -1,4 +1,7 @@
-//! 定时锁频配置：DTO <-> 配置键值转换与校验，并定义 AT+SCHED 伪命令字面量。
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! 定时锁频配置：DTO <-> UCI 转换与校验，并定义 AT+SCHED 伪命令字面量。
 
 use chrono::Timelike;
 use crate::config::{BandLock, ScheduleConfig};
@@ -287,10 +290,10 @@ impl SchedConfigDto {
         Ok(())
     }
 
-    /// 摊平成配置键值。键名与 `config.rs` 的 schedule 读取侧一一对应；
+    /// 摊平成 uci key/value。键名与 `config.rs` 的 schedule 读取侧一一对应；
     /// LuCI 定时页认的是 `AT+SCHED` JSON 里的 DTO 字段名（check_interval / night.lte.bands
     /// 等），从不出现 `schedule_` 前缀——两套命名互转正是本模块的职责。
-    pub fn config_entries(&self) -> Vec<(String, String)> {
+    pub fn uci_entries(&self) -> Vec<(String, String)> {
         let flag = |b: bool| if b { "1".to_string() } else { "0".to_string() };
         let mut out = vec![
             ("schedule_enabled".into(), flag(self.enabled)),
@@ -318,17 +321,19 @@ impl SchedConfigDto {
     }
 }
 
-/// 落盘配置（Debian：合并写入 JSON 扁平键值配置，其余键保留）。
-///
-/// 一次 `update` 覆盖全部 `schedule_*` 键，避免逐键写文件把原子替换放大成 N 次。
-pub async fn write_schedule_config(d: &SchedConfigDto) -> Result<(), String> {
-    let mut patch = crate::configstore::ConfigMap::new();
-    for (k, v) in d.config_entries() {
-        patch.insert(k, v);
+/// 落盘配置。用 exec 直接传参，不经过 shell，避免值里的引号被解释。
+pub async fn write_schedule_uci(d: &SchedConfigDto) -> Result<(), String> {
+    for (k, v) in d.uci_entries() {
+        let arg = format!("at-webserver.config.{k}={v}");
+        let out = tokio::process::Command::new("uci").args(["set", &arg]).output().await.map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(format!("写入 {k} 失败: {}", String::from_utf8_lossy(&out.stderr)));
+        }
     }
-    crate::configstore::update(patch)
-        .await
-        .map_err(|e| format!("写入定时锁频配置失败: {e}"))?;
+    let out = tokio::process::Command::new("uci").args(["commit", "at-webserver"]).output().await.map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("提交配置失败: {}", String::from_utf8_lossy(&out.stderr)));
+    }
     Ok(())
 }
 
@@ -338,7 +343,7 @@ pub async fn write_schedule_config(d: &SchedConfigDto) -> Result<(), String> {
 /// 返回值用于两件事：
 ///   1. 调度循环据此**提前醒来**，保证到点就切（见 `Scheduler::run`）；
 ///   2. 前端「下次切换」的倒计时文案。
-pub fn seconds_to_next_switch(cfg: &ScheduleConfig, now: chrono::DateTime<crate::nettime::Tz>) -> Option<i64> {
+pub fn seconds_to_next_switch(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> Option<i64> {
     let cur = now.hour() as i64 * 3600 + now.minute() as i64 * 60 + now.second() as i64;
     [&cfg.night_start, &cfg.night_end]
         .iter()
@@ -357,7 +362,7 @@ pub fn seconds_to_next_switch(cfg: &ScheduleConfig, now: chrono::DateTime<crate:
 ///
 /// 时刻一律由调用方传入的 `now` 推导（业务侧统一取 `nettime::now()`），
 /// 本函数不自己去问时钟，便于单测固定时间。
-pub fn next_switch_time(cfg: &ScheduleConfig, now: chrono::DateTime<crate::nettime::Tz>) -> String {
+pub fn next_switch_time(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> String {
     match seconds_to_next_switch(cfg, now) {
         Some(secs) => (now + chrono::Duration::seconds(secs)).format("%Y-%m-%d %H:%M").to_string(),
         None => String::new(),
@@ -365,7 +370,7 @@ pub fn next_switch_time(cfg: &ScheduleConfig, now: chrono::DateTime<crate::netti
 }
 
 /// 下一次时段切换的时刻（HH:MM），夜间时段的两个端点就是切换点。
-pub fn next_switch_at(cfg: &ScheduleConfig, now: chrono::DateTime<crate::nettime::Tz>) -> String {
+pub fn next_switch_at(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> String {
     match seconds_to_next_switch(cfg, now) {
         Some(secs) => (now + chrono::Duration::seconds(secs)).format("%H:%M").to_string(),
         None => String::new(),
@@ -399,8 +404,8 @@ mod tests {
     }
 
     /// 固定一个本地时刻（2026-10-31），避免测试依赖运行机器的当前时间。
-    fn at(h: u32, m: u32, s: u32) -> DateTime<crate::nettime::Tz> {
-        crate::nettime::from_ymdhms(2026, 10, 31, h, m, s).expect("构造合法时刻")
+    fn at(h: u32, m: u32, s: u32) -> DateTime<crate::localtime::Tz> {
+        crate::localtime::from_ymdhms(2026, 10, 31, h, m, s).expect("构造合法时刻")
     }
 
     #[test]

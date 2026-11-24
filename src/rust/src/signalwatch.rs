@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 定时轮询推送：在用户指定的时段内，由后端定期读取信号并按策略推送。
 //!
 //! 为什么需要这个模块：本模组（TDTECH / Fibocom 系）**不会主动上报** `^HCSQ` /
@@ -586,7 +589,7 @@ fn grade_status(g: Option<Grade>) -> &'static str {
 /// 当前时刻在当天的分钟数（0..=1439），供时段判定使用。
 ///
 /// 时刻取 [`crate::nettime`]（NTP 优先、设备时钟兜底），时区沿用系统设置
-/// （见 [`crate::nettime`]，取不到时北京时间）—— 巡检时段是按「当地几点」判定的，
+/// （见 [`crate::localtime`]，取不到时北京时间）—— 巡检时段是按「当地几点」判定的，
 /// 时钟不准会导致该推的时段不推。
 pub fn minute_of_day_now() -> i64 {
     let n = crate::nettime::now();
@@ -713,7 +716,7 @@ mod tests {
 
     #[test]
     fn hhmm_validation_rejects_garbage() {
-        // "0:00" 这类不补零的写法要接受：用户手改配置时很常见，没有理由拒绝
+        // "0:00" 这类不补零的写法要接受：用户手改 UCI 时很常见，没有理由拒绝
         for ok in ["00:00", "08:30", "23:59", "0:00"] {
             assert!(valid_hhmm(ok), "{ok} 应被判为合法");
         }

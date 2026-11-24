@@ -25,8 +25,8 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const libDir = path.join(root, 'webui', 'luci-static', 'resources', 'at-webserver');
-const viewDir = path.join(root, 'webui', 'luci-static', 'resources', 'view', 'at-webserver');
+const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const viewDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
 
 const read = function (p) { return fs.readFileSync(p, 'utf8'); };
 

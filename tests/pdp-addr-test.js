@@ -11,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'webui', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
 
 const sandbox = {
 	window: {}, AtWs: undefined, Parse: undefined,

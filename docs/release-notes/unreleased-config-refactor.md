@@ -1,0 +1,264 @@
+# Config 页面功能解耦与通知系统重构（开发中 · 未发版）
+
+> 状态：代码已完成并通过本地门禁测试，尚未提升 `PKG_VERSION`、未打标签、未生成安装包。
+> 基于 `main` 分支 `5e95bab`。本文是本次改动的设计与验收说明，也是交付文档。
+
+## 1. 总览
+
+把原本集中耦合在 `service.js`（1501 行）里的 Config 页面，改造成「模块化入口 + 独立配置弹窗」体系；为四类推送各自补齐独立的**频率限制**与**推送时段**控制（在执行层生效）；彻底删除已废弃的「批量汇总标题」（`notify_tpl_batch`）。
+
+全程遵守 AGENTS.md：无 Lua、Rust/Tokio 真异步、零告警、测试全绿、LF 行尾、作者署名保留、CHANGELOG 同步。
+
+## 2. Config 页面原有功能 → 新模块对应清单
+
+| 原 service.js 内的功能块 | 新模块 | UCI 键（保持不变） |
+| --- | --- | --- |
+| 服务状态 / 重载 / 重启 | service.js 编排层（状态卡 + 底部操作区） | enabled（读） |
+| 调制解调器连接 | `config-connection.js` | connection_type / network_host / network_port / serial_port / serial_baudrate / manage_interface / iface_v4 / iface_v6 |
+| RPC 服务 | `config-connection.js` | websocket_port / websocket_bind / websocket_allow_wan / websocket_auth_key |
+| 默认 DNS 下发 | `config-network.js` | dns_enable / dns_v4_1 / dns_v4_2 / dns_v6_1 / dns_v6_2 / dns_exclusive |
+| 定时锁频总开关 | `config-network.js` | schedule_enabled |
+| 界面壁纸 | `config-network.js` | wallpaper_enabled |
+| 通知（开关/通道/定时/巡检/限频/测试/绑定/QQ菜单） | `config-notify.js` | notify_* / wechat_* / qq_* / notify_timer_interval / notify_poll_* / notify_signal_min_interval |
+| 推送文案 | `config-templates.js` | notify_tpl_prefix / notify_tpl_sms / notify_tpl_call / notify_tpl_signal / notify_tpl_memory / notify_tpl_qq_sms_md |
+| 作者署名（页脚） | service.js 编排层（原样保留） | 无 |
+
+**没有删除、隐藏或改变任何原有配置项、默认值、配置格式与业务逻辑。** 唯一删除的是孤立的「批量汇总标题」，见第 6 节。
+
+## 3. 解耦后的模块结构
+
+新增公共库模块（均在 `htdocs/luci-static/resources/at-webserver/`，遵循 LuCI「require 加载 + window 实例」约定，均为 `L.Class.extend` 子类）：
+
+| 文件 | 职责 |
+| --- | --- |
+| `config-common.js` | 公共工具：UCI get/set、数值/时间夹取与校验、模板 `\n` 转义、控件工厂、文案默认值。逻辑从 service.js 原样迁移 |
+| `config-drawer.js` | 统一响应式配置抽屉 + 交互契约（见第 4 节） |
+| `config-connection.js` | 连接 + RPC 模块，自带 by-id 串口扫描、接口联动、独立读写 |
+| `config-network.js` | DNS + 定时锁频 + 界面模块 |
+| `config-notify.js` | 通知模块，含四类事件开关、双通道、定时/巡检、信号最小间隔、四类频率时段门控、测试推送、绑定进度 |
+| `config-templates.js` | 推送文案模块（含恢复默认） |
+
+`service.js` 保留为菜单入口（menu.d 固定指向 `at-webserver/service`），职责收缩为：
+- 服务状态多源判定与展示、重载/重启操作；
+- 渲染 4 个模块入口卡片，点击打开对应抽屉；
+- 作者署名、探活降级提示（`Ui.startup`）。
+
+**低耦合保证**：每个模块只在自己的 `save(set)` 里 `set` 自己负责的 UCI 键；抽屉在保存那一刻才写入 UCI 内存，取消不写入。因此改一个模块不会覆盖另一个模块的配置，也不会出现跨模块状态污染。所有模块统一通过 `AtWs.uci.uciSave()` 走 OpenWrt 标准「保存并应用」（含 procd reload trigger），配置改动即时通过 reload 生效，无需设备重启。
+
+## 4. 响应式弹窗实现说明
+
+`config-drawer.js` 用 JS 创建真实浮层（非纯 CSS 视觉伪装），PC 与移动端共用一套交互逻辑：
+
+- **PC（≥641px）**：Right Drawer，从右侧滑入，固定于视口右侧，宽 `min(520px,92vw)`、满高，内容区独立滚动、底部操作区固定，遮罩覆盖主页面。
+- **移动端（≤640px）**：Bottom Sheet，从底部上滑，顶部圆角 + 拖拽指示条，安全区 `env(safe-area-inset-bottom)` 适配，内容独立滚动，底部按钮常驻（≥44px 触屏高度）。
+- **视觉Viewport**：监听 `visualViewport.resize`，软键盘弹出时收紧面板最大高度，避免遮挡与横向溢出。
+- **交互规则**：
+  - 遮罩层 / 弹窗外部点击：不关闭（仅轻微抖动提示，防误触）；
+  - 关闭按钮：走关闭逻辑；
+  - ESC：有未保存修改时不直接关闭，先弹二次确认；
+  - 未保存修改：任何关闭路径都弹确认，用户确认「放弃修改」后才丢弃；
+  - 「保存」「取消」明确；保存中禁用所有按钮、防重复提交；
+  - 保存成功：同步 UCI 状态、成功回调、关闭；保存失败：保留用户输入、显示具体错误、不关闭；
+  - 焦点管理：打开聚焦首个可聚焦控件、Tab 焦点锁在弹窗内、关闭后归还焦点；
+  - 滚动：打开锁定 body 滚动、关闭恢复；模块资源（如绑定轮询定时器）经 `onClose` 无条件清理。
+
+**验证**：`tests/manual/drawer-smoke.js`（jsdom，手动运行，不纳入零依赖 CI）覆盖上述 22 项交互，全部通过；见第 8 节。
+
+## 5. 各类通知频率与时段限制实现说明
+
+### 5.1 配置层（config.rs）
+新增 `TypePushLimit`（每类一份）与 `OutOfWindowAction`（defer/drop），四类独立 UCI 键（统一 `notify_limit_*` 前缀，与既有键隔离）：
+
+| 键 | 含义 | 默认 |
+| --- | --- | --- |
+| `notify_limit_<kind>_rate_enabled` | 该类频率限制开关 | `0`（保持既有实时行为） |
+| `notify_limit_<kind>_min_interval` | 最小间隔（分钟），0=不限频，上限 10080 | `60` |
+| `notify_limit_<kind>_window_enabled` | 该类推送时段开关 | `0` |
+| `notify_limit_<kind>_window_start` / `_window_end` | 允许时段 HH:MM，支持跨零点/全天 | `00:00` / `23:59` |
+| `notify_limit_<kind>_window_action` | 窗外策略 defer/drop | `defer` |
+
+`<kind>` ∈ `sms` / `call` / `memory` / `signal`。解析时对负数间隔、非法时间、未知策略一律校验回落，与既有配置口径一致。
+
+### 5.2 执行层（notify.rs）
+新增 `NotifyGate` 门控器，在通知**真正投递前**的 `deliver()` 里裁决：
+- **按类型隔离**：`states: Mutex<[GateState;4]>`，每类独立的 `last_sent` 与延迟队列；`NotifyKind::index()` 保证与配置数组一一对应。
+- **频率**：`min_interval_hold` 判定；间隔内重复被抑制且**不刷新基线**（累计变化到点即补推，不漏报）。
+- **时段**：复用 `in_poll_window`（支持跨零点、相等=全天、非法=全天）；窗外按 defer（延迟到窗口开启后补发）/ drop（丢弃）处理。延迟队列每类只保留**最新一条**，窗口开启时一次性补发，避免重复轰炸。
+- **并发正确**：门控状态用 `std::sync::Mutex`，临界区只有内存操作、无 `.await`（符合 AGENTS.md 锁要求）；`run()` 循环按 10s 扫描延迟队列，通道未就绪/总开关关闭时放回队列，保证不丢消息。
+- **不越权**：原有信号限频（`notify_signal_min_interval`）仍在生产者侧 signalwatch/urc 生效，定时推送（timerpush）豁免该生产者侧限频；新增执行层门控四类默认全关，升级后行为不变。注意：执行层门控作用于**所有**即将投递的同类事件——开启「信号」类频率/时段后，定时推送的快照同样按「信号」类被裁决（可能被抑制或延迟到窗口），这是投递层统一门控的既定语义；两层限制各自独立开关，同时开启时效果叠加。
+
+### 5.3 默认值策略
+四类默认全关，**升级后行为完全不变**。用户按需为短信/来电/存储满/信号分别开启频率与时段。合理的差异化默认（如信号 60 分钟、QQ 10 条/分钟）沿用既有常量。
+
+## 6. 删除「批量汇总标题」清理记录
+
+| 文件 | 删除内容 |
+| --- | --- |
+| `service.js`（原） | `tplBatchInput` 控件、`批量汇总标题` 表单项、`TPL_DEFAULTS.batch`、载入/保存/恢复默认中的 batch 分支、顶部注释 |
+| `config.rs` | `DEFAULT_TPL_BATCH` 常量、`NotifyTemplates.batch` 字段、default/load_config 的 batch、相关测试断言 |
+| `notify.rs` | `combine_messages` 多条分支的 batch 标题拼接、`batch_uses_header_index_and_template` 测试改为 `batch_uses_index_and_template` 并加防回退断言 |
+| `root/etc/config/at-webserver` | `option notify_tpl_batch` 及注释 |
+
+**未误删**：`rpc.js` 的 `sendBatch`、ucode 的 `batch` 方法、ACL 的 `batch`（这些是「批量 AT 命令查询」，与汇总标题无关）；其它模板、通知内容、推送功能完整保留。历史 release-notes 中对该项的文字记录属存档，保留不动。
+
+## 7. 兼容性检查
+
+| 项 | 结论 |
+| --- | --- |
+| RPC 接口 | 未改动任何 ubus/RPC 方法与签名；新增配置走既有 UCI 通道 |
+| ubus 调用 | 服务重载/启动逻辑原样保留 |
+| UCI 配置 | 除删除孤立项 `notify_tpl_batch` 外，既有键名/格式/默认值不变；新增键全部有出厂默认，老配置升级无感 |
+| ACL | 无需改动：`at-webserver` UCI 读写、相关 ubus 权限已覆盖 |
+| 第三方依赖 | 未引入任何插件运行时依赖；测试用 jsdom 仅存于 tests/manual，不进包、不进 CI |
+| Lua | 未引入；全部沿用 JS（Ucode 未改动） |
+| 后端重写 | 未重写；仅在 config.rs/notify.rs 增量扩展，保持 Tokio 真异步、锁语义、启动/收尾顺序 |
+| 低内存设备 | 门控为内存状态 + 10s 低频扫描；无新增常驻线程/轮询 |
+
+## 8. 测试与验收结果
+
+| 项目 | 命令 | 结果 |
+| --- | --- | --- |
+| Rust 全量单测 | `cd src/rust && cargo test` | **379 passed, 0 failed, 2 ignored**（基线 371，新增 8） |
+| Rust clippy | `cargo clippy --all-targets` | 生产段 0 warning；18 条均为 baseline 测试段常量断言 |
+| Node 门禁（24 项） | `for f in tests/*-test.js; do node $f; done` | **24/24 通过** |
+| 推送频率门禁 | `node tests/push-rate-test.js` | **47/47 通过**（含 5 条新增门控接线断言） |
+| 抽屉交互冒烟 | `node tests/manual/drawer-smoke.js`（jsdom） | **30/30 通过** |
+| JS 语法 | `node --check` 全部新模块 + service.js | 全部通过 |
+| 模块导出一致性 | require / window 全局 / L.Class 导出 | 一致 |
+
+未执行：OpenWrt SDK 实机交叉编译与真机刷入（沙箱无 OpenWrt buildroot/硬件）；建议发版前在目标设备验证一次「配置 → 保存并应用 → 推送门控生效」。
+
+## 9. 修改文件清单
+
+**前端**
+- `htdocs/luci-static/resources/view/at-webserver/service.js`（重写为编排层）
+- `htdocs/luci-static/resources/at-webserver/config-common.js`（新增）
+- `htdocs/luci-static/resources/at-webserver/config-drawer.js`（新增）
+- `htdocs/luci-static/resources/at-webserver/config-connection.js`（新增）
+- `htdocs/luci-static/resources/at-webserver/config-network.js`（新增）
+- `htdocs/luci-static/resources/at-webserver/config-notify.js`（新增）
+- `htdocs/luci-static/resources/at-webserver/config-templates.js`（新增）
+
+**后端**
+- `src/rust/src/config.rs`（新增门控配置结构与解析、删除 batch）
+- `src/rust/src/notify.rs`（新增 NotifyGate 与投递门控、删除 batch 标题、新增测试）
+
+**配置 / 测试 / 文档**
+- `root/etc/config/at-webserver`（新增 notify_limit_* 默认项、删除 notify_tpl_batch）
+- `tests/push-rate-test.js`（迁移事实源到新模块 + 新增门控断言）
+- `tests/manual/drawer-smoke.js`（新增，手动运行）
+- `CHANGELOG.md`（新增开发中说明）
+- `docs/release-notes/unreleased-config-refactor.md`（本文，新增）
+
+## 10. 构建产物与安装包
+
+本次为**开发中提交**，未提升版本号、未打标签、未生成 `.ipk`/`.apk` 安装包。按 AGENTS.md，正式安装包应在发版流程中由 SDK/CI 生成，并同步全部版本引用与下载链接资产名。本地已完成源码级全部质量门禁（见第 8 节）。
+
+## 11. Codex Review 修复与通道增强（第二轮）
+
+PR #57 的 Codex Review 提出两条 P2 并发缺陷，一并修复；并按用户要求新增通道能力。
+
+### 11.1 修复：频率闸门 check+reserve 非原子（P2）
+- 旧实现：`decide()` 读到旧 `last_sent` 后释放锁，别处 `mark_sent()` 才刷新；并发同类事件会双双通过，在最小间隔内连发两条。
+- 新实现：`NotifyGate::admit()` 在**同一把 Mutex 临界区**内完成「频率判定 + 预约 `last_sent` + 清延迟副本」。后到者看到已被推进的基线，自然被压住。
+- 补发路径 `flush_deferred()` 同样经闸门裁决，与实时事件共用一把锁（第三轮进一步把「出队 + 裁决」也原子化，见 12.3）。
+- 新增回归测试 `gate_admit_is_atomic_under_concurrency`：8 线程Barrier 同时 admit，断言恰好 1 条放行。
+
+### 11.2 修复：延迟事件入队未唤醒 sweeper（P2）
+- 旧实现：`deliver()` defer 事件后，若 `run()` 的 `select!` 因 `has_deferred==false` 未挂 sweep 定时器，窗口到了也永不补发。
+- 新实现：`Notifier` 持有 `tokio::sync::Notify`；defer 时 `notify_one()`，run 的 `select!` 增加 `wake.notified()` 分支立即重算并重挂定时器。`Notify` 的 permit 语义保证即使消息早于进入 select 到达也不会丢失唤醒。
+
+### 11.3 新增：企业微信 Markdown 格式（text / markdown / markdown_v2）
+- UCI 新增 `wechat_msg_format`（默认 `text`，升级行为不变），前端 config-notify.js 新增下拉。
+- 依企业微信官方文档（path/99110）：
+  - `markdown`：标题 `##`、键值行用引用 + `<font color="comment">` 灰键名（该版本**无列表语法**），兼容旧客户端；
+  - `markdown_v2`：标题 `#`、键值行用 `**键**：值` 无序列表（该版本**无字体颜色**），旧客户端显示纯文本。
+- 按字节裁剪（text 2048 / markdown 4096），`truncate_utf8_bytes` 保证不切断多字节汉字。
+- 端到端测试 `webhook_markdown_payload_is_correct` 校验 msgtype 与嵌套对象。
+
+### 11.4 新增：企业微信与 QQ 共享通道节流 + 实时事件豁免
+- 把 QQ 的预约制节流抽成 `ChannelThrottle`（`qqpush.rs`），QQ 与企业微信各持一实例，均读 `qq_max_per_minute`——**一个设置同步约束两个通道**，节奏算法完全一致（共享同步）。
+- **短信/来电实时事件豁免通道节流**：`dispatch_body()` 按 `NotifyKind` 判定，`Sms`/`Call` 跳过 `pace_throttle`（企业微信）与走 `send_with_throttle(msg, false)`（QQ），保持实时到达；信号/存储满照常节流。逐类 NotifyGate 限频开关仍独立可用。
+- QQ 新增 `send_with_throttle(msg, bool)`，`send()` 保留为走节流的默认入口，现有调用点零改动。
+
+### 11.5 验证
+- `cargo test` 385 passed（第二轮新增 6 个单测：并发原子、3 个 Markdown/格式解析、UTF-8 截断、payload 端到端）。
+- Node 门禁 24/24；`push-rate-test` 55/55（新增 8 条接线断言）；抽屉冒烟 22/22。
+- `cargo clippy` 本次改动段 0 新告警。
+- 新增改动文件：`src/rust/src/qqpush.rs`（抽取 ChannelThrottle、send_with_throttle）。
+
+## 12. Codex Review 修复（第三轮，PR #58）
+
+PR #58 的 Codex Review 提出三条 P2，全部修复。
+
+### 12.1 修复：抽屉字段编辑不触发脏标记（P2，config-drawer.js）
+- 问题：抽屉挂在 `body` 下、不在 `.mt5700-page` 内，页面级 `input/change → markDirty` 监听覆盖不到抽屉控件；只有点保存/重置才标记脏。用户编辑后直接刷新/关页，改动静默丢失（无 `beforeunload` 守护）。
+- 修复：抽屉面板自行把 `input/change` 接到 `AtWs.uci.markDirty()`，与 service.js 页面级行为对齐；`rpc.js` 的 `AtUci` 新增 `isDirty()` 查询，抽屉打开时记录页面脏基线 `prevDirty`。
+
+### 12.2 修复：保存失败后「放弃修改」不回滚暂存 UCI（P2，config-drawer.js）
+- 问题：`controller.save()` 经 `L.uci.set` 暂存键后 `uciSave` 失败，用户选「放弃修改」只关抽屉；被放弃的值仍留在暂存区，之后其它模块的一次成功保存会把它们连带 commit。
+- 修复：setter 首次触碰某键时先 `L.uci.get` 备份原值（`null`=原本不存在）；`forceClose()` 先 `revertStaged()` 回滚（原值存在则 `set`、否则 `unset`），再按 `prevDirty` 基线清除本抽屉引入的脏标记（打开前页面已有的脏状态保留）；保存成功后备份作废。
+
+### 12.3 修复：延迟补发出队与裁决非原子（P2，notify.rs）
+- 问题：`flush_deferred()` 先 `take_due()` 出队、再 `admit()` 裁决。两步之间同类实时事件放行时看不到已出队的副本（`admit` 的「Pass 清副本」去重失效）；频率闸门关闭（默认，仅开时段窗口即如此）时新旧两条都发出——重复且陈旧的推送。
+- 修复：`take_due` 重构为 `NotifyGate::admit_due(kind, now, minute)`，「取出 + 时段/频率裁决 + 基线预约」在**同一把 Mutex 临界区**内完成，与实时 `admit` 串行互斥：实时先到则清掉副本（补发拿到 `None`），补发先到则合法发出且仅一次。通道不可用/总开关关闭时整批不出队，留待下轮。
+- 新增回归测试 `gate_due_flush_serialized_with_live_admit`（实时先到/补发先到两个方向）；`gate_defer_dedups_per_kind` 迁移到 `admit_due`。
+
+### 12.4 验证
+- `cargo test` 386 passed（第三轮净增 1 个单测）。
+- Node 门禁 25/25（新增 `tests/config-drawer-test.js` 7 条接线断言）；`push-rate-test` 56/56（新增 1 条补发串行断言）；抽屉冒烟 30/30（新增脏标记、回滚、页面脏基线 8 条行为断言）。
+- 改动文件：`config-drawer.js`、`rpc.js`（AtUci.isDirty）、`notify.rs`、`tests/config-drawer-test.js`（新增）、`tests/push-rate-test.js`、`tests/manual/drawer-smoke.js`、`CHANGELOG.md`、本文。
+
+## 13. 全 PR 审查修复（第四轮）
+
+对 PR 全部三个提交做前端 / Rust / 跨层一致性三路审查后，修复以下确认缺陷。
+
+### 13.1 前端（P2）
+- **保存后丢失重载副作用**：旧 service.js 保存成功后无条件 `reloadService()`（含服务停止/未注册时的自启自愈与状态复核）；拆分后抽屉只走 `uciSave`。修复：模块入口统一传 `onSaved: reloadService`，恢复「保存即生效」。
+- **已落盘失败保存的回滚不彻底**：`L.uci.save` 成功但 `apply` 失败时变更已在磁盘，「放弃修改」只回滚内存暂存。修复：`uciSave` 把阶段结果附在错误上（`err.uciSaveResult`），抽屉据此在放弃时把回滚后的原值重新 `L.uci.save` 落盘（不 apply）。
+- **焦点陷阱逃逸**：点击遮罩后焦点落 body，Tab 可聚焦背景页面。修复：焦点在面板外时 Tab/Shift+Tab 拉回面板内。
+- **表单样式注入遗漏**：`ensureFormStyles` 只有文案模块调用，connection/network/notify 抽屉的 `.mt5700-cfg-*` 布局在先开其它模块时退化。修复：四个模块 build 均调用。
+
+### 13.2 Rust（P2/P3）
+- **测试推送假成功（P2）**：`notify_test_event` 走 `notify()→deliver()` 门控，开启限频/时段后测试被静默压住但 RPC 返回 Ok。修复：测试推送绕过门控直发（保留本地日志），新增 `test_event_bypasses_rate_gate` 回归。
+- **Deferred 入队两步竞态（P3）**：admit 裁决与 defer 入队拆两步，窗口分钟边界处并发 Pass 清副本后旧事件迟到入队写回陈旧副本，并发 Deferred 也可能旧覆新。修复：入队并入 admit 同一临界区（签名携带消息），`defer()` 降为测试辅助；新增 `gate_defer_is_atomic_with_live_pass` 回归。
+- **企业微信 markdown 裸 URL 拆坏（P3）**：`split_wechat_kv` 裸冒号兜底把 `https://…` 拆成「**https**：//…」。修复：跳过 scheme 冒号（`://`），新增 URL 回归测试。
+- 补齐 `admit_due` Held/Dropped/窗外保留分支与 `rate_enabled+min_interval=0` 的单测；修正 config.rs 时段回退注释（逐字段回落默认，双端非法才等效全天）。
+
+### 13.3 前端细节（P3）
+- 抽屉显式 `require at-webserver/rpc` 并声明 AtWs 全局；初始焦点优先内容区首个输入控件；`onSaved`/render/load 异常隔离（不误报保存失败、不卡死抽屉）。
+- 恢复重构前的 rateSync/timerSync：手动输入同步快捷下拉，消除 isDirty 快照假阳性。
+- `wechat_msg_format` 后端别名（md/v2 等）加载时归一化到下拉选项，不再静默回落 text。
+- 删除 config-connection.js 死代码 `fields`；修正「已禁用」提示指向（重载按钮在页面底部）；QQ 节流文案与 UCI 注释补充「同时约束企业微信、短信/来电豁免」。
+
+### 13.4 文档口径修正
+- 「定时推送不受门控干扰」表述有误：timerpush 快照按「信号」类经过执行层门控（开启信号类频率/时段后同样被约束）；生产者侧 `notify_signal_min_interval` 仍豁免定时推送。已按实际语义改写第 5.2 节。
+
+### 13.5 审查结论中保留不改的事项（设计决策/既有行为）
+- `qq_max_per_minute` 上限 60 高于企业微信 20 条/分硬限（默认 10 安全；上限是否收紧待维护者决策）。
+- `PACE_MAX_WAIT=120s` 截断使深积压齐发（既有算法，本 PR 扩展到企业微信）。
+- 延迟队列/在途发送为内存态，服务 reload 即丢（既有模式）。
+- 抽屉/表单样式走 JS 注入而非 global.css（本 PR 既定模式，是否迁移待维护者决策）。
+
+### 13.6 验证
+- `cargo test` 391 passed（第四轮净增 5 个单测）。
+- Node 门禁 25/25：`config-drawer-test` 14/14（+7）、`push-rate-test` 59/59（+3）；抽屉冒烟 34/34（+4）。
+
+## 14. 窗外默认策略按类型区分（第五轮，需求变更）
+
+需求：默认只推送当前时段内产生的消息，不补发陈旧事件；**电话/短信不受影响**。
+
+- **信号 / 存储满**（非实时事件）：`*_window_action` 默认由 `defer` 改为 **`drop`**。
+  用户开启推送时段后，窗外事件直接丢弃，窗口开启时不再补发之前的陈旧消息。
+- **短信 / 来电**（实时事件）：默认保持 `defer` 不变；时段开关本就默认关闭，
+  实时直发行为完全不受影响。
+- 时段/频率开关仍默认全关，**升级后默认行为不变**；本改动只影响「开启时段后」
+  的默认窗外策略。已显式配置过 `defer`/`drop` 的用户不受影响（显式值优先）。
+- 非法 `*_window_action` 值由一刀切回落 defer 改为回落**本类**默认
+  （`OutOfWindowAction::parse_with_default`）。
+- 三层同步：UCI 出厂默认（memory/signal → 'drop'）、`config.rs`
+  `default_limit_for(prefix)`（default_config 与 UCI 解析同源）、前端
+  `GATE_KINDS[].defAction`（下拉初值、缺省回填、非法值归一）与文案提示。
+- 验证：`cargo test` 392 passed（新增 `window_action_defaults_are_per_kind`：
+  四类默认、default_config 同源、显式优先、非法值按类回落）；Node 门禁 25/25
+  （push-rate-test 60/60，新增三层默认一致断言）；抽屉冒烟 34/34。

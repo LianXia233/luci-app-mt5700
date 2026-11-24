@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 流量使用量**后台统计**。
 //!
 //! # 为什么放在后端常驻进程里
@@ -14,15 +17,15 @@
 //!
 //! | 场景 | 落点 | 重启后 |
 //! |:--|:--|:--|
-//! | 持久化关（默认） | `/tmp/mt5700-usage.json`（临时目录，重启即失） | 丢失，从零开始 |
-//! | 持久化开 | 额外写 `/etc/mt5700/usage.json`（磁盘，systemd 已放开该目录写权限），每 10 分钟最多一次 | 恢复 |
+//! | 持久化关（默认） | `/tmp/mt5700-usage.json`（tmpfs，纯内存） | 丢失，从零开始 |
+//! | 持久化开 | 额外写 `/etc/at-webserver-usage.json`（overlay），每 10 分钟最多一次 | 恢复 |
 //!
 //! - **清零按钮**：无论持久化开关状态如何，都强制重写两个文件（持久化开时把落盘
 //!   文件一并清零，持久化关时删掉落盘文件），不会留下旧值。
 //! - **文件大小上限**：状态文件是定长 schema 的 JSON，`MAX_USAGE_FILE_BYTES`
 //!   既是写入时的断言，也是读取时的准入线——超限的文件一律视为损坏并忽略，
 //!   避免异常大的文件被读进内存。
-//! - **自动清零**：`usage_reset_day`（**每月几号**，默认 1 号，用户可改）存在配置文件里，
+//! - **自动清零**：`usage_reset_day`（**每月几号**，默认 1 号，用户可改）存在 UCI 里，
 //!   与「使用量是否持久化」解耦，否则关掉持久化就连设置一起丢了。
 //!   到点后由本模块自行清零并重新基线，不需要前端参与。
 //!   日期判定（大小月 / 闰年 / 跨年 / 「31 号在小月按月末」）全部由
@@ -31,22 +34,21 @@
 //!
 //! # 统计来源（可手动切换）
 //!
-//! 配置键 `usage_source`（JSON 扁平键值，见 [`crate::configstore`]）决定累计用量的取值口径：
+//! `at-webserver.config.usage_source` 决定累计用量的取值口径：
 //!
 //! | 取值 | 数据源 | AT 通道代价 |
 //! |:--|:--|:--|
-//! | `netdev`（默认） | 承载网口的 `/sys/class/net/<dev>/statistics/{rx,tx}_bytes` | 零 |
+//! | `netdev`（默认） | WAN 区域模组物理网口的 `/sys/class/net/<dev>/statistics/{rx,tx}_bytes` | 零 |
 //! | `modem` | 模组 `AT^DSFLOWQRY` 上报的 DS 累计收发字节 | 走已存在的状态缓存（2s 刷新） |
 //!
 //! 来源切换会改变 `device` 标签，[`accumulate`] 的「承载变了」分支会自动
 //! 重新基线：累计值保留、不把两套计数器的差值误记成一笔巨额流量。
 //!
-//! # 统计网卡口径（Debian）
+//! # 统计网卡口径
 //!
-//! 与 main 分支（OpenWrt，按 `firewall` / `network` 的 WAN 区域解析物理网口）不同，
-//! Debian 上没有 `uci`，网卡按「配置 `netdev` → 环境变量 → USB 网卡 → `eth2`」确定，
-//! 由启动接线处通过 [`UsageTracker::set_device`] 注入配置值。读不到计数器时保持
-//! 累计值并重新探测，不补 0、不换用别的网卡顶替。
+//! 只认 **WAN 防火墙区域**里的物理网口，自动识别模组创建的 WAN 口，
+//! 不写死任何网卡名；显式排除 `br-lan` 及其 VLAN 子接口、`lo` 与 LAN 区域网卡。
+//! 取不到可用 WAN 网卡时**停止采样**（累计值保留），绝不回退 LAN 侧计数器。
 //!
 //! # 边界处理
 //!
@@ -56,6 +58,7 @@
 //! - 峰值只在正常采样节拍内计算；采样间隔异常拉长（进程被阻塞）时跳过，
 //!   免得把一段长时间的低均值当成峰值。
 
+use crate::localtime;
 use crate::nettime;
 use crate::{log_debug, log_info, log_warn};
 use serde::{Deserialize, Serialize};
@@ -64,10 +67,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{watch, Mutex, RwLock};
 
-/// 内存态状态文件（临时目录，重启即失）。
+/// 内存态状态文件（tmpfs，重启即失）。
 pub const USAGE_VOL_PATH: &str = "/tmp/mt5700-usage.json";
-/// 持久化状态文件（磁盘，跨重启保留）。
-pub const USAGE_FLASH_PATH: &str = "/etc/mt5700/usage.json";
+/// 持久化状态文件（overlay，跨重启保留）。
+pub const USAGE_FLASH_PATH: &str = "/etc/at-webserver-usage.json";
 
 /// 统计记录文件大小上限（字节）。
 ///
@@ -90,7 +93,7 @@ const MODEM_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// 持久化落盘的最小间隔（秒）。
 ///
-/// 内存文件每秒都写（临时目录，不额外磨损磁盘），落盘最多每 10 分钟一次，
+/// 内存文件每秒都写（tmpfs，零磨损），闪存最多每 10 分钟写一次，
 /// 把闪存寿命影响压到最低；代价是重启后最多回退 10 分钟的用量。
 const FLASH_INTERVAL_SECS: i64 = 600;
 
@@ -103,17 +106,21 @@ const MODEM_DEVICE_LABEL: &str = "modem:^DSFLOWQRY";
 /// 模组 DS 累计流量查询指令（已在 `state_cfg` 的缓存白名单里，2s 刷新）。
 const DSFLOWQRY_CMD: &str = "AT^DSFLOWQRY";
 
-/// 配置取值归一化：只接受 `netdev` / `modem`，其它一律回落默认。
+/// UCI 取值归一化：只接受 `netdev` / `modem`，其它一律回落默认。
 pub fn normalize_usage_source(raw: &str) -> &'static str {
     if raw.trim() == SOURCE_MODEM { SOURCE_MODEM } else { SOURCE_NETDEV }
 }
 
-/// 承载网卡探测的兜底名。
+/// WAN 防火墙区域解析不到时的兜底逻辑接口名（不是物理网卡名）。
 ///
-/// 与 Debian 安装脚本的探测链保持一致：环境变量 → sysfs 上挂在 USB 总线上的
-/// 网卡 → `eth2`。配置里的 `netdev` 由启动接线处注入（见
-/// [`UsageTracker::set_device`]）。
-const FALLBACK_NETDEV: &str = "eth2";
+/// 只列明确的 WAN 侧逻辑接口；任何情况下都不允许回落到 LAN / `br-lan`：
+/// `br-lan` 承载 LAN 桥接与 Wi-Fi 互传流量，实机其上行计数器可达
+/// 200 GB 以上，计入后会把蜂窝用量放大一到两个数量级。
+const FALLBACK_WAN_IFACES: &[&str] = &["MT5700M", "MT5700Mv6", "wan", "wan6"];
+
+/// LAN 侧硬排除项与 VLAN 子接口前缀。
+const LAN_EXCLUDED: &[&str] = &["lo", "br-lan"];
+const LAN_EXCLUDED_PREFIXES: &[&str] = &["br-lan."];
 
 /// 使用量状态（落盘的 schema）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,11 +163,107 @@ fn netdev_usable(dev: &str) -> bool {
         && std::path::Path::new(&format!("/sys/class/net/{dev}/statistics/rx_bytes")).exists()
 }
 
-/// 在 `/sys/class/net` 里找第一个挂在 USB 总线上的网卡。
+/// 解析 `uci show` 取值：标量 `'eth2'`、列表 `'a' 'b'` 都还原成逐项 token。
 ///
-/// 与 ucode 的 `detectUsbNetdev` 同口径：跳过 `lo` 与 `br-*`，要求存在
-/// `device` 链接且其真实路径含 `usb`。
-fn detect_usb_netdev() -> Option<String> {
+/// 这一层是纯字符串处理，与平台无关，可在 Windows / macOS 上直接跑单测；
+/// 真正读 sysfs 的部分只在 OpenWrt 设备侧调用。
+fn uci_values(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = raw
+        .split('\'')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, s)| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if out.is_empty() {
+        // 少数版本对标量值不带引号，按空白取首项即可
+        if let Some(v) = raw.split_whitespace().next() {
+            out.push(v.to_string());
+        }
+    }
+    out
+}
+
+/// `section -> option -> values`，由一次 `uci show <pkg>` 的输出解析而来。
+type UciShow = std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>;
+
+fn parse_uci_show(text: &str) -> UciShow {
+    let mut out = UciShow::new();
+    for line in text.lines() {
+        let Some((key, raw)) = line.split_once('=') else {
+            continue;
+        };
+        let mut parts = key.splitn(3, '.');
+        let (Some(_pkg), Some(section), Some(option)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        out.entry(section.to_string())
+            .or_default()
+            .insert(option.to_string(), uci_values(raw));
+    }
+    out
+}
+
+/// 取指定防火墙区域（`wan` / `lan`）登记的逻辑接口名，顺序稳定。
+fn zone_ifaces(cfg: &UciShow, zone: &str) -> Vec<String> {
+    let mut sections: Vec<&String> = cfg
+        .iter()
+        .filter(|(_, opts)| {
+            opts.get("name")
+                .and_then(|v| v.first())
+                .map(|s| s.as_str())
+                == Some(zone)
+        })
+        .map(|(sec, _)| sec)
+        .collect();
+    // HashMap 迭代顺序不稳定，按 section 名排序以保证结果可复现
+    sections.sort();
+
+    let mut out = Vec::new();
+    for sec in sections {
+        if let Some(list) = cfg.get(sec).and_then(|o| o.get("network")) {
+            for name in list {
+                if !out.contains(name) {
+                    out.push(name.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 逻辑接口 → 物理网卡；`@alias` 递归解析（最多 4 层，防配置成环）。
+fn resolve_netdev(iface: &str, net: &UciShow) -> Option<String> {
+    let mut cur = iface.to_string();
+    for _ in 0..4 {
+        let opts = net.get(&cur)?;
+        let dev = opts
+            .get("device")
+            .or_else(|| opts.get("ifname"))
+            .and_then(|v| v.first())?;
+        if let Some(alias) = dev.strip_prefix('@') {
+            cur = alias.to_string();
+            continue;
+        }
+        return Some(dev.clone());
+    }
+    None
+}
+
+/// LAN 侧网卡判定：硬排除 `br-lan` / VLAN 子接口 / `lo`，以及 LAN 区域解析出的网卡。
+fn is_lan_side(dev: &str, lan_devs: &std::collections::HashSet<String>) -> bool {
+    dev.is_empty()
+        || LAN_EXCLUDED.contains(&dev)
+        || LAN_EXCLUDED_PREFIXES.iter().any(|p| dev.starts_with(p))
+        || lan_devs.contains(dev)
+}
+
+/// 挂在 USB 总线上的模组网卡（口径与 init.d 的 `detect_usb_netdev` 一致）。
+///
+/// 只判定「是不是 USB 网卡」，不假定任何具体网卡名。
+fn usb_netdev() -> Option<String> {
     let mut names: Vec<String> = std::fs::read_dir("/sys/class/net")
         .ok()?
         .flatten()
@@ -175,37 +278,136 @@ fn detect_usb_netdev() -> Option<String> {
     })
 }
 
-/// 解析承载网卡名：环境变量 → USB 网卡 → 兜底 `eth2`。
+/// 网卡是否被「非 LAN 区域」的 network 接口绑定。
 ///
-/// Debian 侧没有 `uci`：配置里的 `netdev` 键由 [`crate::configstore`] 提供，
-/// 在启动接线处通过 [`UsageTracker::set_device`] 注入；这里只处理环境变量、
-/// sysfs 探测与兜底。只在启动时与「当前网卡读不到计数」时调用，不走热路径。
-fn detect_netdev() -> String {
-    // 1) 环境变量显式指定（systemd Environment= 或手动导出）
-    if let Ok(dev) = std::env::var("AT_WEBSERVER_NETDEV") {
-        let dev = dev.trim().to_string();
-        if netdev_usable(&dev) {
-            return dev;
+/// 只在「WAN 区域候选全无」的兜底路径里，用来确认 USB 网卡确实位于 WAN 侧。
+fn bound_outside_lan(netdev: &str, net: &UciShow, lan_ifaces: &[String]) -> bool {
+    net.iter().any(|(section, opts)| {
+        if lan_ifaces.contains(section) {
+            return false;
         }
-    }
-    // 2) sysfs 上挂在 USB 总线上的网卡（模组数据口）
-    if let Some(dev) = detect_usb_netdev() {
-        if netdev_usable(&dev) {
-            return dev;
-        }
-    }
-    // 3) 兜底
-    FALLBACK_NETDEV.to_string()
+        opts.get("device")
+            .or_else(|| opts.get("ifname"))
+            .map(|v| v.iter().any(|d| d == netdev))
+            .unwrap_or(false)
+    })
 }
 
-/// 写一项配置并落盘；内存态的热更新由各调用方自己做。
-async fn write_config(key: &str, value: &str) -> Result<(), String> {
-    let mut patch = crate::configstore::ConfigMap::new();
-    patch.insert(key.to_string(), value.to_string());
-    crate::configstore::update(patch)
+/// 选出流量统计用的唯一物理网卡：**只认 WAN 区域，绝不回退 LAN / br-lan**。
+///
+/// 纯逻辑实现，UCI 文本 / USB 网卡 / 可用性判定全部由调用方注入，
+/// 因此在 Windows / macOS 上也能完整跑单测；设备侧入口是 [`wan_netdev`]。
+/// 选择顺序：
+/// 1. WAN 区域成员 ∩ USB 模组网口 → 模组创建的 WAN 口；
+/// 2. 模组网口未命中时，取 WAN 区域里第一个非 LAN 侧的可用物理网口；
+/// 3. WAN 区域候选全无时，仍只接受「非 LAN 归属的 USB 网卡」；
+/// 4. 以上全失败返回 None —— 停止统计，累计值保留，不把 LAN 流量算进来。
+fn select_wan_netdev(
+    fw_text: &str,
+    net_text: &str,
+    usb: Option<&str>,
+    usable: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let fw = parse_uci_show(fw_text);
+    let net = parse_uci_show(net_text);
+
+    let lan_ifaces = zone_ifaces(&fw, "lan");
+    let lan_devs: std::collections::HashSet<String> = lan_ifaces
+        .iter()
+        .filter_map(|i| resolve_netdev(i, &net))
+        .collect();
+
+    let mut wan_ifaces = zone_ifaces(&fw, "wan");
+    if wan_ifaces.is_empty() {
+        wan_ifaces = FALLBACK_WAN_IFACES.iter().map(|s| s.to_string()).collect();
+    }
+
+    let mut candidates: Vec<String> = Vec::new();
+    for iface in &wan_ifaces {
+        let Some(dev) = resolve_netdev(iface, &net) else {
+            continue;
+        };
+        if is_lan_side(&dev, &lan_devs) || !usable(&dev) || candidates.contains(&dev) {
+            continue;
+        }
+        candidates.push(dev);
+    }
+
+    // 1) 模组创建的 WAN 口：WAN 区域 ∩ USB 网卡
+    if let Some(usb_dev) = usb {
+        if candidates.iter().any(|d| d == usb_dev) {
+            return Some(usb_dev.to_string());
+        }
+    }
+    // 2) 默认 WAN 口所在的物理网卡：设备上没有模组专用 WAN 口可用时，
+    //    按 `network.wan` 反查出的物理网卡统计，仍绝不回退 LAN。
+    //    仅当 wan 逻辑接口确实属于 WAN 区域时才采用，避免把被挪到
+    //    其它区域的接口误当成 WAN 出口。
+    if wan_ifaces.iter().any(|i| i == "wan") {
+        if let Some(dev) = resolve_netdev("wan", &net) {
+            if !is_lan_side(&dev, &lan_devs) && usable(&dev) {
+                return Some(dev);
+            }
+        }
+    }
+    // 3) WAN 区域内的其它物理网口（仍排除 LAN 侧与 br-lan）
+    if let Some(dev) = candidates.first() {
+        return Some(dev.clone());
+    }
+    // 4) 候选全无：只接受非 LAN 归属的 USB 网卡
+    if let Some(usb_dev) = usb {
+        if !is_lan_side(usb_dev, &lan_devs)
+            && usable(usb_dev)
+            && bound_outside_lan(usb_dev, &net, &lan_ifaces)
+        {
+            return Some(usb_dev.to_string());
+        }
+    }
+    None
+}
+
+/// 一次 `uci show <pkg>`；比旧实现逐个 `uci get` 起子进程更省。
+fn uci_show(pkg: &str) -> String {
+    std::process::Command::new("uci")
+        .args(["-q", "show", pkg])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// 写一项 UCI 配置并提交；内存态的热更新由各调用方自己做。
+async fn uci_set_config(key: &str, value: &str) -> Result<(), String> {
+    let arg = format!("{key}={value}");
+    let out = tokio::process::Command::new("uci")
+        .args(["set", &arg])
+        .output()
         .await
-        .map(|_| ())
-        .map_err(|e| format!("写入 {key} 失败: {e}"))
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("写入 {key} 失败: {}", String::from_utf8_lossy(&out.stderr)));
+    }
+    let out = tokio::process::Command::new("uci")
+        .args(["commit", "at-webserver"])
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("提交配置失败: {}", String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(())
+}
+
+/// 设备侧入口：每次采样重新解析，用户改动接口绑定后下一轮即生效。
+fn wan_netdev() -> Option<String> {
+    let usb = usb_netdev();
+    select_wan_netdev(
+        &uci_show("firewall"),
+        &uci_show("network"),
+        usb.as_deref(),
+        netdev_usable,
+    )
 }
 
 /// 解析 `^DSFLOWQRY` 应答，取 DS 累计接收 / 发送字节数。
@@ -291,13 +493,35 @@ fn remove_file(path: &str) {
     }
 }
 
+/// [`UsageTracker::read_counters_netdev`] 的阻塞实现，只在 blocking 池里运行。
+///
+/// 单独抽成自由函数是为了能整段交给 `spawn_blocking`：它不借用 `self`，
+/// 也不持有任何异步锁，从而不必为了「看起来异步」在锁内再包一层。
+fn read_counters_netdev_blocking() -> Option<(String, u64, u64)> {
+    let dev = match wan_netdev() {
+        Some(d) => d,
+        None => {
+            log_debug!("未识别到 WAN 区域网卡，本轮不采样（不回退 LAN/br-lan）");
+            return None;
+        }
+    };
+    let base = format!("/sys/class/net/{dev}/statistics");
+    let rx = read_counter(&format!("{base}/rx_bytes"));
+    let tx = read_counter(&format!("{base}/tx_bytes"));
+    match (rx, tx) {
+        (Some(rx), Some(tx)) => Some((dev, rx, tx)),
+        _ => {
+            log_debug!("读不到 WAN 网卡 {dev} 的计数器，下轮重新解析");
+            None
+        }
+    }
+}
+
 /// 使用量后台统计器。
 pub struct UsageTracker {
     state: Mutex<UsageState>,
-    /// 自动清零日：每月几号（存配置文件，与使用量是否持久化解耦）。
+    /// 自动清零日：每月几号（存 UCI，与使用量是否持久化解耦）。
     reset_day: AtomicU32,
-    /// 已解析的承载网卡；读不到计数时重新探测。
-    device: Mutex<Option<String>>,
     /// 统计来源（`netdev` / `modem`），可由前端热切换。
     source: RwLock<String>,
     /// 模组来源取数用的异步状态缓存；`netdev` 来源下完全不触碰。
@@ -317,28 +541,9 @@ impl UsageTracker {
         Arc::new(UsageTracker {
             state: Mutex::new(load_state()),
             reset_day: AtomicU32::new(crate::monthly::normalize_day(reset_day)),
-            device: Mutex::new(None),
             source: RwLock::new(normalize_usage_source(source).to_string()),
             cache: Some(cache),
         })
-    }
-
-    /// 注入配置里的 `netdev`（承载网卡名）。
-    ///
-    /// 与 [`crate::configstore`] 的读取是异步的，而本模块的探测是同步的，
-    /// 因此由启动接线处在配置就绪后调用本方法；为空或读不到计数器时后续
-    /// 采样会自动回退到 [`detect_netdev`]。
-    pub async fn set_device(&self, dev: &str) {
-        let dev = dev.trim();
-        if dev.is_empty() {
-            return;
-        }
-        if netdev_usable(dev) {
-            *self.device.lock().await = Some(dev.to_string());
-            log_info!("使用量统计承载网卡: {dev}");
-        } else {
-            log_warn!("配置的 netdev={dev} 不可用，使用量统计将自动探测");
-        }
     }
 
     /// 常驻采样循环：与前端是否打开无关。
@@ -389,28 +594,18 @@ impl UsageTracker {
         }
     }
 
-    /// 物理网卡来源：配置 `netdev` 优先，其次自动探测（环境变量 → USB → 兜底）。
+    /// 物理网卡来源：只认 WAN 区域自动识别出的模组网口。
+    ///
+    /// [`wan_netdev`] 要 fork 两次 `uci show` 并读 sysfs 与 `/proc/net/dev`，
+    /// 全是阻塞调用；本函数在常驻采样循环里每秒跑一次，留在 reactor 线程上
+    /// 会直接拖慢同一运行时里的 AT/RPC 任务调度，因此整段搬到 blocking 池。
     async fn read_counters_netdev(&self) -> Option<(String, u64, u64)> {
-        let mut cached = self.device.lock().await;
-        let mut dev = cached.clone().unwrap_or_default();
-        if !netdev_usable(&dev) {
-            dev = detect_netdev();
-            *cached = Some(dev.clone());
-            log_info!("使用量统计承载网卡: {dev}");
-        }
-        drop(cached);
-
-        let base = format!("/sys/class/net/{dev}/statistics");
-        let rx = read_counter(&format!("{base}/rx_bytes"));
-        let tx = read_counter(&format!("{base}/tx_bytes"));
-        match (rx, tx) {
-            (Some(rx), Some(tx)) => Some((dev, rx, tx)),
-            _ => {
-                // 网卡消失了（接口 down / 换了口）：清掉缓存让下一轮重新探测
-                let mut cached = self.device.lock().await;
-                *cached = None;
-                drop(cached);
-                log_debug!("读不到 {dev} 的计数器，下轮重新探测承载网卡");
+        match tokio::task::spawn_blocking(read_counters_netdev_blocking).await {
+            Ok(v) => v,
+            Err(e) => {
+                // blocking 任务 panic 才会走到这里：记一笔并按「本轮取不到」处理，
+                // 绝不能用 0 顶替，否则累计用量会被瞬间抹平。
+                log_warn!("WAN 网卡计数器采样任务失败: {e}");
                 None
             }
         }
@@ -434,7 +629,7 @@ impl UsageTracker {
     /// 31 号这类「小月不存在」的日子按当月月末触发，不会整月漏清。
     fn maybe_auto_reset(&self, st: &mut UsageState, rx: u64, tx: u64, now: i64) {
         let day = self.reset_day.load(Ordering::Relaxed);
-        if !crate::monthly::should_reset(now, st.start_ts, day, nettime::offset()) {
+        if !crate::monthly::should_reset(now, st.start_ts, day, localtime::offset()) {
             return;
         }
         st.total_rx = 0;
@@ -559,16 +754,16 @@ impl UsageTracker {
         self.snapshot().await
     }
 
-    /// 修改自动清零日（每月几号）：写配置（跨重启生效）+ 热更新内存值。
+    /// 修改自动清零日（每月几号）：写 UCI（跨重启生效）+ 热更新内存值。
     pub async fn set_reset_day(&self, day: u32) -> Result<u32, String> {
         let day = crate::monthly::normalize_day(day);
-        write_config("usage_reset_day", &day.to_string()).await?;
+        uci_set_config("at-webserver.config.usage_reset_day", &day.to_string()).await?;
         self.reset_day.store(day, Ordering::Relaxed);
         log_info!("使用量自动清零已改为 {}", crate::monthly::describe(day));
         Ok(day)
     }
 
-    /// 切换统计来源：写配置（跨重启生效）+ 热更新内存值。
+    /// 切换统计来源：写 UCI（跨重启生效）+ 热更新内存值。
     ///
     /// 只接受 `netdev` / `modem`；切换后 `device` 标签随之改变，
     /// [`accumulate`] 会自动重新基线，累计值保留，不会把两套计数器的
@@ -578,7 +773,7 @@ impl UsageTracker {
         if source == SOURCE_MODEM && self.cache.is_none() {
             return Err("模组数据来源不可用（状态缓存未初始化）".into());
         }
-        write_config("usage_source", source).await?;
+        uci_set_config("at-webserver.config.usage_source", source).await?;
         *self.source.write().await = source.to_string();
         log_info!("使用量统计来源已切换为 {}", if source == SOURCE_MODEM { "模组 AT^DSFLOWQRY" } else { "WAN 物理网卡" });
         Ok(self.snapshot().await)
@@ -677,6 +872,146 @@ mod tests {
             start_ts: 100,
             ..UsageState::default()
         }
+    }
+
+    /// 实机拓扑：WAN zone = MT5700M / MT5700Mv6 / wan / wan6，LAN zone = lan(br-lan)。
+    fn real_world_fw() -> &'static str {
+        "firewall.@zone[0]=zone\n\
+         firewall.@zone[0].name='lan'\n\
+         firewall.@zone[0].network='lan'\n\
+         firewall.@zone[1]=zone\n\
+         firewall.@zone[1].name='wan'\n\
+         firewall.@zone[1].network='MT5700M' 'MT5700Mv6' 'wan' 'wan6'\n"
+    }
+    fn real_world_net() -> &'static str {
+        "network.lan=interface\n\
+         network.lan.device='br-lan'\n\
+         network.wan=interface\n\
+         network.wan.device='eth1'\n\
+         network.wan6=interface\n\
+         network.wan6.device='@wan'\n\
+         network.MT5700M=interface\n\
+         network.MT5700M.device='eth2'\n\
+         network.MT5700Mv6=interface\n\
+         network.MT5700Mv6.device='@MT5700M'\n"
+    }
+    fn all_usable(_: &str) -> bool { true }
+
+    #[test]
+    fn selects_usb_modem_wan_port_without_hardcoded_name() {
+        assert_eq!(
+            select_wan_netdev(real_world_fw(), real_world_net(), Some("eth2"), all_usable),
+            Some("eth2".into())
+        );
+    }
+
+    #[test]
+    fn no_other_modem_wan_port_selects_default_wan_physical_dev() {
+        // 模组 USB 网口未枚举：优先按默认 WAN 口 network.wan 反查物理网卡，
+        // 而不是继续沿用某个残留的模组绑定，也绝不退回 br-lan。
+        assert_eq!(
+            select_wan_netdev(real_world_fw(), real_world_net(), None, all_usable),
+            Some("eth1".into()),
+            "无模组 WAN 口时应选默认 WAN 口的物理网卡"
+        );
+
+        // 只有默认 wan/wan6、完全没有模组专用接口的设备同样命中该判据。
+        let fw = "firewall.@zone[0].name='wan'\nfirewall.@zone[0].network='wan' 'wan6'\n\
+                  firewall.@zone[1].name='lan'\nfirewall.@zone[1].network='lan'\n";
+        assert_eq!(
+            select_wan_netdev(fw, real_world_net(), None, all_usable),
+            Some("eth1".into())
+        );
+    }
+
+    #[test]
+    fn default_wan_dev_is_ignored_when_wan_is_not_in_wan_zone() {
+        // wan 逻辑接口被挪出 WAN 区域时，不能仅凭名字把它当 WAN 出口；
+        // 此时仍应回到 WAN 区域成员 / USB 回落判据。
+        let fw = "firewall.@zone[0].name='wan'\nfirewall.@zone[0].network='wwan'\n\
+                  firewall.@zone[1].name='lan'\nfirewall.@zone[1].network='lan'\n";
+        let net = "network.wan.device='eth1'\nnetwork.wwan.device='br-lan'\n\
+                   network.lan.device='br-lan'\n";
+        assert_eq!(select_wan_netdev(fw, net, None, all_usable), None);
+    }
+
+    #[test]
+    fn br_lan_and_lan_zone_devices_are_never_selected() {
+        let fw = "firewall.@zone[0].name='wan'\nfirewall.@zone[0].network='badwan'\n\
+                  firewall.@zone[1].name='lan'\nfirewall.@zone[1].network='lan'\n";
+        let net = "network.badwan.device='br-lan'\nnetwork.lan.device='br-lan'\n";
+        assert_eq!(select_wan_netdev(fw, net, Some("br-lan"), all_usable), None);
+        // VLAN 子接口同样排除
+        let net2 = "network.badwan.device='br-lan.10'\nnetwork.lan.device='br-lan'\n";
+        assert_eq!(select_wan_netdev(fw, net2, None, all_usable), None);
+    }
+
+    #[test]
+    fn lan_zone_physical_port_is_excluded_even_if_listed_in_wan_zone() {
+        let fw = "firewall.@zone[0].name='wan'\nfirewall.@zone[0].network='wan'\n\
+                  firewall.@zone[1].name='lan'\nfirewall.@zone[1].network='lan'\n";
+        let net = "network.wan.device='eth0'\nnetwork.lan.device='eth0'\n";
+        assert_eq!(select_wan_netdev(fw, net, None, all_usable), None);
+    }
+
+    #[test]
+    fn no_wan_zone_uses_wan_iface_whitelist_not_lan() {
+        assert_eq!(
+            select_wan_netdev("", real_world_net(), Some("eth2"), all_usable),
+            Some("eth2".into())
+        );
+        assert_eq!(
+            select_wan_netdev("", "network.lan.device='br-lan'\n", None, all_usable),
+            None,
+            "firewall 读不到时也不能掉到 LAN 网桥"
+        );
+    }
+
+    #[test]
+    fn all_candidates_empty_falls_back_to_wan_bound_usb_netdev() {
+        // 「全无」：firewall 无 zone、白名单接口也不存在，但 USB 网卡被非 LAN 接口绑定
+        let net = "network.wwan=interface\nnetwork.wwan.device='usb0'\n";
+        assert_eq!(
+            select_wan_netdev("", net, Some("usb0"), all_usable),
+            Some("usb0".into())
+        );
+    }
+
+    #[test]
+    fn usb_netdev_bound_only_to_lan_is_rejected() {
+        let fw = "firewall.@zone[0].name='lan'\nfirewall.@zone[0].network='lan'\n";
+        let net = "network.lan.device='usb0'\n";
+        assert_eq!(select_wan_netdev(fw, net, Some("usb0"), all_usable), None);
+    }
+
+    #[test]
+    fn nothing_available_stops_sampling() {
+        assert_eq!(select_wan_netdev("", "", None, all_usable), None);
+        assert_eq!(select_wan_netdev(real_world_fw(), real_world_net(), Some("eth2"), |_| false), None);
+    }
+
+    #[test]
+    fn alias_chain_resolves_to_physical_dev() {
+        let net = parse_uci_show(
+            "network.wan.device='eth1'\nnetwork.wan6.device='@wan'\nnetwork.v6alias.device='@wan6'\n",
+        );
+        assert_eq!(resolve_netdev("wan6", &net).as_deref(), Some("eth1"));
+        assert_eq!(resolve_netdev("v6alias", &net).as_deref(), Some("eth1"));
+    }
+
+    #[test]
+    fn alias_cycle_is_bounded() {
+        let net = parse_uci_show("network.a.device='@b'\nnetwork.b.device='@a'\n");
+        assert_eq!(resolve_netdev("a", &net), None);
+    }
+
+    #[test]
+    fn uci_list_values_are_parsed() {
+        let cfg = parse_uci_show("firewall.@zone[1].network='MT5700M' 'wan' 'wan6'\n");
+        assert_eq!(
+            cfg["@zone[1]"]["network"],
+            vec!["MT5700M".to_string(), "wan".to_string(), "wan6".to_string()]
+        );
     }
 
     #[test]
@@ -787,7 +1122,7 @@ mod tests {
     #[test]
     fn monthly_reset_clears_totals_and_rebaselines() {
         // 起点 1 月 5 日，设定每月 1 号 → 到 2 月 1 日 00:00 应清零
-        let off = nettime::offset();
+        let off = localtime::offset();
         let start = off.with_ymd_and_hms(2026, 1, 5, 9, 0, 0).unwrap().timestamp();
         let target = off.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap().timestamp();
         assert!(crate::monthly::should_reset(target, start, 1, off));

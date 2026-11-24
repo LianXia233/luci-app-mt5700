@@ -1,9 +1,11 @@
-//! 配置读取（Debian）：从 JSON 扁平键值配置文件（/etc/mt5700/config.json，
-//! 可用 MT5700_CONFIG 覆盖）读取整个配置。键名为扁平字符串键，
-//! 前端页面与业务逻辑无需感知存储介质的变化。
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
 
-use crate::configstore;
+//! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
+//! 键名与 LuCI 页面约定完全一致。
+
 use crate::{log_info, log_warn};
+use crate::logcat::Category;
 use crate::logger::{self, Level};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -152,6 +154,111 @@ pub const DEFAULT_QQ_MAX_PER_MIN: u64 = 10;
 /// QQ 通道节流的条数上限（60 条/分钟 = 每条至少间隔 1 秒）。
 pub const MAX_QQ_MAX_PER_MIN: u64 = 60;
 
+// ---------------------------------------------------------------------------
+// 每种推送类型独立的「频率限制 + 推送时段」策略
+//
+// 背景：历史上只有信号类有最小间隔（生产者侧 signal_min_interval），只有信号
+// 巡检有时段（notify_poll_*）。短信/来电/存储满三类既不限频也不分时段，且信号
+// 的时段只约束巡检采样，URC 上报与定时推送仍会在深夜打扰用户。
+//
+// 这里给四类事件各自一套独立配置，在**推送执行层**（notify.rs 的 Notifier）
+// 统一裁决，每类各有一份频率状态与延迟队列，互不干扰：
+//   - 频率：同类两条之间的最小间隔，间隔内的重复被抑制（不刷新基线）；
+//   - 时段：仅在该时段内投递，支持跨零点；窗外按 defer（延后到窗口开启）/ drop
+//     （直接丢弃）处理。延迟队列按事件类型去重，同一类只保留最新一条，避免
+//     窗口开启时补发一堆陈旧消息。
+//
+// 默认策略刻意保持「与改造前行为一致」：四类频率限制全关、时段限制全关。
+// 信号类真正的频率控制仍是生产者侧的 signal_min_interval（它有「不刷新基线、
+// 累计变化到点补推」的精细语义），此处不重复夹一道，用户可按需另行开启。
+// ---------------------------------------------------------------------------
+
+/// 非允许时段的处理策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutOfWindowAction {
+    /// 延迟到下一个允许时段的起点再发（同一类型只保留最新一条）。
+    Defer,
+    /// 直接丢弃窗外事件。
+    Drop,
+}
+
+impl OutOfWindowAction {
+    /// 解析 UCI 值；非法/未知字符串回落 `default`（各类默认策略不同）。
+    fn parse_with_default(s: &str, default: OutOfWindowAction) -> OutOfWindowAction {
+        if s.eq_ignore_ascii_case("drop") { OutOfWindowAction::Drop }
+        else if s.eq_ignore_ascii_case("defer") { OutOfWindowAction::Defer }
+        else { default }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self { OutOfWindowAction::Defer => "defer", OutOfWindowAction::Drop => "drop" }
+    }
+}
+
+/// 企业微信 webhook 消息格式（UCI `wechat_msg_format`）。
+///
+/// 默认 `Text` 保持升级前行为不变。企业微信文档（path/99110）支持：
+/// - `markdown`：标题/加粗/链接/引用/三种字体颜色（`info`/`comment`/`warning`），兼容旧客户端；
+/// - `markdown_v2`：额外支持表格/列表/图片/代码块，但不支持颜色与 @，旧客户端显示纯文本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WechatMsgFormat {
+    Text,
+    Markdown,
+    MarkdownV2,
+}
+
+impl WechatMsgFormat {
+    /// 解析 UCI 值；未知值回落 `Text`（保持兼容），大小写不敏感。
+    pub fn from_uci(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "markdown" | "md" => WechatMsgFormat::Markdown,
+            "markdown_v2" | "markdown-v2" | "md_v2" | "mdv2" | "v2" => WechatMsgFormat::MarkdownV2,
+            _ => WechatMsgFormat::Text,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WechatMsgFormat::Text => "text",
+            WechatMsgFormat::Markdown => "markdown",
+            WechatMsgFormat::MarkdownV2 => "markdown_v2",
+        }
+    }
+}
+
+/// 单种推送类型的门控配置（频率 + 时段），四类各一份、互不共享状态。
+#[derive(Debug, Clone)]
+pub struct TypePushLimit {
+    /// 是否启用该类频率限制（默认关，保持既有实时行为）。
+    pub rate_enabled: bool,
+    /// 该类最小推送间隔（分钟），0 = 不限频。上限 10080（7 天）。
+    pub min_interval: Duration,
+    /// 是否启用该类推送时段限制（默认关）。
+    pub window_enabled: bool,
+    /// 允许时段起点 HH:MM（含）。
+    pub window_start: String,
+    /// 允许时段终点 HH:MM（含）；小于起点表示跨零点，相等表示全天。
+    pub window_end: String,
+    /// 窗外策略：延迟（defer）/ 丢弃（drop）。默认按类型区分：
+    /// 短信/来电 defer，信号/存储满 drop（只推送当前时段的消息）。
+    pub out_of_window: OutOfWindowAction,
+}
+
+impl Default for TypePushLimit {
+    fn default() -> Self {
+        TypePushLimit {
+            rate_enabled: false,
+            min_interval: Duration::from_secs(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60),
+            window_enabled: false,
+            window_start: DEFAULT_NOTIFY_POLL_START.into(),
+            window_end: DEFAULT_NOTIFY_POLL_END.into(),
+            out_of_window: OutOfWindowAction::Defer,
+        }
+    }
+}
+
+/// 四类推送的门控配置，索引顺序与 `NotifyKind::{Sms,Call,MemoryFull,Signal}` 一致。
+pub type NotifyLimits = [TypePushLimit; 4];
+
 /// 定时轮询推送配置。
 #[derive(Debug, Clone)]
 pub struct PollConfig {
@@ -218,7 +325,7 @@ pub fn valid_hhmm(v: &str) -> bool {
 // ---------------------------------------------------------------------------
 // 自定义推送文案模板
 //
-// 采用「配置文件存单行文本 + 反斜杠转义换行」的约定：扁平键值里的值必须是单行的，
+// 采用「UCI 存单行文本 + 反斜杠转义换行」的约定：UCI 的 option 值是单行的，
 // 无法直接存多行文本，因此模板里的换行统一写成 `\n`（两个字符），由本模块在
 // 读取时还原为真实换行。LuCI 页面在保存时把真实换行转回 `\n`，来回一趟无损。
 //
@@ -243,8 +350,6 @@ pub const DEFAULT_TPL_CALL: &str = "来电\n{content}";
 pub const DEFAULT_TPL_MEMORY: &str = "短信存储空间已满\n后果：清理前可能收不到新短信";
 /// 信号变化通知的默认文案（正文由后端组装，模板默认直接透出）。
 pub const DEFAULT_TPL_SIGNAL: &str = "{content}";
-/// 批量汇总的默认标题。
-pub const DEFAULT_TPL_BATCH: &str = "批量通知汇总";
 /// QQ 富文本短信卡片的默认模板（仅 QQ Markdown 形态生效）。
 ///
 /// 企业微信与 QQ 纯文本仍使用 [DEFAULT_TPL_SMS]；本模板只决定 QQ
@@ -266,11 +371,6 @@ pub struct NotifyTemplates {
     pub memory_full: String,
     /// 信号变化文案模板。
     pub signal: String,
-    /// 批量汇总标题（多条合并时使用）。v1.14.20 起生产路径逐条直发，
-    /// 该标题当前不会被触发，保留仅为兼容已有配置（`notify_tpl_batch` 仍可读可写），
-    /// 由 `notify::combine_messages` 的批量分支消费（仅单测覆盖）。
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub batch: String,
     /// QQ 富文本短信卡片模板（仅 QQ Markdown 形态生效；空或 `{body}` = 用通用转换）。
     pub qq_sms_md: String,
 }
@@ -283,7 +383,6 @@ impl Default for NotifyTemplates {
             call: DEFAULT_TPL_CALL.into(),
             memory_full: DEFAULT_TPL_MEMORY.into(),
             signal: DEFAULT_TPL_SIGNAL.into(),
-            batch: DEFAULT_TPL_BATCH.into(),
             qq_sms_md: DEFAULT_QQ_SMS_MD.into(),
         }
     }
@@ -326,6 +425,8 @@ pub struct NotificationConfig {
     /// 与 `wechat_webhook` 是「AND」关系：开关关闭或地址为空都不发。
     pub wechat_enabled: bool,
     pub wechat_webhook: String,
+    /// 企业微信消息格式（text / markdown / markdown_v2），默认 text 保持兼容。
+    pub wechat_msg_format: WechatMsgFormat,
     pub log_file: String,
     /// 通知日志文件的大小上限（字节）。
     ///
@@ -347,6 +448,8 @@ pub struct NotificationConfig {
     /// 「定时推送」（[`NotificationConfig::timer_interval`]）也不受影响 ——
     /// 那条节奏是用户自己定的，再被这一层夹一道就变成两个开关互相遮蔽。
     pub signal_min_interval: Duration,
+    /// 每种推送类型独立的频率/时段门控（四类各一份，见 [`TypePushLimit`]）。
+    pub limits: NotifyLimits,
     /// 自定义推送文案模板。
     pub templates: NotifyTemplates,
 }
@@ -357,7 +460,7 @@ pub struct QqNotifyConfig {
     pub enabled: bool,
     pub app_id: String,
     pub app_secret: String,
-    /// "group" | "c2c" | "channel" | "bind"（bind=启动后自动抓取 openid 并写回配置）
+    /// "group" | "c2c" | "channel" | "bind"（bind=启动后自动抓取 openid 并写回 UCI）
     pub target_type: String,
     pub target_id: String,
     /// 绑定模式下的用户 QQ 号（仅作展示标签，事件里拿不到 QQ 号）
@@ -380,28 +483,14 @@ pub struct QqNotifyConfig {
 pub struct WebSocketConfig {
     pub port: u16,
     pub auth_key: String,
+    /// 兼容旧键名：1 时监听 0.0.0.0，并由 init.d 追加一条 **src=lan** 的放行规则。
+    /// 它不会自动放行 WAN；WAN 访问仍需用户显式配置防火墙。对外监听务必设置 auth_key。
     pub allow_wan: bool,
     /// RPC 监听地址：websocket_bind 显式值优先；否则 allow_wan=1 → 0.0.0.0，默认 127.0.0.1
     pub bind: String,
-    /// 一次 ^CELLSCAN 允许跑多久；读 cellscan_timeout，下限 10s，默认 180s
+    /// 一次 ^CELLSCAN 允许跑多久；读 UCI cellscan_timeout，下限 10s，默认 180s
     pub scan_timeout: Duration,
 }
-
-/// 独立 WebUI 的 HTTP 服务配置（Debian 分支新增）。
-#[derive(Debug, Clone)]
-pub struct HttpConfig {
-    /// HTTP API + WebUI 监听端口，默认 9000
-    pub port: u16,
-    /// 监听地址，默认 0.0.0.0（开箱即用：浏览器直访 http://<设备IP>:9000）
-    pub bind: String,
-    /// 静态 WebUI 根目录
-    pub web_root: String,
-    /// 访问密钥；为空表示不启用认证
-    pub auth_key: String,
-}
-
-/// WebUI 静态根目录默认值（发行包安装到 /usr/share/mt5700/webui）。
-pub const DEFAULT_WEB_ROOT: &str = "/usr/share/mt5700/webui";
 
 #[derive(Debug, Clone)]
 pub struct ScheduleConfig {
@@ -423,24 +512,45 @@ pub struct ScheduleConfig {
     pub day_nr: BandLock,
 }
 
+/// 插件日志文件的落盘配置。
+///
+/// 业务类日志（AT/短信/拨号/信号…）不再进 syslog，改由这个文件承载，
+/// 因此它必须有界：默认落在 `/tmp`（tmpfs），达到上限后按行边界裁掉最旧的一半。
+/// 分流规则本身（哪些类别进文件、哪些进 syslog）是代码里的策略表，
+/// 见 [`crate::logcat`]，不做成可配置项 —— 让用户能把业务日志重新灌回 syslog
+/// 就等于把这次改造关掉。
+#[derive(Debug, Clone)]
+pub struct LogConfig {
+    /// 是否把业务类日志写入插件文件。关掉后业务日志只留内存环形缓冲。
+    pub plugin_file_enabled: bool,
+    /// 插件日志文件路径；留空用 [`crate::logger::DEFAULT_PLUGIN_LOG_PATH`]。
+    pub plugin_file: String,
+    /// 插件日志文件大小上限（字节），小于 4096 视为非法并回落默认。
+    pub plugin_file_max_bytes: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub enabled: bool,
     pub at: AtConfig,
     pub notification: NotificationConfig,
+    /// 日志落盘策略（业务类日志写哪个文件、上限多大）。
+    ///
+    /// 与 `notification.log_file` 是**两个不同的文件**：那个只装通知记录
+    /// （短信/来电/信号推送的留痕），这个装全部业务类运行痕迹
+    /// （AT 收发、拨号对账、接口拉起…）。分开放是因为两者的读者与清理时机都不同。
+    pub log: LogConfig,
     pub websocket: WebSocketConfig,
-    /// 独立 WebUI 的 HTTP 服务（Debian 分支保留，main 分支没有这一段）
-    pub http: HttpConfig,
     pub schedule: ScheduleConfig,
     /// 使用量统计的自动清零日：**每月几号**（默认 1 号，范围 1~31）。
     ///
-    /// 放在配置文件而不是使用量状态文件里：状态文件在「持久化关」时重启即失，
+    /// 放在 UCI 而不是使用量状态文件里：状态文件在「持久化关」时重启即失，
     /// 设置跟着一起丢会让用户每次重启后都要重填。
     /// 日历语义（大小月 / 闰年 / 跨年）见 [`crate::monthly`]。
     pub usage_reset_day: u32,
     /// 使用量统计来源：`netdev`（WAN 物理网卡，默认）/ `modem`（模组 AT^DSFLOWQRY）。
     ///
-    /// 与清零日同样放配置里：状态文件在「持久化关」时重启即失，
+    /// 与清零日同样放 UCI：状态文件在「持久化关」时重启即失，
     /// 用户选择的来源不能跟着一起丢。
     pub usage_source: String,
     /// 短信默认存储区（SM / ME），启动时兜底应用；界面「保存存储位置」也会写回。
@@ -460,7 +570,7 @@ pub fn default_config() -> Config {
     Config {
         enabled: true,
         at: AtConfig {
-            // 默认 PCUI 串口优先（与出厂默认配置一致）
+            // 默认 PCUI 串口优先（与 UCI 默认配置一致）
             type_: "SERIAL".into(),
             network: NetworkConfig {
                 host: "192.168.8.1".into(),
@@ -480,6 +590,7 @@ pub fn default_config() -> Config {
             enabled: true,
             wechat_enabled: false,
             wechat_webhook: String::new(),
+            wechat_msg_format: WechatMsgFormat::Text,
             log_file: String::new(),
             log_file_max_bytes: crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES,
             types: NotifyTypes {
@@ -504,7 +615,19 @@ pub fn default_config() -> Config {
             timer_interval: Duration::from_secs(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN * 60),
             poll: PollConfig::default(),
             signal_min_interval: Duration::from_secs(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60),
+            limits: [
+                default_limit_for("notify_limit_sms"),
+                default_limit_for("notify_limit_call"),
+                default_limit_for("notify_limit_memory"),
+                default_limit_for("notify_limit_signal"),
+            ],
             templates: NotifyTemplates::default(),
+        },
+        log: LogConfig {
+            plugin_file_enabled: true,
+            // 留空 = 用 logger::DEFAULT_PLUGIN_LOG_PATH；这样改默认路径只需改一处
+            plugin_file: String::new(),
+            plugin_file_max_bytes: crate::logger::DEFAULT_PLUGIN_LOG_BYTES,
         },
         websocket: WebSocketConfig {
             port: 8765,
@@ -512,12 +635,6 @@ pub fn default_config() -> Config {
             allow_wan: false,
             bind: "127.0.0.1".into(),
             scan_timeout: Duration::from_secs(180),
-        },
-        http: HttpConfig {
-            port: 9000,
-            bind: "0.0.0.0".into(),
-            web_root: String::new(),
-            auth_key: String::new(),
         },
         schedule: ScheduleConfig {
             enabled: false,
@@ -550,14 +667,19 @@ pub fn normalize_sms_storage(raw: &str) -> String {
     }
 }
 
+/// 还原 uci show 的单引号包裹，包括 '\'' 的内嵌引号转义。
+fn unquote_uci(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
+        raw[1..raw.len() - 1].replace("'\\''", "'")
+    } else {
+        raw.to_string()
+    }
+}
+
 pub struct UciReader(HashMap<String, String>);
 
 impl UciReader {
-    /// 从 JSON 配置存储的扁平键值映射构造。
-    fn from_map(map: configstore::ConfigMap) -> UciReader {
-        UciReader(map.into_iter().collect())
-    }
-
     pub fn str(&self, key: &str, def: &str) -> String {
         match self.0.get(key) {
             Some(v) if !v.is_empty() => v.clone(),
@@ -612,9 +734,40 @@ fn env_nonempty(key: &str) -> String {
     std::env::var(key).unwrap_or_default().trim().to_string()
 }
 
-/// 解析定时推送间隔：配置以**分钟**为单位，内部换算成 [`Duration`]。
+/// 用一次 `uci show at-webserver` 取回整个配置段。
+pub async fn uci_values() -> Result<UciReader, String> {
+    // 加 5s 超时，避免 uci 命令异常挂起卡死启动。
+    let out = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new("uci")
+            .args(["show", "at-webserver"])
+            .output(),
+    )
+    .await
+    .map_err(|_| "uci show 超时".to_string())?
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("uci show 退出码 {}", out.status));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let prefix = "at-webserver.config.";
+    let mut values = HashMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(eq) = line.find('=') {
+            let key = &line[..eq];
+            let raw = &line[eq + 1..];
+            if let Some(name) = key.strip_prefix(prefix) {
+                values.insert(name.to_string(), unquote_uci(raw));
+            }
+        }
+    }
+    Ok(UciReader(values))
+}
+
+/// 解析定时推送间隔：UCI 以**分钟**为单位，内部换算成 [`Duration`]。
 ///
-/// 单独成函数的理由：`load_config()` 自己会去读配置文件，单测无法注入值；
+/// 单独成函数的理由：`load_config()` 自己会去调 `uci show`，单测无法注入值；
 /// 而这里的规则（默认值、上下限夹取、旧键迁移）恰恰是最容易写错又最难在实机上
 /// 逐个试的部分，必须能被单测直接覆盖。
 ///
@@ -651,7 +804,7 @@ fn timer_interval_from(values: &UciReader) -> Duration {
     Duration::from_secs(minutes.clamp(MIN_NOTIFY_TIMER_INTERVAL_MIN, MAX_NOTIFY_TIMER_INTERVAL_MIN) * 60)
 }
 
-/// 解析「信号类通知最小间隔」：配置 `notify_signal_min_interval`（**分钟**）→ [`Duration`]。
+/// 解析「信号类通知最小间隔」：UCI `notify_signal_min_interval`（**分钟**）→ [`Duration`]。
 ///
 /// 与 `timer_interval_from` 同构，但**没有**「0 → 夹到下限」这一步：这里的 0 是
 /// 用户在界面上显式选择的「不限频」，把它当成没填而回落 60 分钟，等于用户的开关
@@ -680,13 +833,91 @@ fn signal_min_interval_from(values: &UciReader) -> Duration {
     Duration::from_secs(minutes.min(MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN) * 60)
 }
 
-/// 从配置存储读取；读取失败时返回默认配置，让服务仍能起来。
+/// 各类事件的默认门控：在 [`TypePushLimit::default`]（全关）基础上按类型区分
+/// 窗外默认策略——信号/存储满是非实时事件，默认 **drop**：开启时段后只推送
+/// 当前时段内产生的消息，不补发陈旧事件；短信/来电是实时事件，保持 defer
+/// 默认，行为不受影响（时段开关本身仍默认关闭，升级后行为不变）。
+fn default_limit_for(prefix: &str) -> TypePushLimit {
+    let mut d = TypePushLimit::default();
+    if prefix.ends_with("_memory") || prefix.ends_with("_signal") {
+        d.out_of_window = OutOfWindowAction::Drop;
+    }
+    d
+}
+
+/// 解析某一类推送的独立门控配置。
+///
+/// `prefix` 形如 `notify_limit_sms` / `notify_limit_call` / `notify_limit_memory` /
+/// `notify_limit_signal`，对应六项 UCI：`{prefix}_rate_enabled`、`{prefix}_min_interval`、
+/// `{prefix}_window_enabled`、`{prefix}_window_start`、`{prefix}_window_end`、
+/// `{prefix}_window_action`。缺省时回落 [`default_limit_for`]（开关全关；
+/// 窗外策略按类型区分），保证升级后既有行为不变。
+fn type_limit_from(values: &UciReader, prefix: &str) -> TypePushLimit {
+    let d = default_limit_for(prefix);
+    let rate_enabled = values.bool(&format!("{prefix}_rate_enabled"), d.rate_enabled);
+    let window_enabled = values.bool(&format!("{prefix}_window_enabled"), d.window_enabled);
+
+    // 间隔（分钟）：空/非法/负数回落默认；0 是合法的「不限频」；上限夹到 7 天。
+    let min_key = format!("{prefix}_min_interval");
+    let raw_min = values.str(&min_key, "").trim().to_string();
+    let min_interval = if raw_min.is_empty() {
+        d.min_interval
+    } else {
+        match raw_min.parse::<i64>() {
+            Ok(n) if n < 0 => {
+                log_warn!("{min_key} 是负数（{raw_min}），已回落默认 60 分钟");
+                d.min_interval
+            }
+            Ok(n) => Duration::from_secs((n as u64).min(MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN) * 60),
+            Err(_) => {
+                log_warn!("{min_key} 不是数字（{raw_min}），已回落默认 60 分钟");
+                d.min_interval
+            }
+        }
+    };
+
+    // 时段：格式非法时逐字段回落默认值（00:00 / 23:59），双端均非法时等效全天，
+    // 与巡检时段口径一致（笔误不至于让推送彻底静默；单端非法只影响该端）。
+    let start_key = format!("{prefix}_window_start");
+    let end_key = format!("{prefix}_window_end");
+    let raw_start = values.str(&start_key, &d.window_start);
+    let raw_end = values.str(&end_key, &d.window_end);
+    let window_start = if valid_hhmm(&raw_start) {
+        raw_start
+    } else {
+        log_warn!("{start_key} 格式非法（{raw_start}），已回落 {}", d.window_start);
+        d.window_start
+    };
+    let window_end = if valid_hhmm(&raw_end) {
+        raw_end
+    } else {
+        log_warn!("{end_key} 格式非法（{raw_end}），已回落 {}", d.window_end);
+        d.window_end
+    };
+
+    let action_key = format!("{prefix}_window_action");
+    let out_of_window = OutOfWindowAction::parse_with_default(
+        &values.str(&action_key, d.out_of_window.as_str()),
+        d.out_of_window,
+    );
+
+    TypePushLimit {
+        rate_enabled,
+        min_interval,
+        window_enabled,
+        window_start,
+        window_end,
+        out_of_window,
+    }
+}
+
+/// 从 UCI 读取配置；读取失败时返回默认配置，让服务仍能起来。
 pub async fn load_config() -> Config {
     let mut cfg = default_config();
-    let values = match configstore::read_map().await {
-        Ok(map) => UciReader::from_map(map),
+    let values = match uci_values().await {
+        Ok(v) => v,
         Err(e) => {
-            logger::emit(Level::Warn, "CFG", format_args!("读取配置文件失败，使用默认配置: {e}"));
+            logger::emit(Level::Warn, Category::Config, format_args!("读取 UCI 配置失败，使用默认配置: {e}"));
             return cfg;
         }
     };
@@ -729,31 +960,12 @@ pub async fn load_config() -> Config {
     // 下限 10 秒而不是默认 3 分钟：用户配置的小于 3 分钟的值不能被悄悄抬回。
     cfg.websocket.scan_timeout = values.seconds("cellscan_timeout", cfg.websocket.scan_timeout, Duration::from_secs(10));
 
-    // 独立 WebUI 的 HTTP 服务（Debian）：默认 9000 端口对外监听，开箱即用。
-    cfg.http.port = values.int("http_port", 9000).clamp(1, 65535) as u16;
-    cfg.http.bind = {
-        let b = values.str("http_bind", "0.0.0.0");
-        if b.is_empty() { "0.0.0.0".to_string() } else { b }
-    };
-    cfg.http.web_root = {
-        let w = values.str("web_root", "");
-        if w.is_empty() {
-            std::env::var("MT5700_WEBROOT").unwrap_or_else(|_| DEFAULT_WEB_ROOT.to_string())
-        } else {
-            w
-        }
-    };
-    // 认证密钥：auth_key（新）与 websocket_auth_key（兼容旧配置键）取其一
-    {
-        let k = values.str("auth_key", "");
-        cfg.http.auth_key = if k.is_empty() { values.str("websocket_auth_key", "") } else { k };
-    }
-
     // 企业微信推送开关：默认关闭。历史上「webhook 非空即启用」曾把脏数据
     // （值里带引号字符的伪 URL）当成已配置地址，每次通知都白跑三轮重试。
     // 现在改为显式开关，默认关，与 QQ 各自独立。
     cfg.notification.wechat_enabled = values.bool("wechat_enabled", false);
     cfg.notification.wechat_webhook = values.str("wechat_webhook", "");
+    cfg.notification.wechat_msg_format = WechatMsgFormat::from_uci(&values.str("wechat_msg_format", "text"));
     cfg.notification.log_file = values.str("log_file", "");
     // 通知日志文件上限：默认 256 KiB；填 0/负数/过小值都回落到默认，
     // 避免用户手填一个「1」把日志直接废掉。
@@ -763,6 +975,16 @@ pub async fn load_config() -> Config {
     } else {
         crate::ringlog::DEFAULT_MAX_LOG_FILE_BYTES
     };
+    // 插件日志文件（业务类日志的落盘去处，与上面的通知日志是两个文件）。
+    // 下限同样是 4096：用户手填一个「1」会让每条日志都触发一次整文件裁剪。
+    cfg.log.plugin_file_enabled = values.bool("log_plugin_file_enabled", true);
+    cfg.log.plugin_file = values.str("log_plugin_file", "");
+    let plugin_max = values.int("log_plugin_max_bytes", crate::logger::DEFAULT_PLUGIN_LOG_BYTES as i64);
+    cfg.log.plugin_file_max_bytes = if plugin_max >= 4096 {
+        plugin_max as u64
+    } else {
+        crate::logger::DEFAULT_PLUGIN_LOG_BYTES
+    };
     cfg.notification.types = NotifyTypes {
         sms: values.bool("notify_sms", true),
         call: values.bool("notify_call", true),
@@ -771,7 +993,7 @@ pub async fn load_config() -> Config {
     };
 
     // QQ 机器人推送：密钥优先取环境变量（QQ_BOT_APP_ID / QQ_BOT_APP_SECRET），
-    // 避免敏感凭据硬编码进配置文件；环境变量为空时回落配置文件。
+    // 避免敏感凭据硬编码进 UCI 配置；环境变量为空时回落 UCI。
     let qq_app_id = env_nonempty("QQ_BOT_APP_ID");
     let qq_app_secret = env_nonempty("QQ_BOT_APP_SECRET");
     cfg.notification.qq = QqNotifyConfig {
@@ -784,7 +1006,7 @@ pub async fn load_config() -> Config {
         // 消息格式：auto=富文本优先、失败回落纯文本（默认）
         msg_format: values.str("qq_msg_format", "auto"),
         keyboard_enabled: values.bool("qq_keyboard_enabled", false),
-        // 键盘跳转地址：留空时由 qqpush 从本机地址推导
+        // 键盘跳转地址：留空时由 qqpush 从 network.lan.ipaddr 推导
         keyboard_url: values.str("qq_keyboard_url", ""),
         menu_enabled: values.bool("qq_menu_enabled", false),
         // 通道节流（条/分钟）：0 = 不节流；负数与超限都夹进合法范围
@@ -799,7 +1021,16 @@ pub async fn load_config() -> Config {
     // 信号类通知（网络切换提醒 / 信号变动 / 巡检报告）的最小间隔：防刷屏。
     cfg.notification.signal_min_interval = signal_min_interval_from(&values);
 
-    // 自定义推送文案：配置文件里存单行转义文本，空值回落内置默认，保证升级后行为不变。
+    // 每种推送类型独立的频率/时段门控。数组顺序必须与 NotifyKind 的判别顺序一致：
+    // Sms=0 / Call=1 / MemoryFull=2 / Signal=3（见 notify.rs 的 NotifyKind::index）。
+    cfg.notification.limits = [
+        type_limit_from(&values, "notify_limit_sms"),
+        type_limit_from(&values, "notify_limit_call"),
+        type_limit_from(&values, "notify_limit_memory"),
+        type_limit_from(&values, "notify_limit_signal"),
+    ];
+
+    // 自定义推送文案：UCI 存单行转义文本，空值回落内置默认，保证升级后行为不变。
     let tpl = |key: &str, def: &str| -> String {
         let v = values.str(key, "");
         if v.trim().is_empty() {
@@ -815,7 +1046,6 @@ pub async fn load_config() -> Config {
         call: tpl("notify_tpl_call", DEFAULT_TPL_CALL),
         memory_full: tpl("notify_tpl_memory", DEFAULT_TPL_MEMORY),
         signal: tpl("notify_tpl_signal", DEFAULT_TPL_SIGNAL),
-        batch: tpl("notify_tpl_batch", DEFAULT_TPL_BATCH),
         qq_sms_md: tpl("notify_tpl_qq_sms_md", DEFAULT_QQ_SMS_MD),
     };
 
@@ -909,7 +1139,7 @@ mod tests {
 
     #[test]
     fn unescape_template_restores_known_escapes() {
-        // 配置文件里存的是单行转义文本，读取时必须还原为真实换行/制表/反斜杠
+        // UCI 里存的是单行转义文本，读取时必须还原为真实换行/制表/反斜杠
         assert_eq!(
             unescape_template("第一行\\n第二行\\t\\\\ 结束"),
             "第一行\n第二行\t\\ 结束"
@@ -937,7 +1167,6 @@ mod tests {
         assert!(t.call.contains("{content}"));
         assert!(t.signal.contains("{content}"));
         assert!(!t.memory_full.is_empty());
-        assert!(!t.batch.is_empty());
         // v1.28.0：前缀统一为 {time} {count}，各模板不再自带装饰前缀
         assert_eq!(t.prefix, "{time} {count}");
         assert!(!t.sms.contains("喵呜"), "默认短信模板不应带装饰前缀: {}", t.sms);
@@ -951,8 +1180,8 @@ mod tests {
 
     #[test]
     fn notify_timer_interval_bounds_are_ordered() {
-        assert!(MIN_NOTIFY_TIMER_INTERVAL_MIN <= DEFAULT_NOTIFY_TIMER_INTERVAL_MIN);
-        assert!(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN <= MAX_NOTIFY_TIMER_INTERVAL_MIN);
+        const { assert!(MIN_NOTIFY_TIMER_INTERVAL_MIN <= DEFAULT_NOTIFY_TIMER_INTERVAL_MIN) };
+        const { assert!(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN <= MAX_NOTIFY_TIMER_INTERVAL_MIN) };
         // 默认 10 分钟：定时推送是主动推送，太密会变成噪音
         assert_eq!(DEFAULT_NOTIFY_TIMER_INTERVAL_MIN, 10);
         // 上限 24 小时 = 1440 分钟
@@ -1031,6 +1260,98 @@ mod tests {
     }
 
     #[test]
+    fn type_limit_defaults_are_all_off() {
+        // 未配置任何新键的老设备：四类门控全关，行为与改造前一致。
+        let l = type_limit_from(&uci_of(&[]), "notify_sms");
+        assert!(!l.rate_enabled);
+        assert!(!l.window_enabled);
+        assert_eq!(l.min_interval.as_secs(), 3600);
+        assert_eq!(l.window_start, "00:00");
+        assert_eq!(l.window_end, "23:59");
+        assert_eq!(l.out_of_window, OutOfWindowAction::Defer);
+    }
+
+    /// 窗外默认策略按类型区分：信号/存储满默认 drop（只推送当前时段的消息，
+    /// 不补发陈旧事件）；短信/来电保持 defer，实时行为不受影响。
+    #[test]
+    fn window_action_defaults_are_per_kind() {
+        use OutOfWindowAction::*;
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_sms").out_of_window, Defer);
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_call").out_of_window, Defer);
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_memory").out_of_window, Drop);
+        assert_eq!(type_limit_from(&uci_of(&[]), "notify_limit_signal").out_of_window, Drop);
+
+        // default_config 与 UCI 解析同源：索引顺序 Sms/Call/MemoryFull/Signal
+        let cfg = default_config();
+        assert_eq!(cfg.notification.limits[0].out_of_window, Defer);
+        assert_eq!(cfg.notification.limits[1].out_of_window, Defer);
+        assert_eq!(cfg.notification.limits[2].out_of_window, Drop);
+        assert_eq!(cfg.notification.limits[3].out_of_window, Drop);
+        // 开关仍默认全关：升级后行为不变
+        assert!(cfg.notification.limits.iter().all(|l| !l.rate_enabled && !l.window_enabled));
+
+        // 显式配置优先于默认；非法值回落**本类**默认而非一刀切 defer
+        let explicit = type_limit_from(
+            &uci_of(&[("notify_limit_signal_window_action", "defer")]),
+            "notify_limit_signal",
+        );
+        assert_eq!(explicit.out_of_window, Defer);
+        let garbage = type_limit_from(
+            &uci_of(&[("notify_limit_signal_window_action", "xx")]),
+            "notify_limit_signal",
+        );
+        assert_eq!(garbage.out_of_window, Drop);
+        let garbage_sms = type_limit_from(
+            &uci_of(&[("notify_limit_sms_window_action", "xx")]),
+            "notify_limit_sms",
+        );
+        assert_eq!(garbage_sms.out_of_window, Defer);
+    }
+
+    #[test]
+    fn type_limit_parses_rate_and_window() {
+        let l = type_limit_from(
+            &uci_of(&[
+                ("notify_call_rate_enabled", "1"),
+                ("notify_call_min_interval", "15"),
+                ("notify_call_window_enabled", "1"),
+                ("notify_call_window_start", "22:00"),
+                ("notify_call_window_end", "06:00"),
+                ("notify_call_window_action", "drop"),
+            ]),
+            "notify_call",
+        );
+        assert!(l.rate_enabled);
+        assert_eq!(l.min_interval.as_secs(), 15 * 60);
+        assert!(l.window_enabled);
+        assert_eq!(l.window_start, "22:00");
+        assert_eq!(l.window_end, "06:00");
+        assert_eq!(l.out_of_window, OutOfWindowAction::Drop);
+    }
+
+    #[test]
+    fn type_limit_rejects_bad_values() {
+        // 负数间隔 / 非法时段 → 回落默认；0 间隔保留（表示不限频）；超限夹到 7 天。
+        let l = type_limit_from(
+            &uci_of(&[
+                ("notify_memory_min_interval", "-5"),
+                ("notify_memory_window_start", "25:99"),
+                ("notify_memory_window_end", "xx"),
+            ]),
+            "notify_memory",
+        );
+        assert_eq!(l.min_interval.as_secs(), 3600);
+        assert_eq!(l.window_start, "00:00");
+        assert_eq!(l.window_end, "23:59");
+
+        let zero = type_limit_from(&uci_of(&[("notify_sms_min_interval", "0")]), "notify_sms");
+        assert!(zero.min_interval.is_zero());
+
+        let huge = type_limit_from(&uci_of(&[("notify_sms_min_interval", "999999")]), "notify_sms");
+        assert_eq!(huge.min_interval.as_secs(), MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN * 60);
+    }
+
+    #[test]
     fn signal_min_interval_defaults_to_one_hour() {
         // 没配过这个键的老设备：升级后直接获得「一小时内最多一条」，
         // 而不是继续按巡检间隔刷屏 —— 这一版的修复目标本身。
@@ -1074,11 +1395,11 @@ mod tests {
     fn push_rate_defaults_are_sane_against_qq_platform_limits() {
         // 默认值必须真的能防刷屏：一小时一条
         assert_eq!(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN, 60);
-        assert!(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN <= MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN);
+        const { assert!(DEFAULT_NOTIFY_SIGNAL_MIN_INTERVAL_MIN <= MAX_NOTIFY_SIGNAL_MIN_INTERVAL_MIN) };
         // QQ 节流默认值必须压在平台频控（单关系 20 条/分钟、群 30~60 条/分钟）以下，
         // 否则「防拒收」这个目的达不到。
-        assert!(DEFAULT_QQ_MAX_PER_MIN > 0 && DEFAULT_QQ_MAX_PER_MIN < 20);
-        assert!(DEFAULT_QQ_MAX_PER_MIN <= MAX_QQ_MAX_PER_MIN);
+        const { assert!(DEFAULT_QQ_MAX_PER_MIN > 0 && DEFAULT_QQ_MAX_PER_MIN < 20) };
+        const { assert!(DEFAULT_QQ_MAX_PER_MIN <= MAX_QQ_MAX_PER_MIN) };
         // 换算成最小发送间隔：10 条/分钟 = 每条至少 6 秒（整数除法，宁可更保守）
         assert_eq!(60 / DEFAULT_QQ_MAX_PER_MIN, 6);
     }
@@ -1112,11 +1433,11 @@ mod tests {
 
     #[test]
     fn poll_bounds_are_ordered() {
-        assert!(MIN_NOTIFY_POLL_INTERVAL_SECS <= DEFAULT_NOTIFY_POLL_INTERVAL_SECS);
-        assert!(DEFAULT_NOTIFY_POLL_INTERVAL_SECS <= MAX_NOTIFY_POLL_INTERVAL_SECS);
+        const { assert!(MIN_NOTIFY_POLL_INTERVAL_SECS <= DEFAULT_NOTIFY_POLL_INTERVAL_SECS) };
+        const { assert!(DEFAULT_NOTIFY_POLL_INTERVAL_SECS <= MAX_NOTIFY_POLL_INTERVAL_SECS) };
         // 30 秒下限的意义：QQ 主动消息频控是单关系 20 条/分钟，
         // 间隔比这更密就算每次都推也发不出去，只会被频控拦掉。
-        assert!(MIN_NOTIFY_POLL_INTERVAL_SECS >= 30);
+        const { assert!(MIN_NOTIFY_POLL_INTERVAL_SECS >= 30) };
         assert!(MIN_NOTIFY_POLL_DELTA_DB <= DEFAULT_SIGNAL_DELTA_DB as i64);
         assert!(DEFAULT_SIGNAL_DELTA_DB as i64 <= MAX_NOTIFY_POLL_DELTA_DB);
     }

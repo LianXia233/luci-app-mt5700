@@ -1,0 +1,7 @@
+[toolchain]
+# 构建版本单一来源：本地、CI 与 OpenWrt SDK 容器都读这一行。
+# 升级时同步更新 scripts/sdk-build.sh 的 rustup 安装逻辑并跑全量测试。
+channel = "1.98.0"
+profile = "minimal"
+# CI 的 clippy 门禁需要该组件；本地 rustup 会自动安装。
+components = ["clippy"]

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 异步状态缓存（Async State Cache）。
 //!
 //! 目标（对应 MT5700 异步化架构的「状态采集异步化 / 数据缓存异步更新 / 请求去重」）：
@@ -238,7 +241,7 @@ impl StateCache {
 
             let connected = self.client.connected();
             if !connected && loop_state.prev_connected {
-                log_warn!("模组连接断开，清空状态缓存");
+                log_warn!(Cat::At, "模组连接断开，清空状态缓存");
                 self.clear().await;
             }
             loop_state.prev_connected = connected;

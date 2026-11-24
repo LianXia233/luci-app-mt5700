@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! QQ 机器人 openid 自动绑定。
 //!
 //! 背景：QQ 开放平台出于隐私设计，不提供「QQ 号 → openid」的转换接口，
@@ -5,7 +8,7 @@
 //! 本模块实现「绑定模式」：用户在配置里把目标类型设为 `bind` 并填上自己的
 //! QQ 号（仅作标签），服务启动后直连官方网关监听事件；用户给机器人发一条
 //! 消息，收到 `C2C_MESSAGE_CREATE`（或 `GROUP_AT_MESSAGE_CREATE`）即完成
-//! 绑定——openid 写回配置并热替换推送通道，无需重启。
+//! 绑定——openid 写回 UCI 并热替换推送通道，无需重启。
 //!
 //! 网关协议（v2）：wss 连接 → Hello(op=10, 含心跳间隔) → Identify(op=2) →
 //! READY(op=0, t=READY) → 周期心跳(op=1, d=最近事件序号)。
@@ -225,17 +228,34 @@ pub async fn run_bind(
     }
 }
 
-/// 把绑定结果写回配置并落盘；返回是否全部成功。
-///
-/// Debian 分支没有 `uci`，写的是 JSON 扁平键值配置（见 [`crate::configstore`]）。
-pub async fn persist_config(target: &BindTarget) -> Result<(), String> {
-    let mut patch = crate::configstore::ConfigMap::new();
-    patch.insert("qq_target_type".to_string(), target.target_type.clone());
-    patch.insert("qq_target_id".to_string(), target.target_id.clone());
-    crate::configstore::update(patch)
+/// 把绑定结果写回 UCI 并 commit；返回是否全部成功。
+pub async fn persist_uci(target: &BindTarget) -> Result<(), String> {
+    let cmds: [(&str, &str); 2] = [
+        ("qq_target_type", &target.target_type),
+        ("qq_target_id", &target.target_id),
+    ];
+    for (k, v) in cmds {
+        run_cmd("uci", &["set", &format!("at-webserver.config.{k}={v}")]).await?;
+    }
+    run_cmd("uci", &["commit", "at-webserver"]).await?;
+    Ok(())
+}
+
+pub(crate) async fn run_cmd(prog: &str, args: &[&str]) -> Result<(), String> {
+    let out = tokio::process::Command::new(prog)
+        .args(args)
+        .output()
         .await
-        .map(|_| ())
-        .map_err(|e| format!("写入 QQ 绑定结果失败: {e}"))
+        .map_err(|e| format!("执行 {prog} {args:?} 失败: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{prog} {args:?} 退出码 {:?}: {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
 }
 
 async fn fetch_gateway(token: &str) -> Result<String, String> {

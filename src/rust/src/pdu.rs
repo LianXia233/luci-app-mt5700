@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! SMS PDU 编解码。
 //!
 //! 解码侧负责 SMS-DELIVER（模组收进来、我们用 `AT+CMGR` / `AT+CMGL` 读出来的东西）：
@@ -14,8 +17,9 @@
 // 老版本 OpenWrt 自带的 Rust 工具链会直接编译失败。可移植性优先于 lint。
 #![allow(clippy::manual_div_ceil, clippy::manual_is_multiple_of)]
 
+use crate::localtime;
 use crate::nettime;
-use chrono::DateTime;
+use chrono::{DateTime, TimeZone};
 
 /// 3GPP TS 23.038 默认字母表（按码位索引）。
 const GSM7_ALPHABET: &str = concat!(
@@ -121,7 +125,7 @@ pub struct PartialInfo {
 pub struct Sms {
     pub sender: String,
     pub content: String,
-    pub date: DateTime<nettime::Tz>,
+    pub date: DateTime<localtime::Tz>,
     pub partial: Option<PartialInfo>,
 }
 
@@ -210,7 +214,7 @@ fn timezone_offset_minutes(tz: u8) -> i32 {
     }
 }
 
-fn decode_timestamp(ts: &[u8]) -> DateTime<nettime::Tz> {
+fn decode_timestamp(ts: &[u8]) -> DateTime<localtime::Tz> {
     if ts.len() < 7 {
         return nettime::now();
     }
@@ -234,7 +238,7 @@ fn decode_timestamp(ts: &[u8]) -> DateTime<nettime::Tz> {
         None => return nettime::now(),
     };
     let utc = naive_wall - chrono::Duration::minutes(timezone_offset_minutes(ts[6]) as i64);
-    nettime::from_utc(&utc)
+    TimeZone::from_utc_datetime(&localtime::offset(), &utc)
 }
 
 /// 解码 BCD 电话号码，digits 为号码位数。
@@ -391,7 +395,7 @@ pub struct StoredSms {
     pub number: String,
     pub content: String,
     /// 时刻；SUBMIT 在没有绝对有效期时没有发送时刻，为 None。
-    pub time: Option<DateTime<nettime::Tz>>,
+    pub time: Option<DateTime<localtime::Tz>>,
     /// true 表示时刻来自 TP-VP 有效期，而不是真正的发送时刻。
     pub time_approx: bool,
     pub partial: Option<PartialInfo>,
@@ -1121,7 +1125,6 @@ fn monotonic_seed() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     // 发送方 13800138000，时间戳 2025-08-25 12:00:00，UCS2 正文 "测试"。
     const UCS2_PDU: &str = "00040B913108108300F0000852805221000023046D4B8BD5";
@@ -1147,7 +1150,7 @@ mod tests {
         assert_eq!(sms.content, "测试");
         // SCTS 是「短信中心本地时间 2025-08-25 12:00:00，偏移 +08:00」，
         // 绝对时刻为 04:00 UTC。期望值必须按中心时区构造：早先用设备时区
-        // （nettime::from_ymdhms）换算，只有设备恰好也在东八区时才成立，
+        // （localtime::from_ymdhms）换算，只有设备恰好也在东八区时才成立，
         // 换到 UTC 环境就会误报。
         let center = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
         let want = center

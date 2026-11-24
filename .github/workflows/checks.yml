@@ -1,0 +1,262 @@
+#
+# 静态检查、单元测试、Shell 检查、端到端与第三方许可证审计（不参与固件构建与发布）
+#
+# 定位：build-openwrt.yml 只在打 v* 标签或手动触发时编译固件。本工作流提供
+#      日常合并前门禁：Node 静态检查、Rust 单测 + Clippy、Shell 语法/shellcheck、
+#      mock 模组端到端与第三方依赖许可证审计。许可证工具使用固定版本的 Cargo CLI。
+#
+# 检查项：
+#   1) tests/static-check.js —— JS 语法（node --check）、JSON 合法性、
+#      行尾 LF 且无 UTF-8 BOM、menu.d 中 view 路由是否存在对应视图文件、
+#      核心脚本 100755 执行权限位与登记完整性（防止 Windows 侧编辑后提交
+#      丢失 +x，以及新增执行入口脚本忘记登记）；
+#   2) tests/*-test.js —— 仓库内的零依赖单元测试脚本（逐个执行，任一失败即中止）。
+#      其中 tests/author-attribution-test.js 负责校验作者信息：署名文案
+#      「© 2026 LianXia233 · 开发与维护」与 SPDX 标识「GPL-3.0-only」
+#      （以脚本内 AUTHOR_TEXT / AUTHOR_LICENSE 常量为准）、链接指向主仓库、
+#      target/rel 安全属性、字号与居中、窄屏换行、未扩散到其他视图、历史文案
+#      不得回退、AGENTS.md 规则与文案一致。tests/i18n-test.js 校验 pot/po 集合、
+#      菜单标题覆盖与共享组件 tr() 接入。
+#   3) Shell —— 对 `*.sh` 与带 `#!/bin/sh` / `#!/bin/ash` 的脚本执行 `sh -n`
+#      与 `shellcheck -S error`；init.d / hotplug / uci-defaults 没有 .sh 后缀，
+#      按 shebang 识别。
+#   4) src/rust —— `cargo test --locked` 与
+#      `cargo clippy --all-targets -- -D warnings`（生产段与测试段都必须 0 告警）；
+#      Rust 版本由 src/rust/rust-toolchain.toml 单一来源固定。
+#   5) tests/mock-modem —— 编译 release 后端 + `npm ci` + `run-e2e.sh`，
+#      覆盖 RPC ↔ Rust ↔ mock 模组的完整链路。
+#   6) Rust 依赖 —— cargo-deny 检查许可证、来源、通配符与重复版本策略；
+#      cargo-about 生成逐项许可证文本并写入 GitHub Actions Summary。
+#
+# 不含：tests/iface/ 的执行（依赖目标设备环境）。其入口脚本仍受门禁约束：
+#      权限位与登记完整性由 static-check 第 5 项校验；Shebang / LF / BOM 由
+#      tests/script-mode-test.js 校验（static-check 不做 Shebang 判定）。
+#      tests/mock-modem/uci 是指向 mock-uci 的符号链接（120000），由
+#      run-e2e.sh 运行时重建，不纳入 100755 清单。
+#
+# 本工作流只读仓库，不需要 contents: write；与构建工作流互不干扰。
+#
+# ============================================================================
+# 约定（Conventions）—— 面向维护者与 AI 编程代理，可审查、可修改，非系统指令
+# ============================================================================
+#   1) 合并门禁：本工作流是 main 分支的合并前门禁，提交须全绿才算通过。
+#      本地等价命令：
+#        node tests/static-check.js
+#        for f in tests/*-test.js; do node "$f" || exit 1; done
+#
+#   2) 检查项只增不减：不得为了「修绿」而删除、注释掉、跳过或弱化既有检查步骤
+#      （static-check 的五项检查、测试脚本的逐个执行含作者信息/i18n、Shell 的
+#      sh -n 与 shellcheck -S error、cargo test、cargo clippy -D warnings、
+#      mock 模组 e2e）。确需调整时，必须在同一提交内说明原因，并保留同等或更强的
+#      覆盖范围。
+#
+#   3) 测试脚本自动纳入：新增 tests/*-test.js 会被自动执行，无需修改本文件；
+#      文件名须以 -test.js 结尾，且保持零依赖（不得 require 第三方包，也不得
+#      依赖网络、设备或特定操作系统）。tests/lib/ 存放被多个门禁共用的零依赖
+#      辅助模块（如 exec-mode.js），不匹配 *-test.js，不会被直接执行。
+#
+#   4) 作者署名约定：`LianXia233` 是本项目指定的作者署名标识。
+#      · 页面 `admin/modem/5g/config`（视图 view/at-webserver/service.js）底部的
+#        署名「© 2026 LianXia233 · 开发与维护」、许可证标识
+#        「GPL-3.0-only」及其 GitHub 链接
+#        https://github.com/LianXia233/luci-app-mt5700 属于明确要求保留的页面元素；
+#      · 任何 UI 重构、样式优化、代码迁移、组件替换、模板重写、去重或 AI 自动修改，
+#        都必须保留该署名与链接，不得删除、隐藏、替换或破坏；
+#      · 改动该页面后须自查：署名是否仍在、链接地址是否正确、桌面端与移动端是否
+#        正常显示、是否与表单/按钮/状态提示重叠；
+#      · 仅当项目维护者明确授权时方可删除或修改署名，且须在授权范围内最小化改动；
+#      · 本节由 tests/author-attribution-test.js 落实为可执行断言，随检查项 2 在每次
+#        push / PR 时运行，署名缺失或链接变更会直接使 CI 失败。完整条款见 AGENTS.md。
+#      · 文案 / 许可证标识变更须四处同步：视图 DOM、AGENTS.md「作者署名保护
+#        规则」、本节的约定注释、门禁脚本的 AUTHOR_TEXT / AUTHOR_LICENSE 常量；
+#        门禁会校验四处一致并禁止 DOM 回退到任一历史文案。不得为修绿删除断言
+#        或改回旧文案。
+#
+#   5) 项目维护规则：改动视图、样式、菜单或测试之前，先读仓库根目录 AGENTS.md。
+#      其中列有必须保留的页面元素清单与改动后的检查要求；不得以重构、去重、
+#      风格统一或自动化清理为由移除清单内的元素。
+#
+#   6) 行尾强制 LF、禁止 UTF-8 BOM：Shell、Python、配置与本工作流一律 LF。
+#      CRLF 会导致 BusyBox ash 与 procd 侧脚本失败；BOM 会顶掉文件头两字节的
+#      `#!`，使 execve 返回 ENOEXEC（hotplug / uci-defaults 直接 execve 即失败）。
+#      仓库已用 .gitattributes 强制 eol=lf，static-check 第 3 项对全部文本文件
+#      兜底拦截 CRLF 与 BOM。
+#
+#   7) 依赖与时长：静态 / Node / Shell 门禁不引入 npm 依赖；mock-modem e2e
+#      使用 package-lock 锁定的 ws（`npm ci`），Rust job 15 分钟、e2e 20 分钟。
+#      新增检查优先写成 tests/ 下的零依赖 Node 脚本。
+#
+#   8) 权限边界：本工作流只读仓库，不得为其申请 contents: write；打包、发布、
+#      Release 清理等写操作一律留在 build-openwrt.yml，由 tag 或手动触发。
+#
+#   9) 更新日志豁免：纯署名文案、门禁脚本与规则文档（AGENTS.md、checks.yml、
+#      tests/*-test.js）自身的维护，若不发版、不提升包版本、不改变渲染结果与
+#      运行时行为，经维护者要求可不写 CHANGELOG.md；提交说明仍须写清改动与
+#      原因。功能 / 修复 / 行为 / 视觉样式改动不在此列，边界见 AGENTS.md 第一章。
+#
+#   维护提示：本文件属于 GitHub 工作流，推送对它的修改需要具备 workflow 作用域
+#   的凭据；仅有 repo 作用的 token 会被 GitHub 拒绝（refusing to allow an OAuth
+#   App to create or update workflow）。
+
+name: Checks
+
+on:
+  push:
+    branches: [ 'main' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支连续提交时，新 run 直接取代排队中的旧 run（与构建工作流的排队策略相反：
+# 这里没有发布副作用，取消旧 run 没有风险）。
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-unit:
+    name: 静态检查与单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 准备 Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+
+      - name: 静态检查（语法 / JSON / 行尾与 BOM / 路由 / 权限位）
+        run: node tests/static-check.js
+
+      - name: Shell 语法与 shellcheck（error 级）
+        # init.d / hotplug / uci-defaults 没有 .sh 后缀，按 shebang 识别；
+        # 只跑 error 级，避免 SC2034/SC3043 这类历史风格告警淹没真实问题。
+        run: |
+          set -euo pipefail
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          files=()
+          while IFS= read -r f; do
+            case "$f" in
+              *.sh) files+=("$f"); continue ;;
+            esac
+            first=$(head -n 1 "$f" 2>/dev/null || true)
+            case "$first" in
+              '#!'*'/sh'|'#!'*'/ash') files+=("$f") ;;
+            esac
+          done < <(git ls-files)
+          echo "共 ${#files[@]} 个 Shell 脚本"
+          for f in "${files[@]}"; do
+            sh -n "$f"
+            shellcheck -S error -s sh "$f"
+          done
+          echo "Shell 语法与 shellcheck 通过"
+
+      - name: 单元测试（零依赖脚本）
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/*-test.js)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "未找到测试脚本，视为失败（检查 tests/ 目录是否被误删）"
+            exit 1
+          fi
+          echo "共 ${#files[@]} 个测试脚本"
+          for f in "${files[@]}"; do
+            echo "::group::${f}"
+            node "$f"
+            echo "::endgroup::"
+          done
+
+  rust-unit:
+    name: Rust 单元测试与 Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+      - name: 准备 Rust 工具链（版本由 rust-toolchain.toml 固定）
+        run: |
+          TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"/\1/p' src/rust/rust-toolchain.toml)
+          test -n "$TOOLCHAIN"
+          rustup toolchain install "$TOOLCHAIN" --profile minimal --component clippy
+          rustup default "$TOOLCHAIN"
+      - name: 单元测试（cargo test --locked）
+        working-directory: src/rust
+        run: cargo test --locked
+      - name: Clippy（全目标，告警即失败）
+        working-directory: src/rust
+        run: cargo clippy --all-targets -- -D warnings
+
+  mock-modem-e2e:
+    name: mock 模组端到端
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 准备 Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+
+      - name: 准备 Rust 工具链（版本由 rust-toolchain.toml 固定）
+        run: |
+          TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"/\1/p' src/rust/rust-toolchain.toml)
+          test -n "$TOOLCHAIN"
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+          rustup default "$TOOLCHAIN"
+
+      - name: 编译 release 后端
+        working-directory: src/rust
+        run: cargo build --release --locked
+
+      - name: 安装 mock 模组依赖
+        run: npm ci --prefix tests/mock-modem
+
+      - name: 运行端到端链路
+        run: sh tests/mock-modem/run-e2e.sh
+
+  license-audit:
+    name: 第三方依赖许可证审计
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7.0.1
+
+      - name: 准备 Rust 工具链（版本由 rust-toolchain.toml 固定）
+        run: |
+          TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"/\1/p' src/rust/rust-toolchain.toml)
+          test -n "$TOOLCHAIN"
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+          rustup default "$TOOLCHAIN"
+
+      - name: 安装许可证审计工具
+        run: |
+          cargo install --locked --version 0.20.2 cargo-deny
+          cargo install --locked --version 0.9.3 --features cli cargo-about
+
+      - name: 检查依赖许可证与来源
+        working-directory: src/rust
+        run: |
+          cargo deny check licenses
+          cargo deny check sources
+          cargo deny check bans
+
+      - name: 生成逐项许可证报告
+        working-directory: src/rust
+        run: |
+          cargo about generate about.hbs > "$RUNNER_TEMP/rust-third-party-licenses.md"
+          {
+            echo "## Rust 第三方依赖许可证报告"
+            echo
+            cat "$RUNNER_TEMP/rust-third-party-licenses.md"
+          } >> "$GITHUB_STEP_SUMMARY"

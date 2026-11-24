@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 定时锁频调度器：按时段切换 LTE/NR 锁频，可选切换飞行模式；
 //! 长时间无服务时自动解锁恢复，并推送通知。
 
@@ -271,7 +274,7 @@ impl Scheduler {
     }
 
     /// 当前时刻应该使用的模式，"" 表示不锁频。
-    async fn target_mode(&self, now: chrono::DateTime<crate::nettime::Tz>) -> String {
+    async fn target_mode(&self, now: chrono::DateTime<crate::localtime::Tz>) -> String {
         let s = self.state.read().await;
         let night = is_night(&s.cfg, now);
         match (night && s.cfg.night_enabled, !night && s.cfg.day_enabled) {
@@ -559,7 +562,7 @@ fn unlock_config() -> LockPair {
  * 这里起止相等时 `cur >= start && cur < end` 恒为假，等于夜间档不生效。
  * 两者各自成立：调度端点是模式切换时刻（不该重复命中），巡检窗口要含末分钟。
  */
-fn is_night(cfg: &ScheduleConfig, now: chrono::DateTime<crate::nettime::Tz>) -> bool {
+fn is_night(cfg: &ScheduleConfig, now: chrono::DateTime<crate::localtime::Tz>) -> bool {
     let (Some(start), Some(end)) = (parse_hhmm(&cfg.night_start), parse_hhmm(&cfg.night_end)) else {
         log_warn!("夜间时段配置无法解析: {:?}-{:?}", cfg.night_start, cfg.night_end);
         return false;

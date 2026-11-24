@@ -1,3 +1,6 @@
+// Copyright (C) 2026 LianXia233
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! 网络时间源（NTP）：**优先从 NTP 服务器取时间，取不到就退回设备时钟**。
 //!
 //! # 为什么单独成模块
@@ -17,8 +20,8 @@
 //!     它不受 NTP 校正的跳变影响；
 //!   - 本模块内部（它自己就是时间源）。
 //!
-//! `tests` 里有一条源码级回归用例盯着这条约定：除 `nettime.rs` 之外的任何源文件
-//! 出现 `chrono::Local` / `chrono::Utc::now()` / `SystemTime::now()`，测试直接失败。
+//! `tests` 里有一条源码级回归用例盯着这条约定：除 `localtime.rs` / `nettime.rs`
+//! 之外的任何源文件里出现 `chrono::Utc::now()`，测试直接失败。
 //!
 //! # 同步节奏
 //!
@@ -42,27 +45,26 @@
 //! 期间 [`now`] / [`now_ts`] / [`now_ms`] 一律是「设备时钟 + 偏移」的本地计算，
 //! **零网络开销**。
 //!
-//! # 时间口径（Debian）
+//! # 时间口径
 //!
 //! | 层次 | 取值 | 失败回退 |
 //! |:--|:--|:--|
-//! | UTC 时刻 | NTP（三个服务器依次尝试） | 设备时钟 |
-//! | 本地时区 | **`chrono::Local`**（Debian 自带 tzdata，读 `/etc/localtime` 与 `TZ`） | 系统默认 |
+//! | UTC 时刻 | NTP（三个服务器依次尝试） | 设备时钟（[`crate::localtime::now`]） |
+//! | 本地时区 | 系统时区（`/etc/TZ` → uci），见 [`crate::localtime`] | 北京时间 UTC+8 |
 //!
-//! 即：**时刻**优先 NTP、**时区**读设备的系统设置，两者正交。
-//! 与 main 分支（OpenWrt 无 tzdata，自研 `localtime` 解析 POSIX TZ 串）不同，
-//! Debian 上时区这件事系统已经做好了，本模块不重复实现一套解析。
+//! 即：**时刻**优先 NTP、**时区**优先 OpenWrt 系统设置，两者正交。
+//! 时区解析仍全部复用 `localtime`，本模块不重复实现一套。
+//!
+//! # 为什么不用 chrono::Local
+//!
+//! 同 `localtime` 的结论：本固件不带 tzdata、守护进程也没有 `TZ` 环境变量，
+//! `chrono::Local` 会静默退化成 UTC。全仓库约定除 `localtime` 外不许出现它。
 
 use crate::{log_debug, log_info, log_warn};
-use chrono::{DateTime, Local, Offset, TimeZone};
+use chrono::DateTime;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::net::UdpSocket;
-
-/// 本分支的时间类型：**`chrono::Local`**（系统时区由 tzdata 解析）。
-///
-/// 与既有代码（schedule / pdu 等）使用的 `DateTime<Local>` 完全一致。
-pub type Tz = Local;
 
 /// NTP 服务器列表（按序尝试，取第一个应答的）。
 ///
@@ -144,14 +146,15 @@ pub fn source_name() -> &'static str {
 ///
 /// 只在对时逻辑内部使用：算偏移必须用原始设备时钟，否则偏移会自我叠加。
 fn device_ts() -> i64 {
-    Local::now().timestamp()
+    crate::localtime::now().timestamp()
 }
 
 /// 当前 unix 秒（已叠加 NTP 偏移；未同步时即设备时钟）。
 ///
-/// NTP 只校正「时刻」，不参与时区换算，时区由 [`crate::nettime::Tz`] 负责。
+/// 底钟走 [`crate::localtime::now`]（设备时钟 + 系统时区）而不是 `chrono::Utc::now()`：
+/// 两者同一时刻、数值相同，但这样能保证「全仓库只有一个地方读设备时钟」。
 pub fn now_ts() -> i64 {
-    device_ts() + OFFSET_SECS.load(Ordering::Relaxed)
+    crate::localtime::now().timestamp() + OFFSET_SECS.load(Ordering::Relaxed)
 }
 
 /// 当前毫秒时间戳（前端按本地格式化展示）。
@@ -171,36 +174,12 @@ pub fn now_string() -> String {
     now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// 当前时刻（**系统时区由 tzdata 解析**，时刻优先 NTP）。
+/// 当前时刻（**系统时区**，时区取不到时北京时间；时刻优先 NTP）。
 ///
-/// 全代码库请统一用这个，而不是 `chrono::Local::now()` / `chrono::Utc::now()`。
+/// 全代码库请统一用这个，而不是 `chrono::Utc::now()` / `chrono::Local`。
 /// 不需要时区的场合用 [`now_ts`] / [`now_ms`]。
-pub fn now() -> DateTime<Tz> {
-    from_unix(now_ts())
-}
-
-/// unix 秒 → 系统时区时刻。
-pub fn from_unix(secs: i64) -> DateTime<Tz> {
-    Local.timestamp_opt(secs, 0).single().unwrap_or_else(Local::now)
-}
-
-/// 本地年月日时分秒 → 系统时区时刻；DST 歧义/不存在的时刻返回 `None`。
-///
-/// 目前只有单测需要构造「确定的本地时刻」，故仅在测试构建下编译。
-#[cfg(test)]
-pub fn from_ymdhms(y: i32, m: u32, d: u32, h: u32, mi: u32, s: u32) -> Option<DateTime<Tz>> {
-    Local.with_ymd_and_hms(y, m, d, h, mi, s).single()
-}
-
-/// UTC 朴素时刻 → 系统时区时刻（短信中心时区换算用）。
-pub fn from_utc(utc: &chrono::NaiveDateTime) -> DateTime<Tz> {
-    Local.from_utc_datetime(utc)
-}
-
-/// 本地时区的固定偏移（供 [`crate::monthly`] 等需要 `FixedOffset` 的
-/// 日历计算使用：DST 地区按当前时刻的偏移取，够用以定位「本地目标日 00:00」）。
-pub fn offset() -> chrono::FixedOffset {
-    Local::now().offset().fix()
+pub fn now() -> DateTime<crate::localtime::Tz> {
+    crate::localtime::from_unix(now_ts())
 }
 
 /// 解析 NTP 服务端应答，取出**发送时刻**（Transmit Timestamp，字节 40..44）。
@@ -403,17 +382,17 @@ mod tests {
 
     #[test]
     fn now_uses_system_timezone() {
-        // 时刻可以来自 NTP，但时区永远走系统 tzdata（chrono::Local）
+        // 时刻可以来自 NTP，但时区永远走 localtime（系统时区 → 北京时间兜底）
         let dt = now();
-        assert_eq!(dt.offset().local_minus_utc(), offset().local_minus_utc());
+        assert_eq!(dt.offset().local_minus_utc(), crate::localtime::offset().local_minus_utc());
     }
 
     #[test]
     fn no_direct_wall_clock_outside_time_modules() {
-        // 约定：除 nettime（时间源 + 时区）外，任何模块都不许直接取墙上时钟，
-        // 否则同一条日志/同一个判定会出现两条时间线。
+        // 约定：除 localtime（时区层）与 nettime（时间源）外，
+        // 任何模块都不许直接取墙上时钟 —— 否则同一条日志/同一个判定会出现两条时间线。
         // 耗时测量请用 Instant，绝对时刻请用 nettime::now / now_ts / now_ms。
-        let allowed = ["nettime.rs"];
+        let allowed = ["localtime.rs", "nettime.rs"];
         let dir = std::fs::read_dir("src").expect("测试的工作目录应是 crate 根");
         for entry in dir.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();

@@ -1,0 +1,119 @@
+{
+	"admin/modem": {
+		"title": "移动网络",
+		"order": 55,
+		"action": {
+			"type": "firstchild",
+			"recurse": true
+		},
+		"depends": {
+			"acl": [
+				"luci-app-mt5700"
+			]
+		}
+	},
+	"admin/modem/5g": {
+		"title": "5G 模组管理",
+		"order": 10,
+		"action": {
+			"type": "firstchild",
+			"recurse": true
+		}
+	},
+	"admin/modem/5g/status": {
+		"title": "网络状态",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/network_status"
+		}
+	},
+	"admin/modem/5g/settings": {
+		"title": "网络设置",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/network_settings"
+		}
+	},
+	"admin/modem/5g/dial": {
+		"title": "拨号设置",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/dial"
+		}
+	},
+	"admin/modem/5g/scan": {
+		"title": "全网扫频",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/scan"
+		}
+	},
+	"admin/modem/5g/schedule": {
+		"title": "定时锁频",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/schedule"
+		}
+	},
+	"admin/modem/5g/modem-settings": {
+		"title": "模组设置",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/modem_settings"
+		}
+	},
+	"admin/modem/5g/upgrade": {
+		"title": "模组升级",
+		"order": 70,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/upgrade"
+		}
+	},
+	"admin/modem/5g/sms": {
+		"title": "短信中心",
+		"order": 80,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/sms_center"
+		}
+	},
+	"admin/modem/5g/sms-settings": {
+		"title": "短信设置",
+		"order": 90,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/sms_settings"
+		}
+	},
+	"admin/modem/5g/terminal": {
+		"title": "AT 调试终端",
+		"order": 100,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/terminal"
+		}
+	},
+	"admin/modem/5g/logs": {
+		"title": "运行日志",
+		"order": 110,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/logs"
+		}
+	},
+	"admin/modem/5g/config": {
+		"title": "服务配置",
+		"order": 120,
+		"action": {
+			"type": "view",
+			"path": "at-webserver/service"
+		}
+	}
+}
