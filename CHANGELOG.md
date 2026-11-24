@@ -29,7 +29,7 @@ JSON 配置、HTTP/WebSocket 服务与 WebUI 外壳。
   清洗模块别名、`?v=1.32.13` 缓存戳；shim 补 `_()`、`L.env`、`uci.sections`、
   `websocket_*`→`http_*` 映射与 `expect {'': …}` 语义。
 - **fix(webui)** 看板娘随 `syncMascots(root)` 修复恢复；12 视图与 mascot 已用无头浏览器验证。
-- **feat(service)** systemd 服务增加 `/etc/at-webserver` 与 usage 文件写权限；
+- **feat(service)** systemd 服务增加 `/etc/at-webserver` 与 `/var/lib/mt5700` 写权限（usage 持久化改到 `/var/lib/mt5700/usage.json`）；
   包内安装 `/usr/bin/at-webserver-rust` 兼容链接。
 - **test(ci)** 新增 `debian/sync-webui.sh`、`tests/debian-webui-test.js`；Debian CI 增加
   static/Node/Rust/clippy 门禁、固定工具链与 `SHA256SUMS`。

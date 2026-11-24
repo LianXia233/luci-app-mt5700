@@ -216,14 +216,20 @@ at-webserver（Debian 独立版）
 访问：
     WebUI 与 HTTP API 默认监听 0.0.0.0:9000，浏览器打开 http://<本机IP>:9000
 
+系统要求：
+    官方 CI 产物在 Ubuntu 24.04 构建，最低 GLIBC 2.39，适用于 Debian 13+ / Ubuntu 24.04+。
+    更旧的系统请在目标机执行源码安装：sudo ./debian/install.sh
+
 常用命令：
     systemctl status at-webserver      查看运行状态
     systemctl restart at-webserver     重启服务
     journalctl -u at-webserver -n 50   查看最近日志
 
-配置：
-    /etc/mt5700/config.json            主配置（升级时保留）
-    /etc/mt5700/on-uplink.sh           拨号就绪钩子
+配置与数据：
+    /etc/mt5700/config.json            主配置（conffile，升级时保留）
+    /etc/mt5700/on-uplink.sh           拨号就绪钩子（路径固定）
+    /etc/at-webserver/SMS/             短信本地归档
+    /var/lib/mt5700/usage.json         使用量持久化（每 10 分钟最多写一次）
 
 串口权限：
     服务以 dialout 附加组运行（见 service 单元 SupplementaryGroups）。

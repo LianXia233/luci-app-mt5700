@@ -21,7 +21,7 @@ OpenWrt 专属组件的全部依赖。
 - 全网扫频（异步任务，支持取消）、定时锁频（夜间/日间自动倒换）
 - 短信中心（收发/删除/导出）、短信设置、USSD
 - 模组设置、固件升级（FOTA）、AT 调试终端、运行日志
-- 短信/来电/信号通知与企业微信 WebHook 推送
+- 短信/来电/信号通知；企业微信 WebHook 与 QQ 机器人（官方 API v2）推送
 
 ## 架构
 
@@ -56,8 +56,8 @@ webui/                     独立 WebUI（静态资源）
   ├── luci.js              LuCI 兼容垫片（L.rpc/L.uci/L.fs/E）
   ├── shell.css            外壳样式
   ├── _layout-test/        布局回归样张（脱离后端静态预览栅格）
-  └── luci-static/...      原视图与组件（仅 rpc.js 配置流程、service.js Debian 化）
-src/rust/                  后端（Rust + tokio）
+  └── luci-static/...      与 main `htdocs` 逐字节同步（由 sync-webui.sh 维护）
+src/rust/src/              后端（Rust + tokio）
   ├── httpserver.rs        HTTP API + WebSocket（新增）
   ├── configstore.rs       JSON 配置存储，替代 UCI（新增）
   ├── config.rs            配置读取（改为文件，键名沿用原 UCI 语义）
@@ -69,17 +69,24 @@ debian/
   ├── on-uplink.sh         拨号就绪钩子（DHCP 拉起模组网口）
   ├── install.sh           一键编译安装（源码方式）
   ├── build-deb.sh         构建 .deb 包（CI 与本地共用）
+  ├── sync-webui.sh        从 main `htdocs` 整包同步 WebUI 资源
   └── ci-verify.sh         本地模拟 CI 闸门（不开 Actions 时验证产物）
 .github/workflows/
   └── build-deb.yml        云编译工作流（amd64 + arm64 → deb → Release）
 tests/mock-modem/          mock 模组 e2e 测试（TCP RPC 通道）
+tests/debian-webui-test.js WebUI 与 main `htdocs` 的逐字节漂移门禁
 ```
 
-> **前端无构建步骤**：`webui/` 为手写源码，由 `install.sh` 直接复制到 `/usr/share/mt5700/webui`
-> 并由后端 `serve_static()` 原样返回。因此浏览器拿到的 JS/CSS **始终是未压缩源码**，
-> 排查问题时可直接阅读页面加载到的文件内容。
+> **前端无构建步骤**：`webui/luci-static/resources/` 是 main 分支 `htdocs` 的逐字节同步副本，
+> 由 `debian/sync-webui.sh` 维护、`tests/debian-webui-test.js` 校验漂移；`luci.js`、`app.js`、
+> `shell.css`、`index.html` 是 Debian 自有外壳，不同步。安装时由 `install.sh` / deb 包复制到
+> `/usr/share/mt5700/webui`，后端 `serve_static()` 原样返回，因此浏览器拿到的 JS/CSS
+> **始终是未压缩源码**，排查问题时可直接阅读页面加载到的文件内容。
 
-## 部署（Debian 11+）
+## 部署（Debian 13+ / Ubuntu 24.04+）
+
+> CI 在 Ubuntu 24.04 原生构建，二进制最低依赖 **GLIBC 2.39**；Debian 12（2.36）及更早
+> 无法运行该产物。若目标系统更旧，请在目标系统上执行 `debian/install.sh` 源码编译。
 
 ### 方式一：安装 deb 包（推荐）
 
@@ -88,10 +95,10 @@ tests/mock-modem/          mock 模组 e2e 测试（TCP RPC 通道）
 
 ```bash
 # 树莓派 / ARM 工控机
-sudo apt install ./at-webserver_2.0.1-1_arm64.deb
+sudo apt install ./at-webserver_1.32.13-1_arm64.deb
 
 # PC / x86 虚拟机
-sudo apt install ./at-webserver_2.0.1-1_amd64.deb
+sudo apt install ./at-webserver_1.32.13-1_amd64.deb
 ```
 
 `apt` 会自动处理依赖解析与服务注册（`postinst` 中 `daemon-reload` + `enable` + `start`）。
@@ -204,8 +211,8 @@ http://<设备IP>:9000
 | `log_file` | 通知日志路径 | `/tmp/at-notifications.log` |
 | `schedule_enabled` | 定时锁频总开关 | `0` |
 
-环境变量：`MT5700_CONFIG`（配置文件路径）、`MT5700_WEBROOT`（WebUI 目录）、
-`MT5700_UPLINK_HOOK`（拨号钩子路径）。
+环境变量：`MT5700_CONFIG`（配置文件路径）、`MT5700_WEBROOT`（WebUI 目录）。
+拨号就绪钩子路径固定为 `/etc/mt5700/on-uplink.sh`（由 deb 包安装）。
 
 ## HTTP API
 
@@ -217,6 +224,15 @@ http://<设备IP>:9000
 | GET | `/api/netrate?device=` | 接口累计字节数（sysfs，不占 AT 通道） |
 | GET | `/api/usb` | 模组 USB 链路速率 |
 | GET | `/api/syslog?lines=` | 系统日志（journalctl） |
+| GET | `/api/file/read|list|stat` | 受限文件读取 / 设备枚举 / 二进制自检 |
+| POST | `/api/file/write` | 受限文件写入（通知日志等） |
+| POST | `/api/rpc/mt5700/sms` | 短信事务（列表/发送/删除/容量/存储/SMSC） |
+| POST | `/api/rpc/mt5700/usage` / `usage_ctl` | 使用量快照 / 清零 / 换源 / 持久化 |
+| POST | `/api/rpc/mt5700/batch` | 批量 AT 查询 |
+| POST | `/api/rpc/mt5700/notify_test` | 推送通道测试 |
+| POST | `/api/rpc/mt5700/qq_bind_status` / `qq_menu` | QQ 绑定进度 / 自定义菜单 |
+| POST | `/api/rpc/mt5700/task_status|task_cancel|task_list` | 异步任务查询 / 取消 / 列表 |
+| POST | `/api/rpc/service/list|set|delete`、`/api/rpc/rc/init` | systemd/服务页兼容入口 |
 | GET/POST | `/api/config` | 配置读取 / 合并落盘 |
 | POST | `/api/config/apply` | 热应用，返回 `restart_required` |
 | GET | `/api/service/status` | 服务状态 / 串口清单 |
@@ -229,8 +245,13 @@ http://<设备IP>:9000
 
 ```bash
 cd src/rust
-cargo build --release
-cargo test
+cargo build --release --locked
+cargo test --locked
+cargo clippy --all-targets -- -D warnings
+cd ../..
+node tests/static-check.js
+node tests/debian-webui-test.js
+for f in tests/*-test.js; do node "$f" || exit 1; done
 ```
 
 ### 云编译（GitHub Actions）
@@ -239,9 +260,11 @@ cargo test
 
 ```
 GitHub Actions → Debian 软件包云编译（deb）
+  ├─ 门禁            static-check / Node 单测 / cargo test / clippy
+  ├─ 依赖许可证      cargo-about → RUST-DEPENDENCIES.md
   ├─ 编译打包（amd64 · ubuntu-24.04）      官方 x64 runner，原生编译
   ├─ 编译打包（arm64 · ubuntu-24.04-arm）  官方原生 arm64 runner，原生编译
-  └─ 统一发布             汇总两架构产物 → Release
+  └─ 统一发布       汇总两架构 deb + SHA256SUMS → Release
 ```
 
 两个架构均使用 GitHub 官方**原生** runner，arm64 由 arm64 机器（Cobalt 100 / Arm
@@ -304,7 +327,7 @@ http://<host>:9000/_layout-test/status-mock.html
 样张内为静态占位数据，仅用于校验 2 列栅格、奇数末卡横跨全宽、温度网格等布局规则，
 不代表真实设备状态。
 
-## 沙箱实测截图（v2.2.0，模拟模组态）
+## 历史沙箱实测截图（v2.2.0，模拟模组态）
 
 v2.2.0 在 Debian amd64 沙箱中完成整包实测：安装 `debian-v2.2.0` Release 资产后，
 以 **socat 伪终端对 + Fibocom 风格 AT 协议模拟器**替代实体模组，真实服务二进制走
@@ -335,7 +358,7 @@ usage 清零日每月 1 号、服务运行时长正常渲染（`AtWs.formatDurat
 | 二进制分发 | Release 挂 ipk/apk 资产 | Release 挂 `at-webserver_*_amd64/arm64.deb`，标签前缀 `debian-v*` |
 | CI | `.github/workflows/build-openwrt.yml`（3 架构矩阵） | `.github/workflows/build-deb.yml`（amd64 + arm64 矩阵） |
 
-> **标签空间隔离**：本分支的 Release 标签统一使用 `debian-v*` 前缀（如 `debian-v2.0.1`），
+> **标签空间隔离**：本分支的 Release 标签统一使用 `debian-v*` 前缀（如 `debian-v1.32.13`），
 > 与 `main` 分支的 `v*`（OpenWrt 包）互不干扰。分支推送时 CI 自动以 `debian-v<Cargo版本>`
 > 作为 Release 名；也可手动打 `debian-v*` 标签指定名称。
 

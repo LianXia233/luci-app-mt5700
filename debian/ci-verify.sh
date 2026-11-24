@@ -51,6 +51,11 @@ echo "✓ 架构一致：$ARCH"
 echo "==> 内容完整性（关键路径必须存在）"
 LIST=$(dpkg-deb --fsys-tarfile "$DEB" | tar -t)
 for p in ./usr/bin/at-webserver \
+         ./usr/bin/at-webserver-rust \
+         ./var/lib/mt5700 \
+         ./etc/at-webserver \
+         ./usr/share/mt5700/webui/index.html \
+         ./usr/share/doc/at-webserver/ARTWORK-NOTICE.txt \
          ./etc/mt5700/config.json \
          ./etc/mt5700/on-uplink.sh \
          ./lib/systemd/system/at-webserver.service \

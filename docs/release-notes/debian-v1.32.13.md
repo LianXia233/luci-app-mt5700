@@ -27,8 +27,12 @@
 
 ## 安装
 
+CI 产物在 Ubuntu 24.04 原生构建，最低依赖 **GLIBC 2.39**，适用于 Debian 13+ / Ubuntu 24.04+。
+
 ```bash
 sudo apt install ./at-webserver_1.32.13-1_<arch>.deb
 systemctl status at-webserver
 # 浏览器访问 http://<设备IP>:9000
 ```
+
+更旧的 Debian/Ubuntu 请先获取源码并在目标机执行 `sudo ./debian/install.sh` 编译安装。

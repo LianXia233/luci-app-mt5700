@@ -6,17 +6,19 @@
 #   sudo ./debian/install.sh --bin BINARY_PATH   # 跳过编译，直接安装已有二进制
 #
 # 安装内容：
-#   /usr/bin/at-webserver               后端二进制
+#   /usr/bin/at-webserver               后端二进制（at-webserver-rust 为兼容链接）
 #   /usr/share/mt5700/webui/            WebUI 静态资源
 #   /etc/mt5700/config.json             配置（已存在则保留不覆盖）
 #   /etc/mt5700/on-uplink.sh            拨号就绪钩子
+#   /etc/at-webserver/                  短信本地归档
+#   /var/lib/mt5700/                    使用量持久化（usage.json）
 #   /etc/systemd/system/at-webserver.service
 #
 # 卸载：
 #   systemctl disable --now at-webserver
 #   rm -f /usr/bin/at-webserver /etc/systemd/system/at-webserver.service
-#   rm -rf /usr/share/mt5700 /etc/mt5700
-#   rm -f /etc/mt5700/usage.json          # 使用量持久化文件（无需保留统计时删除）
+#   rm -rf /usr/share/mt5700 /etc/mt5700 /etc/at-webserver /var/lib/mt5700
+#   rm -f /usr/bin/at-webserver-rust
 
 set -euo pipefail
 
