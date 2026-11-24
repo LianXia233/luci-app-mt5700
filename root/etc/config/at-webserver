@@ -50,7 +50,7 @@ option dns_v6_1 '2402:4e00::'
 option dns_v6_2 '2400:3200::1'
 option dns_exclusive '1'
 	option websocket_port '8765'           # LuCI RPC 监听端口
-	option websocket_allow_wan '0'          # 1=RPC 监听 0.0.0.0 可被外部访问（建议同时设置 auth_key）
+	option websocket_allow_wan '0'          # 1=RPC 监听 0.0.0.0 并放行 LAN 侧访问（防火墙规则 src=lan；WAN 仍需手动放行；务必同时设置 auth_key）
 	option websocket_bind ''               # 可选：覆盖监听地址，如 0.0.0.0 或 192.168.10.1
 	option websocket_auth_key ''            # RPC 访问密钥（留空则不验证；LuCI 登录态由 rpcd 会话保证）
 	option cellscan_timeout '180'           # 一次 ^CELLSCAN 全网扫频允许运行的秒数（下限 10）

@@ -42,6 +42,21 @@ if [ -z "$WORK_DIR" ]; then
 fi
 [ -f "$WORK_DIR/Makefile" ] || { echo "ERROR: 仓库目录不可用（WORK_DIR=$WORK_DIR）"; exit 1; }
 
+# ---- 供应链校验常量（官方发布值，变更时同步更新） ----
+# Rust 工具链版本与 src/rust/rust-toolchain.toml 单一来源；本地 / CI / SDK 三处一致。
+RUST_TOOLCHAIN_FILE="$WORK_DIR/src/rust/rust-toolchain.toml"
+RUST_TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"/\1/p' "$RUST_TOOLCHAIN_FILE" 2>/dev/null | head -1)"
+[ -n "$RUST_TOOLCHAIN" ] || { echo "ERROR: 无法从 $RUST_TOOLCHAIN_FILE 读取 channel"; exit 1; }
+# rustup-init 与 zig 均为 x86_64 Linux 官方产物；SDK 容器固定 x86_64。
+# rustup 必须固定到归档版本：latest 路径的内容会随上游发布变化，写死 latest 的
+# SHA256 会在上游更新当天让所有构建失败。归档地址与哈希一一对应、可长期复现。
+# 取值来源：https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-linux-gnu/rustup-init.sha256
+#           https://ziglang.org/download/index.json （0.13.0 / x86_64-linux / shasum）
+RUSTUP_VERSION="1.29.3"
+RUSTUP_INIT_SHA256="b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55"
+ZIG_SHA256="d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
+[ "$(uname -m)" = "x86_64" ] || { echo "ERROR: 当前校验和仅覆盖 x86_64 构建容器（uname -m=$(uname -m)）"; exit 1; }
+
 # 产物目录与工具链目录都允许外部覆盖：
 #   OUT_DIR        —— 产物落点。默认 /out（GitHub Actions 挂的就是它）；CNB 传
 #                     /work/out，产物跟着挂载直接落回工作区，后续 Stage 与发布步骤都读得到。
@@ -130,7 +145,19 @@ if phase_run build; then
       SDK_FILE=$(echo "$LISTING" | grep -oE 'openwrt-sdk-[^"< ]+\.tar\.(xz|zst)' | grep -v '\.asc' | head -1)
       [ -n "$SDK_FILE" ] || { echo "ERROR: 未找到 SDK 下载文件（$BASE_URL/targets/$TARGET_DIR/）"; exit 1; }
       echo "==> 下载 SDK: $SDK_FILE"
-      curl -sSL "$BASE_URL/targets/$TARGET_DIR/$SDK_FILE" -o /builder/sdk.tar
+      curl -fsSL --retry 3 "$BASE_URL/targets/$TARGET_DIR/$SDK_FILE" -o /builder/sdk.tar
+      # OpenWrt 在每个 target 目录发布 sha256sums；校验失败必须中止，不能把未验证的 SDK 编进包。
+      CHECKSUMS_TMP=/builder/sha256sums
+      if curl -fsSL "$BASE_URL/targets/$TARGET_DIR/sha256sums" -o "$CHECKSUMS_TMP"; then
+        EXPECTED_SHA=$(awk -v f="$SDK_FILE" '$2==f || $2=="*"f {print $1; exit}' "$CHECKSUMS_TMP")
+        [ -n "$EXPECTED_SHA" ] || { echo "ERROR: sha256sums 中未找到 $SDK_FILE"; exit 1; }
+        echo "$EXPECTED_SHA  /builder/sdk.tar" | sha256sum -c - \
+          || { echo "ERROR: SDK SHA256 校验失败（$SDK_FILE）"; exit 1; }
+        rm -f "$CHECKSUMS_TMP"
+      else
+        echo "ERROR: 无法下载 $BASE_URL/targets/$TARGET_DIR/sha256sums，拒绝使用未校验的 SDK"
+        exit 1
+      fi
       tar -xf /builder/sdk.tar -C /builder
       rm -f /builder/sdk.tar
       SDK_DIR=$(find /builder -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -1)
@@ -151,17 +178,31 @@ if phase_run deps; then
   echo "==> 【依赖安装 2/3】Rust 工具链（rustup + $RUST_TRIPLE 目标）"
   # mipsel-unknown-linux-musl 自 Rust 1.75 起无预编译 std：用 nightly + `-Z build-std` 现编
   if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
-    curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
+    # 不再 curl | sh：下载固定版本的 rustup-init 并校验官方 SHA256 后再执行。
+    RUSTUP_INIT="/tmp/rustup-init.$$"
+    curl -fsSL --retry 3 -o "$RUSTUP_INIT" \
+      "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init"
+    echo "$RUSTUP_INIT_SHA256  $RUSTUP_INIT" | sha256sum -c - \
+      || { rm -f "$RUSTUP_INIT"; echo "ERROR: rustup-init SHA256 校验失败（${RUSTUP_VERSION}）"; exit 1; }
+    chmod +x "$RUSTUP_INIT"
+    "$RUSTUP_INIT" -y --profile minimal --default-toolchain none >/dev/null
+    rm -f "$RUSTUP_INIT"
   fi
   if [ "$RUST_TRIPLE" = "mipsel-unknown-linux-musl" ]; then
     echo "==> mips: nightly + build-std（musl std 无预编译）"
     rustup toolchain install nightly --profile minimal --component rust-src >/dev/null 2>&1
     rustup default nightly
+    # rust-toolchain.toml 固定 stable 版本；mips 需要 nightly 的 build-std，
+    # 用 RUSTUP_TOOLCHAIN 显式覆盖，避免 cargo 在 src/rust 下又切回 stable。
+    export RUSTUP_TOOLCHAIN=nightly
     # -Z build-std 是 cargo 的 unstable 选项（经 Makefile 的 $(CARGO_BUILD_STD_FLAGS) 传入）
     export CARGO_BUILD_STD_FLAGS="-Z build-std=std,panic_abort"
   else
-    rustup default stable
-    rustup target add "$RUST_TRIPLE"
+    echo "==> Rust 工具链固定为 $RUST_TOOLCHAIN（来自 rust-toolchain.toml）"
+    rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal >/dev/null 2>&1
+    rustup default "$RUST_TOOLCHAIN"
+    rustup target add "$RUST_TRIPLE" --toolchain "$RUST_TOOLCHAIN"
+    export RUSTUP_TOOLCHAIN="$RUST_TOOLCHAIN"
   fi
 fi
 
@@ -182,6 +223,8 @@ if phase_run deps; then
       rm -f "$ZIG_TAR"
     done
     [ -s "$ZIG_TAR" ] || { echo "ERROR: zig $ZIG_VER 下载失败"; exit 1; }
+    echo "$ZIG_SHA256  $ZIG_TAR" | sha256sum -c - \
+      || { rm -f "$ZIG_TAR"; echo "ERROR: zig SHA256 校验失败（$ZIG_VER）"; exit 1; }
     tar -xJf "$ZIG_TAR" -C "$TC_DIR"
     rm -f "$ZIG_TAR"
     ln -sf "$TC_DIR/zig-linux-x86_64-${ZIG_VER}/zig" "$TC_DIR/bin/zig"
@@ -273,7 +316,7 @@ for p in luci-app-mt5700; do
 	grep -v "^CONFIG_PACKAGE_${p}=" .config > .config.new || true
 	mv .config.new .config
 	echo "CONFIG_PACKAGE_${p}=m" >> .config
-	# 中文语言包随主包一起发布
+	# 中文语言包与主包一起发布；po/ 已随源码复制进 package 目录。
 	echo "CONFIG_PACKAGE_luci-i18n-mt5700-zh-cn=m" >> .config
 done
 
@@ -395,7 +438,7 @@ done
 # 单包必须内含后端二进制。
 # OpenWrt 24.10+ .apk 不是标准 tar.gz（file 显示 data），不能用 tar 列目录。
 # 校验策略：ipk 用 tar 列文件；apk 用「安装树 + 包体体积」判定。
-PKG_FILE=$(find "$OUT_DIR/${ARCH_PKGS}" -type f -name 'luci-app-mt5700*' -not -name 'luci-i18n*' -print -quit)
+PKG_FILE=$(find "$OUT_DIR/${ARCH_PKGS}" -type f -name 'luci-app-mt5700*' -print -quit)
 [ -n "$PKG_FILE" ] || { echo "ERROR: 未找到 luci-app-mt5700 主包"; exit 1; }
 PKG_SZ=$(wc -c < "$PKG_FILE")
 echo "==> 校验主包: $(basename "$PKG_FILE") (${PKG_SZ} bytes)"

@@ -19,6 +19,12 @@
   与英雄区头像 `mascot.png`（《异环》薄荷）**不是同一作品、不是同一权利人**。
   逐文件指纹、识别依据与授权状态以 `THIRD-PARTY-NOTICES.md` 第 2 节为唯一事实源；
   改动素材或声明时须同步该文件、README 与文档站，不得再把背景图归到《异环》/ Hotta Studio 名下。
+  按维护者决定，素材保留在安装包内；包内必须同时安装
+  `root/usr/share/licenses/luci-app-mt5700/ARTWORK-NOTICE.txt`，不得只留图片不留声明。
+- **i18n 约定**：源语言为简体中文。共享组件文案由 `mt5700.js` 的 `tr()` 统一调用 LuCI `_()`；
+  `po/templates/luci-app-mt5700.pot` 与 `po/zh_Hans/luci-app-mt5700.po` 的 msgid 集合必须一致、
+  无重复、zh_Hans 的 msgstr 非空，且 `menu.d` 的每个标题都已收录。新增语言在 `po/<lang>/` 下建同名文件，
+  不改视图；改动 po、菜单标题或共享组件后执行 `node tests/i18n-test.js`。
 - **发版版本一致性 + 文档徽标同步**：提升版本号（打 `v*` 标签出正式版）时，以下引用必须与新 `PKG_VERSION` 一致，缺一不可：
   `Makefile` 的 `PKG_VERSION` ＝ `compat.js` 的 `MT5700_UI_VERSION` ＝ `src/rust/Cargo.toml` 的 `version` ＝ `CHANGELOG.md` 新增版本小节 ＝ `docs/release-notes/v<版本>.md`；
   同时同步文档徽标与下载入口 —— `README.md` 头部 Version 徽标、`docs/index.html` 的 `#navVersionBadge` / `#latestReleaseTag` 与四处 `releases/download/v<版本>/…` 下载链接。下载链接的资产命名以最近一次 Release 的实际产物为准（形如 `luci-app-mt5700_<版本>-r<PKG_RELEASE>_<架构>.ipk` / `luci-app-mt5700-<版本>-r<PKG_RELEASE>.apk`），不得沿用旧后缀。
@@ -150,8 +156,9 @@ node tests/dual-ui-mode-test.js
 
 ### 必须守住的不变量
 
-- **测试全绿**：改动 `src/rust/` 后在 `src/rust/` 下执行 `cargo test`，必须 0 失败（当前基线 356 项通过、2 项 ignored）。本 crate 是纯 bin target，`cargo test --lib` 会报 no library targets，不能用它替代全量 `cargo test`；新增逻辑要补单测，不得只靠手工验证。
-- **零告警**：`cargo clippy --all-targets` 的生产段保持 0 warning。确需压制某条告警，只允许针对具体规则、并在注释里写明理由；禁止用 `#![allow(...)]` 或整模块关闭告警。
+- **测试全绿**：改动 `src/rust/` 后在 `src/rust/` 下执行 `cargo test --locked`，必须 0 失败（当前基线 377 项通过、2 项 ignored）。本 crate 是纯 bin target，`cargo test --lib` 会报 no library targets，不能用它替代全量 `cargo test`；新增逻辑要补单测，不得只靠手工验证。
+- **零告警**：`cargo clippy --all-targets -- -D warnings` 必须通过（生产段与测试段都是 0 warning）；CI 的 `rust-unit` job 已执行同一命令。确需压制某条告警，只允许针对具体规则、并在注释里写明理由；禁止用 `#![allow(...)]` 或整模块关闭告警。
+- **格式化**：仓库暂未启用 `cargo fmt --check` 门禁——现有代码的紧凑风格与 rustfmt 默认输出差异较大，直接接入会产生上万行纯格式 diff。新增/修改代码按周边风格书写；若决定启用，应先单独提交一次全量格式化，再接门禁。
 - **async 路径不得阻塞**：`async fn` 内禁止 `std::process::Command`、`std::fs::*`、`std::net::TcpStream`、`std::thread::sleep`、`ureq` 等同步/阻塞 API。确有无法异步化的同步依赖（例如 `uci` 命令行、`/sys` 读取、系统串口枚举）时，用 `tokio::task::spawn_blocking` 包住整段，并在注释里写「为什么必须同步」；不要为了「看起来异步」硬包一层却仍在原地轮询或自旋。
 - **锁的选择**：跨 `await` 持锁必须用 `tokio::sync::Mutex`。`std::sync::Mutex` 只允许「无 `await`、临界区只有几次内存操作」的场景（现存的日志环形缓冲、事件环形队列、QQ 通道句柄属此类），新增代码不得扩大这些临界区，也不得把阻塞 IO 挪进锁内。
 - **AT 通道串行语义不得破坏**：单通道互斥仍是 `tokio::sync::Mutex`（`at_queue` 的 `PriLock` / `SmsTransaction`），任何时刻只允许一条命令在途；短信事务的整段占用不得被拆开插入别的命令。凡「为了并行而绕开互斥」的改动一律拒绝。
@@ -162,9 +169,19 @@ node tests/dual-ui-mode-test.js
 
 ```sh
 cd src/rust
-cargo test
-cargo clippy --all-targets
+cargo test --locked
+cargo clippy --all-targets -- -D warnings
+cd ../..
+
+# 仓库级门禁（与 checks.yml 一致）
+node tests/static-check.js
+node tests/i18n-test.js
+for f in tests/*-test.js; do node "$f" || exit 1; done
+sh tests/mock-modem/run-e2e.sh
 ```
+
+CI 还会对 `*.sh` 与带 `#!/bin/sh` / `#!/bin/ash` 的脚本执行 `sh -n` 和
+`shellcheck -S error`；提交前可用本机的 `shellcheck` 预跑同一命令。
 
 再扫描生产段（排除 `#[cfg(test)]`）确认没有残留阻塞调用：
 

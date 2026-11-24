@@ -509,9 +509,19 @@ jobs:
                 opkg install ./<arch>-luci-app-mt5700_*.ipk \
                              ./<arch>-luci-i18n-mt5700-zh-cn_*.ipk
 
-            只需要英文界面时可以只装主包，此时不要再单独装语言包。
+            语言包仅为简体中文；只需要中文界面时主包与语言包一起装即可。
+            主包不依赖语言包，单独安装也能跑，只是界面文案沿用源码中文。
 
-          五、安装前可先做零风险预演
+          五、校验下载完整性
+
+            每个 Release 都附带 SHA256SUMS。下载主包/语言包与 SHA256SUMS 后：
+
+                grep -E 'luci-app-mt5700|luci-i18n' SHA256SUMS | sha256sum -c -
+
+            全部显示 OK 再安装。安装包未由 OpenWrt 官方密钥签名，
+            apk/opkg 的 --allow-untrusted 只跳过签名校验，不校验内容哈希。
+
+          六、安装前可先做零风险预演
 
             用 apk --simulate 走完整架构与依赖求解，但不真正安装：
 
@@ -523,6 +533,20 @@ jobs:
           # 去掉 heredoc 缩进，保持文本左对齐
           sed -i 's/^          //' dist/ARCH-GUIDE.txt
           cat dist/ARCH-GUIDE.txt
+
+      - name: 生成 SHA256SUMS
+        # 安装包未由 OpenWrt 官方密钥签名，用户只能靠哈希核对下载完整性。
+        # 必须在 ARCH-GUIDE 生成之后执行，保证校验和覆盖全部发布资产。
+        run: |
+          set -e
+          (
+            cd dist
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
+              | LC_ALL=C sort \
+              | xargs -r sha256sum > SHA256SUMS
+          )
+          echo "==> SHA256SUMS："
+          cat dist/SHA256SUMS
 
       - name: 发布完整性校验（6 组合主包 + 架构覆盖）
         run: |

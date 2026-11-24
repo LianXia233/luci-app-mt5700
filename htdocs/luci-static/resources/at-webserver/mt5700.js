@@ -193,6 +193,29 @@ if (window.AtTheme) window.AtTheme.injectCss('/luci-static/resources/at-webserve
 var Mt5700 = (function () {
 	var api = {};
 
+	/*
+	 * UI 文案统一翻译入口。
+	 *
+	 * LuCI 在浏览器里提供全局 `_()`；页面正文仍以中文为源串，po/ 目前只维护
+	 * zh_Hans（identity）。这里把共享组件（页面标题、卡片、按钮、表单标签、
+	 * 提示/空态/下拉选项）的文案统一过一遍 `_()`，后续新增语言只需补 po，
+	 * 不必再逐个改 12 个视图。Node 单测/离线环境没有 `_` 时原样返回。
+	 *
+	 * 不翻译业务数据：短信正文、AT 原文、号码、后端错误串都不经过这里。
+	 *
+	 * 命名注意：不要缩成 `tr`。api.table 里有局部 `var tr = E('tr')`，
+	 * `var` 是函数作用域，会把同名的翻译函数整个遮蔽掉，调用时表现为
+	 * “tr is not a function”。这里固定用 trText，避免再被表格行变量撞名。
+	 */
+	function trText(s) {
+		if (typeof s !== 'string' || s === '') return s;
+		if (typeof _ === 'function') {
+			try { return _(s); } catch (e) { return s; }
+		}
+		return s;
+	}
+	api.tr = trText;
+
 	/* ================= 双 UI 模式：视觉层钩子（业务逻辑零改动） =================
 	 * 全部判断只依赖全局 AtUimode 单例；未加载 / 异常一律按普通模式兜底，
 	 * 保证普通模式在任何情况下都走原有代码路径。
@@ -787,7 +810,7 @@ var Mt5700 = (function () {
 
 		/* pageKey/badgeText 由各视图显式传入（路由映射见 menu.d）；
 		 * hero 参数先存起来：极简模式不创建 hero，切回普通模式时按原样重建。 */
-		node._heroArgs = { title: title, subtitle: subtitle, badge: badgeText };
+		node._heroArgs = { title: trText(title), subtitle: trText(subtitle), badge: trText(badgeText) };
 
 		/* 全局界面设置入口（齿轮按钮 → 模式面板）：挂在 document.body 右下角。
 		 * 1) 12 个视图的骨架都由 Mt5700.page 生成，这里调一次即可全页可用；
@@ -816,8 +839,8 @@ var Mt5700 = (function () {
 	api.card = function (title, subtitle, extra) {
 		var card = E('div', { 'class': 'mt5700-card' });
 		var header = E('div', { 'class': 'mt5700-card-header' });
-		header.appendChild(E('h3', { 'class': 'mt5700-card-title' }, title || ''));
-		if (subtitle) header.appendChild(E('p', { 'class': 'mt5700-card-subtitle' }, subtitle));
+		header.appendChild(E('h3', { 'class': 'mt5700-card-title' }, trText(title || '')));
+		if (subtitle) header.appendChild(E('p', { 'class': 'mt5700-card-subtitle' }, trText(subtitle)));
 		if (extra) {
 			var ex = E('div', { 'class': 'mt5700-card-extra' });
 			ex.appendChild(extra);
@@ -917,7 +940,7 @@ var Mt5700 = (function () {
 
 	api.button = function (label, onClick, variant) {
 		variant = variant || 'secondary';
-		var btn = E('button', { 'class': 'mt5700-btn mt5700-btn-' + variant }, label);
+		var btn = E('button', { 'class': 'mt5700-btn mt5700-btn-' + variant }, trText(label));
 		if (onClick) btn.addEventListener('click', onClick);
 		return btn;
 	};
@@ -939,7 +962,7 @@ var Mt5700 = (function () {
 
 	api.badge = function (text, variant) {
 		variant = variant || 'neutral';
-		return E('span', { 'class': 'mt5700-badge mt5700-badge-' + variant }, text);
+		return E('span', { 'class': 'mt5700-badge mt5700-badge-' + variant }, trText(text));
 	};
 
 
@@ -948,7 +971,7 @@ var Mt5700 = (function () {
 	api.confirm = function (message, onOk, okText) {
 		var mask = E('div', { 'class': 'mt5700-modal-mask' });
 		var box = E('div', { 'class': 'mt5700-modal' });
-		var text = E('div', { 'class': 'mt5700-modal-body' }, message);
+		var text = E('div', { 'class': 'mt5700-modal-body' }, trText(message));
 		var actions = E('div', { 'class': 'mt5700-modal-footer' });
 		var cancel = api.ghostButton('取消', function () {
 			if (mask.parentNode) mask.parentNode.removeChild(mask);
@@ -975,7 +998,7 @@ var Mt5700 = (function () {
 
 	api.toast = function (message, type) {
 		type = type || 'info';
-		var t = E('div', { 'class': 'mt5700-toast mt5700-toast-' + type }, message);
+		var t = E('div', { 'class': 'mt5700-toast mt5700-toast-' + type }, trText(message));
 		decorate(t);
 		document.body.appendChild(t);
 		setTimeout(function () { t.classList.add('mt5700-toast-hide'); }, 3000);
@@ -1033,14 +1056,14 @@ var Mt5700 = (function () {
 		sp.appendChild(svg);
 		el.appendChild(sp);
 		el.appendChild(E('div', { 'class': 'mt5700-loading-text' },
-			text || (minimal ? '正在加载…' : '正在全力加载中喵~ ♡')));
+			trText(text || (minimal ? '正在加载…' : '正在全力加载中喵~ ♡'))));
 		return decorate(el);
 	};
 
 	api.empty = function (text) {
 		var el = E('div', { 'class': 'mt5700-empty' });
 		el.appendChild(E('div', { 'class': 'mt5700-empty-text' },
-			text || (isMinimal() ? '暂无数据' : '暂无数据喵~')));
+			trText(text || (isMinimal() ? '暂无数据' : '暂无数据喵~'))));
 		return decorate(el);
 	};
 
@@ -1060,7 +1083,7 @@ var Mt5700 = (function () {
 		 */
 		var labelOf = function (i) {
 			var h = headers[i];
-			return (h == null) ? '' : String(h);
+			return (h == null) ? '' : trText(String(h));
 		};
 
 		/*
@@ -1076,7 +1099,7 @@ var Mt5700 = (function () {
 		var thead = E('thead');
 		var tr = E('tr');
 		headers.forEach(function (h) {
-			tr.appendChild(E('th', {}, h));
+			tr.appendChild(E('th', {}, typeof h === 'string' ? trText(h) : h));
 		});
 		thead.appendChild(tr);
 		table.appendChild(thead);
@@ -1085,7 +1108,7 @@ var Mt5700 = (function () {
 		var tbody = E('tbody');
 		if (!rows || !rows.length) {
 			var tr0 = E('tr');
-			tr0.appendChild(E('td', { colspan: headers.length, 'class': 'mt5700-empty' }, '暂无数据'));
+			tr0.appendChild(E('td', { colspan: headers.length, 'class': 'mt5700-empty' }, trText('暂无数据')));
 			tbody.appendChild(tr0);
 		} else {
 			rows.forEach(function (row) {
@@ -1114,16 +1137,16 @@ var Mt5700 = (function () {
 
 	api.formGroup = function (label, input, hint, required) {
 		var group = E('div', { 'class': 'mt5700-form-group' });
-		var lbl = E('label', { 'class': 'mt5700-label' + (required ? ' mt5700-label-required' : '') }, label);
+		var lbl = E('label', { 'class': 'mt5700-label' + (required ? ' mt5700-label-required' : '') }, trText(label));
 		group.appendChild(lbl);
 		group.appendChild(input);
-		if (hint) group.appendChild(E('div', { 'class': 'mt5700-hint' }, hint));
+		if (hint) group.appendChild(E('div', { 'class': 'mt5700-hint' }, trText(hint)));
 		return group;
 	};
 
 	api.input = function (type, placeholder, value) {
 		var input = E('input', { 'class': 'mt5700-input', type: type || 'text' });
-		if (placeholder) input.placeholder = placeholder;
+		if (placeholder) input.placeholder = trText(placeholder);
 		if (value != null) input.value = value;
 		return input;
 	};
@@ -1131,7 +1154,7 @@ var Mt5700 = (function () {
 	api.select = function (options, value) {
 		var sel = E('select', { 'class': 'mt5700-input mt5700-select' });
 		options.forEach(function (opt) {
-			var o = E('option', { value: opt.value }, opt.label);
+			var o = E('option', { value: opt.value }, trText(opt.label));
 			if (opt.value === value) o.selected = true;
 			sel.appendChild(o);
 		});

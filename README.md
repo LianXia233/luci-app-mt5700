@@ -6,7 +6,7 @@
 
 **适用于 OpenWrt / ImmortalWrt 平台的 MT5700M 5G 模组全功能控制中心与常驻守护套件**
 
-[![Version](https://img.shields.io/badge/Version-v1.32.12-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v1.32.13-3b82f6?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
 [![OpenWrt CI](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/build-openwrt.yml?branch=main&label=Build%20OpenWrt&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/build-openwrt.yml)
 [![Static Checks](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-mt5700/checks.yml?branch=main&label=Checks&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-mt5700/actions/workflows/checks.yml)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square&logo=gnu&logoColor=white)](LICENSE)
@@ -50,7 +50,7 @@
 
 | 特性维度 | 说明 |
 |:---|:---|
-| ⚡ **高性能异步常驻引擎** | 基于 **Rust + Tokio** 异步非阻塞事件驱动，常驻内存仅数十 KiB，内置无锁 AT 事务队列调度与优先级管理，杜绝多进程抢占 TTY 引起的数据截断与指令挂死。 |
+| ⚡ **高性能异步常驻引擎** | 基于 **Rust + Tokio** 异步非阻塞事件驱动，常驻内存以 MB 量级计（随固件、配置与运行负载变化；不依赖任何第三方运行时），AT 事务通过异步互斥 + 优先级队列串行调度，杜绝多进程抢占 TTY 引起的数据截断与指令挂死。 |
 | 🎯 **真实数据可信原则** | 严守四大铁律：**取不到如实说、缺口不连线、不估算速率、全链路可核对**。严格对照 3GPP 规范解析物理层射频指标，绝不注水或绘制伪造的平滑曲线。 |
 | 🎛️ **12 大原生管理控制台** | 无缝融入 LuCI 原生路由菜单，覆盖网络状态仪表盘、APN 接入点、载波聚合、邻区扫频、定时锁频、模组升级、AT 终端等全生命周期功能。 |
 | 💬 **现代聊天式短信中心** | 完整 PDU / Text 短信收发与长短信自动合并分段，呈现**双向 IM 聊天时间轴**；支持本地 ChaCha20 加密归档，模组闪存与路由存储无缝融合成单条时间轴。 |
@@ -122,9 +122,12 @@
 
 ### 2. 软件包下载与安装
 
-前往 [GitHub Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 或 [CNB 镜像 Releases](https://cnb.cool/LianXia233/luci-app-mt5700/-/releases) 下载与架构匹配的安装包（主包 + 语言包）：
+前往 [GitHub Releases](https://github.com/LianXia233/luci-app-mt5700/releases) 或 [CNB 镜像 Releases](https://cnb.cool/LianXia233/luci-app-mt5700/-/releases) 下载与架构匹配的安装包（主包 + 简体中文语言包）。每个 Release 同时附带 `SHA256SUMS`，建议先校验再安装：
 
 ```sh
+# 下载主包、语言包与 SHA256SUMS 到同一目录后
+grep -E 'luci-app-mt5700|luci-i18n' SHA256SUMS | sha256sum -c -
+
 # -------------------------------------------------------------
 # 【OpenWrt 25.x / ImmortalWrt SNAPSHOT / iStoreOS 25.x (apk)】
 # -------------------------------------------------------------
@@ -138,6 +141,8 @@ apk add --allow-untrusted \
 opkg install ./<ARCH>-luci-app-mt5700_*_<ARCH>.ipk
 opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 ```
+
+> 安装包未由 OpenWrt 官方密钥签名，`--allow-untrusted` 只跳过签名校验，不校验内容完整性；请以 `SHA256SUMS` 为准。
 
 ### 3. 初始化配置与快速启动
 
@@ -156,6 +161,8 @@ ubus call service list '{"name":"at-webserver"}'
 ```
 
 进入 LuCI 侧边栏：**移动网络** → **5G 模组管理**（访问地址：`/cgi-bin/luci/admin/modem/5g`），即可开始使用。
+
+> **界面语言**：简体中文为源语言，随包提供 `luci-i18n-mt5700-zh-cn` 语言包。共享组件（页面标题、卡片、按钮、表单标签、空态、下拉选项）已统一经 `mt5700.js` 的 `tr()` 调用 LuCI `_()`；新增语言只需在 `po/<lang>/` 建同名 `.po`，无需改 12 个视图。`tests/i18n-test.js` 校验 po 集合、菜单标题与组件接入。
 
 <details>
 <summary><b>📦 架构选型流程图、报错排查与稳定串口绑定（点击展开）</b></summary>
@@ -409,12 +416,14 @@ config at-webserver 'config'
 node tests/static-check.js
 for f in tests/*-test.js; do node "$f" || exit 1; done
 
-# 2. Rust 后端编译与单元测试 (覆盖 AT 队列、PDU 编解码、环形日志与配额管理)
-cd src/rust && cargo test --release && cargo clippy --release
+# 2. Rust 后端编译、单元测试与 Clippy（生产段与测试段都必须 0 告警）
+(cd src/rust && cargo test --locked && cargo clippy --all-targets -- -D warnings)
 
 # 3. 模组与 RPC 全链路端到端模拟测试 (mock-modem + 真实后端 + RPC 通信)
-cd tests/mock-modem && sh run-e2e.sh
+sh tests/mock-modem/run-e2e.sh
 ```
+
+CI 门禁与本地一致：`static-check` → 零依赖 Node 单测 → Shell 语法/shellcheck（error 级）→ `cargo test` → `cargo clippy -D warnings` → mock 模组 e2e。
 
 ---
 
@@ -464,12 +473,12 @@ MT5700M 模组只有一个主控制 AT 串口（PC UI）。QModem 与本插件�
   权利标注 `© NEXON Games Co., Ltd. & Yostar, Inc.`（国服含上海悠星网络科技有限公司）。
 
 - **授权状态**：本仓库尚未取得权利人的书面许可，也未留存可核验的官方开放许可；项目开源或非商业使用的描述均不构成权利人的授权。
-- **使用与分发风险**：不能仅凭素材与 GPL 代码同包分发，就断言其属于 GPLv3 所称的独立聚合。该角色素材能否继续公开展示及随固件分发仍未解决；在取得可核验授权前，发布者应考虑从发布包移除或替换为原创 / 明确许可的素材。
+- **保留决定与分发风险**：按维护者决定，上述素材继续保留在界面与安装包内作装饰用途。这不是权利人的授权，也不能仅凭素材与 GPL 代码同包分发就断言其属于 GPLv3 所称的独立聚合。安装包会附带 `ARTWORK-NOTICE.txt` 说明权利归属；若权利人提出异议，将移除或替换。
 - **完整清单**：逐文件尺寸与 SHA-256 指纹、角色识别依据、图稿性质、授权状态与处置要求见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) 第 2 节。背景图为二次创作插画，绘师与原始出处未在仓库内留存，角色身份识别未经权利人确认。
 
 ### 第三方软件依赖与许可证
 
-Rust 后端依赖各自保留上游许可证。正式 APK / IPK 会附带逐项依赖清单及许可证全文，安装后位于 `/usr/share/licenses/luci-app-mt5700/RUST-DEPENDENCIES.md`；Mozilla CA 根证书数据所用的 `CDLA-Permissive-2.0` 完整协议也会一并安装。项目代码的 GPL-3.0-only 不会覆盖第三方依赖或角色素材。更多细节见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
+Rust 后端依赖各自保留上游许可证。正式 APK / IPK 会附带逐项依赖清单及许可证全文，安装后位于 `/usr/share/licenses/luci-app-mt5700/RUST-DEPENDENCIES.md`；同一目录还包含项目 GPL-3.0 全文、角色素材声明 `ARTWORK-NOTICE.txt`，以及 Mozilla CA 根证书数据所用的 `CDLA-Permissive-2.0` 完整协议。项目代码的 GPL-3.0-only 不会覆盖第三方依赖或角色素材。更多细节见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
 
 ### 商标与指称使用
 
