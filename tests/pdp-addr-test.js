@@ -11,10 +11,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 
 const sandbox = {
-	window: {}, AtWs: undefined, Parse: undefined,
+	window: {}, Mt5700d: undefined, Parse: undefined,
 	L: {
 		Class: { extend: function (o) { return o; } },
 		view: { extend: function (o) { return o; } },
@@ -27,8 +27,8 @@ sandbox.window = sandbox;
 function loadLib(name) {
 	const code = fs.readFileSync(path.join(libDir, name), 'utf8');
 	const cleaned = code.split('\n').filter(function (l) { return l.indexOf("'require ") !== 0; }).join('\n');
-	const fn = new Function('AtWs', 'Parse', 'E', 'L', cleaned + '\n;return { AtWs: AtWs, Parse: Parse };');
-	return fn(sandbox.AtWs, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
+	const fn = new Function('Mt5700d', 'Parse', 'E', 'L', cleaned + '\n;return { Mt5700d: Mt5700d, Parse: Parse };');
+	return fn(sandbox.Mt5700d, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
 }
 
 const parseLib = loadLib('parse.js');

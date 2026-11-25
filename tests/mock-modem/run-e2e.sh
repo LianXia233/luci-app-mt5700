@@ -16,9 +16,9 @@ command -v cargo >/dev/null 2>&1 || { echo "ERROR: 未找到 cargo"; exit 1; }
 
 LOG_DIR="${TMPDIR:-/tmp}"
 MOCK_LOG="$LOG_DIR/mt5700-mock-modem.log"
-RUST_LOG="$LOG_DIR/mt5700-at-webserver.log"
+RUST_LOG="$LOG_DIR/mt5700-mt5700d.log"
 
-RUST_BIN="../../src/rust/target/release/at-webserver"
+RUST_BIN="../../src/rust/target/release/mt5700d"
 if [ ! -x "$RUST_BIN" ]; then
 	echo "==> 未找到 release 后端，先编译（src/rust）"
 	(cd ../../src/rust && cargo build --release --locked)

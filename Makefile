@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-LUCI_TITLE:=LuCI support for AT WebServer (MT5700M 5G modem)
+LUCI_TITLE:=LuCI support for mt5700d (MT5700M 5G modem)
 # 后端 Rust 二进制已随本包一起编译安装（见 src/Makefile），不再依赖独立后端包。
 # 不在 LUCI_DEPENDS 里声明 rpcd/ucode/usbutils：luci-base 已依赖 rpcd+ucode；
 # usbutils 仅 init.d 可选探测，SDK 内硬依赖会拖 libusb 编译失败。
@@ -22,26 +22,23 @@ PKG_RELEASE:=1
 # 传给 cargo（见 src/Makefile）。发版只需改上面一行。
 export MT5700_VERSION:=$(PKG_VERSION)
 
-# 兼容旧版：已安装 at-webserver-rust 的系统升级到单包后，声明提供同名能力，
-# 避免残留依赖指向不存在的包。
-PKG_PROVIDES:=at-webserver-rust
-
 # 打包前强制 init.d / uci-defaults 可执行（防止部分 checkout 丢失 +x 导致
 # post-install 报 Permission denied）
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/uci-defaults/at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/iface/99-at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/usb/99-at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/at-webserver/on-uplink.sh 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/uci-defaults/mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/iface/99-mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/usb/99-mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/mt5700d/on-uplink.sh 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/mt5700d/migrate-legacy.sh 2>/dev/null || true
 endef
 
 # 安装/升级完成后强制注册开机自启并拉起服务。
 #
-# 背景：本包的 root/etc/init.d/at-webserver 执行位曾两次静默回退
+# 背景：本包的 root/etc/init.d/mt5700d 执行位曾两次静默回退
 # （100755 → 100644），安装阶段的 enable 会以 Permission denied 失败，
-# /etc/rc.d/S99at-webserver 从此缺失，服务永远不开机自启——LuCI 上就表现为
+# /etc/rc.d/S99mt5700d 从此缺失，服务永远不开机自启——LuCI 上就表现为
 # 「未注册 / 进程未运行 / procd 无实例」。uci-defaults 只在首次启动时执行一次，
 # 已装好的设备不会再走，所以这里再兜一道：装包或升包时补权限 + enable + 启动。
 #
@@ -62,6 +59,15 @@ define Package/luci-app-mt5700/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
 	# ---------------------------------------------------------------------
+	# 旧版本遗留数据迁移（一次性）
+	#
+	# 迁移逻辑全部收在 /usr/libexec/mt5700d/migrate-legacy.sh 里：安装期与
+	# 开机期都要跑，内联两份必然漂移；旧路径字面量集中一处，将来整体删除时
+	# 不会遗漏。脚本头的注释写了完整的删除步骤（本版本之后可直接删）。
+	# ---------------------------------------------------------------------
+	[ -x /usr/libexec/mt5700d/migrate-legacy.sh ] && /usr/libexec/mt5700d/migrate-legacy.sh
+
+	# ---------------------------------------------------------------------
 	# 合并 apk/opkg 因「受保护路径」留下的 .apk-new
 	#
 	# OpenWrt 的 apk 把 /etc/init.d 视为受保护路径（与 /etc/config 同等对待）：
@@ -69,31 +75,31 @@ define Package/luci-app-mt5700/postinst
 	# 后果是服务脚本永远停在上一个版本 —— 本插件的关键修复（接口自动创建、
 	# 拨号对齐对账、hotplug 协同）全在 init.d 里，不合并等于没升级。
 	#
-	# 实测（Hiveton H5000M，1.12.3 → 1.12.5）：升级后 /etc/init.d/at-webserver
-	# 仍是 11250 字节的旧版，新版 21753 字节躺在 /etc/init.d/at-webserver.apk-new。
+	# 实测（Hiveton H5000M，1.12.3 → 1.12.5）：升级后 /etc/init.d/mt5700d
+	# 仍是 11250 字节的旧版，新版 21753 字节躺在 /etc/init.d/mt5700d.apk-new。
 	#
 	# 这里只合并服务脚本与 uci-defaults；/etc/config 下的 .apk-new 一律不动——
 	# 那是用户配置，应由用户决定是否采用新版默认值。
 	# ---------------------------------------------------------------------
-	for f in /etc/init.d/at-webserver /etc/uci-defaults/at-webserver; do
+	for f in /etc/init.d/mt5700d /etc/uci-defaults/mt5700d; do
 		for suf in .apk-new .opkg-new; do
 			if [ -f "$$f$$suf" ]; then
-				mv -f "$$f$$suf" "$$f" && logger -t at-webserver "已用新版覆盖 $$f（来自 $${suf}）"
+				mv -f "$$f$$suf" "$$f" && logger -t mt5700d "已用新版覆盖 $$f（来自 $${suf}）"
 			fi
 		done
 		if [ -f "$$f-opkg" ]; then
-			mv -f "$$f-opkg" "$$f" && logger -t at-webserver "已用新版覆盖 $$f（来自 -opkg）"
+			mv -f "$$f-opkg" "$$f" && logger -t mt5700d "已用新版覆盖 $$f（来自 -opkg）"
 		fi
 		chmod 0755 "$$f" 2>/dev/null
 	done
 
-	chmod 0755 /etc/init.d/at-webserver 2>/dev/null
-	/etc/init.d/at-webserver enable
-	/etc/init.d/at-webserver restart 2>/dev/null || /etc/init.d/at-webserver start
+	chmod 0755 /etc/init.d/mt5700d 2>/dev/null
+	/etc/init.d/mt5700d enable
+	/etc/init.d/mt5700d restart 2>/dev/null || /etc/init.d/mt5700d start
 	# 安装/升级后立即核对一次模组接口：不存在就创建（V4 必建并取址，V6 也建、
 	# 按实际网络状况取址）。服务里的同类检查是在后台跑的，装完这一刻还没跑到。
 	# 只建接口、不做 ifup，避免被 DHCP 等待拖住安装进程。
-	/etc/init.d/at-webserver ensure_interfaces 2>/dev/null || true
+	/etc/init.d/mt5700d ensure_interfaces 2>/dev/null || true
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
 	/etc/init.d/rpcd reload 2>/dev/null

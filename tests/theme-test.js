@@ -20,7 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 
 /* ---------- 最小 DOM 桩（同 tabmenu-test 风格） ---------- */
 

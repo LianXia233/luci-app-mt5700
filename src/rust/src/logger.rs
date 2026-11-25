@@ -24,7 +24,7 @@
 //!
 //! 业务日志不再进 syslog 之后，它们必须有个能跨进程重启留存的地方，
 //! 否则「后端刚被 procd 拉起」这种最需要回看的场景反而什么都查不到。
-//! 文件默认落在 `/tmp/at-webserver/plugin.log`（tmpfs，不磨闪存），
+//! 文件默认落在 `/tmp/mt5700d/plugin.log`（tmpfs，不磨闪存），
 //! 由 [`crate::ringlog::append_capped`] 保证永不超上限。
 //!
 //! 注意 [`init_plugin_file`] 之前的日志**只进环形缓冲**：那时还不知道用户把路径
@@ -152,7 +152,7 @@ pub fn parse_cat_filter(raw: &str) -> Vec<String> {
 pub const DEFAULT_PLUGIN_LOG_BYTES: u64 = 512 * 1024;
 
 /// 插件日志文件的默认路径。放在独立子目录下，与通知日志分开，便于整体清理。
-pub const DEFAULT_PLUGIN_LOG_PATH: &str = "/tmp/at-webserver/plugin.log";
+pub const DEFAULT_PLUGIN_LOG_PATH: &str = "/tmp/mt5700d/plugin.log";
 
 #[derive(Clone, Debug)]
 struct PluginFile {
@@ -198,7 +198,7 @@ pub fn init_plugin_file(enabled: bool, path: &str, max_bytes: u64) {
     if let Some(dir) = std::path::Path::new(&target).parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {
             // 这里不能再调 log_*（会重入本函数写的同一条链路），直接走 stderr 兜底
-            eprintln!("at-webserver: 插件日志目录 {} 创建失败，业务日志仅留内存缓冲: {e}", dir.display());
+            eprintln!("mt5700d: 插件日志目录 {} 创建失败，业务日志仅留内存缓冲: {e}", dir.display());
             *lock_sink() = None;
             return;
         }
@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn emit_auto_classifies_by_module() {
         // module_path!() 推导：短信模块的日志必须落成 sms，而不是兜底的 misc
-        emit_auto(Level::Info, "at_webserver::sms", format_args!("分类用例：发送短信"));
+        emit_auto(Level::Info, "mt5700d::sms", format_args!("分类用例：发送短信"));
         let e = find_in_ring("分类用例：发送短信").expect("应能在缓冲里找到");
         assert_eq!(e.cat, "sms");
         assert_eq!(e.level, "INF");
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn unknown_module_falls_back_to_misc() {
-        emit_auto(Level::Info, "at_webserver::brand_new_module", format_args!("分类用例：未登记模块"));
+        emit_auto(Level::Info, "mt5700d::brand_new_module", format_args!("分类用例：未登记模块"));
         let e = find_in_ring("分类用例：未登记模块").expect("应能在缓冲里找到");
         assert_eq!(e.cat, "misc", "未登记的模块必须落 misc（Runtime 组，仍进 syslog）");
     }
@@ -485,7 +485,7 @@ mod tests {
     fn buffer_ignores_level_filter() {
         // 稳态级别是 Warn，但 debug 日志仍要留在缓冲里，否则日志页看不到过程
         with_level(Level::Warn, || {
-            emit_auto(Level::Debug, "at_webserver::atclient", format_args!("分类用例：被级别挡掉的调试日志"));
+            emit_auto(Level::Debug, "mt5700d::atclient", format_args!("分类用例：被级别挡掉的调试日志"));
             let e = find_in_ring("分类用例：被级别挡掉的调试日志").expect("被级别挡掉也要入缓冲");
             assert_eq!(e.level, "DBG");
             assert_eq!(e.cat, "at");

@@ -54,7 +54,7 @@ function check(name, actual, expected) {
 /* ==================== 1. 装载 parse.js（剥 LuCI 语法糖） ==================== */
 
 function loadParse(ls) {
-	const src = fs.readFileSync(path.join(RES, 'at-webserver/parse.js'), 'utf8');
+	const src = fs.readFileSync(path.join(RES, 'mt5700d/parse.js'), 'utf8');
 	let code = src.replace("'require baseclass';", '');
 	const tail = code.indexOf('var ParseClass = L.Class.extend(Parse);');
 	if (tail < 0) throw new Error('parse.js 尾部包装未找到，剥离逻辑需要更新');
@@ -215,7 +215,7 @@ const pduList = fixtures.buildConversations();
 const cmgl = fixtures.cmglText(pduList);
 
 function loadView(Parse, ls, opts) {
-	const src = fs.readFileSync(path.join(RES, 'view/at-webserver/sms_center.js'), 'utf8');
+	const src = fs.readFileSync(path.join(RES, 'view/mt5700d/sms_center.js'), 'utf8');
 	/* 去掉 LuCI 的 `'require x/y';` 头部与 'use strict'，剩下就是标准 JS */
 	const body = src
 		.replace(/^'require [^']*';\s*$/gm, '')
@@ -330,7 +330,7 @@ function loadView(Parse, ls, opts) {
 	 */
 	const options = opts || {};
 	const STORAGE = { used: 6, total: 50, mem1: 'SM', mem2: 'SM', mem3: 'ME' };
-	const AtWs = {
+	const Mt5700d = {
 		client: {
 			sendCommand: (cmd) => {
 				calls.cmds.push(cmd);
@@ -372,7 +372,7 @@ function loadView(Parse, ls, opts) {
 				 */
 				if (action === 'store_stats') {
 					return Promise.resolve({ success: true, result: {
-						dir: '/etc/at-webserver/SMS', totalBytes: 0, maxBytes: 2097152, conversations: []
+						dir: '/etc/mt5700d/SMS', totalBytes: 0, maxBytes: 2097152, conversations: []
 					} });
 				}
 				if (action === 'store_read') {
@@ -415,7 +415,7 @@ function loadView(Parse, ls, opts) {
 	};
 
 	const factory = new Function(
-		'L', 'E', 'Mt5700', 'Ui', 'Parse', 'AtWs', 'document', 'localStorage', 'window', 'console',
+		'L', 'E', 'Mt5700', 'Ui', 'Parse', 'Mt5700d', 'document', 'localStorage', 'window', 'console',
 		body
 	);
 
@@ -440,7 +440,7 @@ function loadView(Parse, ls, opts) {
 		scrollTo: () => {}
 	};
 	const view = factory(
-		L, E, Mt5700, Ui, Parse, AtWs, documentStub, ls || makeLocalStorage(), windowStub, console
+		L, E, Mt5700, Ui, Parse, Mt5700d, documentStub, ls || makeLocalStorage(), windowStub, console
 	);
 	const page = view.render.call(view);
 	return { page, calls, toasts, doc: documentStub };

@@ -36,7 +36,7 @@ function E(tag, attrs, text) {
 }
 
 let markDirtyCalled = 0, clearDirtyCalled = 0, uciSaveResolve = true, dirtyFlag = false, uciSaveFailCommitted = false;
-const AtWs = {
+const Mt5700d = {
 	uci: {
 		markDirty() { markDirtyCalled++; dirtyFlag = true; },
 		clearDirty() { clearDirtyCalled++; dirtyFlag = false; },
@@ -71,13 +71,13 @@ const Mt5700 = {
 	},
 	primaryButton(label, onClick) { return this.button(label, onClick, 'primary'); }
 };
-global.L = L; global.E = E; global.AtWs = AtWs; global.Mt5700 = Mt5700;
+global.L = L; global.E = E; global.Mt5700d = Mt5700d; global.Mt5700 = Mt5700;
 window.L = L; window.E = E;
 
 // 用 vm 在全局上下文执行模块源码
 const vm = require('vm');
 const ctx = vm.createContext(global);
-const src = fs.readFileSync(path.join(REPO, 'htdocs/luci-static/resources/at-webserver/config-drawer.js'), 'utf8');
+const src = fs.readFileSync(path.join(REPO, 'htdocs/luci-static/resources/mt5700d/config-drawer.js'), 'utf8');
 // LuCI 把模块体包在函数里执行以支持顶层 return；这里照做
 vm.runInContext('(function(){' + src + '\n})()', ctx, { filename: 'config-drawer.js' });
 const Drawer = window.MtConfigDrawer;

@@ -7,11 +7,11 @@
  * service.js 是唯一只 require mt5700 的视图，提示条在它那里退回
  * LuCI 原生 .alert-message（static、撑满、把内容整体下推）。
  *
- * 现状约定：两段样式统一放在 at-webserver/global.css，由 mt5700.js 注入；
- * 因为 12 个视图全部 require at-webserver/mt5700，所以注入一次即全覆盖。
+ * 现状约定：两段样式统一放在 mt5700d/global.css，由 mt5700.js 注入；
+ * 因为 12 个视图全部 require mt5700d/mt5700，所以注入一次即全覆盖。
  *
  * 覆盖：
- *   1) 每个视图都依赖 at-webserver/mt5700（→ 必然拿到 global.css）；
+ *   1) 每个视图都依赖 mt5700d/mt5700（→ 必然拿到 global.css）；
  *   2) mt5700.js 注入 global.css，且注入顺序在 mt5700.css 之后；
  *   3) global.css 含提示条与四套弹窗结构的选择器，且只调颜色不动版式；
  *   4) at.css / mt5700.css 不再重复定义这些选择器（防止又散回两处）；
@@ -25,8 +25,8 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'at-webserver');
-const viewDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
+const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'mt5700d');
+const viewDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'view', 'mt5700d');
 
 const read = function (p) { return fs.readFileSync(p, 'utf8'); };
 
@@ -50,10 +50,10 @@ const needUi = [];
 const missMt = [];
 views.forEach(function (f) {
 	const src = read(path.join(viewDir, f));
-	if (!/'require at-webserver\/mt5700'/.test(src)) missMt.push(f);
-	if (!/'require at-webserver\/ui'/.test(src)) needUi.push(f);
+	if (!/'require mt5700d\/mt5700'/.test(src)) missMt.push(f);
+	if (!/'require mt5700d\/ui'/.test(src)) needUi.push(f);
 });
-check('全部视图 require at-webserver/mt5700（global.css 可达）',
+check('全部视图 require mt5700d/mt5700（global.css 可达）',
 	missMt.length === 0, '缺: ' + missMt.join(', '));
 check('视图普遍复用公共组件库（require ui）',
 	needUi.length <= 1, '未引入 ui 的视图: ' + (needUi.join(', ') || '无'));
@@ -102,7 +102,7 @@ check('ui.js 提示条仍使用全局类名', uiJs.indexOf('mt5700-float-notice'
 check('ui.js 不再单独注入提示条样式（只注入 at.css）',
 	(uiJs.match(/injectCss\(/g) || []).length === 1);
 check('service.js 接入统一启动入口（提示条全页一致）',
-	/'require at-webserver\/ui'/.test(read(path.join(viewDir, 'service.js')))
+	/'require mt5700d\/ui'/.test(read(path.join(viewDir, 'service.js')))
 	&& /Ui\.startup\(/.test(read(path.join(viewDir, 'service.js'))));
 
 /* ---------- 6) 行尾 ---------- */

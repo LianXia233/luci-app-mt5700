@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 let pass = 0;
 let fail = 0;
 
@@ -94,10 +94,10 @@ function makeEnv() {
 (async function () {
 	const env = makeEnv();
 	const src = fs.readFileSync(path.join(libDir, 'ui.js'), 'utf8');
-	const factory = new Function('L', 'document', 'window', 'E', 'AtWs', 'AtTheme', src);
+	const factory = new Function('L', 'document', 'window', 'E', 'Mt5700d', 'AtTheme', src);
 	const L_STUB = { Class: { extend: function (o) { return function UiClass() { Object.assign(this, o); }; } } };
 
-	const AtWs = {
+	const Mt5700d = {
 		client: {
 			state: 'degraded',
 			error: 'unit-test',
@@ -113,22 +113,22 @@ function makeEnv() {
 		}
 	};
 
-	const Ui = new (factory(L_STUB, env.documentStub, env.windowStub, env.E, AtWs, null))();
+	const Ui = new (factory(L_STUB, env.documentStub, env.windowStub, env.E, Mt5700d, null))();
 	check('rpc.js 新增 offConnectionStateChange 后 ui.js 有对应注销点',
-		typeof AtWs.client.offConnectionStateChange === 'function');
+		typeof Mt5700d.client.offConnectionStateChange === 'function');
 
 	const tick = () => new Promise((r) => setTimeout(r, 5));
 
 	Ui.startup(env.body, function () { });
 	check('降级态 startup 注册 2 个回调（startup 自身 + 提示条）',
-		AtWs.client.stateCallbacks.length === 2, '实际 ' + AtWs.client.stateCallbacks.length);
+		Mt5700d.client.stateCallbacks.length === 2, '实际 ' + Mt5700d.client.stateCallbacks.length);
 	check('降级态下提示条已插入页面', env.body.children.length === 1,
 		'实际 ' + env.body.children.length);
 
 	env.fire('hashchange');
 	await tick();
-	check('离场后回调归零', AtWs.client.stateCallbacks.length === 0,
-		'实际 ' + AtWs.client.stateCallbacks.length);
+	check('离场后回调归零', Mt5700d.client.stateCallbacks.length === 0,
+		'实际 ' + Mt5700d.client.stateCallbacks.length);
 	check('离场后提示条一并摘除', env.body.children.length === 0,
 		'实际 ' + env.body.children.length);
 
@@ -138,7 +138,7 @@ function makeEnv() {
 		await tick();
 	}
 	check('反复切页 5 次后仍为 0（修复前会累积到 12）',
-		AtWs.client.stateCallbacks.length === 0, '实际 ' + AtWs.client.stateCallbacks.length);
+		Mt5700d.client.stateCallbacks.length === 0, '实际 ' + Mt5700d.client.stateCallbacks.length);
 
 	console.log('\n' + pass + ' passed, ' + fail + ' failed');
 	process.exit(fail ? 1 : 0);

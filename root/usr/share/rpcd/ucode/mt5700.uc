@@ -17,8 +17,8 @@ let rpcFallbackSeq = 0;
 
 function readRpcConfig() {
 	const cursor = uci.cursor();
-	const port = int(cursor.get('at-webserver', 'config', 'websocket_port')) || 8765;
-	const authKey = cursor.get('at-webserver', 'config', 'websocket_auth_key') || '';
+	const port = int(cursor.get('mt5700d', 'config', 'websocket_port')) || 8765;
+	const authKey = cursor.get('mt5700d', 'config', 'websocket_auth_key') || '';
 	return { port: port, authKey: authKey };
 }
 
@@ -614,7 +614,7 @@ function boundOutsideLan(dev, devs, lanIfaces) {
 function usageSource() {
 	let p;
 	try {
-		p = fs.popen('uci -q get at-webserver.config.usage_source', 'r');
+		p = fs.popen('uci -q get mt5700d.config.usage_source', 'r');
 	} catch (e) {
 		return 'netdev';
 	}
@@ -957,7 +957,7 @@ function rpcGate(params) {
 		noteBackendDown();
 		return { err: {
 			success: false,
-			error: 'Rust 后端未运行（127.0.0.1:' + port + ' 未监听）：请确认 at-webserver 服务已启动',
+			error: 'Rust 后端未运行（127.0.0.1:' + port + ' 未监听）：请确认 mt5700d 服务已启动',
 			cause: 'not-listening'
 		} };
 	}

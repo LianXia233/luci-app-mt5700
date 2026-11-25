@@ -39,7 +39,7 @@
 
 | 属性 | 内容与说明 |
 | :--- | :--- |
-| **覆盖范围** | `Makefile`、`src/`（Rust / Tokio 后端）、`root/`、`htdocs/`（`at-webserver/mascot.png` 与 `at-webserver/bg/character-*.webp` 除外）、`po/`、`scripts/`、`tests/`，以及 `docs/` 中的原创文字 |
+| **覆盖范围** | `Makefile`、`src/`（Rust / Tokio 后端）、`root/`、`htdocs/`（`mt5700d/mascot.png` 与 `mt5700d/bg/character-*.webp` 除外）、`po/`、`scripts/`、`tests/`，以及 `docs/` 中的原创文字 |
 | **开源许可证** | GNU General Public License v3.0 only |
 | **SPDX 标识** | `GPL-3.0-only`（依据：根目录 `LICENSE` 为 GPLv3 全文；源码头未声明「or any later version」，按 GPLv3 第 14 条锁定为 v3.0） |
 | **版权所属** | `Copyright (C) 2026 LianXia233` |
@@ -88,11 +88,11 @@
 
 | 文件路径 | 尺寸 / 格式 | 角色设定 / 界面用途 | SHA-256（前 16 位） |
 | :--- | :--- | :--- | :---: |
-| `htdocs/luci-static/resources/at-webserver/bg/character-pc-dark.webp` | 1000×1000，WebP 单帧，98,340 B | 普拉娜 · 普通模式桌面深色背景 | `8c5bd7aa2f53bf52` |
-| `htdocs/luci-static/resources/at-webserver/bg/character-pc-light.webp` | 1000×1000，WebP 单帧，106,368 B | 阿罗娜 · 普通模式桌面浅色背景 | `91f5831319570014` |
-| `htdocs/luci-static/resources/at-webserver/bg/character-mobile-dark.webp` | 840×1120，WebP 单帧，87,770 B | 普拉娜 · 普通模式移动端深色背景 | `fc4aa644dcf5ab78` |
-| `htdocs/luci-static/resources/at-webserver/bg/character-mobile-light.webp` | 840×1120，WebP 单帧，93,070 B | 阿罗娜 · 普通模式移动端浅色背景 | `4d820a655c2cfed2` |
-| `htdocs/luci-static/resources/at-webserver/mascot.png` | 320×320，PNG RGBA，162,214 B | 薄荷 · 英雄卡片圆形头像 | `b3b74e811f954d71` |
+| `htdocs/luci-static/resources/mt5700d/bg/character-pc-dark.webp` | 1000×1000，WebP 单帧，98,340 B | 普拉娜 · 普通模式桌面深色背景 | `8c5bd7aa2f53bf52` |
+| `htdocs/luci-static/resources/mt5700d/bg/character-pc-light.webp` | 1000×1000，WebP 单帧，106,368 B | 阿罗娜 · 普通模式桌面浅色背景 | `91f5831319570014` |
+| `htdocs/luci-static/resources/mt5700d/bg/character-mobile-dark.webp` | 840×1120，WebP 单帧，87,770 B | 普拉娜 · 普通模式移动端深色背景 | `fc4aa644dcf5ab78` |
+| `htdocs/luci-static/resources/mt5700d/bg/character-mobile-light.webp` | 840×1120，WebP 单帧，93,070 B | 阿罗娜 · 普通模式移动端浅色背景 | `4d820a655c2cfed2` |
+| `htdocs/luci-static/resources/mt5700d/mascot.png` | 320×320，PNG RGBA，162,214 B | 薄荷 · 英雄卡片圆形头像 | `b3b74e811f954d71` |
 | `docs/images/mascot.png` | 320×320，PNG RGBA | 上者的文档站副本（同一文件） | `b3b74e811f954d71` |
 | `docs/images/*.png` | 界面截图 | README 与 Release 说明中的界面展示（含上述角色形象） | 随截图更新 |
 

@@ -121,7 +121,7 @@ function runCase(cfg) {
 			popen: function (cmd) {
 				const text = String(cmd);
 				let out;
-				if (text.includes('uci -q get at-webserver.config.usage_source')) {
+				if (text.includes('uci -q get mt5700d.config.usage_source')) {
 					out = [cfg.source || 'netdev'];
 				} else if (text.includes('uci -q show firewall')) {
 					out = lines.filter(function (l) { return l.startsWith('firewall.'); });

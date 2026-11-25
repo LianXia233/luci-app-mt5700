@@ -1,0 +1,261 @@
+config mt5700d 'config'
+	option wallpaper_enabled '1'          # 全局壁纸（三角网格+随机角色立绘）开关：1=显示（默认），0=关闭
+	option ui_mode 'normal'                # 全局界面模式：normal=普通（默认）/ minimal=极简（Material Design 3）；仅影响视觉层，不触发任何后端/硬件操作
+	option enabled '1'
+	option connection_type 'SERIAL'           # 默认 PCUI 优先：AT 走串口 /dev/ttyUSB1（PCUI）；网络 TCP 作为备用
+	option network_host '192.168.8.1'
+	option network_port '20249'
+	option network_timeout '10'
+	option network_allow_wan '0'          # 是否允许外网访问模块 (0=禁止, 1=允许)
+	option network_restrict_access '0'    # 限制只有路由器本身可访问模块 (0=允许局域网, 1=仅路由器)
+	# AT 命令走 PCUI 口，MT5700M-CN 上默认枚举为 ttyUSB1
+	# （ttyUSB0=Application Interface, ttyUSB1=PCUI, ttyUSB2=SerialB, ttyUSB3=SerialC, ttyUSB4=GPS）
+	# 填 'auto' 则逐个探测 /dev/ttyUSB* 自动选出能应答 AT 的端口
+	option serial_port 'auto'          # 'auto' 逐个探测，优先 ttyUSB1(PCUI)
+	option serial_port_custom '/dev/ttyUSB1'  # 自定义串口路径（当 serial_port='custom' 时使用）
+	option serial_baudrate '115200'
+	option serial_timeout '10'
+	# 自动拨号：默认开启。模组不拨号则不会向 USB 网口下发 DHCP，
+	# 网络接口 MT5700M 将一直拿不到 IP，表现为「模组在线但无法联网」。
+	# 服务每次连上模组后会按此配置对齐一次（已在目标状态则不重复下发）。
+	option autodial_enable '1'                 # 1=开启自动拨号（默认），0=关闭
+	option autodial_mode '1'                   # 1=USB网络接口，2=转网口模式
+	# 承载接口：auto=自动扫描（已有接口挂在模组网口上就用它，例如固件自带的 wan → usb0；
+	#   没有则用 MT5700M），也可填接口名手动设置。IPv6 的 auto 跟随 IPv4 接口
+	#   （用以 '@IPv4接口' 为设备的接口，没有则为 IPv4 接口名 + v6），none=不处理 IPv6。
+	option iface_v4 'auto'
+	option iface_v6 'auto'
+# 接口管理：1=承载接口缺失时创建、设为开机自启并登记到上行防火墙区域（默认）；
+# 0=不创建、不修改任何接口与防火墙，拨号就绪后只对选定的承载接口补一次 ifup。
+option manage_interface '1'
+
+# 默认 DNS 下发（拨号成功后写入 WAN 区域里由模组物理网口承载的所有接口）。
+# 目标接口按「USB 模组网口 + WAN 防火墙区域」自动反查，不绑定具体接口名；
+# IPv6 DNS 只下发给经 @别名 引用这些接口的 IPv6 承载接口。
+# 地址集中在这里定义，改这一处即可生效。
+# 写入的 dns 会被 netifd 排在运营商（DHCP/RA）下发的 DNS **之前**，因此它同时
+# 是「运营商没给时的兜底」和「实际优先使用的解析服务器」。
+#   dns_enable      1=下发（默认），0=不下发并清除此前已写入的 dns / peerdns
+#   dns_v4_1/2      IPv4 首选 / 备用，每次拨号成功后都下发；留空表示不写这一条
+#   dns_v6_1/2      IPv6 首选 / 备用，仅当本次拨号确实拿到 IPv6（PDP 类型为
+#                   IPV6/IPV4V6 且 AT+CGPADDR 给出了 IPv6 地址）才下发；
+#                   未拿到 IPv6 时会把上一次留下的 IPv6 DNS 清掉，避免出现
+#                   「无 IPv6 连通性却配了 IPv6 DNS」的长期错位（表现为解析随机超时）
+#   dns_exclusive   1=忽略运营商下发的 DNS（peerdns=0，只用自己的，默认）；
+#                   0=保留运营商 DNS 排在自己后面
+option dns_enable '1'
+option dns_v4_1 '119.29.29.29'
+option dns_v4_2 '223.5.5.5'
+option dns_v6_1 '2402:4e00::'
+option dns_v6_2 '2400:3200::1'
+option dns_exclusive '1'
+	option websocket_port '8765'           # LuCI RPC 监听端口
+	option websocket_allow_wan '0'          # 1=RPC 监听 0.0.0.0 并放行 LAN 侧访问（防火墙规则 src=lan；WAN 仍需手动放行；务必同时设置 auth_key）
+	option websocket_bind ''               # 可选：覆盖监听地址，如 0.0.0.0 或 192.168.10.1
+	option websocket_auth_key ''            # RPC 访问密钥（留空则不验证；LuCI 登录态由 rpcd 会话保证）
+	option cellscan_timeout '180'           # 一次 ^CELLSCAN 全网扫频允许运行的秒数（下限 10）
+
+	# 通知配置
+	# 推送通道独立开关（v1.28.0）：两者互不影响，均默认关闭。
+	# 企业微信：开关 + WebHook 地址都满足才发；QQ：开关 + 凭据齐全才发。
+	option wechat_enabled '0'          # 企业微信推送开关（0=关，1=开）
+	option qq_enabled '0'              # QQ 机器人推送开关（0=关，1=开）
+	option wechat_webhook ''
+	# 企业微信消息格式（v1.34.0）：text（默认，保持兼容）/ markdown / markdown_v2。
+	# markdown 支持标题/加粗/链接/引用/3色字体，兼容旧客户端；markdown_v2 支持
+	# 表格/列表/图片但不支持颜色，且旧客户端显示纯文本。通道节流与 QQ 共享下方 qq_max_per_minute。
+	option wechat_msg_format 'text'
+	# QQ 机器人推送（官方 API v2）。AppID + AppSecret + 目标 ID 全部填写后启用；
+	# AppSecret 建议留空并改用环境变量 QQ_BOT_APP_SECRET（AppID 可用 QQ_BOT_APP_ID）注入，
+	# 避免凭据落盘 UCI。推送为「主动消息」：群 30~60 条/分钟、单关系 20 条/分钟、1000 条/群/天。
+	option qq_app_id ''
+	option qq_app_secret ''
+	option qq_target_type 'group'          # group=群聊 / c2c=单聊 / channel=频道 / bind=自动绑定
+	option qq_target_id ''                 # group_openid / 用户 openid / channel_id（bind 模式由后端自动写回，勿手填）
+	option qq_bind_qq ''                   # 绑定模式下你的 QQ 号（仅日志标签；绑定后给机器人发条消息即自动完成）
+	# QQ 富文本与交互（v1.28.0）。实现与官方文档依据见 src/rust/src/qqpush.rs。
+	option qq_msg_format 'auto'           # auto=富文本(Markdown)优先、失败自动回落纯文本（默认）；markdown=只发富文本；text=只发纯文本
+	option qq_keyboard_enabled '0'        # 1=富文本消息附带「打开管理页」跳转按钮（点击直达本机管理页）
+	option qq_keyboard_url ''             # 按钮跳转地址（http/https）；留空按局域网 IP 自动推导
+	option qq_menu_enabled '0'            # 1=启动时自动配置 QQ 自定义菜单（仅单聊场景生效，也可用 qq_menu RPC 手动配置）
+	# QQ 主动消息节流（条/分钟）。官方频控是群 30~60 条/分钟、单聊 20 条/分钟，
+	# 超限后会被平台丢弃并可能触发封禁，因此这里默认压到 10 条/分钟：
+	# 每条消息按间隔排队发送（延后，不丢弃），实时通知仍会送达，只是不再挤成一坨。
+	# 同一设置也约束企业微信通道；短信/来电为实时事件，豁免节流立即直发。
+	# 0=不节流（交给平台频控，不建议）。范围 0-60。
+	option qq_max_per_minute '10'
+	option log_file '/tmp/mt5700d-notifications.log'
+	# 通知日志文件的大小上限（字节，默认 256 KiB）。/tmp 是 tmpfs（占内存），
+	# 不加限制时长期运行会把内存吃满；达到上限后按行边界裁掉最旧的一半再继续写。
+	# 填小于 4096 的值会被忽略并回落默认。
+	option log_file_max_bytes '262144'
+
+	# --- 插件运行日志（业务类日志的落盘去处，与上面的通知日志是两个文件）---
+	# AT 收发、拨号对账、接口拉起、信号巡检、短信收发这类**模组业务痕迹**不再写进
+	# 系统日志（syslog / logread），改为只进两处：后端内存环形缓冲（日志页实时看）
+	# 与下面这个插件自己的文件（跨进程重启留存）。syslog 里只留软件自身的运行情况
+	# （启动/退出、配置、RPC、串口、任务、存储）以及业务类的 ERR —— 硬故障仍要能在
+	# logread 里直接看到。分流规则是代码里的策略表（src/rust/src/logcat.rs），
+	# 不做成配置项：能把业务日志灌回 syslog 的开关等于把这次改造关掉。
+	option log_plugin_file_enabled '1'      # 1=业务日志写入插件文件（默认），0=只留内存环形缓冲
+	option log_plugin_file '/tmp/mt5700d/plugin.log'  # 留空用该默认路径
+	# 文件大小上限（字节，默认 512 KiB）。同样落在 tmpfs 上，因此必须有界：
+	# 达到上限后按行边界裁掉最旧的一半再继续写，绝不切出半行。
+	# 填小于 4096 的值会被忽略并回落默认（否则每条日志都会触发一次整文件裁剪）。
+	option log_plugin_max_bytes '524288'
+
+	# 使用量「自动清零」日：每月几号（1~31，默认 1 号）。
+	# 按自然月对账，不是滚动天数；大小月 / 闰年 / 跨年由后端处理，
+	# 31 号这类小月没有的日子按当月最后一天触发（不会整月漏清）。
+	option usage_reset_day '1'
+
+	# 使用量统计来源（可在「网络状态 → 本次使用量」里切换）：
+	#   netdev（默认）= 自动识别 WAN 区域的模组物理网口，直读 sysfs 计数器，零 AT 负担；
+	#   modem          = 模组 AT^DSFLOWQRY 上报的 DS 累计流量，复用已有 2s 状态缓存。
+	# 两种来源都只统计 WAN 区域、自动识别模组网口、不写死网卡名，
+	# 并排除 br-lan / lo / LAN 区域网卡；取不到时停止统计而不是回退 LAN。
+	option usage_source 'netdev'
+
+	# 自动推送总开关。关闭后所有事件都不推送（仅写本地日志文件，便于事后追溯），
+	# 同时停掉信号定时轮询（不再周期性占用串口）。默认开启。
+	option notify_enabled '1'
+	option notify_sms '1'
+	option notify_call '1'
+	option notify_memory_full '1'
+
+	# 短信默认存储区：SM=SIM 卡（槽位少，实测 40）、ME=模组 FLASH（实测 300）。
+	# 默认 ME：SM 满后模组会把长短信后续分片溢出到另一个存储区，把一条短信拆成两截。
+	# 启动时若模组实际存储区与本值不符（换卡/模组复位回 SM）会自动切回；
+	# 界面「短信设置 → 存储位置」保存时也会写回本值。
+	option sms_storage 'ME'
+	option notify_signal '1'
+
+	# 定时推送间隔（分钟）：到点就推送一次「当前实际情况」（信号读数 + 短信存储占用），
+	# 与期间有没有事件发生无关 —— 语义是「固定每 N 分钟必发一条」，不是「攒一起发」。
+	# 范围 1-1440（1 分钟 ~ 24 小时），默认 10。调小更实时；调大更省推送配额
+	# （QQ 机器人主动消息频控：单关系 20 条/分钟）。
+	# 短信与来电不受此项影响，始终实时直发。
+	option notify_timer_interval '10'
+
+	# 定时轮询推送（信号巡检）。
+	# 本模组不会主动上报 ^HCSQ / ^CERSSI，因此上面的 notify_signal 开关必须靠
+	# 后端在下面这个时段内主动查询才会生效；时段外一条 AT 都不发，也不推送。
+	# 时段写法：HH:MM，两端都算在时段内。起点大于终点即视为跨零点
+	# （如 start=22:00 / end=06:00）；起止相同（如 00:00/00:00）或格式非法时按「全天」处理。
+	option notify_poll_enabled '1'        # 是否启用信号定时巡检
+	option notify_poll_start '00:00'      # 时段起点 HH:MM（含）
+	option notify_poll_end '23:59'        # 时段终点 HH:MM（含，即默认全天）
+	option notify_poll_interval '300'     # 轮询间隔（秒），范围 30-3600
+	option notify_poll_all '0'            # 0=仅信号变化时推送 / 1=每次轮询都推送当前状态
+	option notify_poll_delta '3'          # 变化阈值（dB），范围 1-30，仅 notify_poll_all=0 时生效
+
+	# 「网络切换提醒 / 信号变化」推送的最小间隔（分钟），默认 60，即同一类通知一小时内最多一条。
+	# 为什么需要：模组在 LTE↔NR 边缘来回切换时，巡检每轮都判定为「有变化」，
+	# 默认 300 秒轮询下能一分钟推好几条，把 QQ 刷屏。这里在「该不该推」之上再加一层时间闸门。
+	# 仅作用于信号类巡检与 URC 上报；短信、来电不受影响（始终实时直发），
+	# 上面的 notify_timer_interval 定时推送也不受限制（那是用户自己定的固定节奏）。
+	# 被这一层压住的那轮不会刷新基线：累计变化在间隔到点后立刻补推，不会永远漏掉。
+	# 0=不限频（恢复旧行为）。范围 0-10080（最长 7 天）。
+	option notify_signal_min_interval '60'
+
+	# --- 每种推送类型独立的频率限制 + 推送时段（四套互不干扰）---
+	# 在**推送执行层**生效：区别于此前的 notify_signal_min_interval（只在信号生产者处生效），
+	# 这六项按类型前缀区分，对短信/来电/存储满/信号四类分别裁决，互不影响。
+	#   *_rate_enabled    1=启用该类频率限制，0=不限制（默认 0，保持既有时序）
+	#   *_min_interval    该类两条推送之间的最小间隔（分钟），0=不限频；上限 10080（7 天）
+	#   *_window_enabled  1=启用该类推送时段，0=全天可推（默认 0）
+	#   *_window_start    允许时段起点 HH:MM（含）
+	#   *_window_end      允许时段终点 HH:MM（含）；起点>终点=跨零点（如 22:00→06:00），相等=全天
+	#   *_window_action   窗外策略：defer=延迟到窗口开启后补发（同类只留最新一条）/ drop=直接丢弃。
+	#                     默认按类型区分：短信/来电 defer（实时事件不受影响）；
+	#                     信号/存储满 drop——开启时段后只推送当前时段内产生的消息，不补发陈旧事件
+	# 四类前缀（统一 notify_limit_*，与既有键完全隔离）：
+	#   notify_limit_sms / notify_limit_call / notify_limit_memory / notify_limit_signal。
+	# 时区：一律用本机系统时区（见上方「时间口径」），时刻取自 NTP 同步后的系统时钟。
+	# 注意：信号类原有的 notify_signal_min_interval 仍在生产者侧独立生效；这里的
+	# notify_limit_signal_rate_enabled 默认关，避免两层重复限频，需要时由用户自行开启。
+	option notify_limit_sms_rate_enabled '0'
+	option notify_limit_sms_min_interval '60'
+	option notify_limit_sms_window_enabled '0'
+	option notify_limit_sms_window_start '00:00'
+	option notify_limit_sms_window_end '23:59'
+	option notify_limit_sms_window_action 'defer'
+	option notify_limit_call_rate_enabled '0'
+	option notify_limit_call_min_interval '60'
+	option notify_limit_call_window_enabled '0'
+	option notify_limit_call_window_start '00:00'
+	option notify_limit_call_window_end '23:59'
+	option notify_limit_call_window_action 'defer'
+	option notify_limit_memory_rate_enabled '0'
+	option notify_limit_memory_min_interval '60'
+	option notify_limit_memory_window_enabled '0'
+	option notify_limit_memory_window_start '00:00'
+	option notify_limit_memory_window_end '23:59'
+	option notify_limit_memory_window_action 'drop'
+	option notify_limit_signal_rate_enabled '0'
+	option notify_limit_signal_min_interval '60'
+	option notify_limit_signal_window_enabled '0'
+	option notify_limit_signal_window_start '00:00'
+	option notify_limit_signal_window_end '23:59'
+	option notify_limit_signal_window_action 'drop'
+
+	# 自定义推送文案。留空 = 使用内置默认文案（升级后未被改动的项仍跟随版本更新）。
+	# UCI 的 option 值是单行的，多行文案统一写成 \n 转义，LuCI 页面会自动转换；
+	# 直接手改 UCI 时也按同样的转义写（后端按 \n / \t / \r / \\ 还原）。
+	# 可用占位符：
+	#   {sender}  发送者（短信为号码/名称）
+	#   {content} 事件正文（短信内容、来电号码与状态、信号完整明细）
+	#   {time}    事件时刻（本地时间 %Y-%m-%d %H:%M:%S）
+	#   {kind}    事件类型中文名（新短信 / 来电 / 信号变化 / 存储空间已满）
+	#   {count}   本条消息合并的事件条数（单条为 1）
+	# 未识别的占位符原样保留。
+	# v1.28.0 起：所有推送只带统一前缀 {time} {count}，各事件模板不再自带装饰性前缀。
+	option notify_tpl_prefix '{time} {count}'  # 全局前缀，附加在所有推送消息最前面（测试通知也会带上）；支持 {time} {count}
+	option notify_tpl_sms ''                # 留空用默认「新短信\n发送者：{sender}\n内容：{content}」（首行是标题）
+	option notify_tpl_call ''               # 留空用默认「来电\n{content}」
+	option notify_tpl_signal ''             # 留空用默认 '{content}'（正文由后端组装）
+	option notify_tpl_memory ''             # 留空用默认「短信存储空间已满\n后果：清理前可能收不到新短信」
+	# QQ 富文本短信卡片（仅 QQ Markdown 生效；企业微信/纯文本仍用 notify_tpl_sms）。
+	# 占位符同通用模板；留空=内置默认卡片；写成 {body} 可改回通用转换。
+	option notify_tpl_qq_sms_md ''
+
+	# 定时锁频配置
+	option schedule_enabled '0'              # 启用定时锁频
+	option schedule_check_interval '60'      # 检测间隔（秒）
+	option schedule_timeout '180'            # 无服务超时时间（秒）
+	option schedule_unlock_lte '1'           # 恢复时解锁LTE
+	option schedule_unlock_nr '1'            # 恢复时解锁NR
+	option schedule_toggle_airplane '1'      # 切换飞行模式生效
+
+	# 定时任务配置
+	option schedule_night_enabled '1'        # 启用夜间模式
+	option schedule_night_start '22:00'      # 夜间模式开始时间
+	option schedule_night_end '06:00'        # 夜间模式结束时间
+
+	# 夜间模式 LTE 配置
+	option schedule_night_lte_type '3'       # LTE锁定类型: 0=解锁, 1=频点, 2=小区, 3=频段
+	option schedule_night_lte_bands ''       # LTE频段 (如: "3,8")
+	option schedule_night_lte_arfcns ''      # LTE频点 (如: "1850,3450")
+	option schedule_night_lte_pcis ''        # LTE PCI (如: "256,128")
+
+	# 夜间模式 NR 配置
+	option schedule_night_nr_type '3'        # NR锁定类型: 0=解锁, 1=频点, 2=小区, 3=频段
+	option schedule_night_nr_bands ''        # NR频段 (如: "78,41")
+	option schedule_night_nr_arfcns ''       # NR频点 (如: "630000,520000")
+	option schedule_night_nr_scs_types ''    # NR SCS类型 (如: "1,1")
+	option schedule_night_nr_pcis ''         # NR PCI (如: "100,200")
+
+	option schedule_day_enabled '1'          # 启用日间模式
+
+	# 日间模式 LTE 配置
+	option schedule_day_lte_type '3'         # LTE锁定类型: 0=解锁, 1=频点, 2=小区, 3=频段
+	option schedule_day_lte_bands ''         # LTE频段
+	option schedule_day_lte_arfcns ''        # LTE频点
+	option schedule_day_lte_pcis ''          # LTE PCI
+
+	# 日间模式 NR 配置
+	option schedule_day_nr_type '3'          # NR锁定类型: 0=解锁, 1=频点, 2=小区, 3=频段
+	option schedule_day_nr_bands ''          # NR频段
+	option schedule_day_nr_arfcns ''         # NR频点
+	option schedule_day_nr_scs_types ''      # NR SCS类型
+	option schedule_day_nr_pcis ''           # NR PCI

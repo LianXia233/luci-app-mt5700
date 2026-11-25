@@ -27,7 +27,7 @@
 
 ## 3. 解耦后的模块结构
 
-新增公共库模块（均在 `htdocs/luci-static/resources/at-webserver/`，遵循 LuCI「require 加载 + window 实例」约定，均为 `L.Class.extend` 子类）：
+新增公共库模块（均在 `htdocs/luci-static/resources/mt5700d/`，遵循 LuCI「require 加载 + window 实例」约定，均为 `L.Class.extend` 子类）：
 
 | 文件 | 职责 |
 | --- | --- |
@@ -38,12 +38,12 @@
 | `config-notify.js` | 通知模块，含四类事件开关、双通道、定时/巡检、信号最小间隔、四类频率时段门控、测试推送、绑定进度 |
 | `config-templates.js` | 推送文案模块（含恢复默认） |
 
-`service.js` 保留为菜单入口（menu.d 固定指向 `at-webserver/service`），职责收缩为：
+`service.js` 保留为菜单入口（menu.d 固定指向 `mt5700d/service`），职责收缩为：
 - 服务状态多源判定与展示、重载/重启操作；
 - 渲染 4 个模块入口卡片，点击打开对应抽屉；
 - 作者署名、探活降级提示（`Ui.startup`）。
 
-**低耦合保证**：每个模块只在自己的 `save(set)` 里 `set` 自己负责的 UCI 键；抽屉在保存那一刻才写入 UCI 内存，取消不写入。因此改一个模块不会覆盖另一个模块的配置，也不会出现跨模块状态污染。所有模块统一通过 `AtWs.uci.uciSave()` 走 OpenWrt 标准「保存并应用」（含 procd reload trigger），配置改动即时通过 reload 生效，无需设备重启。
+**低耦合保证**：每个模块只在自己的 `save(set)` 里 `set` 自己负责的 UCI 键；抽屉在保存那一刻才写入 UCI 内存，取消不写入。因此改一个模块不会覆盖另一个模块的配置，也不会出现跨模块状态污染。所有模块统一通过 `Mt5700d.uci.uciSave()` 走 OpenWrt 标准「保存并应用」（含 procd reload trigger），配置改动即时通过 reload 生效，无需设备重启。
 
 ## 4. 响应式弹窗实现说明
 
@@ -97,7 +97,7 @@
 | `service.js`（原） | `tplBatchInput` 控件、`批量汇总标题` 表单项、`TPL_DEFAULTS.batch`、载入/保存/恢复默认中的 batch 分支、顶部注释 |
 | `config.rs` | `DEFAULT_TPL_BATCH` 常量、`NotifyTemplates.batch` 字段、default/load_config 的 batch、相关测试断言 |
 | `notify.rs` | `combine_messages` 多条分支的 batch 标题拼接、`batch_uses_header_index_and_template` 测试改为 `batch_uses_index_and_template` 并加防回退断言 |
-| `root/etc/config/at-webserver` | `option notify_tpl_batch` 及注释 |
+| `root/etc/config/mt5700d` | `option notify_tpl_batch` 及注释 |
 
 **未误删**：`rpc.js` 的 `sendBatch`、ucode 的 `batch` 方法、ACL 的 `batch`（这些是「批量 AT 命令查询」，与汇总标题无关）；其它模板、通知内容、推送功能完整保留。历史 release-notes 中对该项的文字记录属存档，保留不动。
 
@@ -108,7 +108,7 @@
 | RPC 接口 | 未改动任何 ubus/RPC 方法与签名；新增配置走既有 UCI 通道 |
 | ubus 调用 | 服务重载/启动逻辑原样保留 |
 | UCI 配置 | 除删除孤立项 `notify_tpl_batch` 外，既有键名/格式/默认值不变；新增键全部有出厂默认，老配置升级无感 |
-| ACL | 无需改动：`at-webserver` UCI 读写、相关 ubus 权限已覆盖 |
+| ACL | 无需改动：`mt5700d` UCI 读写、相关 ubus 权限已覆盖 |
 | 第三方依赖 | 未引入任何插件运行时依赖；测试用 jsdom 仅存于 tests/manual，不进包、不进 CI |
 | Lua | 未引入；全部沿用 JS（Ucode 未改动） |
 | 后端重写 | 未重写；仅在 config.rs/notify.rs 增量扩展，保持 Tokio 真异步、锁语义、启动/收尾顺序 |
@@ -131,20 +131,20 @@
 ## 9. 修改文件清单
 
 **前端**
-- `htdocs/luci-static/resources/view/at-webserver/service.js`（重写为编排层）
-- `htdocs/luci-static/resources/at-webserver/config-common.js`（新增）
-- `htdocs/luci-static/resources/at-webserver/config-drawer.js`（新增）
-- `htdocs/luci-static/resources/at-webserver/config-connection.js`（新增）
-- `htdocs/luci-static/resources/at-webserver/config-network.js`（新增）
-- `htdocs/luci-static/resources/at-webserver/config-notify.js`（新增）
-- `htdocs/luci-static/resources/at-webserver/config-templates.js`（新增）
+- `htdocs/luci-static/resources/view/mt5700d/service.js`（重写为编排层）
+- `htdocs/luci-static/resources/mt5700d/config-common.js`（新增）
+- `htdocs/luci-static/resources/mt5700d/config-drawer.js`（新增）
+- `htdocs/luci-static/resources/mt5700d/config-connection.js`（新增）
+- `htdocs/luci-static/resources/mt5700d/config-network.js`（新增）
+- `htdocs/luci-static/resources/mt5700d/config-notify.js`（新增）
+- `htdocs/luci-static/resources/mt5700d/config-templates.js`（新增）
 
 **后端**
 - `src/rust/src/config.rs`（新增门控配置结构与解析、删除 batch）
 - `src/rust/src/notify.rs`（新增 NotifyGate 与投递门控、删除 batch 标题、新增测试）
 
 **配置 / 测试 / 文档**
-- `root/etc/config/at-webserver`（新增 notify_limit_* 默认项、删除 notify_tpl_batch）
+- `root/etc/config/mt5700d`（新增 notify_limit_* 默认项、删除 notify_tpl_batch）
 - `tests/push-rate-test.js`（迁移事实源到新模块 + 新增门控断言）
 - `tests/manual/drawer-smoke.js`（新增，手动运行）
 - `CHANGELOG.md`（新增开发中说明）
@@ -193,7 +193,7 @@ PR #58 的 Codex Review 提出三条 P2，全部修复。
 
 ### 12.1 修复：抽屉字段编辑不触发脏标记（P2，config-drawer.js）
 - 问题：抽屉挂在 `body` 下、不在 `.mt5700-page` 内，页面级 `input/change → markDirty` 监听覆盖不到抽屉控件；只有点保存/重置才标记脏。用户编辑后直接刷新/关页，改动静默丢失（无 `beforeunload` 守护）。
-- 修复：抽屉面板自行把 `input/change` 接到 `AtWs.uci.markDirty()`，与 service.js 页面级行为对齐；`rpc.js` 的 `AtUci` 新增 `isDirty()` 查询，抽屉打开时记录页面脏基线 `prevDirty`。
+- 修复：抽屉面板自行把 `input/change` 接到 `Mt5700d.uci.markDirty()`，与 service.js 页面级行为对齐；`rpc.js` 的 `AtUci` 新增 `isDirty()` 查询，抽屉打开时记录页面脏基线 `prevDirty`。
 
 ### 12.2 修复：保存失败后「放弃修改」不回滚暂存 UCI（P2，config-drawer.js）
 - 问题：`controller.save()` 经 `L.uci.set` 暂存键后 `uciSave` 失败，用户选「放弃修改」只关抽屉；被放弃的值仍留在暂存区，之后其它模块的一次成功保存会把它们连带 commit。
@@ -226,7 +226,7 @@ PR #58 的 Codex Review 提出三条 P2，全部修复。
 - 补齐 `admit_due` Held/Dropped/窗外保留分支与 `rate_enabled+min_interval=0` 的单测；修正 config.rs 时段回退注释（逐字段回落默认，双端非法才等效全天）。
 
 ### 13.3 前端细节（P3）
-- 抽屉显式 `require at-webserver/rpc` 并声明 AtWs 全局；初始焦点优先内容区首个输入控件；`onSaved`/render/load 异常隔离（不误报保存失败、不卡死抽屉）。
+- 抽屉显式 `require mt5700d/rpc` 并声明 Mt5700d 全局；初始焦点优先内容区首个输入控件；`onSaved`/render/load 异常隔离（不误报保存失败、不卡死抽屉）。
 - 恢复重构前的 rateSync/timerSync：手动输入同步快捷下拉，消除 isDirty 快照假阳性。
 - `wechat_msg_format` 后端别名（md/v2 等）加载时归一化到下拉选项，不再静默回落 text。
 - 删除 config-connection.js 死代码 `fields`；修正「已禁用」提示指向（重载按钮在页面底部）；QQ 节流文案与 UCI 注释补充「同时约束企业微信、短信/来电豁免」。

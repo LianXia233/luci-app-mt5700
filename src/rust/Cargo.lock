@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "at-webserver"
+name = "mt5700d"
 version = "1.32.13"
 dependencies = [
  "async-trait",

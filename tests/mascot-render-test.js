@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const file = path.join(root, 'htdocs/luci-static/resources/at-webserver/mt5700.js');
+const file = path.join(root, 'htdocs/luci-static/resources/mt5700d/mt5700.js');
 const js = fs.readFileSync(file, 'utf8');
 
 assert.match(js, /function syncMascots\(root\)/,
@@ -36,7 +36,7 @@ assert.match(pageBody, /syncHero\(node\);\s*\n\s*syncMascots\(node\);/,
 
 assert.match(js, /hero\.appendChild\(E\('div', \{ 'class': 'mt5700-hero-art' \}\)\);/,
 	'buildHero 必须创建 .mt5700-hero-art 容器');
-assert.match(js, /'src': '\/luci-static\/resources\/at-webserver\/mascot\.png\?v=' \+ MT5700_CSS_VERSION/,
+assert.match(js, /'src': '\/luci-static\/resources\/mt5700d\/mascot\.png\?v=' \+ MT5700_CSS_VERSION/,
 	'看板娘必须继续使用 mascot.png，并带 CSS 版本戳');
 
 console.log('看板娘渲染回归检查通过：syncMascots(root) / api.page(node) / hero-art / mascot.png 均就位。');

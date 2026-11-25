@@ -161,11 +161,11 @@ msgstr "保存配置"
 msgid "保存后自动重载"
 msgstr "保存后自动重载"
 
-msgid "AT WebServer"
-msgstr "AT WebServer"
+msgid "mt5700d"
+msgstr "mt5700d"
 
-msgid "LuCI support for AT WebServer"
-msgstr "MT5700 5G 模组 AT WebServer LuCI 控制台"
+msgid "LuCI support for mt5700d"
+msgstr "MT5700M 5G 模组管理套件（mt5700d）"
 
 msgid "通知日志：查看短信、来电、信号变化等通知记录"
 msgstr "通知日志：查看短信、来电、信号变化等通知记录"

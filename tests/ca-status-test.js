@@ -3,11 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
-const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
+const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'mt5700d');
 
 const sandbox = {
-	window: {}, AtWs: undefined, Parse: undefined,
+	window: {}, Mt5700d: undefined, Parse: undefined,
 	L: {
 		Class: { extend: function (o) { return o; } },
 		view: { extend: function (o) { return o; } },
@@ -23,8 +23,8 @@ function loadLib(dir, name) {
 		.split('\n')
 		.filter(function (l) { return l.indexOf("'require ") !== 0; })
 		.join('\n');
-	const fn = new Function('AtWs', 'Parse', 'E', 'L', cleaned + '\n;return { AtWs: AtWs, Parse: Parse };');
-	return fn(sandbox.AtWs, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
+	const fn = new Function('Mt5700d', 'Parse', 'E', 'L', cleaned + '\n;return { Mt5700d: Mt5700d, Parse: Parse };');
+	return fn(sandbox.Mt5700d, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
 }
 
 let results = [];
@@ -37,7 +37,7 @@ try {
 	const parse = loadLib(libDir, 'parse.js');
 	const Parse = parse.Parse || parse;
 	const ws = loadLib(libDir, 'rpc.js');
-	const AtWs = (ws && ws.AtWs) || ws;
+	const Mt5700d = (ws && ws.Mt5700d) || ws;
 
 	// Extract helper functions from network_status.js
 	const netCode = fs.readFileSync(path.join(viewDir, 'network_status.js'), 'utf8');
@@ -51,7 +51,7 @@ try {
 			syncCarriers: syncCarriers
 		};
 	`;
-	const helpersFn = new Function('Parse', 'AtWs', fnCode);
+	const helpersFn = new Function('Parse', 'Mt5700d', fnCode);
 
 	// Case 1: Pure single carrier (1 PCC from HFREQINFO, no secondary cells)
 	{
@@ -64,7 +64,7 @@ try {
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('单载波状态判定', state.caStatus.state === 'single', 'state=' + state.caStatus.state);
 		check('单载波数量为 1', state.carriers.length === 1, 'len=' + state.carriers.length);
@@ -88,7 +88,7 @@ try {
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('CA 状态激活判定 (2CC)', state.caStatus.state === 'ca' && state.carriers.length === 2, 'state=' + state.caStatus.state + ' len=' + state.carriers.length);
 		check('辅载波 SCC1 识别', state.carriers[1].isPcc === false && state.carriers[1].sccIndex === 1, 'sccIndex=' + state.carriers[1].sccIndex);
@@ -111,7 +111,7 @@ try {
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('未在 HFREQINFO 中但 MONSSC 已上报的 SCC 自动纳入聚合', state.caStatus.state === 'ca' && state.carriers.length === 2,
 			'state=' + state.caStatus.state + ' count=' + state.carriers.length);
@@ -134,7 +134,7 @@ try {
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('LTE CA 辅载波聚合激活', state.caStatus.state === 'ca' && state.carriers.length === 2, 'state=' + state.caStatus.state);
 		check('LTE SCC1 真实指标与带宽换算', state.carriers[1].band === '1' && state.carriers[1].dlBwKHz === 20000 && state.carriers[1].rsrp === -95 && state.carriers[1].rssi === -75,
@@ -152,7 +152,7 @@ try {
 			secondarySuccess: false,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('初次查询未就绪展示 pending (绝不假装单载波)', state.caStatus.state === 'pending', 'state=' + state.caStatus.state);
 
@@ -172,7 +172,7 @@ try {
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: Date.now() - 2000 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('主频点查询失败时判定 error (绝不假装单载波)', state.caStatus.state === 'error', 'state=' + state.caStatus.state);
 
@@ -192,7 +192,7 @@ try {
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('查询成功但无载波判定 none (未驻网，而非单载波)', state.caStatus.state === 'none', 'state=' + state.caStatus.state);
 	}
@@ -208,7 +208,7 @@ try {
 			secondarySuccess: null,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		const env = new Function('state', 'Parse', 'AtWs', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, AtWs);
+		const env = new Function('state', 'Parse', 'Mt5700d', fnCode + '; return { syncCarriers: syncCarriers };')(state, Parse, Mt5700d);
 		env.syncCarriers();
 		check('未查询状态 (null) 判定 pending 而非 none/single', state.caStatus.state === 'pending', 'state=' + state.caStatus.state);
 	}

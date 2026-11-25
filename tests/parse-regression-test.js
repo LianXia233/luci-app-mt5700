@@ -14,10 +14,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 
 const sandbox = {
-	window: {}, AtWs: undefined, Parse: undefined,
+	window: {}, Mt5700d: undefined, Parse: undefined,
 	L: {
 		Class: { extend: function (o) { return o; } },
 		view: { extend: function (o) { return o; } },
@@ -33,8 +33,8 @@ function loadLib(name) {
 		.split('\n')
 		.filter(function (l) { return l.indexOf("'require ") !== 0; })
 		.join('\n');
-	const fn = new Function('AtWs', 'Parse', 'E', 'L', cleaned + '\n;return { AtWs: AtWs, Parse: Parse };');
-	return fn(sandbox.AtWs, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
+	const fn = new Function('Mt5700d', 'Parse', 'E', 'L', cleaned + '\n;return { Mt5700d: Mt5700d, Parse: Parse };');
+	return fn(sandbox.Mt5700d, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
 }
 
 let results = [];
@@ -45,32 +45,32 @@ function check(name, cond, detail) {
 
 try {
 	const rpcLib = loadLib('rpc.js');
-	const AtWs = (rpcLib && rpcLib.AtWs) || rpcLib;
+	const Mt5700d = (rpcLib && rpcLib.Mt5700d) || rpcLib;
 	const parseLib = loadLib('parse.js');
 	const Parse = (parseLib && parseLib.Parse) || parseLib;
 
 	/* ---------- 1. NR：PCI 为十六进制（手册 13.9.3，0~0x3EF） ---------- */
 	{
 		// 实机抓取：^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25
-		const d = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-64,-10,25\r\nOK');
 		check('NR PCI 十六进制换算 (0x80 -> 128)', d && d.pci === 128, d ? 'pci=' + d.pci : 'null');
 		check('NR 频点 ARFCN 与 TAC 不再错位', d && d.channel === '501234' && d.lac === '12345' && d.cid === 'C1A2B3C',
 			d ? 'arfcn=' + d.channel + ' tac=' + d.lac + ' cid=' + d.cid : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,3EF,12345,-64,-10,25\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,3EF,12345,-64,-10,25\r\nOK');
 		check('NR PCI 取到上限 0x3EF -> 1007', d && d.pci === 1007, d ? 'pci=' + d.pci : 'null');
 	}
 	{
 		// 十进制上报的 999：按 16 进制会变成 2457（越界），必须回退
-		const d = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,999,12345,-64,-10,25\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,999,12345,-64,-10,25\r\nOK');
 		check('NR PCI 十六进制越界回退十进制', d && d.pci === 999, d ? 'pci=' + d.pci : 'null');
 	}
 
 	/* ---------- 2. LTE：p[3]=ARFCN(十进制)、p[6]=TAC(hex)，PCI 十六进制不越 0~503 ---------- */
 	{
 		// 手册 13.9.5 例句：^MONSC: LTE,460,01,1650,A54933,1F3,183D,-98,-5,-72
-		const d = AtWs.parseMONSC('^MONSC: LTE,460,01,1650,A54933,1F3,183D,-98,-5,-72\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: LTE,460,01,1650,A54933,1F3,183D,-98,-5,-72\r\nOK');
 		check('LTE 频点取 p[3]（1650 = B3 EARFCN），TAC 取 p[6]',
 			d && d.channel === '1650' && d.lac === '183D',
 			d ? 'channel=' + d.channel + ' lac=' + d.lac : 'null');
@@ -80,50 +80,50 @@ try {
 	}
 	{
 		// 实机样例：ARFCN 38400（B41）/ TAC 24C8，PCI=8
-		const d = AtWs.parseMONSC('^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54\r\nOK');
 		check('LTE PCI 十六进制保持 (0x8 -> 8)', d && d.pci === 8, d ? 'pci=' + d.pci : 'null');
 		check('LTE ARFCN 与 TAC 不再互换', d && d.channel === '38400' && d.lac === '24C8',
 			d ? 'channel=' + d.channel + ' lac=' + d.lac : 'null');
 		check('LTE 无 SINR 字段，由 HCSQ 兜底', d && d.sinr === null && d.rssi === -54, d ? 'sinr=' + d.sinr + ' rssi=' + d.rssi : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: LTE,460,00,38400,D975244,1F7,24C8,-85,-10,-54\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: LTE,460,00,38400,D975244,1F7,24C8,-85,-10,-54\r\nOK');
 		check('LTE PCI 上限 0x1F7 -> 503', d && d.pci === 503, d ? 'pci=' + d.pci : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: LTE,460,00,38400,D975244,500,24C8,-85,-10,-54\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: LTE,460,00,38400,D975244,500,24C8,-85,-10,-54\r\nOK');
 		check('LTE PCI 十六进制越界 (0x500=1280) 回退十进制 500', d && d.pci === 500, d ? 'pci=' + d.pci : 'null');
 	}
 
 	/* ---------- 2b. NR <SCS> 与无效值哨兵、NONE 无服务 ---------- */
 	{
 		// 手册 13.9.5 例句：^MONSC: NR,460,01,1650,1,AB12345678,1F3,1234AB,-80,-10,32
-		const d = AtWs.parseMONSC('^MONSC: NR,460,01,1650,1,AB12345678,1F3,1234AB,-80,-10,32\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: NR,460,01,1650,1,AB12345678,1F3,1234AB,-80,-10,32\r\nOK');
 		check('NR SCS 编码 1 -> 30kHz（手册 13.9.3）', d && d.scs === 1 && d.scsKHz === 30,
 			d ? 'scs=' + d.scs + ' khz=' + d.scsKHz : 'null');
 		check('NR 手册例句字段对齐', d && d.channel === '1650' && d.cid === 'AB12345678' && d.pci === 0x1F3 && d.lac === '1234AB',
 			d ? 'ch=' + d.channel + ' cid=' + d.cid + ' pci=' + d.pci + ' tac=' + d.lac : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: NR,460,00,635558,2,C1A2B3C,80,12345,-1256,-348,-188\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: NR,460,00,635558,2,C1A2B3C,80,12345,-1256,-348,-188\r\nOK');
 		check('NR 无效值哨兵(-1256/-348/-188)归一为 null，不当成真实读数',
 			d && d.rsrp === null && d.rsrq === null && d.sinr === null,
 			d ? 'rsrp=' + d.rsrp + ' rsrq=' + d.rsrq + ' sinr=' + d.sinr : 'null');
 		check('NR SCS 编码 2 -> 60kHz', d && d.scsKHz === 60, d ? 'khz=' + d.scsKHz : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: LTE,460,00,,D975244,8,24C8,-85,,\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: LTE,460,00,,D975244,8,24C8,-85,,\r\nOK');
 		check('LTE 留空参数（手册：未获取到则留空）解析为空串/null 而非 0',
 			d && d.channel === '' && d.rsrq === null && d.rssi === null,
 			d ? 'channel=' + JSON.stringify(d && d.channel) + ' rsrq=' + d.rsrq + ' rssi=' + d.rssi : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: NONE\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: NONE\r\nOK');
 		check('NONE（无服务，无小区参数）按读不到处理', d === null, JSON.stringify(d));
 	}
 	{
 		// 手册 13.9.3 WCDMA：<MCC>,<MNC>,<ARFCN>,<PSC>,<Cell_ID>,<LAC>,<RSCP>,<RXLEV>,<EC/N0>
-		const d = AtWs.parseMONSC('^MONSC: WCDMA,460,01,3925,120,1A2B3C,1234,-75,-70,-14,6,1\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: WCDMA,460,01,3925,120,1A2B3C,1234,-75,-70,-14,6,1\r\nOK');
 		check('WCDMA 按手册布局：PSC 十进制在 p[4]，RSCP 在 p[7]',
 			d && d.sysMode === 'WCDMA' && d.channel === '3925' && d.pci === 120 && d.lac === '1234' && d.rsrp === -75 && d.rssi === -70,
 			d ? 'ch=' + d.channel + ' psc=' + d.pci + ' lac=' + d.lac + ' rscp=' + d.rsrp + ' rxlev=' + d.rssi : 'null');
@@ -132,11 +132,11 @@ try {
 	/* ---------- 3. 旧编码格式 B（无前导制式）：PCI 为十进制 ---------- */
 	{
 		// <mcc>,<mnc>,<lac>,<cid>,<pci>,<ch>,<rsrp_raw>,<rsrq_raw>,<sinr_raw>,<sysmode>
-		const d = AtWs.parseMONSC('^MONSC: 460,00,38400,D975244,120,1650,20,25,30,"LTE"\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: 460,00,38400,D975244,120,1650,20,25,30,"LTE"\r\nOK');
 		check('旧编码格式 PCI 按十进制解析 (120 而非 288)', d && d.pci === 120, d ? 'pci=' + d.pci : 'null');
 	}
 	{
-		const d = AtWs.parseMONSC('^MONSC: 460,00,501234,C1A2B3C,80,501234,77,226,30,"NR"\r\nOK');
+		const d = Mt5700d.parseMONSC('^MONSC: 460,00,501234,C1A2B3C,80,501234,77,226,30,"NR"\r\nOK');
 		check('旧编码格式标注 NR 时按十六进制 (0x80 -> 128)', d && d.pci === 128, d ? 'pci=' + d.pci : 'null');
 	}
 

@@ -4,18 +4,18 @@ luci-app-mt5700 角色素材声明 / Artwork Notice
 本安装包内含以下角色形象素材，仅用于 LuCI 界面装饰。它们不属于项目代码，
 不在 GPL-3.0-only 的授权范围内，也未取得权利人的书面许可。
 
-1) htdocs/luci-static/resources/at-webserver/bg/character-pc-light.webp
-   htdocs/luci-static/resources/at-webserver/bg/character-mobile-light.webp
+1) htdocs/luci-static/resources/mt5700d/bg/character-pc-light.webp
+   htdocs/luci-static/resources/mt5700d/bg/character-mobile-light.webp
    《蔚蓝档案》（Blue Archive）角色 阿罗娜 / 彩奈（Arona）。
    权利标注：© NEXON Games Co., Ltd. & Yostar, Inc.
    （中国大陆版本由上海悠星网络科技有限公司运营。）
 
-2) htdocs/luci-static/resources/at-webserver/bg/character-pc-dark.webp
-   htdocs/luci-static/resources/at-webserver/bg/character-mobile-dark.webp
+2) htdocs/luci-static/resources/mt5700d/bg/character-pc-dark.webp
+   htdocs/luci-static/resources/mt5700d/bg/character-mobile-dark.webp
    《蔚蓝档案》（Blue Archive）角色 普拉娜（Plana）。
    权利标注：© NEXON Games Co., Ltd. & Yostar, Inc.
 
-3) htdocs/luci-static/resources/at-webserver/mascot.png
+3) htdocs/luci-static/resources/mt5700d/mascot.png
    《异环》（NTE / Neverness to Everness）角色 薄荷（Mint）。
    著作权归苏州幻塔网络科技有限公司（Hotta Studio）/ 完美世界游戏。
 

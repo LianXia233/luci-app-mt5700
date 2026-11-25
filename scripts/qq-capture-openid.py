@@ -105,12 +105,12 @@ def main():
 
     print("\n===== 把下面的命令贴到路由器（或用 LuCI 表单填写）=====")
     if c2c:
-        print("单聊：uci set at-webserver.config.qq_target_type='c2c'")
-        print("      uci set at-webserver.config.qq_target_id='%s'" % c2c)
+        print("单聊：uci set mt5700d.config.qq_target_type='c2c'")
+        print("      uci set mt5700d.config.qq_target_id='%s'" % c2c)
     if group:
-        print("群聊：uci set at-webserver.config.qq_target_type='group'")
-        print("      uci set at-webserver.config.qq_target_id='%s'" % group)
-    print("      uci commit at-webserver && /etc/init.d/at-webserver restart")
+        print("群聊：uci set mt5700d.config.qq_target_type='group'")
+        print("      uci set mt5700d.config.qq_target_id='%s'" % group)
+    print("      uci commit mt5700d && /etc/init.d/mt5700d restart")
     print("提示：QQ 号本身无法直接用作 openid（平台隐私设计），每个用户只需绑定一次。")
     return 0 if (c2c or group) else 1
 

@@ -43,9 +43,9 @@ assert.match(lock, /^version = 4$/m,
   'Cargo.lock must use the expected lockfile format');
 
 const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"$/m);
-const lockedPackage = lock.match(/\[\[package\]\]\nname = "at-webserver"\nversion = "([^"]+)"/);
+const lockedPackage = lock.match(/\[\[package\]\]\nname = "mt5700d"\nversion = "([^"]+)"/);
 assert.ok(cargoVersion, 'Cargo.toml package version must exist');
-assert.ok(lockedPackage, 'Cargo.lock must contain the at-webserver package');
+assert.ok(lockedPackage, 'Cargo.lock must contain the mt5700d package');
 assert.equal(lockedPackage[1], cargoVersion[1],
   'Cargo.lock package version must match Cargo.toml without hard-coded release versions');
 

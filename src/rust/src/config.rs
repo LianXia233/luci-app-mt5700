@@ -1,7 +1,7 @@
 // Copyright (C) 2026 LianXia233
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! UCI 配置读取：一次 `uci show at-webserver` 取回整个配置段。
+//! UCI 配置读取：一次 `uci show mt5700d` 取回整个配置段。
 //! 键名与 LuCI 页面约定完全一致。
 
 use crate::{log_info, log_warn};
@@ -734,13 +734,13 @@ fn env_nonempty(key: &str) -> String {
     std::env::var(key).unwrap_or_default().trim().to_string()
 }
 
-/// 用一次 `uci show at-webserver` 取回整个配置段。
+/// 用一次 `uci show mt5700d` 取回整个配置段。
 pub async fn uci_values() -> Result<UciReader, String> {
     // 加 5s 超时，避免 uci 命令异常挂起卡死启动。
     let out = tokio::time::timeout(
         Duration::from_secs(5),
         tokio::process::Command::new("uci")
-            .args(["show", "at-webserver"])
+            .args(["show", "mt5700d"])
             .output(),
     )
     .await
@@ -750,7 +750,7 @@ pub async fn uci_values() -> Result<UciReader, String> {
         return Err(format!("uci show 退出码 {}", out.status));
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    let prefix = "at-webserver.config.";
+    let prefix = "mt5700d.config.";
     let mut values = HashMap::new();
     for line in text.lines() {
         let line = line.trim();

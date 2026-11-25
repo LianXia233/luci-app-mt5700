@@ -1,7 +1,7 @@
 #!/bin/sh
-# Exercise the at-webserver init.d interface selection on a disposable OpenWrt VM.
-# Usage (on a disposable OpenWrt test machine, it rewrites network/firewall/at-webserver config):
-#   sh tests/iface/interface-selection.sh /etc/init.d/at-webserver
+# Exercise the mt5700d init.d interface selection on a disposable OpenWrt VM.
+# Usage (on a disposable OpenWrt test machine, it rewrites network/firewall/mt5700d config):
+#   sh tests/iface/interface-selection.sh /etc/init.d/mt5700d
 
 INIT="$1"
 
@@ -9,7 +9,7 @@ INIT="$1"
 # (run() sources "$INIT" with stderr/stdout swallowed, so a missing uci or a
 # bad init path would otherwise just make every case "pass" or "fail" blindly).
 if [ -z "$INIT" ] || [ ! -f "$INIT" ]; then
-	echo "usage: $0 /etc/init.d/at-webserver" >&2
+	echo "usage: $0 /etc/init.d/mt5700d" >&2
 	exit 2
 fi
 if ! command -v uci >/dev/null 2>&1; then
@@ -28,8 +28,8 @@ reset() {
 		for n in MT5700M MT5700Mv6 testwan testwan6 custom1; do uci -q del_list "$z.network=$n"; done
 	done
 	uci commit firewall
-	for o in manage_interface iface_v4 iface_v6; do uci -q delete "at-webserver.config.$o"; done
-	uci commit at-webserver
+	for o in manage_interface iface_v4 iface_v6; do uci -q delete "mt5700d.config.$o"; done
+	uci commit mt5700d
 	rm -f /tmp/ifup.log
 }
 openfi_like() {
@@ -38,7 +38,7 @@ openfi_like() {
 	uci set network.other=interface; uci set network.other.device=eth9; uci set network.other.proto=dhcp
 	uci commit network
 }
-cfg() { uci set "at-webserver.config.$1=$2"; uci commit at-webserver; }
+cfg() { uci set "mt5700d.config.$1=$2"; uci commit mt5700d; }
 
 # NETDEV selects what detect_usb_netdev reports (empty = modem port not enumerated yet).
 run() {
@@ -52,8 +52,8 @@ run() {
 	) >/dev/null 2>&1
 }
 
-touch /etc/config/at-webserver
-uci -q get at-webserver.config >/dev/null || { uci set at-webserver.config=config; uci commit at-webserver; }
+touch /etc/config/mt5700d
+uci -q get mt5700d.config >/dev/null || { uci set mt5700d.config=config; uci commit mt5700d; }
 export NETDEV=usb0
 
 # 1. management off, auto scan: only bring up what already sits on the modem port

@@ -324,13 +324,13 @@ impl SchedConfigDto {
 /// 落盘配置。用 exec 直接传参，不经过 shell，避免值里的引号被解释。
 pub async fn write_schedule_uci(d: &SchedConfigDto) -> Result<(), String> {
     for (k, v) in d.uci_entries() {
-        let arg = format!("at-webserver.config.{k}={v}");
+        let arg = format!("mt5700d.config.{k}={v}");
         let out = tokio::process::Command::new("uci").args(["set", &arg]).output().await.map_err(|e| e.to_string())?;
         if !out.status.success() {
             return Err(format!("写入 {k} 失败: {}", String::from_utf8_lossy(&out.stderr)));
         }
     }
-    let out = tokio::process::Command::new("uci").args(["commit", "at-webserver"]).output().await.map_err(|e| e.to_string())?;
+    let out = tokio::process::Command::new("uci").args(["commit", "mt5700d"]).output().await.map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(format!("提交配置失败: {}", String::from_utf8_lossy(&out.stderr)));
     }

@@ -20,11 +20,14 @@ const ROOT = path.join(__dirname, '..', '..');
  * 反向断言强制登记，不依赖人工自觉。
  */
 const REQUIRED_EXECUTABLES = [
-	'root/etc/init.d/at-webserver',
-	'root/etc/uci-defaults/at-webserver',
-	'root/etc/hotplug.d/iface/99-at-webserver',
-	'root/etc/hotplug.d/usb/99-at-webserver',
-	'root/usr/libexec/at-webserver/on-uplink.sh',
+	'root/etc/init.d/mt5700d',
+	'root/etc/uci-defaults/mt5700d',
+	'root/etc/hotplug.d/iface/99-mt5700d',
+	'root/etc/hotplug.d/usb/99-mt5700d',
+	'root/usr/libexec/mt5700d/on-uplink.sh',
+	/* 一次性迁移脚本：postinst 与 uci-defaults 都按路径直接调用。
+	 * 计划在下个大版本整体删除（删除步骤写在脚本头），届时同步移除本行。 */
+	'root/usr/libexec/mt5700d/migrate-legacy.sh',
 	'scripts/sdk-build.sh',
 	'tests/iface/interface-selection.sh',
 	'tests/mock-modem/e2e-test.js',

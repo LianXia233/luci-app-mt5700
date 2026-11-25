@@ -3,7 +3,7 @@
 		"description": "Grant UCI, ubus and MT5700 RPC access for luci-app-mt5700",
 		"read": {
 			"uci": [
-				"at-webserver",
+				"mt5700d",
 				"network"
 			],
 			"ubus": {
@@ -45,32 +45,32 @@
 				"/dev/serial/by-id": [
 					"list"
 				],
-				"/etc/config/at-webserver": [
+				"/etc/config/mt5700d": [
 					"read",
 					"stat"
 				],
-				"/etc/init.d/at-webserver": [
+				"/etc/init.d/mt5700d": [
 					"list",
 					"read",
 					"stat"
 				],
-				"/usr/bin/at-webserver-rust": [
+				"/usr/bin/mt5700d": [
 					"list",
 					"read",
 					"stat"
 				],
-				"/tmp/at-notifications.log": [
+				"/tmp/mt5700d-notifications.log": [
 					"read",
 					"stat"
 				],
-				"/tmp/at-webserver": [
+				"/tmp/mt5700d": [
 					"list"
 				],
-				"/tmp/at-webserver/*": [
+				"/tmp/mt5700d/*": [
 					"read",
 					"stat"
 				],
-				"/var/log/at-notifications.log": [
+				"/var/log/mt5700d-notifications.log": [
 					"read",
 					"stat"
 				],
@@ -84,7 +84,7 @@
 		},
 		"write": {
 			"uci": [
-				"at-webserver"
+				"mt5700d"
 			],
 			"ubus": {
 				"file": [
@@ -118,20 +118,20 @@
 				]
 			},
 			"file": {
-				"/etc/config/at-webserver": [
+				"/etc/config/mt5700d": [
 					"write",
 					"read",
 					"stat"
 				],
-				"/etc/init.d/at-webserver": [
+				"/etc/init.d/mt5700d": [
 					"exec"
 				],
-				"/tmp/at-notifications.log": [
+				"/tmp/mt5700d-notifications.log": [
 					"write",
 					"read",
 					"stat"
 				],
-				"/var/log/at-notifications.log": [
+				"/var/log/mt5700d-notifications.log": [
 					"write",
 					"read",
 					"stat"

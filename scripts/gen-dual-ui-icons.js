@@ -2,7 +2,7 @@
 /**
  * 生成双 UI 模式的 SVG 图标资源文件。
  *
- * 数据源唯一：htdocs/luci-static/resources/at-webserver/icons.js 里的
+ * 数据源唯一：htdocs/luci-static/resources/mt5700d/icons.js 里的
  * NORMAL / MINIMAL 两张图元表。运行时由 Icon Manager 内联注入（currentColor、
  * 可跟随 MD3 动态色），本脚本把同一份数据导出为项目内部可直接引用的
  * .svg 文件，便于逐页核对、外部引用与回归测试。
@@ -19,7 +19,7 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.join(__dirname, '..');
-const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'mt5700d');
 const iconsDir = path.join(libDir, 'icons');
 const source = path.join(libDir, 'icons.js');
 const checkOnly = process.argv.indexOf('--check') >= 0;

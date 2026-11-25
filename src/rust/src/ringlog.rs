@@ -6,7 +6,7 @@
 //! # 为什么单独成模块
 //!
 //! 「日志页看得到的历史」原来分两块：后端内存环形缓冲（`logger`）与
-//! 通知日志文件（`notify` 的 `log_file`，默认 `/tmp/at-notifications.log`）。
+//! 通知日志文件（`notify` 的 `log_file`，默认 `/tmp/mt5700d-notifications.log`）。
 //! 后者是**纯 append、没有任何上限** —— 短信/来电/信号巡检每来一条就追加几行，
 //! 长期跑会把 tmpfs（内存）吃掉，严重时整机的 `/tmp` 满了会连带影响其它服务。
 //!

@@ -42,15 +42,15 @@ def read(p):
 fixtures_js = read(TESTS / "sms-fixtures.js")
 fixtures_js = "var module = { exports: {} };\n" + fixtures_js + "\nvar fixtures = module.exports;\n"
 
-parse_src = read(RES / "at-webserver" / "parse.js").replace("'require baseclass';", "")
+parse_src = read(RES / "mt5700d" / "parse.js").replace("'require baseclass';", "")
 cut = parse_src.index("var ParseClass =")
 parse_js = parse_src[:cut]
 
-view_src = read(RES / "view" / "at-webserver" / "sms_center.js")
+view_src = read(RES / "view" / "mt5700d" / "sms_center.js")
 view_src = "\n".join(l for l in view_src.split("\n") if not l.strip().startswith("'require "))
 view_js = "var viewDef = (function () {\n" + view_src + "\n})();\n"
 
-css = read(RES / "at-webserver" / "mt5700.css")
+css = read(RES / "mt5700d" / "mt5700.css")
 
 # ---------- LuCI 最小桩 ----------
 STUB = r"""
@@ -74,7 +74,7 @@ var SmsEncode = {
 		return { chars: t.length, encoding: /[^\x00-\x7F]/.test(t) ? 'UCS2' : 'GSM7', parts: 1 };
 	}
 };
-var AtWs = {
+var Mt5700d = {
 	client: {
 		sendCommand: function (cmd) {
 			if (cmd === 'AT+CMGL=4') return Promise.resolve({ success: true, data: window.CMGL_TEXT });
