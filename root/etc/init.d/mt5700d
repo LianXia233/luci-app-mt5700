@@ -26,6 +26,26 @@ EXTRA_HELP="	ensure_interfaces	确保 V4/V6 模组接口存在并登记到上行
 PROG=/usr/bin/mt5700d
 PROG_NAME="mt5700d"
 
+# 停止后端进程（可重复调用）。
+#
+# 不能写 `killall "$PROG_NAME"`：init.d 脚本自身就叫 mt5700d，而
+# `/etc/init.d/mt5700d start`、开机 /etc/rc.d/S*、service 命令都是直接执行
+# 本脚本，busybox ash 会把进程 comm 设成脚本名，killall 因此把执行脚本的
+# 进程自己一起 SIGTERM —— 表现为 start 输出 "Terminated"、退出码 143，
+# procd 实例永远建不起来（实测 2.0.0 实机升级后服务 inactive 就是这个原因）。
+# 所以改为按 /proc/<pid>/exe 判断：只杀可执行文件确实是 $PROG 的进程，
+# 脚本自身的 exe 是 busybox/ash，不会被命中。
+kill_prog_processes() {
+	local d p exe
+	for d in /proc/[0-9]*; do
+		p=${d#/proc/}
+		[ "$p" = "$$" ] && continue
+		exe=$(readlink "$d/exe" 2>/dev/null) || continue
+		[ "$exe" = "$PROG" ] || continue
+		kill "$p" 2>/dev/null
+	done
+}
+
 # 加载 UCI 函数库
 . /lib/functions.sh
 
@@ -547,13 +567,10 @@ start_service() {
 	fi
 
 	# 先清残留进程，再立刻拉起 procd，避免防火墙/串口探测拖死 start。
-	# 严重警告：这里绝不能 `killall mt5700d`——init.d 被直接执行时（开机
-	# /etc/rc.d/S*、`/etc/init.d/mt5700d start`、service 命令都是直接 exec 本脚本），
-	# 脚本自身的进程名(comm)就是 "mt5700d"，killall 会把脚本自己一起 SIGTERM，
-	# start 会在 procd_open_instance 之前被打断（exit 143），服务永远起不来。
-	# 旧实例交给 procd 处理（reload_service 已这么做），这里只清遗留二进制。
+	# 旧实例优先交给 procd 处理；这里只清掉可执行文件确实是本二进制的残留
+	# 进程（kill_prog_processes 不会误杀脚本自身，原因见函数定义处）。
 	killall -q at-server.py 2>/dev/null
-	killall -q "$PROG_NAME" 2>/dev/null
+	kill_prog_processes
 
 	logger -t mt5700d "配置 procd 实例..."
 	procd_open_instance
@@ -1131,7 +1148,7 @@ stop_service() {
 	logger -t mt5700d "停止服务..."
 	echo "Stopping mt5700d..."
 
-	killall -q "$PROG_NAME" 2>/dev/null
+	kill_prog_processes
 	rm -f /var/run/mt5700d.pid
 
 	# 清理防火墙规则（幂等，列表与 apply_firewall_rules 一致）
@@ -1157,13 +1174,13 @@ reload_service() {
 
 	uci -q commit mt5700d
 
-	# 通过 procd 重启实例，避免 killall 与 respawn 竞态导致双实例
+	# 通过 procd 重启实例，避免进程清理与 respawn 竞态导致双实例
 	if ubus -q call service list '{"name":"mt5700d"}' >/dev/null 2>&1; then
 		ubus call service delete '{"name":"mt5700d"}' >/dev/null 2>&1 || true
 		sleep 1
 	fi
-	# 兜底清理残留（仅一次，不依赖 killall 反复拉起）
-	killall -q "$PROG_NAME" 2>/dev/null
+	# 兜底清理残留（仅一次，不依赖清理动作反复拉起）
+	kill_prog_processes
 	rm -f /var/run/mt5700d.pid
 	sleep 1
 
