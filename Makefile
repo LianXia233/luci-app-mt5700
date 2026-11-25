@@ -34,6 +34,39 @@ define Build/Prepare
 	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/mt5700d/migrate-legacy.sh 2>/dev/null || true
 endef
 
+# 升级时保留迁移后的配置文件。preinst 会在新文件解包前把旧路径的用户配置
+# 搬到这个路径；没有 conffiles 声明时，opkg/apk 升级会用包内默认文件覆盖它。
+define Package/luci-app-mt5700/conffiles
+/etc/config/mt5700d
+endef
+
+# 旧 UCI 配置必须在包文件解包前搬迁。
+#
+# 原因：postinst 在解包之后才执行，那时新版 /etc/config/mt5700d 默认文件
+# 已经落地，迁移脚本会因目标存在而跳过，用户配置被静默丢弃。preinst 是本包
+# 唯一能在旧文件仍完整、新文件尚未落地时介入的钩子，因此这里保留一份最小
+# 内联迁移；其余遗留数据仍由 migrate-legacy.sh 统一处理。
+define Package/luci-app-mt5700/preinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+	if [ -f /etc/config/at-webserver ]; then
+		if [ -f /etc/config/mt5700d ]; then
+			# 异常升级态：两份并存时保留较新的目标，旧文件留档供人工恢复。
+			cp -f /etc/config/mt5700d /etc/config/mt5700d.pre-migration 2>/dev/null || true
+			mv -f /etc/config/at-webserver /etc/config/at-webserver.pre-migration 2>/dev/null || true
+			logger -t mt5700d "UCI 新旧配置并存，已保留 mt5700d 并备份旧配置" 2>/dev/null || true
+		else
+			mv -f /etc/config/at-webserver /etc/config/mt5700d
+			sed -i -e 's#at-webserver#mt5700d#g' \
+			       -e 's#at-notifications[.]log#mt5700d-notifications.log#g' \
+			       /etc/config/mt5700d 2>/dev/null
+			logger -t mt5700d "已将 UCI 配置从 at-webserver 迁移到 mt5700d" 2>/dev/null || true
+		fi
+	fi
+}
+exit 0
+endef
+
 # 安装/升级完成后强制注册开机自启并拉起服务。
 #
 # 背景：本包的 root/etc/init.d/mt5700d 执行位曾两次静默回退
@@ -61,9 +94,8 @@ define Package/luci-app-mt5700/postinst
 	# ---------------------------------------------------------------------
 	# 旧版本遗留数据迁移（一次性）
 	#
-	# 迁移逻辑全部收在 /usr/libexec/mt5700d/migrate-legacy.sh 里：安装期与
-	# 开机期都要跑，内联两份必然漂移；旧路径字面量集中一处，将来整体删除时
-	# 不会遗漏。脚本头的注释写了完整的删除步骤（本版本之后可直接删）。
+	# UCI 配置已在 preinst 阶段搬迁；这里与 uci-defaults 复用同一脚本处理
+	# 短信归档、用量、防火墙规则与旧进程清理。脚本头的注释写了完整删除步骤。
 	# ---------------------------------------------------------------------
 	[ -x /usr/libexec/mt5700d/migrate-legacy.sh ] && /usr/libexec/mt5700d/migrate-legacy.sh
 
