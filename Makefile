@@ -40,15 +40,23 @@ define Package/luci-app-mt5700/conffiles
 /etc/config/mt5700d
 endef
 
-# 旧 UCI 配置必须在包文件解包前搬迁。
+# 旧 UCI 配置必须在包文件解包前抢救。
 #
-# 原因：postinst 在解包之后才执行，那时新版 /etc/config/mt5700d 默认文件
-# 已经落地，迁移脚本会因目标存在而跳过，用户配置被静默丢弃。preinst 是本包
-# 唯一能在旧文件仍完整、新文件尚未落地时介入的钩子，因此这里保留一份最小
-# 内联迁移；其余遗留数据仍由 migrate-legacy.sh 统一处理。
+# 原因：postinst 在解包之后才执行，那时新版 /etc/config/mt5700d 默认文件已经
+# 落地，脚本会因目标存在而跳过迁移；也不能指望包管理器清理受保护路径下的
+# 旧文件。preinst 是本包唯一能在旧文件仍完整、新文件尚未落地时介入的钩子。
+#
+# 这里只做「复制到临时位置」：此刻新包尚未解包，migrate-legacy.sh 还不存在，
+# 调不到脚本；sed 与落盘统一放在脚本的 postinst 阶段，规则只保留一份。
+# 临时目录放在 overlay 而不是 /tmp：解包后若断电，tmpfs 清空会让旧配置彻底丢失。
+#
+# 复制前必须先清掉上一次安装可能残留的备份目录：备份只在「本次安装的
+# preinst → postinst」窗口内有效，带着陈旧备份进入下一次安装，脚本会拿
+# 旧备份覆盖用户后来在新版本里改过的配置。
 define Package/luci-app-mt5700/preinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
+	rm -rf /etc/mt5700d-migrate
 	if [ -f /etc/config/at-webserver ]; then
 		if [ -f /etc/config/mt5700d ]; then
 			# 异常升级态：两份并存时保留较新的目标，旧文件留档供人工恢复。
@@ -56,11 +64,9 @@ define Package/luci-app-mt5700/preinst
 			mv -f /etc/config/at-webserver /etc/config/at-webserver.pre-migration 2>/dev/null || true
 			logger -t mt5700d "UCI 新旧配置并存，已保留 mt5700d 并备份旧配置" 2>/dev/null || true
 		else
-			mv -f /etc/config/at-webserver /etc/config/mt5700d
-			sed -i -e 's#at-webserver#mt5700d#g' \
-			       -e 's#at-notifications[.]log#mt5700d-notifications.log#g' \
-			       /etc/config/mt5700d 2>/dev/null
-			logger -t mt5700d "已将 UCI 配置从 at-webserver 迁移到 mt5700d" 2>/dev/null || true
+			mkdir -p /etc/mt5700d-migrate
+			cp -f /etc/config/at-webserver /etc/mt5700d-migrate/legacy-config
+			logger -t mt5700d "已在解包前保存旧 UCI 配置" 2>/dev/null || true
 		fi
 	fi
 }
@@ -94,8 +100,9 @@ define Package/luci-app-mt5700/postinst
 	# ---------------------------------------------------------------------
 	# 旧版本遗留数据迁移（一次性）
 	#
-	# UCI 配置已在 preinst 阶段搬迁；这里与 uci-defaults 复用同一脚本处理
-	# 短信归档、用量、防火墙规则与旧进程清理。脚本头的注释写了完整删除步骤。
+	# UCI 配置已在 preinst 阶段复制到 /etc/mt5700d-migrate/；脚本会用它恢复
+	# /etc/config/mt5700d 并替换旧路径，再处理短信归档、用量、防火墙规则与
+	# 旧进程清理。脚本头的注释写了完整删除步骤。
 	# ---------------------------------------------------------------------
 	[ -x /usr/libexec/mt5700d/migrate-legacy.sh ] && /usr/libexec/mt5700d/migrate-legacy.sh
 

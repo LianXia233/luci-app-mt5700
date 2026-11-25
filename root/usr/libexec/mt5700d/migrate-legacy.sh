@@ -9,7 +9,7 @@
 # 确认不再有设备从旧版本升级后（建议下一个大版本），按下面四步整体删除：
 #   1) 删除本文件 root/usr/libexec/mt5700d/migrate-legacy.sh；
 #   2) 删除三处调用：
-#        - Makefile 的 Package/luci-app-mt5700/preinst（仅 UCI 配置内联段）
+#        - Makefile 的 Package/luci-app-mt5700/preinst
 #        - Makefile 的 Package/luci-app-mt5700/postinst
 #        - root/etc/uci-defaults/mt5700d
 #   3) 删除 tests/lib/exec-mode.js 的 REQUIRED_EXECUTABLES 里的本文件条目；
@@ -17,11 +17,13 @@
 # 四步做完，仓库内不再有旧版本路径引用（grep 旧路径应归零）。
 # ============================================================================
 #
-# 为什么 UCI 配置内联在 preinst，其余逻辑独立成脚本：
-#   1) UCI 配置必须在包文件解包前搬迁，否则新默认文件先落地会让迁移失效，
-#      这个时序只有 preinst 能满足，因此一处内联不可避免；
-#   2) 其余遗留数据在 postinst 与开机期（uci-defaults）都要跑，内联两份
-#      必然漂移，集中在本脚本可以避免遗漏；
+# 为什么 preinst 里留一小段，其余逻辑独立成脚本：
+#   1) 旧 UCI 配置必须在包文件解包前抢救：新包的默认配置此时还没落地，
+#      postinst 阶段再动就晚了。这个时序只有 preinst 能满足，而 preinst
+#      执行时本脚本尚未解包、调不到，因此 preinst 里只保留
+#      「复制到临时位置」这一步，不能依赖包管理器对受保护路径旧文件的清理；
+#   2) sed 规则、落盘与其余遗留数据全部在本脚本，安装期（postinst）与开机期
+#      （uci-defaults）复用同一份实现，不会漂移；
 #   3) 调用点各留一行，主流程保持可读。
 #
 # 幂等：每个动作都先判断来源存在且目标不存在，重复执行安全。
@@ -33,10 +35,26 @@ set -u
 
 log() { logger -t mt5700d "迁移: $*" 2>/dev/null || true; }
 
-# --- 1. UCI 配置（preinst 已处理，此处仅兜底）-------------------------------
-# 正常升级时 preinst 已在新文件解包前完成本步；这里覆盖只执行 uci-defaults
-# 的异常场景。段类型与配置值里的旧路径必须同步替换，否则新服务读到的仍是
-# 旧段类型与旧路径（例如 log_plugin_file 仍指向旧目录），日志页会显示空文件。
+# --- 1. UCI 配置 -------------------------------------------------------------
+# 段类型与配置值里的旧路径必须同步替换，否则新服务读到的仍是旧段类型与
+# 旧路径（例如 log_plugin_file 仍指向旧目录），日志页会显示空文件。
+# sed 规则只写在这一处：preinst 只负责在解包前把旧配置复制到临时位置。
+
+# 1a. 正常升级：preinst 已在解包前保存旧配置。此刻新默认文件已经落地，
+#     必须用备份覆盖它，否则用户配置会被默认值顶掉。
+if [ -f /etc/mt5700d-migrate/legacy-config ]; then
+	cp -f /etc/mt5700d-migrate/legacy-config /etc/config/mt5700d
+	sed -i -e 's#at-webserver#mt5700d#g' \
+	       -e 's#at-notifications[.]log#mt5700d-notifications.log#g' \
+	       /etc/config/mt5700d 2>/dev/null
+	rm -rf /etc/mt5700d-migrate
+	# 旧文件若未被包管理器删除，留着会让 uci 同时加载两份配置
+	rm -f /etc/config/at-webserver
+	log "已用 preinst 保存的旧配置恢复 /etc/config/mt5700d"
+fi
+
+# 1b. 兜底：只执行 uci-defaults、没有经过 preinst 的场景（刷机、手动解包、
+#     从备份恢复 overlay），旧文件仍在且目标尚不存在时直接搬迁。
 if [ -f /etc/config/at-webserver ] && [ ! -f /etc/config/mt5700d ]; then
 	mv -f /etc/config/at-webserver /etc/config/mt5700d
 	sed -i -e 's#at-webserver#mt5700d#g' \
