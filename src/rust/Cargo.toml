@@ -1,6 +1,6 @@
 [package]
 name = "mt5700d"
-version = "1.32.13"
+version = "2.0.0"
 edition = "2021"
 description = "MT5700M 5G module management backend: LuCI RPC bridge, AT command, URC/event bus, schedule and cellscan"
 license = "GPL-3.0-only"
