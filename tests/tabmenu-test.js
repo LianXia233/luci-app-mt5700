@@ -20,7 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 const menuJson = JSON.parse(fs.readFileSync(
 	path.join(__dirname, '..', 'root', 'usr', 'share', 'luci', 'menu.d', 'luci-app-mt5700.json'), 'utf8'));
 

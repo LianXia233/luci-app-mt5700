@@ -13,7 +13,7 @@
 //!
 //! # 存放约定
 //!
-//! - **目录**：`/etc/at-webserver/SMS/`
+//! - **目录**：`/etc/mt5700d/SMS/`
 //!   `/etc` 在 overlay 上（本机 `/dev/loop0` → f2fs），重启与 sysupgrade 默认保留；
 //!   而 `/var` 是 tmpfs（`/var -> /tmp`），断电即失，不能用于长期记录。
 //! - **粒度**：一个会话一个文件。删 A 会话不会碰到 B，也不存在「后写的覆盖先写的」。
@@ -58,7 +58,7 @@ use crate::log_warn;
  * ------------------------------------------------------------------ */
 
 /// 归档根目录。
-pub const SMS_STORE_DIR: &str = "/etc/at-webserver/SMS";
+pub const SMS_STORE_DIR: &str = "/etc/mt5700d/SMS";
 
 /// 归档目录总字节数上限（默认 2 MiB）。
 ///
@@ -87,8 +87,13 @@ const PRUNE_TARGET_DEN: u64 = 5;
 /// 容器版本号。格式变更时递增，旧版本仍可读（只读路径按版本分支）。
 const FORMAT_VERSION: u8 = 1;
 
-/// 魔数 `AWSS`（AT WebServer SMS）。写入前会被混淆，磁盘上看不到明文。
-const MAGIC: [u8; 4] = *b"AWSS";
+/// 容器魔数 `M57D`。写入前会被混淆，磁盘上看不到明文。
+const MAGIC: [u8; 4] = *b"M57D";
+
+/// 旧版容器魔数 `AWSS`。**只用于读取**：早期版本写下的归档以它开头，
+/// 读端不认会让升级设备上的历史短信全部无法解析。写入始终用 [`MAGIC`]，
+/// 旧文件不会在读取时被改写（避免读操作产生写放大与破坏窗口）。
+const LEGACY_MAGIC: [u8; 4] = *b"AWSS";
 
 /// 容器头长度：
 /// 魔数 4 + 版本 1 + 标志 1 + 头长 2 + salt 16 + nonce 12 + 明文长 4 + 写入时刻 8 = 48
@@ -466,7 +471,8 @@ fn decode_container(raw: &[u8]) -> Result<(Vec<u8>, i64), String> {
 	let mut buf = raw.to_vec();
 	scramble(&mut buf); /* 对合，同一函数 */
 
-	if buf[0..4] != MAGIC {
+	let magic = &buf[0..4];
+	if magic != MAGIC && magic != LEGACY_MAGIC {
 		return Err("归档文件魔数不匹配（不是本插件的归档，或已损坏）".into());
 	}
 	let version = buf[4];
@@ -562,7 +568,8 @@ fn read_written_at(path: &Path) -> i64 {
 		return 0;
 	}
 	scramble(&mut head);
-	if head[0..4] != MAGIC {
+	let magic = &head[0..4];
+	if magic != MAGIC && magic != LEGACY_MAGIC {
 		return 0;
 	}
 	i64::from_le_bytes([
@@ -997,6 +1004,18 @@ mod tests {
 		let (out, ts) = decode_container(&blob).expect("解密");
 		assert_eq!(out, plain.to_vec());
 		assert!(ts > 0);
+	}
+
+	#[test]
+	fn legacy_magic_container_still_reads() {
+		/* 早期版本写下的归档以旧魔数开头，读端必须继续认，否则历史短信无法解析。 */
+		let plain = b"{\"number\":\"10000\",\"content\":\"old archive\"}";
+		let mut blob = encode_container(plain);
+		scramble(&mut blob); /* 还原成未混淆形态，改写魔数后再混淆回去 */
+		blob[0..4].copy_from_slice(&LEGACY_MAGIC);
+		scramble(&mut blob);
+		let (out, _ts) = decode_container(&blob).expect("旧魔数归档应可读");
+		assert_eq!(out, plain.to_vec());
 	}
 
 	#[test]

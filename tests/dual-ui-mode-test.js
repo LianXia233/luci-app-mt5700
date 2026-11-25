@@ -17,8 +17,8 @@ const vm = require('vm');
 const { execFileSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
-const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'at-webserver');
-const viewDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
+const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'mt5700d');
+const viewDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'view', 'mt5700d');
 const iconsDir = path.join(libDir, 'icons');
 
 const results = [];
@@ -230,9 +230,9 @@ check('任务要求语义全覆盖',
 
 		const r = await M.set('minimal');
 		check('切换到极简模式即时生效', r.ok && r.mode === 'minimal' && env.attrs['data-ui-mode'] === 'minimal');
-		check('持久化写入 at-webserver.config.ui_mode=minimal',
+		check('持久化写入 mt5700d.config.ui_mode=minimal',
 			env.uciCalls.some(function (c) {
-				return c[0] === 'set' && c[1] === 'at-webserver' && c[2] === 'config'
+				return c[0] === 'set' && c[1] === 'mt5700d' && c[2] === 'config'
 					&& c[3] === 'ui_mode' && c[4] === 'minimal';
 			}));
 		check('持久化只 commit（save），绝不调用 apply',
@@ -240,7 +240,7 @@ check('任务要求语义全覆盖',
 			&& !env.uciCalls.some(function (c) { return c[0] === 'apply'; }),
 			'出现 L.uci.apply 调用');
 		check('sessionStorage 保存已确认模式（刷新恢复）',
-			env.win.sessionStorage.getItem('at-webserver:ui-mode-hint') === 'minimal');
+			env.win.sessionStorage.getItem('mt5700d:ui-mode-hint') === 'minimal');
 
 		const back = await M.set('normal');
 		check('切回普通模式', back.ok && env.attrs['data-ui-mode'] === 'normal');
@@ -518,7 +518,7 @@ check('任务要求语义全覆盖',
 	const uimodeJs = read(path.join(libDir, 'uimode.js'));
 
 	check('mt5700.js require uimode 与 icons',
-		/'require at-webserver\/uimode'/.test(mtJs) && /'require at-webserver\/icons'/.test(mtJs));
+		/'require mt5700d\/uimode'/.test(mtJs) && /'require mt5700d\/icons'/.test(mtJs));
 	const iMt = mtJs.indexOf('mt5700.css?v=');
 	const iGl = mtJs.indexOf('global.css?v=');
 	const iMd3 = mtJs.indexOf('md3.css?v=');
@@ -644,9 +644,9 @@ check('任务要求语义全覆盖',
 		&& mtCss.indexOf('backdrop-filter: blur(20px) saturate(180%)') > 0);
 
 	/* UCI / ACL / 菜单 */
-	const uciCfg = read(path.join(root, 'root', 'etc', 'config', 'at-webserver'));
+	const uciCfg = read(path.join(root, 'root', 'etc', 'config', 'mt5700d'));
 	check('UCI 声明 ui_mode 默认 normal', /option ui_mode 'normal'/.test(uciCfg));
-	check('ui_mode 严格校验且只写 at-webserver.config',
+	check('ui_mode 严格校验且只写 mt5700d.config',
 		/UCI_OPTION = 'ui_mode'/.test(uimodeJs)
 		&& /UCI_SECTION = 'config'/.test(uimodeJs)
 		&& /L\.uci\.set\(UCI_PACKAGE, UCI_SECTION, UCI_OPTION, mode\)/.test(uimodeJs));
@@ -655,16 +655,16 @@ check('任务要求语义全覆盖',
 	check('UCI 只 save 不 apply', uimodeCode.indexOf('L.uci.save(UCI_PACKAGE)') > 0
 		&& !/L\.uci\.apply/.test(uimodeCode));
 	const acl = JSON.parse(read(path.join(root, 'root', 'usr', 'share', 'rpcd', 'acl.d', 'luci-app-mt5700.json')));
-	check('ACL 未改动且已具备 at-webserver 读写权限',
-		acl['luci-app-mt5700'].read.uci.indexOf('at-webserver') >= 0
-		&& acl['luci-app-mt5700'].write.uci.indexOf('at-webserver') >= 0);
+	check('ACL 未改动且已具备 mt5700d 读写权限',
+		acl['luci-app-mt5700'].read.uci.indexOf('mt5700d') >= 0
+		&& acl['luci-app-mt5700'].write.uci.indexOf('mt5700d') >= 0);
 	const menu = JSON.parse(read(path.join(root, 'root', 'usr', 'share', 'luci', 'menu.d', 'luci-app-mt5700.json')));
 	check('菜单路由仍为 12 条且全部指向存在的视图',
 		Object.keys(menu).filter(function (k) { return menu[k].action && menu[k].action.type === 'view'; }).length === 12);
 	const views = fs.readdirSync(viewDir).filter(function (f) { return f.endsWith('.js'); });
 	check('12 个视图数量不变', views.length === 12);
 	check('12 个视图全部 require mt5700（全局样式/模式可达）',
-		views.every(function (f) { return /'require at-webserver\/mt5700'/.test(read(path.join(viewDir, f))); }));
+		views.every(function (f) { return /'require mt5700d\/mt5700'/.test(read(path.join(viewDir, f))); }));
 	check('作者署名仍保留且极简模式不隐藏它（AGENTS.md 保护规则）',
 		read(path.join(viewDir, 'service.js')).indexOf("'class': 'mt5700-author'") > 0
 		&& !/\.mt5700-author[^{]*\{[^}]*display:\s*none/.test(md3Css));
@@ -707,9 +707,9 @@ check('任务要求语义全覆盖',
 
 	/* LF 行尾 */
 	const newFiles = [
-		'htdocs/luci-static/resources/at-webserver/uimode.js',
-		'htdocs/luci-static/resources/at-webserver/icons.js',
-		'htdocs/luci-static/resources/at-webserver/md3.css',
+		'htdocs/luci-static/resources/mt5700d/uimode.js',
+		'htdocs/luci-static/resources/mt5700d/icons.js',
+		'htdocs/luci-static/resources/mt5700d/md3.css',
 		'scripts/gen-dual-ui-icons.js',
 		'tests/dual-ui-mode-test.js',
 		'docs/dual-ui-mode-inventory.md'
@@ -776,7 +776,7 @@ check('任务要求语义全覆盖',
 	check('未新增 ubus/RPC 方法或后端服务',
 		!changed.some(function (f) { return f.indexOf('root/usr/share/rpcd/') === 0; }));
 	check('模式切换代码不含 AT / SMS / 拨号 / USB / 服务重启调用',
-		!/AtWs\.client\.sendCommand|Ui\.sendCmd|AT\+CFUN|L\.uci\.apply|\/etc\/init\.d|ubus\.call|ifup/.test(uimodeCode));
+		!/Mt5700d\.client\.sendCommand|Ui\.sendCmd|AT\+CFUN|L\.uci\.apply|\/etc\/init\.d|ubus\.call|ifup/.test(uimodeCode));
 
 	/* ==========================================================================
 	   汇总

@@ -1,5 +1,5 @@
 #!/bin/sh
-# 在 openwrt/sdk 容器内构建 luci-app-mt5700 + at-webserver-rust（Rust 后端）
+# 在 openwrt/sdk 容器内构建 luci-app-mt5700 + mt5700d（Rust 后端）
 #
 # 用法: sdk-build.sh <EXPECTED_ARCH> <RUST_TRIPLE> <VER> [TARGET_DIR]
 #   EXPECTED_ARCH  矩阵登记的 ARCH_PACKAGES（如 aarch64_cortex-a53 / aarch64_generic）
@@ -284,16 +284,16 @@ if phase_run build; then
 # ---------- 4) 把仓库包放入 buildroot package/ ----------
 echo "==> 【构建执行 2/5】放入软件包源码到 buildroot"
 # 单包结构：src/Makefile 让 luci.mk 在编译 LuCI 包时顺带编译 Rust 后端，
-# 并把 at-webserver-rust 二进制装进同一个包，不再有独立的 at-webserver-rust 包。
+# 并把 mt5700d 二进制装进同一个包，不再有独立的 mt5700d 包。
 rm -rf package/luci-app-mt5700
 mkdir -p package/luci-app-mt5700
 cp -r "$WORK_DIR"/Makefile "$WORK_DIR"/htdocs "$WORK_DIR"/po "$WORK_DIR"/root "$WORK_DIR"/src package/luci-app-mt5700/
 # 确保 init.d / uci-defaults / hotplug / libexec 可执行（cp -r 在部分环境可能丢 +x）
-chmod 0755 package/luci-app-mt5700/root/etc/init.d/at-webserver
-chmod 0755 package/luci-app-mt5700/root/etc/uci-defaults/at-webserver
-chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/iface/99-at-webserver
-chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/usb/99-at-webserver
-chmod 0755 package/luci-app-mt5700/root/usr/libexec/at-webserver/on-uplink.sh
+chmod 0755 package/luci-app-mt5700/root/etc/init.d/mt5700d
+chmod 0755 package/luci-app-mt5700/root/etc/uci-defaults/mt5700d
+chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/iface/99-mt5700d
+chmod 0755 package/luci-app-mt5700/root/etc/hotplug.d/usb/99-mt5700d
+chmod 0755 package/luci-app-mt5700/root/usr/libexec/mt5700d/on-uplink.sh
 
 echo "==> 【构建执行 3/5】初始化 luci feeds"
 # ---------- 5) feeds（确保 luci feed 的 luci.mk 可用；只更新 luci，避免多 feed 元数据重复导致递归依赖） ----------
@@ -363,14 +363,14 @@ make package/luci-app-mt5700/compile V=s
 
 # 校验后端二进制确实被打包进主包（.pkgdir 是最终进包目录）。
 # 注意：LuCI 编译完成后会清理 build_dir 下的 src/ 源码目录（含 cargo target），
-# 所以不能找 src/target/.../release/at-webserver，改找 .pkgdir 里的安装文件
-# at-webserver-rust（这正是 install 步骤 cp 的产物，也对应包内路径 usr/bin/at-webserver-rust）。
+# 所以不能找 src/target/.../release/mt5700d，改找 .pkgdir 里的安装文件
+# mt5700d（这正是 install 步骤 cp 的产物，也对应包内路径 usr/bin/mt5700d）。
 BIN_PATH=""
-BIN_PATH=$(find build_dir -type f -name 'at-webserver-rust' -print -quit 2>/dev/null)
+BIN_PATH=$(find build_dir -type f -name 'mt5700d' -print -quit 2>/dev/null)
 [ -n "$BIN_PATH" ] || {
-	echo "ERROR: 未找到打包产物 at-webserver-rust"
-	echo "--- 全盘搜索 at-webserver* ---"
-	find build_dir -name 'at-webserver*' 2>/dev/null | head -10
+	echo "ERROR: 未找到打包产物 mt5700d"
+	echo "--- 全盘搜索 mt5700d* ---"
+	find build_dir -name 'mt5700d*' 2>/dev/null | head -10
 	echo "--- .pkgdir usr/bin ---"
 	ls -la build_dir/target-*_musl/luci-app-mt5700/.pkgdir/*/usr/bin/ 2>/dev/null | head -10
 	exit 1
@@ -443,19 +443,19 @@ PKG_FILE=$(find "$OUT_DIR/${ARCH_PKGS}" -type f -name 'luci-app-mt5700*' -print 
 PKG_SZ=$(wc -c < "$PKG_FILE")
 echo "==> 校验主包: $(basename "$PKG_FILE") (${PKG_SZ} bytes)"
 
-STAGE_BIN=$(find build_dir -type f -path '*/luci-app-mt5700/ipkg-*/luci-app-mt5700/usr/bin/at-webserver-rust' -print -quit 2>/dev/null)
+STAGE_BIN=$(find build_dir -type f -path '*/luci-app-mt5700/ipkg-*/luci-app-mt5700/usr/bin/mt5700d' -print -quit 2>/dev/null)
 if [ -n "$STAGE_BIN" ]; then
 	echo "==> 安装树已含后端: $STAGE_BIN ($(wc -c < "$STAGE_BIN") bytes)"
 fi
 
 case "$PKG_FILE" in
 	*.ipk)
-		if tar -xzOf "$PKG_FILE" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null | grep -qE '(^|/)usr/bin/at-webserver-rust$'; then
-			echo "==> 已确认 ipk 内含 usr/bin/at-webserver-rust"
+		if tar -xzOf "$PKG_FILE" ./data.tar.gz 2>/dev/null | tar -tzf - 2>/dev/null | grep -qE '(^|/)usr/bin/mt5700d$'; then
+			echo "==> 已确认 ipk 内含 usr/bin/mt5700d"
 		elif [ -n "$STAGE_BIN" ] && [ "$PKG_SZ" -gt 500000 ]; then
 			echo "==> ipk 列表未列出但安装树含后端且包体 ${PKG_SZ}B，判定通过"
 		else
-			echo "ERROR: ipk 缺少 at-webserver-rust"
+			echo "ERROR: ipk 缺少 mt5700d"
 			exit 1
 		fi
 		;;

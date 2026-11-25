@@ -9,7 +9,7 @@ const path = require('path');
  * 死代码清理把 6 档表当成零引用导出删掉，渲染侧退回三档内联阈值，
  * mt5700.css 里的 temp-* 六档色从此无人写、本测试也抽不到源码。
  * 现在分档回到唯一实现，页面与 CSS、本测试共用同一张表。 */
-const NSJS = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver', 'network_status.js');
+const NSJS = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'view', 'mt5700d', 'network_status.js');
 const src = fs.readFileSync(NSJS, 'utf8');
 
 /* 抽取 TEMP_LEVELS 表与 tempLevel 的真实实现，避免测试与实现漂移 */

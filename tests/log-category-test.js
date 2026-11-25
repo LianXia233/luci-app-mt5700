@@ -34,9 +34,9 @@ const read = function (rel) { return fs.readFileSync(path.join(root, rel), 'utf8
 
 const LOGCAT_RS = 'src/rust/src/logcat.rs';
 const LOGGER_RS = 'src/rust/src/logger.rs';
-const LOGS_JS = 'htdocs/luci-static/resources/view/at-webserver/logs.js';
-const MT_CSS = 'htdocs/luci-static/resources/at-webserver/mt5700.css';
-const MT_JS = 'htdocs/luci-static/resources/at-webserver/mt5700.js';
+const LOGS_JS = 'htdocs/luci-static/resources/view/mt5700d/logs.js';
+const MT_CSS = 'htdocs/luci-static/resources/mt5700d/mt5700.css';
+const MT_JS = 'htdocs/luci-static/resources/mt5700d/mt5700.js';
 
 const logcatRs = read(LOGCAT_RS);
 const loggerRs = read(LOGGER_RS);
@@ -320,7 +320,7 @@ check('不使用 Date.parse / new Date(字符串) 解析本地时间文本',
    「时间 [级别] [类别码] 消息」。这段注释只给人看，写旧了不会有任何运行时报错，
    所以只能钉在这里 —— 它同时是「syslog 那路不必解析类别码」这个决定的依据。 */
 const syslogDocLines = logsJs.split('\n').filter(function (l) {
-	return l.indexOf('at-webserver-rust[pid]:') >= 0;
+	return l.indexOf('mt5700d[pid]:') >= 0;
 });
 check('logs.js 记着后端 syslog 行的样例', syslogDocLines.length === 1,
 	'命中 ' + syslogDocLines.length + ' 行');
@@ -339,7 +339,7 @@ check('文件来源的行尾徽章与 syslog 同一套形制',
 	/mt5700-logsrc mt5700-logsrc-file/.test(logsJs));
 check('插件文件路径取自 logs RPC 的 plugin_file，不在前端硬编码',
 	/state\.pluginFile = \(r && r\.plugin_file\) \|\| null;/.test(logsJs)
-	&& logsJs.indexOf('/tmp/at-webserver/plugin.log') < 0);
+	&& logsJs.indexOf('/tmp/mt5700d/plugin.log') < 0);
 check('plugin_file 关掉或没路径时不读文件',
 	/if \(!pf \|\| !pf\.enabled \|\| !pf\.path\) \{/.test(logsJs));
 check('去重键是 ts + "|" + msg', fe.dedupKey({ ts: 1730000000000, msg: '一条日志' }) === '1730000000000|一条日志');

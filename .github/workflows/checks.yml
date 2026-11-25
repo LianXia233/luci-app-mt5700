@@ -56,7 +56,7 @@
 #      辅助模块（如 exec-mode.js），不匹配 *-test.js，不会被直接执行。
 #
 #   4) 作者署名约定：`LianXia233` 是本项目指定的作者署名标识。
-#      · 页面 `admin/modem/5g/config`（视图 view/at-webserver/service.js）底部的
+#      · 页面 `admin/modem/5g/config`（视图 view/mt5700d/service.js）底部的
 #        署名「© 2026 LianXia233 · 开发与维护」、许可证标识
 #        「GPL-3.0-only」及其 GitHub 链接
 #        https://github.com/LianXia233/luci-app-mt5700 属于明确要求保留的页面元素；

@@ -2,7 +2,7 @@
 
 <img src="docs/images/mascot.png" alt="MT5700M 5G Mascot" width="108" height="108" style="border-radius: 50%; box-shadow: 0 4px 16px rgba(0,0,0,0.12); margin-bottom: 8px;" />
 
-# AT WebServer · MT5700M 5G 模组管理
+# mt5700d · MT5700M 5G 模组管理
 
 **适用于 OpenWrt / ImmortalWrt 平台的 MT5700M 5G 模组全功能控制中心与常驻守护套件**
 
@@ -22,7 +22,7 @@
 [![镜像仓库](https://img.shields.io/badge/镜像仓库-CNB-2F54EB?style=flat-square)](https://cnb.cool/LianXia233/luci-app-mt5700)
 
 <p align="center">
-  <b>📦 单包融合交付</b>：集成 12 个原生 LuCI 现代化管理页面与高性能常驻后端 <code>/usr/bin/at-webserver-rust</code><br>
+  <b>📦 单包融合交付</b>：集成 12 个原生 LuCI 现代化管理页面与高性能常驻后端 <code>/usr/bin/mt5700d</code><br>
   涵盖全自动 NDIS 拨号对账 · 真实射频打分看板 · 全网扫频 · 智能锁频 · 聊天式短信中心 · 交互式 AT 终端
 </p>
 
@@ -81,7 +81,7 @@
 
 > [!TIP]
 > **Tab 菜单交互增强**  
-> `admin/modem/5g` 下的 12 个页面共用 LuCI 原生 Tab 菜单，插件在加载后执行纯 DOM 增强（`at-webserver/tabmenu.js`，不修改 LuCI 核心与主题，不拦截点击）：
+> `admin/modem/5g` 下的 12 个页面共用 LuCI 原生 Tab 菜单，插件在加载后执行纯 DOM 增强（`mt5700d/tabmenu.js`，不修改 LuCI 核心与主题，不拦截点击）：
 > 1. **横向滚动记忆保持**：在横向滚动主题下，切换、返回或刷新页面后，菜单会自动将当前选中项居中滚入可视区，不再重置到首项；用户手动滚动的偏移量会在 `sessionStorage` 中按路径记忆。
 > 2. **统一矢量 SVG 图标**：12 个页签各配一枚 24×24 线性图标（`stroke=currentColor` 随主题自适应着色，桌面端 16px / 窄屏 15px），语义精准对应业务功能。
 > 3. **窄屏悬浮菜单**：宽度 ≤768px 时，12 个页签不再换行平铺，而是收进一个 38px 高的药丸触发器（显示当前页名与页签总数）；点击展开 300px 宽的气泡浮层，选中即跳转。点击外部、再点触发器或按 `Esc` 均可收起，`Tab` 键可依次进入浮层条目。桌面宽屏保持原生一排 Tab 不变，暗色模式下浮层沿用插件既有玻璃卡片配色。
@@ -150,14 +150,14 @@ opkg install ./<ARCH>-luci-i18n-mt5700-zh-cn_*.ipk
 
 ```sh
 # 1. 提交初始配置（默认启用自动探测 AT 串口）
-uci set at-webserver.config.enabled='1'
-uci set at-webserver.config.connection_type='SERIAL'
-uci set at-webserver.config.serial_port='auto'
-uci commit at-webserver
+uci set mt5700d.config.enabled='1'
+uci set mt5700d.config.connection_type='SERIAL'
+uci set mt5700d.config.serial_port='auto'
+uci commit mt5700d
 
 # 2. 启动服务并验证后端状态
-service at-webserver restart
-ubus call service list '{"name":"at-webserver"}'
+service mt5700d restart
+ubus call service list '{"name":"mt5700d"}'
 ```
 
 进入 LuCI 侧边栏：**移动网络** → **5G 模组管理**（访问地址：`/cgi-bin/luci/admin/modem/5g`），即可开始使用。
@@ -214,9 +214,9 @@ flowchart TD
 ls -l /dev/serial/by-id/
 
 # 固化配置到 UCI
-uci set at-webserver.config.serial_port='/dev/serial/by-id/usb-XXXX:XXXX-if12-<序列号>'
-uci commit at-webserver
-service at-webserver restart
+uci set mt5700d.config.serial_port='/dev/serial/by-id/usb-XXXX:XXXX-if12-<序列号>'
+uci commit mt5700d
+service mt5700d restart
 ```
 
 </details>
@@ -245,7 +245,7 @@ flowchart TB
         Ucode -.->|"sysfs 直读 (零串口开销)"| SysfsDirect
     end
 
-    subgraph CORE ["🦀 核心守护层 · Rust / Tokio 后端 (at-webserver-rust)"]
+    subgraph CORE ["🦀 核心守护层 · Rust / Tokio 后端 (mt5700d)"]
         direction TB
         RpcServer["<b>本地 RPC 服务 (127.0.0.1:8765)</b><br/>newline-JSON 内部通讯 · 任务分发与状态同步"]
 
@@ -327,7 +327,7 @@ flowchart TB
 
 1. **表现层 (LuCI WebUI)**：基于原生 ES6 与 LuCI 组件开发，纯 DOM / 矢量 SVG 驱动，不依赖重型框架；通过 `rpc.js` 统一封装 JSON-RPC 调用与 `events(since)` 事件轮询。
 2. **中间通信层 (rpcd ucode 代理)**：挂载至系统 rpcd 发布 `luci.mt5700.*` 接口。内置 `/proc/net/tcp` 回环端口预检（零子进程、毫秒级快速失败）与 15s 熔断保护；流量速率 (`netrate`) 与硬件识别走 **sysfs 直读旁路**，全程不下发 AT，零串口开销。
-3. **核心守护层 (Rust/Tokio 常驻后端)**：`/usr/bin/at-webserver-rust` 单实例常驻（内存仅数十 KiB），监听 `127.0.0.1:8765` newline-JSON 协议。通过 `StateCache` 异步预热只读状态，RPC 查询毫秒级返回，避免前端并发查询阻塞串口。
+3. **核心守护层 (Rust/Tokio 常驻后端)**：`/usr/bin/mt5700d` 单实例常驻（内存仅数十 KiB），监听 `127.0.0.1:8765` newline-JSON 协议。通过 `StateCache` 异步预热只读状态，RPC 查询毫秒级返回，避免前端并发查询阻塞串口。
 4. **模组控制层 (AT 事务独占持锁)**：所有 AT 交互统一经过 `PriLock` 优先级队列调度，独占持有模组 PCUI 串口，彻底杜绝多进程抢占 TTY 引起的数据截断与指令挂死。
 
 #### AT 事务优先级调度等级 (PriLock)
@@ -372,7 +372,7 @@ sequenceDiagram
     end
 
     Note over Rust,InitD: 【阶段 4 · 链路拉起】承载接口纳管与防火墙对齐
-    Rust->>InitD: 触发完成回调: /usr/libexec/at-webserver/on-uplink.sh
+    Rust->>InitD: 触发完成回调: /usr/libexec/mt5700d/on-uplink.sh
     InitD->>Netifd: 检查并自动创建 MT5700M / MT5700Mv6 接口 (proto=dhcp)
     InitD->>Netifd: 下发运营商 / 指定 DNS 伺服配置
     InitD->>FW: 将承载接口登记至 wan 区域并热重载 fw4 (NAT)
@@ -408,7 +408,7 @@ sequenceDiagram
 
 ## 📊 功能矩阵 (12 大独立管理页面)
 
-插件所有视图源码位于 `htdocs/luci-static/resources/view/at-webserver/`，各页面能力明细如下：
+插件所有视图源码位于 `htdocs/luci-static/resources/view/mt5700d/`，各页面能力明细如下：
 
 | 业务领域 | 页面名称 | 访问路径 | 核心能力说明 |
 |:---|:---|:---|:---|
@@ -422,7 +422,7 @@ sequenceDiagram
 | 💬 **消息与运维** | **短信中心** | `admin/modem/5g/sms` | 支持 PDU / Text 短信收发与长短信自动合并分片；**聊天式 IM 会话界面**（双方头像、时间分隔、宽度随文收缩）；**发出记录本地 ChaCha20 加密归档**（路由闪存 2 MiB 循环配额，解决模组不写已发槽位的限制）；时间戳与 NTP 精确对齐；批量降序安全删除。 |
 | | **短信设置** | `admin/modem/5g/sms-settings` | 自定义短信中心号码（SMSC，写入回读强校验）；存储介质切换（ME 模组 FLASH / SM SIM 卡）；USSD 快捷查询（话费/流量代码）。 |
 | | **AT 调试终端** | `admin/modem/5g/terminal` | Web 原生交互式控制台，支持常用 AT 指令自动补全、历史回溯、原语调试与脱敏复制。 |
-| | **运行日志** | `admin/modem/5g/log` | 后端内存环形缓冲 + 插件自有日志文件 + 系统 syslog 三源统一入口；日志按 **21 个业务域细分**（AT 通道 / 主动上报 / 拨号承载 / 接口防火墙 / 信号射频 / SIM / 短信 / 通话 / 通知推送 / 扫频 / 锁频 / 模组升级 / 流量 / 时间，以及运行时 / 配置 / RPC / 串口 / 任务 / 存储 / 其他），**类别由后端定类**而非前端拿正则猜；模组业务痕迹不再刷 syslog，只落内存环形缓冲与插件文件（`/tmp/at-webserver/plugin.log`，有界裁剪），仅 `ERR` 破例外发以便 `logread` 直接看到硬故障；支持关键词过滤与一键筛选「错误+警告」；通知记录留痕与企业微信/QQ 告警流追踪。 |
+| | **运行日志** | `admin/modem/5g/log` | 后端内存环形缓冲 + 插件自有日志文件 + 系统 syslog 三源统一入口；日志按 **21 个业务域细分**（AT 通道 / 主动上报 / 拨号承载 / 接口防火墙 / 信号射频 / SIM / 短信 / 通话 / 通知推送 / 扫频 / 锁频 / 模组升级 / 流量 / 时间，以及运行时 / 配置 / RPC / 串口 / 任务 / 存储 / 其他），**类别由后端定类**而非前端拿正则猜；模组业务痕迹不再刷 syslog，只落内存环形缓冲与插件文件（`/tmp/mt5700d/plugin.log`，有界裁剪），仅 `ERR` 破例外发以便 `logread` 直接看到硬故障；支持关键词过滤与一键筛选「错误+警告」；通知记录留痕与企业微信/QQ 告警流追踪。 |
 | | **服务配置** | `admin/modem/5g/config` | 常驻后端参数调优、串口绑定路径选择、自动拨号守护策略、退避重试阈值设置与自愈巡检总控。 |
 
 > 📖 **进阶文档**：
@@ -462,7 +462,7 @@ sequenceDiagram
 识别顺序为：WAN 区域成员 ∩ USB 模组网口 → WAN 区域内其它物理网口 → 候选全无时
 「非 LAN 归属的 USB 网卡」；全部取不到则停止统计，累计值保留，**绝不回退 LAN 侧计数器**。
 
-来源由 `at-webserver.config.usage_source` 控制，也可在「网络状态 → 本次使用量」里切换：
+来源由 `mt5700d.config.usage_source` 控制，也可在「网络状态 → 本次使用量」里切换：
 
 | 取值 | 数据源 | 粒度 / 代价 |
 |:---|:---|:---|
@@ -502,12 +502,12 @@ DNS 下发同样按「USB 模组网口 + WAN 区域」自动反查承载接口�
 
 ---
 
-## 🛠️ UCI 配置参考 (`/etc/config/at-webserver`)
+## 🛠️ UCI 配置参考 (`/etc/config/mt5700d`)
 
 以下为系统核心配置段的典型参考：
 
 ```ini
-config at-webserver 'config'
+config mt5700d 'config'
     option enabled '1'                        # 服务总开关：1=启用，0=禁用
     option connection_type 'SERIAL'           # 通信模式：SERIAL(串口) / TCP(网络调试回环)
     option serial_port 'auto'                 # 串口绑定：auto(自动探测) / /dev/serial/by-id/* / /dev/ttyUSB*
@@ -583,7 +583,7 @@ CI 门禁与本地一致：`static-check` → 零依赖 Node 单测 → Shell �
 <summary><b>1. 为什么安装后打开页面提示「后端未就绪 / 连接被拒绝」？</b></summary>
 
 请按以下顺序排查：
-1. 检查后端服务是否正常运行：`service at-webserver status` 或 `ubus call service list '{"name":"at-webserver"}'`；
+1. 检查后端服务是否正常运行：`service mt5700d status` 或 `ubus call service list '{"name":"mt5700d"}'`；
 2. 检查系统中是否有 busybox 的 `nc` 命令：`which nc`（部分精简固件可能裁剪了 `nc` applet，导致 ucode 无法通过 socket 连接 Rust 后端）；
 3. 检查串口是否被其他进程（如 QModem、minicom、chat 等）独占抢占；
 4. 确认系统是否存在 `rpcd-mod-ucode` 插件（OpenWrt 23.05+ 默认提供）。
@@ -594,7 +594,7 @@ CI 门禁与本地一致：`static-check` → 零依赖 Node 单测 → Shell �
 <summary><b>2. 为什么提示「有 IP 地址却无法上网」？</b></summary>
 
 1. 检查防火墙 NAT 区域：在终端执行 `uci show firewall | grep 'network=.*MT5700M'`，确认 `MT5700M` 承载接口已正确登记入 `wan` 防火墙区域；
-2. 执行一键接口与防火墙自愈脚本：`/etc/init.d/at-webserver ensure_interfaces`；
+2. 执行一键接口与防火墙自愈脚本：`/etc/init.d/mt5700d ensure_interfaces`；
 3. 查看当前 nftables 规则是否包含模组接口：`nft list chain inet fw4 srcnat`。
 
 </details>

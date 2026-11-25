@@ -235,9 +235,9 @@ pub async fn persist_uci(target: &BindTarget) -> Result<(), String> {
         ("qq_target_id", &target.target_id),
     ];
     for (k, v) in cmds {
-        run_cmd("uci", &["set", &format!("at-webserver.config.{k}={v}")]).await?;
+        run_cmd("uci", &["set", &format!("mt5700d.config.{k}={v}")]).await?;
     }
-    run_cmd("uci", &["commit", "at-webserver"]).await?;
+    run_cmd("uci", &["commit", "mt5700d"]).await?;
     Ok(())
 }
 

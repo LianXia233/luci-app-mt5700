@@ -47,9 +47,9 @@ pub const SMS_MODE_LEASE: Duration = Duration::from_secs(30);
 
 /// 把存储区选择写回 UCI 并 commit（开机默认值的来源，界面保存时同路）。
 async fn persist_storage_uci(mem: &str) -> Result<(), String> {
-    let arg = format!("at-webserver.config.sms_storage={mem}");
+    let arg = format!("mt5700d.config.sms_storage={mem}");
     crate::qqbind::run_cmd("uci", &["set", arg.as_str()]).await?;
-    crate::qqbind::run_cmd("uci", &["commit", "at-webserver"]).await?;
+    crate::qqbind::run_cmd("uci", &["commit", "mt5700d"]).await?;
     Ok(())
 }
 

@@ -34,7 +34,7 @@ const fixtures = require('./sms-fixtures.js');
 const HERE = __dirname;
 const ROOT = path.resolve(HERE, '../..');
 const IS_WIN = process.platform === 'win32';
-const RUST_BIN = path.join(ROOT, 'src', 'rust', 'target', 'release', 'at-webserver' + (IS_WIN ? '.exe' : ''));
+const RUST_BIN = path.join(ROOT, 'src', 'rust', 'target', 'release', 'mt5700d' + (IS_WIN ? '.exe' : ''));
 const SIM_DIR = path.join(os.tmpdir(), 'at-ws-sim');
 
 const AUTH = 'test-key-123';
@@ -161,8 +161,8 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."));
     let args: Vec<String> = env::args().skip(1).collect();
 
-    // uci show at-webserver → 全量配置
-    if args.len() >= 2 && args[0] == "show" && args[1] == "at-webserver" {
+    // uci show mt5700d → 全量配置
+    if args.len() >= 2 && args[0] == "show" && args[1] == "mt5700d" {
         match fs::read_to_string(dir.join("mock-uci.out")) {
             Ok(s) => { print!("{}", s); exit(0); }
             Err(_) => exit(1),
@@ -252,9 +252,9 @@ function buildUciConfig() {
 		notify_poll_enabled: "'0'"
 	};
 	Object.keys(overrides).forEach(function (k) {
-		const re = new RegExp('^at-webserver\\.config\\.' + k + '=.*$', 'm');
-		if (re.test(txt)) txt = txt.replace(re, 'at-webserver.config.' + k + '=' + overrides[k]);
-		else txt = txt.replace(/\s*$/, '\n') + 'at-webserver.config.' + k + '=' + overrides[k] + '\n';
+		const re = new RegExp('^mt5700d\\.config\\.' + k + '=.*$', 'm');
+		if (re.test(txt)) txt = txt.replace(re, 'mt5700d.config.' + k + '=' + overrides[k]);
+		else txt = txt.replace(/\s*$/, '\n') + 'mt5700d.config.' + k + '=' + overrides[k] + '\n';
 	});
 	return txt;
 }
@@ -263,7 +263,7 @@ function buildUciConfig() {
 function rewriteUciPort(port) {
 	const file = path.join(UCI_BIN_DIR, 'mock-uci.out');
 	const txt = fs.readFileSync(file, 'utf8')
-		.replace(/^at-webserver\.config\.websocket_port=.*$/m, "at-webserver.config.websocket_port='" + port + "'");
+		.replace(/^mt5700d\.config\.websocket_port=.*$/m, "mt5700d.config.websocket_port='" + port + "'");
 	fs.writeFileSync(file, txt);
 }
 
@@ -294,8 +294,8 @@ function setUciPoll(opts) {
 		notify_poll_end: '23:59'
 	};
 	Object.keys(kv).forEach(function (k) {
-		const line = "at-webserver.config." + k + "='" + kv[k] + "'";
-		const re = new RegExp('^at-webserver\\.config\\.' + k + '=.*$', 'm');
+		const line = "mt5700d.config." + k + "='" + kv[k] + "'";
+		const re = new RegExp('^mt5700d\\.config\\.' + k + '=.*$', 'm');
 		if (re.test(txt)) txt = txt.replace(re, line);
 		else txt = txt.replace(/\s*$/, '\n') + line + '\n';
 	});
@@ -315,9 +315,9 @@ function setUciTimerLegacySeconds() {
 	const file = path.join(UCI_BIN_DIR, 'mock-uci.out');
 	let txt = fs.readFileSync(file, 'utf8');
 	/* 删掉新键：新键优先，留着就测不到旧键迁移 */
-	txt = txt.replace(/^at-webserver\.config\.notify_timer_interval=.*\n?/m, '');
-	const line = "at-webserver.config.notify_interval='30'";
-	const re = /^at-webserver\.config\.notify_interval=.*$/m;
+	txt = txt.replace(/^mt5700d\.config\.notify_timer_interval=.*\n?/m, '');
+	const line = "mt5700d.config.notify_interval='30'";
+	const re = /^mt5700d\.config\.notify_interval=.*$/m;
 	if (re.test(txt)) txt = txt.replace(re, line);
 	else txt = txt.replace(/\s*$/, '\n') + line + '\n';
 	fs.writeFileSync(file, txt);
@@ -333,7 +333,7 @@ function setUciTimerLegacySeconds() {
 /* 每次运行清掉的产物（不含 bin/：uci.exe 与 stub 源码在那里，编译结果要复用） */
 const SIM_FILES = [
 	'hook-received.jsonl', 'dbg.js', 'uci-out.txt', 'uci-err.txt',
-	'at-webserver-stage1.log', 'at-webserver-stage2.log', 'at-webserver-stage3.log',
+	'mt5700d-stage1.log', 'mt5700d-stage2.log', 'mt5700d-stage3.log',
 	'mock-modem.log', 'mock-modem-stage2.log', 'mock-modem-stage3.log',
 	/* 早期版本在顶层留下的假 uci 与数据文件 */
 	'uci-stub.js', 'mock-uci.out', 'mock-uci-tz.txt', 'uci'
@@ -425,7 +425,7 @@ function createRpc(port) {
 /* ---------- 启动后端 ---------- */
 
 async function startBackend(tag) {
-	const logFile = path.join(SIM_DIR, 'at-webserver-' + tag + '.log');
+	const logFile = path.join(SIM_DIR, 'mt5700d-' + tag + '.log');
 	const log = fs.createWriteStream(logFile);
 	const child = track(spawn(RUST_BIN, ['-verbose'], {
 		cwd: HERE,
@@ -804,7 +804,7 @@ async function main() {
 	 * 迁移是否生效要看启动日志：后端按分钟打印间隔。旧键 60 秒 → 1 分钟，
 	 * 首轮推送因此落在 60 秒处 —— 既验证了迁移，也不用等满默认 10 分钟。
 	 */
-	const be3Log = readLog(path.join(SIM_DIR, 'at-webserver-stage3.log'));
+	const be3Log = readLog(path.join(SIM_DIR, 'mt5700d-stage3.log'));
 	check('旧键 notify_interval（秒）已迁移为分钟并按新值启动',
 		be3Log.indexOf('定时推送已启动：每 1 分钟') >= 0,
 		(be3Log.split('\n').filter((l) => l.indexOf('定时推送已启动') >= 0)[0] || '未找到启动日志').trim());
@@ -851,7 +851,7 @@ main().then(async (ctx) => {
 		console.log((r.content || r.body).replace(/\n/g, '\n    '));
 	});
 	console.log('\n=== 后端渲染日志（推送内容）===');
-	const log = readLog(path.join(SIM_DIR, 'at-webserver-stage1.log'));
+	const log = readLog(path.join(SIM_DIR, 'mt5700d-stage1.log'));
 	log.split('\n').filter((l) => l.indexOf('推送内容') >= 0).forEach((l) => console.log('  ' + l.trim()));
 
 	console.log('\n=== 安全审计（IMEI / 恢复出厂）===');

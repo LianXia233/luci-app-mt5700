@@ -8,10 +8,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 
 const sandbox = {
-	window: {}, AtWs: undefined, Parse: undefined,
+	window: {}, Mt5700d: undefined, Parse: undefined,
 	L: {
 		Class: { extend: function (o) { return o; } },
 		view: { extend: function (o) { return o; } },
@@ -27,8 +27,8 @@ function loadLib(name) {
 		.split('\n')
 		.filter(function (l) { return l.indexOf("'require ") !== 0; })
 		.join('\n');
-	const fn = new Function('AtWs', 'Parse', 'E', 'L', cleaned + '\n;return { AtWs: AtWs, Parse: Parse };');
-	return fn(sandbox.AtWs, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
+	const fn = new Function('Mt5700d', 'Parse', 'E', 'L', cleaned + '\n;return { Mt5700d: Mt5700d, Parse: Parse };');
+	return fn(sandbox.Mt5700d, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
 }
 
 let results = [];
@@ -41,13 +41,13 @@ try {
 	const parse = loadLib('parse.js');
 	sandbox.Parse = parse.Parse || parse;
 	const ws = loadLib('rpc.js');
-	const AtWs = (ws && ws.AtWs) || ws;
+	const Mt5700d = (ws && ws.Mt5700d) || ws;
 
 	/* ---- 实机真实回包（内网测试机，SA 驻网） ---- */
 	const real = '^NRSSBID: 504990,0000000c2840c002,128,-64,24,-1,' +
 		'1,-62,0,-63,2,-80,3,-81,4,-79,5,-78,6,-81,255,32767,' +
 		'1,643,504990,-66,24,7,-62,6,-75,5,-77,4,-78\r\nOK';
-	const r = AtWs.parseNRSSBID(real);
+	const r = Mt5700d.parseNRSSBID(real);
 
 	check('parseNRSSBID 返回非 null', r !== null);
 	check('服务小区 ARFCN', r.arfcn === 504990, 'arfcn=' + r.arfcn);
@@ -79,7 +79,7 @@ try {
 		'143,430036,-51,-16,4,-43,2,-55,1,-56,255,32767';
 	/* 手册示例用的是 '=' 而非 ':'，extractATData 只认 ':' —— 统一按实机格式(冒号)校验 */
 	const manualColon = manual.replace('^NRSSBID=', '^NRSSBID: ');
-	const m = AtWs.parseNRSSBID(manualColon);
+	const m = Mt5700d.parseNRSSBID(manualColon);
 	check('手册样例：PCI=110 / RSRP=-83 / SINR=-10',
 		m && m.pci === 110 && m.rsrp === -83 && m.sinr === -10,
 		m ? 'pci=' + m.pci + ' rsrp=' + m.rsrp : 'null');
@@ -91,16 +91,16 @@ try {
 	/* ---- 全部无效的回包：网侧未配置测量的典型情况 ---- */
 	const allInvalid = '^NRSSBID: 504990,0000000c2840c002,128,-64,24,-1,' +
 		'255,32767,255,32767,255,32767,255,32767,255,32767,255,32767,255,32767,255,32767,0';
-	const a = AtWs.parseNRSSBID(allInvalid);
+	const a = Mt5700d.parseNRSSBID(allInvalid);
 	check('全部无效时 8 个波束均为 null', a && a.beams.every(function (v) { return v === null; }),
 		a ? a.beams.join(',') : 'null');
 	check('N_NB_CELL=0 时邻区为空数组', a && a.neighbors.length === 0, a ? 'count=' + a.neighbors.length : 'null');
 
 	/* ---- 异常输入不得抛错 ---- */
-	check('空数据返回 null', AtWs.parseNRSSBID('') === null);
-	check('ERROR 回包返回 null', AtWs.parseNRSSBID('\r\nERROR\r\n') === null);
-	check('字段不足时返回 null', AtWs.parseNRSSBID('^NRSSBID: 1,2,3') === null);
-	check('undefined 输入返回 null', AtWs.parseNRSSBID(undefined) === null);
+	check('空数据返回 null', Mt5700d.parseNRSSBID('') === null);
+	check('ERROR 回包返回 null', Mt5700d.parseNRSSBID('\r\nERROR\r\n') === null);
+	check('字段不足时返回 null', Mt5700d.parseNRSSBID('^NRSSBID: 1,2,3') === null);
+	check('undefined 输入返回 null', Mt5700d.parseNRSSBID(undefined) === null);
 
 } catch (e) {
 	check('测试执行未抛异常', false, String(e && e.stack || e));

@@ -1332,7 +1332,7 @@ pub fn is_passthrough_urc(line: &str) -> bool {
 /// 脚本不存在或执行失败都静默跳过：它是补充手段，兜底路径在 init.d 的重试
 /// 与 hotplug 钩子里，缺了它功能仍然可用。
 async fn notify_uplink_ready() {
-    const HOOK: &str = "/usr/libexec/at-webserver/on-uplink.sh";
+    const HOOK: &str = "/usr/libexec/mt5700d/on-uplink.sh";
     if !std::path::Path::new(HOOK).exists() {
         return;
     }

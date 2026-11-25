@@ -18,7 +18,7 @@ const root = path.resolve(__dirname, '..');
 const potPath = path.join(root, 'po/templates/luci-app-mt5700.pot');
 const poPath = path.join(root, 'po/zh_Hans/luci-app-mt5700.po');
 const menuPath = path.join(root, 'root/usr/share/luci/menu.d/luci-app-mt5700.json');
-const uiPath = path.join(root, 'htdocs/luci-static/resources/at-webserver/mt5700.js');
+const uiPath = path.join(root, 'htdocs/luci-static/resources/mt5700d/mt5700.js');
 
 let failures = 0;
 function check(name, ok, detail) {

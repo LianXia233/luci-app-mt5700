@@ -18,7 +18,7 @@
 //! | 场景 | 落点 | 重启后 |
 //! |:--|:--|:--|
 //! | 持久化关（默认） | `/tmp/mt5700-usage.json`（tmpfs，纯内存） | 丢失，从零开始 |
-//! | 持久化开 | 额外写 `/etc/at-webserver-usage.json`（overlay），每 10 分钟最多一次 | 恢复 |
+//! | 持久化开 | 额外写 `/etc/mt5700d-usage.json`（overlay），每 10 分钟最多一次 | 恢复 |
 //!
 //! - **清零按钮**：无论持久化开关状态如何，都强制重写两个文件（持久化开时把落盘
 //!   文件一并清零，持久化关时删掉落盘文件），不会留下旧值。
@@ -34,7 +34,7 @@
 //!
 //! # 统计来源（可手动切换）
 //!
-//! `at-webserver.config.usage_source` 决定累计用量的取值口径：
+//! `mt5700d.config.usage_source` 决定累计用量的取值口径：
 //!
 //! | 取值 | 数据源 | AT 通道代价 |
 //! |:--|:--|:--|
@@ -70,7 +70,7 @@ use tokio::sync::{watch, Mutex, RwLock};
 /// 内存态状态文件（tmpfs，重启即失）。
 pub const USAGE_VOL_PATH: &str = "/tmp/mt5700-usage.json";
 /// 持久化状态文件（overlay，跨重启保留）。
-pub const USAGE_FLASH_PATH: &str = "/etc/at-webserver-usage.json";
+pub const USAGE_FLASH_PATH: &str = "/etc/mt5700d-usage.json";
 
 /// 统计记录文件大小上限（字节）。
 ///
@@ -389,7 +389,7 @@ async fn uci_set_config(key: &str, value: &str) -> Result<(), String> {
         return Err(format!("写入 {key} 失败: {}", String::from_utf8_lossy(&out.stderr)));
     }
     let out = tokio::process::Command::new("uci")
-        .args(["commit", "at-webserver"])
+        .args(["commit", "mt5700d"])
         .output()
         .await
         .map_err(|e| e.to_string())?;
@@ -757,7 +757,7 @@ impl UsageTracker {
     /// 修改自动清零日（每月几号）：写 UCI（跨重启生效）+ 热更新内存值。
     pub async fn set_reset_day(&self, day: u32) -> Result<u32, String> {
         let day = crate::monthly::normalize_day(day);
-        uci_set_config("at-webserver.config.usage_reset_day", &day.to_string()).await?;
+        uci_set_config("mt5700d.config.usage_reset_day", &day.to_string()).await?;
         self.reset_day.store(day, Ordering::Relaxed);
         log_info!("使用量自动清零已改为 {}", crate::monthly::describe(day));
         Ok(day)
@@ -773,7 +773,7 @@ impl UsageTracker {
         if source == SOURCE_MODEM && self.cache.is_none() {
             return Err("模组数据来源不可用（状态缓存未初始化）".into());
         }
-        uci_set_config("at-webserver.config.usage_source", source).await?;
+        uci_set_config("mt5700d.config.usage_source", source).await?;
         *self.source.write().await = source.to_string();
         log_info!("使用量统计来源已切换为 {}", if source == SOURCE_MODEM { "模组 AT^DSFLOWQRY" } else { "WAN 物理网卡" });
         Ok(self.snapshot().await)

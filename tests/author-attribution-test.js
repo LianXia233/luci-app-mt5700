@@ -21,8 +21,8 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const viewDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
-const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const viewDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'view', 'mt5700d');
+const libDir = path.join(root, 'htdocs', 'luci-static', 'resources', 'mt5700d');
 
 const SERVICE_VIEW = path.join(viewDir, 'service.js');
 const CSS = path.join(libDir, 'mt5700.css');

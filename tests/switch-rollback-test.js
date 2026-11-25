@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 const code = fs.readFileSync(path.join(libDir, 'ui.js'), 'utf8');
 
 const start = code.indexOf('api.switch = function');

@@ -802,7 +802,7 @@ jobs:
           # checkout preview-<sha> 拿到的就不是被构建的那份代码。正式版通道传的是
           # 已存在的 tag，gh 会忽略该参数，因此统一加没有副作用。
           FLAGS=(--repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}")
-          TITLE="AT WebServer ${TAG}"
+          TITLE="mt5700d ${TAG}"
           if [ "$PRERELEASE" = "true" ]; then
             FLAGS+=(--prerelease)
             # 标题承担「版本号」职责：tag 本身只是提交短 SHA，不含 PKG_VERSION，

@@ -1,0 +1,1652 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+
+USE_PROCD=1
+
+# 自定义动作：登记到帮助里，用户不必知道内部函数名也能发现这两个入口。
+#   ensure_interfaces      确保 V4/V6 模组接口存在（安装/升级后 postinst 也会调用）
+#   on_uplink              拉起模组接口（后端确认拨号就绪时调用）
+#   sync_serial_by_id      维护 /dev/serial/by-id 稳定符号链接
+#
+# 严重陷阱（本喵实测踩到，务必保留此说明）：
+#   EXTRA_COMMANDS 里登记的名字**必须与同名函数完全一致**。rc.common 最后
+#   执行的是 `$action "$@"`，即按命令名找同名函数；名字对不上时不会报
+#   「未知命令」，而是由 shell 抛 `sync_by_id: not found`，看起来像函数没定义，
+#   实际函数一直都在（type 能查到）。排查时会严重误导方向。
+#   且 rc.common 的 list_contains 校验**只检查名字在不在列表里**，
+#   不检查对应函数是否存在 —— 所以这个错误完全不会被提前拦住。
+EXTRA_COMMANDS="ensure_interfaces on_uplink on_downlink sync_serial_by_id"
+EXTRA_HELP="	ensure_interfaces	确保 V4/V6 模组接口存在并登记到上行防火墙区域（安装/升级后自动调用）
+	on_uplink		拉起模组接口并下发默认 DNS（后端确认拨号就绪时调用）
+	on_downlink		链路断开时撤掉 IPv6 默认 DNS（接口 ifdown 时自动调用；IPv4 不撤）
+	sync_serial_by_id	重建 /dev/serial/by-id 稳定符号链接（模组拔插后自动调用）"
+
+PROG=/usr/bin/mt5700d
+PROG_NAME="mt5700d"
+
+# 停止后端进程（可重复调用）。
+#
+# 不能写 `killall "$PROG_NAME"`：init.d 脚本自身就叫 mt5700d，而
+# `/etc/init.d/mt5700d start`、开机 /etc/rc.d/S*、service 命令都是直接执行
+# 本脚本，busybox ash 会把进程 comm 设成脚本名，killall 因此把执行脚本的
+# 进程自己一起 SIGTERM —— 表现为 start 输出 "Terminated"、退出码 143，
+# procd 实例永远建不起来（实测 2.0.0 实机升级后服务 inactive 就是这个原因）。
+# 所以改为按 /proc/<pid>/exe 判断：只杀可执行文件确实是 $PROG 的进程，
+# 脚本自身的 exe 是 busybox/ash，不会被命中。
+kill_prog_processes() {
+	local d p exe
+	for d in /proc/[0-9]*; do
+		p=${d#/proc/}
+		[ "$p" = "$$" ] && continue
+		exe=$(readlink "$d/exe" 2>/dev/null) || continue
+		[ "$exe" = "$PROG" ] || continue
+		kill "$p" 2>/dev/null
+	done
+}
+
+# 加载 UCI 函数库
+. /lib/functions.sh
+
+# ---------------------------------------------------------------------------
+# /dev/serial/by-id 稳定符号链接维护
+#
+# 为什么需要（真实故障）：
+#   ttyUSB* 编号由「内核枚举顺序 + option 驱动绑定顺序」决定，同一个模组换 USB
+#   口、换 xHCI 控制器、或与别的 USB 串口设备共存时，编号会整体平移 ——
+#   实测换口后 PCUI 由 ttyUSB1 变成 ttyUSB2。用户在 LuCI 里手工选定的
+#   /dev/ttyUSB1 就此失效，现象是「昨天配好能用，拔插一次就再也不通」，
+#   而且换回去又能用，极难定位。
+#   by-id 命名只用「模组自身描述符 + 接口标识」，与枚举顺序完全无关。
+#
+# 为什么不用 udev / mdev：
+#   本固件（ImmortalWrt SNAPSHOT, mediatek/filogic）既没有 udev 也没有 mdev
+#   （/proc/sys/kernel/hotplug 指向 procd 的 /sbin/hotplug），所有串口设备节点
+#   都是内核 devtmpfs 直接产出的，没有任何组件会替我们建 /dev/serial/by-id。
+#   因此由本脚本自己维护，触发点：服务启动、hotplug 事件、手动 sync_by_id。
+#
+# ---------------------------------------------------------------------------
+# 命名策略（本条是本函数最需要小心的地方，踩过坑）
+#
+# 命名必须同时满足两条互相拉扯的要求：
+#   (a) 跨编号漂移稳定 —— 换 USB 口 / 换控制器 / 共存设备变化后，同一物理口
+#       必须得到同一个路径名，否则「持久化到配置里」这个目标无法成立；
+#   (b) 跨设备唯一 —— 同一台机器上挂两个模组（或模组 + 其它 USB 串口）时，
+#       命名不能互相覆盖，否则 while 循环里后写的会盖掉先写的，
+#       表现为「两个口只剩一个 by-id，另一个静默消失」。
+#
+# 实测拿到的描述符（TDTECH MT5700M-CN，但设计上不依赖这个具体型号）：
+#   idVendor=3466 idProduct=3301 serial=57050M5826800582 bNumInterfaces=7
+#   接口列表（USB 3.0 复合设备，配置号是 2，故目录名为 2-1:2.x）：
+#     2-1:2.0 class=02 sub=0d proto=00  "TDTECH Connect - Network Card"  (网卡)
+#     2-1:2.1 class=0a sub=00 proto=01  "CDC Network Data"
+#     2-1:2.2 class=ff sub=06 proto=13  "TDTECH Connect - Application Interface"
+#     2-1:2.3 class=ff sub=06 proto=12  "TDTECH Connect - PC UI Interface"   ← AT 口
+#     2-1:2.4 class=ff sub=06 proto=1b  "TDTECH Connect - SerialB"
+#     2-1:2.5 class=ff sub=06 proto=1c  "TDTECH Connect - SerialC"
+#     2-1:2.6 class=ff sub=06 proto=14  "TDTECH Connect - GPS Interface"
+#
+# 各候选键的稳定性评估：
+#   - iSerial（57050M5826800582）：**不保证唯一**。它是模组出厂批次号+序号，
+#     同型号不同台可能重复（贴牌/批量刷写会撞号），部分批次甚至为空。
+#     仅凭它命名会在双模组场景互相覆盖 → 不能单独作为主键。
+#   - product（"TDTECH MT5700M-CN"）：多个模组必然相同，且含空格/连字符，
+#     作为文件名需清洗；更关键的是刷不同固件后 product 会变 → 不适合做键。
+#   - bInterfaceProtocol（0x12/0x13/0x1b/0x1c/0x14）：**模组固件写死在接口
+#     描述符里的接口标识**，同一固件的同一物理口恒定，换 USB 口/换控制器/
+#     换主机全都不变 → 满足 (a)；同一设备内各接口协议号互不相同 → 满足 (b)。
+#     唯一缺点：两台不同型号模组若碰巧协议号相同会撞名，但那种情况下
+#     iSerial 前缀会把它区分开（见下）。
+#
+# 最终采用「组合键」而不是任何单一键：
+#   usb-<idVendor>:<idProduct>-if<proto2hex><可选 -<iSerial 清洗片段>><可选 -n<N>>
+#   例：usb-3466:3301-if12-57050M5826800582
+#       usb-3466:3301-if12-57050M5826800582-n2   （同描述符撞名时的去重后缀）
+#
+#   - VID:PID 打头：跨模组唯一性的第一道闸（不同型号必不同）；
+#   - if<proto>：设备内唯一性的保证，也是 AT 口识别的主要依据；
+#   - iSerial 片段：同型号多台时区分（有则加，无则省略，不影响可用性）；
+#   - -n<N>：极端情况（同型号 + 同 iSerial + 同接口号）才出现的兜底去重序号。
+#
+# 这样命名的好处：**换了新模组、新型号，不需要改一行代码**，函数自动产出
+# 与描述符一致的唯一路径；AT 口优先级则交给 Rust 侧按 interface 名判定
+# （见 serialdetect::interface_score），两边职责分离、各自独立演进。
+detect_usb_netdev() {
+	local d link
+	for d in /sys/class/net/*; do
+		[ -e "$d" ] || continue
+		# 只排除回环与网桥；具体网卡名一律不写死 —— 机型互换网口、
+		# 或模组恰好枚举成 eth1 时，下面的 USB 总线判据才是可靠依据。
+		case "$(basename "$d")" in
+			lo|br-*) continue ;;
+		esac
+		link=$(readlink -f "$d/device" 2>/dev/null)
+		case "$link" in
+			*usb*) echo "$(basename "$d")"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+iface_device_name() {
+	local iface dev
+	iface="$1"
+	dev=$(uci -q get "network.$iface.device")
+	[ -n "$dev" ] || dev=$(uci -q get "network.$iface.ifname")
+	# V6 承载接口的 device 写成 '@<V4接口>'（跟随 IPv4 的实际网口），
+	# 那是 UCI 的接口引用而不是网卡名 —— 直接 echo 会把 "@MT5700M" 当成设备
+	# 打进日志，排障时会去 ls 一个不存在的网卡。这里跟随一层引用取真实网卡。
+	case "$dev" in
+		@*)
+			local ref
+			ref=${dev#@}
+			dev=$(uci -q get "network.$ref.device")
+			[ -n "$dev" ] || dev=$(uci -q get "network.$ref.ifname")
+			;;
+	esac
+	[ -n "$dev" ] || dev=$(detect_usb_netdev 2>/dev/null)
+	echo "$dev"
+}
+
+# 接口是否已经拿到地址。
+# 不能用 ifstatus 的 "up": true 当作「已拿到地址」：dhcp 在请求中或失败重试时
+# 接口同样是 up，此时日志却会写「已就绪（已拿到地址）」，把排障方向带偏。
+# 判据：ifstatus 的 ipv4-address / ipv6-address 数组里确实有元素。
+#
+# 踩坑记录：ifstatus 输出是**美化过的多行 JSON**，`"ipv4-address": [` 之后就是换行。
+# 若正则写成 `\[[^]]`（要求 `[` 后同行还有非 ] 字符），则永远匹配不到 ——
+# 实测该 bug 会让「接口明明有 IP」也被判成没有地址，于是走满 180s 重试并打出
+# 「未取到地址」的误报，同时拖住安装流程。必须先 tr 掉换行再匹配。
+iface_has_address() {
+	ifstatus "$1" 2>/dev/null | tr -d '\n' \
+		| grep -qE '"(ipv4-address|ipv6-address)"[[:space:]]*:[[:space:]]*\[[[:space:]]*\{'
+}
+
+# ---------------------------------------------------------------------------
+BY_ID_DIR='/dev/serial/by-id'
+
+# 把字符串清洗成安全的文件名片段。
+#
+# 规则与理由：
+#   1) 只保留 [A-Za-z0-9._-]，其余（空格、斜杠、冒号、非 ASCII）统一替换为 '_'。
+#      product/manufacturer 常带空格（"TDTECH Connect - PC UI"），不清洗会产出
+#      带空格的路径，Shell 与 UCI 里都要额外加引号，容易出错。
+#   2) 去掉首尾的 '_'，避免出现 "usb-3466:3301-if12-_foo" 这种噪声。
+#   3) **纯点号结果必须作废**：异常固件/未初始化 flash 可能把 iSerial 报成 "."、
+#      ".."、甚至一串点号，而 ".." 在路径语义里是「上一级目录」，
+#      虽然本函数的调用点都带了固定前缀（不会真的逃逸），但产出
+#      "usb-...-if12-.." 这种名字本身就没有任何辨识价值，且会让
+#      readlink -f 的解析结果变得难读。直接判空，交给调用方走「省略该片段」分支。
+#   4) 长度截断到 48 字符：USB 描述符字段最长 126 字节，极端情况下会把
+#      文件名撑到超过 NAME_MAX 的余量；iSerial 前 48 字符已足够区分同批设备。
+sanitize_id_part() {
+	local out
+	out=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_' | sed 's/^_*//; s/_*$//')
+	# 纯点号（含 "." / ".." / "..."）无区分价值，一律作废
+	case "$out" in
+		.*) case "$out" in *[!.]*) ;; *) echo ''; return 0 ;; esac ;;
+	esac
+	# 截断到 48 字符
+	out=$(printf '%.48s' "$out")
+	echo "$out"
+}
+
+# 接口协议号 → 两位小写十六进制，用于 by-id 命名的 if<N> 片段。
+#
+# 严重陷阱（实测踩到）：sysfs 的 bInterfaceProtocol 读出来的是**十六进制字符串**
+# （本机实测为 "12" / "13" / "1b" / "1c" / "14" 共 5 个不同值），
+# 直接 `printf '%02x' "$1"` 会让 printf 按**十进制**解释它：
+#   "12"(0x12=18dec) 被当成 12dec → 输出 "0c"   ← 错，且与真实协议号无关
+#   "1b" 因含非十进制字符，busybox printf 报错 → fallback "00"
+#   结果 ttyUSB2/ttyUSB3 双双变成 "0000"，产生本不该有的撞名。
+#
+# 正确做法：分两步归一化 ——
+#   1) 统一去掉可能存在的 "0x" 前缀（不同内核对 sysfs 打印格式不完全一致）；
+#   2) 用已知的十六进制值域做校验：两位且字符合法，则原样保留（它已经是
+#      十六进制表示，不需要再转换）；否则视为异常值回退 "00"。
+# 关键认识：**这里的输入已经是十六进制文本，不需要也不应该做进制换算**，
+# 唯一要做的是校验并保持原样。
+to_hex2() {
+	local v
+	# 去 0x / 0X 前缀（不同内核对 sysfs 的打印格式不完全一致）
+	v=$(printf '%s' "$1" | sed 's/^0[xX]//')
+	# 去首尾与中间空白。
+	#
+	# ===== 严重陷阱，务必保留此说明（本喵实测踩到并花了几轮才定位）=====
+	# 这里**绝不能用 tr -d '[:space:]'**。busybox 的 tr 对 POSIX 字符类
+	# 解析有缺陷：它会把 "[:space:]" 里的字母按**字面字符集**处理，
+	# 于是 's','p','a','c','e' 这几个字母全被当成要删除的字符！
+	# 实测后果（bInterfaceProtocol 的真实取值）：
+	#   '1c' -> '1'     （c 被当成 space 里的字符删掉）
+	#   '1e' -> '1'     （e 同上）
+	#   '0c' -> '0'
+	#   '0e' -> '0'
+	#   而 '1b'/'1d'/'1f'/'13'/'14' 幸存 —— 因为 b/d/f 不在 "space" 里。
+	# 表现是「只有含 c/e 的接口号被算错」，毫无规律、极难定位，
+	# 且会让不同物理口算出同一个 if 号（本可避免的撞名）。
+	# 同理 tr '[:upper:]' '[:lower:]' 在 busybox 上**完全无效**（实测 FF 原样保留），
+	# 也不能用 —— 那边的缺陷只是不生效，这边的缺陷是**破坏数据**，更危险。
+	# 结论：本函数一律用 sed 完成清洗，不依赖 busybox tr 的字符类。
+	v=$(printf '%s' "$v" | sed 's/[[:space:]]//g')
+	# 大小写归一（用 tr 的显式字符区间写法，实测 busybox 对该写法正确）
+	v=$(printf '%s' "$v" | tr 'A-F' 'a-f')
+	# 校验：1~2 位纯十六进制字符才可用；1 位补前导 0（如 "c" → "0c"）
+	case "$v" in
+		*[!0-9a-f]*) echo '00'; return 0 ;;
+	esac
+	if [ -z "$v" ]; then
+		echo '00'
+		return 0
+	fi
+	# 超长（>2 位）视为异常，防止把整个字段塞进文件名
+	if [ "${#v}" -gt 2 ]; then
+		echo '00'
+		return 0
+	fi
+	if [ "${#v}" -eq 1 ]; then
+		echo "0$v"
+		return 0
+	fi
+	echo "$v"
+}
+
+sync_serial_by_id() {
+	local tty base up parent iface ifnum proto hex cur vid pid serial
+	local link name cnt=0 target
+	# 已生成的名字清单（用于 -n<N> 去重），以及各自的重名计数
+	local used_names='' n dup
+
+	[ -d /dev ] || return 1
+
+	# 没有任何 USB 串口时不做任何事（也不建目录），避免在无模组的机器上留空目录。
+	# 两个通配符要分开判定：ls 对不存在的参数会报错并返回非 0，写在一起会把
+	# 「另一个通配符有匹配」的情况误判成「没有串口」。
+	if ! ls /dev/ttyUSB* >/dev/null 2>&1 && ! ls /dev/ttyACM* >/dev/null 2>&1; then
+		# 设备都拔了：清掉旧链接，防止断链被后端当成有效候选
+		# （断链会让自动探测白等一次 800ms 超时预算）
+		if [ -d "$BY_ID_DIR" ]; then
+			for link in "$BY_ID_DIR"/usb-*; do
+				[ -L "$link" ] || continue
+				rm -f "$link" 2>/dev/null
+			done
+		fi
+		return 0
+	fi
+
+	mkdir -p "$BY_ID_DIR" 2>/dev/null || {
+		logger -t mt5700d "警告：无法创建 $BY_ID_DIR，by-id 稳定路径不可用（将回退 ttyUSB*）"
+		return 1
+	}
+
+	# 先清掉本轮之前生成的全部 usb-* 链接，再统一重建。
+	#
+	# 为什么整批清而不做增量：
+	#   增量维护需要「旧链接 → 新设备」的映射，而设备拔出后旧链接已无法解析，
+	#   无从判断它对应哪个口。整批重建最坏也只是短时间内链接不存在（毫秒级），
+	#   且本函数在服务启动/hotplug 时同步执行，不涉及运行期读路径竞争。
+	#   只删 usb-* 前缀，不动目录里其它内容（避免误删别人放的链接）。
+	for link in "$BY_ID_DIR"/usb-*; do
+		[ -L "$link" ] || continue
+		rm -f "$link" 2>/dev/null
+	done
+
+	for tty in /dev/ttyUSB* /dev/ttyACM*; do
+		# -c 判定字符设备：通配符无匹配时会原样作为字面量传入，这一步会滤掉
+		[ -c "$tty" ] || continue
+		base=$(basename "$tty")
+
+		# 解析该 tty 所属的 USB 接口目录：
+		#   /sys/class/tty/ttyUSB1/device -> .../2-1:2.3/ttyUSB1
+		# 其父目录即接口目录，接口标识与设备描述符都在那里。
+		up=$(readlink -f "/sys/class/tty/$base/device" 2>/dev/null)
+		[ -n "$up" ] || continue
+		parent=$(dirname "$up")
+		[ -d "$parent" ] || continue
+
+		# 接口号：目录名形如 "2-1:2.3"，取 ':' 之后的 "2.3"。
+		# 注意配置号不一定是 1（USB 3.0 复合设备实测为 2），且设备口位会变，
+		# 因此这个值**只用来说明「哪个配置」，不参与稳定性判定**。
+		ifnum=$(basename "$parent" | sed -n 's/.*://p')
+		[ -n "$ifnum" ] || continue
+
+		# 接口名（"TDTECH Connect - PC UI Interface"）：仅用于日志可读性，
+		# 不参与命名 —— 它含空格会带来引号麻烦，且刷固件后可能变化。
+		iface=$(cat "$parent/interface" 2>/dev/null)
+
+		# bInterfaceProtocol 是命名主键。
+		# 它由模组固件写死在接口描述符里，同一物理口恒定，
+		# 与 USB 口位/控制器/编号/主机无关；同一设备内各接口互不相同。
+		proto=$(cat "$parent/bInterfaceProtocol" 2>/dev/null)
+		hex=$(to_hex2 "$proto")
+
+		# 往上找到真正的 USB 设备目录（含 idVendor 的那一级）。
+		# 不能只取 parent 的父目录：复合设备/集线器下层级数不固定，必须上溯。
+		vid=''; pid=''; serial=''
+		cur="$parent"
+		while [ "$cur" != "/" ] && [ "$cur" != "." ]; do
+			if [ -f "$cur/idVendor" ]; then
+				vid=$(cat "$cur/idVendor" 2>/dev/null)
+				pid=$(cat "$cur/idProduct" 2>/dev/null)
+				serial=$(cat "$cur/serial" 2>/dev/null)
+				break
+			fi
+			cur=$(dirname "$cur")
+		done
+		[ -n "$vid" ] || continue
+		# 跳过根集线器（1d6b 是 Linux Foundation 的 xHCI 根 hub 供应商号）
+		[ "$vid" = "1d6b" ] && continue
+
+		# 组装名称：VID:PID（跨型号唯一） + 接口协议号（设备内唯一）
+		name="usb-${vid}:${pid}-if${hex}"
+		# iSerial 可用则追加，用于同型号多台时的区分；不可用则省略，
+		# 此时同型号多台会靠下面的 -n<N> 序号兜底，功能不受影响。
+		if [ -n "$serial" ]; then
+			name="$name-$(sanitize_id_part "$serial")"
+		fi
+
+		# 撞名兜底：极端情况下（同型号 + 同 iSerial + 同协议号）加 -n<N>。
+		# 用 used_names 记录本轮已用名字，避免后写的链接覆盖先写的。
+		n=1
+		dup="$name"
+		while : ; do
+			case " $used_names " in
+				*" $dup "*) n=$((n + 1)); dup="$name-n$n" ;;
+				*) break ;;
+			esac
+		done
+		name="$dup"
+		used_names="$used_names $name"
+
+		link="$BY_ID_DIR/$name"
+
+		# ln -sf 对已存在的链接会覆盖（GNU/busybox 都是先 unlink 再创建），
+		# 但为稳妥仍显式 rm：某些 busybox 版本的 -f 在跨设备时行为不一致。
+		rm -f "$link" 2>/dev/null
+		ln -sf "$tty" "$link" 2>/dev/null || {
+			logger -t mt5700d "警告：创建 $link 失败"
+			continue
+		}
+
+		# 校验产出有效（能解析回一个存在的字符设备），避免留下断链
+		target=$(readlink -f "$link" 2>/dev/null)
+		if [ -c "$target" ]; then
+			cnt=$((cnt + 1))
+			logger -t mt5700d "by-id: $base（$iface）-> $name"
+		else
+			logger -t mt5700d "警告：$link 解析结果 $target 不是有效字符设备，已删除"
+			rm -f "$link" 2>/dev/null
+		fi
+	done
+
+	if [ "$cnt" -gt 0 ]; then
+		logger -t mt5700d "已维护 $cnt 个 $BY_ID_DIR 稳定链接"
+	else
+		logger -t mt5700d "未生成任何 by-id 链接（USB 串口可能尚未完全枚举），后端将回退使用 ttyUSB*"
+	fi
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# 模组网口的设备名（统一来源，避免各处硬编码 eth2）
+#
+# 优先取 UCI network.<iface>.device，其次兼容旧的 ifname；
+# 都拿不到时在 /sys/class/net 里探测挂在 USB 总线上的网卡
+# （cdc_ncm / cdc_ether / rndis_host / cdc_mbim 都会出现在 usb 设备路径下）。
+# 硬编码 eth2 在不同机型上可能不成立；仓库里 ucode 侧早就改成「不硬编码」，
+# 这里统一到同一套规则。
+# ---------------------------------------------------------------------------
+
+# 模组接口名的出厂默认（与机型定制包保持一致）。实际使用的接口由 resolve_ifaces 决定。
+DEFAULT_IFACE_4G='MT5700M'
+DEFAULT_IFACE_6G='MT5700Mv6'
+IFACE_4G="$DEFAULT_IFACE_4G"
+IFACE_6G="$DEFAULT_IFACE_6G"
+
+# ---------------------------------------------------------------------------
+# 承载接口的选择与管理（UCI mt5700d.config）
+#
+#   iface_v4          'auto'（默认）：自动扫描 —— 已有接口挂在模组网口上时直接用它
+#                     （例如固件自带的 wan → usb0），没有才用/创建 MT5700M；
+#                     也可填具体接口名（手动设置）。
+#   iface_v6          'auto'（默认）：用经 '@<IPv4 接口>' 引用它的接口（例如 wan6 → @wan），
+#                     没有则用「IPv4 接口名 + v6」；填 'none' 表示不处理 IPv6；也可填具体接口名。
+#   manage_interface  1（默认）：缺失时创建接口、置 auto=1、登记到上行防火墙区域；
+#                     0：不创建、不修改任何 network / firewall 配置，拨号就绪时只对上面
+#                     选定的接口补一次 ifup。
+#
+# 为什么要能选：固件已有 wan / wan6 指向模组网口时，再建 MT5700M 会让同一网卡上跑两套
+# DHCP、出现两条默认路由，而且删掉 MT5700M 后服务启动时又会重建。
+#
+# 接口名会拼进 uci 路径，只接受 [A-Za-z0-9_]，否则回退为 auto 并记录日志。
+# ---------------------------------------------------------------------------
+manage_interface_enabled() {
+	[ "$(uci -q get mt5700d.config.manage_interface)" != "0" ]
+}
+
+valid_iface_name() {
+	case "$1" in
+		''|*[!A-Za-z0-9_]*) return 1 ;;
+	esac
+	return 0
+}
+
+# 设备（device / 旧式 ifname）恰好是模组网口的接口，按 UCI 顺序每行一个
+modem_direct_ifaces() {
+	local dev s d
+	dev=$(detect_usb_netdev 2>/dev/null)
+	[ -n "$dev" ] || return 0
+	for s in $(uci -q show network | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+		d=$(uci -q get "network.$s.device")
+		[ -n "$d" ] || d=$(uci -q get "network.$s.ifname")
+		[ "$d" = "$dev" ] && echo "$s"
+	done
+}
+
+# 经 '@<接口>' 别名引用 $1 的接口（例如 wan6 的 device='@wan'）
+alias_ifaces_of() {
+	local s d
+	for s in $(uci -q show network | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+		d=$(uci -q get "network.$s.device")
+		[ -n "$d" ] || d=$(uci -q get "network.$s.ifname")
+		[ "$d" = "@$1" ] && echo "$s"
+	done
+}
+
+# 按配置解析出本次使用的 IFACE_4G / IFACE_6G（IFACE_6G 为空表示不处理 IPv6）。
+# 返回 1 表示自动扫描模式下模组网口尚未枚举：此时不应创建接口，等网口出现后
+# 由启动流程、hotplug 或拨号就绪回调再处理，避免先建出一个多余的 MT5700M。
+resolve_ifaces() {
+	local v4 v6 found
+	v4=$(uci -q get mt5700d.config.iface_v4)
+	v6=$(uci -q get mt5700d.config.iface_v6)
+	[ -n "$v4" ] || v4=auto
+	[ -n "$v6" ] || v6=auto
+	if [ "$v4" != auto ] && ! valid_iface_name "$v4"; then
+		logger -t mt5700d "警告：iface_v4='$v4' 不是合法的接口名，按自动扫描处理"
+		v4=auto
+	fi
+	if [ "$v6" != auto ] && [ "$v6" != none ] && ! valid_iface_name "$v6"; then
+		logger -t mt5700d "警告：iface_v6='$v6' 不是合法的接口名，按自动处理"
+		v6=auto
+	fi
+
+	if [ "$v4" = auto ]; then
+		# 数据通信接口优先按「模组物理网卡位置 + WAN 区域归属」反查，复用 DNS
+		# 下发同一套判据（dns_direct_ifaces），避免同网卡的 LAN 侧接口被误选；
+		# 没有 WAN 归属时再退回纯物理网卡反查，最后才用出厂默认接口名。
+		found=$(dns_direct_ifaces | head -n 1)
+		[ -n "$found" ] || found=$(modem_direct_ifaces | head -n 1)
+		if [ -n "$found" ]; then
+			IFACE_4G="$found"
+		elif [ -n "$(detect_usb_netdev 2>/dev/null)" ]; then
+			IFACE_4G="$DEFAULT_IFACE_4G"
+		else
+			IFACE_4G="$DEFAULT_IFACE_4G"
+			IFACE_6G="$DEFAULT_IFACE_6G"
+			uci -q get "network.$DEFAULT_IFACE_4G" >/dev/null 2>&1 || return 1
+		fi
+	else
+		IFACE_4G="$v4"
+	fi
+
+	case "$v6" in
+		none) IFACE_6G='' ;;
+		auto)
+			found=$(alias_ifaces_of "$IFACE_4G" | head -n 1)
+			if [ -n "$found" ]; then
+				IFACE_6G="$found"
+			elif [ "$IFACE_4G" = "$DEFAULT_IFACE_4G" ]; then
+				IFACE_6G="$DEFAULT_IFACE_6G"
+			else
+				IFACE_6G="${IFACE_4G}v6"
+			fi
+			;;
+		*) IFACE_6G="$v6" ;;
+	esac
+	return 0
+}
+
+# 拉起接口的重试预算。
+#
+# 背景：模组冷启动链路是「USB 枚举 → AT 就绪 → 驻网 → 开启自动拨号 → 向 USB 网口
+# 下发 DHCP → netifd 取址」，整条链常见耗时 30~60s。旧实现是「等设备 15s +
+# ifup 一次 + 等 up 20s」，共 35s 后只打一条警告就永久放弃，之后没有任何机制补
+# ifup（仓库里也没有 hotplug 脚本），于是接口长期没有 IP——模组明明在线。
+# 现在改为带间隔的多次 ifup，覆盖整条冷启动链路。
+IFUP_RETRY_TIMES=18
+IFUP_RETRY_INTERVAL=10
+
+# 开机自启注册自愈。
+#
+# 现象：手动 /etc/init.d/mt5700d start 能起来，但路由器重启后服务又消失，
+#       LuCI 显示「未注册 / 进程未运行 / procd 无实例」。
+# 根因：/etc/rc.d/S${START}mt5700d 软链接缺失，即服务从未被 enable。
+#       （历史上是 init.d 执行位回退导致安装期 enable 失败，详见 uci-defaults 注释。
+#         enable 只在安装那一刻执行一次，错过之后不会自动补。）
+# 处理：每次 start 都检查一次，缺失就补 enable。这样即便存量设备错过了
+#       安装期注册，只要有人（或开机、或点一下「重载服务」）执行一次 start，
+#       注册状态就被永久修好，不会再随重启复发。幂等，可重复执行。
+ensure_enabled() {
+	[ -e "/etc/rc.d/S${START}mt5700d" ] && return 0
+
+	# 执行位可能在打包/刷机过程中再次丢失，先补权限再 enable
+	[ -x "/etc/init.d/mt5700d" ] || chmod 0755 /etc/init.d/mt5700d 2>/dev/null
+	/etc/init.d/mt5700d enable 2>/dev/null
+
+	if [ -e "/etc/rc.d/S${START}mt5700d" ]; then
+		logger -t mt5700d "检测到服务未注册开机自启，已自动补建 S${START}mt5700d"
+	else
+		logger -t mt5700d "警告：服务未注册开机自启且自动 enable 失败，重启后需手动 start"
+	fi
+	return 0
+}
+
+start_service() {
+	local enabled
+
+	logger -t mt5700d "开始启动服务..."
+
+	ensure_enabled
+
+	uci -q commit mt5700d
+
+	config_load mt5700d
+	config_get_bool enabled config enabled 0
+
+	if [ "$enabled" -eq 0 ]; then
+		logger -t mt5700d "服务已禁用，退出启动"
+		echo "mt5700d is disabled in configuration"
+		return 1
+	fi
+
+	if [ ! -x "$PROG" ]; then
+		logger -t mt5700d "错误：找不到可执行文件 $PROG"
+		echo "Error: $PROG not found"
+		return 1
+	fi
+
+	# 先清残留进程，再立刻拉起 procd，避免防火墙/串口探测拖死 start。
+	# 旧实例优先交给 procd 处理；这里只清掉可执行文件确实是本二进制的残留
+	# 进程（kill_prog_processes 不会误杀脚本自身，原因见函数定义处）。
+	killall -q at-server.py 2>/dev/null
+	kill_prog_processes
+
+	logger -t mt5700d "配置 procd 实例..."
+	procd_open_instance
+	procd_set_param command "$PROG"
+	procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param pidfile /var/run/mt5700d.pid
+	# TZ：必须显式传，否则后端拿不到时区。
+	# OpenWrt 把时区设置（LuCI 系统 → 时间同步 → 时区）写成 UCI
+	# system.@system[0].timezone，并派生出 /etc/TZ；而 TZ 环境变量**只由
+	# /etc/profile 为登录 shell 导出**，procd 拉起守护进程时不会带上。
+	# 后果实测：SSH 里 `date` 是 CST，服务日志却早 8 小时（静默退化成 UTC）。
+	# 这里按「/etc/TZ → uci → CST-8(北京时间)」取值注入，与后端
+	# crate::localtime 的三级回退完全同序，保证内外口径一致。
+	TZ_VALUE="$(cat /etc/TZ 2>/dev/null)"
+	[ -n "$TZ_VALUE" ] || TZ_VALUE="$(uci -q get system.@system[0].timezone)"
+	[ -n "$TZ_VALUE" ] || TZ_VALUE="CST-8"
+	procd_set_param env TZ="$TZ_VALUE"
+	procd_close_instance
+
+	logger -t mt5700d "服务启动配置完成"
+	echo "mt5700d started successfully"
+
+	# 串口绑定、接口拉起与防火墙放到后台，避免 /etc/init.d/firewall reload 阻塞 start
+	( mt5700d_post_start ) >/dev/null 2>&1 &
+}
+
+mt5700d_post_start() {
+	config_load mt5700d
+
+	# 1) 串口模式：先确保 MT5700 的 USB 串口被绑定出来（后端要靠它发 AT）
+	local conn_type
+	config_get conn_type config connection_type 'SERIAL'
+	# 注意：`ls /dev/ttyUSB* /dev/ttyACM*` 在其中一个通配符**无匹配**时也会返回非 0
+	# （ls 会对不存在的参数报错），于是「串口早已就绪」会被误判成「没有串口」，
+	# 每次启动都白跑一遍绑定流程。两个通配符必须分开判定。
+	if [ "$conn_type" = "SERIAL" ] \
+		&& ! ls /dev/ttyUSB* >/dev/null 2>&1 \
+		&& ! ls /dev/ttyACM* >/dev/null 2>&1; then
+		bind_modem_serial
+	fi
+
+	# 1b) 维护 by-id 稳定链接。必须排在 bind_modem_serial 之后：绑定失败的
+	#     唯一职责就是产出 ttyUSB*，链接才有可指向的目标。放在接口拉起之前，
+	#     保证后端首次读配置时链接已就绪。
+	sync_serial_by_id
+
+	# 2) 模组接口的启动对齐（见下方 ensure_modem_interface 注释）
+	ensure_modem_interface
+
+	# 3) 防火墙规则（RPC + 模块 AT 端口）
+	apply_firewall_rules
+
+	logger -t mt5700d "后台串口/接口/防火墙初始化完成"
+}
+
+# ---------------------------------------------------------------------------
+# 串口绑定：把 MT5700 的 USB 串口挂到 usb-serial 驱动上。
+#
+# 旧实现依赖 lsusb 且把 VID:PID 写死为 3466:3301，两个问题：
+#   1) lsusb 属于 usbutils，而本包刻意不在 LUCI_DEPENDS 声明它（避免拖 libusb），
+#      未装 usbutils 的固件上 command -v lsusb 为假 → 整段静默跳过，日志里
+#      看不出任何原因，现象是「没有任何 ttyUSB 设备、后端反复报找不到串口」。
+#   2) PID 会随 AT^SETMODE 切换 USB 组合而变化，写死 PID 在切换后必然失效。
+# 现在直接读 sysfs（不需要任何外部工具），按 VID 匹配、PID 透传。
+# ---------------------------------------------------------------------------
+bind_modem_serial() {
+	local dev vid pid drv new_id
+
+	for dev in /sys/bus/usb/devices/*/idVendor; do
+		[ -f "$dev" ] || continue
+		vid=$(cat "$dev" 2>/dev/null)
+		pid=$(cat "$(dirname "$dev")/idProduct" 2>/dev/null)
+		[ -n "$vid" ] && [ -n "$pid" ] || continue
+		# 3466 为 MT5700 的 vendor id；只固定 VID，PID 随 USB 模式变化
+		[ "$vid" = "3466" ] || continue
+
+		logger -t mt5700d "检测到模组 USB 设备 $vid:$pid，尝试绑定串口驱动"
+		modprobe usbserial 2>/dev/null || true
+		modprobe option 2>/dev/null || true
+
+		for drv in option option1 generic; do
+			new_id="/sys/bus/usb-serial/drivers/$drv/new_id"
+			[ -w "$new_id" ] || continue
+			echo "$vid $pid" > "$new_id" 2>/dev/null || continue
+			sleep 1
+			if ls /dev/ttyUSB* >/dev/null 2>&1 || ls /dev/ttyACM* >/dev/null 2>&1; then
+				logger -t mt5700d "已通过 $drv 绑定 $vid:$pid"
+				return 0
+			fi
+			logger -t mt5700d "通过 $drv 绑定 $vid:$pid 后仍未出现串口节点，继续尝试"
+		done
+	done
+
+	logger -t mt5700d "未发现可绑定的 MT5700 USB 设备（3466:*），或串口已由内核自动绑定"
+	return 1
+}
+
+# 机型未预置接口时自动创建（V4 与 V6 都要创建）
+#
+# 旧行为是「接口不存在则 continue」——在非定制机型上等于什么都不做，也没有任何日志。
+# 用户看到的是「模组 AT 在线、接口列表里没有 MT5700M、无法联网」，且完全不知道插件跳过了。
+#
+# 核心原则：**接口先建好，地址再谈**。
+#   地址能不能拿到取决于运营商与模组状态（尤其 IPv6），但接口本身不应该因为
+#   「此刻还没拿到地址」或「缺少某个客户端」就不存在 —— 那会让模组在线却没有接口可管。
+#
+# 取址策略按可用性分档：
+#   V4（MT5700M，proto=dhcp）：**必须拿到地址**，拿不到等于没网，由带间隔的重试循环
+#       + hotplug(iface/usb) + 后端 on-uplink 通知三路兜底；
+#   V6（MT5700Mv6，proto=dhcpv6）：**按实际网络状况获取** —— 运营商下发就取到，
+#       不下发也不影响 IPv4 使用，所以用 reqaddress=try / reqprefix=auto 不做强制。
+#
+# 因此以下情况都不会阻止创建（只记录提示）：
+#   - 缺少 odhcp6c：V6 接口照建，安装 odhcp6c 后即生效；
+#   - 模组网口尚未枚举：接口照建，之后由 on_uplink / hotplug 补齐 device。
+#
+# 两者共用模组的同一 USB 网口（OpenWrt 默认配置里的 wan / wan6 也是这么写的，
+# netifd 允许同一 device 被 v4 与 v6 两个 interface 同时使用）。
+#
+# 参数：$1=接口名  $2=proto（dhcp / dhcpv6）
+# ---------------------------------------------------------------------------
+ensure_iface_created() {
+	local iface proto device cur_dev cur_proto
+
+	iface="$1"
+	proto="$2"
+
+	# V4 的设备名按 sysfs 探测模组 USB 网口（V6 不直接用设备名，见下）
+	device=$(uci -q get "network.${IFACE_4G}.device")
+	[ -n "$device" ] || device=$(iface_device_name "$IFACE_4G")
+
+	if uci -q get "network.$iface" >/dev/null 2>&1; then
+		# 已存在：只在缺 device 时补齐，不改动其它配置
+		cur_dev=$(uci -q get "network.$iface.device")
+		if [ -z "$cur_dev" ]; then
+			if [ "$proto" = "dhcpv6" ]; then
+				uci -q set "network.$iface.device=@${IFACE_4G}"
+				uci -q set "network.$iface.ifname=@${IFACE_4G}"
+				uci -q commit network
+				logger -t mt5700d "$iface 已补上 device=@${IFACE_4G}"
+			elif [ -n "$device" ]; then
+				uci -q set "network.$iface.device=$device"
+				uci -q commit network
+				logger -t mt5700d "$iface 已补上 device=$device"
+			fi
+		fi
+		return 0
+	fi
+
+	logger -t mt5700d "机型未预置 $iface 接口，自动创建（proto=$proto）"
+	uci -q set "network.$iface=interface"
+	uci -q set "network.$iface.proto=$proto"
+
+	if [ "$proto" = "dhcpv6" ]; then
+		# 用 @<V4 接口> 引用上层设备，与机型定制包写法一致
+		# （实测 H5000M 上 MT5700Mv6 的 device/ifname 就是 '@MT5700M'）。
+		# 好处：V4 若换了网口名（eth2 → 其它），V6 自动跟随，不需要两处同步。
+		uci -q set "network.$iface.device=@${IFACE_4G}"
+		uci -q set "network.$iface.ifname=@${IFACE_4G}"
+		# 按实际网络状况获取：运营商下发就取到，不下发也不判失败
+		uci -q set "network.$iface.reqaddress=try"
+		uci -q set "network.$iface.reqprefix=auto"
+		# 允许把上游前缀扩展分发给下游接口（LAN）——不加这一项，
+		# 即使拿到 IPv6 前缀也不会下发到内网，等于白拿。
+		uci -q set "network.$iface.extendprefix=1"
+		uci -q set "network.$iface.defaultroute=1"
+	else
+		[ -n "$device" ] && uci -q set "network.$iface.device=$device"
+	fi
+
+	uci -q set "network.$iface.auto=1"
+	uci -q commit network
+
+	# 创建后的提示（不影响接口存在）
+	if [ "$proto" = "dhcpv6" ] && ! command -v odhcp6c >/dev/null 2>&1; then
+		logger -t mt5700d "提示：$iface 已创建，但系统缺少 odhcp6c，暂时无法获取 IPv6 地址（安装 odhcp6c 后生效）"
+	fi
+	if [ "$proto" != "dhcpv6" ] && [ -z "$device" ]; then
+		logger -t mt5700d "提示：$iface 已创建，但暂未确定模组网口，网口枚举后会自动补上 device"
+	fi
+
+	cur_proto=$(uci -q get "network.$iface.proto")
+	[ "$cur_proto" = "$proto" ] || logger -t mt5700d "警告：$iface 自动创建后 proto=$cur_proto，非预期（期望 $proto）"
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# 模组接口的启动对齐（幂等，可重复执行）
+#
+# 症状：LuCI 上模组显示在线，但「网络 → 接口」里 MT5700M 没有 IP，因此上不了网。
+# 取证结果：ifstatus MT5700M → "up": false, "autostart": false。
+# UCI 里该接口只有 device/ifname/proto/metric/defaultroute/norelease，
+# 既没有 auto='1'，也没人主动 ifup，于是 netifd 从不启动它 ——
+# 即使模组拨号成功、USB 网口已经能 DHCP，接口也不会去要地址。
+#
+# 处理策略：
+#   1) 接口不存在且能定位到模组 USB 网口 → 自动创建；
+#   2) 打开 auto='1'（开机自启）；
+#   3) 校验 proto（机型把接口定成 none/static 时开自动拨号也拿不到地址，需明确告警）；
+#   4) 以「已取到地址」为达成条件，带间隔多次 ifup（覆盖 30~60s 的冷启动链路）。
+# 注意：不写入 IP/网关等具体地址，全部交给 dhcp proto 协商，
+# 也不改动设备名与 metric，保持机型定制包的定义。
+# ---------------------------------------------------------------------------
+ensure_modem_interface() {
+	local i iface_4g iface_6g auto_val need_commit=0 p n
+
+	if ! manage_interface_enabled; then
+		logger -t mt5700d "接口管理已关闭（manage_interface=0）：不创建、不修改模组接口与防火墙；拨号就绪后只拉起选定的承载接口"
+		return 0
+	fi
+	if ! resolve_ifaces; then
+		logger -t mt5700d "模组网口尚未枚举，暂不创建承载接口（网口出现后由 hotplug / 拨号就绪回调处理）"
+		return 0
+	fi
+	iface_4g="$IFACE_4G"
+	iface_6g="$IFACE_6G"
+	logger -t mt5700d "承载接口：IPv4=$iface_4g IPv6=${iface_6g:-（不处理）}"
+
+	# V4 与 V6 都自动创建：V4 必须拿到地址，V6 按实际网络状况获取
+	ensure_iface_created "$iface_4g" dhcp || true
+	[ -z "$iface_6g" ] || ensure_iface_created "$iface_6g" dhcpv6 || true
+
+	# 登记到承载 NAT 的上行区域。必须独立于"新建"分支执行：接口若早已存在，
+	# ensure_iface_created 会直接返回，只在新建分支里做登记就会漏掉存量设备。
+	ensure_firewall_zone
+
+	for i in "$iface_4g" "$iface_6g"; do
+		uci -q get "network.$i" >/dev/null 2>&1 || continue
+		auto_val=$(uci -q get "network.$i.auto")
+		if [ "$auto_val" != "1" ]; then
+			uci -q set "network.$i.auto=1"
+			need_commit=1
+		fi
+		# proto 校验：none/static 时自动拨号成功也取不到地址，必须让人看得见
+		p=$(uci -q get "network.$i.proto")
+		case "$p" in
+			dhcp|dhcpv6|static|none) ;;
+			*) logger -t mt5700d "警告：$i 的 proto=$p 非 dhcp 系，自动拨号后可能取不到地址" ;;
+		esac
+	done
+
+	if [ "$need_commit" -eq 1 ]; then
+		uci -q commit network
+		logger -t mt5700d "已将 $iface_4g/$iface_6g 设置为开机自启（auto=1）"
+	fi
+
+	if ! uci -q get "network.$iface_4g" >/dev/null 2>&1; then
+		logger -t mt5700d "警告：$iface_4g 创建失败（uci 未生效），跳过拉起"
+		return 0
+	fi
+
+	# 后端拨号达成后会调用 on-uplink 钩子；这里做启动期的兜底重试。
+	n=0
+	got4=0
+	while [ "$n" -lt "$IFUP_RETRY_TIMES" ]; do
+		if iface_has_address "$iface_4g"; then
+			logger -t mt5700d "$iface_4g 已取到地址（第 $((n + 1)) 次检查，设备 $(iface_device_name "$iface_4g")）"
+			got4=1
+			break
+		fi
+		# ifup 是幂等的：接口已 up 但仍在等 DHCP 时重复调用不会破坏状态
+		ifup "$iface_4g" 2>&1 | logger -t mt5700d || true
+		if uci -q get "network.$iface_6g" >/dev/null 2>&1; then
+			ifup "$iface_6g" 2>&1 | logger -t mt5700d || true
+		fi
+		n=$((n + 1))
+		sleep "$IFUP_RETRY_INTERVAL"
+	done
+
+	if [ "$got4" -eq 0 ]; then
+		logger -t mt5700d "警告：$iface_4g 在 $((IFUP_RETRY_TIMES * IFUP_RETRY_INTERVAL))s 内未取到地址。\
+已尝试 $(iface_device_name "$iface_4g")；请检查 logread -e mt5700d 与「模组是否已驻网」；\
+hotplug 钩子与后端周期对账会继续处理"
+	fi
+
+	# V6 不判定达成：只记录实际结果，便于排障时一眼看出"是有 v6 还是没下发"
+	if uci -q get "network.$iface_6g" >/dev/null 2>&1; then
+		if iface_has_address "$iface_6g"; then
+			logger -t mt5700d "$iface_6g 已获取 IPv6 地址"
+		else
+			logger -t mt5700d "$iface_6g 暂未获取 IPv6 地址（按实际网络状况获取，不影响 IPv4 使用）"
+		fi
+	fi
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# 防火墙规则
+#
+# 清理列表里有一部分是历史名字（mt5700d_wan_block / mt5700d_wan_allow /
+# at_rpc_wan_block 当前版本不再创建），保留它们是为了把旧版本留下的残留一并清掉；
+# 更早版本遗留的规则由一次性迁移脚本负责清理，本列表不再承担。
+# 实际会创建的只是下面 apply_firewall_rules 里出现的这几条（按开关取子集）。
+# ---------------------------------------------------------------------------
+FW_RULE_NAMES="mt5700d_wan_block mt5700d_wan_allow at_module_restrict \
+at_module_restrict_self at_module_wan_block at_module_wan_allow at_rpc_wan_allow \
+at_rpc_wan_block"
+
+fw_clean_rules() {
+	local rule_name rule_idx
+	for rule_name in $FW_RULE_NAMES; do
+		rule_idx=$(uci show firewall 2>/dev/null | grep "\.name='$rule_name'" | cut -d'[' -f2 | cut -d']' -f1 | head -n1)
+		[ -n "$rule_idx" ] && uci delete firewall.@rule[$rule_idx] 2>/dev/null
+	done
+	uci commit firewall 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# 把模组接口登记到承载 NAT 的上行防火墙区域（自动修复「有 IP 但上不了网」）
+#
+# 症状：模组拨号成功、接口也正常取到 IPv4 地址（ifstatus 有 ipv4-address、默认路由
+#       已建立），但路由器背后与内网都打不开网页。
+#
+# 根因：自动创建的接口只写了 network 配置，**从未登记到任何防火墙区域**。
+#       fw4 只为「区域内的接口」下发源地址转换与 lan→上行区域的转发放行；接口不在
+#       区域内时，内网源地址不会被改写，上游无法回程 —— 于是出现「有 IP 却不通网」。
+#       机型定制包预置的接口之所以正常，只是因为它同时把 MT5700M/MT5700Mv6 写进了
+#       wan 区域的 network 列表。同一个接口，差的就只有这一处登记。
+#
+# 实测（H5000M / ImmortalWrt SNAPSHOT / fw4）：
+#   登记在区域内 → nft: oifname { "eth1", "eth2" } jump srcnat_wan
+#                  以 LAN 地址为源 ping 223.5.5.5 → 2/2 通（~26ms）
+#   摘掉登记     → 该 jump 只剩 eth1，同一个 ping → 2/2 全丢（100% loss）
+#
+# 目标区域判定（不写死区域索引，索引顺序随固件而异）：
+#   1) 存在名为 wan 的区域 → 用它（与 OpenWrt 默认配置和用户预期一致）；
+#   2) 否则用带 masq='1' 的区域，优先其中已登记现成上行口（wan/wwan/pppoe…）的那个；
+#   3) 都没有 → 自行新建一个标准 wan 区域，并补齐 lan 区域与 lan→wan 转发
+#      （否则新建的区域形同虚设）。
+#
+# 只做「登记」：不改动既有区域的 masq / 转发等既有定义。若目标区域没有开 masq，
+# 只打警告、不擅自开启 —— 避免破坏「公网地址直路由」这类刻意配置。
+# ---------------------------------------------------------------------------
+FW_ZONE_DIRTY=0
+
+fw_zone_list() {
+	uci show firewall 2>/dev/null | sed -n 's/^\(firewall\.@zone\[[0-9]*\]\)=zone$/\1/p'
+}
+
+# 找出承载 NAT 的上行区域，输出其 uci 路径（如 firewall.@zone[1]）；找不到返回 1
+fw_find_uplink_zone() {
+	local z name masq nets n
+
+	# 1) 名字就叫 wan 的区域优先
+	for z in $(fw_zone_list); do
+		name=$(uci -q get "$z.name")
+		[ "$name" = "wan" ] && { echo "$z"; return 0; }
+	done
+
+	# 2) 带 masq 且已登记现成上行口
+	for z in $(fw_zone_list); do
+		[ "$(uci -q get "$z.masq")" = "1" ] || continue
+		nets=$(uci -q get "$z.network")
+		for n in $nets; do
+			case "$n" in
+				wan|wan6|wwan|wwan6|pppoe*|lte*|rmnet*|usb*)
+					echo "$z"; return 0 ;;
+			esac
+		done
+	done
+
+	# 3) 任意带 masq 的区域
+	for z in $(fw_zone_list); do
+		[ "$(uci -q get "$z.masq")" = "1" ] && { echo "$z"; return 0; }
+	done
+
+	return 1
+}
+
+# 是否存在名为 name 的区域（fw4 不允许同名区域，创建前必须先查）
+fw_has_zone() {
+	local z
+	for z in $(fw_zone_list); do
+		[ "$(uci -q get "$z.name")" = "$1" ] && return 0
+	done
+	return 1
+}
+
+# 把 iface 追加进区域 z 的 network 列表。
+# 返回 0=有改动，1=无需改动（已在列表 / 接口不存在 / 写入失败）。
+fw_zone_add_iface() {
+	local z iface nets n
+
+	z="$1"; iface="$2"
+
+	# 接口不在 UCI 里就不要往区域塞名字：fw4 会把解析不到的名字当噪声
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 1
+
+	nets=$(uci -q get "$z.network")
+	for n in $nets; do
+		[ "$n" = "$iface" ] && return 1
+	done
+
+	uci -q add_list "$z.network=$iface" 2>/dev/null || return 1
+	return 0
+}
+
+# 是否已存在 dest=<zone_name> 的 forwarding；返回 0=已有，1=刚补上，2=无法写入
+fw_ensure_forwarding() {
+	local dest f
+	dest="$1"
+
+	for f in $(uci show firewall 2>/dev/null | sed -n 's/^\(firewall\.@forwarding\[[0-9]*\]\)=forwarding$/\1/p'); do
+		[ "$(uci -q get "$f.dest")" = "$dest" ] && return 0
+	done
+
+	uci -q add firewall forwarding || return 2
+	uci -q set firewall.@forwarding[-1].src='lan'
+	uci -q set firewall.@forwarding[-1].dest="$dest"
+	return 1
+}
+
+ensure_firewall_zone() {
+	local z zname created=0 changed=0
+
+	z=$(fw_find_uplink_zone)
+
+	if [ -z "$z" ]; then
+		logger -t mt5700d "未找到带 NAT 的上行防火墙区域，正在创建 wan 区域（masq=1）"
+
+		# lan 区域不存在时一并补上：只有 wan 区域而没有 lan，内网无从转发
+		if ! fw_has_zone lan; then
+			uci -q add firewall zone
+			uci -q set firewall.@zone[-1].name='lan'
+			uci -q set firewall.@zone[-1].input='ACCEPT'
+			uci -q set firewall.@zone[-1].output='ACCEPT'
+			uci -q set firewall.@zone[-1].forward='ACCEPT'
+			uci -q get network.lan >/dev/null 2>&1 && uci -q set firewall.@zone[-1].network='lan'
+			logger -t mt5700d "已补建 lan 防火墙区域（此前不存在）"
+		fi
+
+		uci -q add firewall zone
+		uci -q set firewall.@zone[-1].name='wan'
+		uci -q set firewall.@zone[-1].input='REJECT'
+		uci -q set firewall.@zone[-1].output='ACCEPT'
+		uci -q set firewall.@zone[-1].forward='DROP'
+		uci -q set firewall.@zone[-1].masq='1'
+		uci -q set firewall.@zone[-1].mtu_fix='1'
+
+		# 先落盘，后续 add_list 才有一个稳定的区域索引可引用
+		uci -q commit firewall 2>/dev/null
+		z='firewall.@zone[-1]'
+		created=1
+		changed=1
+	fi
+
+	zname=$(uci -q get "$z.name")
+	[ -n "$zname" ] || zname='(未命名)'
+
+	if [ "$created" -eq 1 ]; then
+		fw_ensure_forwarding "$zname"
+		case "$?" in
+			1) logger -t mt5700d "已补上 lan → $zname 转发" ;;
+			2) logger -t mt5700d "警告：lan → $zname 转发补建失败，内网可能仍无法上网" ;;
+		esac
+	elif [ "$(uci -q get "$z.masq")" != "1" ]; then
+		# 不擅自改别人的防火墙：只提醒，不动手
+		logger -t mt5700d "注意：上行区域 $zname 未开启 masq；若内网无法上网，请确认是否需要源地址转换"
+	fi
+
+	if fw_zone_add_iface "$z" "$IFACE_4G"; then
+		logger -t mt5700d "已将 $IFACE_4G 登记到防火墙区域 $zname（此前不在区域内，会导致有 IP 却无法上网）"
+		changed=1
+	fi
+	if fw_zone_add_iface "$z" "$IFACE_6G"; then
+		logger -t mt5700d "已将 $IFACE_6G 登记到防火墙区域 $zname"
+		changed=1
+	fi
+
+	if [ "$changed" -eq 1 ]; then
+		uci -q commit firewall 2>/dev/null
+		FW_ZONE_DIRTY=1
+	fi
+	return 0
+}
+
+# 区域有改动时重载防火墙。刻意不在 ensure_firewall_zone 里直接重载：
+# post_start 流程随后会调用 apply_firewall_rules，它本来就要重载一次，
+# 由它清掉脏标记即可，避免一次启动重载两遍。
+fw_reload_if_dirty() {
+	[ "$FW_ZONE_DIRTY" -eq 1 ] || return 0
+	timeout 10 /etc/init.d/firewall reload >/dev/null 2>&1 || true
+	FW_ZONE_DIRTY=0
+	logger -t mt5700d "防火墙已重载（模组接口的区域登记已生效）"
+	return 0
+}
+
+# 按配置重建本插件的防火墙规则（先清旧、再按需新增）。
+#
+# src / dest 与 README「服务配置」页的说明保持一致：
+#   - RPC 端口放行只针对**内网 → 路由器本机**（只写 src=lan、不写 dest/dest_ip：
+#     fw4 对只带源区域的规则走 input 链，目标天然是路由器自身。dest_ip 会被
+#     fw4 当字面 IP/CIDR 解析，写 '@router' 这类引用会让整条规则被跳过——
+#     实机 fw4 check 已验证）；
+#   - 模组管理口（network_host:network_port）默认对 WAN 侧 REJECT，可选放行
+#     （network_allow_wan=1）或限制为仅路由器本身可访问（network_restrict_access=1，
+#     本机流量走 output 链，不受 zone 规则影响，天然放行）。
+apply_firewall_rules() {
+	local module_allow_wan restrict_module module_host module_port
+	local rpc_allow_wan rpc_port
+
+	config_get_bool module_allow_wan config network_allow_wan 0
+	config_get_bool restrict_module config network_restrict_access 0
+	config_get module_host config network_host '192.168.8.1'
+	config_get module_port config network_port '20249'
+	config_get_bool rpc_allow_wan config websocket_allow_wan 0
+	config_get rpc_port config websocket_port 8765
+
+	fw_clean_rules
+
+	# RPC 对外监听时放行：只带 src=lan 的规则落 fw4 的 input 链，目标即路由器
+	# 本机；不写 dest/dest_ip（dest_ip 按 IP/CIDR 解析，'@router' 之类引用非法，
+	# 整条规则会被 fw4 跳过）。
+	if [ "$rpc_allow_wan" -eq 1 ]; then
+		uci add firewall rule >/dev/null
+		uci set firewall.@rule[-1].name='at_rpc_wan_allow'
+		uci set firewall.@rule[-1].src='lan'
+		uci set firewall.@rule[-1].dest_port="$rpc_port"
+		uci set firewall.@rule[-1].proto='tcp'
+		uci set firewall.@rule[-1].target='ACCEPT'
+		uci set firewall.@rule[-1].enabled='1'
+		logger -t mt5700d "已允许内网访问 RPC 端口 $rpc_port（建议设置 auth_key）"
+	fi
+
+	if [ "$module_allow_wan" -eq 1 ]; then
+		uci add firewall rule >/dev/null
+		uci set firewall.@rule[-1].name='at_module_wan_allow'
+		uci set firewall.@rule[-1].src='wan'
+		uci set firewall.@rule[-1].dest='*'
+		uci set firewall.@rule[-1].dest_ip="$module_host"
+		uci set firewall.@rule[-1].dest_port="$module_port"
+		uci set firewall.@rule[-1].proto='tcp'
+		uci set firewall.@rule[-1].target='ACCEPT'
+		uci set firewall.@rule[-1].enabled='1'
+	else
+		uci add firewall rule >/dev/null
+		uci set firewall.@rule[-1].name='at_module_wan_block'
+		uci set firewall.@rule[-1].src='wan'
+		uci set firewall.@rule[-1].dest='*'
+		uci set firewall.@rule[-1].dest_ip="$module_host"
+		uci set firewall.@rule[-1].dest_port="$module_port"
+		uci set firewall.@rule[-1].proto='tcp'
+		uci set firewall.@rule[-1].target='REJECT'
+		uci set firewall.@rule[-1].enabled='1'
+	fi
+
+	if [ "$restrict_module" -eq 1 ]; then
+		uci add firewall rule >/dev/null
+		uci set firewall.@rule[-1].name='at_module_restrict'
+		uci set firewall.@rule[-1].src='*'
+		uci set firewall.@rule[-1].dest='*'
+		uci set firewall.@rule[-1].dest_ip="$module_host"
+		uci set firewall.@rule[-1].dest_port="$module_port"
+		uci set firewall.@rule[-1].proto='tcp'
+		uci set firewall.@rule[-1].target='REJECT'
+		uci set firewall.@rule[-1].enabled='1'
+		# src='*' 使 REJECT 覆盖所有区域的转发放行；路由器本机访问模组走 output
+		# 链，fw4 的 zone 规则管不到它，无需本机豁免规则（写一条 src_ip=127.0.0.1
+		# 的 ACCEPT 落在 forward 链的规则里永远匹配不到本机流量，纯死代码）。
+		logger -t mt5700d "已将模组 AT 端口限制为仅路由器本身可访问"
+	fi
+
+	uci commit firewall 2>/dev/null
+	# 这次重载同时覆盖 ensure_firewall_zone 登记的区域改动，故清掉脏标记，
+	# 避免调用方（post_start → 本函数）之后再重载一遍。
+	FW_ZONE_DIRTY=0
+	# 后台 reload，避免阻塞；失败不致命
+	timeout 8 /etc/init.d/firewall reload >/dev/null 2>&1 || true
+	logger -t mt5700d "防火墙规则已应用"
+}
+
+stop_service() {
+	logger -t mt5700d "停止服务..."
+	echo "Stopping mt5700d..."
+
+	kill_prog_processes
+	rm -f /var/run/mt5700d.pid
+
+	# 清理防火墙规则（幂等，列表与 apply_firewall_rules 一致）
+	fw_clean_rules
+	timeout 8 /etc/init.d/firewall reload >/dev/null 2>&1 || true
+	logger -t mt5700d "已清理所有防火墙规则"
+
+	# 撤掉下发过的默认 DNS：服务停止即代表本插件不再管理这些接口。
+	# 选在 stop 而不是 ifdown 上做，是因为 stop 是一次明确、不会自我触发的动作，
+	# 不存在「刚写完就被自己清掉」的竞态（详见 hotplug.d/iface/99-mt5700d）。
+	if resolve_ifaces; then
+		clear_default_dns
+	fi
+
+	sleep 1
+	logger -t mt5700d "服务已停止"
+	echo "mt5700d stopped"
+}
+
+reload_service() {
+	logger -t mt5700d "重新加载配置..."
+	echo "Reloading mt5700d configuration..."
+
+	uci -q commit mt5700d
+
+	# 通过 procd 重启实例，避免进程清理与 respawn 竞态导致双实例
+	if ubus -q call service list '{"name":"mt5700d"}' >/dev/null 2>&1; then
+		ubus call service delete '{"name":"mt5700d"}' >/dev/null 2>&1 || true
+		sleep 1
+	fi
+	# 兜底清理残留（仅一次，不依赖清理动作反复拉起）
+	kill_prog_processes
+	rm -f /var/run/mt5700d.pid
+	sleep 1
+
+	start_service
+
+	# DNS 相关配置（地址 / 开关）可能刚被改过：立刻按新配置重算一次，让改动
+	# 当场生效，而不是等到下一次拨号才看见效果。
+	# uci commit network 会触发 netifd 重新配置接口，这里不需要额外 ifup。
+	if resolve_ifaces; then
+		apply_default_dns || true
+	fi
+
+	logger -t mt5700d "配置重新加载完成"
+}
+
+# ---------------------------------------------------------------------------
+# 默认 DNS 下发（拨号成功后写入承载接口，作为兜底且实际优先的解析服务器）
+#
+# 为什么需要：
+#   蜂窝拨号下发的 DNS 完全由运营商决定，实测拿到的是 221.179.38.7 /
+#   120.196.165.7 这类省内递归节点，可用性与污染情况都不可控；IPv6 接口更常见的
+#   是一条都不给（实测 ifstatus MT5700Mv6 的 dns-server 为空数组），此时 IPv6
+#   域名解析直接不可用。这里在拨号成功后把一组**可配置的公共 DNS**写进承载
+#   接口的 dns 列表，让解析不再依赖运营商的心情。
+#
+# 「兜底」的确切含义（本机实测，这条结论不要凭直觉改写）：
+#   netifd 把 UCI 里手写的 dns 排在 DHCP/RA 下发的 DNS **之前** ——
+#   实测 resolv.conf.auto 顺序为 119.29.29.29、223.5.5.5、221.179.38.7、
+#   120.196.165.7。所以写 dns 不会「被运营商覆盖而白写」，它同时是优先项，
+#   peerdns 保持默认 1 即可；确需完全忽略运营商 DNS 时才用 dns_exclusive=1。
+#
+# IPv6 的下发条件是硬要求，不是可选优化：
+#   只有本次拨号**实际分配到 IPv6** 才写；否则必须把上一次留下的 IPv6 DNS 一并
+#   清掉。留着会造成「没有 IPv6 连通性却配着 IPv6 DNS」的长期错位，表现为解析
+#   随机超时，现象与「网速慢」难以区分，排障成本极高。
+#
+# 地址集中定义在 UCI（mt5700d.config.dns_*），改配置即可，不必改脚本。
+# ---------------------------------------------------------------------------
+
+# 内置默认地址：仅在该 UCI 键**不存在**时回落（老配置升级上来的场景）。
+# 键存在但被显式留空时尊重留空 —— 那是用户「不要这一条」的明确选择。
+DEFAULT_DNS_V4_1='119.29.29.29'
+DEFAULT_DNS_V4_2='223.5.5.5'
+DEFAULT_DNS_V6_1='2402:4e00::'
+DEFAULT_DNS_V6_2='2400:3200::1'
+
+dns_push_enabled() {
+	[ "$(uci -q get mt5700d.config.dns_enable)" != "0" ]
+}
+
+# 读取一个 DNS 地址配置项：$1=UCI 键  $2=内置默认
+dns_conf() {
+	local v
+	if v=$(uci -q get "mt5700d.config.$1") && [ -n "$v" ]; then
+		echo "$v"
+		return 0
+	fi
+	# 键存在（哪怕为空）→ 尊重用户；键不存在 → 用内置默认
+	if uci -q get "mt5700d.config.$1" >/dev/null 2>&1; then
+		echo ''
+		return 0
+	fi
+	echo "$2"
+}
+
+# 把地址列表拼成日志用的字符串（空列表显示「（无）」）
+dns_list_str() {
+	local out='' d
+	for d in "$@"; do
+		[ -n "$d" ] && out="${out:+$out }$d"
+	done
+	echo "${out:-（无）}"
+}
+
+# 经后端 ubus 接口发一条 AT 命令，返回原始应答文本；失败返回 1。
+#
+# 为什么走 ubus 而不是自己开串口：串口是后端的独占资源，init.d 再去读会与后端
+# 抢设备（表现为 AT 超时、后端状态掉线）。后端本来就对外提供了 mt5700.at 方法
+# （LuCI 的 AT 终端页正是用它），复用它既不冲突，也不需要 init.d 知道模组
+# 当前在哪个 /dev/ttyUSB* 上。
+at_query() {
+	local raw
+	raw=$(timeout 5 ubus -S call mt5700 at "{\"cmd\":\"$1\"}" 2>/dev/null) || return 1
+	[ -n "$raw" ] || return 1
+	command -v jsonfilter >/dev/null 2>&1 || return 1
+	printf '%s' "$raw" | jsonfilter -e '@.data'
+}
+
+# 本次拨号是否**实际分配到 IPv6 地址**。
+#   返回 0 = 确认拿到，1 = 确认没拿到，2 = **无法判定**（AT 通道未就绪等）。
+#
+# 为什么必须区分「没有」和「不知道」：
+#   reload_service 会在**后端刚重启完**时调用重算，那一刻 ubus 的 mt5700 对象
+#   可能还没注册，AT 查询必然失败。若把失败当成「没有 IPv6」，就会在一次
+#   普通的配置保存里把原本正常的 IPv6 DNS 清掉 —— 实测踩到过，表现为「改个
+#   IPv4 DNS，IPv6 解析跟着挂了」。所以无法判定时调用方必须保持现状。
+dial_has_ipv6() {
+	local cgpaddr cgdcont cid pdp
+
+	# 1) AT+CGPADDR 只列出「已激活且已分配到地址」的上下文，用它定位本次拨号
+	#    实际使用的 CID，并检查它有没有带出 IPv6 地址。
+	#    运营商把 PDP 配成 IPV4V6 却只给 v4 的情况并不罕见，只看 PDP 类型会误判。
+	cgpaddr=$(at_query 'AT+CGPADDR') || return 2
+	[ -n "$cgpaddr" ] || return 2
+	cid=$(printf '%s\n' "$cgpaddr" | awk '
+		/^\+CGPADDR:/ {
+			line = $0
+			sub(/^\+CGPADDR:[ ]*/, "", line)
+			n = split(line, f, ",")
+			c = f[1]; gsub(/[^0-9]/, "", c)
+			for (i = 2; i <= n; i++) {
+				a = f[i]
+				gsub(/[^0-9A-Fa-f:.]/, "", a)
+				if (a ~ /:/) { print c; exit }              # 冒号形式 2409:8d5a:...
+				if (gsub(/\./, ".", a) == 15) { print c; exit }  # 点分十进制形式（16 段）
+			}
+		}')
+	# 有应答但没有任何 CID 带 IPv6 地址 → 本次拨号确认没有 IPv6。
+	# 注意（口径要点）：这里以「AT+CGPADDR 里真的出现了 IPv6 地址」为唯一依据。
+	# 运营商把 PDP 配成 IPV4V6 却只下发 v4 地址的情况很常见，只看 PDP 类型就会
+	# 在没有 v6 连通性时也配上 IPv6 DNS —— 表现为解析随机超时，却极难与前缀
+	# 是否拿到联系起来。README / 配置注释 / 本文件描述的「实际分配到 IPv6」
+	# 就是这个判据。
+	[ -n "$cid" ] || return 1
+
+	# 2) 再核对该 CID 的 PDP 类型（用户约定的口径：IPV6 / IPV4V6）。
+	#    PDP 类型只做**否定**用：配成 IPV4 单栈时即使地址列里出现了 v6 也按没有处理。
+	#    查询本身失败（`|| return 0`）、或应答里没有该 CID 时按「有」处理 ——
+	#    此时地址已经确认存在（第 1 步过了），不因为少一条 AT 应答就判成没有，
+	#    那样会在网络其实有 v6 时把 DNS 清掉。
+	cgdcont=$(at_query 'AT+CGDCONT?') || return 0
+	pdp=$(printf '%s\n' "$cgdcont" | awk -v cid="$cid" '
+		/^\+CGDCONT:/ {
+			line = $0
+			n = split(line, f, ",")
+			c = f[1]; gsub(/[^0-9]/, "", c)
+			if (c + 0 == cid + 0) {
+				t = f[2]; gsub(/[^A-Za-z0-9]/, "", t)
+				print toupper(t)
+				exit
+			}
+		}')
+	case "$pdp" in
+		''|IPV6|IPV4V6) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# 覆盖式写入接口的 dns 列表。$1=接口名  $2..=DNS 地址（空值自动跳过）
+# 返回 0=有改动并已 commit，1=已经是目标状态（避免每次拨号都动一次 UCI）。
+iface_set_dns() {
+	local iface="$1"; shift
+	local d cur want peer
+
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 1
+
+	want=''
+	for d in "$@"; do
+		[ -n "$d" ] || continue
+		want="$want$d "
+	done
+	cur=$(uci -q get "network.$iface.dns" 2>/dev/null | tr '\n' ' ')
+
+	# 独占模式 = 忽略运营商下发的 DNS（peerdns=0）；否则显式写回 peerdns=1。
+	# 显式写回而不是删掉：开关来回切换时状态始终可预测，不会残留上一次的值。
+	# 默认独占（peerdns=0）：只有明确关掉才保留运营商下发的 DNS
+	peer=0
+	[ "$(uci -q get mt5700d.config.dns_exclusive)" = "0" ] && peer=1
+
+	if [ "$cur" = "$want" ] && [ "$(uci -q get "network.$iface.peerdns")" = "$peer" ]; then
+		return 1
+	fi
+
+	uci -q delete "network.$iface.dns" 2>/dev/null
+	for d in "$@"; do
+		[ -n "$d" ] || continue
+		uci -q add_list "network.$iface.dns=$d" || true
+	done
+	uci -q set "network.$iface.peerdns=$peer"
+	uci -q commit network
+	return 0
+}
+
+# 撤掉接口上由本插件写入的 dns / peerdns（$1=接口名；0=有改动，1=无需改动）
+iface_clear_dns() {
+	local iface="$1" changed=0
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 1
+	uci -q delete "network.$iface.dns" 2>/dev/null && changed=1
+	uci -q delete "network.$iface.peerdns" 2>/dev/null && changed=1
+	[ "$changed" -eq 1 ] || return 1
+	uci -q commit network
+	return 0
+}
+
+# 拨号成功后下发默认 DNS。
+#   $1 可选：'1'/'0' 由调用方显式指定本次是否拿到 IPv6；留空则按 AT 实际状态判定。
+#
+# 与 manage_interface 的语义保持一致：该开关关闭时本插件不修改任何 network 配置，
+# 包括 DNS —— 那时接口是用户自己的，写进去只会覆盖他手工配的解析服务器。
+# ---------------------------------------------------------------------------
+# DNS 下发目标：WAN 区域里由「模组物理网口」承载的逻辑接口。
+#
+# 不绑定任何具体接口名：先用 USB 总线判据定位模组网口，再从 `uci show network`
+# 反查绑定它的接口，最后用防火墙 WAN 区域做归属校验。这样无论固件把模组口
+# 复用成 wan、插件自建 MT5700M，还是用户自定义名字，DNS 都能覆盖到位。
+# ---------------------------------------------------------------------------
+
+# $1 是否登记在 name='wan' 的防火墙区域。firewall 里根本没有 wan 区域时
+# 放行（避免配置异常导致 DNS 完全不下发），其余情况严格按成员判定。
+iface_in_wan_zone() {
+	local iface="$1" sec list found=0
+	for sec in $(uci -q show firewall | sed -n "s/^firewall\.\([^.=]*\)\.name='wan'$/\1/p"); do
+		found=1
+		list=$(uci -q get "firewall.$sec.network" 2>/dev/null)
+		case " $list " in
+			*" $iface "*) return 0 ;;
+		esac
+	done
+	[ "$found" = "1" ] || return 0
+	return 1
+}
+
+# 直接绑定模组物理网卡、且位于 WAN 区域的接口（每行一个）。
+# 复用既有的 modem_direct_ifaces()：同样按 USB 模组网口反查，只多一道 WAN 归属校验，
+# 不再重复扫一遍 UCI 接口列表。
+dns_direct_ifaces() {
+	local s
+	detect_usb_netdev >/dev/null 2>&1 || return 0
+	for s in $(modem_direct_ifaces); do
+		iface_in_wan_zone "$s" || continue
+		echo "$s"
+	done
+}
+
+# 经 '@<接口>' 引用上述接口的别名接口（IPv6 承载接口），同样要求在 WAN 区域。
+# 复用既有的 alias_ifaces_of()；多个直接接口可能指向同一别名，故按名字去重。
+dns_alias_ifaces() {
+	local ref s seen=''
+	for ref in $(dns_direct_ifaces); do
+		for s in $(alias_ifaces_of "$ref"); do
+			case " $seen " in
+				*" $s "*) continue ;;
+			esac
+			seen="$seen $s"
+			iface_in_wan_zone "$s" || continue
+			echo "$s"
+		done
+	done
+}
+
+apply_default_dns() {
+	local flag="$1" v4_1 v4_2 v6_1 v6_2 has6 targets4 targets6 i
+
+	if ! dns_push_enabled; then
+		# 开关关闭：把之前写进去的都撤掉，避免「关了开关但 DNS 还在」的错觉
+		clear_default_dns
+		return 0
+	fi
+	manage_interface_enabled || return 0
+
+	v4_1=$(dns_conf dns_v4_1 "$DEFAULT_DNS_V4_1")
+	v4_2=$(dns_conf dns_v4_2 "$DEFAULT_DNS_V4_2")
+	v6_1=$(dns_conf dns_v6_1 "$DEFAULT_DNS_V6_1")
+	v6_2=$(dns_conf dns_v6_2 "$DEFAULT_DNS_V6_2")
+
+	# 目标接口按「模组物理网口 + WAN 区域」自动反查，不写死接口名；
+	# 模组网口尚未枚举等极端情况才回落到 resolve_ifaces 的结果。
+	targets4=$(dns_direct_ifaces | tr '\n' ' ')
+	targets6=$(dns_alias_ifaces | tr '\n' ' ')
+	[ -n "$targets4" ] || targets4="$IFACE_4G"
+	if [ -z "$IFACE_6G" ]; then
+		targets6=''
+	elif [ -z "$targets6" ]; then
+		targets6="$IFACE_6G"
+	fi
+
+	# IPv4：每次拨号成功都下发到所有直接承载接口（无附加条件）
+	for i in $targets4; do
+		if iface_set_dns "$i" "$v4_1" "$v4_2"; then
+			logger -t mt5700d "已向 $i 下发默认 DNS：$(dns_list_str "$v4_1" "$v4_2")"
+			apply_dns_restart "$i"
+		fi
+	done
+
+	[ -n "$targets6" ] || return 0
+
+	case "$flag" in
+		1) has6=1 ;;
+		0) has6=0 ;;
+		*)
+			dial_has_ipv6
+			case $? in
+				0) has6=1 ;;
+				1) has6=0 ;;
+				*)
+					# 无法判定：既不写也不清，保持现状。
+					# 这里「保守」的方向和 IPv4 不同 —— 乱清会让已经在用的
+					# IPv6 解析凭空失效，比暂时不更新更糟。
+					logger -t mt5700d "AT 通道暂不可用，无法判定是否获取 IPv6：保留 IPv6 接口现有 DNS 配置"
+					return 0
+					;;
+			esac
+			;;
+	esac
+
+	if [ "$has6" = "1" ]; then
+		for i in $targets6; do
+			if iface_set_dns "$i" "$v6_1" "$v6_2"; then
+				logger -t mt5700d "本次拨号已获取 IPv6，已向 $i 下发默认 DNS：$(dns_list_str "$v6_1" "$v6_2")"
+				apply_dns_restart "$i"
+			fi
+		done
+	else
+		# 重拨时网络类型可能从 IPV4V6 变成 IPv4-only，残留的 IPv6 DNS 会让解析
+		# 先去试一个永远不通的地址 —— 必须清掉，这是「重拨即更新」的另一半。
+		for i in $targets6; do
+			if iface_clear_dns "$i"; then
+				logger -t mt5700d "本次拨号未获取 IPv6，已清除 $i 的默认 DNS（避免无 IPv6 连通性却配 IPv6 DNS）"
+				apply_dns_restart "$i"
+			fi
+		done
+	fi
+	return 0
+}
+
+# 让刚改动的 DNS 真正进入 resolv.conf。
+#
+# UCI 写完不等于生效：netifd 只在协议重新协商时才会把 dns 写进
+# resolv.conf.auto，光 uci commit 不会触发（实测改完地址，resolv.conf 里仍是
+# 旧值）。因此改了配置就得重启一次接口。
+# 只在「接口已经在稳态（有地址）」时补这一次重启：还没有地址的场合，调用方
+# （on_uplink / ensure_modem_interface）本来就会 ifup，不必重复。
+apply_dns_restart() {
+	local iface="$1"
+	uci -q get "network.$iface" >/dev/null 2>&1 || return 0
+	iface_has_address "$iface" || return 0
+	ifup "$iface" 2>&1 | logger -t mt5700d || true
+}
+
+# 撤掉本插件下发过的 DNS（开关关闭 / 链路断开时调用）
+clear_default_dns() {
+	local targets4 targets6 i
+	manage_interface_enabled || return 0
+	targets4=$(dns_direct_ifaces | tr '\n' ' ')
+	targets6=$(dns_alias_ifaces | tr '\n' ' ')
+	# 并上 resolve_ifaces 的结果：模组网口暂未枚举时也曾按它下发过 DNS，
+	# 不清掉就会留下「关了开关但 DNS 还在」的残留。
+	for i in $IFACE_4G $IFACE_6G; do
+		[ -n "$i" ] || continue
+		case " $targets4 $targets6 " in
+			*" $i "*) ;;
+			*) targets4="$targets4 $i" ;;
+		esac
+	done
+	for i in $targets4 $targets6; do
+		[ -n "$i" ] || continue
+		iface_clear_dns "$i" && logger -t mt5700d "已清除 $i 的默认 DNS"
+	done
+	return 0
+}
+
+# 由后端在「自动拨号达成」时调用（on-uplink 钩子），也可手动执行：
+#   /etc/init.d/mt5700d on_uplink [1|0]
+# 1 = 本次拨号已拿到 IPv6，0 = 未拿到；不传则按 AT 实际状态判定。
+#
+# 做两件事：把模组接口 ifup 一次；按本次拨号结果下发/更新默认 DNS。
+# 让「拨号成功」与「网卡要地址」有明确先后关系，而不是靠 init.d 在后端拨号
+# 之前抢跑 + 猜时间。
+on_uplink() {
+	local i
+	if ! manage_interface_enabled; then
+		# 只拉起、不改配置：选定的接口不存在就什么都不做
+		resolve_ifaces || true
+		for i in "$IFACE_4G" "$IFACE_6G"; do
+			[ -n "$i" ] || continue
+			uci -q get "network.$i" >/dev/null 2>&1 || continue
+			iface_has_address "$i" && continue
+			ifup "$i" 2>&1 | logger -t mt5700d || true
+		done
+		return 0
+	fi
+	resolve_ifaces || return 0
+	ensure_iface_created "$IFACE_4G" dhcp || return 1
+	[ -z "$IFACE_6G" ] || ensure_iface_created "$IFACE_6G" dhcpv6 || true
+	# 在接口建好之后、ifup 之前下发：本次 ifup 就能直接用上新 DNS，
+	# 不必等到下一次接口重建才生效。
+	apply_default_dns "$1"
+	ensure_firewall_zone
+	for i in "$IFACE_4G" "$IFACE_6G"; do
+		[ -n "$i" ] || continue
+		uci -q get "network.$i" >/dev/null 2>&1 || continue
+		if iface_has_address "$i"; then
+			continue
+		fi
+		ifup "$i" 2>&1 | logger -t mt5700d || true
+	done
+	fw_reload_if_dirty
+	return 0
+}
+
+# 链路断开时撤掉默认 DNS（由 hotplug 的 ifdown 事件调用，也可手动执行：
+#   /etc/init.d/mt5700d on_downlink）。
+#
+# **只撤 IPv6 那一份**，IPv4 不动 —— 这点很关键，本喵第一版写成「两边都清」
+# 实测就翻车了：
+#   - IPv4 DNS 是无条件下发的兜底值，接口重启 / 重拨期间把它清掉，等于在最需要
+#     兜底的时候凭空抽掉解析服务器；
+#   - netifd 的 ifup 语义是「down → up」，手动或自动重启接口都会发一次 ifdown，
+#     于是出现「on_uplink 刚写完 → ifup 触发 ifdown → 立刻被自己清掉」的竞态，
+#     现象是 DNS 时有时无，且日志上看不出是谁干的。
+#
+# IPv6 那份相反：它严格跟随链路状态存在，链路断了留着就是「无 IPv6 连通性却
+# 配着 IPv6 DNS」。重拨时 on_uplink 会按新的拨号结果重新判定并下发，
+# 所以这里只负责撤掉，不承担重新下发的职责 —— 两边分工明确。
+on_downlink() {
+	# 注意：本动作**不挂 hotplug ifdown**（原因见 hotplug.d/iface/99-mt5700d
+	# 里的说明），只作为手动排查入口与 stop_service 的清理步骤。
+	resolve_ifaces || return 0
+	manage_interface_enabled || return 0
+	[ -n "$IFACE_6G" ] || return 0
+	iface_clear_dns "$IFACE_6G" &&
+		logger -t mt5700d "链路断开，已清除 $IFACE_6G 的默认 DNS（等下次拨号按实际情况重新下发）"
+	return 0
+}
+
+# 语义化别名：确保模组接口存在（V4 必建、V6 也建）并尝试拉起一次。
+# 供安装/升级流程（Makefile 的 postinst、uci-defaults）以及手动排查使用：
+#   /etc/init.d/mt5700d ensure_interfaces
+# 说明：安装时模组往往还没就绪，这里只做「接口先在」这件事；
+# 取址由 init.d 的后台重试、hotplug 钩子与后端拨号就绪通知继续负责。
+ensure_interfaces() {
+	local i
+
+	# 只保证接口存在（并置 auto=1），**不做 ifup**。
+	#
+	# 原因：ifup 会等待 DHCP 就绪，单个接口可达数十秒；安装期（postinst）同步调用
+	# 会把 apk/opkg 拖住 —— 实测合并前的版本在这里耗时 180s 才返回。
+	# 拉起交给 init.d 的后台重试、hotplug 钩子与后端拨号就绪通知。
+	if ! manage_interface_enabled; then
+		logger -t mt5700d "接口管理已关闭（manage_interface=0），跳过创建模组接口"
+		return 0
+	fi
+	if ! resolve_ifaces; then
+		logger -t mt5700d "模组网口尚未枚举，暂不创建承载接口（网口出现后由 hotplug / 拨号就绪回调处理）"
+		return 0
+	fi
+	ensure_iface_created "$IFACE_4G" dhcp || return 1
+	[ -z "$IFACE_6G" ] || ensure_iface_created "$IFACE_6G" dhcpv6 || true
+
+	for i in "$IFACE_4G" "$IFACE_6G"; do
+		uci -q get "network.$i" >/dev/null 2>&1 || continue
+		if [ "$(uci -q get "network.$i.auto")" != "1" ]; then
+			uci -q set "network.$i.auto=1"
+			uci -q commit network
+			logger -t mt5700d "$i 已设为 auto=1"
+		fi
+	done
+
+	# 安装/升级路径也要登记区域：存量设备往往接口早已存在（只剩这一处没配），
+	# 这正是「拨号正常、有 IP、却上不了网」最常见的成因。
+	ensure_firewall_zone
+	fw_reload_if_dirty
+
+	return 0
+}
+
+service_triggers() {
+	procd_add_reload_trigger "mt5700d"
+}

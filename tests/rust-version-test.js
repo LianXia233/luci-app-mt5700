@@ -52,8 +52,8 @@ const tomlVer = cargoToml.match(/^version = "([0-9]+(?:\.[0-9]+)+)"$/m);
 assert(tomlVer, 'Cargo.toml 缺少合法的 version');
 assert(tomlVer[1] === pkgVersion,
 	'Cargo.toml 版本（' + tomlVer[1] + '）必须与 PKG_VERSION（' + pkgVersion + '）一致');
-const lockVer = cargoLock.match(/name = "at-webserver"\nversion = "([0-9]+(?:\.[0-9]+)+)"/);
-assert(lockVer, 'Cargo.lock 缺少 at-webserver 条目');
+const lockVer = cargoLock.match(/name = "mt5700d"\nversion = "([0-9]+(?:\.[0-9]+)+)"/);
+assert(lockVer, 'Cargo.lock 缺少 mt5700d 条目');
 assert(lockVer[1] === pkgVersion,
 	'Cargo.lock 版本（' + lockVer[1] + '）必须与 PKG_VERSION（' + pkgVersion + '）一致，否则 cargo --locked 会失败');
 

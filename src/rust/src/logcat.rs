@@ -244,7 +244,7 @@ impl Category {
 
     /// 由 `module_path!()` 推导默认类别。
     ///
-    /// `module_path!()` 形如 `at_webserver::sms` 或 `at_webserver::sms::tests`，
+    /// `module_path!()` 形如 `mt5700d::sms` 或 `mt5700d::sms::tests`，
     /// 取**紧跟 crate 名之后**的那一段（即顶层模块名），这样 `#[cfg(test)] mod tests`
     /// 里的日志也会归到它所属的业务模块，而不是统统变成 `tests`。
     /// 只有一段时说明就在 crate 根（`main.rs`），按 Runtime 处理。
@@ -344,7 +344,7 @@ mod tests {
     fn misc_is_runtime_so_unclassified_logs_keep_old_behaviour() {
         // 兜底类别必须在 Runtime 组：漏标的日志行为与改动前一致，仍进 syslog
         assert_eq!(Category::Misc.group(), Group::Runtime);
-        assert_eq!(Category::from_module("at_webserver::some_brand_new_module"), Category::Misc);
+        assert_eq!(Category::from_module("mt5700d::some_brand_new_module"), Category::Misc);
         assert_eq!(Category::from_module("totally::unknown"), Category::Misc);
     }
 
@@ -358,7 +358,7 @@ mod tests {
             "signalwatch", "sms", "sms_store", "state", "state_cfg", "transport", "urc", "usage",
         ];
         for m in declared {
-            let cat = Category::from_module(&format!("at_webserver::{m}"));
+            let cat = Category::from_module(&format!("mt5700d::{m}"));
             assert_ne!(cat, Category::Misc, "模块 {m} 未登记类别映射");
         }
     }
@@ -366,10 +366,10 @@ mod tests {
     #[test]
     fn module_mapping_ignores_nested_test_module() {
         // `#[cfg(test)] mod tests` 里的日志应归到所属业务模块
-        assert_eq!(Category::from_module("at_webserver::sms::tests"), Category::Sms);
-        assert_eq!(Category::from_module("at_webserver::usage::tests"), Category::Usage);
+        assert_eq!(Category::from_module("mt5700d::sms::tests"), Category::Sms);
+        assert_eq!(Category::from_module("mt5700d::usage::tests"), Category::Usage);
         // crate 根（main.rs）→ Runtime
-        assert_eq!(Category::from_module("at_webserver"), Category::Runtime);
+        assert_eq!(Category::from_module("mt5700d"), Category::Runtime);
     }
 
     #[test]
@@ -380,7 +380,7 @@ mod tests {
             "atclient", "urc", "sms", "notify", "signalwatch", "schedule", "usage", "config",
             "rpcserver", "serialdetect", "nettime", "main",
         ] {
-            let c = Category::from_module(&format!("at_webserver::{m}"));
+            let c = Category::from_module(&format!("mt5700d::{m}"));
             if !seen.contains(&c) {
                 seen.push(c);
             }

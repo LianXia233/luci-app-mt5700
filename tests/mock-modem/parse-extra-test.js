@@ -10,11 +10,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 
 // 用 Function 模拟 LuCI 全局环境加载两个库文件
 const sandbox = {
-	window: {}, AtWs: undefined, Parse: undefined,
+	window: {}, Mt5700d: undefined, Parse: undefined,
 	L: {
 		/* rpc.js 末尾会执行 L.Class.extend(...)，缺了它加载直接抛错 */
 		Class: { extend: function (o) { return o; } },
@@ -32,8 +32,8 @@ function loadLib(name) {
 		.split('\n')
 		.filter(function (l) { return l.indexOf("'require ") !== 0; })
 		.join('\n');
-	const fn = new Function('AtWs', 'Parse', 'E', 'L', cleaned + '\n;return { AtWs: AtWs, Parse: Parse };');
-	return fn(sandbox.AtWs, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
+	const fn = new Function('Mt5700d', 'Parse', 'E', 'L', cleaned + '\n;return { Mt5700d: Mt5700d, Parse: Parse };');
+	return fn(sandbox.Mt5700d, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
 }
 
 let results = [];
@@ -48,11 +48,11 @@ try {
 	/* parse.js 同样以 return 结尾，附加 return 不可达：加载结果即模块对象本身 */
 	sandbox.Parse = parse.Parse || parse;
 	const ws = loadLib('rpc.js');
-	/* rpc.js 以 `return AtWsClass;` 结尾，附加的 return 不可达；extend 被 mock 成原样返回，
-	 * 因此加载结果本身就是 AtWs 对象。 */
-	sandbox.AtWs = (ws && ws.AtWs) || ws;
+	/* rpc.js 以 `return Mt5700dClass;` 结尾，附加的 return 不可达；extend 被 mock 成原样返回，
+	 * 因此加载结果本身就是 Mt5700d 对象。 */
+	sandbox.Mt5700d = (ws && ws.Mt5700d) || ws;
 	const Parse = sandbox.Parse;
-	const AtWs = sandbox.AtWs;
+	const Mt5700d = sandbox.Mt5700d;
 
 	/* ---- 辅载波聚合 ---- */
 	const monsscLines = '^MONSSC: "NR",2360,86,-70,-10,15,0\r\n^MONSSC: NONE';
@@ -230,7 +230,7 @@ try {
 		JSON.stringify(tdNone));
 
 	/* ---- rpc.js raw_data 拆分 REJINFO ---- */
-	const parsed = AtWs.parseRawData('^REJINFO:46000,1,40,2,3,40,"0026F8","FF","0A444202"\r\n');
+	const parsed = Mt5700d.parseRawData('^REJINFO:46000,1,40,2,3,40,"0026F8","FF","0A444202"\r\n');
 	const rejType = parsed.filter(function (p) { return p.type === 'REJINFO'; });
 	check('parseRawData 拆分 REJINFO 类型', rejType.length === 1 && rejType[0].parsed && rejType[0].parsed.plmn === '46000',
 		rejType.length + ' 条');

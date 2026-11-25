@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**luci-app-mt5700**（`at-webserver`）短信功能完整操作、行为语义与排障手册  
+**luci-app-mt5700**（`mt5700d`）短信功能完整操作、行为语义与排障手册  
 *面向 MT5700M-CN 5G 模组 · 深度对齐 3GPP 规范与厂商实机驱动实现*
 
 <p align="center">
@@ -135,11 +135,11 @@
 短信到达时可实时推送到企业微信机器人、QQ 机器人、钉钉或自定义 Webhook，配置位于 **服务配置** 页：
 
 ```sh
-uci set at-webserver.config.notify_sms='1'            # 启用新短信通知推送
-uci set at-webserver.config.notify_memory_full='1'    # 启用短信存储空间告警
-uci set at-webserver.config.notify_tpl_sms='【新短信提醒】来自: {sender}\n内容: {content}\n接收时间: {time}'
-uci set at-webserver.config.notify_tpl_memory='【告警】5G 模组短信存储区已满，请及时登录后台清理！'
-uci commit at-webserver && /etc/init.d/at-webserver restart
+uci set mt5700d.config.notify_sms='1'            # 启用新短信通知推送
+uci set mt5700d.config.notify_memory_full='1'    # 启用短信存储空间告警
+uci set mt5700d.config.notify_tpl_sms='【新短信提醒】来自: {sender}\n内容: {content}\n接收时间: {time}'
+uci set mt5700d.config.notify_tpl_memory='【告警】5G 模组短信存储区已满，请及时登录后台清理！'
+uci commit mt5700d && /etc/init.d/mt5700d restart
 ```
 
 - ⚡ **即时直发**：短信与来电通知走实时事件通道，**不受定时汇总轮询间隔约束**。
@@ -178,7 +178,7 @@ uci commit at-webserver && /etc/init.d/at-webserver restart
 | **发送结果不明：请勿重复点击** | 模组发包后未在规定窗口内回传 `+CMGS:` | 运营商侧可能已处理，请前往运营商后台或稍后刷新确认 |
 | **模组写入后回读不一致** | SMSC 中心号码参数未成功固化到 SIM | 检查号码格式是否为 3～20 位纯数字，无需额外添加 `+` |
 | **存储容量显示 0/0 或消失** | 瞬时串口竞争导致未能解析到 `AT+CPMS?` | 点击右上角「刷新」重试，不影响既有短信记录 |
-| **后端不可用 / 请求过于频繁** | 后端服务未就绪或连续触发熔断保护 | 执行 `/etc/init.d/at-webserver restart` 重启后端进程 |
+| **后端不可用 / 请求过于频繁** | 后端服务未就绪或连续触发熔断保护 | 执行 `/etc/init.d/mt5700d restart` 重启后端进程 |
 
 ---
 

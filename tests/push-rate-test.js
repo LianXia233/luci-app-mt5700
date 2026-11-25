@@ -21,12 +21,12 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const read = function (p) { return fs.readFileSync(path.join(root, p), 'utf8'); };
 
-const serviceJs = read(path.join('htdocs', 'luci-static', 'resources', 'view', 'at-webserver', 'service.js'));
+const serviceJs = read(path.join('htdocs', 'luci-static', 'resources', 'view', 'mt5700d', 'service.js'));
 // v1.33 重构：文案与读写逻辑从 service.js 拆到公共模块，测试事实源随之迁移。
-const libDir = path.join('htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join('htdocs', 'luci-static', 'resources', 'mt5700d');
 const commonJs = read(path.join(libDir, 'config-common.js'));
 const notifyJs = read(path.join(libDir, 'config-notify.js'));
-const uciDefaults = read(path.join('root', 'etc', 'config', 'at-webserver'));
+const uciDefaults = read(path.join('root', 'etc', 'config', 'mt5700d'));
 const configRs = read(path.join('src', 'rust', 'src', 'config.rs'));
 const notifyRs = read(path.join('src', 'rust', 'src', 'notify.rs'));
 const signalwatchRs = read(path.join('src', 'rust', 'src', 'signalwatch.rs'));
@@ -224,7 +224,7 @@ check('每类门控都有频率开关/间隔/时段开关/起止/窗外策略六
 	&& /_window_enabled'/.test(notifyJs) && /_window_start'/.test(notifyJs)
 	&& /_window_end'/.test(notifyJs) && /_window_action'/.test(notifyJs), '六项');
 check('模块化：通知逻辑从 service.js 拆出且 service.js 仍为入口',
-	serviceJs.indexOf("'require at-webserver/config-notify'") >= 0
+	serviceJs.indexOf("'require mt5700d/config-notify'") >= 0
 	&& notifyJs.indexOf('MtConfigNotify =') >= 0, '解耦');
 
 /* ---------- 8. 企业微信 Markdown + 通道节流同步 + 实时事件豁免（本次新增） ---------- */

@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-LUCI_TITLE:=LuCI support for AT WebServer (MT5700M 5G modem)
+LUCI_TITLE:=LuCI support for mt5700d (MT5700M 5G modem)
 # 后端 Rust 二进制已随本包一起编译安装（见 src/Makefile），不再依赖独立后端包。
 # 不在 LUCI_DEPENDS 里声明 rpcd/ucode/usbutils：luci-base 已依赖 rpcd+ucode；
 # usbutils 仅 init.d 可选探测，SDK 内硬依赖会拖 libusb 编译失败。
@@ -14,7 +14,7 @@ LUCI_DEPENDS:=
 LUCI_PKGARCH:=
 
 PKG_NAME:=luci-app-mt5700
-PKG_VERSION:=1.32.13
+PKG_VERSION:=2.0.1
 PKG_RELEASE:=1
 
 # Rust 后端版本号单一来源：把 PKG_VERSION 以环境变量导出，子 make
@@ -22,26 +22,62 @@ PKG_RELEASE:=1
 # 传给 cargo（见 src/Makefile）。发版只需改上面一行。
 export MT5700_VERSION:=$(PKG_VERSION)
 
-# 兼容旧版：已安装 at-webserver-rust 的系统升级到单包后，声明提供同名能力，
-# 避免残留依赖指向不存在的包。
-PKG_PROVIDES:=at-webserver-rust
-
 # 打包前强制 init.d / uci-defaults 可执行（防止部分 checkout 丢失 +x 导致
 # post-install 报 Permission denied）
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/uci-defaults/at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/iface/99-at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/usb/99-at-webserver 2>/dev/null || true
-	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/at-webserver/on-uplink.sh 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/uci-defaults/mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/iface/99-mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/etc/hotplug.d/usb/99-mt5700d 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/mt5700d/on-uplink.sh 2>/dev/null || true
+	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/mt5700d/migrate-legacy.sh 2>/dev/null || true
+endef
+
+# 升级时保留迁移后的配置文件。preinst 会在新文件解包前把旧路径的用户配置
+# 搬到这个路径；没有 conffiles 声明时，opkg/apk 升级会用包内默认文件覆盖它。
+define Package/luci-app-mt5700/conffiles
+/etc/config/mt5700d
+endef
+
+# 旧 UCI 配置必须在包文件解包前抢救。
+#
+# 原因：postinst 在解包之后才执行，那时新版 /etc/config/mt5700d 默认文件已经
+# 落地，脚本会因目标存在而跳过迁移；也不能指望包管理器清理受保护路径下的
+# 旧文件。preinst 是本包唯一能在旧文件仍完整、新文件尚未落地时介入的钩子。
+#
+# 这里只做「复制到临时位置」：此刻新包尚未解包，migrate-legacy.sh 还不存在，
+# 调不到脚本；sed 与落盘统一放在脚本的 postinst 阶段，规则只保留一份。
+# 临时目录放在 overlay 而不是 /tmp：解包后若断电，tmpfs 清空会让旧配置彻底丢失。
+#
+# 复制前必须先清掉上一次安装可能残留的备份目录：备份只在「本次安装的
+# preinst → postinst」窗口内有效，带着陈旧备份进入下一次安装，脚本会拿
+# 旧备份覆盖用户后来在新版本里改过的配置。
+define Package/luci-app-mt5700/preinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+	rm -rf /etc/mt5700d-migrate
+	if [ -f /etc/config/at-webserver ]; then
+		if [ -f /etc/config/mt5700d ]; then
+			# 异常升级态：两份并存时保留较新的目标，旧文件留档供人工恢复。
+			cp -f /etc/config/mt5700d /etc/config/mt5700d.pre-migration 2>/dev/null || true
+			mv -f /etc/config/at-webserver /etc/config/at-webserver.pre-migration 2>/dev/null || true
+			logger -t mt5700d "UCI 新旧配置并存，已保留 mt5700d 并备份旧配置" 2>/dev/null || true
+		else
+			mkdir -p /etc/mt5700d-migrate
+			cp -f /etc/config/at-webserver /etc/mt5700d-migrate/legacy-config
+			logger -t mt5700d "已在解包前保存旧 UCI 配置" 2>/dev/null || true
+		fi
+	fi
+}
+exit 0
 endef
 
 # 安装/升级完成后强制注册开机自启并拉起服务。
 #
-# 背景：本包的 root/etc/init.d/at-webserver 执行位曾两次静默回退
+# 背景：本包的 root/etc/init.d/mt5700d 执行位曾两次静默回退
 # （100755 → 100644），安装阶段的 enable 会以 Permission denied 失败，
-# /etc/rc.d/S99at-webserver 从此缺失，服务永远不开机自启——LuCI 上就表现为
+# /etc/rc.d/S99mt5700d 从此缺失，服务永远不开机自启——LuCI 上就表现为
 # 「未注册 / 进程未运行 / procd 无实例」。uci-defaults 只在首次启动时执行一次，
 # 已装好的设备不会再走，所以这里再兜一道：装包或升包时补权限 + enable + 启动。
 #
@@ -62,6 +98,15 @@ define Package/luci-app-mt5700/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
 	# ---------------------------------------------------------------------
+	# 旧版本遗留数据迁移（一次性）
+	#
+	# UCI 配置已在 preinst 阶段复制到 /etc/mt5700d-migrate/；脚本会用它恢复
+	# /etc/config/mt5700d 并替换旧路径，再处理短信归档、用量、防火墙规则与
+	# 旧进程清理。脚本头的注释写了完整删除步骤。
+	# ---------------------------------------------------------------------
+	[ -x /usr/libexec/mt5700d/migrate-legacy.sh ] && /usr/libexec/mt5700d/migrate-legacy.sh
+
+	# ---------------------------------------------------------------------
 	# 合并 apk/opkg 因「受保护路径」留下的 .apk-new
 	#
 	# OpenWrt 的 apk 把 /etc/init.d 视为受保护路径（与 /etc/config 同等对待）：
@@ -69,31 +114,31 @@ define Package/luci-app-mt5700/postinst
 	# 后果是服务脚本永远停在上一个版本 —— 本插件的关键修复（接口自动创建、
 	# 拨号对齐对账、hotplug 协同）全在 init.d 里，不合并等于没升级。
 	#
-	# 实测（Hiveton H5000M，1.12.3 → 1.12.5）：升级后 /etc/init.d/at-webserver
-	# 仍是 11250 字节的旧版，新版 21753 字节躺在 /etc/init.d/at-webserver.apk-new。
+	# 实测（Hiveton H5000M，1.12.3 → 1.12.5）：升级后 /etc/init.d/mt5700d
+	# 仍是 11250 字节的旧版，新版 21753 字节躺在 /etc/init.d/mt5700d.apk-new。
 	#
 	# 这里只合并服务脚本与 uci-defaults；/etc/config 下的 .apk-new 一律不动——
 	# 那是用户配置，应由用户决定是否采用新版默认值。
 	# ---------------------------------------------------------------------
-	for f in /etc/init.d/at-webserver /etc/uci-defaults/at-webserver; do
+	for f in /etc/init.d/mt5700d /etc/uci-defaults/mt5700d; do
 		for suf in .apk-new .opkg-new; do
 			if [ -f "$$f$$suf" ]; then
-				mv -f "$$f$$suf" "$$f" && logger -t at-webserver "已用新版覆盖 $$f（来自 $${suf}）"
+				mv -f "$$f$$suf" "$$f" && logger -t mt5700d "已用新版覆盖 $$f（来自 $${suf}）"
 			fi
 		done
 		if [ -f "$$f-opkg" ]; then
-			mv -f "$$f-opkg" "$$f" && logger -t at-webserver "已用新版覆盖 $$f（来自 -opkg）"
+			mv -f "$$f-opkg" "$$f" && logger -t mt5700d "已用新版覆盖 $$f（来自 -opkg）"
 		fi
 		chmod 0755 "$$f" 2>/dev/null
 	done
 
-	chmod 0755 /etc/init.d/at-webserver 2>/dev/null
-	/etc/init.d/at-webserver enable
-	/etc/init.d/at-webserver restart 2>/dev/null || /etc/init.d/at-webserver start
+	chmod 0755 /etc/init.d/mt5700d 2>/dev/null
+	/etc/init.d/mt5700d enable
+	/etc/init.d/mt5700d restart 2>/dev/null || /etc/init.d/mt5700d start
 	# 安装/升级后立即核对一次模组接口：不存在就创建（V4 必建并取址，V6 也建、
 	# 按实际网络状况取址）。服务里的同类检查是在后台跑的，装完这一刻还没跑到。
 	# 只建接口、不做 ifup，避免被 DHCP 等待拖住安装进程。
-	/etc/init.d/at-webserver ensure_interfaces 2>/dev/null || true
+	/etc/init.d/mt5700d ensure_interfaces 2>/dev/null || true
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
 	/etc/init.d/rpcd reload 2>/dev/null

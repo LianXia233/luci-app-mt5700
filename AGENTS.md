@@ -35,13 +35,13 @@
 
 - **主仓库**：<https://github.com/LianXia233/luci-app-mt5700>（CNB 为镜像）。
 - **许可证**：SPDX `GPL-3.0-only`（与 `README.md` 的声明一致），完整条款见根目录 `LICENSE`；页脚以纯文本标识展示，不得改成 `GPL-3.0-or-later` 或其他表达式。
-- **前端视图**：`htdocs/luci-static/resources/view/at-webserver/*.js`；公共 UI 与样式：`htdocs/luci-static/resources/at-webserver/mt5700.js`、`mt5700.css`。
+- **前端视图**：`htdocs/luci-static/resources/view/mt5700d/*.js`；公共 UI 与样式：`htdocs/luci-static/resources/mt5700d/mt5700.js`、`mt5700.css`。
 - **菜单与路由映射**：`root/usr/share/luci/menu.d/luci-app-mt5700.json`。
 - **单元测试**：`node tests/<name>-test.js`（纯 Node 脚本，无外部依赖；`tests/*-test.js` 会由 `.github/workflows/checks.yml` 自动纳入 CI）。
 - **行尾强制 LF**：`.gitattributes` 已声明 `* text=auto eol=lf`，禁止提交 CRLF。
 - **更新日志同步**：任何进入 `main` 的功能 / 修复 / 样式 / 行为改动，必须同步更新 `CHANGELOG.md`（随改动提交，或在同版本定版提交前补齐），不得只改代码不写日志。
   - **更新日志豁免**（需维护者明确要求）：纯文案微调、署名文案变更、门禁脚本与规则文档（`checks.yml`、`tests/*-test.js`、本文件）自身的维护，若不发版、不提升包版本、不改变渲染结果与运行时行为，可不写 `CHANGELOG.md`；提交说明仍须写清改动与原因。此例外不适用于功能、修复、行为或视觉样式改动，也不免除发版时的版本一致性要求。
-- **角色素材归属**：`htdocs/luci-static/resources/at-webserver/bg/character-*.webp` 是《蔚蓝档案》（Blue Archive）角色「阿罗娜 / 彩奈」（浅色）与「普拉娜」（深色）的二次创作插画，与英雄区头像 `mascot.png`（《异环》薄荷）**不是同一作品、不是同一权利人**。逐文件指纹、识别依据与授权状态以 `THIRD-PARTY-NOTICES.md` 第 2 节为唯一事实源；改动素材或声明时须同步该文件、README 与文档站，不得再把背景图归到《异环》/ Hotta Studio 名下。
+- **角色素材归属**：`htdocs/luci-static/resources/mt5700d/bg/character-*.webp` 是《蔚蓝档案》（Blue Archive）角色「阿罗娜 / 彩奈」（浅色）与「普拉娜」（深色）的二次创作插画，与英雄区头像 `mascot.png`（《异环》薄荷）**不是同一作品、不是同一权利人**。逐文件指纹、识别依据与授权状态以 `THIRD-PARTY-NOTICES.md` 第 2 节为唯一事实源；改动素材或声明时须同步该文件、README 与文档站，不得再把背景图归到《异环》/ Hotta Studio 名下。
   按维护者决定，素材保留在安装包内；包内必须同时安装 `root/usr/share/licenses/luci-app-mt5700/ARTWORK-NOTICE.txt`，不得只留图片不留声明。
 - **i18n 约定**：源语言为简体中文。共享组件文案由 `mt5700.js` 的 `trText()` 统一调用 LuCI `_()`（不要缩成 `tr`：`api.table` 的局部 `var tr` 会遮蔽同名函数）。`po/templates/luci-app-mt5700.pot` 与 `po/zh_Hans/luci-app-mt5700.po` 的 msgid 集合必须一致、无重复、zh_Hans 的 msgstr 非空，且 `menu.d` 的每个标题都已收录。新增语言在 `po/<lang>/` 下建同名文件，不改视图；改动 po、菜单标题或共享组件后执行 `node tests/i18n-test.js`。
 - **发版版本一致性 + 文档徽标同步**：提升版本号（打 `v*` 标签出正式版）时，以下引用必须与新 `PKG_VERSION` 一致，缺一不可：  
@@ -61,7 +61,7 @@
 > [!IMPORTANT]
 > 1. 弹窗、提示条、toast 这类**跨页面组件**的样式一律写在 `global.css`，严禁写进只服务单页的文件。
 > 2. 不要把「全局生效」建立在「某个页面碰巧 require 了 `ui.js`」之上 —— 那只是可选依赖，一旦某页为减体积不引入就会退化。
-> 3. 新增视图必须 `require at-webserver/mt5700`（否则拿不到全局样式），建议同时 `require at-webserver/ui` 以复用公共组件。
+> 3. 新增视图必须 `require mt5700d/mt5700`（否则拿不到全局样式），建议同时 `require mt5700d/ui` 以复用公共组件。
 > 4. 改动这两块后执行 `node tests/global-css-test.js`：校验 12 个视图的依赖可达性、`global.css` 的注入顺序（必须晚于 `mt5700.css`）、提示条与四套弹窗结构的选择器是否仍在，以及旧文件里有没有重复定义。
 
 ### 样式与模块的缓存版本戳
@@ -82,7 +82,7 @@
 
 ### 响应式配置弹窗交互规范（Right Drawer / Modal Bottom Sheet）
 
-配置修改与子模块表单统一实现响应式配置弹窗（由 `at-webserver/config-drawer.js` 驱动）：
+配置修改与子模块表单统一实现响应式配置弹窗（由 `mt5700d/config-drawer.js` 驱动）：
 
 | 运行环境 | 呈现形态 | 布局与尺寸规范 |
 | :--- | :--- | :--- |
@@ -116,9 +116,9 @@
 
 | 组成部分 | 文件路径 | 详细说明 |
 | :--- | :--- | :--- |
-| **署名 DOM** | `htdocs/luci-static/resources/view/at-webserver/service.js` | 渲染函数末尾追加 `.mt5700-author`，追加在底部操作栏之后；容器内为 1 个主链接 + 1 个许可证 span |
+| **署名 DOM** | `htdocs/luci-static/resources/view/mt5700d/service.js` | 渲染函数末尾追加 `.mt5700-author`，追加在底部操作栏之后；容器内为 1 个主链接 + 1 个许可证 span |
 | **许可证标识** | 同上 | `.mt5700-author-license` 纯文本 `GPL-3.0-only`，复用容器排版，不新增 CSS 规则 |
-| **署名样式** | `htdocs/luci-static/resources/at-webserver/mt5700.css` | 文件末尾「作者署名」小节，仅引用既有主题变量 |
+| **署名样式** | `htdocs/luci-static/resources/mt5700d/mt5700.css` | 文件末尾「作者署名」小节，仅引用既有主题变量 |
 | **静态校验** | `tests/author-attribution-test.js` | 以 `AUTHOR_TEXT` 常量为准，含旧标签防回退、文档一致性与链接/样式回归检查 |
 
 署名文案固定为 `© 2026 LianXia233 · 开发与维护`，许可证标识固定为 `GPL-3.0-only`，链接固定指向 `https://github.com/LianXia233/luci-app-mt5700`，并使用 `target="_blank"` + `rel="noopener noreferrer"`。容器 `.mt5700-author` 内为单个链接节点，不再渲染旧前缀标签；`mt5700.css` 的 `.mt5700-author-label` 选择器保留为占位，不产生任何渲染效果。
@@ -129,7 +129,7 @@
 
 | # | 修改位置 | 变更要求 |
 | :---: | :--- | :--- |
-| **1** | `view/at-webserver/service.js` | `.mt5700-author` 容器内的链接文本 |
+| **1** | `view/mt5700d/service.js` | `.mt5700-author` 容器内的链接文本 |
 | **2** | 本文件「作者署名保护规则」 | 文案声明、实现位置表与固定文案段 |
 | **3** | `tests/author-attribution-test.js` | `AUTHOR_TEXT` / `AUTHOR_LICENSE` 常量（门禁唯一事实源，含历史文案防回退清单） |
 | **4** | `.github/workflows/checks.yml` | 检查项说明与约定 4 的文案 |
@@ -226,7 +226,7 @@ grep -nE 'std::process::Command|std::fs::|std::net::Tcp|thread::sleep|ureq::' sr
 
 ### Rust 后端版本与包版本联动
 
-后端自报版本（`at-webserver-rust --version` 与启动日志里的 `at-webserver <版本> 启动中`）只由 `PKG_VERSION` 驱动，不允许再出现「二进制自报 1.29.0、包版本 1.32.7」这类分叉。
+后端自报版本（`mt5700d --version` 与启动日志里的 `mt5700d <版本> 启动中`）只由 `PKG_VERSION` 驱动，不允许再出现「二进制自报 1.29.0、包版本 1.32.7」这类分叉。
 
 | 联动环节 | 声明或配置位置 | 作用与职责 |
 | :--- | :--- | :--- |
@@ -245,7 +245,7 @@ grep -n '^version' src/rust/Cargo.toml
 cd src/rust && cargo test
 ```
 
-- 交叉编译产物核对：解包或安装后执行 `/usr/bin/at-webserver-rust --version`，输出中的版本必须等于包管理器里的 `luci-app-mt5700` 版本。
+- 交叉编译产物核对：解包或安装后执行 `/usr/bin/mt5700d --version`，输出中的版本必须等于包管理器里的 `luci-app-mt5700` 版本。
 
 ---
 

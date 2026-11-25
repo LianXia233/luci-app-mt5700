@@ -12,7 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
+const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'mt5700d');
 const code = fs.readFileSync(path.join(viewDir, 'network_status.js'), 'utf8');
 
 const start = code.indexOf('function isNonDataApn');

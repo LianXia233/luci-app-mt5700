@@ -8,10 +8,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
+const libDir = path.join(__dirname, '..', '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
 
 const sandbox = {
-	AtWs: undefined, Parse: undefined,
+	Mt5700d: undefined, Parse: undefined,
 	L: {
 		Class: { extend: function (o) { return o; } },
 		view: { extend: function (o) { return o; } },
@@ -27,8 +27,8 @@ function loadLib(name) {
 		.split('\n')
 		.filter(function (l) { return l.indexOf("'require ") !== 0; })
 		.join('\n');
-	const fn = new Function('AtWs', 'Parse', 'E', 'L', cleaned + '\n;return { AtWs: AtWs, Parse: Parse };');
-	return fn(sandbox.AtWs, sandbox.Parse, function () { return { appendChild: function () { } }; }, sandbox.L);
+	const fn = new Function('Mt5700d', 'Parse', 'E', 'L', cleaned + '\n;return { Mt5700d: Mt5700d, Parse: Parse };');
+	return fn(sandbox.Mt5700d, sandbox.Parse, function () { return { appendChild: function () { } }; }, sandbox.L);
 }
 
 let results = [];
@@ -46,14 +46,14 @@ try {
 	const parse = loadLib('parse.js');
 	sandbox.Parse = parse.Parse;
 	/*
-	 * rpc.js 以 `return AtWsClass;` 结尾，附加的 return 不可达；而 L.Class.extend
-	 * 被 mock 成「原样返回入参」，所以加载结果本身就是 AtWs 对象。
+	 * rpc.js 以 `return Mt5700dClass;` 结尾，附加的 return 不可达；而 L.Class.extend
+	 * 被 mock 成「原样返回入参」，所以加载结果本身就是 Mt5700d 对象。
 	 */
 	const ws = loadLib('rpc.js');
-	const AtWs = (ws && ws.AtWs) || ws;
+	const Mt5700d = (ws && ws.Mt5700d) || ws;
 
 	/* ---- 4G（LTE）：^HCSQ: "LTE",45,34,106,19 ---- */
-	const lte = AtWs.parseHCSQ('^HCSQ: "LTE",45,34,106,19\r\nOK');
+	const lte = Mt5700d.parseHCSQ('^HCSQ: "LTE",45,34,106,19\r\nOK');
 	check('LTE 制式识别', lte && lte.networkMode === 'LTE', lte ? lte.networkMode : 'null');
 	check('LTE RSSI = value1', near(lte.rssi, -76), 'rssi=' + lte.rssi);
 	check('LTE RSRP = value2', near(lte.rsrp, -106), 'rsrp=' + lte.rsrp);
@@ -63,12 +63,12 @@ try {
 	check('LTE SINR 不再取到 RSRQ 字段', !near(lte.sinr, -16.2), 'sinr=' + lte.sinr);
 
 	/* ---- LTE 只报 3 个数值（无 RSRQ）也要能出 SINR ---- */
-	const lteShort = AtWs.parseHCSQ('^HCSQ: "LTE",45,34,106');
+	const lteShort = Mt5700d.parseHCSQ('^HCSQ: "LTE",45,34,106');
 	check('LTE 短字段仍解析 SINR', lteShort && near(lteShort.sinr, 1.2) && lteShort.rsrq === null,
 		'sinr=' + (lteShort && lteShort.sinr) + ' rsrq=' + (lteShort && lteShort.rsrq));
 
 	/* ---- 5G（NR）：^HCSQ: "NR",76,241,31，行为保持不变 ---- */
-	const nr = AtWs.parseHCSQ('^HCSQ: "NR",76,241,31\r\nOK');
+	const nr = Mt5700d.parseHCSQ('^HCSQ: "NR",76,241,31\r\nOK');
 	check('NR 制式识别', nr && nr.networkMode === 'NR', nr ? nr.networkMode : 'null');
 	check('NR RSRP = value1', near(nr.rsrp, -64), 'rsrp=' + nr.rsrp);
 	check('NR SINR = value2', near(nr.sinr, 28.2), 'sinr=' + nr.sinr);
@@ -76,47 +76,47 @@ try {
 	check('NR 不产出 RSSI', nr.rssi === null, 'rssi=' + nr.rssi);
 
 	/* ---- 255 = 未知或不可测，应返回 null 而不是换算成假值 ---- */
-	const invalid = AtWs.parseHCSQ('^HCSQ: "LTE",45,255,255,19');
+	const invalid = Mt5700d.parseHCSQ('^HCSQ: "LTE",45,255,255,19');
 	check('LTE 255 视为无数据', invalid.rsrp === null && invalid.sinr === null && near(invalid.rsrq, -10),
 		'rsrp=' + invalid.rsrp + ' sinr=' + invalid.sinr + ' rsrq=' + invalid.rsrq);
-	const nrInvalid = AtWs.parseHCSQ('^HCSQ: "NR",255,241,31');
+	const nrInvalid = Mt5700d.parseHCSQ('^HCSQ: "NR",255,241,31');
 	check('NR 255 视为无数据', nrInvalid.rsrp === null && near(nrInvalid.sinr, 28.2), 'rsrp=' + nrInvalid.rsrp);
 
 	/* ---- 3G（WCDMA）：^HCSQ: "WCDMA",30,30,58 ---- */
-	const w = AtWs.parseHCSQ('^HCSQ: "WCDMA",30,30,58\r\nOK');
+	const w = Mt5700d.parseHCSQ('^HCSQ: "WCDMA",30,30,58\r\nOK');
 	check('WCDMA 三项', w && near(w.rssi, -91) && near(w.rscp, -91) && near(w.ecio, -3),
 		w ? 'rssi=' + w.rssi + ' rscp=' + w.rscp + ' ecio=' + w.ecio : 'null');
 
 	/* ---- 2G（GSM）：^HCSQ: "GSM",36,255（手册 13.5.5 举例） ---- */
-	const g = AtWs.parseHCSQ('^HCSQ: "GSM",36,255\r\nOK');
+	const g = Mt5700d.parseHCSQ('^HCSQ: "GSM",36,255\r\nOK');
 	check('GSM RSSI', g && near(g.rssi, -85) && g.rsrp === null, g ? 'rssi=' + g.rssi : 'null');
 
 	/* ---- 无服务 ---- */
-	const none = AtWs.parseHCSQ('^HCSQ: "NOSERVICE"\r\nOK');
+	const none = Mt5700d.parseHCSQ('^HCSQ: "NOSERVICE"\r\nOK');
 	check('NOSERVICE 不产出信号', none && none.networkMode === 'NOSERVICE' && none.rsrp === null && none.sinr === null,
 		none ? none.networkMode : 'null');
 
 	/* ---- 解析入口：带 OK 与 CR/LF 的完整应答 ---- */
-	const viaRaw = AtWs.parseRawData('^HCSQ: "LTE",45,34,106,19\r\n');
+	const viaRaw = Mt5700d.parseRawData('^HCSQ: "LTE",45,34,106,19\r\n');
 	const hcsqRaw = viaRaw.filter(function (p) { return p.type === 'HCSQ'; });
 	check('parseRawData 归入 HCSQ 类型', hcsqRaw.length === 1 && near(hcsqRaw[0].parsed.sinr, 1.2),
 		hcsqRaw.length + ' 条');
 
 	/* ---- 换算函数边界 ---- */
-	check('convertSinr 边界', near(AtWs.convertSinr(0), -20) && near(AtWs.convertSinr(251), 30),
-		AtWs.convertSinr(0) + ' / ' + AtWs.convertSinr(251));
-	check('convertRsrq 边界', near(AtWs.convertRsrq(0), -19.5) && near(AtWs.convertRsrq(34), -3),
-		AtWs.convertRsrq(0) + ' / ' + AtWs.convertRsrq(34));
-	check('convertEcio 边界', near(AtWs.convertEcio(0), -32) && near(AtWs.convertEcio(65), 0),
-		AtWs.convertEcio(0) + ' / ' + AtWs.convertEcio(65));
-	check('convertSinr 无浮点尾差', String(AtWs.convertSinr(226)) === '25.2', String(AtWs.convertSinr(226)));
+	check('convertSinr 边界', near(Mt5700d.convertSinr(0), -20) && near(Mt5700d.convertSinr(251), 30),
+		Mt5700d.convertSinr(0) + ' / ' + Mt5700d.convertSinr(251));
+	check('convertRsrq 边界', near(Mt5700d.convertRsrq(0), -19.5) && near(Mt5700d.convertRsrq(34), -3),
+		Mt5700d.convertRsrq(0) + ' / ' + Mt5700d.convertRsrq(34));
+	check('convertEcio 边界', near(Mt5700d.convertEcio(0), -32) && near(Mt5700d.convertEcio(65), 0),
+		Mt5700d.convertEcio(0) + ' / ' + Mt5700d.convertEcio(65));
+	check('convertSinr 无浮点尾差', String(Mt5700d.convertSinr(226)) === '25.2', String(Mt5700d.convertSinr(226)));
 
 	/* ---- ^MONSC 的 LTE 布局（手册 13.9.3/13.9.5）----
 	 * LTE,<mcc>,<mnc>,<arfcn 十进制>,<cid hex>,<pci hex>,<tac hex>,<rsrp>,<rsrq>,<rssi>，无 SINR。
 	 * 两个历史错位都在这里护栏：套 NR 布局会让 rsrp 取到 rsrq；把 p[3]/p[6]
 	 * 当成 TAC/ARFCN 会让频点变成十六进制串、频段反推全错。
 	 */
-	const mLte = AtWs.parseMONSC('^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54');
+	const mLte = Mt5700d.parseMONSC('^MONSC: LTE,460,00,38400,D975244,8,24C8,-85,-10,-54');
 	check('MONSC LTE 制式与 PCI(hex)', mLte && mLte.sysMode === 'LTE' && mLte.pci === 8,
 		mLte ? 'sysMode=' + mLte.sysMode + ' pci=' + mLte.pci : 'null');
 	check('MONSC LTE cid 不再取到 PCI', mLte.cid === 'D975244', 'cid=' + mLte.cid);
@@ -129,7 +129,7 @@ try {
 	check('MONSC LTE ARFCN 为纯数字（可直接反推频段）', /^\d+$/.test(mLte.channel),
 		'channel=' + mLte.channel);
 	/* NR 布局回归护栏：PCI 走十六进制换算（0x80 -> 128），channel 为频点 501234，lac 为 TAC 12345 */
-	const mNr = AtWs.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-65,-9,29');
+	const mNr = Mt5700d.parseMONSC('^MONSC: NR,460,00,501234,1,C1A2B3C,80,12345,-65,-9,29');
 	check('MONSC NR 布局与 PCI(hex)', mNr.rsrp === -65 && mNr.rsrq === -9 && mNr.sinr === 29 && mNr.pci === 128 && mNr.channel === '501234' && mNr.lac === '12345',
 		'rsrp=' + mNr.rsrp + ' sinr=' + mNr.sinr + ' pci=' + mNr.pci + ' ch=' + mNr.channel + ' tac=' + mNr.lac);
 } catch (e) {

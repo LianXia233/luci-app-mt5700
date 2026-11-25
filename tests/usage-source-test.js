@@ -16,15 +16,15 @@ const read = function (rel) {
 	return fs.readFileSync(path.join(root, rel), 'utf8');
 };
 
-const uci = read('root/etc/config/at-webserver');
+const uci = read('root/etc/config/mt5700d');
 const uc = read('root/usr/share/rpcd/ucode/mt5700.uc');
 const usageRs = read('src/rust/src/usage.rs');
 const configRs = read('src/rust/src/config.rs');
 const mainRs = read('src/rust/src/main.rs');
 const rpcServerRs = read('src/rust/src/rpcserver.rs');
-const rpcJs = read('htdocs/luci-static/resources/at-webserver/rpc.js');
-const viewJs = read('htdocs/luci-static/resources/view/at-webserver/network_status.js');
-const initd = read('root/etc/init.d/at-webserver');
+const rpcJs = read('htdocs/luci-static/resources/mt5700d/rpc.js');
+const viewJs = read('htdocs/luci-static/resources/view/mt5700d/network_status.js');
+const initd = read('root/etc/init.d/mt5700d');
 
 /* 一、UCI 契约 */
 assert(/option usage_source 'netdev'/.test(uci), 'UCI 必须有默认来源 netdev');
@@ -79,7 +79,7 @@ assert(rpcJs.includes('function fetchUsageCtl(action, day, source)'),
 	'fetchUsageCtl 必须接受 source 参数');
 assert(viewJs.includes("'id': 'usage-source'"), '使用量卡片缺少来源选择控件');
 assert(viewJs.includes('function setUsageSource()'), '缺少来源切换处理函数');
-assert(viewJs.includes("AtWs.usageCtl('set_source', undefined, source)"),
+assert(viewJs.includes("Mt5700d.usageCtl('set_source', undefined, source)"),
 	'来源切换必须走 usage_ctl set_source');
 assert(viewJs.includes("document.getElementById('usage-source')"), '渲染逻辑需同步来源控件');
 assert(viewJs.includes('var usageNetdev = (state.usage && state.usage.source !=='),
@@ -90,9 +90,9 @@ assert(viewJs.includes('usageNetdev || state.deviceInterface || sampledNetdev'),
 	'数据通信接口优先级需为 usage > netrate > 占位符');
 
 /* 四之二、来源控件样式契约：防止再次被全局 select 深度美化吞掉 */
-const viewCss = read('htdocs/luci-static/resources/at-webserver/mt5700.css');
-const skeletonJs = read('htdocs/luci-static/resources/at-webserver/mt5700.js');
-const compatJs = read('htdocs/luci-static/resources/at-webserver/compat.js');
+const viewCss = read('htdocs/luci-static/resources/mt5700d/mt5700.css');
+const skeletonJs = read('htdocs/luci-static/resources/mt5700d/mt5700.js');
+const compatJs = read('htdocs/luci-static/resources/mt5700d/compat.js');
 const makefile = read('Makefile');
 assert(viewJs.includes("'class': 'mt-usage-source', 'id': 'usage-source'"),
 	'来源下拉必须使用独立样式 class');
@@ -111,8 +111,8 @@ assert(viewCss.includes('border-radius: 4px !important') &&
 	'来源控件需为贴合文字的小方框，不设最小宽度');
 assert(skeletonJs.includes("MT5700_CSS_VERSION = '2.46.9'"),
 	'改 mt5700.css 必须递增 MT5700_CSS_VERSION');
-assert(compatJs.includes("MT5700_UI_VERSION = '1.32.13'") &&
-	makefile.includes('PKG_VERSION:=1.32.13'),
+assert(compatJs.includes("MT5700_UI_VERSION = '2.0.1'") &&
+	makefile.includes('PKG_VERSION:=2.0.1'),
 	'UI 版本戳必须与 PKG_VERSION 一致');
 
 /* 五、DNS 下发：按 WAN 区域 + 模组物理网口自动反查，不绑定接口名 */

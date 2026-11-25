@@ -1026,7 +1026,7 @@ pub fn now_string() -> String {
 }
 
 /// 号码归一化：剥掉前导 `+` 与国家码 `86`，与前端 `Parse.normalizePhoneNumber`
-/// （`htdocs/.../at-webserver/parse.js`）**保持同一规则**。
+/// （`htdocs/.../mt5700d/parse.js`）**保持同一规则**。
 ///
 /// 为什么必须统一：同一个联系人会以三种面貌出现 ——
 /// 短信 PDU 里的 `8613800138000`、`+CLIP` 里的 `+8613800138000`、

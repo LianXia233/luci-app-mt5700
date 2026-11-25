@@ -25,7 +25,7 @@
 		"order": 10,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/network_status"
+			"path": "mt5700d/network_status"
 		}
 	},
 	"admin/modem/5g/settings": {
@@ -33,7 +33,7 @@
 		"order": 20,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/network_settings"
+			"path": "mt5700d/network_settings"
 		}
 	},
 	"admin/modem/5g/dial": {
@@ -41,7 +41,7 @@
 		"order": 30,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/dial"
+			"path": "mt5700d/dial"
 		}
 	},
 	"admin/modem/5g/scan": {
@@ -49,7 +49,7 @@
 		"order": 40,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/scan"
+			"path": "mt5700d/scan"
 		}
 	},
 	"admin/modem/5g/schedule": {
@@ -57,7 +57,7 @@
 		"order": 50,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/schedule"
+			"path": "mt5700d/schedule"
 		}
 	},
 	"admin/modem/5g/modem-settings": {
@@ -65,7 +65,7 @@
 		"order": 60,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/modem_settings"
+			"path": "mt5700d/modem_settings"
 		}
 	},
 	"admin/modem/5g/upgrade": {
@@ -73,7 +73,7 @@
 		"order": 70,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/upgrade"
+			"path": "mt5700d/upgrade"
 		}
 	},
 	"admin/modem/5g/sms": {
@@ -81,7 +81,7 @@
 		"order": 80,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/sms_center"
+			"path": "mt5700d/sms_center"
 		}
 	},
 	"admin/modem/5g/sms-settings": {
@@ -89,7 +89,7 @@
 		"order": 90,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/sms_settings"
+			"path": "mt5700d/sms_settings"
 		}
 	},
 	"admin/modem/5g/terminal": {
@@ -97,7 +97,7 @@
 		"order": 100,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/terminal"
+			"path": "mt5700d/terminal"
 		}
 	},
 	"admin/modem/5g/logs": {
@@ -105,7 +105,7 @@
 		"order": 110,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/logs"
+			"path": "mt5700d/logs"
 		}
 	},
 	"admin/modem/5g/config": {
@@ -113,7 +113,7 @@
 		"order": 120,
 		"action": {
 			"type": "view",
-			"path": "at-webserver/service"
+			"path": "mt5700d/service"
 		}
 	}
 }

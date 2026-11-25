@@ -20,15 +20,15 @@
 
 ```
 Makefile / src/Makefile / src/rust/*         Rust 后端（AT 队列、SMS、PDU、拨号…）
-root/etc/config/at-webserver                 UCI 配置（单节 config at-webserver 'config'）
-root/etc/init.d/at-webserver                 服务/拨号/USB 接口管理
-root/etc/uci-defaults/at-webserver           首次安装初始化
+root/etc/config/mt5700d                 UCI 配置（单节 config mt5700d 'config'）
+root/etc/init.d/mt5700d                 服务/拨号/USB 接口管理
+root/etc/uci-defaults/mt5700d           首次安装初始化
 root/etc/hotplug.d/{iface,usb}/99-*         热插拔
 root/usr/share/rpcd/ucode/mt5700.uc         Ucode RPC 插件（11 个方法）
 root/usr/share/rpcd/acl.d/luci-app-mt5700.json  ACL
 root/usr/share/luci/menu.d/luci-app-mt5700.json 菜单/路由
-htdocs/luci-static/resources/at-webserver/   公共 JS + 3 张 CSS + 图片/webp 资源
-htdocs/luci-static/resources/view/at-webserver/ 12 个视图
+htdocs/luci-static/resources/mt5700d/   公共 JS + 3 张 CSS + 图片/webp 资源
+htdocs/luci-static/resources/view/mt5700d/ 12 个视图
 tests/                                      零依赖 Node 单测与 mock-modem
 scripts/sdk-build.sh / qq-capture-openid.py 构建与工具
 docs/                                       文档、发布说明、布局测试
@@ -52,8 +52,8 @@ po/                                         i18n
 | logs | 运行日志 | `logs.js` | 110 |
 | config | 服务配置 | `service.js` | 120 |
 
-**12 个视图全部 `require at-webserver/mt5700`**（`tests/global-css-test.js` 强制校验）；
-11 个还 `require at-webserver/ui`，`service.js` 亦已引入 `ui`（`Ui.startup`）。
+**12 个视图全部 `require mt5700d/mt5700`**（`tests/global-css-test.js` 强制校验）；
+11 个还 `require mt5700d/ui`，`service.js` 亦已引入 `ui`（`Ui.startup`）。
 `mt5700.js` 是唯一的全局样式注入点，因此「全局」能力必须挂在这里。
 
 ## 4. 公共模块（真实职责）
@@ -63,7 +63,7 @@ po/                                         i18n
 | `compat.js` | `String.prototype.format` 垫片；把 `mt5700-<版本>` 并入 `L.env.resource_version` | `window.AtCompat` |
 | `theme.js` | LuCI 明暗主题判定（Aurora/Argon/官方），写 `<html class="at-dark|at-light" data-at-theme>`；`injectCss()` 幂等 | `window.AtTheme` |
 | `tabmenu.js` | 12 页签图标增强（`TAB_ICONS`，24×24 线性 SVG，stroke 1.8）+ 滚动位置保持 + Tab 对比度兜底 | `window.AtTabmenu` |
-| `rpc.js` | ATClient 单例、连接状态机、事件轮询、SMS/AT/usage/logs 等 RPC 封装、`AtUci`（uciSave/uciHasChanges） | `window.AtWs` |
+| `rpc.js` | ATClient 单例、连接状态机、事件轮询、SMS/AT/usage/logs 等 RPC 封装、`AtUci`（uciSave/uciHasChanges） | `window.Mt5700d` |
 | `parse.js` | AT 响应解析（SMS PDU、信号、FOTA、邻区、PDP 等） | `window.Parse` |
 | `ui.js` | `promptModal`、`switch`、`autoRefresh`、`startup`、`degradedNotice`、`interval`/`onLeave`（hashchange 生命周期清理）、`sendCmd` | `window.Ui`；注入 `at.css?v=1.15.1` |
 | `mt5700.js` | 页面骨架 `page()`、卡片/指标/按钮/表格/表单/暂存条、`confirm`/toast/loading/empty、信号/星座图/MIMO SVG、全局背景 | `window.Mt5700`；注入 `mt5700.css?v=2.46.4` 与 `global.css?v=1.0.0` |
@@ -83,18 +83,18 @@ po/                                         i18n
 经 `nc 127.0.0.1 <port>` 与 Rust 后端通信，方法名/参数属于**严格禁止修改**范围。
 
 `root/usr/share/rpcd/acl.d/luci-app-mt5700.json`：
-- read：`uci: ["at-webserver","network"]`、`ubus` 各对象、`file` 若干路径；
-- write：`uci: ["at-webserver"]`、`ubus.uci: add/set/delete/commit/apply/changes/revert/order`。
+- read：`uci: ["mt5700d","network"]`、`ubus` 各对象、`file` 若干路径；
+- write：`uci: ["mt5700d"]`、`ubus.uci: add/set/delete/commit/apply/changes/revert/order`。
 
-> **`ui_mode` 落在 `at-webserver` 包内，read/write 权限已具备，因此不需要改 ACL、
+> **`ui_mode` 落在 `mt5700d` 包内，read/write 权限已具备，因此不需要改 ACL、
 > 不需要新增 ubus 方法、不需要新增后端服务。**
 
 ## 6. UCI 配置定义与读写机制
 
-- 配置节：`config at-webserver 'config'`，约 90+ 个 `option`（`wallpaper_enabled`、`enabled`、`autodial_*`、`notify_*`、`schedule_*`、`qq_*` 等）。
-- 读取：`L.uci.load('at-webserver')` → `L.uci.get('at-webserver','config',<key>)`；
+- 配置节：`config mt5700d 'config'`，约 90+ 个 `option`（`wallpaper_enabled`、`enabled`、`autodial_*`、`notify_*`、`schedule_*`、`qq_*` 等）。
+- 读取：`L.uci.load('mt5700d')` → `L.uci.get('mt5700d','config',<key>)`；
   见 `service.js:158/225/1141`、`logs.js:207`、`dial.js:655`、`mt5700.js:85`。
-- 写入：暂存式 `staged.set()`（`mt5700.js:923`）→ `L.uci.set(...)` → `AtWs.uci.uciSave('at-webserver')`；
+- 写入：暂存式 `staged.set()`（`mt5700.js:923`）→ `L.uci.set(...)` → `Mt5700d.uci.uciSave('mt5700d')`；
   `uciSave` = `L.uci.save(section)` + `L.uci.apply(false, true)`（`rpc.js:778`）。
 - **本次 `ui_mode` 只用 `L.uci.set` + `L.uci.save`（commit），不调用 `apply()`**：
   避免触发网络配置重新应用/服务重启。
@@ -107,7 +107,7 @@ po/                                         i18n
 | `theme.js` | 模块求值即 `apply()` 写 `<html>` 明暗类；DOMContentLoaded 后 MutationObserver + matchMedia 跟随 |
 | `mt5700.js` | 注入 3 张 CSS；`startGlobalBg()` 读 `wallpaper_enabled` 后挂载角色立绘层 |
 | `tabmenu.js` | `api.init()` 轮询/MutationObserver 等待 `#tabmenu` 渲染后增强 |
-| `ui.js` | `Ui.startup(body, onReady)`：先注册连接状态监听，再 `AtWs.client.connect()`；`Ui.interval` 在 hashchange 时自动 clear |
+| `ui.js` | `Ui.startup(body, onReady)`：先注册连接状态监听，再 `Mt5700d.client.connect()`；`Ui.interval` 在 hashchange 时自动 clear |
 | `rpc.js:364` | ATClient 事件轮询 `setInterval(pollEvents, pollInterval)` |
 | `network_status.js` | `Ui.interval(1000, sampleRate)` / `(1000, sampleUsage)` / `(5000, 刷新)` |
 | `scan.js / schedule.js / logs.js / sms_center.js / upgrade.js` | 各自 `Ui.interval` 或 `setInterval`（2s / 15s / 自动刷新 / 1s ticker / 1s 计时） |
@@ -166,7 +166,7 @@ po/                                         i18n
 
 ## 10. 状态管理（真实）
 
-- 全局单例：`window.AtWs.client`（rpc.js ATClient）、`window.AtTheme`、`window.Mt5700`、`window.Ui`、`window.AtTabmenu`。
+- 全局单例：`window.Mt5700d.client`（rpc.js ATClient）、`window.AtTheme`、`window.Mt5700`、`window.Ui`、`window.AtTabmenu`。
 - 页面级：各视图 `render()` 内的局部 `state` 对象 + `Ui.interval`/`onLeave` 生命周期。
 - 未保存配置：`Mt5700.staged()`（`mt5700.js:923`）暂存 + `applybar`。
 - 无独立前端状态库 / 无 localStorage 持久化（仅 `tabmenu.js` 用 `sessionStorage` 记 Tab 滚动位置）。

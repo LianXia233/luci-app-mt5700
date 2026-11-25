@@ -11,11 +11,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'at-webserver');
-const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'at-webserver');
+const libDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'mt5700d');
+const viewDir = path.join(__dirname, '..', 'htdocs', 'luci-static', 'resources', 'view', 'mt5700d');
 
 const sandbox = {
-	window: {}, AtWs: undefined, Parse: undefined,
+	window: {}, Mt5700d: undefined, Parse: undefined,
 	L: {
 		Class: { extend: function (o) { return o; } },
 		view: { extend: function (o) { return o; } },
@@ -31,8 +31,8 @@ function loadLib(dir, name) {
 		.split('\n')
 		.filter(function (l) { return l.indexOf("'require ") !== 0; })
 		.join('\n');
-	const fn = new Function('AtWs', 'Parse', 'E', 'L', cleaned + '\n;return { AtWs: AtWs, Parse: Parse };');
-	return fn(sandbox.AtWs, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
+	const fn = new Function('Mt5700d', 'Parse', 'E', 'L', cleaned + '\n;return { Mt5700d: Mt5700d, Parse: Parse };');
+	return fn(sandbox.Mt5700d, sandbox.Parse, function () { return { appendChild: function () {} }; }, sandbox.L);
 }
 
 let results = [];
@@ -45,10 +45,10 @@ try {
 	const parse = loadLib(libDir, 'parse.js');
 	const Parse = parse.Parse || parse;
 	const ws = loadLib(libDir, 'rpc.js');
-	const AtWs = (ws && ws.AtWs) || ws;
+	const Mt5700d = (ws && ws.Mt5700d) || ws;
 
 	// ---- Issue #38: parseHFREQINFO 同行多组载波解析 ----
-	var hfreq = AtWs.parseHFREQINFO;
+	var hfreq = Mt5700d.parseHFREQINFO;
 	check('parseHFREQINFO 函数存在', typeof hfreq === 'function');
 
 	// 1. 单组行（9 字段）→ 1 个载波
@@ -159,8 +159,8 @@ try {
 		check('syncCarriers 可从源码提取', false, '源码定位失败');
 	} else {
 		var syncCode = netCode.slice(syncStart, syncEnd);
-		var syncFn = new Function('Parse', 'AtWs', syncCode + '\nreturn syncCarriers;');
-		var syncCarriers = syncFn(Parse, AtWs);
+		var syncFn = new Function('Parse', 'Mt5700d', syncCode + '\nreturn syncCarriers;');
+		var syncCarriers = syncFn(Parse, Mt5700d);
 		check('syncCarriers 函数存在', typeof syncCarriers === 'function');
 
 		// 模拟 SCC 信号缺失场景：MONSSC NONE + CASCELLINFO ERROR
@@ -180,12 +180,12 @@ try {
 		};
 
 		// 用 Function 执行 syncCarriers，注入 state
-		var syncExec = new Function('state', 'Parse', 'AtWs',
+		var syncExec = new Function('state', 'Parse', 'Mt5700d',
 			'var cell = state.cell; var rawHfreq = state.rawHfreq; var secNR = state.secondaryNR; var secLTE = state.secondaryLTE;' +
 			'var now = Date.now(); var stale = false;' +
 			syncCode + '\n' +
 			'syncCarriers(); return state.carriers;');
-		var carriers = syncExec(mockState, Parse, AtWs);
+		var carriers = syncExec(mockState, Parse, Mt5700d);
 
 		check('syncCarriers 产出 2 个载波', carriers.length === 2, '实际 ' + carriers.length);
 		check('PCC 有信号读数', carriers[0] && carriers[0].rsrp === -64, carriers[0] && carriers[0].rsrp);
@@ -207,7 +207,7 @@ try {
 			secondarySuccess: true,
 			caStatus: { state: 'pending', lastSuccessTime: 0 }
 		};
-		var carriers2 = syncExec(mockState2, Parse, AtWs);
+		var carriers2 = syncExec(mockState2, Parse, Mt5700d);
 		check('SCC1 signalReason = at-error（MONSSC error）',
 			carriers2[1] && carriers2[1].signalReason === 'at-error', carriers2[1] && carriers2[1].signalReason);
 	}
@@ -219,7 +219,7 @@ try {
 	var mockState3 = JSON.parse(JSON.stringify(mockState));
 	mockState3.secondaryNR = [{ arfcn: '630000', pci: null, rsrp: null, rsrq: null, sinr: null, measType: null }];
 	mockState3.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
-	var carriers3 = syncExec(mockState3, Parse, AtWs);
+	var carriers3 = syncExec(mockState3, Parse, Mt5700d);
 	check('SCC1 匹配到小区但无读数 → rsrp 仍为 null（不伪造）', carriers3[1] && carriers3[1].rsrp == null, carriers3[1] && carriers3[1].rsrp);
 	check('SCC1 匹配到小区但测量全空 → no-measurement（不再静默）',
 		carriers3[1] && carriers3[1].signalReason === 'no-measurement', carriers3[1] && carriers3[1].signalReason);
@@ -228,7 +228,7 @@ try {
 	var mockState4 = JSON.parse(JSON.stringify(mockState));
 	mockState4.secondaryNR = [{ arfcn: '630000', pci: 300, rsrp: null, rsrq: null, sinr: null, measType: 'SSB' }];
 	mockState4.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
-	var carriers4 = syncExec(mockState4, Parse, AtWs);
+	var carriers4 = syncExec(mockState4, Parse, Mt5700d);
 	check('SCC1 仅 PCI 无信号读数 → no-measurement',
 		carriers4[1] && carriers4[1].signalReason === 'no-measurement', carriers4[1] && carriers4[1].signalReason);
 
@@ -236,7 +236,7 @@ try {
 	var mockState5 = JSON.parse(JSON.stringify(mockState));
 	mockState5.secondaryNR = [{ arfcn: '630000', pci: 300, rsrp: -71, rsrq: -9, sinr: 18, measType: 'SSB' }];
 	mockState5.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
-	var carriers5 = syncExec(mockState5, Parse, AtWs);
+	var carriers5 = syncExec(mockState5, Parse, Mt5700d);
 	check('SCC1 有 RSRP → signalReason 为 null', carriers5[1] && carriers5[1].signalReason === null, carriers5[1] && carriers5[1].signalReason);
 
 	// RSSI 也算可用读数（LTE 侧 SINR 恒空，页面用 RSSI 兜底显示）
@@ -247,7 +247,7 @@ try {
 		{ n: 0, sysMode: 'LTE', band: '3', dlFcn: '630000', dlFreqKHz: 3450000, dlBwKHz: 100000, sysModeCode: '6' }
 	];
 	mockState5b.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
-	var carriers5b = syncExec(mockState5b, Parse, AtWs);
+	var carriers5b = syncExec(mockState5b, Parse, Mt5700d);
 	check('SCC1(LTE) 有 RSSI → 不标注缺测', carriers5b[1] && !carriers5b[1].signalReason, carriers5b[1] && carriers5b[1].signalReason);
 	check('SCC1(LTE) 仅 RSSI → rssi 透传到载波对象（渲染层可显示 RSSI）',
 		carriers5b[1] && carriers5b[1].rssi === -65, carriers5b[1] && carriers5b[1].rssi);
@@ -259,7 +259,7 @@ try {
 	mockState6.rawHfreq = [mockState6.rawHfreq[0]];
 	mockState6.secondaryNR = [{ arfcn: '630000', pci: null, rsrp: null, rsrq: null, sinr: null, measType: null }];
 	mockState6.secondaryATStatus = { monssc: 'ok', cascell: 'ok' };
-	var carriers6 = syncExec(mockState6, Parse, AtWs);
+	var carriers6 = syncExec(mockState6, Parse, Mt5700d);
 	check('孤儿 NR 辅站无读数 → no-measurement',
 		carriers6[1] && carriers6[1].signalReason === 'no-measurement', carriers6[1] && carriers6[1].signalReason);
 

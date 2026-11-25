@@ -1,13 +1,13 @@
 # 本 Makefile 由 luci.mk 在包构建阶段调用（`make clean compile` / `make install`），
 # 运行在 $(PKG_BUILD_DIR)/src/ 下。Rust 源码位于 src/rust/。
 #
-# 作用：把 Rust 后端 at-webserver 编进 luci-app-mt5700 同一个包，
+# 作用：把 Rust 后端 mt5700d 编进 luci-app-mt5700 同一个包，
 #      使前端 LuCI 页面 + 后端二进制合为单个 apk/ipk，安装时不再依赖独立的
-#      at-webserver-rust 包（v1.0.0 正因为该包未产出导致 apk 报依赖缺失）。
+#      mt5700d 包（v1.0.0 正因为该包未产出导致 apk 报依赖缺失）。
 #
 # 链路：luci.mk Build/Compile → 本文件 compile → cargo build
 #      luci.mk Package/install（$(wildcard ${CURDIR}/src) 分支）→ Build/Install/Default
-#      → 本文件 install → $(DESTDIR)/usr/bin/at-webserver-rust
+#      → 本文件 install → $(DESTDIR)/usr/bin/mt5700d
 
 RUST_DIR := rust
 
@@ -86,7 +86,7 @@ endif
 # 注意：不能用 FROM_APK——OpenWrt 构建体系（含 24.10 分支与 feeds）里不存在这个
 # 变量，写它等于恒取 opkg 分支，隔离形同虚设。
 CARGO_TARGET_DIR := $(CURDIR)/target/$(if $(CONFIG_USE_APK),apk,opkg)
-BIN := $(CARGO_TARGET_DIR)/$(RUST_TARGET)/release/at-webserver
+BIN := $(CARGO_TARGET_DIR)/$(RUST_TARGET)/release/mt5700d
 
 .PHONY: all compile clean install
 
@@ -105,8 +105,8 @@ install: compile
 	# 注意：luci.mk 调用本子 Makefile 时只传 DESTDIR，不传 INSTALL_DIR/INSTALL_BIN，
 	# 直接用 mkdir/cp/chmod（SDK 容器内必有），避免 Error 127。
 	mkdir -p "$(DESTDIR)/usr/bin"
-	cp "$(BIN)" "$(DESTDIR)/usr/bin/at-webserver-rust"
-	chmod 0755 "$(DESTDIR)/usr/bin/at-webserver-rust"
+	cp "$(BIN)" "$(DESTDIR)/usr/bin/mt5700d"
+	chmod 0755 "$(DESTDIR)/usr/bin/mt5700d"
 
 clean:
 	cd $(RUST_DIR) && cargo clean 2>/dev/null || true
