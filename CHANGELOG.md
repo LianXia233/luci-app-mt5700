@@ -6,7 +6,7 @@
 *12 个原生 LuCI 高性能视图 + Rust / Tokio 常驻高并发后端 · 单包融合交付*
 
 <p align="center">
-  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v1.32.13-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
+  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.0.2-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
   <img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC%E6%80%BB%E6%95%B0-91%20Releases-16a34a?style=flat-square" alt="Total Versions" />
   <img src="https://img.shields.io/badge/%E8%BF%AD%E4%BB%A3%E5%91%A8%E6%9C%9F-70%20Days-0891b2?style=flat-square" alt="Timespan" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-ea580c?style=flat-square" alt="License" /></a>
@@ -17,8 +17,8 @@
 ---
 
 > [!TIP]
-> **最新正式版：[v1.32.13](docs/release-notes/v1.32.13.md)（2026-11-24）**  
-> **正式恢复工程化收口**：恢复 i18n / CI 门禁 / 供应链校验 / 素材声明，并合并 1.32.12 的看板娘渲染修复与 `trText` 防遮蔽修复。升级后建议按 `Ctrl + F5` 强制刷新浏览器缓存。
+> **最新正式版：[v2.0.2](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.0.2)（2026-11-25）**  
+> **mt5700d 常驻后端与单包融合交付**：可执行文件、服务名、配置与前端资源统一为 `mt5700d`；升级自动迁移既有配置与历史数据，服务启动链路修复。升级后建议按 `Ctrl + F5` 强制刷新浏览器缓存。
 
 ### 🧭 阶段速览与导航
 
