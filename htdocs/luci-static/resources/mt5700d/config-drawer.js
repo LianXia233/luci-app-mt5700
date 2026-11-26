@@ -164,6 +164,15 @@ var MtConfigDrawer = (function () {
 				forceClose();
 			}, 'danger'));
 			confirmWrap.appendChild(row);
+			/* 确认条插在可滚动 body 的顶部，而「关闭」按钮在底部 foot：用户滚到底部
+			 * 点关闭时确认条落在视野之外，表现为「点了没反应 / 关不掉」。这里把它
+			 * 滚进视野，并把焦点放在「继续编辑」（不默认聚焦危险按钮）。 */
+			if (typeof confirmWrap.scrollIntoView === 'function')
+				confirmWrap.scrollIntoView({ block: 'nearest' });
+			var firstBtn = row.querySelector('button');
+			if (firstBtn && typeof firstBtn.focus === 'function') {
+				try { firstBtn.focus(); } catch (e) { /* ignore */ }
+			}
 		}
 		function hideConfirm() {
 			confirmOpen = false;
