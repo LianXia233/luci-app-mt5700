@@ -217,4 +217,11 @@ var MtQqBind = (function () {
 	return { mount: mount };
 })();
 
-return MtQqBind;
+/* LuCI 26.x 的 factory 校验要求返回 Class 子类（`Class.isSubclass`），返回普通对象
+ * 会抛 “factory yields invalid constructor” 并让整页 require 失败。与本目录其余
+ * 模块保持一致：extend 成类 + 挂 window 供 `'require mt5700d/qqqbind'` 的页面直接用。 */
+var MtQqBindClass = L.Class.extend(MtQqBind);
+if (typeof window !== 'undefined') {
+	window.MtQqBind = new MtQqBindClass();
+}
+return MtQqBindClass;
