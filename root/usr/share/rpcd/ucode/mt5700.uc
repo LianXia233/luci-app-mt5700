@@ -1422,7 +1422,10 @@ return {
 		qq_qr_poll: {
 			args: { _rid: '' },
 			call: function (req) {
-				return rpcCall('qq_qr_poll', { _rid: getStr(req.args, '_rid') });
+				/* 与 qq_qr_start 同预算：单次轮询也是一发 HTTPS，用默认 12s 会让
+				 * 「后端 10s 超时 + 握手」贴边，弱网下被 nc 提前掐断，前端表现为
+				 * 一次随机的「网络中断」，白白触发退避。 */
+				return rpcCall('qq_qr_poll', { _rid: getStr(req.args, '_rid') }, 15);
 			}
 		},
 		qq_qr_cancel: {

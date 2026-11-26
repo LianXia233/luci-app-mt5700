@@ -29,7 +29,11 @@ var MtQqBind = (function () {
 	/* 后端单次 HTTP 预算 10s，轮询间隔取 2s：与官方 SDK 的节奏一致，
 	 * 再密只会把路由器 CPU 和 QQ 侧限流一起打满，再疏则扫码后要等明显一拍。 */
 	var POLL_INTERVAL = 2000;
-	var MAX_CONSECUTIVE_ERRORS = 3;
+	/* 断线退避：5G 重拨 / 基站切换 / 换小区后连续断网十几秒是常态，固定 2s×3
+	 * 次（6s）就放弃会把「马上就能扫完」的流程打断。这里指数退避到 15s 封顶，
+	 * 总预算 ≈ 2+4+8+15×5 ≈ 89s，仍以「二维码本身已过期」为真正的终止条件。 */
+	var MAX_ERROR_DELAY = 15000;
+	var MAX_CONSECUTIVE_ERRORS = 8;
 
 	function mount(bodyEl, hooks) {
 		var h = hooks || {};
@@ -60,6 +64,10 @@ var MtQqBind = (function () {
 			var scale = Math.max(1, Math.floor(256 / total));
 			canvas.width = total * scale;
 			canvas.height = total * scale;
+			/* 按位图真实像素设宽：CSS 里写死 256px 会把 245px 的位图做非整数放大，
+			 * 定位图案多出灰边，低端扫码器识别率明显下降。只改 width，height 保持
+			 * auto，窄屏 max-width:100% 缩小时仍能按 1:1 比例缩放。 */
+			canvas.style.width = canvas.width + 'px';
 			var g = canvas.getContext('2d');
 			g.fillStyle = '#fff';
 			g.fillRect(0, 0, canvas.width, canvas.height);
@@ -120,7 +128,18 @@ var MtQqBind = (function () {
 			pollRpc('qrpoll-' + Date.now()).then(function (res) {
 				if (!res) throw new Error('RPC 无响应');
 				var st = String(res.state || '');
-				if (!res.success || st === 'failed') throw new Error((res && res.error) || '轮询失败');
+				if (!res.success || st === 'failed') {
+					// retryable=false 是后端明确的终态（应答残缺/解密失败）：同一条 task
+					// 再轮询只会得到同样的结果，退避重试纯属浪费，直接停下让用户重出码。
+					if (res.retryable === false) {
+						stopPoll();
+						pending = false;
+						status.textContent = '绑定失败：' + (res.error || '未知原因')
+							+ '（可点「刷新二维码」重试）';
+						return;
+					}
+					throw new Error(res.error || '轮询失败');
+				}
 				errors = 0;
 				if (st === 'pending') { timer = setTimeout(poll, POLL_INTERVAL); return; }
 				if (st === 'expired') {
@@ -136,7 +155,7 @@ var MtQqBind = (function () {
 				if (st === 'success') { onSuccess(res); return; }
 				timer = setTimeout(poll, POLL_INTERVAL);
 			}).catch(function (err) {
-				// 刚拨号时 DNS/TLS 抖动很常见：连续失败到阈值才告知，前两次静默重试
+				// 刚拨号时 DNS/TLS 抖动很常见：按指数退避重试，别把好不容易扫完的流程打断
 				errors++;
 				if (errors >= MAX_CONSECUTIVE_ERRORS) {
 					stopPoll();
@@ -144,8 +163,10 @@ var MtQqBind = (function () {
 						+ '（可点「刷新二维码」重试）';
 					return;
 				}
-				status.textContent = '网络抖动，重试中…';
-				timer = setTimeout(poll, POLL_INTERVAL);
+				var wait = Math.min(MAX_ERROR_DELAY, POLL_INTERVAL * Math.pow(2, errors));
+				status.textContent = '网络中断，' + Math.round(wait / 1000)
+					+ ' 秒后重试（' + errors + '/' + MAX_CONSECUTIVE_ERRORS + '）…';
+				timer = setTimeout(poll, wait);
 			});
 		}
 
@@ -153,15 +174,24 @@ var MtQqBind = (function () {
 			stopPoll();
 			pending = false;
 			bound = true;
-			// 后端已把 AppID/AppSecret/目标写回 UCI；这里同步表单，避免保存时用旧值覆盖
+			if (typeof h.onBound === 'function') h.onBound();
+			// 后端已把 AppID/AppSecret/目标写回 UCI；这里同步表单，避免保存时用旧值覆盖。
+			// openid 为空时**不能**清空目标输入框：后端刻意保留了原 group/channel 目标，
+			// 前端一清空，保存时又会把目标写成空串。
 			if (h.appId) h.appId.value = String(res.app_id || '');
-			if (h.targetId) h.targetId.value = String(res.target_id || '');
+			if (h.targetId && res.target_id) h.targetId.value = String(res.target_id);
 			if (h.target && res.target_id) h.target.value = 'c2c';
-			if (h.enabled) h.enabled.checked = true;
+			// 写回失败时不要勾开关：那会让用户在「配置其实没落盘」的状态下保存并重启，
+			// 重启后凭据为空、通道静默不工作。
+			if (h.enabled && res.saved) h.enabled.checked = true;
 			var text = '绑定成功：AppID ' + (res.app_id || '?')
 				+ (res.target_id ? '，openid 已回填' : '（未取到 openid，可配合「绑定」模式补）');
-			status.textContent = (res.saved ? text : text + '；但写回配置失败：' + (res.save_error || '未知原因'))
-				+ '。点底部「保存并应用」让开关与格式一起生效。';
+			// 写回失败时不要引导用户保存：此时 UCI 里没有新凭据，任何保存/应用都
+			// 只会把设备重启到「无凭据」状态。
+			status.textContent = res.saved
+				? text + '。点底部「保存并应用」让开关与格式一起生效。'
+				: text + '；但写回配置失败：' + (res.save_error || '未知原因')
+					+ '。请检查 /etc/config/mt5700d 可写后重新扫码。';
 		}
 
 		panel.appendChild(canvas);
@@ -177,7 +207,8 @@ var MtQqBind = (function () {
 				begin();
 			}, 'secondary'),
 			E('span', { 'class': 'mt5700-hint' },
-				'免手抄：扫码授权后 AppID/AppSecret 由后端取回并写回配置，openid 一并回填。')));
+				'免手抄：扫码授权后 AppID/AppSecret 由后端取回并直接写入 UCI，openid 一并回填；'
+					+ '之后点「保存」不会用页面旧值覆盖新密钥。')));
 		bodyEl.appendChild(panel);
 
 		return { open: begin, close: close };

@@ -47,6 +47,8 @@ pub enum Phase {
     Pending,
     Complete,
     Expired,
+    /// 终态失败：原因存在 `Inner::failure`，重新 start 才能恢复
+    Failed,
 }
 
 impl Phase {
@@ -56,6 +58,7 @@ impl Phase {
             Phase::Pending => "pending",
             Phase::Complete => "success",
             Phase::Expired => "expired",
+            Phase::Failed => "failed",
         }
     }
 }
@@ -87,6 +90,9 @@ pub enum PollOutcome {
     Pending,
     /// 二维码已过期，需要重新 start
     Expired,
+    /// 会话已进入终态失败（协议应答残缺 / 解密失败）。重试同一个 task 只会得到
+    /// 同样的结果，前端必须停下来让用户重新出码，不能当成网络抖动一直重试。
+    Failed(String),
     /// 扫码完成。`app_secret` 仅在**首次**完成的那次轮询里是 `Some`：
     /// 上层用它写一次 UCI 就够，重复轮询不应反复落盘明文。
     Complete {
@@ -107,6 +113,8 @@ struct Inner {
     /// 仅内存持有；`task_id` 失效后一并清掉
     key_b64: String,
     outcome: Option<Outcome>,
+    /// `Phase::Failed` 的原因（终端错误，不能让前端当成网络抖动反复重试）
+    failure: Option<String>,
 }
 
 /// 扫码绑定会话。字段用 `std::sync::Mutex` 保护（临界区只有几次内存操作，无 `await`），
@@ -114,6 +122,9 @@ struct Inner {
 #[derive(Debug, Default)]
 pub struct QrBind {
     inner: std::sync::Mutex<Inner>,
+    /// 串行化 start：两次并发的 start 会各建一个服务端任务，后写会话的那个让
+    /// 先返回的二维码变成死码（前端画的是 A，后端轮询的是 B），用户扫完永远没反应。
+    start_lock: tokio::sync::Mutex<()>,
 }
 
 impl QrBind {
@@ -129,6 +140,14 @@ impl QrBind {
     /// 创建新任务并返回二维码。会无条件覆盖上一次未完成的会话：
     /// 同时维护两个 task 只会让前端不知道该显示哪张码。
     pub async fn start(&self, source: &str) -> Result<StartInfo, String> {
+        // 同一时刻只允许一个 start 在飞行（见字段注释）。cancel 不持这把锁，
+        // 所以下面还要用 epoch 复核「申请任务期间是否被取消」。
+        let _start_guard = self.start_lock.lock().await;
+        let epoch_before = self
+            .inner
+            .lock()
+            .map_err(|_| "扫码会话状态锁异常".to_string())?
+            .epoch;
         let key_b64 = tokio::task::spawn_blocking(random_key_b64)
             .await
             .map_err(|e| format!("生成任务密钥失败: {e}"))??;
@@ -145,6 +164,11 @@ impl QrBind {
             .inner
             .lock()
             .map_err(|_| "扫码会话状态锁异常".to_string())?;
+        if g.epoch != epoch_before {
+            // 申请期间被 cancel：这张码对应的会话已经被丢弃，交回去只会让用户
+            // 扫一张后端不认的二维码。
+            return Err("扫码会话已被取消，请重新生成二维码".into());
+        }
         let epoch = g.epoch.wrapping_add(1);
         *g = Inner {
             epoch,
@@ -152,6 +176,7 @@ impl QrBind {
             task_id,
             key_b64,
             outcome: None,
+            failure: None,
         };
         Ok(StartInfo { url, size, rows })
     }
@@ -161,12 +186,17 @@ impl QrBind {
     /// 网络失败**不清会话**：路由器刚拨上号、DNS 抖动、网关偶发 502 都很常见，
     /// 一次失败就把用户的二维码作废，体验比"多等两秒"差得多。真正的失效只有
     /// 服务端明确返回 expired（status=3）。
+    ///
+    /// 但「服务端说已完成、我们却解不出来」是终态：同一个 task 再轮询只会得到
+    /// 同样的应答，必须置 `Phase::Failed` 让前端停下来，否则会以 2s 节奏无限重试
+    /// 一个永远失败的结果，用户只看到「网络抖动」。
     pub async fn poll(&self) -> Result<PollOutcome, String> {
         let Snapshot {
             task_id,
             key_b64,
             phase,
             outcome,
+            failure,
             epoch,
         } = {
             let g = self.inner.lock().map_err(|_| "扫码会话状态锁异常".to_string())?;
@@ -175,6 +205,7 @@ impl QrBind {
                 key_b64: g.key_b64.clone(),
                 phase: g.phase,
                 outcome: g.outcome.clone(),
+                failure: g.failure.clone(),
                 epoch: g.epoch,
             } // 锁在此释放：下面的网络请求可能几百毫秒，不能带着锁
         };
@@ -185,6 +216,11 @@ impl QrBind {
                 } else {
                     PollOutcome::Idle
                 })
+            }
+            Phase::Failed => {
+                return Ok(PollOutcome::Failed(
+                    failure.unwrap_or_else(|| "扫码绑定失败".to_string()),
+                ))
             }
             Phase::Complete => {
                 let o = outcome.ok_or_else(|| "扫码会话缺少绑定结果".to_string())?;
@@ -205,31 +241,29 @@ impl QrBind {
 
         match reply.status {
             STATUS_COMPLETED => {
-                if reply.encrypt_secret.is_empty() || reply.app_id.is_empty() {
-                    return Err("扫码结果缺少 AppID 或密文（可能不是一次完整授权）".into());
-                }
-                let app_secret = decrypt_secret(&reply.encrypt_secret, &key_b64)?;
+                let decrypted = if reply.encrypt_secret.is_empty() || reply.app_id.is_empty() {
+                    Err("扫码结果缺少 AppID 或密文（可能不是一次完整授权）".to_string())
+                } else {
+                    decrypt_secret(&reply.encrypt_secret, &key_b64)
+                };
+                let app_secret = match decrypted {
+                    Ok(s) => s,
+                    Err(msg) => {
+                        // 终态失败：丢弃 task/key，只保留原因供前端展示（不自动重出码，
+                        // 避免「解密一直失败 → 前端自动刷新 → 用户反复扫码」的死循环）
+                        let stale = self.settle(epoch, Phase::Failed, None, Some(msg.clone()))?;
+                        return Ok(if stale {
+                            PollOutcome::Pending
+                        } else {
+                            PollOutcome::Failed(msg)
+                        });
+                    }
+                };
                 let outcome = Outcome {
                     app_id: reply.app_id.clone(),
                     openid: reply.openid.clone(),
                 };
-                let stale = {
-                    let mut g = self
-                        .inner
-                        .lock()
-                        .map_err(|_| "扫码会话状态锁异常".to_string())?;
-                    if g.epoch != epoch {
-                        // 用户已经重新出码或取消：这份结果属于旧任务，整份丢弃。
-                        // 尤其不能碰 key_b64 —— 那是新会话的密钥，清掉后新码永远解不开。
-                        true
-                    } else {
-                        g.phase = Phase::Complete;
-                        g.outcome = Some(outcome);
-                        // 密钥用完即弃：绑定成功后没有任何地方还需要它
-                        g.key_b64.clear();
-                        false
-                    }
-                };
+                let stale = self.settle(epoch, Phase::Complete, Some(outcome), None)?;
                 if stale {
                     return Ok(PollOutcome::Pending);
                 }
@@ -240,21 +274,7 @@ impl QrBind {
                 })
             }
             STATUS_EXPIRED => {
-                // 同样要复核代号：旧任务的「已过期」不能把新会话判死
-                let stale = {
-                    let mut g = self
-                        .inner
-                        .lock()
-                        .map_err(|_| "扫码会话状态锁异常".to_string())?;
-                    if g.epoch != epoch {
-                        true
-                    } else {
-                        g.phase = Phase::Expired;
-                        g.task_id.clear();
-                        g.key_b64.clear();
-                        false
-                    }
-                };
+                let stale = self.settle(epoch, Phase::Expired, None, None)?;
                 if stale {
                     return Ok(PollOutcome::Pending);
                 }
@@ -263,6 +283,28 @@ impl QrBind {
             // 0 = 任务不存在 / 1 = 等待扫码：都按"继续等"处理，前端只看 state
             _ => Ok(PollOutcome::Pending),
         }
+    }
+
+    /// 在会话代号仍然匹配时写入终态并清掉 task/key；返回 `true` 表示结果属于旧会话，
+    /// 调用方必须整份丢弃（不能碰新会话的 key，否则新二维码永远解不开）。
+    fn settle(
+        &self,
+        epoch: u64,
+        phase: Phase,
+        outcome: Option<Outcome>,
+        failure: Option<String>,
+    ) -> Result<bool, String> {
+        let mut g = self.inner.lock().map_err(|_| "扫码会话状态锁异常".to_string())?;
+        if g.epoch != epoch {
+            return Ok(true);
+        }
+        g.phase = phase;
+        g.outcome = outcome;
+        g.failure = failure;
+        g.task_id.clear();
+        // 密钥用完即弃：进入终态后没有任何地方还需要它
+        g.key_b64.clear();
+        Ok(false)
     }
 
     /// 取消扫码（关闭面板、刷新二维码前调用）。丢弃 task 后服务端任务会自行过期。
@@ -304,18 +346,24 @@ impl QrBind {
                 let mut save_error = String::new();
                 // 只有首次完成才带 AppSecret：重复轮询不反复写盘、不反复热替换
                 if let Some(secret) = app_secret.as_deref() {
-                    if let Err(e) = persist_credentials(&app_id, secret, &openid).await {
-                        saved = false;
-                        save_error = e;
-                    }
-                    // rebind_qq 内部会 fork uci 推导管理页地址，必须离开 reactor 线程
-                    let n = notify.clone();
-                    let (aid, sec, oid) = (app_id.clone(), secret.to_string(), openid.clone());
-                    if tokio::task::spawn_blocking(move || n.rebind_qq(&aid, &sec, &oid))
-                        .await
-                        .unwrap_or(false)
-                    {
-                        log_info!("QQ 扫码绑定：通道已热替换（openid {}）", if openid.is_empty() { "-" } else { openid.as_str() });
+                    match persist_credentials(&app_id, secret, &openid).await {
+                        Ok(()) => {
+                            // 只有落盘成功才热替换：否则运行中的通道会用一份「重启后就
+                            // 消失」的密钥，表现为当时能推、重启后全挂且日志无线索。
+                            // rebind_qq 内部会 fork uci 推导管理页地址，必须离开 reactor 线程
+                            let n = notify.clone();
+                            let (aid, sec, oid) = (app_id.clone(), secret.to_string(), openid.clone());
+                            if tokio::task::spawn_blocking(move || n.rebind_qq(&aid, &sec, &oid))
+                                .await
+                                .unwrap_or(false)
+                            {
+                                log_info!("QQ 扫码绑定：通道已热替换（openid {}）", if openid.is_empty() { "-" } else { openid.as_str() });
+                            }
+                        }
+                        Err(e) => {
+                            saved = false;
+                            save_error = e;
+                        }
                     }
                 }
                 serde_json::json!({
@@ -333,7 +381,15 @@ impl QrBind {
             }),
             // 只有没 start 过或已取消时才会是 Idle，前端按「重新出码」处理
             Ok(PollOutcome::Idle) => serde_json::json!({ "success": true, "state": "idle" }),
-            Err(e) => serde_json::json!({ "success": false, "state": "failed", "error": e }),
+            // 终态失败（应答残缺/解密失败）：`retryable=false` 让前端立刻停下，
+            // 不要用「网络抖动」的退避逻辑把一个永远不会变的结果重试 89 秒。
+            Ok(PollOutcome::Failed(e)) => serde_json::json!({
+                "success": false, "state": "failed", "retryable": false, "error": e,
+            }),
+            // 网络/协议传输层错误：会话仍是 Pending，前端退避后重试即可
+            Err(e) => serde_json::json!({
+                "success": false, "state": "failed", "retryable": true, "error": e,
+            }),
         }
     }
 
@@ -356,6 +412,8 @@ struct Snapshot {
     key_b64: String,
     phase: Phase,
     outcome: Option<Outcome>,
+    /// `Phase::Failed` 的终态原因
+    failure: Option<String>,
     /// 取快照时的会话代号：回写状态前必须复核，见 `Inner::epoch` 的注释
     epoch: u64,
 }
@@ -370,13 +428,40 @@ pub async fn persist_credentials(app_id: &str, app_secret: &str, openid: &str) -
         pairs.push(("qq_target_type", "c2c"));
         pairs.push(("qq_target_id", openid));
     }
-    for (k, v) in pairs {
-        crate::qqbind::run_cmd("uci", &["set", &format!("mt5700d.config.{k}={v}")]).await?;
+    for (applied, (k, v)) in pairs.into_iter().enumerate() {
+        if let Err(e) = crate::qqbind::run_cmd("uci", &["set", &format!("mt5700d.config.{k}={v}")]).await {
+            if applied > 0 {
+                // 半写状态必须撤干净：`uci set` 只写 /tmp/.uci 的增量，残余项会被
+                // init.d reload_service 里那句 `uci -q commit mt5700d` 顺带提交上去，
+                // 变成「AppID 是新的、Secret 是旧的」这种最难受的错配。
+                let _ = crate::qqbind::run_cmd("uci", &["revert", "mt5700d"]).await;
+            }
+            return Err(e);
+        }
     }
-    crate::qqbind::run_cmd("uci", &["commit", "mt5700d"]).await
+    crate::qqbind::run_cmd("uci", &["commit", "mt5700d"]).await?;
+    // 凭据落盘后收紧权限：UCI 默认 0644，而扫码绑定让「密钥落盘」变成默认路径。
+    // 用 busybox chmod 而不是 std::os::unix：本项目的单测还要在 Windows 上跑，
+    // `cfg(unix)` 分支在本地没有任何编译验证机会；chmod 失败也不影响绑定本身。
+    harden_config_permissions().await;
+    Ok(())
+}
+
+/// `/etc/config/mt5700d` 收紧到 0600（仅 root 可读）。
+async fn harden_config_permissions() {
+    if let Err(e) = crate::qqbind::run_cmd("chmod", &["600", "/etc/config/mt5700d"]).await {
+        log_debug!("QQ 扫码绑定：收紧配置文件权限失败（不影响绑定）: {e}");
+    }
 }
 
 // ---------------- 协议层（全部同步，由上层 spawn_blocking 调起） ----------------
+
+/// 复用的 HTTP Agent：`ureq::post` 每次都会新建连接，2s 一次的轮询等于反复做
+/// TLS 握手（5G 上单次 300–500ms、CPU 也明显）。Agent 自带连接池 + keep-alive。
+fn http_agent() -> &'static ureq::Agent {
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build())
+}
 
 fn create_task(key_b64: &str) -> Result<String, String> {
     let v = post_json(CREATE_TASK_URL, &serde_json::json!({ "key": key_b64 }))?;
@@ -404,7 +489,7 @@ fn poll_task(task_id: &str) -> Result<PollReply, String> {
     check_retcode(&v)?;
     let data = v.get("data").cloned().unwrap_or(Value::Null);
     Ok(PollReply {
-        status: data.get("status").and_then(|x| x.as_i64()).unwrap_or(0),
+        status: as_int(data.get("status")).unwrap_or(0),
         // bot_appid 有时以数字下发，统一转成字符串，避免下游再分两种情况
         app_id: match data.get("bot_appid") {
             Some(Value::String(s)) => s.clone(),
@@ -424,8 +509,22 @@ fn poll_task(task_id: &str) -> Result<PollReply, String> {
     })
 }
 
+/// 数字或数字字符串都能取。
+///
+/// 官方 SDK 用 `!== 0` / `?? 0` 直接比数字，所以这层兼容不是协议要求；但一旦平台
+/// 侧把 `retcode`/`status` 换成字符串（`bot_appid` 就已经出现过两种形态），严格
+/// `as_i64` 会把「已完成」读成 0（pending），表现为扫码成功但永远不结束——这类
+/// 失败从日志上完全看不出来，容错成本又极低。
+fn as_int(v: Option<&Value>) -> Option<i64> {
+    match v? {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
 fn check_retcode(v: &Value) -> Result<(), String> {
-    if v.get("retcode").and_then(|x| x.as_i64()) == Some(0) {
+    if as_int(v.get("retcode")) == Some(0) {
         return Ok(());
     }
     let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("未知错误");
@@ -433,8 +532,8 @@ fn check_retcode(v: &Value) -> Result<(), String> {
 }
 
 fn post_json(url: &str, body: &Value) -> Result<Value, String> {
-    let resp = ureq::post(url)
-        .timeout(HTTP_TIMEOUT)
+    let resp = http_agent()
+        .post(url)
         .set("Content-Type", "application/json")
         .set("Accept", "application/json")
         .send_string(&body.to_string())
@@ -596,6 +695,51 @@ mod tests {
         let key: Vec<u8> = (0..32).collect();
         let enc = base64_encode(&key);
         assert_eq!(b64_decode(&enc).unwrap(), key);
+    }
+
+    #[test]
+    fn int_fields_accept_string_and_number() {
+        assert_eq!(as_int(Some(&serde_json::json!(2))), Some(2));
+        assert_eq!(as_int(Some(&serde_json::json!("2"))), Some(2));
+        assert_eq!(as_int(Some(&serde_json::json!(" 0 "))), Some(0));
+        assert_eq!(as_int(Some(&serde_json::json!(null))), None);
+        assert_eq!(as_int(Some(&serde_json::json!("x"))), None);
+        assert_eq!(as_int(None), None);
+    }
+
+    #[tokio::test]
+    async fn failed_phase_is_terminal_and_reports_reason() {
+        let q = QrBind::new();
+        {
+            let mut g = q.inner.lock().unwrap();
+            g.epoch = 3;
+            g.phase = Phase::Failed;
+            g.failure = Some("AppSecret 解密失败".into());
+        }
+        // 终态失败必须原样回放原因，且不触发网络（没有 task_id 也不会 panic）
+        assert_eq!(
+            q.poll().await.unwrap(),
+            PollOutcome::Failed("AppSecret 解密失败".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn settle_with_stale_epoch_never_touches_new_session() {
+        let q = QrBind::new();
+        {
+            let mut g = q.inner.lock().unwrap();
+            g.epoch = 5;
+            g.phase = Phase::Pending;
+            g.task_id = "NEW-TASK".into();
+            g.key_b64 = "NEW-KEY".into();
+        }
+        // 旧会话（epoch 4）迟到的终态写入必须被丢弃：否则新二维码的密钥被清掉，
+        // 用户扫完永远解不开。
+        assert!(q.settle(4, Phase::Complete, None, None).unwrap());
+        let g = q.inner.lock().unwrap();
+        assert_eq!(g.phase, Phase::Pending);
+        assert_eq!(g.task_id, "NEW-TASK");
+        assert_eq!(g.key_b64, "NEW-KEY");
     }
 
     #[test]

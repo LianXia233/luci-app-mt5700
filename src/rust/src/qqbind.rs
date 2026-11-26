@@ -246,16 +246,39 @@ pub(crate) async fn run_cmd(prog: &str, args: &[&str]) -> Result<(), String> {
         .args(args)
         .output()
         .await
-        .map_err(|e| format!("执行 {prog} {args:?} 失败: {e}"))?;
+        .map_err(|e| format!("执行 {prog} {} 失败: {e}", redact_args(args)))?;
     if out.status.success() {
         Ok(())
     } else {
         Err(format!(
-            "{prog} {args:?} 退出码 {:?}: {}",
+            "{prog} {} 退出码 {:?}: {}",
+            redact_args(args),
             out.status.code(),
             String::from_utf8_lossy(&out.stderr).trim()
         ))
     }
+}
+
+/// 错误信息里的 argv 必须脱敏。
+///
+/// 扫码绑定会执行 `uci set mt5700d.config.qq_app_secret=<刚解出来的明文>`，这条
+/// 命令一旦失败，原始 argv 会随错误串回到 LuCI 页面（`save_error`）并可能进日志，
+/// 等于把 AppSecret 又泄一遍。只保留键名，值一律替换成 `***`。
+fn redact_args(args: &[&str]) -> String {
+    let shown: Vec<String> = args
+        .iter()
+        .map(|a| match a.split_once('=') {
+            Some((k, _)) => {
+                let lower = k.to_ascii_lowercase();
+                let sensitive = ["secret", "passwd", "password", "token", "auth_key"]
+                    .iter()
+                    .any(|s| lower.contains(s));
+                if sensitive { format!("{k}=***") } else { (*a).to_string() }
+            }
+            None => (*a).to_string(),
+        })
+        .collect();
+    format!("{shown:?}")
 }
 
 async fn fetch_gateway(token: &str) -> Result<String, String> {
@@ -308,6 +331,16 @@ mod tests {
     fn brief_truncates_long_values() {
         let long = "x".repeat(1000);
         assert!(brief(&serde_json::json!({ "k": long })).chars().count() <= 200);
+    }
+
+    #[test]
+    fn run_cmd_error_text_never_contains_secret_value() {
+        // 扫码绑定写 UCI 的 argv 里带明文 AppSecret：错误信息回到 LuCI 页面前必须脱敏
+        let shown = redact_args(&["set", "mt5700d.config.qq_app_secret=abc123SECRET"]);
+        assert!(!shown.contains("abc123SECRET"), "错误串泄露了 AppSecret: {shown}");
+        assert!(shown.contains("qq_app_secret=***"));
+        // 非敏感键保持原样，排障信息不丢
+        assert_eq!(redact_args(&["commit", "mt5700d"]), r#"["commit", "mt5700d"]"#);
     }
 
     #[tokio::test]
