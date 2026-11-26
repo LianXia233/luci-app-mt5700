@@ -845,12 +845,25 @@ var AtUci = {
 		}
 	},
 
-	// 查询该配置是否存在待应用变更（rpcd uci.changes）
+	// 查询 rpcd 侧是否存在待应用变更（诊断用）。
+	//
+	// 注意：L.uci.changes 在 luci.js 26.x 里没有声明 params，传进去的参数只会被当成
+	// 「私有参数」丢掉，ubus 收到的是空 params → rpcd 返回的是**按配置分组的大表**
+	// （{mt5700d: [...], ...}），不是扁平数组。所以这里必须兼容两种形态，且绝不能
+	// 用它的结果决定「要不要保存」——表单改动先落在浏览器状态里，只有 uci.save()
+	// 才写进 delta；按 delta 判空会在刚打开页面时把用户的改动静默跳过。
 	uciHasChanges: function (section) {
-		return L.uci.changes(section).then(function (changes) {
-			return Array.isArray(changes) ? changes.length > 0 : !!changes;
+		return L.uci.changes().then(function (changes) {
+			if (Array.isArray(changes))
+				return changes.length > 0;
+			if (changes && typeof changes === 'object') {
+				var mine = changes[section];
+				if (Array.isArray(mine))
+					return mine.length > 0;
+				return Object.keys(changes).length > 0;
+			}
+			return !!changes;
 		}).catch(function () {
-			// changes 不可用时不阻断主流程，按「有变更」处理
 			return true;
 		});
 	},
@@ -860,35 +873,20 @@ var AtUci = {
 	 * 返回 { applied: bool, saved: bool, appliedSkipped: bool }
 	 */
 	uciSave: function (section, opts) {
-		var options = opts || {};
+		var self = this;
 		var result = { saved: false, applied: false, appliedSkipped: false, changes: null };
 
-		return this.uciHasChanges(section).then(function (has) {
-			result.changes = has;
-			if (!has && options.skipWhenClean !== false) {
-				// 无待应用变更：不需要 save/apply，直接视为已生效
-				result.saved = true;
-				result.appliedSkipped = true;
-				return result;
-			}
-			return L.uci.save(section).then(function () {
-				result.saved = true;
-				return L.uci.apply(false, true);
-			}).then(function () {
-				result.applied = true;
-				return result;
-			}, function (err) {
-				// ubus 状态码 5 = NO_DATA：rpcd 未收到待应用数据，通常表示
-				// 变更已在上一轮 commit，配置实际已生效，不视为失败。
-				var code = err && err.code;
-				var msg = (err && err.message) || '';
-				if (code === 5 || /未收到数据|No data|NO_DATA/i.test(msg)) {
-					result.applied = true;
-					result.appliedSkipped = true;
-					return result;
-				}
-				throw err;
-			});
+		// 始终 save → apply：save 只把浏览器暂存的改动下发给 rpcd（uci/set），
+		// apply 才做 commit + 触发 procd reload。不做「有没有变更」的前置判断，
+		// 否则页面刚打开、rpcd delta 为空时会把用户这一轮的编辑直接跳过。
+		return L.uci.save(section).then(function () {
+			result.saved = true;
+			return L.uci.apply(10);
+		}).then(function () {
+			result.applied = true;
+			return result;
+		}, function (err) {
+			return self.recoverNoData(err, result);
 		}).catch(function (err) {
 			// 把阶段性结果附在错误上：调用方（配置抽屉）据此区分
 			// 「save 已落盘但 apply 失败」与「尚未落盘」，放弃修改时
@@ -896,6 +894,35 @@ var AtUci = {
 			if (err && typeof err === 'object') err.uciSaveResult = result;
 			throw err;
 		});
+	},
+
+	/**
+	 * 兜住 rpcd `uci/apply` 的 UBUS_STATUS_NO_DATA(5)。
+	 *
+	 * 语义：rpcd 的 rpc_uci_apply_access() 遍历会话 delta，只统计**非空**配置
+	 * 文件；一个都没有就直接返回 5（rpcd uci.c）。delta 为空 = 磁盘已是最新，
+	 * 这一轮确实没有需要提交的差异，保存是成功的。
+	 *
+	 * 为什么可以判定为成功而不是吞错：L.uci.save() 里每条 uci/set 都是
+	 * reject:true，任何一条没写进 delta 都会先 reject，根本走不到 apply；
+	 * 能走到 apply 说明 set 阶段全成功。
+	 *
+	 * 为什么按文案兜底：LuCI 的 RPCError **不带 code 字段**，ubus 码只在
+	 *   `RPC call to uci/apply failed with ubus code 5: 无已接收数据`
+	 * 这段文字里；且文案随语言/版本变化（未收到数据 / 无已接收数据 / No data），
+	 * 旧实现只匹配「未收到数据」，在 26.x 上必然漏判（本次实机即此）。
+	 */
+	recoverNoData: function (err, result) {
+		// apply 的正常返回是 0（空 reply → rpc 层折成 0）；confirm 轮询失败时
+		// LuCI 直接 reject 数字，这里一并按码处理。
+		var code = (typeof err === 'number') ? err : (err && err.code);
+		var msg = (err && (err.message || err.msg)) || String(err == null ? '' : err);
+		var noData = code === 5 ||
+			/no[ _-]?data|未收到数据|无已接收数据/i.test(msg);
+		if (!noData) throw err;
+		result.applied = true;
+		result.appliedSkipped = true;
+		return result;
 	}
 };
 

@@ -96,6 +96,9 @@
 					"at",
 					"events",
 					"qq_menu",
+					"qq_qr_cancel",
+					"qq_qr_poll",
+					"qq_qr_start",
 					"sms",
 					"usage_ctl"
 				],

@@ -6,7 +6,8 @@
 'require mt5700d/rpc';
 'require mt5700d/ui';
 'require mt5700d/config-common';
-/* global L, E, Mt5700, Mt5700d, Ui, MtConfigCommon */
+'require mt5700d/qqqbind';
+/* global L, E, Mt5700, Mt5700d, Ui, MtConfigCommon, MtQqBind */
 
 /*
  * 配置模块：通知（事件开关 / 推送通道 / 定时推送 / 信号巡检 / 频率与时段门控 /
@@ -79,7 +80,8 @@ var MtConfigNotify = (function () {
 		var qqTargetId = Mt5700.input('text', 'group_openid / 用户 openid / channel_id', '');
 		bodyEl.appendChild(Mt5700.formGroup('QQ 推送', qq.wrap, '独立开关，默认关闭；与企业微信互不影响。'));
 		bodyEl.appendChild(Mt5700.formGroup('QQ 机器人 AppID', qqAppId, '也可用环境变量 QQ_BOT_APP_ID 覆盖'));
-		bodyEl.appendChild(Mt5700.formGroup('QQ 机器人 AppSecret', qqSecret, '建议留空并经环境变量注入，避免凭据落盘 UCI'));
+		bodyEl.appendChild(Mt5700.formGroup('QQ 机器人 AppSecret', qqSecret,
+			'建议留空并经环境变量注入；扫码绑定会把密钥写入 /etc/config/mt5700d（权限 600）'));
 		bodyEl.appendChild(Mt5700.formGroup('QQ 推送目标类型', qqTarget,
 			'选「绑定」：保存并应用后，用你的 QQ 给机器人发一条消息即自动完成绑定'));
 		bodyEl.appendChild(Mt5700.formGroup('绑定 QQ 号', qqBind, '仅用于日志标识，openid 由后端自动抓取'));
@@ -87,6 +89,25 @@ var MtConfigNotify = (function () {
 			'绑定模式留空即可；手动模式请粘贴完整 openid。'));
 		all.qq = qq.input; all.qqAppId = qqAppId; all.qqSecret = qqSecret;
 		all.qqTarget = qqTarget; all.qqBind = qqBind; all.qqTargetId = qqTargetId;
+
+		/* 扫码绑定把 AppSecret 直接写进了 UCI，而本页的 L.uci 快照是**页面加载时**
+		 * 的旧值（后端走 `uci commit`，不经 rpcd 的 uci 状态缓存）。保存时若无条件
+		 * 回写 qq_app_secret，就会把刚拿到的密钥覆盖成旧值/空串——首次绑定时输入框
+		 * 本来就是空的，一保存就作废。因此只在「本次会话没绑定过」或「用户手动改过
+		 * 该输入框」时才写这一项。 */
+		var qrBound = false;
+		var qqSecretDirty = false;
+		qqSecret.addEventListener('input', function () { qqSecretDirty = true; });
+
+		/* ---- QQ 扫码绑定：独立模块 mt5700d/qqqbind，这里只把待回填的控件交进去 ----
+		 * 申请任务、画码、轮询、过期换码、取消都在模块内，配置页不持有任何扫码状态。 */
+		MtQqBind.mount(bodyEl, {
+			appId: qqAppId,
+			targetId: qqTargetId,
+			target: qqTarget,
+			enabled: qq.input,
+			onBound: function () { qrBound = true; }
+		});
 
 		var qqFormat = Mt5700.select([
 			{ label: '自动（富文本优先，失败回落纯文本，推荐）', value: 'auto' },
@@ -454,7 +475,9 @@ var MtConfigNotify = (function () {
 			set('wechat_msg_format', wechatFmt.value);
 			set('qq_enabled', qq.input.checked ? '1' : '0');
 			set('qq_app_id', qqAppId.value.trim());
-			set('qq_app_secret', qqSecret.value.trim());
+			// 扫码绑定后设备上的密钥比输入框里的新：跳过回写，见 qrBound 的注释。
+			if (!qrBound || qqSecretDirty)
+				set('qq_app_secret', qqSecret.value.trim());
 			set('qq_target_type', qqTarget.value);
 			set('qq_bind_qq', qqBind.value.trim());
 			set('qq_target_id', qqTargetId.value.trim());

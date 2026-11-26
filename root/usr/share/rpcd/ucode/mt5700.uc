@@ -1395,6 +1395,45 @@ return {
 				return rpcCall('qq_bind_status', { _rid: getStr(req.args, '_rid') });
 			}
 		},
+		qq_qr_start: {
+			args: { source: '', _rid: '' },
+			call: function (req) {
+				/* source 会拼进二维码 URL 并展示在 QQ 授权页：只放安全字符。
+				 * 中文/空格/超长一律回落默认标识（后端还会再编码一次，双保险，
+				 * 这里挡的是「把任意串塞进链接」这种用法，不是转义）。 */
+				let source = getStr(req.args, 'source');
+				let allowed = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-';
+				let ok = (source != null && length(source) >= 1 && length(source) <= 32);
+				if (ok) {
+					for (let i = 0; i < length(source); i++) {
+						if (index(allowed, substr(source, i, 1)) < 0) {
+							ok = false;
+							break;
+						}
+					}
+				}
+				if (!ok) {
+					source = 'mt5700d';
+				}
+				/* 15s：后端单次 HTTP 预算 10s + TLS 握手，比默认 12s 留一点余量 */
+				return rpcCall('qq_qr_start', { source: source, _rid: getStr(req.args, '_rid') }, 15);
+			}
+		},
+		qq_qr_poll: {
+			args: { _rid: '' },
+			call: function (req) {
+				/* 与 qq_qr_start 同预算：单次轮询也是一发 HTTPS，用默认 12s 会让
+				 * 「后端 10s 超时 + 握手」贴边，弱网下被 nc 提前掐断，前端表现为
+				 * 一次随机的「网络中断」，白白触发退避。 */
+				return rpcCall('qq_qr_poll', { _rid: getStr(req.args, '_rid') }, 15);
+			}
+		},
+		qq_qr_cancel: {
+			args: { _rid: '' },
+			call: function (req) {
+				return rpcCall('qq_qr_cancel', { _rid: getStr(req.args, '_rid') });
+			}
+		},
 		qq_menu: {
 			args: { action: 'set', _rid: '' },
 			call: function (req) {

@@ -760,6 +760,41 @@ impl Notifier {
         }
     }
 
+    /// 扫码绑定成功后热替换 QQ 通道：凭据与目标来自刚刚写回 UCI 的值，其余策略
+    /// （消息格式 / 节流 / 键盘 / 菜单）沿用启动时的配置快照，省掉一次整服务重启。
+    ///
+    /// 返回 `false` 表示通道没有真正启用（`qq_enabled=0`，或凭据仍不完整）：
+    /// 此时配置已经落盘，用户勾选开关并保存后由正常启动链路建通道。
+    /// 注意：`from_config` 在推导管理页地址时会 fork `uci`，调用方必须放进
+    /// `spawn_blocking`，不得在 `async fn` 里直接调。
+    pub fn rebind_qq(&self, app_id: &str, app_secret: &str, target_id: &str) -> bool {
+        if !self.cfg.qq.enabled {
+            log_warn!("QQ 扫码绑定：凭据已写入 UCI，但 QQ 推送开关未开启，暂不启用通道");
+            return false;
+        }
+        let mut cfg = self.cfg.qq.clone();
+        cfg.app_id = app_id.trim().to_string();
+        cfg.app_secret = app_secret.trim().to_string();
+        // 只有真的拿到 openid 才改目标类型：只授权了机器人、没带扫码者身份时
+        // 保持原有 group/channel 目标，否则会拼出「c2c + 群 openid」这种必失败的组合
+        if target_id.trim().is_empty() {
+            log_warn!("QQ 扫码绑定：本次未取到 openid，保留原有推送目标 {}", cfg.target_type);
+        } else {
+            cfg.target_type = "c2c".into();
+            cfg.target_id = target_id.trim().to_string();
+        }
+        match QqSender::from_config(&cfg) {
+            Some(s) => {
+                self.set_qq(Some(s));
+                true
+            }
+            None => {
+                log_warn!("QQ 扫码绑定：凭据不完整（AppID/AppSecret/目标为空），通道未启用");
+                false
+            }
+        }
+    }
+
     /// QQ 自定义菜单管理（LuCI `qq_menu` RPC）：set=覆盖配置默认菜单，get=查询当前菜单。
     ///
     /// 自定义菜单仅 C2C（单聊）场景生效（官方限制），对所有用户生效；
