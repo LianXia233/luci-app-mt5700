@@ -6,7 +6,7 @@
 *12 个原生 LuCI 高性能视图 + Rust / Tokio 常驻高并发后端 · 单包融合交付*
 
 <p align="center">
-  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.0.2-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
+  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.1.0-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
   <img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC%E6%80%BB%E6%95%B0-91%20Releases-16a34a?style=flat-square" alt="Total Versions" />
   <img src="https://img.shields.io/badge/%E8%BF%AD%E4%BB%A3%E5%91%A8%E6%9C%9F-70%20Days-0891b2?style=flat-square" alt="Timespan" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-ea580c?style=flat-square" alt="License" /></a>
@@ -17,8 +17,8 @@
 ---
 
 > [!TIP]
-> **最新正式版：[v2.0.2](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.0.2)（2026-11-25）**  
-> **mt5700d 常驻后端与单包融合交付**：可执行文件、服务名、配置与前端资源统一为 `mt5700d`；升级自动迁移既有配置与历史数据，服务启动链路修复。升级后建议按 `Ctrl + F5` 强制刷新浏览器缓存。
+> **最新正式版：[v2.1.0](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.1.0)（2026-11-27）**  
+> **QQ 机器人扫码绑定**：手机 QQ 扫一次码即可取回 AppID/AppSecret 并绑定 openid，免手抄、免二次发消息；同时修复 LuCI 26 保存误报、扫码链路弱网重试与升级后 reload 不换进程等问题。升级后建议按 `Ctrl + F5` 强制刷新浏览器缓存。
 
 ### 🧭 阶段速览与导航
 
@@ -49,13 +49,17 @@
 
 ---
 
-## 🚧 未发布 · QQ 机器人扫码绑定
+## 🚀 v2.1.0 · QQ 机器人扫码绑定
 
-> 用手机 QQ 扫码一次搞定「取凭据 + 绑 openid」，替代原先「去开放平台抄 AppID/AppSecret → 再给机器人发一条消息」的两步流程。尚未发版。
+> 用手机 QQ 扫码一次搞定「取凭据 + 绑 openid」，替代原先「去开放平台抄 AppID/AppSecret → 再给机器人发一条消息」的两步流程。本版同时修掉扫码链路在 5G 弱网、LuCI 26 与升级重启场景下实机暴露的全部缺陷。
 
 | 版本 | 发布日期 | 分类 | 主要改进与变更摘要 |
 | :--- | :---: | :--- | :--- |
-| 待定 | — | `✨ 新增` `🛡️ 安全` | QQ 通知卡片新增「扫码绑定」：后端建任务/出码/轮询并用 AES-256-GCM 本地解密，凭据直写 UCI，前端只拿 AppID 与 openid |
+| v2.1.0 | 2026-11-27 | `✨ 新增` `🛡️ 安全` `🐛 修复` | QQ 通知卡片新增「扫码绑定」：扫码一次取回 AppID/AppSecret/openid；后端建任务/出码/轮询，AES-256-GCM 本地解密后直写 UCI，前端只拿 AppID 与 openid。修复保存覆盖 AppSecret、错误串回显明文密钥、并发出死码、终态失败空转、弱网 6 秒放弃、LuCI 26 模块工厂与保存误报 NO_DATA、升级后 reload 不换进程等问题 |
+
+> **扫码绑定链路**：`POST /lite/create_bind_task`（32B 随机密钥）→ 二维码指向官方 `connect.html`（`task_id` + `_wv=2`）→ 每 2s `POST /lite/poll_bind_result` → `status=2` 时用 AES-256-GCM（`IV(12)‖CT‖TAG(16)`）本地解密 → `uci set/commit` 写入 `qq_app_id / qq_app_secret / qq_target_type / qq_target_id` → 热替换 QQ 通道，无需重启。协议字段与超时对齐 `@tencent-connect/qqbot-connector@1.2.0`。
+>
+> **实机结论（ImmortalWRT SNAPSHOT / aarch64）**：二维码有效期实测约 150s；扫码 → 凭据落盘 → 测试推送成功；配置文件权限收紧为 0600；扫码后按「保存」不会覆盖新密钥。
 
 ---
 
