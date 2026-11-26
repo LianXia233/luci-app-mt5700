@@ -41,6 +41,11 @@ kill_prog_processes() {
 		p=${d#/proc/}
 		[ "$p" = "$$" ] && continue
 		exe=$(readlink "$d/exe" 2>/dev/null) || continue
+		# 二进制被替换后（opkg 升级、手工覆盖、调试部署），旧进程的 exe 链接会
+		# 变成 "/usr/bin/mt5700d (deleted)"，与 $PROG 不再相等 —— 直接比较会漏杀
+		# 旧进程。实测：升级二进制后 `/etc/init.d/mt5700d reload` 报告成功，实际
+		# 仍在跑旧 inode，直到重启才生效。去掉该后缀再比较。
+		exe=${exe% (deleted)}
 		[ "$exe" = "$PROG" ] || continue
 		kill "$p" 2>/dev/null
 	done
