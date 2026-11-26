@@ -173,6 +173,9 @@ pub struct RpcServer {
     sms: Arc<crate::sms::SmsService>,
     /// QQ 绑定进度（bind 模式时由绑定任务更新，qq_bind_status 读取；未设置则返回 idle）
     bind_status: Option<std::sync::Arc<crate::qqbind::BindStatus>>,
+    /// QQ 扫码绑定会话（qq_qr_start / qq_qr_poll / qq_qr_cancel 共用的内存态）。
+    /// 与 bind_status 是两条独立链路：扫码一次拿凭据 + openid，发消息模式只补 openid。
+    qr_bind: std::sync::Arc<crate::qqqr::QrBind>,
     /// 使用量后台统计器：`usage` / `usage_ctl` 读写的都是它。
     usage: Arc<crate::usage::UsageTracker>,
     /// 短信本地归档：`store_stats` / `store_read` / `store_drop` 读写的都是它。
@@ -206,6 +209,7 @@ impl RpcServer {
             ctx,
             notify,
             bind_status: None,
+            qr_bind: std::sync::Arc::new(crate::qqqr::QrBind::new()),
             usage,
             sms,
             archive: None,
@@ -239,6 +243,7 @@ impl RpcServer {
             ctx: self.ctx.clone(),
             notify: self.notify.clone(),
             bind_status: self.bind_status.clone(),
+            qr_bind: self.qr_bind.clone(),
             usage: self.usage.clone(),
             sms: self.sms.clone(),
             archive: self.archive.clone(),
@@ -440,6 +445,21 @@ impl RpcServer {
                     "target_id": s.target.as_ref().map(|t| t.target_id.as_str()).unwrap_or(""),
                     "error": s.error,
                 } })
+            }
+            // QQ 扫码绑定（LuCI 通知卡片「扫码绑定」）：协议细节、UCI 落盘与热替换
+            // 全部在 qqqr 模块内，这里只取参数并包一层 {"id","result"}。
+            "qq_qr_start" => {
+                let source = req.params.get("source").and_then(|v| v.as_str()).unwrap_or("mt5700d");
+                let result = self.qr_bind.rpc_start(source).await;
+                serde_json::json!({ "id": id, "result": result })
+            }
+            "qq_qr_poll" => {
+                let result = self.qr_bind.rpc_poll(&self.notify).await;
+                serde_json::json!({ "id": id, "result": result })
+            }
+            "qq_qr_cancel" => {
+                let result = self.qr_bind.rpc_cancel();
+                serde_json::json!({ "id": id, "result": result })
             }
             // QQ 自定义菜单（LuCI「配置 QQ 菜单」按钮）：set=覆盖配置默认菜单，
             // get=查询当前菜单。菜单仅 C2C 场景生效，见 qqpush 模块文档。

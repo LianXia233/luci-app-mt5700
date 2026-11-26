@@ -18,6 +18,11 @@ async-trait = "0.1"
 # （rustls 栈与 ureq 共用，避免引入 openssl）
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+# QQ 扫码绑定：解密官方回传的 AppSecret（AES-256-GCM，纯 Rust 实现，
+# 不引入 C/openssl，交叉编译到 Cortex-A53 时与 rustls 栈互不影响）
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+# 二维码矩阵生成（只要矩阵，不用它的图像/SVG 后端；零额外依赖）
+qrcodegen = "1"
 
 [profile.release]
 opt-level = "s"

@@ -6,7 +6,8 @@
 'require mt5700d/rpc';
 'require mt5700d/ui';
 'require mt5700d/config-common';
-/* global L, E, Mt5700, Mt5700d, Ui, MtConfigCommon */
+'require mt5700d/qqqbind';
+/* global L, E, Mt5700, Mt5700d, Ui, MtConfigCommon, MtQqBind */
 
 /*
  * 配置模块：通知（事件开关 / 推送通道 / 定时推送 / 信号巡检 / 频率与时段门控 /
@@ -87,6 +88,15 @@ var MtConfigNotify = (function () {
 			'绑定模式留空即可；手动模式请粘贴完整 openid。'));
 		all.qq = qq.input; all.qqAppId = qqAppId; all.qqSecret = qqSecret;
 		all.qqTarget = qqTarget; all.qqBind = qqBind; all.qqTargetId = qqTargetId;
+
+		/* ---- QQ 扫码绑定：独立模块 mt5700d/qqqbind，这里只把待回填的控件交进去 ----
+		 * 申请任务、画码、轮询、过期换码、取消都在模块内，配置页不持有任何扫码状态。 */
+		MtQqBind.mount(bodyEl, {
+			appId: qqAppId,
+			targetId: qqTargetId,
+			target: qqTarget,
+			enabled: qq.input
+		});
 
 		var qqFormat = Mt5700.select([
 			{ label: '自动（富文本优先，失败回落纯文本，推荐）', value: 'auto' },

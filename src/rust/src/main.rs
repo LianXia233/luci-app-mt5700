@@ -21,6 +21,7 @@ mod notify;
 mod pdu;
 mod qqbind;
 mod qqpush;
+mod qqqr;
 mod ringlog;
 mod rpcserver;
 mod schedconfig;
