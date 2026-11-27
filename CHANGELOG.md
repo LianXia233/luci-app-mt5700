@@ -6,7 +6,7 @@
 *12 个原生 LuCI 高性能视图 + Rust / Tokio 常驻高并发后端 · 单包融合交付*
 
 <p align="center">
-  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.1.0-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
+  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.1.1-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
   <img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC%E6%80%BB%E6%95%B0-91%20Releases-16a34a?style=flat-square" alt="Total Versions" />
   <img src="https://img.shields.io/badge/%E8%BF%AD%E4%BB%A3%E5%91%A8%E6%9C%9F-70%20Days-0891b2?style=flat-square" alt="Timespan" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-ea580c?style=flat-square" alt="License" /></a>
@@ -17,8 +17,8 @@
 ---
 
 > [!TIP]
-> **最新正式版：[v2.1.0](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.1.0)（2026-11-27）**  
-> **QQ 机器人扫码绑定**：手机 QQ 扫一次码即可取回 AppID/AppSecret 并绑定 openid，免手抄、免二次发消息；同时修复 LuCI 26 保存误报、扫码链路弱网重试与升级后 reload 不换进程等问题。升级后建议按 `Ctrl + F5` 强制刷新浏览器缓存。
+> **最新正式版：[v2.1.1](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.1.1)（2026-11-27）**  
+> **时间口径收敛与夜间模式可读性**：前端业务时间不再取浏览器时钟，一律消费后端 `nettime` 的 `at_ms`（成功/失败应答、批量与预取路径均透传），手机时区或系统时间设错时横轴、终端历史仍与日志、通知同源；同时补齐日志徽章与三处页面的暗色规则，修复夜间小字看不清。升级后建议按 `Ctrl + F5` 强制刷新浏览器缓存。
 
 ### 🧭 阶段速览与导航
 
@@ -49,15 +49,15 @@
 
 ---
 
-## 🚧 未发布（Unreleased）
+## 🚀 v2.1.1 · 时间口径收敛与夜间模式可读性
 
-> 以下改动已落在 `fix/nettime-and-dark-theme` 分支，待并入下一版本定版时归入对应版本号；当前未提升 `PKG_VERSION` 与文档版本徽标。
+> 前端业务时间统一改为消费后端 `nettime` 的权威时刻，手机时区或系统时间设错时不再与日志、通知对不上；同时修掉「半套暗色规则」导致的夜间小字看不清。协议向后兼容，老前端忽略 `at_ms` 即可。
 
 | 版本 | 发布日期 | 分类 | 主要改进与变更摘要 |
 | :--- | :---: | :--- | :--- |
-| 待定 | — | `🐛 修复` | **时间口径收敛**：后端 `at` 应答与 `raw_data` URC 上报注入 `at_ms`（`nettime::now_ms()`，NTP 优先、设备时钟回退）；前端新增 `serverClock(atMs)` 统一格式化后端 epoch，无有效值显示占位、不回退浏览器时钟。趋势图横轴、终端命令历史、REJINFO 上报打戳、REJINFO 卡片展示 4 处业务时间改用权威时刻，手机时区/系统时间设错时仍与日志、通知同源；协议向后兼容，老前端忽略 `at_ms` 即可。失败应答与批量接口同样透传 `at_ms`（`sendBatch` 逐条、status 页预取缓存两个分支都保留），避免 AT 报错条目显示「时间未知」、趋势图横轴退化成序号占位 |
-| 待定 | — | `🎨 界面` | **夜间模式可读性**：补齐日志级别/方向/来源徽章与 `logscroll-btn` 的 `.at-dark` 提亮规则，`--mt5700-text-muted` 暗色值由 `#64748b` 提亮到 `#8fa3b8`，模组设置页/拨号页局部样式补 `html.at-dark` 分支，信号档位标签不透明度 0.5 → 0.85。此前 logcat 分类徽章已有 21 条暗色规则但这几组漏写，10~11px 小字对比度仅约 2~3:1。`MT5700_CSS_VERSION` 2.46.9 → 2.46.10，确保升级后浏览器重新拉取样式表（`uhttpd` 静态资源恒给 `Last-Modified: 1970`，不递增版本戳会「代码已改、界面未变」） |
-| 待定 | — | `🔧 工程` | 新增 `tests/server-time-test.js`（24 项断言）锁定后端 `at_ms` 注入、前端透传链（含失败应答与批量/预取路径）、4 处违规点禁用浏览器时钟；`global-css-test.js` 第 7 节逐个断言徽章暗色规则成对出现；`usage-source-test.js` 的 `MT5700_CSS_VERSION` 基线同步到 2.46.10；`AGENTS.md` 新增第七章「时间口径规则」固化唯一墙上时间入口与三类时间分流 |
+| v2.1.1 | 2026-11-27 | `🐛 修复` | **时间口径收敛**：后端 `at` 应答与 `raw_data` URC 上报注入 `at_ms`（`nettime::now_ms()`，NTP 优先、设备时钟回退）；前端新增 `serverClock(atMs)` 统一格式化后端 epoch，无有效值显示占位、不回退浏览器时钟。趋势图横轴、终端命令历史、REJINFO 上报打戳、REJINFO 卡片展示 4 处业务时间改用权威时刻，手机时区/系统时间设错时仍与日志、通知同源；协议向后兼容，老前端忽略 `at_ms` 即可。失败应答与批量接口同样透传 `at_ms`（`sendBatch` 逐条、status 页预取缓存两个分支都保留），避免 AT 报错条目显示「时间未知」、趋势图横轴退化成序号占位 |
+| v2.1.1 | 2026-11-27 | `🎨 界面` | **夜间模式可读性**：补齐日志级别/方向/来源徽章与 `logscroll-btn` 的 `.at-dark` 提亮规则，`--mt5700-text-muted` 暗色值由 `#64748b` 提亮到 `#8fa3b8`（暗底对比度约 3.6:1 → 6.6:1），模组设置页/拨号页局部样式补 `html.at-dark` 分支，信号档位标签不透明度 0.5 → 0.85。此前 logcat 分类徽章已有 21 条暗色规则但这几组漏写，10~11px 小字对比度仅约 2~3:1。`MT5700_CSS_VERSION` 2.46.9 → 2.46.10，确保升级后浏览器重新拉取样式表（`uhttpd` 静态资源恒给 `Last-Modified: 1970`，不递增版本戳会「代码已改、界面未变」） |
+| v2.1.1 | 2026-11-27 | `🔧 工程` | 新增 `tests/server-time-test.js`（24 项断言）锁定后端 `at_ms` 注入、前端透传链（含失败应答与批量/预取路径）、4 处违规点禁用浏览器时钟；`global-css-test.js` 第 7 节逐个断言徽章暗色规则成对出现；`usage-source-test.js` 的 `MT5700_CSS_VERSION` 基线同步到 2.46.10；`AGENTS.md` 新增第七章「时间口径规则」固化唯一墙上时间入口与三类时间分流。`checks.yml` 的 Rust 作业显示名改回「Rust 单元测试」，与 `main` 分支保护要求的必需检查 context 对齐（名称不一致曾使 PR 恒为 `blocked`，四项 CI 全绿也合不了） |
 
 ---
 
