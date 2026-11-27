@@ -312,6 +312,8 @@ cargo about generate about.hbs
 
 - 后端 `at` RPC 应答注入 `"at_ms": nettime::now_ms()`；`raw_data` URC 上报事件同样注入 `at_ms`（协议向后兼容，老前端忽略即可）。
 - 前端 `sendCommand` 把应答里的 `at_ms` 透传到结果对象；`parseRawData(text, atMs)` 把上报时刻传给 `parseRejInfo(line, atMs)`。
+- **成功与失败应答一视同仁**：AT 报错时后端照样带 `at_ms`，前端失败分支不得丢弃，否则终端历史里失败条目只能显示「时间未知」。
+- **批量与预取路径不得丢字段**：`sendBatch` 逐条透传 `at_ms`，status 页 `prefetchRound()` 的成功/失败两个分支都要把它存进预取表。只修逐条 `sendCommand` 是不够的 —— 批量才是 status 页取数主干，漏一处就会让趋势图横轴永远退化成「—1」「—2」占位。
 - 所有前端业务时刻一律走 `Mt5700d.serverClock(atMs)`；后端没给时刻时显示占位，**不得用 `Date.now()` 兜底**。
 
 ### 禁止回退的反例（历史真实违规，已修复）
@@ -326,6 +328,8 @@ cargo about generate about.hbs
 ### 已知局限（不能只靠测试）
 
 `nettime.rs` 的源码级守卫只匹配 `chrono::Utc::now(`、`chrono::Local`、`SystemTime::now()` 三种字面模式，**捕获不到 `use chrono::Utc;` 之后写 `Utc::now()` 的写法**。因此改动后端时间相关代码时，必须额外人工全目录扫描，不能因为测试通过就认定无绕过。
+
+`serverClock` 用 `new Date(ms)` 做格式化，**时区取浏览器本地时区**：它解决的是「浏览器时钟偏差」，不解决「手机时区设错」。两端时区不一致时，同一 epoch 会显示成不同的钟点（与后端 `nettime::now_string()` 的设备时区文本可能差几个小时）。这属于展示层口径，排查跨时区问题时以 epoch 为准。
 
 ### 复核命令
 
