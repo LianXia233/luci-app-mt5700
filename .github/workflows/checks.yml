@@ -175,7 +175,12 @@ jobs:
           done
 
   rust-unit:
-    name: Rust 单元测试与 Clippy
+    # 作业显示名 = 分支保护要求的必需检查 context。main 的 required status checks 是
+    # 「静态检查与单元测试」「Rust 单元测试」，此前这里叫「Rust 单元测试与 Clippy」，
+    # 名字对不上 → 必需检查永远不出现，PR 恒为 blocked，四项 CI 全绿也合不了。
+    # 以后想在这个名字里加词，先改分支保护的要求名，再改这里，别只改一边。
+    # Clippy 仍在本作业内执行（见下方「Clippy」步骤），名字短不代表不带它。
+    name: Rust 单元测试
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
