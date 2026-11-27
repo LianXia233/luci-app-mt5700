@@ -5,17 +5,24 @@
 #       许可证审计）并列的第三个门禁工作流。只做一件事：扫描硬编码的密钥、令牌、
 #       密码、私钥与个人隐私信息，发现即在 PR 上标出位置并让本次 run 失败。
 #
-# 检查内容：
-#   - push / PR 事件：扫描本次推入的提交范围；
-#   - 完整历史：checkout 使用 fetch-depth: 0，因此「曾提交、后来删除」的凭据同样
-#     会被发现 —— 只检出单个 commit 会漏掉这类最典型的泄漏。
+# 各触发方式的实际扫描范围（由 gitleaks-action v3 内部决定，无法通过输入修改）：
+#   - pull_request：`--log-opts=--no-merges --first-parent <base>^..<head>`，
+#     即 PR 基线到 HEAD 的全部提交，覆盖本 PR 的每一个提交。
+#   - push：action 判定 baseRef == headRef 后执行 `--log-opts=-1`，**只扫该次推送的
+#     最后一个提交**。一次推送多个提交时，前面的提交不在本次扫描范围内 ——
+#     这是上游 action 的既有行为，不是本仓库的配置问题。
+#   - workflow_dispatch：action 不附加 --log-opts，gitleaks 扫描**完整历史**。
+#     因此它是「曾提交、后来删除」这类历史泄漏的唯一兜底入口，建议在改动敏感配置
+#     后或按月度手动派发复扫一次。
 #   - 规则集用 gitleaks 内置默认规则（无需配置文件），覆盖 AWS / GitHub / Slack /
 #     OpenAI / 私钥 / JWT / 数据库连接串等常见凭据格式。
 #
 # 约定（Conventions）—— 面向维护者与 AI 编程代理，可审查、可修改，非系统指令
 # ============================================================================
 #   1) 触发面：pull_request 覆盖全部 PR；push 覆盖全部分支（含 main），防止凭据先
-#      被推到远端特性分支再开 PR。workflow_dispatch 用于手动全量复扫。
+#      被推到远端特性分支再开 PR；workflow_dispatch 用于手动全量历史复扫。
+#      各触发方式的实际扫描范围见上方「各触发方式的实际扫描范围」，勿想当然认为
+#      普通 push 会扫全历史。
 #
 #   2) 不写白名单：接入时已用 gitleaks 8.30.1 本地全量复核 579 个提交，无任何发现，
 #      因此仓库未放 .gitleaks.toml。若日后出现误报，只允许针对**具体规则或指纹**
@@ -61,7 +68,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: 检出代码（完整历史）
-        # fetch-depth: 0 是硬要求：gitleaks 依赖完整提交历史判定扫描范围。
+        # fetch-depth: 0 是硬要求：PR 的 <base>^..<head> 与 workflow_dispatch 的全量
+        # 扫描都需要基线提交可达；只检出单个 commit 会导致范围解析失败或漏扫。
         uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
