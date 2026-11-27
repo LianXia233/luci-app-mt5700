@@ -368,10 +368,16 @@ impl RpcServer {
                     }
                 }
                 let resp = self.run_command(cmd).await;
+                /* at_ms：后端权威时刻（nettime::now_ms，NTP 优先）。
+                 * 前端某些页面要把「命令发出/应答到达」当业务时间展示（终端回显、
+                 * 网络拒绝时间、信号采样横轴）。这些时刻不能取浏览器时钟 ——
+                 * 手机时区设错或系统时间偏了就会显示成毫无意义的点。统一从这里取，
+                 * 与日志/通知/清零判定共用同一个插件时间源。 */
                 let mut result = serde_json::json!({
                     "success": resp.success,
                     "data": resp.data,
                     "error": resp.error,
+                    "at_ms": crate::nettime::now_ms(),
                 });
                 /* 仅失败应答带 cause：skip_serializing_if 只作用于 serde 序列化，
                  * json! 手工拼接必须自己判空，否则成功应答也会多出 cause:null。 */
