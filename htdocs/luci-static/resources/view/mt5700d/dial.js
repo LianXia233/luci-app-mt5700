@@ -85,7 +85,9 @@ return L.view.extend({
 			'  .mt-pdp-table-wrap .mt5700-table th:nth-child(5), .mt-pdp-table-wrap .mt5700-table td:nth-child(5) { width: 190px; text-align: right; }',
 			'}',
 			'/* 底部暂存条适配 */',
-			'.mt5700-applybar { z-index: 100; }'
+			'.mt5700-applybar { z-index: 100; }',
+			/* 暗色模式：CID 徽章 #7c3aed 压在深卡片底上对比度不足，提到 400 级 */
+			'html.at-dark .mt-pdp-cid { color: #c4b5fd; }'
 		].join('\n'));
 		body.appendChild(dialStyle);
 

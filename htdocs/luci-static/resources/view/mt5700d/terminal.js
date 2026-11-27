@@ -161,11 +161,15 @@ return L.view.extend({
 			sendBtn.disabled = true;
 
 			Mt5700d.client.sendCommand(command).then(function (res) {
+				/* 时刻取后端 nettime（应答自带 at_ms），不用浏览器时钟：
+				 * 手机时区设错 / 系统时间偏了时，终端回显的时间必须与日志/通知一致。
+				 * 老后端无 at_ms 时显示占位，不拿本地时钟冒充。 */
+				var stamp = Mt5700d.serverClock(res && res.at_ms);
 				entries.push({
 					cmd: command,
 					body: res.success ? String(res.data || '(无输出)') : String(res.error || '未知错误'),
 					ok: !!res.success,
-					at: new Date().toLocaleTimeString('zh-CN', { hour12: false })
+					at: stamp || '时间未知'
 				});
 				cmdInput.value = '';
 				renderConsole();

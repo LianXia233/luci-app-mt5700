@@ -107,7 +107,12 @@ return L.view.extend({
 			'.mt-sysctl-desc { font-size: 12px; color: var(--mt5700-text-secondary); line-height: 1.55; margin-top: 4px; }',
 			'.mt-sysctl-item .mt5700-btn { flex: 0 0 auto; min-width: 120px; }',
 			'.mt5700-btn-warn { color: #b45309; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.4); }',
-			'.mt5700-btn-warn:hover:not(:disabled) { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.6); }'
+			'.mt5700-btn-warn:hover:not(:disabled) { background: rgba(245, 158, 11, 0.18); border-color: rgba(245, 158, 11, 0.6); }',
+			/* 暗色模式提亮：以上是 500~600 级字色，压在深卡片底 rgba(22,27,46) 上
+			   10~11px 小字对比度不足，夜间看不清。与 mt5700.css 的 at-dark 徽章同口径。 */
+			'html.at-dark .mt-sys-acq-cards .mt5700-radio-card-badge { color: #c4b5fd; }',
+			'html.at-dark .mt-sys-srv-note { color: #fbbf24; }',
+			'html.at-dark .mt5700-btn-warn { color: #fbbf24; }'
 		].join('\n'));
 		body.appendChild(modemStyle);
 

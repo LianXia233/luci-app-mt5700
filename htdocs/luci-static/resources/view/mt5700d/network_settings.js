@@ -77,7 +77,9 @@ return L.view.extend({
 			rejectBody.appendChild(E('div', { 'class': 'mt5700-hint' },
 				'原始原因值 #' + r.originalCause + ' · LAC ' + (r.lac || '—') + ' · RAC ' + (r.rac || '—') +
 				(r.esmCause !== undefined ? ' · ESM 原因 #' + r.esmCause : '') +
-				' · ' + new Date(r.at).toLocaleTimeString()));
+				/* 上报时刻取后端 nettime 的 epoch（r.at），不用浏览器时钟；
+				 * 老后端没有该字段时据实显示"时间未知"。 */
+				' · ' + (Mt5700d.serverClock(r.at) || '时间未知')));
 		}
 		renderReject();
 

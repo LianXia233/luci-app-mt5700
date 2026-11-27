@@ -25,7 +25,8 @@
 
 [四、 ⚖️ 保护机制的边界](#四保护机制的边界) &nbsp;•&nbsp;
 [五、 🦀 Rust/Tokio 后端健康规则](#五rusttokio-后端健康规则) &nbsp;•&nbsp;
-[六、 📦 第三方依赖许可证与来源规则](#六第三方依赖许可证与来源规则)
+[六、 📦 第三方依赖许可证与来源规则](#六第三方依赖许可证与来源规则) &nbsp;•&nbsp;
+[七、 🕐 时间口径规则](#七时间口径规则插件时间源)
 
 </div>
 
@@ -280,3 +281,66 @@ cargo about generate about.hbs
 ```
 
 新增或升级依赖后，必须审查完整报告；未知许可证或未知来源未解决前，不得合并或发布。
+
+---
+
+## 七、时间口径规则（插件时间源）
+
+插件有且只有一套权威时间源：后端 `crate::nettime`（NTP 优先，取不到回退设备时钟）。**凡是「现在几点」的墙上时间判定或业务展示，都必须源自它**；浏览器时钟、裸 `SystemTime::now()` / `chrono::Utc::now()` 一律不得进入业务路径。本节与「Rust/Tokio 后端健康规则」同等强制，改后端时间逻辑或前端时间展示时逐条自查。
+
+### 权威时间入口
+
+| 用途 | 后端 / 前端入口 | 说明 |
+| :--- | :--- | :--- |
+| 后端墙上时间（唯一入口） | `crate::nettime::now()` | NTP 同步失败时回退设备时钟；`localtime` 只负责时区显示，不做计时 |
+| 毫秒 / 秒 epoch | `nettime::now_ms()` / `nettime::now_ts()` | 需要传给前端时刻时用 `now_ms()` |
+| 后端格式化时刻 | `nettime::now_string()` | 日志、URC 文本等后端自渲染场景 |
+| 前端统一格式化出口 | `Mt5700d.serverClock(atMs[, withDate])` | **只格式化后端给的 epoch**，不是取当前时刻；无有效值显示「时间未知」，绝不回退浏览器时钟 |
+
+### 三类时间的强制分流
+
+| 类别 | 典型场景 | 必须用 | 禁止 |
+| :--- | :--- | :--- | :--- |
+| **墙上时间**（判定 + 展示） | 日志时间、通知时间、时段 / 锁频判定、按月清零、短信归档、图表横轴、命令历史、URC 上报时刻 | 后端 `nettime`；前端消费后端 `at_ms` 再交给 `serverClock` | 后端 `SystemTime::now()` / `Utc::now()` / `Local::now()`；前端 `new Date()` / `toLocaleTimeString()` / `getHours()` 取当前时刻 |
+| **间隔测量** | AT 超时、节流、速率、凭证有效期 | 后端 `std::time::Instant`、前端 `performance.now()` | 用墙上时间算间隔（NTP 校正会跳变） |
+| **纯技术用途** | 超时 deadline、TTL、去重键、文件名、熔断窗口 | `Date.now()`（前端）、`Instant`（后端） | 把这些值当作业务时间展示或推算依据 |
+
+> [!IMPORTANT]
+> `new Date(ms)` 用于**格式化后端给的 epoch**（如 `logs.js`、`serverClock`）是合规的；违规的是 `new Date()` **无参取当前时刻**并用于业务展示。两者不要混淆，也不要把合规用法一并「修掉」。
+
+### 前后端时间传递（已落地机制）
+
+- 后端 `at` RPC 应答注入 `"at_ms": nettime::now_ms()`；`raw_data` URC 上报事件同样注入 `at_ms`（协议向后兼容，老前端忽略即可）。
+- 前端 `sendCommand` 把应答里的 `at_ms` 透传到结果对象；`parseRawData(text, atMs)` 把上报时刻传给 `parseRejInfo(line, atMs)`。
+- **成功与失败应答一视同仁**：AT 报错时后端照样带 `at_ms`，前端失败分支不得丢弃，否则终端历史里失败条目只能显示「时间未知」。
+- **批量与预取路径不得丢字段**：`sendBatch` 逐条透传 `at_ms`，status 页 `prefetchRound()` 的成功/失败两个分支都要把它存进预取表。只修逐条 `sendCommand` 是不够的 —— 批量才是 status 页取数主干，漏一处就会让趋势图横轴永远退化成「—1」「—2」占位。
+- 所有前端业务时刻一律走 `Mt5700d.serverClock(atMs)`；后端没给时刻时显示占位，**不得用 `Date.now()` 兜底**。
+
+### 禁止回退的反例（历史真实违规，已修复）
+
+| 文件 | 曾经的违规写法 | 正确做法 |
+| :--- | :--- | :--- |
+| `view/mt5700d/network_status.js` | 趋势图采样点 `new Date()` 取当前时刻打横轴 | 用本轮信号查询应答的 `at_ms`（存于 `state.cell.at_ms`）格式化 |
+| `view/mt5700d/terminal.js` | AT 历史条目 `new Date().toLocaleTimeString()` | 用 `res.at_ms` 经 `serverClock` 格式化 |
+| `view/mt5700d/network_settings.js` | 网络拒绝卡片 `new Date(r.at).toLocaleTimeString()` | 用后端 epoch `r.at` 经 `serverClock` 格式化 |
+| `mt5700d/parse.js` | `parseRejInfo` 内 `at: Date.now()` | 用传入的 `atMs`；未传则 `at: null`，由展示层显示占位 |
+
+### 已知局限（不能只靠测试）
+
+`nettime.rs` 的源码级守卫只匹配 `chrono::Utc::now(`、`chrono::Local`、`SystemTime::now()` 三种字面模式，**捕获不到 `use chrono::Utc;` 之后写 `Utc::now()` 的写法**。因此改动后端时间相关代码时，必须额外人工全目录扫描，不能因为测试通过就认定无绕过。
+
+`serverClock` 用 `new Date(ms)` 做格式化，**时区取浏览器本地时区**：它解决的是「浏览器时钟偏差」，不解决「手机时区设错」。两端时区不一致时，同一 epoch 会显示成不同的钟点（与后端 `nettime::now_string()` 的设备时区文本可能差几个小时）。这属于展示层口径，排查跨时区问题时以 epoch 为准。
+
+### 复核命令
+
+```sh
+node tests/server-time-test.js
+
+# 前端业务时钟残留：应为空或仅剩注释（logs.js 的 new Date(ms) 是格式化后端 epoch，合规）
+grep -rn 'new Date()\|toLocaleTimeString\|getHours()' htdocs/luci-static/resources/view/mt5700d/*.js
+
+# 后端绕过时间源：应只有 nettime.rs / localtime.rs 内部命中
+grep -rn 'SystemTime::now\|Utc::now\|Local::now' src/rust/src/*.rs | grep -v -E 'nettime.rs|localtime.rs'
+```
+
+改动 `parse.js` / `rpc.js` 的时间传递链后，确认 `server-time-test.js`、`usage-source-test.js`、`static-check.js` 全绿；后端另按第五章跑 `cargo test` 与 clippy。

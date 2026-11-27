@@ -40,7 +40,7 @@ var rpcAt = L.rpc.declare({
  * + fork nc + rpcd 往返），status 页一轮 25 条命令就白付 400ms 以上。
  * 合批后一轮只付一次桥开销，AT 通道仍然是单通道串行（互斥语义不变）。
  *
- * 返回 { success, items: [{cmd, success, data|error|cause}] }；
+ * 返回 { success, items: [{cmd, success, data|error|cause, at_ms}] }；
  * 批量整体失败（后端不可用 / 熔断）时 success 为 false，调用方退回逐条发送。
  */
 var rpcAtBatch = L.rpc.declare({
@@ -425,7 +425,7 @@ ATClient.prototype.pollEvents = function () {
 ATClient.prototype.handlePush = function (ev) {
 	if (!ev || typeof ev.type !== 'string') return;
 	if (ev.type === 'raw_data' && typeof ev.data === 'string') {
-		this.dispatchRawData(ev.data);
+		this.dispatchRawData(ev.data, ev.at_ms);
 		return;
 	}
 	if (['incoming_call', 'new_sms', 'pdcp_data', 'memory_full', 'cellscan', 'urc_data'].indexOf(ev.type) >= 0) {
@@ -518,11 +518,21 @@ ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
 					});
 				}
 				self.noteCommandFailure(resp.cause);
-				return { success: false, error: resp.error || '命令执行失败', cause: resp.cause };
+				/* 失败应答同样带 at_ms（后端无条件注入）：终端要把「哪一刻发出的
+				 * 命令失败了」如实写进历史，丢掉它只会让失败用例显示「时间未知」。
+				 * 客户端侧失败（熔断 / 超时）没有后端时刻，保持 undefined 是刻意的。 */
+				return {
+					success: false,
+					error: resp.error || '命令执行失败',
+					cause: resp.cause,
+					at_ms: resp.at_ms
+				};
 			}
 			self.noteCommandSuccess();
 			self.markBackendUp();
-			return { success: true, data: resp.data };
+			/* at_ms：后端 nettime 权威时刻（NTP 优先）。要把命令应答当业务时间
+			 * 展示的页面（终端回显、信号采样等）用它，不用浏览器时钟。 */
+			return { success: true, data: resp.data, at_ms: resp.at_ms };
 		}).catch(function (err) {
 			self.noteCommandFailure('timeout');
 			return { success: false, error: (err && err.message) || '命令执行失败', cause: 'timeout' };
@@ -539,9 +549,11 @@ ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
  * 但会尊重整体不可用 / 熔断状态，条件与 sendCommand 完全一致。
  *
  * 返回 Promise<数组|null>：
- *   数组 —— 与入参顺序一致的 [{cmd, success, data?, error?, cause?}]；
+ *   数组 —— 与入参顺序一致的 [{cmd, success, data?, error?, cause?, at_ms?}]；
  *   null —— 批量整体不可用（通道降级 / 熔断 / 超时 / RPC 失败），
  *           调用方应退回逐条 sendCommand，行为与改动前完全一致。
+ * 逐条的 at_ms 是后端 nettime 权威时刻，与 sendCommand 同口径透传，
+ * 调用方不得丢弃（趋势图横轴等业务时间依赖它，丢了只能退化成序号占位）。
  *
  * 预算取 24000ms：ucode 侧整批硬超时是 18s，必须比它大，
  * 才能先拿到后端/桥给的明确结论（哪几条超时），而不是浏览器先 abort。
@@ -577,7 +589,11 @@ ATClient.prototype.sendBatch = function (commands, timeoutMs) {
 				success: it.success !== false,
 				data: it.data,
 				error: it.error,
-				cause: it.cause
+				cause: it.cause,
+				/* 逐条带上后端 nettime 时刻：批量是 status 页的取数主干，
+				 * 这里吞掉 at_ms 会让下游（趋势图横轴）一律退化成序号占位。
+				 * 整批超时那条没有后端应答，at_ms 保持 undefined。 */
+				at_ms: it.at_ms
 			});
 		}
 		return out;
@@ -784,9 +800,10 @@ ATClient.prototype.offConnectionStateChange = function (cb) {
 	if (i >= 0) this.stateCallbacks.splice(i, 1);
 };
 
-ATClient.prototype.dispatchRawData = function (text) {
+ATClient.prototype.dispatchRawData = function (text, atMs) {
 	var self = this;
-	var parsed = parseRawData(text);
+	/* atMs 是后端 nettime 给的权威上报时刻，透传给解析层给 URC 打业务时间。 */
+	var parsed = parseRawData(text, atMs);
 	for (var i = 0; i < parsed.length; i++) {
 		self.emitPush({ success: true, type: 'urc_data', data: parsed[i] });
 	}
@@ -1003,6 +1020,25 @@ function formatDuration(seconds, showDays) {
 	return h2 + '时' + m2 + '分' + (seconds % 60) + '秒';
 }
 
+/*
+ * 把后端给的毫秒时刻（nettime::now_ms，NTP 优先）格式化为本地时区时刻串。
+ *
+ * 关键：入参必须来自后端 epoch，不能用 `serverClock(Date.now())` —— 那等于
+ * 绕回浏览器时钟，正是本函数要消灭的用法。`new Date(ms)` 在这里只对**已确定的
+ * 时刻**做格式化（与 logs.js 的 epoch 展示同一口径），不读取"现在几点"。
+ * 后端没给（老固件 / 应答缺字段）时返回 null，调用方据此显示"时间未知"，
+ * 而不是拿浏览器时钟冒充。
+ */
+function serverClock(atMs, withDate) {
+	if (atMs == null || !isFinite(atMs)) return null;
+	var d = new Date(Number(atMs));
+	if (isNaN(d.getTime())) return null;
+	function p2(n) { return (n < 10 ? '0' : '') + n; }
+	var hm = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+	if (!withDate) return hm;
+	return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + hm;
+}
+
 var NR_BANDS = {
 	'1': '2100 MHz (FDD)', '2': '1900 MHz (FDD)', '3': '1800 MHz (FDD)', '5': '850 MHz (FDD)',
 	'7': '2600 MHz (FDD)', '8': '900 MHz (FDD)', '20': '800 MHz (FDD)', '28': '700 MHz (FDD)',
@@ -1101,7 +1137,7 @@ function psRegText(stat) {
 
 /* ---- raw_data 拆分（^PDCPDATAINFO / URC） ---- */
 
-function parseRawData(text) {
+function parseRawData(text, atMs) {
 	var out = [];
 	var re = /\^PDCPDATAINFO:\s*([^\r\n]+)/g;
 	var m, rest = text;
@@ -1120,8 +1156,8 @@ function parseRawData(text) {
 		} else if (line.indexOf('^CERSSI:') === 0) {
 			out.push({ type: 'CERSSI', raw: line });
 		} else if (line.indexOf('^REJINFO') === 0) {
-			// 网络拒绝原因主动上报，解析后进 REJINFO 类型
-			out.push({ type: 'REJINFO', raw: line, parsed: Parse.parseRejInfo(line) });
+			// 网络拒绝原因主动上报；atMs 是后端 nettime 给的权威上报时刻
+			out.push({ type: 'REJINFO', raw: line, parsed: Parse.parseRejInfo(line, atMs) });
 		}
 	}
 	return out;
@@ -1678,6 +1714,7 @@ var Mt5700d = {
 	parseTemperature: parseTemperature,
 	formatFlow: formatFlow,
 	formatDuration: formatDuration,
+	serverClock: serverClock,
 	parseHCSQ: parseHCSQ,
 	parseMONSC: parseMONSC,
 	parseHFREQINFO: parseHFREQINFO,

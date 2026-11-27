@@ -113,7 +113,16 @@ impl Dispatcher {
                     match u {
                         Some(u) => {
                             if u.broadcast {
-                                self.ws(serde_json::json!({"type": "raw_data", "data": u.line}));
+                                /* at_ms：后端权威时刻（nettime），供前端给主动上报
+                                 * 标注业务时间（如 ^REJINFO 的网络拒绝时刻）。前端原先
+                                 * 用 Date.now() 打戳，手机时区/系统时钟一偏就与日志对不上；
+                                 * 与日志/通知共用同一时间源才排得了障。data 仍是纯文本，
+                                 * 老前端忽略 at_ms 即可，协议向后兼容。 */
+                                self.ws(serde_json::json!({
+                                    "type": "raw_data",
+                                    "data": u.line,
+                                    "at_ms": crate::nettime::now_ms(),
+                                }));
                             }
                             self.safe_handle(u.line).await;
                         }

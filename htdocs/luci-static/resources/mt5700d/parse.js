@@ -1183,7 +1183,9 @@ var Parse = (function () {
 	};
 
 	// 解析一行 ^REJINFO 上报，不匹配时返回 null。手册正文用了全角冒号，两种都收。
-	api.parseRejInfo = function (line) {
+	// atMs：后端 nettime 给的权威毫秒时刻（URC 上报时刻）。不传则 at 为 null，
+	// 展示层据实显示"时间未知"——绝不回退到 Date.now()（浏览器时钟）。
+	api.parseRejInfo = function (line, atMs) {
 		var match = line.match(/\^REJINFO[：:]\s*(.+)/);
 		if (!match) return null;
 		var f = match[1].split(',').map(function (v) { return v.trim(); });
@@ -1211,7 +1213,8 @@ var Parse = (function () {
 			// 手册：当 LNAS 注册被拒绝 #19 时才会带上这个值
 			esmCause: f[9] !== undefined ? num(f[9]) : undefined,
 			raw: line.trim(),
-			at: Date.now()
+			/* 权威时刻来自后端（nettime）；无后端时间时留 null，不编造本地时刻 */
+			at: (atMs != null && isFinite(atMs)) ? Number(atMs) : null
 		};
 	};
 
