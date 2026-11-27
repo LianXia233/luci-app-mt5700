@@ -6672,15 +6672,15 @@ html.at-dark .mt5700-sms-prompt .cbi-input-text:hover {
    只给键盘焦点描边，不干扰鼠标点击。 */
 .mt5700-cmd-quick-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }.mt5700-cmd-quick {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
-  padding: 12px 28px 12px 11px;
+  padding: 14px 28px 14px 13px;
   border: 1px solid var(--mt5700-border);
   border-radius: var(--mt5700-radius-md);
   background: var(--mt5700-card-bg);
@@ -6697,8 +6697,8 @@ html.at-dark .mt5700-sms-prompt .cbi-input-text:hover {
   outline-offset: 2px;
 }.mt5700-cmd-quick-icon {
   flex: 0 0 auto;
-  width: 21px;
-  height: 21px;
+  width: 22px;
+  height: 22px;
   color: var(--mt5700-accent);
 }.mt5700-cmd-text {
   display: flex;

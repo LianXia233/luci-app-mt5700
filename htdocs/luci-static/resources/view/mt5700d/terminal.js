@@ -10,32 +10,31 @@
 
 /**
  * AT 调试终端页面：
- * - 命令输入 + 回车发送、发送 / 清空 / 保存命令
+ * - 命令输入 + 回车发送、发送 / 清空
  * - 终端式输出（成功 / 失败着色，自动滚动到底部）
- * - 高频命令：只读、常用的 12 条直接展示为带图标的大按钮
+ * - 常用命令：维护者指定的 9 条只读查询，直接展示为带图标的大按钮
  * - 低频命令：按手册章节归为 8 组，收纳到折叠面板，支持关键字过滤
  * - 写操作（重启 / 清零 / 切换模式）单独成组并标红，点击后强化二次确认
- * - 已保存命令（localStorage savedAtCommands），支持删除
+ * - 不设「已保存命令」卡片：命令库本身已覆盖全部指令，少一张半空卡片，
+ *   页面层级更干净（历史 localStorage 数据不再读取，避免陈旧命令复活）
  *
  * 命令语法逐条对照《MT5700M-CN 5G 系列模组 AT 命令手册》V200R001C20 / 文档版本 01。
  * 只收录「不需要额外参数就能执行」的形式；需要参数的命令（锁频、FOTA 下载等）
  * 不做成快捷按钮，避免一点就 ERROR。
  */
 
-/* 高频：只读、无副作用、排障必然用到的命令 */
+/* 高频：沿用维护者确认的 9 条常用只读命令，名称与命令一一对应，
+ * 不擅自增减；其余查询按需收进下方分组，保持这里一眼可扫。 */
 var QUICK_COMMANDS = [
-	{ label: '信号强度', cmd: 'AT^HCSQ?', icon: 'op-signal', hint: 'RSRP / RSRQ / SINR' },
-	{ label: '5G 注册', cmd: 'AT+C5GREG?', icon: 'op-5g', hint: '5GC 注册状态' },
-	{ label: '驻留小区', cmd: 'AT^MONSC', icon: 'op-cell', hint: 'PCI / 频点 / 小区 ID' },
-	{ label: '工作频段', cmd: 'AT^HFREQINFO?', icon: 'op-band', hint: 'LTE / NR 工作频率' },
-	{ label: '网络时间', cmd: 'AT^NWTIME?', icon: 'op-schedule', hint: '网络系统时间与时区' },
-	{ label: '系统信息', cmd: 'AT^SYSINFOEX', icon: 'op-info', hint: '服务状态 / 域 / 漫游' },
-	{ label: 'SIM 状态', cmd: 'AT+CPIN?', icon: 'op-sim', hint: 'PIN 就绪状态' },
-	{ label: 'ICCID', cmd: 'AT^ICCID?', icon: 'op-sim', hint: 'SIM 卡号' },
-	{ label: '模组版本', cmd: 'ATI', icon: 'op-device', hint: '厂商 / 型号 / 软件版本' },
-	{ label: '拨号状态', cmd: 'AT^NDISSTATQRY?', icon: 'op-dial', hint: 'NDIS 连接状态' },
-	{ label: '流量统计', cmd: 'AT^DSFLOWQRY', icon: 'op-network', hint: '上下行字节数' },
-	{ label: '芯片温度', cmd: 'AT^CHIPTEMP?', icon: 'op-device', hint: '各传感器温度' }
+	{ label: '查询信号强度', cmd: 'AT^HCSQ?', icon: 'op-signal', hint: 'RSRP / RSRQ / SINR' },
+	{ label: '查询版本', cmd: 'ATI', icon: 'op-device', hint: '厂商 / 型号 / 软件版本' },
+	{ label: '查询 SIM 状态', cmd: 'AT+CPIN?', icon: 'op-sim', hint: 'PIN 就绪状态' },
+	{ label: '查询 ICCID', cmd: 'AT^ICCID?', icon: 'op-sim', hint: 'SIM 卡号' },
+	{ label: '查询 IMSI', cmd: 'AT+CIMI', icon: 'op-sim', hint: '国际移动用户识别码' },
+	{ label: '查询网络注册', cmd: 'AT+CREG?', icon: 'op-network', hint: 'CS 域注册状态' },
+	{ label: '查询基站信息', cmd: 'AT+CGREG?', icon: 'op-cell', hint: 'PS 域注册与小区信息' },
+	{ label: '查询网络时间', cmd: 'AT^NWTIME?', icon: 'op-schedule', hint: '网络系统时间与时区' },
+	{ label: '查询 IMEI', cmd: 'AT+CGSN', icon: 'op-shield', hint: '只读查询，不在页面留存' }
 ];
 
 /* 低频：按手册章节归类，默认折叠；danger 项会改变模组状态或数据 */
@@ -47,22 +46,19 @@ var COMMAND_GROUPS = [
 			{ label: '软件版本', cmd: 'AT+CGMR', icon: 'op-info' },
 			{ label: '私有版本', cmd: 'AT^VERSION?', icon: 'op-info' },
 			{ label: '能力域', cmd: 'AT+GCAP', icon: 'op-info' },
-			{ label: '产品序列号', cmd: 'AT+CGSN', icon: 'op-shield', hint: '只读查询，不在页面留存' },
 			{ label: 'SIM 卡类型', cmd: 'AT^CARDMODE', icon: 'op-sim' },
 			{ label: '本机号码', cmd: 'AT+CNUM', icon: 'op-info' }
 		]
 	},
 	{
 		title: 'SIM 与电话本', icon: 'op-sim', items: [
-			{ label: 'IMSI', cmd: 'AT+CIMI', icon: 'op-sim' },
 			{ label: 'SIM 状态上报', cmd: 'AT^SIMSQ?', icon: 'op-sim' },
 			{ label: '电话本存储器', cmd: 'AT+CPBS?', icon: 'op-sim' }
 		]
 	},
 	{
 		title: '网络与注册', icon: 'op-network', items: [
-			{ label: 'CS 注册', cmd: 'AT+CREG?', icon: 'op-network' },
-			{ label: 'PS 注册', cmd: 'AT+CGREG?', icon: 'op-network' },
+			{ label: '5G 注册', cmd: 'AT+C5GREG?', icon: 'op-5g', hint: '5GC 注册状态' },
 			{ label: 'EPS 注册', cmd: 'AT+CEREG?', icon: 'op-network' },
 			{ label: 'IMS 注册', cmd: 'AT+CIREG?', icon: 'op-network' },
 			{ label: '当前运营商', cmd: 'AT+COPS?', icon: 'op-network' },
@@ -72,6 +68,9 @@ var COMMAND_GROUPS = [
 	},
 	{
 		title: '信号与小区', icon: 'op-signal', items: [
+			{ label: '驻留小区', cmd: 'AT^MONSC', icon: 'op-cell', hint: 'PCI / 频点 / 小区 ID' },
+			{ label: '工作频段', cmd: 'AT^HFREQINFO?', icon: 'op-band', hint: 'LTE / NR 工作频率' },
+			{ label: '系统信息', cmd: 'AT^SYSINFOEX', icon: 'op-info', hint: '服务状态 / 域 / 漫游' },
 			{ label: 'SSB 信息', cmd: 'AT^NRSSBID?', icon: 'op-signal' },
 			{ label: 'NSA 辅小区', cmd: 'AT^MONSSC', icon: 'op-cell' },
 			{ label: 'CA 辅小区', cmd: 'AT^CASCELLINFO?', icon: 'op-cell' },
@@ -85,6 +84,8 @@ var COMMAND_GROUPS = [
 	},
 	{
 		title: '拨号与地址', icon: 'op-dial', items: [
+			{ label: '拨号状态', cmd: 'AT^NDISSTATQRY?', icon: 'op-dial', hint: 'NDIS 连接状态' },
+			{ label: '流量统计', cmd: 'AT^DSFLOWQRY', icon: 'op-network', hint: '上下行字节数' },
 			{ label: 'PDP 上下文', cmd: 'AT+CGDCONT?', icon: 'op-dial' },
 			{ label: 'IPv4 地址', cmd: 'AT^DHCP?', icon: 'op-network' },
 			{ label: 'IPv6 地址', cmd: 'AT^DHCPV6?', icon: 'op-network' },
@@ -104,6 +105,7 @@ var COMMAND_GROUPS = [
 	},
 	{
 		title: '诊断与日志', icon: 'op-logs', items: [
+			{ label: '芯片温度', cmd: 'AT^CHIPTEMP?', icon: 'op-device', hint: '各传感器温度' },
 			{ label: 'FOTA 状态', cmd: 'AT^FOTASTATE?', icon: 'op-upgrade' },
 			{ label: '日志导出开关', cmd: 'AT^LOGCATSWITCH?', icon: 'op-logs' },
 			{ label: '功能模式', cmd: 'AT+CFUN?', icon: 'op-info' }
@@ -132,12 +134,6 @@ return L.view.extend({
 		var body = page._body;
 
 		var entries = [];
-		var saved = [];
-
-		try {
-			var raw = localStorage.getItem('savedAtCommands');
-			if (raw) saved = JSON.parse(raw);
-		} catch (e) { /* ignore */ }
 
 		/* ---------- 终端主体 ---------- */
 		var termCard = Mt5700.card('AT 调试终端', '输入指令后按回车或点击发送；清空仅清除本页日志，不影响模组');
@@ -166,12 +162,10 @@ return L.view.extend({
 			entries = [];
 			renderConsole();
 		});
-		var saveBtn = Mt5700.ghostButton('保存命令', saveCurrent);
 
 		inputRow.appendChild(cmdInput);
 		inputRow.appendChild(sendBtn);
 		inputRow.appendChild(clearBtn);
-		inputRow.appendChild(saveBtn);
 		terminal.appendChild(inputRow);
 
 		cmdInput.addEventListener('keydown', function (e) {
@@ -214,54 +208,19 @@ return L.view.extend({
 			return btn;
 		}
 
-		/* ---------- 高频命令 + 已保存命令 ---------- */
-		var rowCommon = E('div', { 'class': 'mt5700-grid mt5700-grid-2' });
-		body.appendChild(rowCommon);
-
-		var quickCard = Mt5700.card('高频命令', '只读查询，点击后二次确认下发');
+		/* ---------- 常用命令：独占整行，9 条 3×3 对齐 ---------- */
+		var quickCard = Mt5700.card('常用命令', '只读查询 · 点击后二次确认下发');
 		var quickGrid = E('div', { 'class': 'mt5700-cmd-quick-grid' });
 		quickCard._body.appendChild(quickGrid);
 		QUICK_COMMANDS.forEach(function (item) {
 			quickGrid.appendChild(commandButton(item, true));
 		});
-		rowCommon.appendChild(quickCard);
-
-		var savedCard = Mt5700.card('已保存的命令', '来自本机浏览器 localStorage');
-		var savedWrap = E('div', { 'class': 'mt5700-inline' });
-		savedCard._body.appendChild(savedWrap);
-		rowCommon.appendChild(savedCard);
-
-		function renderSaved() {
-			savedWrap.innerHTML = '';
-			if (!saved.length) {
-				savedWrap.appendChild(Mt5700.empty('暂无已保存命令'));
-				return;
-			}
-			saved.forEach(function (item) {
-				var btn = Mt5700.button(item.remark || item.command, function () {
-					confirmAndSend(item.command, item.remark || item.command, false);
-				}, 'secondary');
-				var wrap = E('span', { 'class': 'mt5700-inline' });
-				wrap.appendChild(btn);
-				wrap.appendChild(Mt5700.dangerButton('删除', function () {
-					saved = saved.filter(function (c) { return c.command !== item.command; });
-					persistSaved();
-					renderSaved();
-				}));
-				savedWrap.appendChild(wrap);
-			});
-		}
-
-		function persistSaved() {
-			try {
-				localStorage.setItem('savedAtCommands', JSON.stringify(saved));
-			} catch (e) { /* ignore */ }
-		}
+		body.appendChild(quickCard);
 
 		/* ---------- 命令库：分组折叠 + 过滤 ---------- */
-		var libCard = Mt5700.card('命令库', '按手册章节归类；共 ' +
-			COMMAND_GROUPS.reduce(function (n, g) { return n + g.items.length; }, 0) +
-			' 条低频命令，默认折叠');
+		var libCard = Mt5700.card('更多命令', '按手册章节归类 · ' + COMMAND_GROUPS.length +
+			' 组 / ' + COMMAND_GROUPS.reduce(function (n, g) { return n + g.items.length; }, 0) +
+			' 条，默认折叠');
 
 		var filterRow = E('div', { 'class': 'mt5700-cmd-filter' });
 		var filterInput = Mt5700.input('text', '搜索命令名、AT 指令或用途');
@@ -375,7 +334,7 @@ return L.view.extend({
 			});
 		}
 
-		/* 快捷按钮 / 已保存命令：点击后二次确认再下发。
+		/* 命令按钮点击后二次确认再下发。
 		 * 写操作用更重的文案，避免「重启模组 / 流量清零」被当成普通查询误触。 */
 		function confirmAndSend(command, label, danger) {
 			var prefix = danger ? '谨慎操作：这条指令会改变模组状态或数据。\n\n' : '';
@@ -384,28 +343,7 @@ return L.view.extend({
 			}, danger ? '确认下发写操作' : '确认发送');
 		}
 
-		function saveCurrent() {
-			var cmd = (cmdInput.value || '').trim();
-			if (!cmd) { Mt5700.warning('请输入要保存的指令'); return; }
-			Ui.promptModal('保存 AT 命令', [
-				{ key: 'cmd', label: '命令', value: cmd },
-				{ key: 'remark', label: '备注' }
-			], function (values) {
-				var remark = (values.remark || '').trim();
-				if (!remark) { Mt5700.warning('请输入备注'); return; }
-				if (saved.some(function (c) { return c.command === values.cmd; })) {
-					Mt5700.warning('该命令已存在');
-					return;
-				}
-				saved.push({ command: values.cmd, remark: remark });
-				persistSaved();
-				Mt5700.success('已保存');
-				renderSaved();
-			});
-		}
-
 		/* ---------- 初始化 ---------- */
-		renderSaved();
 		renderConsole();
 		applyFilter();
 

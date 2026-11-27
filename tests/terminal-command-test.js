@@ -40,7 +40,12 @@ const groupCmds = groupsSrc.match(/cmd:\s*'([^']+)'/g || []).map((s) => s.match(
 const allCmds = quickCmds.concat(groupCmds);
 
 /* ---------- 1) 命令清单规模与层级 ---------- */
-check('高频命令数量 >= 10', quickCmds.length >= 10, '实际 ' + quickCmds.length);
+check('高频命令恰好是维护者确认的 9 条', quickCmds.length === 9, '实际 ' + quickCmds.length);
+/* 这 9 条是用户明确指定的高频集合，后续不得擅自增减或替换 */
+check('高频命令集合与常用清单一一对应',
+	['AT^HCSQ?', 'ATI', 'AT+CPIN?', 'AT^ICCID?', 'AT+CIMI', 'AT+CREG?', 'AT+CGREG?', 'AT^NWTIME?', 'AT+CGSN']
+		.every((c) => quickCmds.indexOf(c) >= 0),
+	quickCmds.join(', '));
 check('低频命令数量 >= 30', groupCmds.length >= 30, '实际 ' + groupCmds.length);
 check('命令总数 >= 40', allCmds.length >= 40, '实际 ' + allCmds.length);
 check('低频分组数量 >= 8', (groupsSrc.match(/title:\s*'/g) || []).length >= 8);
@@ -116,8 +121,15 @@ check('桌面 / 平板 / 手机三档响应式',
 check('尊重减少动态效果偏好', /prefers-reduced-motion[\s\S]*?\.mt5700-cmd-quick/.test(mtCss));
 
 /* ---------- 6) 缓存版本戳与行尾 ---------- */
-check('MT5700_CSS_VERSION 递增到 2.46.11',
-	/MT5700_CSS_VERSION = '2\.46\.11'/.test(mtJs));
+check('MT5700_CSS_VERSION 递增到 2.46.12',
+	/MT5700_CSS_VERSION = '2\.46\.12'/.test(mtJs));
+check('已移除「已保存命令」卡片与 localStorage 依赖',
+	terminalJs.indexOf('已保存的命令') < 0
+	&& terminalJs.indexOf('savedAtCommands') < 0
+	&& terminalJs.indexOf('saveCurrent') < 0);
+check('常用命令独占整行（不与其他卡片并排）',
+	/body\.appendChild\(quickCard\)/.test(terminalJs)
+	&& terminalJs.indexOf("mt5700-grid-2") < 0);
 [['terminal.js', terminalJs], ['mt5700.css', mtCss], ['mt5700.js', mtJs]].forEach((pair) => {
 	check(pair[0] + ': LF 行尾', pair[1].indexOf('\r\n') < 0);
 });
