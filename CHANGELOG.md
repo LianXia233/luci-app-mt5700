@@ -6,7 +6,7 @@
 *12 个原生 LuCI 高性能视图 + Rust / Tokio 常驻高并发后端 · 单包融合交付*
 
 <p align="center">
-  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.1.1-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
+  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.1.2-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
   <img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC%E6%80%BB%E6%95%B0-91%20Releases-16a34a?style=flat-square" alt="Total Versions" />
   <img src="https://img.shields.io/badge/%E8%BF%AD%E4%BB%A3%E5%91%A8%E6%9C%9F-70%20Days-0891b2?style=flat-square" alt="Timespan" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-ea580c?style=flat-square" alt="License" /></a>
@@ -17,8 +17,8 @@
 ---
 
 > [!TIP]
-> **最新正式版：[v2.1.1](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.1.1)（2026-11-27）**  
-> **时间口径收敛与夜间模式可读性**：前端业务时间不再取浏览器时钟，一律消费后端 `nettime` 的 `at_ms`（成功/失败应答、批量与预取路径均透传），手机时区或系统时间设错时横轴、终端历史仍与日志、通知同源；同时补齐日志徽章与三处页面的暗色规则，修复夜间小字看不清。升级后建议按 `Ctrl + F5` 强制刷新浏览器缓存。
+> **最新正式版：[v2.1.2](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.1.2)（2026-11-27）**  
+> **AT 命令库与终端命令区重构**：常用命令固定为维护者确认的 9 条只读查询并独占整行 3×3；其余 46 条按手册章节归 8 组折叠收纳，支持关键字过滤，写操作单独标红强化确认。按 Codex 与审查结论移除 `AT+COPS=?` / `AT+COPN` 两条超时命令，修正暗色 hover 失效、搜索范围与发送中禁用等交互边界。升级后请按 `Ctrl + F5` 强制刷新浏览器缓存。
 
 ### 🧭 阶段速览与导航
 
@@ -49,12 +49,12 @@
 
 ---
 
-## 🚧 未发布（Unreleased）
+## 🚀 v2.1.2 · AT 命令库与终端命令区重构
 
 | 版本 | 发布日期 | 分类 | 主要改进与变更摘要 |
 | :--- | :---: | :--- | :--- |
-| 待定 | — | `✨ 新增` `🎨 界面` | **AT 终端命令库扩展**：维护者确认的 9 条常用只读命令（信号强度 / 版本 / SIM 状态 / ICCID / IMSI / 网络注册 / 基站信息 / 网络时间 / IMEI）直接展示为带图标、命令预览与「只读」标识的大卡片；其余低频命令按手册章节归为设备与身份、SIM 与电话本、网络与注册、信号与小区、拨号与地址、时钟与短信、诊断与日志 8 组，收纳进可折叠面板，支持命令名 / 指令 / 用途关键字过滤；重启协议栈、飞行模式、模组重启、流量清零 4 条写操作独立成组并标红，确认文案升级为「谨慎操作」。移除原「已保存的命令 / 来自本机浏览器 localStorage」卡片，常用命令区独占整行按 3×3 对齐，卡片内边距与图标适度放大，输入行只保留发送 / 清空 |
-| 待定 | — | `🔧 工程` | 命令语法逐条对照 V200R001C20 手册核对，收录规则两条：无需额外参数、应答能在后端 2 秒预算内完整返回。`AT+COPS=?` 与 `AT+COPN` 实测超时（后者更隐蔽：被中途截断的半截列表仍报 `success:true`）故不收录。新增 `tests/terminal-command-test.js`（66 项源码断言）与 `tests/terminal-render-test.js`（19 项 DOM 行为断言），锁定命令规模、语法形态、危险标识、搜索过滤、发送中禁用、暗色 hover 与三档响应式；`MT5700_CSS_VERSION` 2.46.10 → 2.46.12 确保样式表真正失效 |
+| v2.1.2 | 2026-11-27 | `✨ 新增` `🎨 界面` | **AT 终端命令库扩展**：维护者确认的 9 条常用只读命令（信号强度 / 版本 / SIM 状态 / ICCID / IMSI / 网络注册 / 基站信息 / 网络时间 / IMEI）直接展示为带图标、命令预览与「只读」标识的大卡片；其余低频命令按手册章节归为设备与身份、SIM 与电话本、网络与注册、信号与小区、拨号与地址、时钟与短信、诊断与日志 8 组，收纳进可折叠面板，支持命令名 / 指令 / 用途关键字过滤；重启协议栈、飞行模式、模组重启、流量清零 4 条写操作独立成组并标红，确认文案升级为「谨慎操作」。移除原「已保存的命令 / 来自本机浏览器 localStorage」卡片，常用命令区独占整行按 3×3 对齐，卡片内边距与图标适度放大，输入行只保留发送 / 清空 |
+| v2.1.2 | 2026-11-27 | `🔧 工程` | 命令语法逐条对照 V200R001C20 手册核对，收录规则两条：无需额外参数、应答能在后端 2 秒预算内完整返回。`AT+COPS=?` 与 `AT+COPN` 实测超时（后者更隐蔽：被中途截断的半截列表仍报 `success:true`）故不收录。新增 `tests/terminal-command-test.js`（66 项源码断言）与 `tests/terminal-render-test.js`（19 项 DOM 行为断言），锁定命令规模、语法形态、危险标识、搜索过滤、发送中禁用、暗色 hover 与三档响应式；`MT5700_CSS_VERSION` 2.46.10 → 2.46.12 确保样式表真正失效 |
 
 ---
 
