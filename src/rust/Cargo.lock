@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "mt5700d"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
