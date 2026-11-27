@@ -425,7 +425,7 @@ ATClient.prototype.pollEvents = function () {
 ATClient.prototype.handlePush = function (ev) {
 	if (!ev || typeof ev.type !== 'string') return;
 	if (ev.type === 'raw_data' && typeof ev.data === 'string') {
-		this.dispatchRawData(ev.data);
+		this.dispatchRawData(ev.data, ev.at_ms);
 		return;
 	}
 	if (['incoming_call', 'new_sms', 'pdcp_data', 'memory_full', 'cellscan', 'urc_data'].indexOf(ev.type) >= 0) {
@@ -522,7 +522,9 @@ ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
 			}
 			self.noteCommandSuccess();
 			self.markBackendUp();
-			return { success: true, data: resp.data };
+			/* at_ms：后端 nettime 权威时刻（NTP 优先）。要把命令应答当业务时间
+			 * 展示的页面（终端回显、信号采样等）用它，不用浏览器时钟。 */
+			return { success: true, data: resp.data, at_ms: resp.at_ms };
 		}).catch(function (err) {
 			self.noteCommandFailure('timeout');
 			return { success: false, error: (err && err.message) || '命令执行失败', cause: 'timeout' };
@@ -784,9 +786,10 @@ ATClient.prototype.offConnectionStateChange = function (cb) {
 	if (i >= 0) this.stateCallbacks.splice(i, 1);
 };
 
-ATClient.prototype.dispatchRawData = function (text) {
+ATClient.prototype.dispatchRawData = function (text, atMs) {
 	var self = this;
-	var parsed = parseRawData(text);
+	/* atMs 是后端 nettime 给的权威上报时刻，透传给解析层给 URC 打业务时间。 */
+	var parsed = parseRawData(text, atMs);
 	for (var i = 0; i < parsed.length; i++) {
 		self.emitPush({ success: true, type: 'urc_data', data: parsed[i] });
 	}
@@ -1003,6 +1006,25 @@ function formatDuration(seconds, showDays) {
 	return h2 + '时' + m2 + '分' + (seconds % 60) + '秒';
 }
 
+/*
+ * 把后端给的毫秒时刻（nettime::now_ms，NTP 优先）格式化为本地时区时刻串。
+ *
+ * 关键：入参必须来自后端 epoch，不能用 `serverClock(Date.now())` —— 那等于
+ * 绕回浏览器时钟，正是本函数要消灭的用法。`new Date(ms)` 在这里只对**已确定的
+ * 时刻**做格式化（与 logs.js 的 epoch 展示同一口径），不读取"现在几点"。
+ * 后端没给（老固件 / 应答缺字段）时返回 null，调用方据此显示"时间未知"，
+ * 而不是拿浏览器时钟冒充。
+ */
+function serverClock(atMs, withDate) {
+	if (atMs == null || !isFinite(atMs)) return null;
+	var d = new Date(Number(atMs));
+	if (isNaN(d.getTime())) return null;
+	function p2(n) { return (n < 10 ? '0' : '') + n; }
+	var hm = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+	if (!withDate) return hm;
+	return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + hm;
+}
+
 var NR_BANDS = {
 	'1': '2100 MHz (FDD)', '2': '1900 MHz (FDD)', '3': '1800 MHz (FDD)', '5': '850 MHz (FDD)',
 	'7': '2600 MHz (FDD)', '8': '900 MHz (FDD)', '20': '800 MHz (FDD)', '28': '700 MHz (FDD)',
@@ -1101,7 +1123,7 @@ function psRegText(stat) {
 
 /* ---- raw_data 拆分（^PDCPDATAINFO / URC） ---- */
 
-function parseRawData(text) {
+function parseRawData(text, atMs) {
 	var out = [];
 	var re = /\^PDCPDATAINFO:\s*([^\r\n]+)/g;
 	var m, rest = text;
@@ -1120,8 +1142,8 @@ function parseRawData(text) {
 		} else if (line.indexOf('^CERSSI:') === 0) {
 			out.push({ type: 'CERSSI', raw: line });
 		} else if (line.indexOf('^REJINFO') === 0) {
-			// 网络拒绝原因主动上报，解析后进 REJINFO 类型
-			out.push({ type: 'REJINFO', raw: line, parsed: Parse.parseRejInfo(line) });
+			// 网络拒绝原因主动上报；atMs 是后端 nettime 给的权威上报时刻
+			out.push({ type: 'REJINFO', raw: line, parsed: Parse.parseRejInfo(line, atMs) });
 		}
 	}
 	return out;
@@ -1678,6 +1700,7 @@ var Mt5700d = {
 	parseTemperature: parseTemperature,
 	formatFlow: formatFlow,
 	formatDuration: formatDuration,
+	serverClock: serverClock,
 	parseHCSQ: parseHCSQ,
 	parseMONSC: parseMONSC,
 	parseHFREQINFO: parseHFREQINFO,

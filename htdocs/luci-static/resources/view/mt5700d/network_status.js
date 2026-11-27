@@ -984,8 +984,12 @@ return L.view.extend({
 
 
 			// 更新趋势历史（只记录设备真实采样；不再用合成数据伪造首屏曲线）
-			var now = new Date();
-			var timeStr = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+			/* 采样时刻取后端 nettime（本轮 HFREQINFO 应答的 at_ms），不用浏览器时钟：
+			 * 手机时区设错 / 系统时间偏了时，横轴时间仍与日志/通知同源。
+			 * 老后端无此字段时用序号占位，保证去重键唯一，且不冒充一个具体时刻。 */
+			var sampleMs = (c.at_ms != null) ? c.at_ms : null;
+			var timeStr = (sampleMs != null ? Mt5700d.serverClock(sampleMs) : null)
+				|| ('—' + (sigHistory.length + 1));
 
 			var hasRsrp = (rsrp != null && rsrp !== '' && !isNaN(rsrp));
 			var numRsrq = (rsrq != null && rsrq !== '' && !isNaN(rsrq)) ? Number(rsrq) : null;
@@ -2433,6 +2437,9 @@ return L.view.extend({
 				return atCommand('AT^HFREQINFO?');
 			}).then(function (hfreq) {
 				state.hfreqSuccess = hfreq.success;
+				/* 本轮信号采样的权威时刻取后端 nettime（应答自带 at_ms），
+				 * 供趋势图横轴打点；不取浏览器时钟，避免手机时区/系统时间偏差。 */
+				state.cell.at_ms = (hfreq && hfreq.at_ms != null) ? hfreq.at_ms : null;
 				state.rawHfreq = (hfreq.success && hfreq.data) ? Mt5700d.parseHFREQINFO(hfreq.data) : [];
 				if (serving) {
 					state.cell.mcc = serving.mcc; state.cell.mnc = serving.mnc;
