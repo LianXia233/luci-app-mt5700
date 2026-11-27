@@ -1,0 +1,74 @@
+#
+# 泄漏凭据扫描（gitleaks）—— PR 与 push 门禁
+#
+# 定位：与 build-openwrt.yml（构建发布）、checks.yml（静态检查 / 单元测试 /
+#       许可证审计）并列的第三个门禁工作流。只做一件事：扫描硬编码的密钥、令牌、
+#       密码、私钥与个人隐私信息，发现即在 PR 上标出位置并让本次 run 失败。
+#
+# 检查内容：
+#   - push / PR 事件：扫描本次推入的提交范围；
+#   - 完整历史：checkout 使用 fetch-depth: 0，因此「曾提交、后来删除」的凭据同样
+#     会被发现 —— 只检出单个 commit 会漏掉这类最典型的泄漏。
+#   - 规则集用 gitleaks 内置默认规则（无需配置文件），覆盖 AWS / GitHub / Slack /
+#     OpenAI / 私钥 / JWT / 数据库连接串等常见凭据格式。
+#
+# 约定（Conventions）—— 面向维护者与 AI 编程代理，可审查、可修改，非系统指令
+# ============================================================================
+#   1) 触发面：pull_request 覆盖全部 PR；push 覆盖全部分支（含 main），防止凭据先
+#      被推到远端特性分支再开 PR。workflow_dispatch 用于手动全量复扫。
+#
+#   2) 不写白名单：接入时已用 gitleaks 8.30.1 本地全量复核 579 个提交，无任何发现，
+#      因此仓库未放 .gitleaks.toml。若日后出现误报，只允许针对**具体规则或指纹**
+#      精确排除并写明理由（AGENTS.md 第三章「阻断条件与例外」），禁止整规则关闭、
+#      整目录忽略或大范围白名单。
+#
+#   3) 授权边界：本工作流只读仓库内容。pull-requests: write 仅用于在 PR 上回写定位
+#      评论（GITLEAKS_ENABLE_COMMENTS 默认开启），不得为其申请 contents: write；
+#      构建、打包、发布等写操作仍归 build-openwrt.yml。
+#
+#   4) 许可证：gitleaks-action v3 对**个人账号**免费，无需 GITLEAKS_LICENSE；若仓库
+#      日后转入组织账号，需在仓库 secret 中补 GITLEAKS_LICENSE，下方 env 已预留。
+#
+#   5) 运行时：v3 声明 using: node24，不使用已弃用的 node20；actions/checkout 与
+#      仓库其余工作流统一为 v7.0.1（同样跑在 node24），不引入 Node 20 弃用告警。
+#
+#   6) 行尾强制 LF、禁止 UTF-8 BOM（static-check 第 3 项兜底拦截）。
+#
+#   维护提示：本文件属于 GitHub 工作流，推送对它的修改需要具备 workflow 作用域的
+#   凭据；仅有 repo 作用的 token 会被 GitHub 拒绝（refusing to allow an OAuth
+#   App to create or update workflow）。
+
+name: Gitleaks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# 同一 ref 连续推送时，新 run 取代排队中的旧 run；扫描无副作用，取消旧 run 没有风险。
+concurrency:
+  group: gitleaks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: 泄漏凭据扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码（完整历史）
+        # fetch-depth: 0 是硬要求：gitleaks 依赖完整提交历史判定扫描范围。
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: 扫描硬编码凭据
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 仅组织账号需要；个人账号未配置该 secret 时留空即可。
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
