@@ -1227,8 +1227,10 @@ return L.view.extend({
 				bands += '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + chartW +
 					'" height="' + bandH.toFixed(1) + '" fill="' + t.color + '" opacity="0.045"/>';
 				if (!narrow) {
+					/* 档位标签：原来 opacity=0.5 在暗底把彩色字压到约 2~3:1，
+					 * 9.5px 小字夜间看不清；提到 0.85 不改变"低饱和分区"的观感。 */
 					bands += '<text x="' + (padL + chartW - 4) + '" y="' + (y1 + bandH / 2 + 3).toFixed(1) +
-						'" font-size="9.5" font-family="sans-serif" fill="' + t.color + '" opacity="0.5" text-anchor="end">' + t.label + '</text>';
+						'" font-size="9.5" font-family="sans-serif" fill="' + t.color + '" opacity="0.85" text-anchor="end">' + t.label + '</text>';
 				}
 			}
 

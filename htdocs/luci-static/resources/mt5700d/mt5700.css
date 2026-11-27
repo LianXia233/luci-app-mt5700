@@ -70,7 +70,9 @@
     --mt5700-subtle-bg: rgba(30, 36, 62, 0.6);
     --mt5700-text: #f1f5f9;
     --mt5700-text-secondary: #94a3b8;
-    --mt5700-text-muted: #64748b;
+    /* muted 由 #64748b 提到 #8fa3b8：暗底上 11~12px 次要小字（时间戳、说明）
+       原值只有约 3.7:1，未达 4.5:1，夜间看不清。 */
+    --mt5700-text-muted: #8fa3b8;
     --mt5700-border: rgba(139, 92, 246, 0.22);
     --mt5700-border-subtle: rgba(148, 163, 184, 0.15);
     --mt5700-border-focus: rgba(167, 139, 250, 0.6);
@@ -2436,7 +2438,24 @@
   border-color: rgba(45, 212, 191, 0.4);
   background: rgba(45, 212, 191, 0.12);
   color: #2dd4bf;
-}/* 空状态 */
+}/* ---------- 日志级别 / 方向 / 来源徽章的暗色提亮 ----------
+   与下方 21 条 logcat 分类徽章（.at-dark .mt5700-logcat-*）同一套口径：
+   暗底 rgba(22,27,46) 上若沿用亮色模式的 500~600 级字色（#0284c7 等），
+   10~11px 小字对比度不足 3:1，夜间基本看不清。这里统一提到 300~400 级。
+   漏写的根因：logpurpose / logsrc-file 都有 at-dark 变体，唯独这组没有，
+   测试也没覆盖，故长期存活。global-css-test.js 已补断言防回归。 */
+.at-dark .mt5700-logrow-info .mt5700-loglv { color: #38bdf8; border-color: rgba(56,189,248,0.4); background: rgba(56,189,248,0.14); }
+.at-dark .mt5700-logrow-warn .mt5700-loglv { color: #fbbf24; border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.14); }
+.at-dark .mt5700-logrow-err  .mt5700-loglv { color: #f87171; border-color: rgba(248,113,113,0.4); background: rgba(248,113,113,0.14); }
+.at-dark .mt5700-logrow-dbg  .mt5700-loglv { color: #a78bfa; border-color: rgba(167,139,250,0.4); background: rgba(167,139,250,0.14); }
+.at-dark .mt5700-logdir-tx  { color: #38bdf8; border-color: rgba(56,189,248,0.4); background: rgba(56,189,248,0.12); }
+.at-dark .mt5700-logdir-rx  { color: #34d399; border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.12); }
+.at-dark .mt5700-logdir-req { color: #94a3b8; border-color: rgba(148,163,184,0.4); background: rgba(148,163,184,0.12); }
+.at-dark .mt5700-logsrc { color: #a78bfa; border-color: rgba(167,139,250,0.4); background: rgba(167,139,250,0.1); }
+.at-dark .mt5700-logscroll-btn { color: #a78bfa; }
+.at-dark .mt5700-logtab:hover { color: #a78bfa !important; }
+.at-dark .mt5700-logbtn-danger { color: #f87171; }
+.at-dark .mt5700-logexpand { color: #a78bfa; }/* 空状态 */
 .mt5700-logempty { padding: 46px 20px; text-align: center; }.mt5700-logempty-title { font-size: 14px; font-weight: 600; color: var(--mt5700-text, #1e1b4b); margin-bottom: 8px; }.at-dark .mt5700-logempty-title { color: var(--mt5700-text, #f1f5f9); }.mt5700-logempty-desc { font-size: 12.5px; line-height: 1.75; color: var(--mt5700-text-muted, #64748b); max-width: 520px; margin: 0 auto; }/* 搜索高亮 */
 .mt5700-loglist mark {
   background: rgba(254, 240, 138, 0.5);

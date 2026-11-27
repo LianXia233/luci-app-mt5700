@@ -111,6 +111,37 @@ check('service.js 接入统一启动入口（提示条全页一致）',
 	check(pair[0] + ': LF 行尾', pair[1].indexOf('\r\n') < 0);
 });
 
+/* ---------- 7) 日志徽章暗色覆盖（夜间可读性回归） ----------
+ * 历史问题：logcat 分类徽章有完整 21 条 .at-dark 提亮，但级别/方向/来源徽章
+ * 漏写，暗底上 10~11px 字对比度不足 3:1，夜间看不清。这里逐个选择器断言
+ * 亮色定义与 .at-dark 定义成对出现，防止再次只加半套。 */
+[
+	'.mt5700-logrow-info .mt5700-loglv',
+	'.mt5700-logrow-warn .mt5700-loglv',
+	'.mt5700-logrow-err  .mt5700-loglv',
+	'.mt5700-logrow-dbg  .mt5700-loglv',
+	'.mt5700-logdir-tx', '.mt5700-logdir-rx', '.mt5700-logdir-req',
+	'.mt5700-logsrc', '.mt5700-logscroll-btn'
+].forEach(function (sel) {
+	const norm = function (s) { return s.replace(/\s+/g, ' '); };
+	const hasDark = mtCss.split('\n').some(function (ln) {
+		return norm(ln).indexOf('.at-dark ' + norm(sel)) >= 0 && ln.indexOf('{') >= 0;
+	});
+	check('暗色覆盖 ' + norm(sel), hasDark, '缺 .at-dark 规则');
+});
+check('暗色 --mt5700-text-muted 已提亮到 #8fa3b8',
+	/at-dark[\s\S]{0,900}--mt5700-text-muted:\s*#8fa3b8/i.test(mtCss));
+/* 视图注入的局部样式同样要有暗色分支（这些出过问题） */
+[['modem_settings.js', '.mt-sys-srv-note'], ['modem_settings.js', '.mt5700-btn-warn'],
+ ['modem_settings.js', '.mt5700-radio-card-badge'], ['dial.js', '.mt-pdp-cid']].forEach(function (pair) {
+	const src = read(path.join(viewDir, pair[0]));
+	/* 选择器可能带中间层级（如 html.at-dark .mt-sys-acq-cards .mt5700-radio-card-badge），
+	 * 只要求 at-dark 规则里出现目标类名即可 */
+	const darkRules = src.split('\n').filter(function (ln) { return ln.indexOf('at-dark ') >= 0; }).join('\n');
+	check(pair[0] + ' 暗色分支 ' + pair[1],
+		darkRules.indexOf(pair[1]) >= 0, '缺 html.at-dark 覆盖');
+});
+
 /* ---------- 汇总 ---------- */
 const failed = results.filter(function (r) { return !r.ok; });
 console.log('\n' + (failed.length ? 'FAILED ' + failed.length : 'ALL ' + results.length + ' PASSED'));
