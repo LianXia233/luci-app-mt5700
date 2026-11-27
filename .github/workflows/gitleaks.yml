@@ -6,14 +6,15 @@
 #       密码、私钥与个人隐私信息，发现即在 PR 上标出位置并让本次 run 失败。
 #
 # 各触发方式的实际扫描范围（由 gitleaks-action v3 内部决定，无法通过输入修改）：
-#   - pull_request：`--log-opts=--no-merges --first-parent <base>^..<head>`，
-#     即 PR 基线到 HEAD 的全部提交，覆盖本 PR 的每一个提交。
-#   - push：action 判定 baseRef == headRef 后执行 `--log-opts=-1`，**只扫该次推送的
-#     最后一个提交**。一次推送多个提交时，前面的提交不在本次扫描范围内 ——
-#     这是上游 action 的既有行为，不是本仓库的配置问题。
+#   - pull_request：取 PR 的首末提交，执行 `--log-opts=--no-merges --first-parent
+#     <首个>^..<最后>`，覆盖本 PR 的每一个提交。
+#   - push：同样取自 push payload 的首末提交 —— 单提交推送时 baseRef == headRef，
+#     退化为 `--log-opts=-1`（即该提交本身）；多提交推送时执行
+#     `<首个>^..<最后>`。两种情况都覆盖本次推送的全部提交，不会漏扫。
+#     commits 为空（如删除分支、仅推 tag）时 action 直接跳过并成功退出。
 #   - workflow_dispatch：action 不附加 --log-opts，gitleaks 扫描**完整历史**。
-#     因此它是「曾提交、后来删除」这类历史泄漏的唯一兜底入口，建议在改动敏感配置
-#     后或按月度手动派发复扫一次。
+#     这是「曾提交、后来删除」这类历史泄漏唯一会被发现的入口（push / PR 只看新增
+#     提交），建议在改动敏感配置后或按月度手动派发复扫一次。
 #   - 规则集用 gitleaks 内置默认规则（无需配置文件），覆盖 AWS / GitHub / Slack /
 #     OpenAI / 私钥 / JWT / 数据库连接串等常见凭据格式。
 #
@@ -30,7 +31,8 @@
 #      整目录忽略或大范围白名单。
 #
 #   3) 授权边界：本工作流只读仓库内容。pull-requests: write 仅用于在 PR 上回写定位
-#      评论（GITLEAKS_ENABLE_COMMENTS 默认开启），不得为其申请 contents: write；
+#      评论（GITLEAKS_ENABLE_COMMENTS 默认开启）；评论失败（如 fork PR 的只读 token）
+#      在 action 内部降级为 warning，不会把门禁误判成红。不得为其申请 contents: write；
 #      构建、打包、发布等写操作仍归 build-openwrt.yml。
 #
 #   4) 许可证：gitleaks-action v3 对**个人账号**免费，无需 GITLEAKS_LICENSE；若仓库
@@ -40,6 +42,11 @@
 #      仓库其余工作流统一为 v7.0.1（同样跑在 node24），不引入 Node 20 弃用告警。
 #
 #   6) 行尾强制 LF、禁止 UTF-8 BOM（static-check 第 3 项兜底拦截）。
+#
+#   7) 作业名即分支保护 context：本作业名「泄漏凭据扫描」已登记为 main 的
+#      required status check（app_id 15368 / GitHub Actions）。改名会让必需检查
+#      永不出现、PR 恒为 blocked —— 要改就先改分支保护的 contexts / checks 列表，
+#      再改这里；两者必须一致（checks.yml 的 rust-unit 作业踩过同一个坑）。
 #
 #   维护提示：本文件属于 GitHub 工作流，推送对它的修改需要具备 workflow 作用域的
 #   凭据；仅有 repo 作用的 token 会被 GitHub 拒绝（refusing to allow an OAuth
