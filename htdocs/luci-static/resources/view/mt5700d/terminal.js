@@ -19,8 +19,12 @@
  *   页面层级更干净（历史 localStorage 数据不再读取，避免陈旧命令复活）
  *
  * 命令语法逐条对照《MT5700M-CN 5G 系列模组 AT 命令手册》V200R001C20 / 文档版本 01。
- * 只收录「不需要额外参数就能执行」的形式；需要参数的命令（锁频、FOTA 下载等）
- * 不做成快捷按钮，避免一点就 ERROR。
+ * 收录规则两条，缺一不可：
+ * 1. 只收录「不需要额外参数就能执行」的形式（锁频、FOTA 下载等不做按钮）；
+ * 2. 应答必须能在后端 2 秒预算内完整返回。`AT+COPS=?`（运营商搜索）和
+ *    `AT+COPN`（全量运营商名表）实测超过 2 秒：前者直接超时失败，后者更隐蔽——
+ *    atclient 在「超时前已收到部分行」时按成功返回，界面显示的是半截列表且
+ *    没有结束符。两条都不做成按钮，需要时请在输入框手敲并自行判读。
  */
 
 /* 高频：沿用维护者确认的 9 条常用只读命令，名称与命令一一对应，
@@ -34,7 +38,7 @@ var QUICK_COMMANDS = [
 	{ label: '查询网络注册', cmd: 'AT+CREG?', icon: 'op-network', hint: 'CS 域注册状态' },
 	{ label: '查询基站信息', cmd: 'AT+CGREG?', icon: 'op-cell', hint: 'PS 域注册与小区信息' },
 	{ label: '查询网络时间', cmd: 'AT^NWTIME?', icon: 'op-schedule', hint: '网络系统时间与时区' },
-	{ label: '查询 IMEI', cmd: 'AT+CGSN', icon: 'op-shield', hint: '只读查询，不在页面留存' }
+	{ label: '查询 IMEI', cmd: 'AT+CGSN', icon: 'op-shield', hint: '只读；结果仅显示在下方终端，不上传、不写入本地存储' }
 ];
 
 /* 低频：按手册章节归类，默认折叠；danger 项会改变模组状态或数据 */
@@ -61,9 +65,7 @@ var COMMAND_GROUPS = [
 			{ label: '5G 注册', cmd: 'AT+C5GREG?', icon: 'op-5g', hint: '5GC 注册状态' },
 			{ label: 'EPS 注册', cmd: 'AT+CEREG?', icon: 'op-network' },
 			{ label: 'IMS 注册', cmd: 'AT+CIREG?', icon: 'op-network' },
-			{ label: '当前运营商', cmd: 'AT+COPS?', icon: 'op-network' },
-			{ label: '可用运营商', cmd: 'AT+COPS=?', icon: 'op-search', hint: '搜索耗时较长' },
-			{ label: '运营商名称', cmd: 'AT+COPN', icon: 'op-network' }
+			{ label: '当前运营商', cmd: 'AT+COPS?', icon: 'op-network' }
 		]
 	},
 	{
@@ -173,7 +175,10 @@ return L.view.extend({
 		});
 
 		/* ---------- 命令按钮构造 ---------- */
+		/* searchable 只收分组内的按钮：常用卡单独占据页面上方，不参与「更多命令」的
+		 * 过滤，否则搜「IMEI」会把常用卡一起藏掉，而结果计数却显示在下方卡里。 */
 		var searchable = [];
+		var allCmdBtns = [];
 
 		function commandButton(item, quick) {
 			var danger = !!item.danger;
@@ -201,10 +206,13 @@ return L.view.extend({
 			btn.addEventListener('click', function () {
 				confirmAndSend(item.cmd, item.label, danger);
 			});
-			searchable.push({
-				btn: btn,
-				text: (item.label + ' ' + item.cmd + ' ' + (item.hint || '')).toLowerCase()
-			});
+			allCmdBtns.push(btn);
+			if (!quick) {
+				searchable.push({
+					btn: btn,
+					text: (item.label + ' ' + item.cmd + ' ' + (item.hint || '')).toLowerCase()
+				});
+			}
 			return btn;
 		}
 
@@ -274,7 +282,7 @@ return L.view.extend({
 				var visible = g.body.querySelectorAll('.mt5700-cmd-chip:not(.mt5700-cmd-hidden)').length;
 				g.root.classList.toggle('mt5700-cmd-hidden', visible === 0);
 				if (q && visible) g.root.open = true;
-				if (!q) g.root.open = false;
+				/* 清空关键字时保留用户已展开的分组，不强行折叠 */
 			});
 			resultLine.textContent = q ? ('匹配 ' + total + ' 条命令') : '';
 			noResult.classList.toggle('mt5700-cmd-hidden', total > 0);
@@ -306,12 +314,19 @@ return L.view.extend({
 		/* ---------- 发送 ---------- */
 		var sending = false;
 
+		/* 发送中禁用所有命令按钮：否则用户点第二下只会命中 `if (sending) return;`
+		 * 被静默丢弃，看起来像按钮坏了。AGENTS.md 也要求提交中禁用按钮。 */
+		function setCmdButtonsDisabled(disabled) {
+			allCmdBtns.forEach(function (b) { b.disabled = disabled; });
+		}
+
 		function send(cmd) {
 			var command = (cmd != null ? cmd : cmdInput.value).trim();
 			if (!command) { Mt5700.warning('请输入 AT 指令'); return; }
 			if (sending) return;
 			sending = true;
 			sendBtn.disabled = true;
+			setCmdButtonsDisabled(true);
 
 			Mt5700d.client.sendCommand(command).then(function (res) {
 				/* 时刻取后端 nettime（应答自带 at_ms），不用浏览器时钟：
@@ -331,6 +346,7 @@ return L.view.extend({
 			}).then(function () {
 				sending = false;
 				sendBtn.disabled = false;
+				setCmdButtonsDisabled(false);
 			});
 		}
 

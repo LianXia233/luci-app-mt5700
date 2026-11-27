@@ -6728,9 +6728,11 @@ html.at-dark .mt5700-sms-prompt .cbi-input-text:hover {
   font-size: 9px;
   line-height: 1.5;
   white-space: nowrap;
-}.mt5700-cmd-kind-read {
-  color: var(--mt5700-green);
+}/* 9px 小字配 #10b981 on #d1fae5 只有约 2.2:1，改深色并放大到 10px */
+.mt5700-cmd-kind-read {
+  color: #047857;
   background: var(--mt5700-green-pale);
+  font-size: 10px;
 }.mt5700-cmd-kind-write {
   color: #b45309;
   background: rgba(245, 158, 11, .14);
@@ -6843,6 +6845,14 @@ html.at-dark .mt5700-sms-prompt .cbi-input-text:hover {
 }.mt5700-cmd-chip-danger:focus-visible { outline-color: var(--mt5700-danger); }
 .mt5700-cmd-chip-danger .mt5700-cmd-code { color: #b45309; }
 
+/* 发送中禁用：保留布局，去掉位移与指针反馈 */
+.mt5700-cmd-quick:disabled,
+.mt5700-cmd-chip:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
 .mt5700-cmd-hidden { display: none !important; }.mt5700-cmd-empty {
   padding: 18px 12px;
   text-align: center;
@@ -6850,13 +6860,11 @@ html.at-dark .mt5700-sms-prompt .cbi-input-text:hover {
   color: var(--mt5700-text-muted);
 }
 
-/* 暗色：终端窗口本身固定深色，命令区则跟随主题变量 */
-html.at-dark .mt5700-cmd-quick,
-html.at-dark .mt5700-cmd-chip {
-  background: rgba(30, 36, 52, .72);
-  border-color: rgba(148, 163, 184, .18);
-  color: #e2e8f0;
-}html.at-dark .mt5700-cmd-label { color: #e2e8f0; }html.at-dark .mt5700-cmd-code { color: #8fa3b8; }html.at-dark .mt5700-cmd-group {
+/* 暗色：终端窗口本身固定深色，命令区底色一律跟随主题变量。
+   不要在这里给 .mt5700-cmd-quick / .mt5700-cmd-chip 写死 background / border-color：
+   html.at-dark 前缀把它抬到 (0,2,1)，会盖住 .mt5700-cmd-chip:hover 的 (0,2,0)，
+   暗色下 hover 就没有任何反馈。html.at-dark 已重定义这几个变量，亮色规则自动适配。 */
+html.at-dark .mt5700-cmd-label { color: #e2e8f0; }html.at-dark .mt5700-cmd-code { color: #8fa3b8; }html.at-dark .mt5700-cmd-group {
   background: rgba(22, 27, 46, .6);
   border-color: rgba(148, 163, 184, .16);
 }html.at-dark .mt5700-cmd-group-head:hover { background: rgba(139, 92, 246, .1); }html.at-dark .mt5700-cmd-group-title { color: #e2e8f0; }html.at-dark .mt5700-cmd-group-caret { border-color: #8fa3b8; }html.at-dark .mt5700-cmd-kind-read {
@@ -6868,10 +6876,19 @@ html.at-dark .mt5700-cmd-chip {
 }html.at-dark .mt5700-cmd-chip-danger {
   background: rgba(239, 68, 68, .1);
   border-color: rgba(248, 113, 113, .38);
+}html.at-dark .mt5700-cmd-chip-danger:hover {
+  background: rgba(239, 68, 68, .18);
+  border-color: var(--mt5700-danger);
 }html.at-dark .mt5700-cmd-chip-danger .mt5700-cmd-icon,
 html.at-dark .mt5700-cmd-chip-danger .mt5700-cmd-label { color: #fca5a5; }html.at-dark .mt5700-cmd-chip-danger .mt5700-cmd-code { color: #fcd34d; }html.at-dark .mt5700-cmd-empty { color: #8fa3b8; }
+/* 暗色 hover 显式配对：危险项有自己的红框规则，这里用 :not() 排除 */
+html.at-dark .mt5700-cmd-quick:hover,
+html.at-dark .mt5700-cmd-chip:not(.mt5700-cmd-chip-danger):hover {
+  background: var(--mt5700-card-bg-hover);
+  border-color: var(--mt5700-accent);
+}
 
-/* 响应式：桌面 4 列 / 分组 3 列；平板 3/2；手机 2/1；超窄 1 列 */
+/* 响应式：桌面常用 3 列 / 分组 3 列；平板 3/2；手机 2/1；超窄 1 列 */
 @media (max-width: 960px) {
   .mt5700-cmd-quick-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .mt5700-cmd-group-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }

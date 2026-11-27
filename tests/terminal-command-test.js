@@ -35,8 +35,10 @@ function section(src, start, end) {
 
 const quickSrc = section(terminalJs, 'var QUICK_COMMANDS = [', '];');
 const groupsSrc = section(terminalJs, 'var COMMAND_GROUPS = [', '];\n\nfunction cmdIcon');
-const quickCmds = quickSrc.match(/cmd:\s*'([^']+)'/g || []).map((s) => s.match(/'([^']+)'/)[1]);
-const groupCmds = groupsSrc.match(/cmd:\s*'([^']+)'/g || []).map((s) => s.match(/'([^']+)'/)[1]);
+/* 注意括号：`regex || []` 会把正则对象直接传给 match，无匹配时返回 null 再 .map 会抛异常，
+ * 测试应当给出 FAIL 而不是崩溃。 */
+const quickCmds = (quickSrc.match(/cmd:\s*'([^']+)'/g) || []).map((s) => s.match(/'([^']+)'/)[1]);
+const groupCmds = (groupsSrc.match(/cmd:\s*'([^']+)'/g) || []).map((s) => s.match(/'([^']+)'/)[1]);
 const allCmds = quickCmds.concat(groupCmds);
 
 /* ---------- 1) 命令清单规模与层级 ---------- */
@@ -53,6 +55,11 @@ check('高频与低频命令无重复',
 	quickCmds.every((c) => groupCmds.indexOf(c) < 0),
 	quickCmds.filter((c) => groupCmds.indexOf(c) >= 0).join(', '));
 check('命令列表内无重复项', allCmds.length === new Set(allCmds).size);
+/* 这两条命令实测超过后端 2 秒 AT 预算：COPS=? 直接超时，COPN 会返回被中途截断的
+ * 半截列表却报 success:true（atclient.rs 对「超时前收到部分行」按成功处理），
+ * 因此严禁再加回快捷按钮。需要时请在输入框手敲并自行判读。 */
+check('未收录超出 2 秒预算的 AT+COPS=?', allCmds.indexOf('AT+COPS=?') < 0);
+check('未收录会被静默截断的 AT+COPN', allCmds.indexOf('AT+COPN') < 0);
 
 /* ---------- 2) 语法形态与隐私 ---------- */
 check('所有命令以 AT 开头', allCmds.every((c) => /^AT/.test(c)),
@@ -62,6 +69,9 @@ check('命令集中在手册常见形态（AT 前缀 + 可选 ?/=）',
 	allCmds.filter((c) => !/^AT[A-Z0-9^&+/?=,]+$/.test(c)).join(', '));
 /* 严禁把真实身份号写进前端仓库：任何 15 位连续数字都不允许出现在命令清单里 */
 check('命令清单未混入 15 位身份号字面量', !/\d{15}/.test(quickSrc + groupsSrc));
+check('IMEI 提示不谎称「不在页面留存」',
+	/结果仅显示在下方终端，不上传、不写入本地存储/.test(quickSrc)
+	&& quickSrc.indexOf('不在页面留存') < 0);
 
 /* ---------- 3) 写操作标识与二次确认 ---------- */
 check('存在独立的维护操作分组', /title:\s*'维护操作/.test(groupsSrc));
@@ -90,6 +100,14 @@ check('搜索框按命令名 / 指令 / 用途过滤',
 	&& /搜索命令名、AT 指令或用途/.test(terminalJs));
 check('搜索时自动展开命中的分组', /if \(q && visible\) g\.root\.open = true/.test(terminalJs));
 check('无匹配时显示空状态', /没有匹配的命令/.test(terminalJs));
+check('搜索只索引分组命令，常用卡不参与',
+	/if \(!quick\) \{\s*searchable\.push/.test(terminalJs));
+check('清空关键字后不强行折叠用户展开的分组',
+	terminalJs.indexOf('if (!q) g.root.open = false') < 0);
+check('发送中禁用所有命令按钮',
+	/allCmdBtns\.forEach\(function \(b\) \{ b\.disabled = disabled; \}\)/.test(terminalJs)
+	&& /setCmdButtonsDisabled\(true\)/.test(terminalJs)
+	&& /setCmdButtonsDisabled\(false\)/.test(terminalJs));
 
 /* ---------- 5) 样式覆盖 ---------- */
 [
@@ -109,11 +127,19 @@ check('hover / active 交互状态成对存在', /\.mt5700-cmd-quick:hover/.test
 	&& /\.mt5700-cmd-quick:active/.test(mtCss)
 	&& /\.mt5700-cmd-chip:hover/.test(mtCss)
 	&& /\.mt5700-cmd-chip:active/.test(mtCss));
-check('暗色模式覆盖卡片 / 分组 / 徽标 / 危险项',
-	/html\.at-dark \.mt5700-cmd-quick/.test(mtCss)
-	&& /html\.at-dark \.mt5700-cmd-group/.test(mtCss)
+check('暗色模式覆盖分组 / 徽标 / 危险项',
+	/html\.at-dark \.mt5700-cmd-group/.test(mtCss)
 	&& /html\.at-dark \.mt5700-cmd-kind-read/.test(mtCss)
 	&& /html\.at-dark \.mt5700-cmd-chip-danger/.test(mtCss));
+/* 回归：暗色基础规则若写死 background / border-color，(0,2,1) 会盖住
+ * .mt5700-cmd-chip:hover 的 (0,2,0)，暗色下 hover 就没有任何反馈。 */
+check('暗色下命令卡底色跟随主题变量，不写死 rgba',
+	!/html\.at-dark \.mt5700-cmd-quick,\s*html\.at-dark \.mt5700-cmd-chip\s*\{[^}]*background:/.test(mtCss));
+check('暗色 hover 有显式配对规则',
+	/html\.at-dark \.mt5700-cmd-quick:hover/.test(mtCss)
+	&& /html\.at-dark \.mt5700-cmd-chip:not\(\.mt5700-cmd-chip-danger\):hover/.test(mtCss));
+check('只读徽标字号不小于 10px 且用深色文字',
+	/\.mt5700-cmd-kind-read\s*\{[^}]*color:\s*#047857[^}]*font-size:\s*10px/.test(mtCss));
 check('桌面 / 平板 / 手机三档响应式',
 	(mtCss.match(/@media \(max-width: 960px\)[\s\S]*?\.mt5700-cmd-quick-grid/g) || []).length > 0
 	&& /@media \(max-width: 640px\)[\s\S]*?\.mt5700-cmd-quick-grid/.test(mtCss)
