@@ -84,6 +84,12 @@ check('保存成功后重载服务即时生效（与重构前行为一致）',
 check('四个配置模块 build 均注入表单样式（不依赖先开过文案模块）',
 	moduleJs.every(function (src) { return /C\.ensureFormStyles\(\);/.test(src); }),
 	'ensureFormStyles ×4');
+check('抽屉背景使用 --mt5700-float-bg 兜底并显式适配 html.at-dark（issue #63）',
+	/--mt5700-float-bg/.test(drawerJs)
+	&& !/--at-panel-bg/.test(drawerJs)
+	&& /html\.at-dark \.mt5700-drawer\{/.test(drawerJs)
+	&& /\.mt5700-drawer-close\{[^}]*color:inherit;/.test(drawerJs),
+	'暗色背景与文字可读性');
 
 const fails = results.filter(function (r) { return !r.ok; });
 console.log('\n===== 结果: ' + (results.length - fails.length) + '/' + results.length + ' 通过 =====');
