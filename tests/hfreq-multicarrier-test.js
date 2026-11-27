@@ -341,7 +341,11 @@ try {
 	check('ucode 原样透传后端 result（不吞 cause）', /if \(resp\.result\) \{\s*\n\s*return resp\.result;/.test(ucSrc));
 
 	var rpcSrc = fs.readFileSync(path.join(libDir, 'rpc.js'), 'utf8');
-	check('rpc.js 转发后端 cause', /return \{ success: false, error: resp\.error \|\| '命令执行失败', cause: resp\.cause \};/.test(rpcSrc));
+	/* 断言「后端 cause 被原样转发」这件事，而不是字段表里恰好只有 cause：
+	 * 失败应答还带着后端 nettime 的 at_ms（终端历史要用），字段增减是正常演进，
+	 * 不该让这条断言变成每次加字段都要改的脆弱字面量。 */
+	check('rpc.js 转发后端 cause',
+		/success: false,[\s\S]{0,200}?cause: resp\.cause/.test(rpcSrc));
 
 } catch (e) {
 	console.error('测试执行异常:', e);

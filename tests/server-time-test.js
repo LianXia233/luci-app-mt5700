@@ -51,6 +51,20 @@ check('parseRawData 接收并下传 atMs',
 	/function parseRawData\(text,\s*atMs\)/.test(rpcJs)
 	&& /parseRejInfo\(line,\s*atMs\)/.test(rpcJs));
 
+/* ---------- 2b) 失败应答与批量路径同样透传 ----------
+ * 只修成功路径是不够的：AT 失败应答后端照样带 at_ms，前端在失败分支丢掉
+ * 它，终端历史里「命令失败」那几条就只能是「时间未知」；批量接口是 status
+ * 页的取数主干，吞掉逐条 at_ms 会让趋势图横轴永远退化成序号占位。
+ */
+const cmdFn = rpcJs.slice(rpcJs.indexOf('ATClient.prototype.sendCommand = function'),
+	rpcJs.indexOf('ATClient.prototype.sendBatch = function'));
+check('sendCommand 失败应答也带 at_ms', (cmdFn.match(/at_ms:\s*resp\.at_ms/g) || []).length >= 2);
+check('sendBatch 逐条透传 at_ms', /at_ms:\s*it\.at_ms/.test(rpcJs));
+const pfFn = statusJs.slice(statusJs.indexOf('function prefetchRound()'),
+	statusJs.indexOf('function atCommand(cmd)'));
+check('status 预取缓存保留 at_ms（成功与失败分支都要）',
+	(pfFn.match(/at_ms:\s*it\.at_ms/g) || []).length >= 2);
+
 /* ---------- 3) 4 处业务时间违规已消除 ---------- */
 check('terminal.js 不再用浏览器时钟打命令时间戳',
 	termJs.indexOf("new Date().toLocaleTimeString") < 0

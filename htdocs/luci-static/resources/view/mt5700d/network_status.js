@@ -2872,10 +2872,13 @@ return L.view.extend({
 				for (var j = 0; j < items.length; j++) {
 					var it = items[j];
 					if (!it || !it.cmd) continue;
+					/* at_ms 必须一起存：预取是本页取数的主干路径，丢掉时刻会让
+					 * 消费方（如 HFREQINFO 的 at_ms）拿到 null，趋势图横轴退化成
+					 * 「—1」「—2」占位。与 sendCommand 路径保持同一份字段。 */
 					if (it.success) {
-						prefetch[it.cmd] = { success: true, data: it.data };
+						prefetch[it.cmd] = { success: true, data: it.data, at_ms: it.at_ms };
 					} else {
-						prefetch[it.cmd] = { success: false, error: it.error, cause: it.cause };
+						prefetch[it.cmd] = { success: false, error: it.error, cause: it.cause, at_ms: it.at_ms };
 					}
 				}
 			}).catch(function () {

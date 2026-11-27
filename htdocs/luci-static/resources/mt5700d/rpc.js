@@ -40,7 +40,7 @@ var rpcAt = L.rpc.declare({
  * + fork nc + rpcd 往返），status 页一轮 25 条命令就白付 400ms 以上。
  * 合批后一轮只付一次桥开销，AT 通道仍然是单通道串行（互斥语义不变）。
  *
- * 返回 { success, items: [{cmd, success, data|error|cause}] }；
+ * 返回 { success, items: [{cmd, success, data|error|cause, at_ms}] }；
  * 批量整体失败（后端不可用 / 熔断）时 success 为 false，调用方退回逐条发送。
  */
 var rpcAtBatch = L.rpc.declare({
@@ -518,7 +518,15 @@ ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
 					});
 				}
 				self.noteCommandFailure(resp.cause);
-				return { success: false, error: resp.error || '命令执行失败', cause: resp.cause };
+				/* 失败应答同样带 at_ms（后端无条件注入）：终端要把「哪一刻发出的
+				 * 命令失败了」如实写进历史，丢掉它只会让失败用例显示「时间未知」。
+				 * 客户端侧失败（熔断 / 超时）没有后端时刻，保持 undefined 是刻意的。 */
+				return {
+					success: false,
+					error: resp.error || '命令执行失败',
+					cause: resp.cause,
+					at_ms: resp.at_ms
+				};
 			}
 			self.noteCommandSuccess();
 			self.markBackendUp();
@@ -541,9 +549,11 @@ ATClient.prototype.sendCommand = function (command, timeoutMs, retried) {
  * 但会尊重整体不可用 / 熔断状态，条件与 sendCommand 完全一致。
  *
  * 返回 Promise<数组|null>：
- *   数组 —— 与入参顺序一致的 [{cmd, success, data?, error?, cause?}]；
+ *   数组 —— 与入参顺序一致的 [{cmd, success, data?, error?, cause?, at_ms?}]；
  *   null —— 批量整体不可用（通道降级 / 熔断 / 超时 / RPC 失败），
  *           调用方应退回逐条 sendCommand，行为与改动前完全一致。
+ * 逐条的 at_ms 是后端 nettime 权威时刻，与 sendCommand 同口径透传，
+ * 调用方不得丢弃（趋势图横轴等业务时间依赖它，丢了只能退化成序号占位）。
  *
  * 预算取 24000ms：ucode 侧整批硬超时是 18s，必须比它大，
  * 才能先拿到后端/桥给的明确结论（哪几条超时），而不是浏览器先 abort。
@@ -579,7 +589,11 @@ ATClient.prototype.sendBatch = function (commands, timeoutMs) {
 				success: it.success !== false,
 				data: it.data,
 				error: it.error,
-				cause: it.cause
+				cause: it.cause,
+				/* 逐条带上后端 nettime 时刻：批量是 status 页的取数主干，
+				 * 这里吞掉 at_ms 会让下游（趋势图横轴）一律退化成序号占位。
+				 * 整批超时那条没有后端应答，at_ms 保持 undefined。 */
+				at_ms: it.at_ms
 			});
 		}
 		return out;
