@@ -6,8 +6,8 @@
 *12 个原生 LuCI 高性能视图 + Rust / Tokio 常驻高并发后端 · 单包融合交付*
 
 <p align="center">
-  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.1.2-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
-  <img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC%E6%80%BB%E6%95%B0-91%20Releases-16a34a?style=flat-square" alt="Total Versions" />
+  <a href="https://github.com/LianXia233/luci-app-mt5700/releases"><img src="https://img.shields.io/badge/Release-v2.1.3-2563eb?style=flat-square&logo=github" alt="Latest Version" /></a>
+  <img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC%E6%80%BB%E6%95%B0-92%20Releases-16a34a?style=flat-square" alt="Total Versions" />
   <img src="https://img.shields.io/badge/%E8%BF%AD%E4%BB%A3%E5%91%A8%E6%9C%9F-70%20Days-0891b2?style=flat-square" alt="Timespan" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-ea580c?style=flat-square" alt="License" /></a>
 </p>
@@ -17,8 +17,8 @@
 ---
 
 > [!TIP]
-> **最新正式版：[v2.1.2](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.1.2)（2026-11-27）**  
-> **AT 命令库与终端命令区重构**：常用命令固定为维护者确认的 9 条只读查询并独占整行 3×3；其余 46 条按手册章节归 8 组折叠收纳，支持关键字过滤，写操作单独标红强化确认。按 Codex 与审查结论移除 `AT+COPS=?` / `AT+COPN` 两条超时命令，修正暗色 hover 失效、搜索范围与发送中禁用等交互边界。升级后请按 `Ctrl + F5` 强制刷新浏览器缓存。
+> **最新正式版：[v2.1.3](https://github.com/LianXia233/luci-app-mt5700/releases/tag/v2.1.3)（2026-11-27）**  
+> **夜间模式配置抽屉可读性修复（#63）**：`config-drawer.js` 改用 `--mt5700-float-bg` 兜底并显式适配 `html.at-dark` 背景与文字、`color:inherit` 关闭按钮及暗色错误提示/取消按钮对比度，解决普通模式夜间主题下配置抽屉「浅底浅字」看不见的问题。升级后请按 `Ctrl + F5` 强制刷新浏览器缓存。
 
 ### 🧭 阶段速览与导航
 
@@ -49,11 +49,11 @@
 
 ---
 
-## 🔧 未发布（Unreleased）
+## 🚀 v2.1.3 · 夜间模式配置抽屉可读性修复
 
 | 版本 | 发布日期 | 分类 | 主要改进与变更摘要 |
 | :--- | :---: | :--- | :--- |
-| 未发布 | 2026-11-27 | `🐛 修复` `🎨 界面` | **修复普通模式夜间配置抽屉文字看不见（#63）**：`config-drawer.js` 此前将抽屉背景兜底写为未定义的 `--at-panel-bg`（在普通模式下回落为浅灰 `#f7f7fa`），而文字继承了 `at.css` / `mt5700.css` 在 `html.at-dark` 下的浅色 `--at-text` / `--mt5700-text`，导致暗色主题下出现「浅底浅字」无法辨认。改用 `--mt5700-float-bg` 兜底并补充 `html.at-dark .mt5700-drawer` 暗色背景/文字、`color:inherit` 关闭按钮及暗色错误提示/取消按钮对比度，同步更新 `tests/config-drawer-test.js` 回归断言 |
+| v2.1.3 | 2026-11-27 | `🐛 修复` `🎨 界面` | **修复普通模式夜间配置抽屉文字看不见（#63）**：`config-drawer.js` 此前将抽屉背景兜底写为未定义的 `--at-panel-bg`（在普通模式下回落为浅灰 `#f7f7fa`），而文字继承了 `at.css` / `mt5700.css` 在 `html.at-dark` 下的浅色 `--at-text` / `--mt5700-text`，导致暗色主题下出现「浅底浅字」无法辨认。改用 `--mt5700-float-bg` 兜底并补充 `html.at-dark .mt5700-drawer` 暗色背景/文字、`color:inherit` 关闭按钮及暗色错误提示/取消按钮对比度，同步更新 `tests/config-drawer-test.js` 回归断言 |
 
 ---
 
